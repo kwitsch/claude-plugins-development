@@ -12,6 +12,7 @@ Development repository for Claude Code plugins. One top-level directory per plug
 | `tests/`        | Integration tests (`*.test.mjs`, `node:test`), run against `plugin/`.                                    |
 | `scripts/`      | Build scripts (`build.mjs`).                                                                             |
 | `package.json`  | Per-plugin pnpm scripts: `build`, `test`, `typecheck`.                                                   |
+| `CLAUDE.md`     | Developer notes for the plugin. Not inside `plugin/` (a plugin-root CLAUDE.md is not loaded and triggers a validate warning). |
 
 Hand-written plugin content that is not generated (`SKILL.md`, `hooks/hooks.json`, `agents/*.md`, `README.md`) lives directly in `plugin/` and is edited there.
 
