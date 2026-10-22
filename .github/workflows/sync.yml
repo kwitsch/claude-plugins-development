@@ -108,4 +108,4 @@ jobs:
           git switch -c "$b"
           git commit -m "Sync $P $V"
           git push --force origin "$b"
-          gh pr view "$b" > /dev/null 2>&1 || gh pr create --base main --head "$b" --title "Sync $P $V" --body "Synced from kwitsch/claude-plugins-development@$GITHUB_SHA (tag $TAG)."
+          [ -n "$(gh pr list --head "$b" --state open --json number --jq '.[].number')" ] || gh pr create --base main --head "$b" --title "Sync $P $V" --body "Synced from kwitsch/claude-plugins-development@$GITHUB_SHA (tag $TAG)."
