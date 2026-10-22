@@ -1,21 +1,7 @@
 {
   "permissions": {
-    "allow": [
-      "AskUserQuestion",
-      "Bash(pnpm install*)",
-      "Bash(pnpm build*)",
-      "Bash(pnpm -r build*)",
-      "Bash(pnpm test*)",
-      "Bash(pnpm -r test*)",
-      "Bash(pnpm --filter *)",
-      "Bash(claude plugin validate *)"
-    ],
-    "deny": [
-      "Edit(./*/plugin/**/*.mjs)",
-      "Write(./*/plugin/**/*.mjs)",
-      "Edit(./*/plugin/.claude-plugin/plugin.json)",
-      "Write(./*/plugin/.claude-plugin/plugin.json)"
-    ]
+    "allow": ["AskUserQuestion", "Bash(pnpm install*)", "Bash(pnpm build*)", "Bash(pnpm -r build*)", "Bash(pnpm test*)", "Bash(pnpm -r test*)", "Bash(pnpm --filter *)", "Bash(claude plugin validate *)"],
+    "deny": ["Edit(./*/plugin/**/*.mjs)", "Edit(./*/plugin/.claude-plugin/plugin.json)"]
   },
   "attribution": {
     "commit": "",
