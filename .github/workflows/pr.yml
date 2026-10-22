@@ -1,0 +1,47 @@
+name: PR
+
+on:
+  pull_request:
+
+jobs:
+  changed-plugins:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Detect changed plugins
+        id: changed
+        run: |
+          plugins=$(git diff --name-only "origin/${{ github.base_ref }}...HEAD" | cut -d/ -f1 | sort -u \
+            | while read -r d; do [ -f "$d/plugin.json" ] && echo "$d"; done | tr '\n' ' ')
+          echo "plugins=$plugins" >> "$GITHUB_OUTPUT"
+          echo "changed: ${plugins:-none}"
+
+      - name: Versions in package.json and plugin.json must match
+        if: steps.changed.outputs.plugins != ''
+        run: |
+          rc=0
+          for p in ${{ steps.changed.outputs.plugins }}; do
+            a=$(jq -r .version "$p/plugin.json"); b=$(jq -r .version "$p/package.json")
+            if [ "$a" != "$b" ]; then echo "::error::$p: plugin.json $a != package.json $b"; rc=1; fi
+          done
+          exit $rc
+
+      - name: Install
+        if: steps.changed.outputs.plugins != ''
+        run: pnpm install --frozen-lockfile
+
+      - name: Build and test changed plugins
+        if: steps.changed.outputs.plugins != ''
+        run: |
+          for p in ${{ steps.changed.outputs.plugins }}; do
+            pnpm --filter "$p" build
+            pnpm --filter "$p" test
+          done

@@ -39,6 +39,11 @@ for (const k of ["name", "version", "description"]) {
     process.exit(1);
   }
 }
+const pkg = JSON.parse(readFileSync(path.join(ROOT, "package.json"), "utf8"));
+if (pkg.version !== manifest.version) {
+  console.error(`version mismatch: package.json ${pkg.version} != plugin.json ${manifest.version}`);
+  process.exit(1);
+}
 mkdirSync(path.join(PLUGIN, ".claude-plugin"), { recursive: true });
 copyFileSync(path.join(ROOT, "plugin.json"), path.join(PLUGIN, ".claude-plugin", "plugin.json"));
 console.log(`built ${manifest.name}@${manifest.version} (${sources.length} source file(s))`);
