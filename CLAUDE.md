@@ -34,6 +34,8 @@ claude plugin validate <name>/plugin
 - Runtime code in `plugin/` must be zero-dependency Node (`node:` builtins only); `node_modules` is not shipped.
 - Commit messages: no `Co-Authored-By:` trailer, no "Generated with" footer.
 
-## CI (`.github/workflows/pr.yml`)
+## CI
 
-On every PR, for each plugin dir with changes: `plugin.json` and `package.json` versions must match, then `pnpm --filter <name> build` and `test` must pass.
+PR (`.github/workflows/pr.yml`): On every PR, for each plugin dir with changes: `plugin.json` and `package.json` versions must match, then `pnpm --filter <name> build` and `test` must pass.
+
+On tag push `<name>-<version>` (`.github/workflows/sync.yml`): build+test that plugin, then open a PR in kwitsch/claude-plugins replacing `plugins/<name>` with `<name>/plugin/`. Needs secret `RELEASE_TOKEN`.
