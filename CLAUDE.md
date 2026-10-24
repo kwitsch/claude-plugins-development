@@ -38,4 +38,4 @@ claude plugin validate <name>/plugin
 
 PR (`.github/workflows/pr.yml`): On every PR, for each plugin dir with changes: `plugin.json` and `package.json` versions must match, then `pnpm --filter <name> build` and `test` must pass.
 
-On tag push `<name>-<version>` (`.github/workflows/sync.yml`): build+test that plugin, then open a PR in kwitsch/claude-plugins replacing `plugins/<name>` with `<name>/plugin/`. Needs secret `RELEASE_TOKEN`.
+On tag push `<name>-<version>` (`.github/workflows/sync.yml`): build+test that plugin, then replace `plugins/<name>` in kwitsch/claude-plugins with `<name>/plugin/` and push the commit directly to `main`. Needs secret `RELEASE_TOKEN` (fine-grained PAT with Contents read/write on kwitsch/claude-plugins; the `main` branch protection there excludes administrators, so the push is allowed).
