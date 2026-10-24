@@ -48,7 +48,9 @@ function scan(args) {
         return { code: 11, status: "noconfig", config: "-", lines: [] };
     let entries;
     try {
-        const parsed = JSON.parse(stripJsonc(readFileSync(config, "utf8")));
+        // strip a UTF-8 BOM (Windows editors); JSON.parse rejects it, dprint accepts it
+        const raw = readFileSync(config, "utf8").replace(/^﻿/, "");
+        const parsed = JSON.parse(stripJsonc(raw));
         const plugins = parsed.plugins;
         if (plugins !== undefined && !Array.isArray(plugins))
             throw new Error('"plugins" is not an array');
