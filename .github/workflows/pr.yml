@@ -10,11 +10,6 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24
-          cache: pnpm
 
       - name: Detect changed plugins
         id: changed
@@ -33,6 +28,16 @@ jobs:
             if [ "$a" != "$b" ]; then echo "::error::$p: plugin.json $a != package.json $b"; rc=1; fi
           done
           exit $rc
+
+      # Toolchain only when something must be built: setup-node's post step
+      # fails when `cache: pnpm` is set but `pnpm install` never ran.
+      - uses: pnpm/action-setup@v4
+        if: steps.changed.outputs.plugins != ''
+      - uses: actions/setup-node@v4
+        if: steps.changed.outputs.plugins != ''
+        with:
+          node-version: 24
+          cache: pnpm
 
       - name: Install
         if: steps.changed.outputs.plugins != ''
