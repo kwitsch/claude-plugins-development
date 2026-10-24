@@ -24,7 +24,9 @@ jobs:
         env:
           BEFORE: ${{ github.event.before }}
         run: |
-          git cat-file -e "$BEFORE^{commit}" 2>/dev/null || { echo "::error::cannot diff $BEFORE..$GITHUB_SHA"; exit 1; }
+          # shortcut: BEFORE is all zeros (first push) or missing (force push); fall back to the parent commit, or the empty tree, so only the last commit of a force push is diffed
+          git cat-file -e "$BEFORE^{commit}" 2>/dev/null \
+            || BEFORE=$(git rev-parse -q --verify "$GITHUB_SHA^" || git hash-object -t tree /dev/null)
           tags=""
           for p in $(git diff --name-only "$BEFORE" "$GITHUB_SHA" | cut -d/ -f1 | sort -u); do
             [ -f "$p/plugin.json" ] || continue

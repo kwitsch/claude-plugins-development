@@ -75,14 +75,7 @@ jobs:
         run: |
           pnpm --filter "$P" build
           pnpm --filter "$P" test
-          git diff --exit-code -- "$P/plugin" || {
-            echo "::error::$P/plugin is stale; run pnpm --filter $P build and commit"
-            exit 1
-          }
-          test -z "$(git status --porcelain -- "$P/plugin")" || {
-            echo "::error::$P/plugin has untracked build output"
-            exit 1
-          }
+          bash .github/scripts/check-plugin-fresh.sh "$P"
 
       - uses: actions/checkout@v4
         if: steps.resolve.outputs.plugin != ''
