@@ -1,0 +1,53 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  tag:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      tags: ${{ steps.tag.outputs.tags }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Tag changed plugins
+        id: tag
+        env:
+          BEFORE: ${{ github.event.before }}
+        run: |
+          git cat-file -e "$BEFORE^{commit}" 2>/dev/null || { echo "::error::cannot diff $BEFORE..$GITHUB_SHA"; exit 1; }
+          tags=""
+          for p in $(git diff --name-only "$BEFORE" "$GITHUB_SHA" | cut -d/ -f1 | sort -u); do
+            [ -f "$p/plugin.json" ] || continue
+            t="$p-$(jq -r .version "$p/plugin.json")"
+            if git ls-remote --exit-code --tags origin "refs/tags/$t" > /dev/null; then
+              echo "::notice::$t already exists, not re-tagging"
+            else
+              git tag "$t" "$GITHUB_SHA"
+              git push origin "refs/tags/$t"
+            fi
+            tags="$tags $t"
+          done
+          echo "tags=$(jq -cn '$ARGS.positional' --args $tags)" >> "$GITHUB_OUTPUT"
+          echo "tags:${tags:- none}"
+
+  sync:
+    needs: tag
+    if: needs.tag.outputs.tags != '[]'
+    strategy:
+      fail-fast: false
+      matrix:
+        tag: ${{ fromJSON(needs.tag.outputs.tags) }}
+    uses: ./.github/workflows/sync.yml
+    with:
+      tag: ${{ matrix.tag }}
+    secrets: inherit
