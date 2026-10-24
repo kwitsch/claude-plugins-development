@@ -86,14 +86,16 @@ jobs:
           token: ${{ secrets.RELEASE_TOKEN }}
           path: target
 
-      - name: Mirror, commit and open PR
+      # Pushes straight to main. RELEASE_TOKEN is a fine-grained PAT (Contents:
+      # read/write on kwitsch/claude-plugins) acting as the repo admin; the main
+      # branch protection there does not apply to administrators.
+      - name: Mirror, commit and push to main
         if: steps.resolve.outputs.plugin != ''
         working-directory: target
         env:
           P: ${{ steps.resolve.outputs.plugin }}
           V: ${{ steps.resolve.outputs.version }}
           TAG: ${{ github.ref_name }}
-          GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
         run: |
           mkdir -p "plugins/$P"
           rsync -a --delete "../$P/plugin/" "plugins/$P/"
@@ -106,8 +108,5 @@ jobs:
             || echo "::warning::$P has no entry in marketplace.json; add it manually"
           git config user.name "Kwitsch"
           git config user.email "kwitsch@gmail.com"
-          b="sync/$TAG"
-          git switch -c "$b"
-          git commit -m "Sync $P $V"
-          git push --force origin "$b"
-          [ -n "$(gh pr list --head "$b" --state open --json number --jq '.[].number')" ] || gh pr create --base main --head "$b" --title "Sync $P $V" --body "Synced from kwitsch/claude-plugins-development@$GITHUB_SHA (tag $TAG)."
+          git commit -m "Sync $P $V" -m "Synced from kwitsch/claude-plugins-development@$GITHUB_SHA (tag $TAG)."
+          git push origin HEAD:main
