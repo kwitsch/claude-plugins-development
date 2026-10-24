@@ -34,6 +34,29 @@ jobs:
           done
           exit $rc
 
+      - name: Version must be bumped and not yet tagged
+        if: steps.changed.outputs.plugins != '' && github.base_ref == 'main'
+        env:
+          PLUGINS: ${{ steps.changed.outputs.plugins }}
+          BASE: ${{ github.base_ref }}
+        run: |
+          rc=0
+          for p in $PLUGINS; do
+            v=$(jq -r .version "$p/plugin.json")
+            if git cat-file -e "origin/$BASE:$p/plugin.json" 2>/dev/null; then
+              old=$(git show "origin/$BASE:$p/plugin.json" | jq -r .version)
+              if [ "$v" = "$old" ] || ! printf '%s\n%s\n' "$old" "$v" | sort -V -C; then
+                echo "::error::$p changed but version $v is not higher than $old on $BASE"; rc=1
+              fi
+            fi
+            for repo in origin https://github.com/kwitsch/claude-plugins.git; do
+              s=0; git ls-remote --exit-code --tags "$repo" "refs/tags/$p-$v" > /dev/null || s=$?
+              if [ "$s" -eq 0 ]; then echo "::error::$p: tag $p-$v already exists in $repo; bump the version"; rc=1
+              elif [ "$s" -ne 2 ]; then echo "::error::$p: could not list tags of $repo (git exit $s)"; rc=1; fi
+            done
+          done
+          exit $rc
+
       - name: Install
         if: steps.changed.outputs.plugins != ''
         run: pnpm install --frozen-lockfile
@@ -44,4 +67,6 @@ jobs:
           for p in ${{ steps.changed.outputs.plugins }}; do
             pnpm --filter "$p" build
             pnpm --filter "$p" test
+            git diff --exit-code -- "$p/plugin" || { echo "::error::$p/plugin is stale; run pnpm --filter $p build and commit"; exit 1; }
+            test -z "$(git status --porcelain -- "$p/plugin")" || { echo "::error::$p/plugin has untracked build output"; exit 1; }
           done
