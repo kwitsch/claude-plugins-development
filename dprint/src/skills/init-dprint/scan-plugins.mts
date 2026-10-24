@@ -125,17 +125,19 @@ function scan(args: string[]): ScanResult {
   }
 
   const candidates = new Map<string, RefPlugin[]>();
+  const names = new Set<string>();
+  const add = (key: string, p: RefPlugin) => {
+    const list = candidates.get(key);
+    if (list) list.push(p);
+    else candidates.set(key, [p]);
+  };
   for (const p of ref) {
-    for (const key of [
-      ...p.extensions.map((x) => "." + x),
-      ...(p.fileNames ?? []),
-    ]) {
-      const list = candidates.get(key);
-      if (list) list.push(p);
-      else candidates.set(key, [p]);
+    for (const x of p.extensions) add("." + x, p);
+    for (const n of p.fileNames ?? []) {
+      names.add(n);
+      add(n, p);
     }
   }
-  const names = new Set(ref.flatMap((p) => p.fileNames ?? []));
 
   const counts = new Map<string, number>();
   for (const f of files) {
@@ -149,9 +151,7 @@ function scan(args: string[]): ScanResult {
     if (c === undefined || c.some((p) => inConfig(p, entries))) continue;
     found.push({ type, n, ids: c.map((p) => p.id) });
   }
-  found.sort(
-    (a, b) => b.n - a.n || (a.type < b.type ? -1 : a.type > b.type ? 1 : 0),
-  );
+  found.sort((a, b) => b.n - a.n || (a.type < b.type ? -1 : 1));
   const lines = found.map(
     (x) => `type=${x.type} files=${x.n} candidates=${x.ids.join(",")}`,
   );

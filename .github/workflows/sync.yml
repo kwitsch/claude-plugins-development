@@ -59,7 +59,9 @@ jobs:
 
       - name: Install
         if: steps.resolve.outputs.plugin != ''
-        run: pnpm install --frozen-lockfile
+        env:
+          P: ${{ steps.resolve.outputs.plugin }}
+        run: pnpm install --frozen-lockfile --filter "$P..."
 
       - name: Build, test, and check committed build is current
         if: steps.resolve.outputs.plugin != ''

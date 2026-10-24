@@ -90,19 +90,22 @@ function scan(args) {
         return { code: 2, status: "error", config, lines: [] };
     }
     const candidates = new Map();
+    const names = new Set();
+    const add = (key, p) => {
+        const list = candidates.get(key);
+        if (list)
+            list.push(p);
+        else
+            candidates.set(key, [p]);
+    };
     for (const p of ref) {
-        for (const key of [
-            ...p.extensions.map((x) => "." + x),
-            ...(p.fileNames ?? []),
-        ]) {
-            const list = candidates.get(key);
-            if (list)
-                list.push(p);
-            else
-                candidates.set(key, [p]);
+        for (const x of p.extensions)
+            add("." + x, p);
+        for (const n of p.fileNames ?? []) {
+            names.add(n);
+            add(n, p);
         }
     }
-    const names = new Set(ref.flatMap((p) => p.fileNames ?? []));
     const counts = new Map();
     for (const f of files) {
         const t = fileType(f, names);
@@ -116,7 +119,7 @@ function scan(args) {
             continue;
         found.push({ type, n, ids: c.map((p) => p.id) });
     }
-    found.sort((a, b) => b.n - a.n || (a.type < b.type ? -1 : a.type > b.type ? 1 : 0));
+    found.sort((a, b) => b.n - a.n || (a.type < b.type ? -1 : 1));
     const lines = found.map((x) => `type=${x.type} files=${x.n} candidates=${x.ids.join(",")}`);
     return {
         code: lines.length ? 10 : 0,
