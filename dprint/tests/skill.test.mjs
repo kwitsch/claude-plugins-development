@@ -31,3 +31,9 @@ test("SKILL.md invokes the script via CLAUDE_SKILL_DIR, never defines MIN_VERSIO
   assert.doesNotMatch(SKILL, /!`/);
   assert.ok(SKILL.split("\n").length < 500);
 });
+
+test("SKILL.md runs the plugin scan via CLAUDE_SKILL_DIR and adds plugins only via config add", () => {
+  assert.match(SKILL, /\$\{CLAUDE_SKILL_DIR\}\/scan-plugins\.mjs/);
+  assert.match(SKILL, /scan-plugins\.reference\.md/);
+  assert.match(SKILL, /config add/);
+});
