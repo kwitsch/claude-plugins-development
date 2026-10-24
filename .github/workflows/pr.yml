@@ -29,15 +29,32 @@ jobs:
           done
           exit $rc
 
-      # Toolchain only when something must be built: setup-node's post step
-      # fails when `cache: pnpm` is set but `pnpm install` never ran.
-      - uses: pnpm/action-setup@v4
-        if: steps.changed.outputs.plugins != ''
-      - uses: actions/setup-node@v4
-        if: steps.changed.outputs.plugins != ''
-        with:
-          node-version: 24
-          cache: pnpm
+      - name: Version must be bumped and not yet tagged
+        if: steps.changed.outputs.plugins != '' && github.base_ref == 'main'
+        env:
+          PLUGINS: ${{ steps.changed.outputs.plugins }}
+          BASE: ${{ github.base_ref }}
+        run: |
+          rc=0
+          for p in $PLUGINS; do
+            v=$(jq -r .version "$p/plugin.json")
+            # sort -V is not semver-aware for pre-release suffixes, so only plain X.Y.Z is allowed
+            if ! [[ "$v" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              echo "::error::$p: version '$v' must be X.Y.Z"; rc=1; continue
+            fi
+            if git cat-file -e "origin/$BASE:$p/plugin.json" 2>/dev/null; then
+              old=$(git show "origin/$BASE:$p/plugin.json" | jq -r .version)
+              if [ "$v" = "$old" ] || ! printf '%s\n%s\n' "$old" "$v" | sort -V -C; then
+                echo "::error::$p changed but version $v is not higher than $old on $BASE"; rc=1
+              fi
+            fi
+            for repo in origin https://github.com/kwitsch/claude-plugins.git; do
+              s=0; git ls-remote --exit-code --tags "$repo" "refs/tags/$p-$v" > /dev/null || s=$?
+              if [ "$s" -eq 0 ]; then echo "::error::$p: tag $p-$v already exists in $repo; bump the version"; rc=1
+              elif [ "$s" -ne 2 ]; then echo "::error::$p: could not list tags of $repo (git exit $s)"; rc=1; fi
+            done
+          done
+          exit $rc
 
       - name: Install
         if: steps.changed.outputs.plugins != ''
@@ -49,4 +66,5 @@ jobs:
           for p in ${{ steps.changed.outputs.plugins }}; do
             pnpm --filter "$p" build
             pnpm --filter "$p" test
+            bash .github/scripts/check-plugin-fresh.sh "$p"
           done

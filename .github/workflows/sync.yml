@@ -3,12 +3,18 @@ name: Sync
 on:
   push:
     tags: ["*"]
+  workflow_call:
+    inputs:
+      tag:
+        description: Tag <name>-<version> to sync
+        type: string
+        required: true
 
 permissions:
   contents: read
 
 concurrency:
-  group: sync-${{ github.ref_name }}
+  group: sync-${{ inputs.tag || github.ref_name }}
   cancel-in-progress: false
 
 jobs:
@@ -18,11 +24,12 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          ref: ${{ inputs.tag }}
 
       - name: Resolve plugin
         id: resolve
         env:
-          TAG: ${{ github.ref_name }}
+          TAG: ${{ inputs.tag || github.ref_name }}
         run: |
           p=""
           for d in */; do
@@ -46,8 +53,8 @@ jobs:
       - name: Tag must be on main
         if: steps.resolve.outputs.plugin != ''
         env:
-          TAG: ${{ github.ref_name }}
-        run: git merge-base --is-ancestor "$GITHUB_SHA" origin/main || { echo "::error::$TAG is not on main"; exit 1; }
+          TAG: ${{ inputs.tag || github.ref_name }}
+        run: git merge-base --is-ancestor HEAD origin/main || { echo "::error::$TAG is not on main"; exit 1; }
 
       - uses: pnpm/action-setup@v4
         if: steps.resolve.outputs.plugin != ''
@@ -68,14 +75,7 @@ jobs:
         run: |
           pnpm --filter "$P" build
           pnpm --filter "$P" test
-          git diff --exit-code -- "$P/plugin" || {
-            echo "::error::$P/plugin is stale; run pnpm --filter $P build and commit"
-            exit 1
-          }
-          test -z "$(git status --porcelain -- "$P/plugin")" || {
-            echo "::error::$P/plugin has untracked build output"
-            exit 1
-          }
+          bash .github/scripts/check-plugin-fresh.sh "$P"
 
       - uses: actions/checkout@v4
         if: steps.resolve.outputs.plugin != ''
@@ -93,7 +93,8 @@ jobs:
         env:
           P: ${{ steps.resolve.outputs.plugin }}
           V: ${{ steps.resolve.outputs.version }}
-          TAG: ${{ github.ref_name }}
+          TAG: ${{ inputs.tag || github.ref_name }}
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
         run: |
           mkdir -p "plugins/$P"
           rsync -a --delete "../$P/plugin/" "plugins/$P/"
