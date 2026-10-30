@@ -2,6 +2,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { applyEdit, lineDiff, trimToEdit } from "../plugin/mcp/format.mjs";
+import { applyTextEdits } from "../plugin/mcp/lsp.mjs";
 
 const h = (aStart, aEnd, bStart, bEnd) => ({ aStart, aEnd, bStart, bEnd });
 
@@ -132,4 +133,60 @@ test("applyEdit: null cases, old === new, replaceAll", () => {
   assert.equal(applyEdit("abc", "b", "B", false), "aBc");
   assert.equal(applyEdit("aXa", "a", "b", true), "bXb");
   assert.equal(applyEdit("abc", "z", "x", true), null);
+});
+
+test("applyTextEdits: several edits applied back to front regardless of array order", () => {
+  const edits = [
+    {
+      range: {
+        start: { line: 0, character: 0 },
+        end: { line: 0, character: 1 },
+      },
+      newText: "X",
+    },
+    {
+      range: {
+        start: { line: 2, character: 1 },
+        end: { line: 2, character: 2 },
+      },
+      newText: "YY",
+    },
+  ];
+  assert.equal(applyTextEdits("abc\ndef\nghi", edits), "Xbc\ndef\ngYYi");
+});
+
+test("applyTextEdits: multi-line replacement", () => {
+  const edits = [
+    {
+      range: {
+        start: { line: 0, character: 1 },
+        end: { line: 2, character: 0 },
+      },
+      newText: " B\n",
+    },
+  ];
+  assert.equal(applyTextEdits("a\nb\nc\n", edits), "a B\nc\n");
+});
+
+test("applyTextEdits: end past the last line / line length is clamped (whole-document edit)", () => {
+  const whole = [
+    {
+      range: {
+        start: { line: 0, character: 0 },
+        end: { line: 99, character: 0 },
+      },
+      newText: "x\n",
+    },
+  ];
+  assert.equal(applyTextEdits("x  \n\n", whole), "x\n");
+  const pastLineEnd = [
+    {
+      range: {
+        start: { line: 0, character: 1 },
+        end: { line: 0, character: 50 },
+      },
+      newText: "",
+    },
+  ];
+  assert.equal(applyTextEdits("ab\ncd", pastLineEnd), "a\ncd");
 });
