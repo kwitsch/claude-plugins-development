@@ -1,8 +1,16 @@
 // Unit tests for the pure helpers of the built plugin/mcp/format.mjs (no dprint, no spawn).
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { applyEdit, lineDiff, trimToEdit } from "../plugin/mcp/format.mjs";
+import {
+  applyEdit,
+  formatPre,
+  lineDiff,
+  trimToEdit,
+} from "../plugin/mcp/format.mjs";
 import { applyTextEdits } from "../plugin/mcp/lsp.mjs";
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 
 const h = (aStart, aEnd, bStart, bEnd) => ({ aStart, aEnd, bStart, bEnd });
 
@@ -189,4 +197,52 @@ test("applyTextEdits: end past the last line / line length is clamped (whole-doc
     },
   ];
   assert.equal(applyTextEdits("ab\ncd", pastLineEnd), "a\ncd");
+});
+
+test("formatPre guards fail open with {} before touching dprint", async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "dprint-fmt-"));
+  const file = path.join(dir, "a.ts");
+  writeFileSync(file, "const a = 1;\n");
+  assert.deepEqual(await formatPre({ tool_name: "Write", tool_input: {} }), {});
+  assert.deepEqual(
+    await formatPre({
+      tool_name: "Write",
+      tool_input: { file_path: "rel.ts", content: "x" },
+    }),
+    {},
+  );
+  assert.deepEqual(
+    await formatPre({
+      cwd: dir,
+      tool_name: "Read",
+      tool_input: { file_path: file },
+    }),
+    {},
+  );
+  assert.deepEqual(
+    await formatPre({
+      cwd: dir,
+      tool_name: "Edit",
+      tool_input: {
+        file_path: path.join(dir, "missing.ts"),
+        old_string: "a",
+        new_string: "b",
+      },
+    }),
+    {},
+  );
+  assert.deepEqual(
+    await formatPre({
+      cwd: dir,
+      tool_name: "Edit",
+      tool_input: {
+        file_path: file,
+        old_string: "zzz",
+        new_string: "b",
+        replace_all: "false",
+      },
+    }),
+    {},
+  );
+  assert.deepEqual(await formatPre(undefined), {});
 });
