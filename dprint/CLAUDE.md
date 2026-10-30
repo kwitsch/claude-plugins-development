@@ -1,7 +1,9 @@
 # dprint
 
-Skill-only plugin: one model-invocable skill `init-dprint` (`plugin/skills/init-dprint/SKILL.md`) with two
-zero-dep scripts and one data file, all in `plugin/skills/init-dprint/`:
+Plugin with one model-invocable skill `init-dprint` (`plugin/skills/init-dprint/SKILL.md`) and one PreToolUse
+format hook.
+
+Skill: two zero-dep scripts and one data file, all in `plugin/skills/init-dprint/`:
 
 - `check-dprint.mjs`: dprint detection and minimum-version check (contract: `check-dprint.reference.md`).
 - `scan-plugins.mjs`: read-only scan of the project's file types against its dprint config (contract:
@@ -9,9 +11,20 @@ zero-dep scripts and one data file, all in `plugin/skills/init-dprint/`:
 - `dprint-plugins.json`: hand-written plugin reference data read by `scan-plugins.mjs`. It is **not** build
   output; edit it in place.
 
-`check-dprint.mjs`, `scan-plugins.mjs` and `plugin/.claude-plugin/plugin.json` are **build output** (`pnpm build`) of
-`src/skills/init-dprint/check-dprint.mts`, `src/skills/init-dprint/scan-plugins.mts` and `plugin.json`. Do not edit
-them here.
+Hook: `plugin/hooks/hooks.json` (hand-written) wires PreToolUse `Write|Edit` as an `mcp_tool` hook to tool
+`format_pre` of the MCP server `dprint-hooks` (`plugin/.mcp.json`, hand-written, `command: node`). The server is
+`plugin/mcp/` (zero-dep):
+
+- `server.mjs`: MCP stdio loop (newline-delimited JSON-RPC), single tool `format_pre`.
+- `lsp.mjs`: `dprint lsp` client (one lazily spawned child, Content-Length JSON-RPC, 30 s request timeout,
+  respawn after a crash, `applyTextEdits`). Needs dprint >= 0.50 on `PATH` or in `~/.dprint/bin`.
+- `format.mjs`: `formatPre` (Write: `formatting`; Edit: `rangeFormatting` over the edited lines, whole-file
+  `formatting` on a JSON-RPC error), `lineDiff` and `trimToEdit` (keep only hunks touching the edit, widen
+  `old_string` until it is unique). Every failure returns `{}` (fail open).
+
+`check-dprint.mjs`, `scan-plugins.mjs`, `plugin/mcp/*.mjs` and `plugin/.claude-plugin/plugin.json` are **build
+output** (`pnpm build`) of `src/skills/init-dprint/check-dprint.mts`, `src/skills/init-dprint/scan-plugins.mts`,
+`src/mcp/{server,lsp,format}.mts` and `plugin.json`. Do not edit them here.
 
 `MIN_VERSION` is defined only in the `.mts` source. Changing it: edit there, update the
 "Minimum dprint version" line in `README.md`, rebuild. Tests read the value from the built script.

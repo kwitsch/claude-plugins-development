@@ -14,6 +14,12 @@ Skill that checks for a minimum dprint version, installs or updates dprint at us
 | ------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `init-dprint` | Checks whether dprint is installed in at least the minimum version; if it is missing or too old, asks once via `AskUserQuestion` and, only on an explicit yes, installs it or updates it, then re-checks. With a usable dprint it then scans the project's file types (`git ls-files`) and asks once per file type the dprint config does not cover whether to add a matching plugin; when several plugins fit, you pick one. |
 
+## Hooks
+
+| Event                    | What it does                                                                                                                                                                                                                                                                                                    |
+| ------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| PreToolUse `Write\|Edit` | `format_pre` (MCP server `dprint-hooks`) formats the file with the project's own dprint config via `dprint lsp` before it lands on disk. Write: the whole content. Edit: only the edited lines (range formatting, whole-file fallback trimmed to the edit), returned as a small `old_string`/`new_string` edit. |
+
 ## Notes
 
 - Minimum dprint version: `0.50.0` (the `MIN_VERSION` constant in `src/skills/init-dprint/check-dprint.mts`).
@@ -24,3 +30,7 @@ Skill that checks for a minimum dprint version, installs or updates dprint at us
 - Plugins are added with `dprint config add <name>`, which needs network access and resolves the latest version.
 - Only the config in the project root is checked. Plugins of `extends` configs and non-registry plugins (for example `exec`) are not recognized.
 - The scan needs `git`.
+- The format hook needs dprint >= 0.50 (`dprint lsp`) on `PATH` or in `~/.dprint/bin` and `node` on `PATH`. Without dprint, or on any error or timeout (30 s per request), the Write/Edit goes through unformatted.
+- Which files are formatted is decided by dprint's config (plugins, includes, excludes); unmatched files are left alone.
+- The hook's `dprint lsp` process takes its working directory and `rootUri` from the first hook call of the session; after a worktree switch mid-session it still formats against the first project's config.
+- The first format in a project may download dprint plugins and time out; later calls succeed.
