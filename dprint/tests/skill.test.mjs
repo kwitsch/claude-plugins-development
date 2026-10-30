@@ -6,11 +6,19 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const SKILL = readFileSync(path.join(ROOT, "plugin/skills/init-dprint/SKILL.md"), "utf8");
+const SKILL = readFileSync(
+  path.join(ROOT, "plugin/skills/init-dprint/SKILL.md"),
+  "utf8",
+);
 
 test("generated manifest equals plugin.json", () => {
   assert.deepEqual(
-    JSON.parse(readFileSync(path.join(ROOT, "plugin/.claude-plugin/plugin.json"), "utf8")),
+    JSON.parse(
+      readFileSync(
+        path.join(ROOT, "plugin/.claude-plugin/plugin.json"),
+        "utf8",
+      ),
+    ),
     JSON.parse(readFileSync(path.join(ROOT, "plugin.json"), "utf8")),
   );
 });
@@ -36,4 +44,11 @@ test("SKILL.md runs the plugin scan via CLAUDE_SKILL_DIR and adds plugins only v
   assert.match(SKILL, /\$\{CLAUDE_SKILL_DIR\}\/scan-plugins\.mjs/);
   assert.match(SKILL, /scan-plugins\.reference\.md/);
   assert.match(SKILL, /config add/);
+});
+
+test("README documents the format_pre hook and its dprint lsp requirement", () => {
+  const readme = readFileSync(path.join(ROOT, "plugin/README.md"), "utf8");
+  assert.match(readme, /format_pre/);
+  assert.match(readme, /dprint lsp/);
+  assert.match(readme, /0\.50/);
 });
