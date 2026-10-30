@@ -48,6 +48,15 @@ export class DprintLsp {
     this.child = null;
     this.ready = null;
     child?.kill();
+    this.failPending(new Error("dprint lsp disposed")); // the exit handler ignores a disposed child
+  }
+
+  private failPending(err: Error): void {
+    for (const p of this.pending.values()) {
+      clearTimeout(p.timer);
+      p.reject(err);
+    }
+    this.pending.clear();
   }
 
   private async formatNow(
@@ -94,7 +103,10 @@ export class DprintLsp {
       stdio: "pipe",
       env: {
         ...process.env,
-        PATH: `${process.env.PATH ?? ""}:${join(homedir(), ".dprint", "bin")}`,
+        // filter(Boolean): an empty PATH must not yield a leading empty segment (= the cwd)
+        PATH: [process.env.PATH, join(homedir(), ".dprint", "bin")]
+          .filter(Boolean)
+          .join(":"),
       },
     });
     this.child = child;
@@ -106,11 +118,7 @@ export class DprintLsp {
       if (this.child !== child) return;
       this.child = null;
       this.ready = null;
-      for (const p of this.pending.values()) {
-        clearTimeout(p.timer);
-        p.reject(err);
-      }
-      this.pending.clear();
+      this.failPending(err);
     };
     child.on("error", (e) => dead(e));
     child.on("exit", (code, signal) =>
@@ -183,6 +191,7 @@ export class DprintLsp {
       const timer = setTimeout(() => {
         this.pending.delete(id);
         reject(new Error(`dprint lsp: ${method} timed out`));
+        this.child?.kill(); // a hung child must not be reused; the next format() respawns
       }, REQUEST_TIMEOUT_MS);
       this.pending.set(id, { resolve, reject, timer });
       this.send({ jsonrpc: "2.0", id, method, params });
@@ -211,8 +220,9 @@ export function applyTextEdits(text: string, edits: TextEdit[]): string {
     starts.push(i + 1);
   const offset = (p: { line: number; character: number }) => {
     if (p.line >= starts.length) return text.length;
-    const lineEnd =
+    let lineEnd =
       p.line + 1 < starts.length ? starts[p.line + 1] - 1 : text.length;
+    if (p.line + 1 < starts.length && text[lineEnd - 1] === "\r") lineEnd--; // CRLF: the line ends before the "\r"
     return Math.min(starts[p.line] + p.character, lineEnd); // LSP: past the line end means the line end
   };
   const spans = edits

@@ -100,6 +100,13 @@ test("trimToEdit: CRLF and missing trailing newline are preserved byte-exactly",
   });
 });
 
+test("trimToEdit: deleting a whitespace-only last line without trailing newline also drops the separator before it", () => {
+  assert.deepEqual(trim("a\n\n   ", "a\n", [[2, 2]], true), {
+    oldString: "\n   ",
+    newString: "",
+  });
+});
+
 test("trimToEdit (a): edited line unchanged + inserted blank line -> widened to the edited line", () => {
   assert.deepEqual(trim("a\n}\nb\n}\n", "a\n\n}\nb\n}\n", [[0, 0]], true), {
     oldString: "a\n",
@@ -245,4 +252,19 @@ test("formatPre guards fail open with {} before touching dprint", async () => {
     {},
   );
   assert.deepEqual(await formatPre(undefined), {});
+});
+
+test("applyTextEdits: a position past the end of a CRLF line clamps before the \\r", () => {
+  assert.equal(
+    applyTextEdits("a  \r\nb\r\n", [
+      {
+        range: {
+          start: { line: 0, character: 1 },
+          end: { line: 0, character: 99 },
+        },
+        newText: "",
+      },
+    ]),
+    "a\r\nb\r\n",
+  );
 });

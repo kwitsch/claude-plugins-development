@@ -50,5 +50,12 @@ test("README documents the format_pre hook and its dprint lsp requirement", () =
   const readme = readFileSync(path.join(ROOT, "plugin/README.md"), "utf8");
   assert.match(readme, /format_pre/);
   assert.match(readme, /dprint lsp/);
-  assert.match(readme, /0\.50/);
+  const min = /^const MIN_VERSION = "(\d+\.\d+)/m.exec(
+    readFileSync(
+      path.join(ROOT, "plugin/skills/init-dprint/check-dprint.mjs"),
+      "utf8",
+    ),
+  )?.[1];
+  assert.ok(min);
+  assert.ok(readme.includes(`dprint >= ${min}`));
 });

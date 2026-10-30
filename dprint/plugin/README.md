@@ -1,6 +1,6 @@
 # dprint
 
-Skill that checks for a minimum dprint version, installs or updates dprint at user level after confirmation, and offers to add dprint plugins for file types the project's dprint config does not cover.
+Skill that checks for a minimum dprint version, installs or updates dprint at user level after confirmation, and offers to add dprint plugins for file types the project's dprint config does not cover. Also formats every Write and Edit with the project's dprint config via a PreToolUse hook (MCP server dprint-hooks; needs node and dprint >= 0.50 on PATH).
 
 ## Install
 

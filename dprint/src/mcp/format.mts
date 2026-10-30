@@ -39,6 +39,26 @@ export function applyEdit(
 
 /** LCS line diff: ordered, non-overlapping hunks separated by at least one common line. */
 export function lineDiff(a: string[], b: string[]): Hunk[] {
+  // the table only needs the changed middle: strip the common prefix and suffix first
+  let pre = 0;
+  while (pre < a.length && pre < b.length && a[pre] === b[pre]) pre++;
+  let suf = 0;
+  while (
+    suf < a.length - pre &&
+    suf < b.length - pre &&
+    a[a.length - 1 - suf] === b[b.length - 1 - suf]
+  )
+    suf++;
+  if (pre > 0 || suf > 0)
+    return lineDiff(
+      a.slice(pre, a.length - suf),
+      b.slice(pre, b.length - suf),
+    ).map((h) => ({
+      aStart: h.aStart + pre,
+      aEnd: h.aEnd + pre,
+      bStart: h.bStart + pre,
+      bEnd: h.bEnd + pre,
+    }));
   if (a.length * b.length > 25_000_000) {
     // too big for the table: one hunk over the middle that differs (same shape, never fails)
     let p = 0;
@@ -97,11 +117,12 @@ export function trimToEdit(
   formatted: string,
   editLines: Array<[number, number]>,
 ): { oldString: string; newString: string } | null {
-  const a = original.split("\n");
-  const b = formatted.split("\n");
-  // byte-exact text of lines[x, y): the last element is the trailing partial line, an empty slice is ""
+  // lines keep their terminator, so removing a final unterminated line also removes the "\n" before it
+  const split = (t: string) => t.match(/[^\n]*\n|[^\n]+/g) ?? [];
+  const a = split(original);
+  const b = split(formatted);
   const render = (lines: string[], x: number, y: number) =>
-    lines.slice(x, y).join("\n") + (x < y && y < lines.length ? "\n" : "");
+    lines.slice(x, y).join("");
   const hunks = lineDiff(a, b);
   const kept: number[] = [];
   hunks.forEach((h, k) => {
