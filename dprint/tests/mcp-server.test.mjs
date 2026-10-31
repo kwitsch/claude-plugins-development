@@ -102,8 +102,10 @@ function stubDprint(mode = "ok") {
   chmodSync(f, 0o755);
 }
 
-function startServer() {
+/** Spawn the built server; `opts.cwd` sets its process cwd (default: the test's). */
+function startServer(opts = {}) {
   const child = spawn(path.join(bin, "node"), [SERVER], {
+    cwd: opts.cwd,
     env: { PATH: bin, HOME: home },
     stdio: ["pipe", "pipe", "pipe"],
   });
@@ -124,10 +126,11 @@ function startServer() {
         JSON.stringify({ jsonrpc: "2.0", id, method, params }) + "\n",
       );
     });
-  const call = async (args) =>
-    (await rpc("tools/call", { name: "format_pre", arguments: args })).result
+  const tool = async (name, args) =>
+    (await rpc("tools/call", { name, arguments: args })).result
       .structuredContent;
-  return { rpc, call };
+  const call = (args) => tool("format_pre", args);
+  return { rpc, call, tool };
 }
 
 const lines = (n) => Array.from({ length: n }, (_, i) => `l${i}`);
@@ -505,4 +508,72 @@ test(".mcp.json key matches every hooks.json server id and each hook tool is lis
     assert.equal(e.server, `plugin:dprint:${keys[0]}`);
     assert.ok(tools.includes(e.tool), e.tool);
   }
+});
+
+test("format_pre formats only files whose real path is inside the cwd and outside the scratchpad", async () => {
+  stubDprint();
+  const s = startServer();
+  const other = path.join(tmp, "other");
+  mkdirSync(other);
+  const write = (file, extra = {}) =>
+    s.call({
+      cwd: repo,
+      ...extra,
+      tool_name: "Write",
+      tool_input: { file_path: file, content: "x   \n" },
+    });
+  // positive control: a plain file in the cwd is formatted
+  assert.equal(
+    (await write(path.join(repo, "a.ts"))).hookSpecificOutput.updatedInput
+      .content,
+    "x\n",
+  );
+  // a file in another directory
+  assert.deepEqual(await write(path.join(other, "a.ts")), {});
+  // a symlink inside the cwd to a file elsewhere: Write and Edit
+  writeFileSync(path.join(other, "t.ts"), "l0\nl1\n");
+  symlinkSync(path.join(other, "t.ts"), path.join(repo, "link.ts"));
+  assert.deepEqual(await write(path.join(repo, "link.ts")), {});
+  assert.deepEqual(
+    await s.call({
+      cwd: repo,
+      tool_name: "Edit",
+      tool_input: {
+        file_path: path.join(repo, "link.ts"),
+        old_string: "l1",
+        new_string: "l1 x   ",
+      },
+    }),
+    {},
+  );
+  // a dangling symlink inside the cwd
+  symlinkSync(path.join(other, "missing.ts"), path.join(repo, "dl.ts"));
+  assert.deepEqual(await write(path.join(repo, "dl.ts")), {});
+  // the session scratchpad inside the cwd is skipped, the rest of the cwd is not
+  const scratch = path.join(repo, "scratch");
+  mkdirSync(scratch);
+  assert.deepEqual(
+    await write(path.join(scratch, "a.ts"), { scratchpad_dir: scratch }),
+    {},
+  );
+  assert.equal(
+    (await write(path.join(repo, "b.ts"), { scratchpad_dir: scratch }))
+      .hookSpecificOutput.updatedInput.content,
+    "x\n",
+  );
+});
+
+test("format_pre without a cwd skips instead of using the server's own cwd", async () => {
+  stubDprint();
+  const s = startServer({ cwd: repo });
+  const args = {
+    tool_name: "Write",
+    tool_input: { file_path: path.join(repo, "a.ts"), content: "x   \n" },
+  };
+  assert.deepEqual(await s.call(args), {});
+  assert.equal(
+    (await s.call({ ...args, cwd: repo })).hookSpecificOutput.updatedInput
+      .content,
+    "x\n",
+  );
 });
