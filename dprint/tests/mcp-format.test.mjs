@@ -45,11 +45,11 @@ test("lineDiff: several ordered hunks around common lines", () => {
   );
 });
 
-test("lineDiff: above the size guard -> one hunk over the prefix/suffix-trimmed middle", () => {
+test("lineDiff: above the size guard throws (formatPre fails open)", () => {
   const many = (x) => Array.from({ length: 5001 }, () => x);
-  assert.deepEqual(
-    lineDiff(["p", ...many("a"), "s"], ["p", ...many("b"), "s"]),
-    [h(1, 5002, 1, 5002)],
+  assert.throws(
+    () => lineDiff(["p", ...many("a"), "s"], ["p", ...many("b"), "s"]),
+    /too large/,
   );
 });
 

@@ -15,15 +15,18 @@ Hook: `plugin/hooks/hooks.json` (hand-written) wires PreToolUse `Write|Edit` as 
 `format_pre` of the MCP server `dprint-hooks` (`plugin/.mcp.json`, hand-written, `command: node`). The server is
 `plugin/mcp/` (zero-dep):
 
-- `server.mjs`: MCP stdio loop (newline-delimited JSON-RPC), single tool `format_pre`.
+- `server.mjs`: MCP stdio loop (newline-delimited JSON-RPC), tools `format_pre`, `cwd_changed` (CwdChanged hook)
+  and `worktree_entered` (PostToolUse EnterWorktree hook).
 - `lsp.mjs`: `dprint lsp` client (one lazily spawned child, Content-Length JSON-RPC, 30 s request timeout,
-  respawn after a crash, `applyTextEdits`). Needs dprint >= 0.50 on `PATH` or in `~/.dprint/bin`.
+  respawn after a crash, `applyTextEdits`). Needs dprint >= 0.50 (`findDprint` from
+  `skills/init-dprint/find-dprint.mjs`: `PATH`, then `~/.dprint/bin`).
 - `format.mjs`: `formatPre` (Write: `formatting`; Edit: `rangeFormatting` over the edited lines, whole-file
   `formatting` on a JSON-RPC error), `lineDiff` and `trimToEdit` (keep only hunks touching the edit, widen
-  `old_string` until it is unique). Every failure returns `{}` (fail open).
+  `old_string` until it is unique), one `DprintLsp` per cwd, per session/agent cwd overrides, and universal-format's
+  path exclusions. Every failure returns `{}` (fail open), including a diff above the size guard.
 
-`check-dprint.mjs`, `scan-plugins.mjs`, `plugin/mcp/*.mjs` and `plugin/.claude-plugin/plugin.json` are **build
-output** (`pnpm build`) of `src/skills/init-dprint/check-dprint.mts`, `src/skills/init-dprint/scan-plugins.mts`,
+`check-dprint.mjs`, `find-dprint.mjs`, `scan-plugins.mjs`, `plugin/mcp/*.mjs` and `plugin/.claude-plugin/plugin.json` are **build
+output** (`pnpm build`) of `src/skills/init-dprint/{check-dprint,find-dprint,scan-plugins}.mts`,
 `src/mcp/{server,lsp,format}.mts` and `plugin.json`. Do not edit them here.
 
 `MIN_VERSION` is defined only in the `.mts` source. Changing it: edit there, update the

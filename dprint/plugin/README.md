@@ -4,7 +4,7 @@ Skill that checks for a minimum dprint version, installs or updates dprint at us
 
 ## Install
 
-```
+```text
 /plugin install dprint@kwitsch-plugins
 ```
 
@@ -32,5 +32,5 @@ Skill that checks for a minimum dprint version, installs or updates dprint at us
 - The scan needs `git`.
 - The format hook needs dprint >= 0.50 (`dprint lsp`) on `PATH` or in `~/.dprint/bin` and `node` on `PATH`. Without dprint, or on any error or timeout (30 s per request), the Write/Edit goes through unformatted.
 - Which files are formatted is decided by dprint's config (plugins, includes, excludes); unmatched files are left alone.
-- The hook's `dprint lsp` process takes its working directory and `rootUri` from the first hook call of the session; after a worktree switch mid-session it still formats against the first project's config.
+- One `dprint lsp` process runs per working directory; `CwdChanged` and `EnterWorktree` hooks re-root the session/agent. Files outside the working directory, under `node_modules`, `vendor`, `.git`, `.claude/worktrees`, `.claude/agent-memory`, and `*.local.*` files are never formatted.
 - The first format in a project may download dprint plugins and time out; later calls succeed.

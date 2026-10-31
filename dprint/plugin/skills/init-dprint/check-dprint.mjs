@@ -4,33 +4,9 @@
 // against MIN_VERSION. Prints exactly one
 // `status=<ok|missing|outdated|error> version=<X.Y.Z|-> min=<MIN> path=<abs|->`
 // line; exit codes per check-dprint.reference.md. Read-only: never installs.
-import { accessSync, statSync, constants } from "node:fs";
 import { execFileSync } from "node:child_process";
-import { homedir } from "node:os";
-import { join, resolve } from "node:path";
+import { findDprint } from "./find-dprint.mjs";
 const MIN_VERSION = "0.50.0";
-/** true when p is a regular file executable by this user */
-function isExecutableFile(p) {
-    try {
-        accessSync(p, constants.X_OK);
-        return statSync(p).isFile();
-    }
-    catch {
-        return false;
-    }
-}
-/** absolute path of the dprint to use, or null */
-function findDprint() {
-    for (const dir of (process.env.PATH ?? "").split(":")) {
-        if (!dir)
-            continue;
-        const p = resolve(dir, "dprint");
-        if (isExecutableFile(p))
-            return p;
-    }
-    const fallback = join(homedir(), ".dprint", "bin", "dprint");
-    return isExecutableFile(fallback) ? fallback : null;
-}
 /** negative if version < MIN_VERSION, 0 if equal, positive if greater */
 function compareToMin(version) {
     const a = version.split(".").map(Number);
@@ -71,7 +47,9 @@ function check(args) {
     const version = `${m[1]}.${m[2]}.${m[3]}`;
     // a prerelease of MIN_VERSION sorts below it
     const cmp = compareToMin(version) || (m[4] ? -1 : 0);
-    return cmp >= 0 ? { code: 0, status: "ok", version, path } : { code: 11, status: "outdated", version, path };
+    return cmp >= 0
+        ? { code: 0, status: "ok", version, path }
+        : { code: 11, status: "outdated", version, path };
 }
 const r = check(process.argv.slice(2));
 process.stdout.write(`status=${r.status} version=${r.version} min=${MIN_VERSION} path=${r.path}\n`);

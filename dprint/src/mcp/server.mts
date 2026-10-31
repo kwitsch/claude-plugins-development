@@ -4,11 +4,14 @@
 //   format_pre (PreToolUse Write|Edit) — format via `dprint lsp`, return updatedInput
 import process from "node:process";
 import readline from "node:readline";
-import { readFileSync, realpathSync } from "node:fs";
-import { fileURLToPath } from "node:url";
-import { disposeLsp, formatPre, type HookResult } from "./format.mjs";
-
-export { applyEdit, formatPre, lineDiff, trimToEdit } from "./format.mjs";
+import { readFileSync } from "node:fs";
+import {
+  cwdChanged,
+  disposeLsp,
+  formatPre,
+  worktreeEntered,
+  type HookResult,
+} from "./format.mjs";
 
 const SERVER_NAME = "dprint-hooks"; // keep aligned with the .mcp.json key
 const SERVER_INFO = { name: SERVER_NAME, version: readVersion() };
@@ -36,18 +39,6 @@ type ToolDef = {
   handler: (args: any) => Promise<HookResult>;
 };
 
-// True only when this file is the process entry point, false when imported by a test.
-function isMainModule(): boolean {
-  try {
-    return (
-      realpathSync(process.argv[1]) ===
-      realpathSync(fileURLToPath(import.meta.url))
-    );
-  } catch {
-    return false;
-  }
-}
-
 function startServer(): void {
   const TOOLS: ToolDef[] = [
     {
@@ -56,6 +47,20 @@ function startServer(): void {
         "PreToolUse Write|Edit: format the write/edit with the project's dprint config via `dprint lsp` before it lands (updatedInput; Edit stays a minimal range-bounded diff).",
       inputSchema: { type: "object", additionalProperties: true },
       handler: formatPre,
+    },
+    {
+      name: "cwd_changed",
+      description:
+        "CwdChanged: use the new working directory for this session/agent's later format_pre calls.",
+      inputSchema: { type: "object", additionalProperties: true },
+      handler: cwdChanged,
+    },
+    {
+      name: "worktree_entered",
+      description:
+        "PostToolUse EnterWorktree: CwdChanged does not fire for it, so capture the worktree path here for later format_pre calls.",
+      inputSchema: { type: "object", additionalProperties: true },
+      handler: worktreeEntered,
     },
   ];
   const findTool = (name: string) => TOOLS.find((t) => t.name === name);
@@ -136,4 +141,4 @@ function startServer(): void {
   });
 }
 
-if (isMainModule()) startServer();
+startServer();

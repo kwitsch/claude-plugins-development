@@ -133,7 +133,7 @@ test("server.mjs is an executable node script", () => {
   assert.ok(statSync(SERVER).mode & 0o100);
 });
 
-test("initialize reports dprint-hooks with the manifest version; tools/list has exactly format_pre", async () => {
+test("initialize reports dprint-hooks with the manifest version; tools/list has exactly the hook tools", async () => {
   const s = startServer();
   const init = await s.rpc("initialize", {
     protocolVersion: "2025-11-25",
@@ -150,7 +150,59 @@ test("initialize reports dprint-hooks with the manifest version; tools/list has 
   const list = await s.rpc("tools/list", {});
   assert.deepEqual(
     list.result.tools.map((t) => t.name),
-    ["format_pre"],
+    ["format_pre", "cwd_changed", "worktree_entered"],
+  );
+});
+
+test("excluded and out-of-root paths are never formatted", async () => {
+  stubDprint();
+  const s = startServer();
+  for (const file of [
+    path.join(repo, "node_modules/x.ts"),
+    path.join(repo, "settings.local.json"),
+    path.join(repo, ".claude/worktrees/w/x.ts"),
+    path.join(tmp, "outside.ts"),
+  ])
+    assert.deepEqual(
+      await s.call({
+        cwd: repo,
+        tool_name: "Write",
+        tool_input: { file_path: file, content: "x   \n" },
+      }),
+      {},
+      file,
+    );
+});
+
+test("cwd_changed / worktree_entered re-root later format_pre calls for that session", async () => {
+  stubDprint();
+  const s = startServer();
+  const other = path.join(tmp, "other");
+  const third = path.join(tmp, "third");
+  for (const d of [other, third]) mkdirSync(d);
+  const write = (dir) =>
+    s.call({
+      cwd: repo,
+      session_id: "s1",
+      tool_name: "Write",
+      tool_input: { file_path: path.join(dir, "a.ts"), content: "x   \n" },
+    });
+  assert.deepEqual(await write(other), {}); // outside the hook cwd
+  await s.rpc("tools/call", {
+    name: "cwd_changed",
+    arguments: { session_id: "s1", new_cwd: other },
+  });
+  assert.equal(
+    (await write(other)).hookSpecificOutput.updatedInput.content,
+    "x\n",
+  );
+  await s.rpc("tools/call", {
+    name: "worktree_entered",
+    arguments: { session_id: "s1", tool_response: { worktreePath: third } },
+  });
+  assert.equal(
+    (await write(third)).hookSpecificOutput.updatedInput.content,
+    "x\n",
   );
 });
 

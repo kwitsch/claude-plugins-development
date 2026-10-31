@@ -25,6 +25,41 @@
           }
         ]
       }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "EnterWorktree",
+        "hooks": [
+          {
+            "type": "mcp_tool",
+            "server": "plugin:dprint:dprint-hooks",
+            "tool": "worktree_entered",
+            "timeout": 60,
+            "input": {
+              "agent_id": "${agent_id}",
+              "session_id": "${session_id}",
+              "tool_response": { "worktreePath": "${tool_response.worktreePath}" }
+            }
+          }
+        ]
+      }
+    ],
+    "CwdChanged": [
+      {
+        "hooks": [
+          {
+            "type": "mcp_tool",
+            "server": "plugin:dprint:dprint-hooks",
+            "tool": "cwd_changed",
+            "timeout": 60,
+            "input": {
+              "agent_id": "${agent_id}",
+              "session_id": "${session_id}",
+              "new_cwd": "${new_cwd}"
+            }
+          }
+        ]
+      }
     ]
   }
 }

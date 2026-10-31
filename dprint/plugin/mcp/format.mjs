@@ -35,20 +35,9 @@ export function lineDiff(a, b) {
             bStart: h.bStart + pre,
             bEnd: h.bEnd + pre,
         }));
-    if (a.length * b.length > 25_000_000) {
-        // too big for the table: one hunk over the middle that differs (same shape, never fails)
-        let p = 0;
-        while (p < a.length && p < b.length && a[p] === b[p])
-            p++;
-        let s = 0;
-        while (s < a.length - p &&
-            s < b.length - p &&
-            a[a.length - 1 - s] === b[b.length - 1 - s])
-            s++;
-        return p === a.length && p === b.length
-            ? []
-            : [{ aStart: p, aEnd: a.length - s, bStart: p, bEnd: b.length - s }];
-    }
+    // too big for the table: throw, formatPre fails open ({}) instead of returning a near whole-file edit
+    if (a.length * b.length > 25_000_000)
+        throw new Error("diff too large");
     // shortcut: O(n·m) memory on lines; fine for source files, upgrade to Myers if a >20k-line file shows up
     const n = a.length;
     const m = b.length;
@@ -139,16 +128,45 @@ export function trimToEdit(original, formatted, editLines) {
             return null;
     }
 }
-// One `dprint lsp` for the server's lifetime; its cwd/rootUri come from the first hook call.
-let lsp = null;
-const client = (cwd) => (lsp ??= new DprintLsp({
-    cwd: typeof cwd === "string" && cwd ? cwd : process.cwd(),
-}));
-/** Kill the dprint lsp child, if any (MCP stdin closed). */
-export function disposeLsp() {
-    lsp?.dispose();
-    lsp = null;
+// One `dprint lsp` per working directory (rootUri decides which dprint.json applies), created lazily.
+const clients = new Map();
+const client = (cwd) => {
+    let c = clients.get(cwd);
+    if (!c)
+        clients.set(cwd, (c = new DprintLsp({ cwd })));
+    return c;
+};
+// EnterWorktree / CwdChanged move a session's or subagent's cwd without the hook payload's `cwd` following.
+const cwdOverrides = new Map();
+const overrideKey = (args) => typeof args?.agent_id === "string" && args.agent_id
+    ? args.agent_id
+    : typeof args?.session_id === "string"
+        ? args.session_id
+        : "";
+function setCwd(args, cwd) {
+    const key = overrideKey(args);
+    if (key && typeof cwd === "string" && cwd)
+        cwdOverrides.set(key, cwd);
+    return {};
 }
+/** CwdChanged: use `new_cwd` for this session/agent's later format_pre calls. */
+export const cwdChanged = (args) => Promise.resolve(setCwd(args, args?.new_cwd));
+/** PostToolUse EnterWorktree: CwdChanged does not fire for it, so take the worktree path from the tool response. */
+export const worktreeEntered = (args) => Promise.resolve(setCwd(args, args?.tool_response?.worktreePath));
+/** Kill every dprint lsp child (MCP stdin closed). */
+export function disposeLsp() {
+    for (const c of clients.values())
+        c.dispose();
+    clients.clear();
+}
+// Same exclusions as universal-format: dependency/VCS dirs, other agents' worktrees, personal *.local.* files.
+const isExcludedPath = (rel) => {
+    const segs = rel.split(path.sep);
+    return (segs.some((s) => s === "node_modules" || s === "vendor" || s === ".git") ||
+        segs.some((s, i) => s === ".claude" &&
+            (segs[i + 1] === "worktrees" || segs[i + 1] === "agent-memory")) ||
+        segs[segs.length - 1].includes(".local."));
+};
 const lineOf = (text, idx) => text.slice(0, idx).split("\n").length - 1;
 function done(updatedInput, fp) {
     return {
@@ -166,15 +184,26 @@ export async function formatPre(args) {
         let fp = typeof ti.file_path === "string" ? ti.file_path : "";
         if (!fp)
             return {};
+        const key = overrideKey(args);
+        const hookCwd = typeof args.cwd === "string" ? args.cwd : "";
+        const cwd = (key && cwdOverrides.get(key)) || hookCwd;
         if (!path.isAbsolute(fp)) {
-            if (!args.cwd)
+            if (!cwd)
                 return {};
-            fp = path.resolve(args.cwd, fp);
+            fp = path.resolve(cwd, fp);
         }
+        const root = cwd || process.cwd();
+        const rel = path.relative(root, fp);
+        // outside the lsp's root no dprint.json applies; excluded paths are never ours to format
+        if (rel === ".." ||
+            rel.startsWith(".." + path.sep) ||
+            path.isAbsolute(rel) ||
+            isExcludedPath(rel))
+            return {};
         const uri = pathToFileURL(fp).href;
         if (args.tool_name === "Write") {
             const content = typeof ti.content === "string" ? ti.content : "";
-            const F = await client(args.cwd).format(uri, content);
+            const F = await client(root).format(uri, content);
             if (F === null || F === content || (F === "" && content !== ""))
                 return {};
             return done({ file_path: fp, content: F }, fp);
@@ -206,7 +235,7 @@ export async function formatPre(args) {
                     ? { line: endLine + 1, character: 0 }
                     : { line: endLine, character: mLines[endLine].length },
             };
-            const F = await client(args.cwd).format(uri, M, range);
+            const F = await client(root).format(uri, M, range);
             if (F === null || F === M || (F === "" && M !== ""))
                 return {};
             const r = trimToEdit(O, F, editLines);

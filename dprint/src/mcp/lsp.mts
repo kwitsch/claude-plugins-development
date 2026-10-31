@@ -1,9 +1,8 @@
 // lsp.mts — minimal `dprint lsp` client: one lazily spawned child speaking Content-Length framed
 // JSON-RPC over stdio, one format() at a time (promise-chain mutex), respawned after a crash.
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
-import { homedir } from "node:os";
-import { join } from "node:path";
 import { pathToFileURL } from "node:url";
+import { findDprint } from "../skills/init-dprint/find-dprint.mjs";
 
 export type LspRange = {
   start: { line: number; character: number };
@@ -97,18 +96,9 @@ export class DprintLsp {
 
   private start(): Promise<void> {
     if (this.ready) return this.ready;
-    // same lookup order as the skill's findDprint(): PATH first, then ~/.dprint/bin
-    const child = spawn("dprint", ["lsp"], {
-      cwd: this.cwd,
-      stdio: "pipe",
-      env: {
-        ...process.env,
-        // filter(Boolean): an empty PATH must not yield a leading empty segment (= the cwd)
-        PATH: [process.env.PATH, join(homedir(), ".dprint", "bin")]
-          .filter(Boolean)
-          .join(":"),
-      },
-    });
+    const bin = findDprint();
+    if (!bin) return Promise.reject(new Error("dprint not found"));
+    const child = spawn(bin, ["lsp"], { cwd: this.cwd, stdio: "pipe" });
     this.child = child;
     this.buf = Buffer.alloc(0);
     child.stdin.on("error", () => {}); // EPIPE after a crash; the crash itself surfaces via exit/error
