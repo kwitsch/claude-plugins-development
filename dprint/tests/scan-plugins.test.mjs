@@ -100,6 +100,14 @@ test("all detected types covered (URL with checksum suffix) -> exit 0", () => {
   assert.deepEqual(r.lines, ["status=ok config=dprint.json missing=0"]);
 });
 
+test("only .config/dprint.json -> it is the config, exit 0", () => {
+  write("a.ts");
+  write(".config/dprint.json", config(TS_URL, JSON_URL));
+  const r = run();
+  assert.equal(r.code, 0);
+  assert.deepEqual(r.lines, ["status=ok config=.config/dprint.json missing=0"]);
+});
+
 test("uncovered types -> exit 10, sorted by file count, candidates from the reference", () => {
   write("a.ts");
   write("b.ts");
