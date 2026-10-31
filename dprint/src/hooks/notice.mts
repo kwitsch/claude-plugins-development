@@ -90,7 +90,7 @@ async function onSessionCwd($: Engine, e: unknown, next: Next): Promise<unknown>
  */
 async function onCwdChanged($: Engine, e: unknown, next: Next): Promise<unknown> {
   const r = await next(e);
-  void warnIfNoConfig($, (e as { new_cwd?: string }).new_cwd ?? "").catch(() => {});
+  void warnIfNoConfig($, (e as { new_cwd?: string } | null | undefined)?.new_cwd ?? "").catch(() => {});
   return r;
 }
 
