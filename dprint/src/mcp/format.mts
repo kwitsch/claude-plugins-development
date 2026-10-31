@@ -269,14 +269,15 @@ export const worktreeEntered = (args: WorktreeEnteredInput = {}): HookResult =>
   setCwd(args, args.tool_response?.worktreePath);
 
 /**
- * PostToolUse ExitWorktree hook: return to the cwd from before EnterWorktree, else the stale worktree root
+ * PostToolUse ExitWorktree hook: switch to the cwd the session is restored to (`restoredCwd`; the cwd from
+ * before EnterWorktree, or Claude Code's fallback when that no longer exists), else the stale worktree root
  * would skip every file outside it.
  *
- * @param args - Hook input with `tool_response.originalCwd`, `session_id` and `agent_id`.
+ * @param args - Hook input with `tool_response.restoredCwd`, `session_id` and `agent_id`.
  * @returns `{}`.
  */
 export const worktreeExited = (args: WorktreeExitedInput = {}): HookResult =>
-  setCwd(args, args.tool_response?.originalCwd);
+  setCwd(args, args.tool_response?.restoredCwd);
 
 /**
  * Kill every `dprint lsp` child (called when MCP stdin closes).
@@ -359,7 +360,8 @@ function done(updatedInput: Record<string, unknown>, fp: string): HookResult {
  * Write: whole-file `formatting` of `content`. Edit: apply the edit in memory, `rangeFormatting` over the
  * edited lines, then {@link trimToEdit} keeps the result a minimal `old_string`/`new_string` pair, accepted
  * only when the trimmed result formats (whole document) exactly like the intended edit. Files outside the
- * working directory, {@link isExcludedPath} paths and CRLF files (Edit only) are skipped.
+ * working directory and {@link isExcludedPath} paths are skipped. Edits on CRLF files are trimmed on the
+ * LF-normalized text Claude Code's Edit matches against.
  *
  * @param args - Hook input: `cwd`, `session_id`, `agent_id`, `tool_name` and `tool_input`.
  * @returns The rewritten tool input, or `{}` on every guard and error (fail open).
@@ -398,8 +400,10 @@ export async function formatPre(
     }
 
     if (args.tool_name === "Edit") {
-      const O = readFileSync(fp, "utf8"); // ENOENT -> catch -> {}
-      // Claude Code's Edit matches against LF-normalized content, so an old_string carrying "\r" would miss
+      // Claude Code's Edit matches old_string against the file with CRLF normalized to LF and writes the file's
+      // own line endings back (verified in a real session), so trim on that LF view: an old_string carrying
+      // "\r\n" would be refused as not found. A lone "\r" left after normalizing is not handled: fail open.
+      const O = readFileSync(fp, "utf8").replaceAll("\r\n", "\n"); // ENOENT -> catch -> {}
       if (O.includes("\r")) return {};
       const oldStr = ti.old_string ?? "";
       const newStr = ti.new_string ?? "";

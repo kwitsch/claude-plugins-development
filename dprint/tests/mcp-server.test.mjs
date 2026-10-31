@@ -206,7 +206,7 @@ test("cwd_changed / worktree_entered re-root later format_pre calls for that ses
   );
   await s.rpc("tools/call", {
     name: "worktree_exited",
-    arguments: { session_id: "s1", tool_response: { originalCwd: other } },
+    arguments: { session_id: "s1", tool_response: { restoredCwd: other } },
   });
   assert.deepEqual(await write(third), {}); // back outside the cwd
   assert.equal(
@@ -234,6 +234,24 @@ test("Write with trailing spaces -> updatedInput.content stripped + notice", asy
     /^dprint: reformatted /,
   );
   assert.equal(out.hookSpecificOutput.permissionDecision, undefined);
+});
+
+test("Edit on a CRLF file: old_string/new_string come back LF-only (Claude Code's Edit matches the LF view)", async () => {
+  stubDprint();
+  const s = startServer();
+  const file = path.join(repo, "crlf.ts");
+  writeFileSync(file, lines(10).join("\r\n") + "\r\n");
+  const out = await s.call({
+    cwd: repo,
+    tool_name: "Edit",
+    tool_input: { file_path: file, old_string: "l5", new_string: "l5 x   " },
+  });
+  assert.deepEqual(out.hookSpecificOutput.updatedInput, {
+    file_path: file,
+    old_string: "l5\n",
+    new_string: "l5 x\n",
+    replace_all: false,
+  });
 });
 
 test("Edit: only the edited line region comes back, occurring once in the file", async () => {

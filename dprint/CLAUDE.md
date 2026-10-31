@@ -24,7 +24,7 @@ Hook: `plugin/hooks/hooks.json` (hand-written) wires PreToolUse `Write|Edit` as 
 - `format.mjs`: `formatPre` (Write: `formatting`; Edit: `rangeFormatting` over the edited lines, whole-file
   `formatting` on a JSON-RPC error), `lineDiff` and `trimToEdit` (keep only hunks touching the edit, widen
   `old_string` until it is unique; accepted only if the trimmed file formats like the intended edit, two extra
-  whole-document `formatting` calls; CRLF files fail open), one `DprintLsp` per cwd, per session/agent cwd overrides, and universal-format's
+  whole-document `formatting` calls; CRLF files are trimmed on their LF view), one `DprintLsp` per cwd, per session/agent cwd overrides, and universal-format's
   path exclusions. Every failure returns `{}` (fail open), including a diff above the size guard.
 
 `check-dprint.mjs`, `find-dprint.mjs`, `scan-plugins.mjs`, `plugin/mcp/*.mjs` and `plugin/.claude-plugin/plugin.json` are **build

@@ -54,7 +54,7 @@
             "input": {
               "agent_id": "${agent_id}",
               "session_id": "${session_id}",
-              "tool_response": { "originalCwd": "${tool_response.originalCwd}" }
+              "tool_response": { "restoredCwd": "${tool_response.restoredCwd}" }
             }
           }
         ]

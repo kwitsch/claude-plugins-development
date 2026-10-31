@@ -52,8 +52,8 @@ export interface WorktreeExitedInput {
   /** Template: `${session_id}`. */
   session_id?: string;
   tool_response?: {
-    /** Template: `${tool_response.originalCwd}`. */
-    originalCwd?: string;
+    /** Template: `${tool_response.restoredCwd}`. */
+    restoredCwd?: string;
   };
 }
 
