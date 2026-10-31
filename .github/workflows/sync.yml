@@ -56,7 +56,7 @@ jobs:
           TAG: ${{ inputs.tag || github.ref_name }}
         run: git merge-base --is-ancestor HEAD origin/main || { echo "::error::$TAG is not on main"; exit 1; }
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         if: steps.resolve.outputs.plugin != ''
       - uses: actions/setup-node@v4
         if: steps.resolve.outputs.plugin != ''

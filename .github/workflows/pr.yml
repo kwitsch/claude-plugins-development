@@ -63,7 +63,7 @@ jobs:
 
       # Toolchain only when something must be built: setup-node's post step
       # fails when `cache: pnpm` is set but `pnpm install` never ran.
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         if: steps.changed.outputs.plugins != ''
       - uses: actions/setup-node@v4
         if: steps.changed.outputs.plugins != ''
