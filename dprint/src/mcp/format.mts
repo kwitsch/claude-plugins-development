@@ -10,6 +10,11 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
+import type {
+  CwdChangedInput,
+  FormatPreInput,
+  WorktreeEnteredInput,
+} from "./hook-inputs.mjs";
 import { DprintLsp, type LspRange } from "./lsp.mjs";
 
 /** Hook output: empty (`{}`) to let the tool call through unchanged, else the rewritten tool input. */
@@ -219,25 +224,27 @@ const cwdOverrides = new Map<string, string>();
  * Key of {@link cwdOverrides} for a hook payload.
  *
  * @param args - Hook input.
- * @returns `agent_id` inside a subagent, else `session_id`, else `""` (no override possible).
+ * @returns `agent_id` inside a subagent (empty in the main session), else `session_id`, else `""` (no
+ * override possible).
  */
-const overrideKey = (args: any): string =>
-  typeof args?.agent_id === "string" && args.agent_id
-    ? args.agent_id
-    : typeof args?.session_id === "string"
-      ? args.session_id
-      : "";
+const overrideKey = (args: {
+  agent_id?: string;
+  session_id?: string;
+}): string => args.agent_id || args.session_id || "";
 
 /**
  * Record a cwd override for the payload's session or subagent.
  *
  * @param args - Hook input (supplies the key).
- * @param cwd - New working directory; ignored unless a non-empty string.
+ * @param cwd - New working directory; ignored when empty.
  * @returns `{}`: these hooks never change the tool call.
  */
-function setCwd(args: any, cwd: unknown): HookResult {
+function setCwd(
+  args: { agent_id?: string; session_id?: string },
+  cwd: string | undefined,
+): HookResult {
   const key = overrideKey(args);
-  if (key && typeof cwd === "string" && cwd) cwdOverrides.set(key, cwd);
+  if (key && cwd) cwdOverrides.set(key, cwd);
   return {};
 }
 
@@ -247,8 +254,8 @@ function setCwd(args: any, cwd: unknown): HookResult {
  * @param args - Hook input with `new_cwd`, `session_id` and `agent_id`.
  * @returns `{}`.
  */
-export const cwdChanged = (args: any): HookResult =>
-  setCwd(args, args?.new_cwd);
+export const cwdChanged = (args: CwdChangedInput = {}): HookResult =>
+  setCwd(args, args.new_cwd);
 
 /**
  * PostToolUse EnterWorktree hook: CwdChanged does not fire for it, so take the worktree path from the tool
@@ -257,8 +264,8 @@ export const cwdChanged = (args: any): HookResult =>
  * @param args - Hook input with `tool_response.worktreePath`, `session_id` and `agent_id`.
  * @returns `{}`.
  */
-export const worktreeEntered = (args: any): HookResult =>
-  setCwd(args, args?.tool_response?.worktreePath);
+export const worktreeEntered = (args: WorktreeEnteredInput = {}): HookResult =>
+  setCwd(args, args.tool_response?.worktreePath);
 
 /**
  * Kill every `dprint lsp` child (called when MCP stdin closes).
@@ -345,14 +352,15 @@ function done(updatedInput: Record<string, unknown>, fp: string): HookResult {
  * @param args - Hook input: `cwd`, `session_id`, `agent_id`, `tool_name` and `tool_input`.
  * @returns The rewritten tool input, or `{}` on every guard and error (fail open).
  */
-export async function formatPre(args: any): Promise<HookResult> {
+export async function formatPre(
+  args: FormatPreInput = {},
+): Promise<HookResult> {
   try {
-    const ti = args?.tool_input ?? {};
-    let fp: string = typeof ti.file_path === "string" ? ti.file_path : "";
+    const ti = args.tool_input ?? {};
+    let fp = ti.file_path ?? "";
     if (!fp) return {};
     const key = overrideKey(args);
-    const hookCwd = typeof args.cwd === "string" ? args.cwd : "";
-    const cwd = (key && cwdOverrides.get(key)) || hookCwd;
+    const cwd = (key && cwdOverrides.get(key)) || args.cwd || "";
     if (!path.isAbsolute(fp)) {
       if (!cwd) return {};
       fp = path.resolve(cwd, fp);
@@ -370,7 +378,7 @@ export async function formatPre(args: any): Promise<HookResult> {
     const uri = pathToFileURL(fp).href;
 
     if (args.tool_name === "Write") {
-      const content: string = typeof ti.content === "string" ? ti.content : "";
+      const content = ti.content ?? "";
       const F = await client(root).format(uri, content);
       const out = changed(F, content);
       if (out === null) return {};
@@ -379,11 +387,9 @@ export async function formatPre(args: any): Promise<HookResult> {
 
     if (args.tool_name === "Edit") {
       const O = readFileSync(fp, "utf8"); // ENOENT -> catch -> {}
-      const oldStr: string =
-        typeof ti.old_string === "string" ? ti.old_string : "";
-      const newStr: string =
-        typeof ti.new_string === "string" ? ti.new_string : "";
-      const replaceAll = ti.replace_all === true || ti.replace_all === "true";
+      const oldStr = ti.old_string ?? "";
+      const newStr = ti.new_string ?? "";
+      const replaceAll = ti.replace_all === "true"; // template-substituted, so always a string
       const M = applyEdit(O, oldStr, newStr, replaceAll);
       if (M === null) return {};
 
@@ -434,9 +440,9 @@ export async function formatPre(args: any): Promise<HookResult> {
     }
 
     return {};
-  } catch (e: any) {
+  } catch (e) {
     process.stderr.write(
-      `[dprint-hooks] format_pre failed open: ${e?.message ?? e}\n`,
+      `[dprint-hooks] format_pre failed open: ${e instanceof Error ? e.message : String(e)}\n`,
     );
     return {};
   }

@@ -34,7 +34,15 @@ output** (`pnpm build`) of `src/skills/init-dprint/{check-dprint,find-dprint,sca
 - `src/**/*.{mts,ts}` are written for humans: every function, method, class, type, type member and
   module-level constant carries a TSDoc comment (`@param name - text`, `@returns`, `@remarks`, one blank line
   before the first tag). `pnpm lint` (ESLint + typescript-eslint, `eslint-plugin-tsdoc`, `eslint-plugin-jsdoc`;
-  config `eslint.config.mjs`) enforces it; CI runs it. `plugin/` is ignored by the linter.
+  config `eslint.config.mjs`, type-checked rules incl. `no-explicit-any`/`no-unsafe-*`) enforces it; CI runs
+  it. `plugin/` is ignored by the linter.
+- `plugin/hooks/hooks.json` is the hook-input contract. `scripts/hooks.mjs` validates it (only `mcp_tool`
+  hooks, `server` = `plugin:dprint:<.mcp.json key>`, every `${…}` placeholder a real input field of its event
+  and, for `Write`/`Edit` matchers, of those tools, one input shape per tool) and generates
+  `src/mcp/hook-inputs.d.mts` (one interface per tool plus the `HookInputs` map) from the `input` templates.
+  `server.mts` types its tool table by `HookInputs`, so a tool missing on either side is a compile error.
+  `pnpm build` regenerates the file; `pnpm lint` runs `scripts/hooks.mjs --check` first and fails while it is
+  stale. Never edit the `.d.mts` by hand. A new hook event needs its input fields in `EVENT_FIELDS` there.
 - `pnpm build` compiles with `tsc` (`.mts` → `.mjs`, `.ts` → `.js`) and then minifies every emitted file with
   terser: no comments, mangled locals, shebang and export names kept. The output is optimized for size and
   load time, not for reading; debug against `src/`.

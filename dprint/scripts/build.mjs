@@ -32,7 +32,17 @@ function walk(dir) {
 // 1. remove stale build output (plugin/ holds no hand-written .mjs/.js)
 for (const f of walk(PLUGIN)) if (/\.m?js$/.test(f)) rmSync(f);
 
-// 2. compile (only if there are sources): .mts -> .mjs, .ts -> .js
+// 2. validate hooks.json and regenerate the hook input types (src/mcp/hook-inputs.d.mts) from it
+const hooks = spawnSync(
+  process.execPath,
+  [path.join(ROOT, "scripts/hooks.mjs")],
+  {
+    stdio: "inherit",
+  },
+);
+if (hooks.status !== 0) process.exit(hooks.status ?? 1);
+
+// 3. compile (only if there are sources): .mts -> .mjs, .ts -> .js
 const sources = walk(path.join(ROOT, "src")).filter((f) => /\.m?ts$/.test(f));
 if (sources.length) {
   const tsc = spawnSync("pnpm", ["exec", "tsc", "-p", "tsconfig.json"], {
@@ -53,7 +63,7 @@ if (sources.length) {
   }
 }
 
-// 3. manifest: <name>/plugin.json is the source of truth
+// 4. manifest: <name>/plugin.json is the source of truth
 const manifest = JSON.parse(
   readFileSync(path.join(ROOT, "plugin.json"), "utf8"),
 );

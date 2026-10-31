@@ -1,4 +1,6 @@
 // Lint config for the TypeScript sources in src/. plugin/ is build output (minified .mjs) and is never linted.
+// Hook inputs are typed by src/mcp/hook-inputs.d.mts (generated from hooks.json by scripts/hooks.mjs), so the
+// type-checked rules (no-explicit-any, no-unsafe-*) stay on.
 import js from "@eslint/js";
 import jsdoc from "eslint-plugin-jsdoc";
 import tsdoc from "eslint-plugin-tsdoc";
@@ -22,7 +24,13 @@ export default tseslint.config(
         tsconfigRootDir: import.meta.dirname,
       },
     },
-    settings: { jsdoc: { mode: "typescript" } },
+    // TSDoc spells JSDoc's @template as @typeParam
+    settings: {
+      jsdoc: {
+        mode: "typescript",
+        tagNamePreference: { template: "typeParam" },
+      },
+    },
     rules: {
       // TSDoc syntax (`@param name - text`, `@remarks`, `@returns`, …)
       "tsdoc/syntax": "error",
@@ -56,13 +64,6 @@ export default tseslint.config(
       // TSDoc has no dotted `@param opts.x` names; document an options object's fields on its type instead
       "jsdoc/require-param": ["error", { checkDestructured: false }],
       "jsdoc/check-param-names": ["error", { checkDestructured: false }],
-      // the hook payloads are untyped JSON from Claude Code; `any` is the honest type at that boundary
-      "@typescript-eslint/no-explicit-any": "off",
-      "@typescript-eslint/no-unsafe-argument": "off",
-      "@typescript-eslint/no-unsafe-assignment": "off",
-      "@typescript-eslint/no-unsafe-call": "off",
-      "@typescript-eslint/no-unsafe-member-access": "off",
-      "@typescript-eslint/no-unsafe-return": "off",
     },
   },
 );

@@ -35,10 +35,22 @@ const FORMAT_OPTIONS = { tabSize: 2, insertSpaces: true };
 /** A JSON-RPC error response (as opposed to a timeout or a dead child). */
 class RpcError extends Error {}
 
+/** A JSON-RPC message from the child, as far as this client reads it; every field is checked before use. */
+type RpcMessage = {
+  /** Request/response id; absent or `null` on notifications. */
+  id?: unknown;
+  /** Set on server-to-client requests and notifications. */
+  method?: unknown;
+  /** Response payload. */
+  result?: unknown;
+  /** Error response payload. */
+  error?: { message?: unknown } | null;
+};
+
 /** An in-flight request awaiting its response. */
 type Pending = {
   /** Settles the request with the response `result`. */
-  resolve: (v: any) => void;
+  resolve: (v: unknown) => void;
   /** Settles the request with an error response, a timeout or the child's death. */
   reject: (e: Error) => void;
   /** Timeout of the request. */
@@ -129,17 +141,16 @@ export class DprintLsp {
       textDocument: { uri, languageId: "", version: 1, text },
     });
     try {
-      const whole = (): Promise<TextEdit[] | null> =>
-        this.request("textDocument/formatting", {
+      const whole = () =>
+        this.request<TextEdit[] | null>("textDocument/formatting", {
           textDocument: { uri },
           options: FORMAT_OPTIONS,
         });
-      const edits: TextEdit[] | null = range
-        ? await this.request("textDocument/rangeFormatting", {
-            textDocument: { uri },
-            range,
-            options: FORMAT_OPTIONS,
-          }).catch((e) => {
+      const edits = range
+        ? await this.request<TextEdit[] | null>(
+            "textDocument/rangeFormatting",
+            { textDocument: { uri }, range, options: FORMAT_OPTIONS },
+          ).catch((e: unknown) => {
             if (!(e instanceof RpcError)) throw e;
             return whole(); // plugin without range support: one retry on the whole document
           })
@@ -181,7 +192,7 @@ export class DprintLsp {
       capabilities: {},
     }).then(
       () => this.notify("initialized", {}),
-      (e) => {
+      (e: unknown) => {
         if (this.child === child) this.dispose();
         throw e;
       },
@@ -211,14 +222,14 @@ export class DprintLsp {
       if (this.buf.length < end) return;
       const body = this.buf.subarray(sep + 4, end).toString("utf8");
       this.buf = this.buf.subarray(end);
-      let msg: any;
+      let msg: unknown;
       try {
         msg = JSON.parse(body);
       } catch {
         this.broken();
         return;
       }
-      this.onMessage(msg);
+      if (typeof msg === "object" && msg !== null) this.onMessage(msg);
     }
   }
 
@@ -237,40 +248,49 @@ export class DprintLsp {
    * @param msg - Parsed message: a response settles its pending request, a server-to-client request is
    * answered with `null`, a notification is ignored.
    */
-  private onMessage(msg: any): void {
-    if (msg?.id === undefined || msg.id === null) return; // server notification
+  private onMessage(msg: RpcMessage): void {
+    if (msg.id === undefined || msg.id === null) return; // server notification
     if (msg.method !== undefined) {
       this.send({ jsonrpc: "2.0", id: msg.id, result: null }); // server->client request
       return;
     }
+    if (typeof msg.id !== "number") return; // not one of ours: this client only sends numeric ids
     const p = this.pending.get(msg.id);
     if (!p) return;
     this.pending.delete(msg.id);
     clearTimeout(p.timer);
     if (msg.error)
-      p.reject(new RpcError(String(msg.error.message ?? "JSON-RPC error")));
+      p.reject(
+        new RpcError(
+          typeof msg.error.message === "string"
+            ? msg.error.message
+            : "JSON-RPC error",
+        ),
+      );
     else p.resolve(msg.result);
   }
 
   /**
    * Send a request and wait for its response.
    *
+   * @typeParam T - Type of the response `result` (the LSP spec's result type for `method`; not checked).
    * @param method - JSON-RPC method.
    * @param params - Method parameters.
    * @returns The response `result`; rejects with {@link RpcError} on an error response, or with a plain
    * `Error` when the child is not running, dies or times out (a timeout also kills the child).
    */
-  private request(method: string, params: unknown): Promise<any> {
+  private request<T = unknown>(method: string, params: unknown): Promise<T> {
     if (!this.child)
       return Promise.reject(new Error("dprint lsp is not running"));
     const id = this.nextId++;
-    return new Promise((resolve, reject) => {
+    return new Promise<T>((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pending.delete(id);
         reject(new Error(`dprint lsp: ${method} timed out`));
         this.child?.kill(); // a hung child must not be reused; the next format() respawns
       }, REQUEST_TIMEOUT_MS);
-      this.pending.set(id, { resolve, reject, timer });
+      // the result is trusted to match T: dprint answers per the LSP spec for `method`
+      this.pending.set(id, { resolve: (v) => resolve(v as T), reject, timer });
       this.send({ jsonrpc: "2.0", id, method, params });
     });
   }

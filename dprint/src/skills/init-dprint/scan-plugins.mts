@@ -112,8 +112,12 @@ function scan(args: string[]): ScanResult {
   try {
     // strip a UTF-8 BOM (Windows editors); JSON.parse rejects it, dprint accepts it
     const raw = readFileSync(config, "utf8").replace(/^\uFEFF/, "");
-    const parsed = JSON.parse(stripJsonc(raw));
-    const plugins: unknown = parsed.plugins;
+    // a non-object config (e.g. `null`) throws on the member access below -> reported as unreadable
+    const parsed = JSON.parse(stripJsonc(raw)) as {
+      plugins?: unknown;
+      extends?: unknown;
+    };
+    const plugins = parsed.plugins;
     if (plugins !== undefined && !Array.isArray(plugins))
       throw new Error('"plugins" is not an array');
     entries = ((plugins ?? []) as unknown[]).filter(
@@ -152,8 +156,11 @@ function scan(args: string[]): ScanResult {
 
   let ref: RefPlugin[];
   try {
-    ref = JSON.parse(
-      readFileSync(new URL("./dprint-plugins.json", import.meta.url), "utf8"),
+    // bundled, hand-maintained reference data (shape checked by its tests), not user input
+    ref = (
+      JSON.parse(
+        readFileSync(new URL("./dprint-plugins.json", import.meta.url), "utf8"),
+      ) as { plugins: RefPlugin[] }
     ).plugins;
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
