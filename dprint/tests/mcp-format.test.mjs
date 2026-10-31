@@ -150,6 +150,12 @@ test("applyEdit: null cases, old === new, replaceAll", () => {
   assert.equal(applyEdit("abc", "z", "x", true), null);
 });
 
+test("applyTextEdits: inserts at the same position land in array order", () => {
+  const at = { line: 0, character: 1 };
+  const ins = (newText) => ({ range: { start: at, end: at }, newText });
+  assert.equal(applyTextEdits("ab", [ins("X"), ins("Y")]), "aXYb");
+});
+
 test("applyTextEdits: several edits applied back to front regardless of array order", () => {
   const edits = [
     {

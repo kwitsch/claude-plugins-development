@@ -191,12 +191,13 @@ export function applyTextEdits(text, edits) {
         return Math.min(starts[p.line] + p.character, lineEnd); // LSP: past the line end means the line end
     };
     const spans = edits
-        .map((e) => ({
+        .map((e, i) => ({
         s: offset(e.range.start),
         e: offset(e.range.end),
         t: e.newText,
+        i,
     }))
-        .sort((x, y) => y.s - x.s);
+        .sort((x, y) => y.s - x.s || y.i - x.i); // same start: later edit first, so inserts land in array order
     let out = text;
     for (const { s, e, t } of spans)
         out = out.slice(0, s) + t + out.slice(e);
