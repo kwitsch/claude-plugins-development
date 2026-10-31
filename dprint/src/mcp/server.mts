@@ -6,14 +6,16 @@
  * @remarks
  * stdout carries JSON-RPC only; logs go to stderr. Each tool backs one hook in `hooks/hooks.json`:
  * `format_pre` (PreToolUse `Write|Edit`) formats via `dprint lsp` and returns `updatedInput`;
- * `cwd_changed` (CwdChanged) and `worktree_entered` (PostToolUse `EnterWorktree`) track the session's cwd.
+ * `cwd_changed` (CwdChanged), `worktree_entered` and `worktree_exited` (PostToolUse `EnterWorktree`/`ExitWorktree`)
+ * track the session's cwd; `file_written` (PostToolUse `Write|Edit`) records Edit/Write results and
+ * `file_changed` (FileChanged) formats watched files changed by other tools on disk.
  *
  * @packageDocumentation
  */
 import { readFileSync } from "node:fs";
 import process from "node:process";
 import readline from "node:readline";
-import { cwdChanged, disposeLsp, formatPre, type HookResult, worktreeEntered, worktreeExited } from "./format.mjs";
+import { cwdChanged, disposeLsp, fileChanged, fileWritten, formatPre, type HookResult, worktreeEntered, worktreeExited } from "./format.mjs";
 import type { HookInputs } from "./hook-inputs.mjs";
 
 /** Server name reported on `initialize`; keep aligned with the `.mcp.json` key. */
@@ -96,6 +98,14 @@ function startServer(): void {
     worktree_exited: {
       description: "PostToolUse ExitWorktree: switch later format_pre calls back to the cwd from before EnterWorktree.",
       handler: worktreeExited,
+    },
+    file_written: {
+      description: "PostToolUse Write|Edit: remember the written content so file_changed leaves Edit/Write results alone.",
+      handler: fileWritten,
+    },
+    file_changed: {
+      description: "FileChanged: format a watched file inside the cwd on disk after a change not made by Edit/Write.",
+      handler: fileChanged,
     },
   };
   const send = (msg: unknown) => process.stdout.write(JSON.stringify(msg) + "\n");

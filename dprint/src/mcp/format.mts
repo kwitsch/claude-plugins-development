@@ -1,5 +1,6 @@
 /**
- * The `format_pre`, `cwd_changed` and `worktree_entered` hook handlers plus the pure helpers behind them.
+ * The `format_pre`, `file_written`, `file_changed`, `cwd_changed`, `worktree_entered` and `worktree_exited` hook
+ * handlers plus the pure helpers behind them.
  *
  * @remarks
  * Helpers: {@link applyEdit} (Claude Code's Edit semantics, copied from universal-format), {@link lineDiff}
@@ -7,11 +8,13 @@
  *
  * @packageDocumentation
  */
-import { lstatSync, readFileSync, realpathSync } from "node:fs";
+import { execFile } from "node:child_process";
+import { lstatSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
+import { promisify } from "node:util";
 import { findConfig } from "../skills/dprint/find-config.mjs";
-import type { CwdChangedInput, FormatPreInput, WorktreeEnteredInput, WorktreeExitedInput } from "./hook-inputs.mjs";
+import type { CwdChangedInput, FileChangedInput, FileWrittenInput, FormatPreInput, WorktreeEnteredInput, WorktreeExitedInput } from "./hook-inputs.mjs";
 import { DprintLsp, type LspRange } from "./lsp.mjs";
 
 /** Hook output: empty (`{}`) to let the tool call through unchanged, else the rewritten tool input. */
@@ -399,6 +402,94 @@ export function inScope(
     if (sp === "" || !outside(sp)) return null;
   }
   return { fp, real };
+}
+
+/**
+ * Content last written per real path, by Edit/Write (recorded by {@link fileWritten}) or by {@link fileChanged}.
+ *
+ * @remarks
+ * FileChanged must not re-format Edit/Write results or its own writes, so {@link fileChanged} skips a file whose
+ * content equals the entry. Entries are kept on a match, so duplicate and add-then-change events are skipped too.
+ * shortcut: entries stay until the server exits; prune if memory ever matters.
+ */
+const written = new Map<string, string>();
+
+/** `execFile` returning a promise of `{ stdout, stderr }`. */
+const execFileAsync = promisify(execFile);
+
+/**
+ * PostToolUse `Write|Edit` hook: remember the content Edit/Write wrote, so {@link fileChanged} leaves it alone.
+ *
+ * @param args - Hook input: `cwd`, `agent_id`, `session_id`, `scratchpad_dir` and `tool_input.file_path`.
+ * @returns `{}` (fail open on every error).
+ */
+export function fileWritten(args: FileWrittenInput = {}): HookResult {
+  try {
+    const sc = scopeOf(args);
+    const s = sc && inScope(sc, args.tool_input?.file_path ?? "");
+    if (s) written.set(s.real, readFileSync(s.fp, "utf8"));
+  } catch (e) {
+    process.stderr.write(
+      `[dprint-hooks] file_written failed open: ${e instanceof Error ? e.message : String(e)}\n`,
+    );
+  }
+  return {};
+}
+
+/**
+ * FileChanged hook: format a watched file inside the cwd on disk after a change not made by Edit/Write.
+ *
+ * @remarks
+ * Skips `unlink` events, files out of {@link inScope}, cwds without a dprint config, CR/CRLF files, content equal
+ * to the {@link written} entry, and (user decision) files unchanged against the git index
+ * (`git status --porcelain` empty, e.g. after checkout/pull/reset/stash); when git fails or is absent the file is
+ * formatted.
+ * The whole file is formatted via `textDocument/formatting` and written in place only when dprint changed it and
+ * the file did not change meanwhile. Never returns `watchPaths`, so Claude Code keeps its watch list.
+ *
+ * @param args - Hook input: `cwd`, `agent_id`, `session_id`, `scratchpad_dir`, `file_path` and `event`.
+ * @returns `{}` (fail open on every error).
+ */
+export async function fileChanged(
+  args: FileChangedInput = {},
+): Promise<HookResult> {
+  try {
+    if (args.event === "unlink") return {};
+    const sc = scopeOf(args);
+    const s = sc && inScope(sc, args.file_path ?? "");
+    if (!sc || !s || findConfig(sc.root) === null) return {};
+    const text = readFileSync(s.fp, "utf8");
+    // shortcut: CR/CRLF files are skipped, a whole-file write would need formatPre's LF-view handling; add it when a CRLF project needs FileChanged formatting
+    if (text.includes("\r")) return {};
+    if (written.get(s.real) === text) return {};
+    // user decision: a file equal to the git index (git restored it) is left alone; --no-optional-locks keeps
+    // .git/index.lock free for the user's git, cwd = dirname picks the nearest repository (nested repos, submodules)
+    try {
+      const { stdout } = await execFileAsync(
+        "git",
+        ["--no-optional-locks", "status", "--porcelain", "--", s.fp],
+        { cwd: path.dirname(s.fp), encoding: "utf8", timeout: 10_000 },
+      );
+      if (stdout === "") return {};
+    } catch {
+      // no git, not a repository or timeout: format
+    }
+    const out = changed(
+      await client(sc.root).format(pathToFileURL(s.fp).href, text),
+      text,
+    );
+    if (out === null) return {};
+    // a write that landed while dprint was formatting wins
+    if (readFileSync(s.fp, "utf8") !== text) return {};
+    writeFileSync(s.fp, out);
+    written.set(s.real, out); // after the write: a failed write records nothing
+    return {};
+  } catch (e) {
+    process.stderr.write(
+      `[dprint-hooks] file_changed failed open: ${e instanceof Error ? e.message : String(e)}\n`,
+    );
+    return {};
+  }
 }
 
 /**
