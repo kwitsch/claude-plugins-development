@@ -1,18 +1,23 @@
 # dprint
 
-Plugin with one model-invocable skill `dprint` (`plugin/skills/dprint/SKILL.md`), one PreToolUse
-format hook, three cwd-tracking hooks (CwdChanged, PostToolUse EnterWorktree/ExitWorktree) and one Claude Code
-function-hooks module `plugin/hooks/notice.mjs` (15 s toast when the working directory has no dprint config).
+Plugin with one model-invocable skill `dprint` (`plugin/skills/dprint/SKILL.md`; actions `init`, `check`, `fmt`,
+no argument = `fmt`), one PreToolUse format hook, three cwd-tracking hooks (CwdChanged, PostToolUse
+EnterWorktree/ExitWorktree) and one Claude Code function-hooks module `plugin/hooks/notice.mjs` (15 s toast when
+the working directory has no dprint config).
 
-Skill: two zero-dep scripts (plus the shared `find-dprint.mjs` and `config-names.mjs`, the six dprint config file
-names in `CONFIG_NAMES`) and one data file, all in
+Skill: three zero-dep scripts (plus the shared `find-dprint.mjs`, `find-config.mjs` and `config-names.mjs`, the six
+dprint config file names in `CONFIG_NAMES`) and one data file, all in
 `plugin/skills/dprint/`:
 
 - `check-dprint.mjs`: dprint detection and minimum-version check (contract: `check-dprint.reference.md`).
 - `scan-plugins.mjs`: read-only scan of the project's file types against its dprint config (contract:
   `scan-plugins.reference.md`).
+- `run-dprint.mjs`: check/fmt dispatcher with the not-set-up gate (contract: `run-dprint.reference.md`).
 - `dprint-plugins.json`: hand-written plugin reference data read by `scan-plugins.mjs`. It is **not** build
   output; edit it in place.
+
+`find-dprint.mjs` exports `findDprint` (binary: `PATH`, then `~/.dprint/bin`) and `findConfig` (first of
+`CONFIG_NAMES` from `config-names.mjs` in a directory or its ancestors).
 
 Hook: `plugin/hooks/hooks.json` (hand-written) wires PreToolUse `Write|Edit` as an `mcp_tool` hook to tool
 `format_pre` of the MCP server `dprint-hooks` (`plugin/.mcp.json`, hand-written, `command: node`). The server is
@@ -39,10 +44,11 @@ per directory per 15 s, and calls `$.ui.toast(text, { timeoutMs: 15000 })` when 
 `hooks` map; `claude plugin validate plugin` checks the module and warns "gating hook without .catch" for three of
 its hooks (expected: the check is detached with `.catch`).
 
-`check-dprint.mjs`, `config-names.mjs`, `find-config.mjs`, `find-dprint.mjs`, `scan-plugins.mjs`, `plugin/mcp/*.mjs`, `plugin/hooks/notice.mjs`
-and `plugin/.claude-plugin/plugin.json` are **build output** (`pnpm build`) of
-`src/skills/dprint/{check-dprint,config-names,find-config,find-dprint,scan-plugins}.mts`, `src/mcp/{server,lsp,format}.mts`,
-`src/hooks/notice.mts` and `plugin.json`. Do not edit them here.
+`check-dprint.mjs`, `config-names.mjs`, `find-config.mjs`, `find-dprint.mjs`, `run-dprint.mjs`, `scan-plugins.mjs`,
+`plugin/mcp/*.mjs`, `plugin/hooks/notice.mjs` and `plugin/.claude-plugin/plugin.json` are **build output**
+(`pnpm build`) of
+`src/skills/dprint/{check-dprint,config-names,find-config,find-dprint,run-dprint,scan-plugins}.mts`,
+`src/mcp/{server,lsp,format}.mts`, `src/hooks/notice.mts` and `plugin.json`. Do not edit them here.
 
 ## Sources vs. build output
 

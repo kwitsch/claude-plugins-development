@@ -91,3 +91,10 @@ test("SKILL.md uses the arguments placeholder exactly once and no indexed placeh
   assert.equal(SKILL.split("$ARGUMENTS").length, 2);
   assert.doesNotMatch(SKILL, /\$[01]\b/);
 });
+
+test("README documents /dprint:dprint and mirrors the plugin.json description", () => {
+  const readme = readFileSync(path.join(ROOT, "plugin/README.md"), "utf8");
+  assert.match(readme, /\/dprint:dprint/);
+  const { description } = JSON.parse(readFileSync(path.join(ROOT, "plugin.json"), "utf8"));
+  assert.ok(readme.includes(description));
+});
