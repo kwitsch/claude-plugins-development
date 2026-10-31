@@ -74,6 +74,7 @@ jobs:
         if: steps.changed.outputs.plugins != ''
         run: |
           for p in ${{ steps.changed.outputs.plugins }}; do
+            pnpm --filter "$p" run --if-present lint
             pnpm --filter "$p" build
             pnpm --filter "$p" test
             bash .github/scripts/check-plugin-fresh.sh "$p"

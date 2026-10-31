@@ -1,12 +1,19 @@
 #!/usr/bin/env node
-// init-dprint skill helper: list the project's file types (git ls-files in cwd), find the dprint
-// config in cwd and report every file type that a plugin in dprint-plugins.json can format but no
-// plugin in the config covers. Output and exit codes per scan-plugins.reference.md. Read-only.
+/**
+ * init-dprint skill helper: list the project's file types and report every type that a plugin in
+ * `dprint-plugins.json` can format but no plugin in the project's dprint config covers.
+ *
+ * @remarks
+ * File types come from `git ls-files` in the working directory; the config is looked up in the working
+ * directory only. Output and exit codes are documented in `scan-plugins.reference.md`. Read-only.
+ *
+ * @packageDocumentation
+ */
 
 import { existsSync, readFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 
-// dprint's own discovery order (resolve_main_config_path.rs, POSSIBLE_CONFIG_FILE_NAMES)
+/** Config file names in dprint's own discovery order (`resolve_main_config_path.rs`, `POSSIBLE_CONFIG_FILE_NAMES`). */
 const CONFIG_NAMES = [
   "dprint.json",
   "dprint.jsonc",
@@ -14,21 +21,36 @@ const CONFIG_NAMES = [
   ".dprint.jsonc",
 ];
 
+/** One plugin entry of `dprint-plugins.json`. */
 interface RefPlugin {
+  /** Registry name, as accepted by `dprint config add`. */
   id: string;
+  /** npm package name, when the plugin is published there. */
   npm?: string;
+  /** Lower-cased file extensions without the leading dot. */
   extensions: string[];
+  /** Exact file names the plugin formats (for example `Dockerfile`). */
   fileNames?: string[];
 }
 
+/** Outcome of {@link scan}: the exit code plus the header fields and one line per uncovered file type. */
 interface ScanResult {
+  /** Process exit code (0 ok, 2 error, 10 missing, 11 noconfig). */
   code: number;
+  /** `ok`, `missing`, `noconfig` or `error`. */
   status: string;
+  /** Config file name that was read, or `-`. */
   config: string;
+  /** `type=… files=… candidates=…` lines, most frequent type first. */
   lines: string[];
 }
 
-/** JSONC -> JSON: drops comments and trailing commas outside string literals */
+/**
+ * Convert JSONC to JSON by dropping comments and trailing commas outside string literals.
+ *
+ * @param text - JSONC source.
+ * @returns Text that `JSON.parse` accepts when the input was valid JSONC.
+ */
 function stripJsonc(text: string): string {
   const keep = (m: string) => (m[0] === '"' ? m : "");
   return text
@@ -36,7 +58,13 @@ function stripJsonc(text: string): string {
     .replace(/"(?:\\.|[^"\\])*"|,(?=\s*[\]}])/g, keep);
 }
 
-/** true when a config plugins entry references p (registry URL, npm specifier or node_modules path) */
+/**
+ * Check whether a config `plugins` entry references a reference plugin.
+ *
+ * @param p - Reference plugin.
+ * @param entries - String entries of the config's `plugins` array.
+ * @returns `true` when an entry is p's registry URL, npm specifier or `node_modules` path.
+ */
 function inConfig(p: RefPlugin, entries: string[]): boolean {
   const prefix = `https://plugins.dprint.dev/${p.id}-`;
   const npm = p.npm;
@@ -51,7 +79,13 @@ function inConfig(p: RefPlugin, entries: string[]): boolean {
   );
 }
 
-/** file-type key of a git path: exact reference file name, else "." + lower-cased extension, else null */
+/**
+ * Map a git path to its file-type key.
+ *
+ * @param path - Repository-relative path as printed by `git ls-files`.
+ * @param names - Exact file names known from the reference data.
+ * @returns The base name when it is a known file name, else `.` plus the lower-cased extension, else `null`.
+ */
 function fileType(path: string, names: Set<string>): string | null {
   const base = path.slice(path.lastIndexOf("/") + 1);
   if (names.has(base)) return base;
@@ -59,7 +93,12 @@ function fileType(path: string, names: Set<string>): string | null {
   return dot > 0 ? "." + base.slice(dot + 1).toLowerCase() : null;
 }
 
-/** args = command-line arguments after the script path */
+/**
+ * Run the scan in the current working directory.
+ *
+ * @param args - Command-line arguments after the script path; any argument is a usage error.
+ * @returns The exit code, header fields and per-type lines to print.
+ */
 function scan(args: string[]): ScanResult {
   if (args.length > 0) {
     process.stderr.write("usage: node scan-plugins.mjs (takes no arguments)\n");
@@ -72,9 +111,13 @@ function scan(args: string[]): ScanResult {
   let entries: string[];
   try {
     // strip a UTF-8 BOM (Windows editors); JSON.parse rejects it, dprint accepts it
-    const raw = readFileSync(config, "utf8").replace(/^﻿/, "");
-    const parsed = JSON.parse(stripJsonc(raw));
-    const plugins: unknown = parsed.plugins;
+    const raw = readFileSync(config, "utf8").replace(/^\uFEFF/, "");
+    // a non-object config (e.g. `null`) throws on the member access below -> reported as unreadable
+    const parsed = JSON.parse(stripJsonc(raw)) as {
+      plugins?: unknown;
+      extends?: unknown;
+    };
+    const plugins = parsed.plugins;
     if (plugins !== undefined && !Array.isArray(plugins))
       throw new Error('"plugins" is not an array');
     entries = ((plugins ?? []) as unknown[]).filter(
@@ -113,8 +156,11 @@ function scan(args: string[]): ScanResult {
 
   let ref: RefPlugin[];
   try {
-    ref = JSON.parse(
-      readFileSync(new URL("./dprint-plugins.json", import.meta.url), "utf8"),
+    // bundled, hand-maintained reference data (shape checked by its tests), not user input
+    ref = (
+      JSON.parse(
+        readFileSync(new URL("./dprint-plugins.json", import.meta.url), "utf8"),
+      ) as { plugins: RefPlugin[] }
     ).plugins;
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
@@ -163,7 +209,9 @@ function scan(args: string[]): ScanResult {
   };
 }
 
+/** Result of this run. */
 const r = scan(process.argv.slice(2));
+/** Count printed as `missing=`; `-` when the scan did not get that far. */
 const missing = r.code === 0 || r.code === 10 ? String(r.lines.length) : "-";
 process.stdout.write(
   [`status=${r.status} config=${r.config} missing=${missing}`, ...r.lines].join(

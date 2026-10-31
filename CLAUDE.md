@@ -36,7 +36,7 @@ claude plugin validate < name > /plugin
 
 ## CI
 
-PR (`.github/workflows/pr.yml`): On every PR, for each plugin dir with changes: `plugin.json` and `package.json` versions must match; for PRs into `main` the version must be higher than on `main` and tag `<name>-<version>` must not exist here or in kwitsch/claude-plugins; then `pnpm --filter <name> build` and `test` must pass and the committed `<name>/plugin/` must equal the fresh build. Job `changed-plugins` is the required status check on `main` (branch protection in GitHub settings) — do not rename it.
+PR (`.github/workflows/pr.yml`): On every PR, for each plugin dir with changes: `plugin.json` and `package.json` versions must match; for PRs into `main` the version must be higher than on `main` and tag `<name>-<version>` must not exist here or in kwitsch/claude-plugins; then `pnpm --filter <name> lint` (only if the plugin defines a `lint` script), `build` and `test` must pass and the committed `<name>/plugin/` must equal the fresh build. Job `changed-plugins` is the required status check on `main` (branch protection in GitHub settings) — do not rename it.
 
 Release (`.github/workflows/release.yml`): On push to `main`, tag the pushed commit `<name>-<version>` for each plugin dir the push changed, then run Sync for every changed plugin's tag (a tag that already exists is not re-created but is still synced, which makes re-runs idempotent).
 

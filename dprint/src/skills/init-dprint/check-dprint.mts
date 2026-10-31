@@ -1,46 +1,40 @@
 #!/usr/bin/env node
-// init-dprint skill helper: locate dprint (first executable on PATH, else
-// ~/.dprint/bin/dprint), read `dprint --version`, compare it numerically
-// against MIN_VERSION. Prints exactly one
-// `status=<ok|missing|outdated|error> version=<X.Y.Z|-> min=<MIN> path=<abs|->`
-// line; exit codes per check-dprint.reference.md. Read-only: never installs.
+/**
+ * init-dprint skill helper: locate dprint, read `dprint --version` and compare it numerically against
+ * {@link MIN_VERSION}.
+ *
+ * @remarks
+ * Prints exactly one line
+ * `status=<ok|missing|outdated|error> version=<X.Y.Z|-> min=<MIN> path=<abs|->` and exits with the code
+ * documented in `check-dprint.reference.md`. Read-only: never installs anything.
+ *
+ * @packageDocumentation
+ */
 
-import { accessSync, statSync, constants } from "node:fs";
 import { execFileSync } from "node:child_process";
-import { homedir } from "node:os";
-import { join, resolve } from "node:path";
+import { findDprint } from "./find-dprint.mjs";
 
+/** Lowest supported dprint version; the only definition (README and tests read it from here). */
 const MIN_VERSION = "0.50.0";
 
+/** Outcome of {@link check}: the exit code plus the fields of the status line. */
 interface CheckResult {
+  /** Process exit code (0 ok, 2 error, 10 missing, 11 outdated). */
   code: number;
+  /** `ok`, `missing`, `outdated` or `error`. */
   status: string;
+  /** Detected `X.Y.Z`, or `-` when unknown. */
   version: string;
+  /** Absolute path of the dprint binary, or `-` when none was found. */
   path: string;
 }
 
-/** true when p is a regular file executable by this user */
-function isExecutableFile(p: string): boolean {
-  try {
-    accessSync(p, constants.X_OK);
-    return statSync(p).isFile();
-  } catch {
-    return false;
-  }
-}
-
-/** absolute path of the dprint to use, or null */
-function findDprint(): string | null {
-  for (const dir of (process.env.PATH ?? "").split(":")) {
-    if (!dir) continue;
-    const p = resolve(dir, "dprint");
-    if (isExecutableFile(p)) return p;
-  }
-  const fallback = join(homedir(), ".dprint", "bin", "dprint");
-  return isExecutableFile(fallback) ? fallback : null;
-}
-
-/** negative if version < MIN_VERSION, 0 if equal, positive if greater */
+/**
+ * Compare a `X.Y.Z` version numerically against {@link MIN_VERSION}.
+ *
+ * @param version - Release version without prerelease suffix.
+ * @returns Negative if `version` is lower, 0 if equal, positive if higher.
+ */
 function compareToMin(version: string): number {
   const a = version.split(".").map(Number);
   const b = MIN_VERSION.split(".").map(Number);
@@ -50,14 +44,20 @@ function compareToMin(version: string): number {
   return 0;
 }
 
-/** args = command-line arguments after the script path */
+/**
+ * Locate dprint and classify its version.
+ *
+ * @param args - Command-line arguments after the script path; any argument is a usage error.
+ * @returns The status line fields and the exit code.
+ */
 function check(args: string[]): CheckResult {
   if (args.length > 0) {
     process.stderr.write("usage: node check-dprint.mjs (takes no arguments)\n");
     return { code: 2, status: "error", version: "-", path: "-" };
   }
   const path = findDprint();
-  if (path === null) return { code: 10, status: "missing", version: "-", path: "-" };
+  if (path === null)
+    return { code: 10, status: "missing", version: "-", path: "-" };
 
   let out: string;
   try {
@@ -76,15 +76,22 @@ function check(args: string[]): CheckResult {
 
   const m = /^dprint (\d+)\.(\d+)\.(\d+)(-\S+)?/.exec(out.trim());
   if (!m) {
-    process.stderr.write(`check-dprint: unparseable '${path} --version' output: ${JSON.stringify(out.trim())}\n`);
+    process.stderr.write(
+      `check-dprint: unparseable '${path} --version' output: ${JSON.stringify(out.trim())}\n`,
+    );
     return { code: 2, status: "error", version: "-", path };
   }
   const version = `${m[1]}.${m[2]}.${m[3]}`;
   // a prerelease of MIN_VERSION sorts below it
   const cmp = compareToMin(version) || (m[4] ? -1 : 0);
-  return cmp >= 0 ? { code: 0, status: "ok", version, path } : { code: 11, status: "outdated", version, path };
+  return cmp >= 0
+    ? { code: 0, status: "ok", version, path }
+    : { code: 11, status: "outdated", version, path };
 }
 
+/** Result of this run, printed as the single status line. */
 const r = check(process.argv.slice(2));
-process.stdout.write(`status=${r.status} version=${r.version} min=${MIN_VERSION} path=${r.path}\n`);
+process.stdout.write(
+  `status=${r.status} version=${r.version} min=${MIN_VERSION} path=${r.path}\n`,
+);
 process.exit(r.code);
