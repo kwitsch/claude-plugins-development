@@ -5,6 +5,7 @@ import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
 import {
   chmodSync,
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -74,6 +75,8 @@ beforeEach(() => {
   home = path.join(tmp, "home");
   repo = path.join(tmp, "repo");
   for (const d of [bin, home, repo]) mkdirSync(d);
+  // a stray config above os.tmpdir() must not leak into the tests: the search stops at a .git
+  mkdirSync(path.join(tmp, ".git"));
   for (const t of ["bash", "node"]) {
     const src = spawnSync("sh", ["-c", `command -v ${t}`], {
       encoding: "utf8",
@@ -81,6 +84,8 @@ beforeEach(() => {
     if (src) symlinkSync(src, path.join(bin, t));
   }
   writeFileSync(path.join(tmp, "stub-lsp.mjs"), STUB_LSP);
+  // format_pre only formats when the cwd holds a dprint config
+  writeFileSync(path.join(repo, "dprint.json"), "{}");
 });
 
 afterEach(() => {
@@ -179,7 +184,10 @@ test("cwd_changed / worktree_entered re-root later format_pre calls for that ses
   const s = startServer();
   const other = path.join(tmp, "other");
   const third = path.join(tmp, "third");
-  for (const d of [other, third]) mkdirSync(d);
+  for (const d of [other, third]) {
+    mkdirSync(d);
+    writeFileSync(path.join(d, "dprint.json"), "{}");
+  }
   const write = (dir) =>
     s.call({
       cwd: repo,
@@ -336,6 +344,119 @@ test("Edit whose trim would drop the deleted repeated line -> {} (never loses th
     },
   });
   assert.deepEqual(out, {});
+});
+
+test("cwd without any dprint config -> Write returns {} and no dprint lsp is spawned", async () => {
+  // a dprint that would format, but logs every spawn
+  const log = path.join(tmp, "spawned.log");
+  const f = path.join(bin, "dprint");
+  writeFileSync(
+    f,
+    `#!/usr/bin/env bash\necho spawned >> "${log}"\nexec node "${path.join(tmp, "stub-lsp.mjs")}" ok\n`,
+  );
+  chmodSync(f, 0o755);
+  const bare = path.join(tmp, "bare");
+  mkdirSync(bare);
+  const s = startServer();
+  const out = await s.call({
+    cwd: bare,
+    tool_name: "Write",
+    tool_input: { file_path: path.join(bare, "a.ts"), content: "x   \n" },
+  });
+  assert.deepEqual(out, {});
+  assert.equal(existsSync(log), false);
+  // same server, cwd with a config: the logging stub is spawned and formats
+  const ok = await s.call({
+    cwd: repo,
+    tool_name: "Write",
+    tool_input: { file_path: path.join(repo, "a.ts"), content: "x   \n" },
+  });
+  assert.equal(ok.hookSpecificOutput.updatedInput.content, "x\n");
+  assert.equal(existsSync(log), true);
+});
+
+test("only .config/dprint.jsonc in the cwd -> the Write is formatted", async () => {
+  stubDprint();
+  const dir = path.join(tmp, "dotconfig");
+  mkdirSync(path.join(dir, ".config"), { recursive: true });
+  writeFileSync(path.join(dir, ".config/dprint.jsonc"), "{}");
+  const s = startServer();
+  const out = await s.call({
+    cwd: dir,
+    tool_name: "Write",
+    tool_input: { file_path: path.join(dir, "a.ts"), content: "x   \n" },
+  });
+  assert.equal(out.hookSpecificOutput.updatedInput.content, "x\n");
+});
+
+test("a dprint config only in an ancestor of the cwd -> the Write is formatted", async () => {
+  stubDprint();
+  const sub = path.join(repo, "packages", "foo");
+  mkdirSync(sub, { recursive: true });
+  const s = startServer();
+  const out = await s.call({
+    cwd: sub,
+    tool_name: "Write",
+    tool_input: { file_path: path.join(sub, "a.ts"), content: "x   \n" },
+  });
+  assert.equal(out.hookSpecificOutput.updatedInput.content, "x\n");
+});
+
+test("the config search stops at the git repo root and at a worktree root", async () => {
+  stubDprint();
+  const s = startServer();
+  const write = (cwd) =>
+    s.call({
+      cwd,
+      tool_name: "Write",
+      tool_input: { file_path: path.join(cwd, "a.ts"), content: "x   \n" },
+    });
+  // config above the repo root is ignored; a config at the repo root counts
+  const outer = path.join(tmp, "outer");
+  const repoRoot = path.join(outer, "repo");
+  const sub = path.join(repoRoot, "pkg", "foo");
+  mkdirSync(sub, { recursive: true });
+  mkdirSync(path.join(repoRoot, ".git"));
+  writeFileSync(path.join(outer, "dprint.json"), "{}");
+  assert.deepEqual(await write(sub), {});
+  writeFileSync(path.join(repoRoot, "dprint.json"), "{}");
+  assert.equal((await write(sub)).hookSpecificOutput.updatedInput.content, "x\n");
+  // a worktree (".git" is a file) is its own root: the main checkout's config does not reach into it
+  const wt = path.join(repoRoot, "wt");
+  mkdirSync(path.join(wt, "src"), { recursive: true });
+  writeFileSync(path.join(wt, ".git"), "gitdir: elsewhere\n");
+  assert.deepEqual(await write(path.join(wt, "src")), {});
+  writeFileSync(path.join(wt, "dprint.json"), "{}");
+  assert.equal(
+    (await write(path.join(wt, "src"))).hookSpecificOutput.updatedInput.content,
+    "x\n",
+  );
+});
+
+test("the config gate follows cwd_changed: config-less dir -> {}, back in the config dir -> formatted", async () => {
+  stubDprint();
+  const bare = path.join(tmp, "bare");
+  mkdirSync(bare);
+  const s = startServer();
+  const write = (dir) =>
+    s.call({
+      cwd: repo,
+      session_id: "s1",
+      tool_name: "Write",
+      tool_input: { file_path: path.join(dir, "a.ts"), content: "x   \n" },
+    });
+  const cd = (dir) =>
+    s.rpc("tools/call", {
+      name: "cwd_changed",
+      arguments: { session_id: "s1", new_cwd: dir },
+    });
+  await cd(bare);
+  assert.deepEqual(await write(bare), {});
+  await cd(repo);
+  assert.equal(
+    (await write(repo)).hookSpecificOutput.updatedInput.content,
+    "x\n",
+  );
 });
 
 test("no dprint on PATH or in ~/.dprint/bin -> {}", async () => {

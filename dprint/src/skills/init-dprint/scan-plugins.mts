@@ -11,15 +11,9 @@
  */
 
 import { execFileSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
-
-/** Config file names in dprint's own discovery order (`resolve_main_config_path.rs`, `POSSIBLE_CONFIG_FILE_NAMES`). */
-const CONFIG_NAMES = [
-  "dprint.json",
-  "dprint.jsonc",
-  ".dprint.json",
-  ".dprint.jsonc",
-];
+import { readFileSync } from "node:fs";
+import { join, resolve } from "node:path";
+import { findConfig } from "./find-config.mjs";
 
 /** One plugin entry of `dprint-plugins.json`. */
 interface RefPlugin {
@@ -104,15 +98,22 @@ function scan(args: string[]): ScanResult {
     process.stderr.write("usage: node scan-plugins.mjs (takes no arguments)\n");
     return { code: 2, status: "error", config: "-", lines: [] };
   }
-  const config = CONFIG_NAMES.find((n) => existsSync(n));
-  if (config === undefined) {
+  const cwd = process.cwd();
+  const cfg = findConfig(cwd);
+  if (cfg === null) {
     return { code: 11, status: "noconfig", config: "-", lines: [] };
+  }
+  // the header carries only the config's name (never a path: it is space-delimited); an ancestor's config is noted on stderr
+  const config = cfg.name;
+  const configPath = join(cfg.dir, cfg.name);
+  if (cfg.dir !== resolve(cwd)) {
+    process.stderr.write(`scan-plugins: config found above the cwd: ${configPath}\n`);
   }
 
   let entries: string[];
   try {
     // strip a UTF-8 BOM (Windows editors); JSON.parse rejects it, dprint accepts it
-    const raw = readFileSync(config, "utf8").replace(/^\uFEFF/, "");
+    const raw = readFileSync(configPath, "utf8").replace(/^\uFEFF/, "");
     // a non-object config (e.g. `null`) throws on the member access below -> reported as unreadable
     const parsed = JSON.parse(stripJsonc(raw)) as {
       plugins?: unknown;
