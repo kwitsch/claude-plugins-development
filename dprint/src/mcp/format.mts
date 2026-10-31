@@ -7,7 +7,7 @@
  *
  * @packageDocumentation
  */
-import { readFileSync } from "node:fs";
+import { lstatSync, readFileSync, realpathSync } from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { findConfig } from "../skills/dprint/find-config.mjs";
@@ -303,6 +303,105 @@ const isExcludedPath = (rel: string): boolean => {
 };
 
 /**
+ * Real path of `p`, also for a path that does not exist yet (the new file of a Write).
+ *
+ * @remarks
+ * A missing path resolves through its nearest existing ancestor. A dangling symlink, or a link that cannot be
+ * resolved (`ELOOP`, `EACCES`), throws: falling back to the lexical path of a dangling link would let a Write
+ * follow it out of the cwd.
+ *
+ * @param p - Path to resolve.
+ * @returns The real path of `p`, or of its nearest existing ancestor joined with the missing rest.
+ */
+const realish = (p: string): string => {
+  try {
+    return realpathSync(p);
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw e;
+    try {
+      lstatSync(p);
+    } catch {
+      const dir = path.dirname(p);
+      return dir === p ? p : path.join(realish(dir), path.basename(p));
+    }
+    throw e; // p itself exists: a dangling symlink
+  }
+};
+
+/** Effective working directory of one hook call, resolved once for many {@link inScope} checks. */
+type Scope = {
+  /** Lexical effective cwd: the `dprint lsp` root and the `findConfig` start. */
+  root: string;
+  /** Real path of `root`. */
+  realRoot: string;
+  /** Real path of the session's `scratchpad_dir`, or `null` when the payload has none. */
+  realScratch: string | null;
+};
+
+/**
+ * Resolve the effective cwd of a hook payload.
+ *
+ * @remarks
+ * The cwd override of the session/subagent ({@link cwdOverrides}), else the payload's `cwd`; never the MCP
+ * server's own `process.cwd()`.
+ *
+ * @param args - Hook input: `cwd`, `agent_id`, `session_id`, `scratchpad_dir`.
+ * @returns The scope, or `null` when no cwd is known or a path cannot be resolved (callers skip).
+ */
+export function scopeOf(
+  args: {
+    cwd?: string;
+    agent_id?: string;
+    session_id?: string;
+    scratchpad_dir?: string;
+  } = {},
+): Scope | null {
+  const key = overrideKey(args);
+  const root = (key && cwdOverrides.get(key)) || args.cwd || "";
+  if (!root) return null;
+  try {
+    return {
+      root,
+      realRoot: realish(root),
+      realScratch: args.scratchpad_dir ? realish(args.scratchpad_dir) : null,
+    };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Decide whether a file belongs to the scope and may be formatted.
+ *
+ * @param sc - Scope from {@link scopeOf}.
+ * @param file - File path, absolute or relative to `sc.root`.
+ * @returns `fp` (the path as Claude used it, resolved against `sc.root`) and `real` (its real path) when the
+ * real path is strictly inside `sc.realRoot`, not an {@link isExcludedPath} path and not inside the scratchpad;
+ * else `null` (also for an empty path, the cwd itself, or a dangling/unresolvable link).
+ */
+export function inScope(
+  sc: Scope,
+  file: string,
+): { fp: string; real: string } | null {
+  if (!file) return null;
+  const fp = path.resolve(sc.root, file);
+  let real: string;
+  try {
+    real = realish(fp);
+  } catch {
+    return null;
+  }
+  const outside = (rel: string) => rel === ".." || rel.startsWith(".." + path.sep) || path.isAbsolute(rel);
+  const rel = path.relative(sc.realRoot, real);
+  if (rel === "" || outside(rel) || isExcludedPath(rel)) return null;
+  if (sc.realScratch !== null) {
+    const sp = path.relative(sc.realScratch, real);
+    if (sp === "" || !outside(sp)) return null;
+  }
+  return { fp, real };
+}
+
+/**
  * Zero-based line of a character offset, without copying the prefix.
  *
  * @param text - Document.
@@ -354,12 +453,14 @@ function done(updatedInput: Record<string, unknown>, fp: string): HookResult {
  * @remarks
  * Write: whole-file `formatting` of `content`. Edit: apply the edit in memory, `rangeFormatting` over the
  * edited lines, then {@link trimToEdit} keeps the result a minimal `old_string`/`new_string` pair, accepted
- * only when the trimmed result formats (whole document) exactly like the intended edit. Files outside the
- * working directory and {@link isExcludedPath} paths are skipped. Nothing is formatted (and no `dprint lsp`
+ * only when the trimmed result formats (whole document) exactly like the intended edit. Only files
+ * {@link inScope} of {@link scopeOf} are formatted: real path (symlinks resolved, dangling links rejected)
+ * inside the effective cwd, not an {@link isExcludedPath} path and not inside the session scratchpad; without
+ * a known cwd nothing is formatted. Nothing is formatted (and no `dprint lsp`
  * spawned) unless the effective cwd or an ancestor holds one of `CONFIG_NAMES` (`findConfig`, never above the git repository or worktree root). Edits on CRLF files are trimmed on the
  * LF-normalized text Claude Code's Edit matches against.
  *
- * @param args - Hook input: `cwd`, `session_id`, `agent_id`, `tool_name` and `tool_input`.
+ * @param args - Hook input: `cwd`, `session_id`, `agent_id`, `scratchpad_dir`, `tool_name` and `tool_input`.
  * @returns The rewritten tool input, or `{}` on every guard and error (fail open).
  */
 export async function formatPre(
@@ -367,25 +468,12 @@ export async function formatPre(
 ): Promise<HookResult> {
   try {
     const ti = args.tool_input ?? {};
-    let fp = ti.file_path ?? "";
-    if (!fp) return {};
-    const key = overrideKey(args);
-    const cwd = (key && cwdOverrides.get(key)) || args.cwd || "";
-    if (!path.isAbsolute(fp)) {
-      if (!cwd) return {};
-      fp = path.resolve(cwd, fp);
-    }
-    const root = cwd || process.cwd();
-    const rel = path.relative(root, fp);
-    // outside the lsp's root no dprint.json applies; excluded paths are never ours to format
-    if (
-      rel === ".."
-      || rel.startsWith(".." + path.sep)
-      || path.isAbsolute(rel)
-      || isExcludedPath(rel)
-    ) {
-      return {};
-    }
+    // only files whose real path is inside the effective cwd and outside the scratchpad; no known cwd: skip
+    const sc = scopeOf(args);
+    const s = sc && inScope(sc, ti.file_path ?? "");
+    if (!sc || !s) return {};
+    const root = sc.root;
+    const fp = s.fp;
     // formatting is opt-in: only when the effective cwd, or an ancestor up to the git repo/worktree root, holds a dprint config
     if (findConfig(root) === null) return {};
     const uri = pathToFileURL(fp).href;

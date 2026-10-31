@@ -17,6 +17,8 @@ export interface FormatPreInput {
   agent_id?: string;
   /** Template: `${session_id}`. */
   session_id?: string;
+  /** Template: `${scratchpad_dir}`. */
+  scratchpad_dir?: string;
   /** Template: `${tool_name}`. */
   tool_name?: string;
   tool_input?: {
