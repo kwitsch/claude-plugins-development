@@ -12,14 +12,7 @@
 
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
-
-/** Config file names in dprint's own discovery order (`resolve_main_config_path.rs`, `POSSIBLE_CONFIG_FILE_NAMES`). */
-const CONFIG_NAMES = [
-  "dprint.json",
-  "dprint.jsonc",
-  ".dprint.json",
-  ".dprint.jsonc",
-];
+import { CONFIG_NAMES } from "./config-names.mjs";
 
 /** One plugin entry of `dprint-plugins.json`. */
 interface RefPlugin {

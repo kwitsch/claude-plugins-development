@@ -11,12 +11,12 @@ working directory).
 
 ## Environment
 
-| Input                 | Purpose                                                                                                                              | Required |
-| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------ | -------- |
-| `PATH`                | Must contain `git`                                                                                                                   | yes      |
-| working directory     | The project root. Its dprint config is the first of `dprint.json`, `dprint.jsonc`, `.dprint.json`, `.dprint.jsonc` that exists there | yes      |
-| scanned files         | `git ls-files --cached --others --exclude-standard`: tracked plus untracked-but-not-ignored files under the cwd                      | —        |
-| `dprint-plugins.json` | Plugin list next to the script (registry ids, npm package names, file extensions and file names)                                     | yes      |
+| Input                 | Purpose                                                                                                                                                                             | Required |
+| --------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- |
+| `PATH`                | Must contain `git`                                                                                                                                                                  | yes      |
+| working directory     | The project root. Its dprint config is the first of `dprint.json`, `dprint.jsonc`, `.dprint.json`, `.dprint.jsonc`, `.config/dprint.json`, `.config/dprint.jsonc` that exists there | yes      |
+| scanned files         | `git ls-files --cached --others --exclude-standard`: tracked plus untracked-but-not-ignored files under the cwd                                                                     | —        |
+| `dprint-plugins.json` | Plugin list next to the script (registry ids, npm package names, file extensions and file names)                                                                                    | yes      |
 
 ## Output
 
