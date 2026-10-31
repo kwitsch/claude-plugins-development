@@ -98,3 +98,25 @@ test("README documents /dprint:dprint and mirrors the plugin.json description", 
   const { description } = JSON.parse(readFileSync(path.join(ROOT, "plugin.json"), "utf8"));
   assert.ok(readme.includes(description));
 });
+
+test("README documents the cwd scope, FileChanged formatting and the watch-list hook", () => {
+  const readme = readFileSync(path.join(ROOT, "plugin/README.md"), "utf8");
+  for (const s of [
+    "file_written",
+    "file_changed",
+    "mcp/watch-paths.mjs",
+    "dprint file-paths",
+    "scratchpad_dir",
+    "git status --porcelain",
+    "5000",
+    "and the file's real path is inside the working directory and not in the session scratchpad",
+  ])
+    assert.ok(readme.includes(s), s);
+  const manifest = JSON.parse(
+    readFileSync(path.join(ROOT, "plugin.json"), "utf8"),
+  );
+  assert.match(
+    manifest.description,
+    /formats every Write and Edit inside the working directory, and files changed there by other tools, with the project's dprint config via hooks/,
+  );
+});
