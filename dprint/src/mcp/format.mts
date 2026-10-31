@@ -60,8 +60,9 @@ export function applyEdit(
   replaceAll: boolean,
 ): string | null {
   if (oldStr === "") return null;
-  if (replaceAll)
+  if (replaceAll) {
     return current.includes(oldStr) ? current.split(oldStr).join(newStr) : null;
+  }
   const idx = current.indexOf(oldStr);
   if (idx === -1) return null;
   if (current.indexOf(oldStr, idx + oldStr.length) !== -1) return null; // non-unique
@@ -89,9 +90,10 @@ export function lineDiff(a: string[], b: string[]): Hunk[] {
     suf < a.length - pre &&
     suf < b.length - pre &&
     a[a.length - 1 - suf] === b[b.length - 1 - suf]
-  )
+  ) {
     suf++;
-  if (pre > 0 || suf > 0)
+  }
+  if (pre > 0 || suf > 0) {
     return lineDiff(
       a.slice(pre, a.length - suf),
       b.slice(pre, b.length - suf),
@@ -101,6 +103,7 @@ export function lineDiff(a: string[], b: string[]): Hunk[] {
       bStart: h.bStart + pre,
       bEnd: h.bEnd + pre,
     }));
+  }
   if (a.length * b.length > 25_000_000) throw new Error("diff too large");
   const n = a.length;
   const m = b.length;
@@ -160,8 +163,9 @@ export function trimToEdit(
   const hunks = lineDiff(a, b);
   const kept: number[] = [];
   hunks.forEach((h, k) => {
-    if (editLines.some(([s, e]) => h.aStart <= e + 1 && h.aEnd >= s))
+    if (editLines.some(([s, e]) => h.aStart <= e + 1 && h.aEnd >= s)) {
       kept.push(k);
+    }
   });
   if (kept.length === 0) return null;
   const first = kept[0];
@@ -315,8 +319,9 @@ const lineOf = (text: string, idx: number): number => {
     let i = text.indexOf("\n");
     i !== -1 && i < idx;
     i = text.indexOf("\n", i + 1)
-  )
+  ) {
     n++;
+  }
   return n;
 };
 
@@ -381,8 +386,9 @@ export async function formatPre(
       rel.startsWith(".." + path.sep) ||
       path.isAbsolute(rel) ||
       isExcludedPath(rel)
-    )
+    ) {
       return {};
+    }
     const uri = pathToFileURL(fp).href;
 
     if (args.tool_name === "Write") {
@@ -411,8 +417,9 @@ export async function formatPre(
         let i = O.indexOf(oldStr);
         i !== -1;
         i = replaceAll ? O.indexOf(oldStr, i + oldStr.length) : -1
-      )
+      ) {
         occ.push(i);
+      }
       const editLines = occ.map((i): [number, number] => [
         lineOf(O, i),
         lineOf(O, i + oldStr.length - 1),
@@ -444,8 +451,9 @@ export async function formatPre(
       const R = O.replace(r.oldString, () => r.newString);
       if (
         ((await lsp.format(uri, M)) ?? M) !== ((await lsp.format(uri, R)) ?? R)
-      )
+      ) {
         return {};
+      }
       return done(
         {
           file_path: fp,

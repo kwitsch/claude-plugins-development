@@ -10,16 +10,16 @@
  *
  * @packageDocumentation
  */
+import { readFileSync } from "node:fs";
 import process from "node:process";
 import readline from "node:readline";
-import { readFileSync } from "node:fs";
 import {
   cwdChanged,
   disposeLsp,
   formatPre,
+  type HookResult,
   worktreeEntered,
   worktreeExited,
-  type HookResult,
 } from "./format.mjs";
 import type { HookInputs } from "./hook-inputs.mjs";
 
@@ -133,11 +133,13 @@ function startServer(): void {
         });
       case "tools/call": {
         const name = params?.name;
-        if (typeof name !== "string" || !Object.hasOwn(TOOLS, name))
+        if (typeof name !== "string" || !Object.hasOwn(TOOLS, name)) {
           return fail(id, -32602, `unknown tool: ${String(name)}`);
+        }
         const args = params?.arguments ?? {};
-        if (typeof args !== "object" || args === null || Array.isArray(args))
+        if (typeof args !== "object" || args === null || Array.isArray(args)) {
           return fail(id, -32602, "arguments must be an object");
+        }
         // trust boundary: the object's shape is the hooks.json template that typed this tool's input
         const handler = TOOLS[name as keyof Tools].handler;
         let result;
@@ -180,8 +182,9 @@ function startServer(): void {
         `[${SERVER_NAME}] handler crash: ${e instanceof Error ? e.stack : String(e)}\n`,
       );
       // a request (has an id) must always get a response, or the client hangs
-      if (req.id !== undefined)
+      if (req.id !== undefined) {
         fail(req.id, -32603, `internal error: ${errMsg(e)}`);
+      }
     });
   });
   rl.on("close", () => {

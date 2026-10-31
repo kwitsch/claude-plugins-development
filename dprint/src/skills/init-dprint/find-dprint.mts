@@ -4,7 +4,7 @@
  * @packageDocumentation
  */
 
-import { accessSync, statSync, constants } from "node:fs";
+import { accessSync, constants, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 
