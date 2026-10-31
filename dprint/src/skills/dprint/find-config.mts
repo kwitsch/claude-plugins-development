@@ -25,7 +25,7 @@ const hits = new Map<string, FoundConfig>();
  * @remarks
  * This is the format gate's own rule, not dprint's: `dprint lsp` resolves its config per file by itself and does
  * not stop at the git root, so a config above the root still applies to a started lsp but never opens the gate.
- * Misses are not cached (a config created mid-session, e.g. by `init-dprint`, must be seen at once); the walk is
+ * Misses are not cached (a config created mid-session, e.g. by `dprint`, must be seen at once); the walk is
  * bounded by the git root, so a miss costs a few `existsSync` calls per directory level.
  *
  * @param dir - Directory to start from.

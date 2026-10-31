@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const SKILL = readFileSync(
-  path.join(ROOT, "plugin/skills/init-dprint/SKILL.md"),
+  path.join(ROOT, "plugin/skills/dprint/SKILL.md"),
   "utf8",
 );
 
@@ -24,7 +24,7 @@ test("generated manifest equals plugin.json", () => {
 });
 
 test("SKILL.md frontmatter: name, model-invocable, allowed-tools without bare Bash", () => {
-  assert.match(SKILL, /^name: init-dprint$/m);
+  assert.match(SKILL, /^name: dprint$/m);
   assert.doesNotMatch(SKILL, /^disable-model-invocation:\s*true/m);
   const tools = /^allowed-tools:\s*(.+)$/m.exec(SKILL)?.[1] ?? "";
   assert.match(tools, /AskUserQuestion/);
@@ -52,7 +52,7 @@ test("README documents the format_pre hook and its dprint lsp requirement", () =
   assert.match(readme, /dprint lsp/);
   const min = /^const MIN_VERSION = "(\d+\.\d+)/m.exec(
     readFileSync(
-      path.join(ROOT, "src/skills/init-dprint/check-dprint.mts"),
+      path.join(ROOT, "src/skills/dprint/check-dprint.mts"),
       "utf8",
     ),
   )?.[1];
@@ -63,7 +63,7 @@ test("README documents the format_pre hook and its dprint lsp requirement", () =
 test("README documents the config gate, the 15 s toast module and all six config names; line 3 mirrors plugin.json", async () => {
   const readme = readFileSync(path.join(ROOT, "plugin/README.md"), "utf8");
   const { CONFIG_NAMES } = await import(
-    "../plugin/skills/init-dprint/config-names.mjs"
+    "../plugin/skills/dprint/config-names.mjs"
   );
   assert.match(readme, /hooks\/notice\.mjs/);
   assert.match(readme, /15 s toast/);
@@ -74,4 +74,27 @@ test("README documents the config gate, the 15 s toast module and all six config
   );
   assert.equal(readme.split("\n")[2], manifest.description);
   assert.match(manifest.description, /shows a toast when it has none/);
+});
+
+test("SKILL.md frontmatter: argument-hint lists the three actions", () => {
+  assert.match(SKILL, /^argument-hint: "\[init\|check\|fmt\] \[scope\]"$/m);
+});
+
+test("SKILL.md runs check/fmt via run-dprint, points to /dprint init and can create a config", () => {
+  assert.match(SKILL, /\$\{CLAUDE_SKILL_DIR\}\/run-dprint\.mjs/);
+  assert.match(SKILL, /run-dprint\.reference\.md/);
+  assert.match(SKILL, /\/dprint init/);
+  assert.match(SKILL, / init -y/);
+});
+
+test("SKILL.md uses the arguments placeholder exactly once and no indexed placeholders", () => {
+  assert.equal(SKILL.split("$ARGUMENTS").length, 2);
+  assert.doesNotMatch(SKILL, /\$[01]\b/);
+});
+
+test("README documents /dprint:dprint and mirrors the plugin.json description", () => {
+  const readme = readFileSync(path.join(ROOT, "plugin/README.md"), "utf8");
+  assert.match(readme, /\/dprint:dprint/);
+  const { description } = JSON.parse(readFileSync(path.join(ROOT, "plugin.json"), "utf8"));
+  assert.ok(readme.includes(description));
 });

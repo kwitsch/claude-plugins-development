@@ -14,7 +14,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { register } from "../plugin/hooks/notice.mjs";
-import { CONFIG_NAMES } from "../plugin/skills/init-dprint/config-names.mjs";
+import { CONFIG_NAMES } from "../plugin/skills/dprint/config-names.mjs";
 
 const PLUGIN = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),

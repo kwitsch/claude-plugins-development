@@ -1,4 +1,4 @@
-// Contract tests for the built plugin/skills/init-dprint/scan-plugins.mjs and a shape test for the
+// Contract tests for the built plugin/skills/dprint/scan-plugins.mjs and a shape test for the
 // shipped dprint-plugins.json. Isolated PATH (only node + git), HOME and git repo per test.
 import { test, beforeEach } from "node:test";
 import assert from "node:assert/strict";
@@ -16,7 +16,7 @@ import { fileURLToPath } from "node:url";
 
 const DIR = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
-  "../plugin/skills/init-dprint",
+  "../plugin/skills/dprint",
 );
 const SCRIPT = path.join(DIR, "scan-plugins.mjs");
 const REF = JSON.parse(
