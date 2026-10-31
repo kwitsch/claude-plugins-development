@@ -5,9 +5,9 @@ working directory).
 
 ## Parameters
 
-| #   | Name | Format | Required | Notes                                                       |
-| --- | ---- | ------ | -------- | ----------------------------------------------------------- |
-| —   | none | —      | —        | Takes no arguments; any argument is a usage error (exit 2). |
+| # | Name | Format | Required | Notes                                                       |
+| - | ---- | ------ | -------- | ----------------------------------------------------------- |
+| — | none | —      | —        | Takes no arguments; any argument is a usage error (exit 2). |
 
 ## Environment
 

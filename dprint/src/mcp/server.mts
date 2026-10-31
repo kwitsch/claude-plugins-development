@@ -13,14 +13,7 @@
 import { readFileSync } from "node:fs";
 import process from "node:process";
 import readline from "node:readline";
-import {
-  cwdChanged,
-  disposeLsp,
-  formatPre,
-  type HookResult,
-  worktreeEntered,
-  worktreeExited,
-} from "./format.mjs";
+import { cwdChanged, disposeLsp, formatPre, type HookResult, worktreeEntered, worktreeExited } from "./format.mjs";
 import type { HookInputs } from "./hook-inputs.mjs";
 
 /** Server name reported on `initialize`; keep aligned with the `.mcp.json` key. */

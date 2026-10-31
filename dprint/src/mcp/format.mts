@@ -10,12 +10,7 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import type {
-  CwdChangedInput,
-  FormatPreInput,
-  WorktreeEnteredInput,
-  WorktreeExitedInput,
-} from "./hook-inputs.mjs";
+import type { CwdChangedInput, FormatPreInput, WorktreeEnteredInput, WorktreeExitedInput } from "./hook-inputs.mjs";
 import { DprintLsp, type LspRange } from "./lsp.mjs";
 
 /** Hook output: empty (`{}`) to let the tool call through unchanged, else the rewritten tool input. */
@@ -87,9 +82,9 @@ export function lineDiff(a: string[], b: string[]): Hunk[] {
   while (pre < a.length && pre < b.length && a[pre] === b[pre]) pre++;
   let suf = 0;
   while (
-    suf < a.length - pre &&
-    suf < b.length - pre &&
-    a[a.length - 1 - suf] === b[b.length - 1 - suf]
+    suf < a.length - pre
+    && suf < b.length - pre
+    && a[a.length - 1 - suf] === b[b.length - 1 - suf]
   ) {
     suf++;
   }
@@ -181,9 +176,9 @@ export function trimToEdit(
     const oldString = render(a, aA, aB);
     const i = original.indexOf(oldString);
     if (
-      oldString !== "" &&
-      i !== -1 &&
-      original.indexOf(oldString, i + 1) === -1
+      oldString !== ""
+      && i !== -1
+      && original.indexOf(oldString, i + 1) === -1
     ) {
       const newString = render(b, bA, bB);
       return oldString === newString ? null : { oldString, newString };
@@ -296,13 +291,13 @@ export function disposeLsp(): void {
 const isExcludedPath = (rel: string): boolean => {
   const segs = rel.split(path.sep);
   return (
-    segs.some((s) => s === "node_modules" || s === "vendor" || s === ".git") ||
-    segs.some(
+    segs.some((s) => s === "node_modules" || s === "vendor" || s === ".git")
+    || segs.some(
       (s, i) =>
-        s === ".claude" &&
-        (segs[i + 1] === "worktrees" || segs[i + 1] === "agent-memory"),
-    ) ||
-    segs[segs.length - 1].includes(".local.")
+        s === ".claude"
+        && (segs[i + 1] === "worktrees" || segs[i + 1] === "agent-memory"),
+    )
+    || segs[segs.length - 1].includes(".local.")
   );
 };
 
@@ -382,10 +377,10 @@ export async function formatPre(
     const rel = path.relative(root, fp);
     // outside the lsp's root no dprint.json applies; excluded paths are never ours to format
     if (
-      rel === ".." ||
-      rel.startsWith(".." + path.sep) ||
-      path.isAbsolute(rel) ||
-      isExcludedPath(rel)
+      rel === ".."
+      || rel.startsWith(".." + path.sep)
+      || path.isAbsolute(rel)
+      || isExcludedPath(rel)
     ) {
       return {};
     }
@@ -426,8 +421,8 @@ export async function formatPre(
       ]);
 
       // full lines of M from the first replacement to the last inserted char (insertion offset if new is empty)
-      const lastStart = occ[occ.length - 1] +
-        (occ.length - 1) * (newStr.length - oldStr.length);
+      const lastStart = occ[occ.length - 1]
+        + (occ.length - 1) * (newStr.length - oldStr.length);
       const endLine = lineOf(
         M,
         newStr ? lastStart + newStr.length - 1 : lastStart,

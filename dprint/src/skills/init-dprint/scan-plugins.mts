@@ -52,7 +52,7 @@ interface ScanResult {
  * @returns Text that `JSON.parse` accepts when the input was valid JSONC.
  */
 function stripJsonc(text: string): string {
-  const keep = (m: string) => (m[0] === '"' ? m : "");
+  const keep = (m: string) => (m[0] === "\"" ? m : "");
   return text
     .replace(/"(?:\\.|[^"\\])*"|\/\/[^\n]*|\/\*[\s\S]*?\*\//g, keep)
     .replace(/"(?:\\.|[^"\\])*"|,(?=\s*[\]}])/g, keep);
@@ -70,12 +70,12 @@ function inConfig(p: RefPlugin, entries: string[]): boolean {
   const npm = p.npm;
   return entries.some(
     (e) =>
-      (e.startsWith(prefix) && /^v?\d/.test(e.slice(prefix.length))) ||
-      (npm !== undefined &&
-        (e === `npm:${npm}` ||
-          e.startsWith(`npm:${npm}@`) ||
-          e.startsWith(`npm:${npm}/`) ||
-          e.includes(`node_modules/${npm}/`))),
+      (e.startsWith(prefix) && /^v?\d/.test(e.slice(prefix.length)))
+      || (npm !== undefined
+        && (e === `npm:${npm}`
+          || e.startsWith(`npm:${npm}@`)
+          || e.startsWith(`npm:${npm}/`)
+          || e.includes(`node_modules/${npm}/`))),
   );
 }
 
@@ -120,7 +120,7 @@ function scan(args: string[]): ScanResult {
     };
     const plugins = parsed.plugins;
     if (plugins !== undefined && !Array.isArray(plugins)) {
-      throw new Error('"plugins" is not an array');
+      throw new Error("\"plugins\" is not an array");
     }
     entries = ((plugins ?? []) as unknown[]).filter(
       (e): e is string => typeof e === "string",
