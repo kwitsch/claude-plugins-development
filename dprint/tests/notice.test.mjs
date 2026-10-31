@@ -25,6 +25,8 @@ let dir, other;
 beforeEach(() => {
   dir = mkdtempSync(path.join(tmpdir(), "dprint-notice-test-"));
   other = mkdtempSync(path.join(tmpdir(), "dprint-notice-other-"));
+  // a stray config above os.tmpdir() must not leak into the tests: the search stops at a .git
+  for (const d of [dir, other]) mkdirSync(path.join(d, ".git"));
 });
 
 /** register the module; returns the recorded hooks as [{ event, matcher, hook }] */

@@ -100,7 +100,7 @@ async function warnIfNoConfig($: Engine, dir: string): Promise<void> {
   if (last !== undefined && now - last < TOAST_MS) return;
   shown.set(dir, now);
   $.ui.toast(
-    `dprint: no dprint config in ${dir} or up to its git root, formatting is off (${CONFIG_NAMES.join(", ")})`,
+    `dprint: no dprint config in ${dir} or above (up to the git root), formatting is off (${CONFIG_NAMES.join(", ")})`,
     { timeoutMs: TOAST_MS },
   );
 }

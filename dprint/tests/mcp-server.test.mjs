@@ -75,6 +75,8 @@ beforeEach(() => {
   home = path.join(tmp, "home");
   repo = path.join(tmp, "repo");
   for (const d of [bin, home, repo]) mkdirSync(d);
+  // a stray config above os.tmpdir() must not leak into the tests: the search stops at a .git
+  mkdirSync(path.join(tmp, ".git"));
   for (const t of ["bash", "node"]) {
     const src = spawnSync("sh", ["-c", `command -v ${t}`], {
       encoding: "utf8",
