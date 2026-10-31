@@ -10,7 +10,7 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import { findConfig } from "../skills/init-dprint/find-config.mjs";
+import { findConfig } from "../skills/dprint/find-config.mjs";
 import type { CwdChangedInput, FormatPreInput, WorktreeEnteredInput, WorktreeExitedInput } from "./hook-inputs.mjs";
 import { DprintLsp, type LspRange } from "./lsp.mjs";
 

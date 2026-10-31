@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * init-dprint skill helper: locate dprint, read `dprint --version` and compare it numerically against
+ * dprint skill helper: locate dprint, read `dprint --version` and compare it numerically against
  * {@link MIN_VERSION}.
  *
  * @remarks

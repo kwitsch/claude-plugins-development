@@ -1,10 +1,10 @@
 ---
-name: init-dprint
+name: dprint
 description: Checks whether dprint is installed in at least the plugin's minimum version and, after confirmation via AskUserQuestion, installs it (when missing) or updates it (when too old) at user level. Then scans the project's file types and, for each type the dprint config does not cover, asks whether to add a matching dprint plugin. Use when the user wants dprint set up, installed, updated, checked, or its plugins completed for a project.
 allowed-tools: ["AskUserQuestion", "Bash(node:*)"]
 ---
 
-# init-dprint
+# dprint
 
 Makes sure a usable dprint, at least the minimum version pinned in `check-dprint.mjs`, is
 available. Detection is read-only. Installing or updating happens only after an explicit

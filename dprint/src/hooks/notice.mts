@@ -13,7 +13,7 @@
  */
 
 /**
- * dprint's config file names. A copy of `CONFIG_NAMES` (`skills/init-dprint/config-names.mts`): a relative import
+ * dprint's config file names. A copy of `CONFIG_NAMES` (`skills/dprint/config-names.mts`): a relative import
  * may not resolve in the engine; `tests/notice.test.mjs` fails on drift.
  */
 const CONFIG_NAMES = [

@@ -1,4 +1,4 @@
-// Contract tests for the built plugin/skills/init-dprint/check-dprint.mjs.
+// Contract tests for the built plugin/skills/dprint/check-dprint.mjs.
 // Isolated PATH (only bash + node) and HOME per test; dprint is stubbed.
 import { test, beforeEach } from "node:test";
 import assert from "node:assert/strict";
@@ -9,9 +9,9 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const PLUGIN = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../plugin");
-const SCRIPT = path.join(PLUGIN, "skills/init-dprint/check-dprint.mjs");
+const SCRIPT = path.join(PLUGIN, "skills/dprint/check-dprint.mjs");
 // the built script is minified; MIN_VERSION is read from its source
-const SOURCE = path.resolve(PLUGIN, "../src/skills/init-dprint/check-dprint.mts");
+const SOURCE = path.resolve(PLUGIN, "../src/skills/dprint/check-dprint.mts");
 const MIN = /^const MIN_VERSION = "([0-9.]+)";$/m.exec(readFileSync(SOURCE, "utf8"))?.[1];
 
 let bin, home;

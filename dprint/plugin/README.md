@@ -23,11 +23,11 @@ Skill that checks for a minimum dprint version, installs or updates dprint at us
 
 ## Notes
 
-- Minimum dprint version: `0.50.0` (the `MIN_VERSION` constant in `src/skills/init-dprint/check-dprint.mts`).
+- Minimum dprint version: `0.50.0` (the `MIN_VERSION` constant in `src/skills/dprint/check-dprint.mts`).
 - Installs via the official installer (`curl -fsSL https://dprint.dev/install.sh | sh`) to `~/.dprint/bin` — user level, no sudo. Updates use `dprint upgrade`.
 - Shell rc files are never edited: if `~/.dprint/bin` is not on `PATH`, the skill prints the `export PATH=...` line to add yourself.
 - Linux, macOS and WSL only. Requires `node` on `PATH`.
-- The plugin list is `skills/init-dprint/dprint-plugins.json`, a snapshot of the plugins.dprint.dev registry (date in the file).
+- The plugin list is `skills/dprint/dprint-plugins.json`, a snapshot of the plugins.dprint.dev registry (date in the file).
 - Plugins are added with `dprint config add <name>`, which needs network access and resolves the latest version.
 - A dprint config counts in the working directory or in the nearest ancestor directory that has one, but never above the git repository root, or inside a git worktree the worktree root (no global config). This is the format hook's own gate, not dprint's rule: once the gate is open, `dprint lsp` resolves the config per file itself and does not stop at the git root, so a config above the root applies to a started lsp but never opens the gate. The config names are `dprint.json`, `dprint.jsonc`, `.dprint.json`, `.dprint.jsonc`, `.config/dprint.json`, `.config/dprint.jsonc`. Plugins of `extends` configs and non-registry plugins (for example `exec`) are not recognized.
 - The scan needs `git`.

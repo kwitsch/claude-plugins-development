@@ -1,12 +1,12 @@
 # dprint
 
-Plugin with one model-invocable skill `init-dprint` (`plugin/skills/init-dprint/SKILL.md`), one PreToolUse
+Plugin with one model-invocable skill `dprint` (`plugin/skills/dprint/SKILL.md`), one PreToolUse
 format hook, three cwd-tracking hooks (CwdChanged, PostToolUse EnterWorktree/ExitWorktree) and one Claude Code
 function-hooks module `plugin/hooks/notice.mjs` (15 s toast when the working directory has no dprint config).
 
 Skill: two zero-dep scripts (plus the shared `find-dprint.mjs` and `config-names.mjs`, the six dprint config file
 names in `CONFIG_NAMES`) and one data file, all in
-`plugin/skills/init-dprint/`:
+`plugin/skills/dprint/`:
 
 - `check-dprint.mjs`: dprint detection and minimum-version check (contract: `check-dprint.reference.md`).
 - `scan-plugins.mjs`: read-only scan of the project's file types against its dprint config (contract:
@@ -22,7 +22,7 @@ Hook: `plugin/hooks/hooks.json` (hand-written) wires PreToolUse `Write|Edit` as 
   `worktree_entered` and `worktree_exited` (PostToolUse EnterWorktree/ExitWorktree hooks).
 - `lsp.mjs`: `dprint lsp` client (one lazily spawned child per cwd, Content-Length JSON-RPC, 30 s request timeout,
   respawn after a crash, `applyTextEdits`). Needs dprint >= 0.50 (`findDprint` from
-  `skills/init-dprint/find-dprint.mjs`: `PATH`, then `~/.dprint/bin`).
+  `skills/dprint/find-dprint.mjs`: `PATH`, then `~/.dprint/bin`).
 - `format.mjs`: `formatPre` (config gate first: `{}` and no `dprint lsp` spawn unless `findConfig` finds a config in the
   effective cwd or an ancestor (never above the nearest dir holding `.git`: repo root or worktree root); Write: `formatting`; Edit: `rangeFormatting` over the edited lines, whole-file
   `formatting` on a JSON-RPC error), `lineDiff` and `trimToEdit` (keep only hunks touching the edit, widen
@@ -41,7 +41,7 @@ its hooks (expected: the check is detached with `.catch`).
 
 `check-dprint.mjs`, `config-names.mjs`, `find-config.mjs`, `find-dprint.mjs`, `scan-plugins.mjs`, `plugin/mcp/*.mjs`, `plugin/hooks/notice.mjs`
 and `plugin/.claude-plugin/plugin.json` are **build output** (`pnpm build`) of
-`src/skills/init-dprint/{check-dprint,config-names,find-config,find-dprint,scan-plugins}.mts`, `src/mcp/{server,lsp,format}.mts`,
+`src/skills/dprint/{check-dprint,config-names,find-config,find-dprint,scan-plugins}.mts`, `src/mcp/{server,lsp,format}.mts`,
 `src/hooks/notice.mts` and `plugin.json`. Do not edit them here.
 
 ## Sources vs. build output

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * init-dprint skill helper: list the project's file types and report every type that a plugin in
+ * dprint skill helper: list the project's file types and report every type that a plugin in
  * `dprint-plugins.json` can format but no plugin in the project's dprint config covers.
  *
  * @remarks

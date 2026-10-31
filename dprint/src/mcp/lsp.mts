@@ -9,7 +9,7 @@
  */
 import { type ChildProcessWithoutNullStreams, spawn } from "node:child_process";
 import { pathToFileURL } from "node:url";
-import { findDprint } from "../skills/init-dprint/find-dprint.mjs";
+import { findDprint } from "../skills/dprint/find-dprint.mjs";
 
 /** LSP range: zero-based line and UTF-16 character offsets, end exclusive. */
 export type LspRange = {
