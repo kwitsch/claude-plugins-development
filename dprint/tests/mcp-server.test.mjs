@@ -699,12 +699,45 @@ test("file_changed leaves a file alone that is unchanged against the git index",
   writeFileSync(c, "y  \n");
   assert.deepEqual(await s.tool("file_changed", ev), {});
   assert.equal(readFileSync(c, "utf8"), "y\n");
-  // a gitignored file prints nothing in plain `git status --porcelain`, but is formatted like Write/Edit would
-  writeFileSync(path.join(repo, ".gitignore"), "ignored.ts\n");
+  // gitignored files are never formatted: not by file_changed, not by Write, not by Edit
+  writeFileSync(path.join(repo, ".gitignore"), "ignored.ts\nignored-dir/\n");
   const ig = path.join(repo, "ignored.ts");
   writeFileSync(ig, "z  \n");
   assert.deepEqual(await s.tool("file_changed", { ...ev, file_path: ig }), {});
-  assert.equal(readFileSync(ig, "utf8"), "z\n");
+  assert.equal(readFileSync(ig, "utf8"), "z  \n");
+  assert.deepEqual(
+    await s.call({
+      cwd: repo,
+      tool_name: "Write",
+      tool_input: { file_path: ig, content: "z  \n" },
+    }),
+    {},
+  );
+  assert.deepEqual(
+    await s.call({
+      cwd: repo,
+      tool_name: "Write",
+      tool_input: { file_path: path.join(repo, "ignored-dir", "new", "n.ts"), content: "z  \n" },
+    }),
+    {},
+  );
+  assert.deepEqual(
+    await s.call({
+      cwd: repo,
+      tool_name: "Edit",
+      tool_input: { file_path: ig, old_string: "z", new_string: "w" },
+    }),
+    {},
+  );
+  // positive control: the same Write to a non-ignored file is formatted
+  assert.equal(
+    (await s.call({
+      cwd: repo,
+      tool_name: "Write",
+      tool_input: { file_path: path.join(repo, "n.ts"), content: "z  \n" },
+    })).hookSpecificOutput.updatedInput.content,
+    "z\n",
+  );
 });
 
 const WATCH = path.join(PLUGIN, "mcp/watch-paths.mjs");

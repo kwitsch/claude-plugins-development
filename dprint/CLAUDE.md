@@ -35,8 +35,8 @@ Hook: `plugin/hooks/hooks.json` (hand-written) wires PreToolUse `Write|Edit` as 
 - `format.mjs`: scope via `scopeOf` (effective cwd: override, else payload `cwd`, never `process.cwd()`) and
   `inScope` (real path strictly inside the real cwd, not excluded, not inside `scratchpad_dir`; dangling links
   rejected); `fileWritten` records Edit/Write content per real path; `fileChanged` formats a watched file whole on
-  disk unless it is out of scope, has a lone CR (CRLF files are formatted on their LF view), equals the recorded content (a SHA-256 digest; `fileWritten` records only where a config exists), or is tracked and unchanged against the git index
-  (`git --no-optional-locks status --porcelain --ignored` empty; git failure means format); it uses its own `dprint lsp` and drops events beyond 50 in flight; at most 8 `dprint lsp` children live, the least recently used is disposed; `formatPre` (config gate first: `{}` and no `dprint lsp` spawn unless `findConfig` finds a config in the
+  disk unless it is out of scope, has a lone CR (CRLF files are formatted on their LF view), equals the recorded content (a SHA-256 digest; `fileWritten` records only where a config exists), is gitignored (`git check-ignore`), or is tracked and unchanged against the git index
+  (`git --no-optional-locks status --porcelain` empty; git failure means format); it uses its own `dprint lsp` and drops events beyond 50 in flight; at most 8 `dprint lsp` children live, the least recently used is disposed; `formatPre` (config gate first, then the gitignore check (`git check-ignore`; Write/Edit skip ignored files): `{}` and no `dprint lsp` spawn unless `findConfig` finds a config in the
   effective cwd or an ancestor (never above the nearest dir holding `.git`: repo root or worktree root); Write: `formatting`; Edit: `rangeFormatting` over the edited lines, whole-file
   `formatting` on a JSON-RPC error), `lineDiff` and `trimToEdit` (keep only hunks touching the edit, widen
   `old_string` until it is unique; accepted only if the trimmed file formats like the intended edit, two extra

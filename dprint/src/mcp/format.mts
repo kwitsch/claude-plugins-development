@@ -10,7 +10,7 @@
  */
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
-import { lstatSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
@@ -455,6 +455,27 @@ const utf8 = new TextDecoder("utf-8", { fatal: true });
 const execFileAsync = promisify(execFile);
 
 /**
+ * Whether git ignores a file (`git check-ignore`); tracked files never count as ignored.
+ *
+ * @remarks
+ * Runs in the nearest existing ancestor directory of the file, so a nested repository or submodule applies its own
+ * ignore rules and a Write to a new directory still resolves. No git, no repository or a timeout mean "not ignored".
+ *
+ * @param fp - Absolute file path.
+ * @returns `true` only when git reports the file as ignored (exit 0).
+ */
+async function isGitIgnored(fp: string): Promise<boolean> {
+  let cwd = path.dirname(fp);
+  while (!existsSync(cwd) && cwd !== path.dirname(cwd)) cwd = path.dirname(cwd);
+  try {
+    await execFileAsync("git", ["--no-optional-locks", "check-ignore", "-q", "--", fp], { cwd, timeout: 10_000 });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * PostToolUse `Write|Edit` hook: remember the content Edit/Write wrote, so {@link fileChanged} leaves it alone.
  *
  * @param args - Hook input: `cwd`, `agent_id`, `session_id`, `scratchpad_dir` and `tool_input.file_path`.
@@ -481,9 +502,9 @@ export function fileWritten(args: FileWrittenInput = {}): HookResult {
  *
  * @remarks
  * Skips `unlink` events, files out of {@link inScope}, cwds without a dprint config, files with a lone `\r`,
- * content equal to the {@link written} digest, and (user decision) tracked files unchanged against the git index
- * (`git status --porcelain --ignored` empty, e.g. after checkout/pull/reset/stash; gitignored files are
- * formatted like Write/Edit would); when git fails or is absent the file is formatted. CRLF files are formatted
+ * content equal to the {@link written} digest, and (user decision) gitignored files and tracked files unchanged
+ * against the git index (`git status --porcelain` empty, e.g. after checkout/pull/reset/stash); when git fails or
+ * is absent the file is formatted. CRLF files are formatted
  * on their LF view and written back with CRLF. At most {@link MAX_PENDING_CHANGES} events run at once (the rest
  * are dropped) on a `dprint lsp` of their own.
  * The whole file is formatted via `textDocument/formatting` and written in place only when dprint changed it and
@@ -509,13 +530,14 @@ export async function fileChanged(
     // CRLF files are formatted on their LF view (as formatPre's Edit does) and written back with CRLF; a lone "\r" fails open
     const lf = text.replaceAll("\r\n", "\n");
     if (lf.includes("\r")) return {};
-    // user decision: a tracked file equal to the git index (git restored it) is left alone; --ignored keeps
-    // gitignored files in (as for Write/Edit), --no-optional-locks keeps .git/index.lock free for the user's git,
-    // cwd = dirname picks the nearest repository (nested repos, submodules)
+    // user decision: gitignored files are never formatted
+    if (await isGitIgnored(s.fp)) return {};
+    // user decision: a tracked file equal to the git index (git restored it) is left alone; --no-optional-locks
+    // keeps .git/index.lock free for the user's git, cwd = dirname picks the nearest repository (nested repos, submodules)
     try {
       const { stdout } = await execFileAsync(
         "git",
-        ["--no-optional-locks", "status", "--porcelain", "--ignored", "--", s.fp],
+        ["--no-optional-locks", "status", "--porcelain", "--", s.fp],
         { cwd: path.dirname(s.fp), encoding: "utf8", timeout: 10_000 },
       );
       if (stdout === "") return {};
@@ -600,7 +622,8 @@ function done(updatedInput: Record<string, unknown>, fp: string): HookResult {
  * edited lines, then {@link trimToEdit} keeps the result a minimal `old_string`/`new_string` pair, accepted
  * only when the trimmed result formats (whole document) exactly like the intended edit. Only files
  * {@link inScope} of {@link scopeOf} are formatted: real path (symlinks resolved, dangling links rejected)
- * inside the effective cwd, not an {@link isExcludedPath} path and not inside the session scratchpad; without
+ * inside the effective cwd, not an {@link isExcludedPath} path, not gitignored ({@link isGitIgnored}) and not
+ * inside the session scratchpad; without
  * a known cwd nothing is formatted. Nothing is formatted (and no `dprint lsp`
  * spawned) unless the effective cwd or an ancestor holds one of `CONFIG_NAMES` (`findConfig`, never above the git repository or worktree root). Edits on CRLF files are trimmed on the
  * LF-normalized text Claude Code's Edit matches against.
@@ -621,6 +644,8 @@ export async function formatPre(
     const fp = s.fp;
     // formatting is opt-in: only when the effective cwd, or an ancestor up to the git repo/worktree root, holds a dprint config
     if (findConfig(root) === null) return {};
+    // user decision: gitignored files are never formatted
+    if (await isGitIgnored(fp)) return {};
     const uri = pathToFileURL(fp).href;
 
     if (args.tool_name === "Write") {
