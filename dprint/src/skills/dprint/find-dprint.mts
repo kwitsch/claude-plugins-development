@@ -1,14 +1,13 @@
 /**
- * Shared dprint lookup (binary and project config) used by `check-dprint.mts`, `run-dprint.mts` and the MCP
- * server's lsp client (`mcp/lsp.mts`).
+ * Shared dprint binary lookup used by `check-dprint.mts`, `run-dprint.mts` and the MCP server's lsp client
+ * (`mcp/lsp.mts`). The project config lookup is `find-config.mts`.
  *
  * @packageDocumentation
  */
 
-import { accessSync, constants, existsSync, statSync } from "node:fs";
+import { accessSync, constants, statSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, join, resolve } from "node:path";
-import { CONFIG_NAMES } from "./config-names.mjs";
+import { join, resolve } from "node:path";
 
 /**
  * Check whether a path is a regular file this user may execute.
@@ -39,22 +38,4 @@ export function findDprint(): string | null {
   }
   const fallback = join(homedir(), ".dprint", "bin", "dprint");
   return isExecutableFile(fallback) ? fallback : null;
-}
-
-/**
- * Find the project dprint config the way dprint does: the first of `CONFIG_NAMES` in `start`, else in each
- * ancestor directory up to the filesystem root.
- *
- * @param start - Directory to start in (normally `process.cwd()`).
- * @returns Absolute path of the config file, or `null` when no directory up to the root has one.
- */
-export function findConfig(start: string): string | null {
-  for (let dir = resolve(start);; dir = dirname(dir)) {
-    // shortcut: a directory named like a config counts as found (same as scan-plugins), switch to statSync().isFile() if that ever matters
-    for (const name of CONFIG_NAMES) {
-      const p = join(dir, name);
-      if (existsSync(p)) return p;
-    }
-    if (dirname(dir) === dir) return null;
-  }
 }

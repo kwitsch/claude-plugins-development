@@ -5,7 +5,7 @@
  *
  * @remarks
  * Usage `node run-dprint.mjs <check|fmt> [scope]`. Without dprint or a config in the working directory or an
- * ancestor it prints `status=notsetup reason=<missing|noconfig>`, a hint to run `/dprint init` and exits 3
+ * ancestor up to the git root (`findConfig`, the same lookup as the format hook) it prints `status=notsetup reason=<missing|noconfig>`, a hint to run `/dprint init` and exits 3
  * without running dprint. Otherwise dprint runs with inherited stdio (no shell, the scope is passed after `--`)
  * and its exit code is passed through. Contract: `run-dprint.reference.md`.
  *
@@ -13,7 +13,8 @@
  */
 
 import { spawnSync } from "node:child_process";
-import { findConfig, findDprint } from "./find-dprint.mjs";
+import { findConfig } from "./find-config.mjs";
+import { findDprint } from "./find-dprint.mjs";
 
 /**
  * Validate the arguments, check that dprint is set up and run it.
@@ -38,7 +39,7 @@ function run(args: string[]): number {
     const missing = dprint === null;
     process.stdout.write(`status=notsetup reason=${missing ? "missing" : "noconfig"}\n`);
     process.stderr.write(
-      `dprint is not set up here (${missing ? "no dprint found" : "no dprint config found in this directory or its ancestors"}): run /dprint init (/dprint:dprint init) first\n`,
+      `dprint is not set up here (${missing ? "no dprint found" : "no dprint config found in this directory or its ancestors up to the git root"}): run /dprint init (/dprint:dprint init) first\n`,
     );
     return 3;
   }

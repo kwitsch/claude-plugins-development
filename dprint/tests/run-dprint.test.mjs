@@ -1,6 +1,6 @@
 // Contract tests for the built plugin/skills/dprint/run-dprint.mjs.
 // Isolated PATH (only bash + node), HOME and project dir per test; dprint is stubbed and logs its argv.
-// Every run passes a cwd inside proj: otherwise findConfig walks up to the repo-root dprint.json.
+// Every run passes a cwd inside proj: otherwise findConfig walks up to the repo-root dprint.json (it stops at the nearest `.git`).
 import { test, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
@@ -94,6 +94,16 @@ test("config only in the parent directory -> found by walk-up, dprint runs", () 
   const r = run(["fmt"], path.join(proj, "sub"));
   assert.equal(r.code, 0);
   assert.deepEqual(argv(), ["fmt"]);
+});
+
+test("config above the git root does not count (same lookup as the format hook) -> exit 3, noconfig", () => {
+  stubDprint();
+  writeFileSync(path.join(path.dirname(proj), "dprint.json"), "{}\n");
+  mkdirSync(path.join(proj, ".git"));
+  const r = run(["check"]);
+  assert.equal(r.code, 3);
+  assert.equal(r.out, "status=notsetup reason=noconfig\n");
+  assert.equal(ran(), false);
 });
 
 test("only .config/dprint.json -> it counts as config, dprint runs", () => {

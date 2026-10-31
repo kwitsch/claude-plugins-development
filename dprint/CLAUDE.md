@@ -16,8 +16,9 @@ dprint config file names in `CONFIG_NAMES`) and one data file, all in
 - `dprint-plugins.json`: hand-written plugin reference data read by `scan-plugins.mjs`. It is **not** build
   output; edit it in place.
 
-`find-dprint.mjs` exports `findDprint` (binary: `PATH`, then `~/.dprint/bin`) and `findConfig` (first of
-`CONFIG_NAMES` from `config-names.mjs` in a directory or its ancestors).
+`find-dprint.mjs` exports `findDprint` (binary: `PATH`, then `~/.dprint/bin`); `find-config.mjs` exports `findConfig`
+(first of `CONFIG_NAMES` in a directory or its ancestors, never above the git/worktree root), shared by
+`run-dprint.mjs`, `scan-plugins.mjs` and `mcp/format.mjs`.
 
 Hook: `plugin/hooks/hooks.json` (hand-written) wires PreToolUse `Write|Edit` as an `mcp_tool` hook to tool
 `format_pre` of the MCP server `dprint-hooks` (`plugin/.mcp.json`, hand-written, `command: node`). The server is

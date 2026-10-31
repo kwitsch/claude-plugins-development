@@ -25,7 +25,7 @@ On a not-set-up gate failure only this stdout line, plus one stderr line telling
 status=notsetup reason=<missing|noconfig>
 ```
 
-`missing`: no executable `dprint` on `PATH` nor at `$HOME/.dprint/bin/dprint`. `noconfig`: none of `dprint.json`, `dprint.jsonc`, `.dprint.json`, `.dprint.jsonc`, `.config/dprint.json`, `.config/dprint.jsonc` in the working directory or any ancestor (dprint's global config does not count).
+`missing`: no executable `dprint` on `PATH` nor at `$HOME/.dprint/bin/dprint`. `noconfig`: none of `dprint.json`, `dprint.jsonc`, `.dprint.json`, `.dprint.jsonc`, `.config/dprint.json`, `.config/dprint.jsonc` in the working directory or any ancestor up to the git root (the format hook's lookup; dprint's global config does not count).
 
 Otherwise the output is dprint's own stdout/stderr (may contain ANSI colours); it is not parsed.
 

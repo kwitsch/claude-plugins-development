@@ -19,7 +19,7 @@ Without any argument the skill runs `fmt` on the whole current working directory
 dprint may treat an explicit scope as overriding the config's `includes` (the `excludes` still
 apply), so `fmt` with a scope can rewrite files the config leaves out.
 `check` and `fmt` need dprint and a project dprint config (in the current directory or an
-ancestor); when either is missing they run nothing and tell the user to run `/dprint init`
+ancestor up to the git root); when either is missing they run nothing and tell the user to run `/dprint init`
 (`/dprint:dprint init`) first.
 
 `init` makes sure a usable dprint, at least the minimum version pinned in `check-dprint.mjs`, is
@@ -72,7 +72,7 @@ Arguments: "$ARGUMENTS"
    - `3` (not set up): tell the user that dprint must first be initialized with `/dprint init`
      (`/dprint:dprint init`) and name the reason from the `status=notsetup reason=` line
      (`missing` = no dprint found, `noconfig` = no dprint config in this directory or its
-     ancestors). Run nothing else and never start init on your own.
+     ancestors up to the git root). Run nothing else and never start init on your own.
    - `0`: report success; for `fmt`, quote dprint's summary line if it printed one.
    - `20` (`check`): list the unformatted files from the output and mention `/dprint fmt` with the
      same scope.
