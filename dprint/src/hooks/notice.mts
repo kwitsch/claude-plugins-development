@@ -13,7 +13,7 @@
  */
 import { CONFIG_NAMES } from "../skills/init-dprint/config-names.mjs";
 
-/** How long the missing-config toast stays, in ms (the task's 15 seconds). */
+/** How long the missing-config toast stays, in ms: long enough to read, short enough not to nag; a UX default, safe to change. */
 const TOAST_MS = 15_000;
 
 /** The part of the engine interface `$` this module uses. */
