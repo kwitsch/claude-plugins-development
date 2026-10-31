@@ -148,12 +148,12 @@ export class DprintLsp {
         });
       const edits = range
         ? await this.request<TextEdit[] | null>(
-            "textDocument/rangeFormatting",
-            { textDocument: { uri }, range, options: FORMAT_OPTIONS },
-          ).catch((e: unknown) => {
-            if (!(e instanceof RpcError)) throw e;
-            return whole(); // plugin without range support: one retry on the whole document
-          })
+          "textDocument/rangeFormatting",
+          { textDocument: { uri }, range, options: FORMAT_OPTIONS },
+        ).catch((e: unknown) => {
+          if (!(e instanceof RpcError)) throw e;
+          return whole(); // plugin without range support: one retry on the whole document
+        })
         : await whole();
       return edits && edits.length > 0 ? applyTextEdits(text, edits) : null;
     } finally {
@@ -183,9 +183,7 @@ export class DprintLsp {
       this.failPending(err);
     };
     child.on("error", (e) => dead(e));
-    child.on("exit", (code, signal) =>
-      dead(new Error(`dprint lsp exited (${code ?? signal})`)),
-    );
+    child.on("exit", (code, signal) => dead(new Error(`dprint lsp exited (${code ?? signal})`)));
     const ready = this.request("initialize", {
       processId: process.pid,
       rootUri: pathToFileURL(this.cwd).href,
@@ -341,8 +339,7 @@ export function applyTextEdits(text: string, edits: TextEdit[]): string {
     starts.push(i + 1);
   const offset = (p: { line: number; character: number }) => {
     if (p.line >= starts.length) return text.length;
-    let lineEnd =
-      p.line + 1 < starts.length ? starts[p.line + 1] - 1 : text.length;
+    let lineEnd = p.line + 1 < starts.length ? starts[p.line + 1] - 1 : text.length;
     if (p.line + 1 < starts.length && text[lineEnd - 1] === "\r") lineEnd--; // CRLF: the line ends before the "\r"
     return Math.min(starts[p.line] + p.character, lineEnd); // LSP: past the line end means the line end
   };

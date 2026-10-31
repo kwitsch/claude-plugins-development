@@ -108,10 +108,9 @@ export function lineDiff(a: string[], b: string[]): Hunk[] {
   const L = Array.from({ length: n + 1 }, () => new Uint16Array(m + 1));
   for (let i = n - 1; i >= 0; i--) {
     for (let j = m - 1; j >= 0; j--) {
-      L[i][j] =
-        a[i] === b[j]
-          ? L[i + 1][j + 1] + 1
-          : Math.max(L[i + 1][j], L[i][j + 1]);
+      L[i][j] = a[i] === b[j]
+        ? L[i + 1][j + 1] + 1
+        : Math.max(L[i + 1][j], L[i][j + 1]);
     }
   }
   const hunks: Hunk[] = [];
@@ -157,8 +156,7 @@ export function trimToEdit(
   const split = (t: string) => t.match(/[^\n]*\n|[^\n]+/g) ?? [];
   const a = split(original);
   const b = split(formatted);
-  const render = (lines: string[], x: number, y: number) =>
-    lines.slice(x, y).join("");
+  const render = (lines: string[], x: number, y: number) => lines.slice(x, y).join("");
   const hunks = lineDiff(a, b);
   const kept: number[] = [];
   hunks.forEach((h, k) => {
@@ -175,7 +173,7 @@ export function trimToEdit(
   // common (LCS-matched) context available on each side, bounded by the neighbouring non-kept hunks
   const lo = hunks[first - 1]?.aEnd ?? 0;
   const hi = hunks[last + 1]?.aStart ?? a.length;
-  for (let up = true; ; up = !up) {
+  for (let up = true;; up = !up) {
     const oldString = render(a, aA, aB);
     const i = original.indexOf(oldString);
     if (
@@ -211,7 +209,7 @@ const clients = new Map<string, DprintLsp>();
  */
 const client = (cwd: string): DprintLsp => {
   let c = clients.get(cwd);
-  if (!c) clients.set(cwd, (c = new DprintLsp({ cwd })));
+  if (!c) clients.set(cwd, c = new DprintLsp({ cwd }));
   return c;
 };
 
@@ -255,8 +253,7 @@ function setCwd(
  * @param args - Hook input with `new_cwd`, `session_id` and `agent_id`.
  * @returns `{}`.
  */
-export const cwdChanged = (args: CwdChangedInput = {}): HookResult =>
-  setCwd(args, args.new_cwd);
+export const cwdChanged = (args: CwdChangedInput = {}): HookResult => setCwd(args, args.new_cwd);
 
 /**
  * PostToolUse EnterWorktree hook: CwdChanged does not fire for it, so take the worktree path from the tool
@@ -265,8 +262,7 @@ export const cwdChanged = (args: CwdChangedInput = {}): HookResult =>
  * @param args - Hook input with `tool_response.worktreePath`, `session_id` and `agent_id`.
  * @returns `{}`.
  */
-export const worktreeEntered = (args: WorktreeEnteredInput = {}): HookResult =>
-  setCwd(args, args.tool_response?.worktreePath);
+export const worktreeEntered = (args: WorktreeEnteredInput = {}): HookResult => setCwd(args, args.tool_response?.worktreePath);
 
 /**
  * PostToolUse ExitWorktree hook: switch to the cwd the session is restored to (`restoredCwd`; the cwd from
@@ -276,8 +272,7 @@ export const worktreeEntered = (args: WorktreeEnteredInput = {}): HookResult =>
  * @param args - Hook input with `tool_response.restoredCwd`, `session_id` and `agent_id`.
  * @returns `{}`.
  */
-export const worktreeExited = (args: WorktreeExitedInput = {}): HookResult =>
-  setCwd(args, args.tool_response?.restoredCwd);
+export const worktreeExited = (args: WorktreeExitedInput = {}): HookResult => setCwd(args, args.tool_response?.restoredCwd);
 
 /**
  * Kill every `dprint lsp` child (called when MCP stdin closes).
@@ -333,8 +328,7 @@ const lineOf = (text: string, idx: number): number => {
  * @returns The formatted text, or `null` when dprint changed nothing or answered an empty file for non-empty
  * input (treated as a failure).
  */
-const changed = (F: string | null, input: string): string | null =>
-  F === null || F === input || (F === "" && input !== "") ? null : F;
+const changed = (F: string | null, input: string): string | null => F === null || F === input || (F === "" && input !== "") ? null : F;
 
 /**
  * Build the hook output that replaces the tool input.
@@ -425,8 +419,7 @@ export async function formatPre(
       ]);
 
       // full lines of M from the first replacement to the last inserted char (insertion offset if new is empty)
-      const lastStart =
-        occ[occ.length - 1] +
+      const lastStart = occ[occ.length - 1] +
         (occ.length - 1) * (newStr.length - oldStr.length);
       const endLine = lineOf(
         M,
@@ -435,10 +428,9 @@ export async function formatPre(
       const mLines = M.split("\n");
       const range: LspRange = {
         start: { line: lineOf(M, occ[0]), character: 0 },
-        end:
-          endLine + 1 < mLines.length
-            ? { line: endLine + 1, character: 0 }
-            : { line: endLine, character: mLines[endLine].length },
+        end: endLine + 1 < mLines.length
+          ? { line: endLine + 1, character: 0 }
+          : { line: endLine, character: mLines[endLine].length },
       };
 
       const lsp = client(root);
