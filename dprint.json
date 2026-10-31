@@ -1,0 +1,62 @@
+{
+  "typescript": {
+    "associations": [
+      "dprint/tests/check-dprint.test.mjs"
+    ],
+    "lineWidth": 200,
+    "quoteStyle": "preferDouble",
+    "module.sortImportDeclarations": "maintain",
+    "module.sortExportDeclarations": "maintain",
+    "importDeclaration.sortNamedImports": "maintain",
+    "exportDeclaration.sortNamedExports": "maintain",
+    "importDeclaration.preferSingleLine": false,
+    "exportDeclaration.preferSingleLine": false,
+    "ifStatement.useBraces": "maintain",
+    "forStatement.useBraces": "maintain",
+    "forInStatement.useBraces": "maintain",
+    "forOfStatement.useBraces": "maintain",
+    "whileStatement.useBraces": "maintain",
+    "binaryExpression.operatorPosition": "sameLine"
+  },
+  "json": {
+    "lineWidth": 600,
+    "packageJson.applyConventions": false
+  },
+  "markdown": {
+    "lineWidth": 600,
+    "table.minColumnWidth": 3,
+    "codeBlock.skipFormat": true
+  },
+  "yaml": {
+    "printWidth": 200
+  },
+  "shuck": {
+    "useTabs": false,
+    "indentWidth": 2
+  },
+  "excludes": [
+    "**/node_modules",
+    "**/*-lock.json",
+    "**/pnpm-lock.yaml",
+    ".claude/worktrees",
+    "./README.md",
+    ".claude/skills/scaffold-plugin/templates",
+    "*/plugin/**/*.mjs",
+    "*/plugin/.claude-plugin/plugin.json",
+    "*/src/mcp/hook-inputs.d.mts"
+  ],
+  "plugins": [
+    "npm:@dprint/typescript@0.96.1",
+    "npm:@dprint/json@0.25.2",
+    "npm:@dprint/markdown@0.28.2",
+    "npm:dprint-plugin-yaml@0.6.0",
+    "npm:@dprint/shuck@0.2.2",
+    "https://plugins.dprint.dev/prettier-0.70.0.json@c91d4f147eded09b51e1b2d5f8a03940a60278b9b4dc13b23e35b6173742ec08"
+  ],
+  "prettier": {
+    "associations": [
+      "**/*.{ts,tsx,mts,cts,js,jsx,mjs,cjs}",
+      "!dprint/tests/check-dprint.test.mjs"
+    ]
+  }
+}

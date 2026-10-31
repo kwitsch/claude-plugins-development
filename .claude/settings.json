@@ -7,5 +7,8 @@
     "commit": "",
     "pr": "",
     "sessionUrl": false
+  },
+  "enabledPlugins": {
+    "universal-format@kwitsch-plugins": false
   }
 }
