@@ -5,6 +5,7 @@
   "typescript": {},
   "json": {},
   "markdown": {
+    "table.minColumnWidth": 3,
     "codeBlock.skipFormat": true
   },
   "yaml": {},
