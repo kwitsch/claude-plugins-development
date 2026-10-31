@@ -2,17 +2,9 @@
   "lineWidth": 2147483647,
   "indentWidth": 2,
   "useTabs": false,
-  "typescript": {
-    "quoteStyle": "preferDouble",
-    "importDeclaration.preferSingleLine": false,
-    "exportDeclaration.preferSingleLine": false,
-    "binaryExpression.operatorPosition": "sameLine"
-  },
-  "json": {
-    "packageJson.applyConventions": false
-  },
+  "typescript": {},
+  "json": {},
   "markdown": {
-    "table.minColumnWidth": 3,
     "codeBlock.skipFormat": true
   },
   "yaml": {},
