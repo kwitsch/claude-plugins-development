@@ -11,10 +11,11 @@ import { CONFIG_NAMES } from "./config-names.mjs";
 const hits = new Map<string, string>();
 
 /**
- * First dprint config in `dir` or, like dprint itself, in the nearest ancestor that has one.
+ * First dprint config in `dir` or in the nearest ancestor that has one, but never above the git repository root or,
+ * inside a git worktree, the worktree root (the nearest directory holding `.git`, a directory or a file).
  *
  * @param dir - Directory to start from.
- * @returns Absolute path of the config, or `null` when none exists up to the filesystem root.
+ * @returns Absolute path of the config, or `null` when none exists up to that root (the filesystem root outside git).
  */
 export function findConfig(dir: string): string | null {
   const hit = hits.get(dir);
@@ -28,6 +29,6 @@ export function findConfig(dir: string): string | null {
         return p;
       }
     }
-    if (path.dirname(d) === d) return null;
+    if (existsSync(path.join(d, ".git")) || path.dirname(d) === d) return null;
   }
 }

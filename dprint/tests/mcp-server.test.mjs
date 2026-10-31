@@ -400,6 +400,37 @@ test("a dprint config only in an ancestor of the cwd -> the Write is formatted",
   assert.equal(out.hookSpecificOutput.updatedInput.content, "x\n");
 });
 
+test("the config search stops at the git repo root and at a worktree root", async () => {
+  stubDprint();
+  const s = startServer();
+  const write = (cwd) =>
+    s.call({
+      cwd,
+      tool_name: "Write",
+      tool_input: { file_path: path.join(cwd, "a.ts"), content: "x   \n" },
+    });
+  // config above the repo root is ignored; a config at the repo root counts
+  const outer = path.join(tmp, "outer");
+  const repoRoot = path.join(outer, "repo");
+  const sub = path.join(repoRoot, "pkg", "foo");
+  mkdirSync(sub, { recursive: true });
+  mkdirSync(path.join(repoRoot, ".git"));
+  writeFileSync(path.join(outer, "dprint.json"), "{}");
+  assert.deepEqual(await write(sub), {});
+  writeFileSync(path.join(repoRoot, "dprint.json"), "{}");
+  assert.equal((await write(sub)).hookSpecificOutput.updatedInput.content, "x\n");
+  // a worktree (".git" is a file) is its own root: the main checkout's config does not reach into it
+  const wt = path.join(repoRoot, "wt");
+  mkdirSync(path.join(wt, "src"), { recursive: true });
+  writeFileSync(path.join(wt, ".git"), "gitdir: elsewhere\n");
+  assert.deepEqual(await write(path.join(wt, "src")), {});
+  writeFileSync(path.join(wt, "dprint.json"), "{}");
+  assert.equal(
+    (await write(path.join(wt, "src"))).hookSpecificOutput.updatedInput.content,
+    "x\n",
+  );
+});
+
 test("the config gate follows cwd_changed: config-less dir -> {}, back in the config dir -> formatted", async () => {
   stubDprint();
   const bare = path.join(tmp, "bare");

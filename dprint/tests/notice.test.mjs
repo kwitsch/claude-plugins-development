@@ -117,6 +117,30 @@ test("a config in an ancestor of the cwd -> no toast", async () => {
   assert.deepEqual(toasts, []);
 });
 
+test("the search for a config stops at the git repo root and at a worktree root", async () => {
+  writeFileSync(path.join(dir, "dprint.json"), "{}"); // above the repo root: must not count
+  const repoRoot = path.join(dir, "repo");
+  const sub = path.join(repoRoot, "pkg");
+  mkdirSync(sub, { recursive: true });
+  mkdirSync(path.join(repoRoot, ".git"));
+  const { $, toasts } = engine(sub);
+  await fire("session.start", undefined, $);
+  assert.equal(toasts.length, 1);
+  writeFileSync(path.join(repoRoot, "dprint.json"), "{}"); // at the repo root: counts
+  const sub2 = path.join(repoRoot, "pkg2");
+  mkdirSync(sub2);
+  const { $: $2, toasts: t2 } = engine(sub2);
+  await fire("session.start", undefined, $2);
+  assert.deepEqual(t2, []);
+  // a worktree (".git" is a file) is its own root even inside a repo that has a config
+  const wt = path.join(repoRoot, "wt");
+  mkdirSync(path.join(wt, "src"), { recursive: true });
+  writeFileSync(path.join(wt, ".git"), "gitdir: elsewhere\n");
+  const { $: $3, toasts: t3 } = engine(path.join(wt, "src"));
+  await fire("session.start", undefined, $3);
+  assert.equal(t3.length, 1);
+});
+
 test("the same dir within 15 s is toasted once even when several hooks fire", async () => {
   const { $, toasts } = engine(dir);
   await fire("tool.call", "EnterWorktree", $);

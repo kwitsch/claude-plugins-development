@@ -80,8 +80,8 @@ function parentOf(dir: string): string {
 }
 
 /**
- * Show the missing-config toast unless `dir` or an ancestor (as for the format gate) holds one of
- * {@link CONFIG_NAMES}. At most one toast per directory per {@link TOAST_MS}.
+ * Show the missing-config toast unless `dir` or an ancestor up to the git repository or worktree root (as for the
+ * format gate) holds one of {@link CONFIG_NAMES}. At most one toast per directory per {@link TOAST_MS}.
  *
  * @param $ - Engine interface.
  * @param dir - Absolute directory to check; empty means unknown (no toast).
@@ -93,13 +93,14 @@ async function warnIfNoConfig($: Engine, dir: string): Promise<void> {
   for (let d = dir; d; d = parentOf(d)) {
     const base = d.endsWith(sep) ? d : d + sep;
     for (const n of CONFIG_NAMES) if (await $.fs.exists(base + n)) return;
+    if (await $.fs.exists(base + ".git")) break; // repository or worktree root: never search above it
   }
   const now = Date.now();
   const last = shown.get(dir);
   if (last !== undefined && now - last < TOAST_MS) return;
   shown.set(dir, now);
   $.ui.toast(
-    `dprint: no dprint config in ${dir} or above, formatting is off (${CONFIG_NAMES.join(", ")})`,
+    `dprint: no dprint config in ${dir} or up to its git root, formatting is off (${CONFIG_NAMES.join(", ")})`,
     { timeoutMs: TOAST_MS },
   );
 }

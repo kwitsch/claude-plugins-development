@@ -24,7 +24,7 @@ Hook: `plugin/hooks/hooks.json` (hand-written) wires PreToolUse `Write|Edit` as 
   respawn after a crash, `applyTextEdits`). Needs dprint >= 0.50 (`findDprint` from
   `skills/init-dprint/find-dprint.mjs`: `PATH`, then `~/.dprint/bin`).
 - `format.mjs`: `formatPre` (config gate first: `{}` and no `dprint lsp` spawn unless `findConfig` finds a config in the
-  effective cwd or an ancestor; Write: `formatting`; Edit: `rangeFormatting` over the edited lines, whole-file
+  effective cwd or an ancestor (never above the nearest dir holding `.git`: repo root or worktree root); Write: `formatting`; Edit: `rangeFormatting` over the edited lines, whole-file
   `formatting` on a JSON-RPC error), `lineDiff` and `trimToEdit` (keep only hunks touching the edit, widen
   `old_string` until it is unique; accepted only if the trimmed file formats like the intended edit, two extra
   whole-document `formatting` calls; CRLF files are trimmed on their LF view), one `DprintLsp` per cwd, per session/agent cwd overrides, and universal-format's
@@ -33,7 +33,7 @@ Hook: `plugin/hooks/hooks.json` (hand-written) wires PreToolUse `Write|Edit` as 
 Toast: `plugin/hooks/hooks.json` also lists `"modules": ["./notice.mjs"]` (Claude Code function hooks, early-access
 API). `notice.mjs` hooks `session.start`, `classic.CwdChanged` and `tool.call` for `EnterWorktree`/`ExitWorktree`,
 lets the event run, then checks the resulting cwd (`new_cwd` for CwdChanged, the tool result's `worktreePath`/`restoredCwd` for the
-worktree tools, else `$.session.cwd()`) and its ancestors for the `CONFIG_NAMES` (an inlined copy: the module has no
+worktree tools, else `$.session.cwd()`) and its ancestors (up to the dir holding `.git`) for the `CONFIG_NAMES` (an inlined copy: the module has no
 imports; a test checks it against `config-names.mts`) with `$.fs.exists` detached (errors swallowed), at most one toast
 per directory per 15 s, and calls `$.ui.toast(text, { timeoutMs: 15000 })` when none exists. `scripts/hooks.mjs` validates only the
 `hooks` map; `claude plugin validate plugin` checks the module and warns "gating hook without .catch" for three of

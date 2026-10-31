@@ -53,7 +53,7 @@ Diagnostics and the `extends` warning go to stderr.
 | ---- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | 0    | ok: every detected file type with a known plugin is covered                                                                                            |
 | 10   | missing: uncovered types listed                                                                                                                        |
-| 11   | noconfig: no config file in the cwd or an ancestor                                                                                                     |
+| 11   | noconfig: no config file in the cwd or an ancestor up to the git root                                                                                  |
 | 2    | error: usage, config unreadable or invalid JSONC, `plugins` not an array, `git ls-files` failed, or `dprint-plugins.json` unreadable (stderr explains) |
 
 ## Limitations
