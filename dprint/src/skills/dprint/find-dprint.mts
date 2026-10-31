@@ -1,5 +1,6 @@
 /**
- * Shared dprint lookup used by `check-dprint.mts` and the MCP server's lsp client (`mcp/lsp.mts`).
+ * Shared dprint binary lookup used by `check-dprint.mts`, `run-dprint.mts` and the MCP server's lsp client
+ * (`mcp/lsp.mts`). The project config lookup is `find-config.mts`.
  *
  * @packageDocumentation
  */

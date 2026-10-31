@@ -10,6 +10,7 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
+import { findConfig } from "../skills/dprint/find-config.mjs";
 import type { CwdChangedInput, FormatPreInput, WorktreeEnteredInput, WorktreeExitedInput } from "./hook-inputs.mjs";
 import { DprintLsp, type LspRange } from "./lsp.mjs";
 
@@ -354,7 +355,8 @@ function done(updatedInput: Record<string, unknown>, fp: string): HookResult {
  * Write: whole-file `formatting` of `content`. Edit: apply the edit in memory, `rangeFormatting` over the
  * edited lines, then {@link trimToEdit} keeps the result a minimal `old_string`/`new_string` pair, accepted
  * only when the trimmed result formats (whole document) exactly like the intended edit. Files outside the
- * working directory and {@link isExcludedPath} paths are skipped. Edits on CRLF files are trimmed on the
+ * working directory and {@link isExcludedPath} paths are skipped. Nothing is formatted (and no `dprint lsp`
+ * spawned) unless the effective cwd or an ancestor holds one of `CONFIG_NAMES` (`findConfig`, never above the git repository or worktree root). Edits on CRLF files are trimmed on the
  * LF-normalized text Claude Code's Edit matches against.
  *
  * @param args - Hook input: `cwd`, `session_id`, `agent_id`, `tool_name` and `tool_input`.
@@ -384,6 +386,8 @@ export async function formatPre(
     ) {
       return {};
     }
+    // formatting is opt-in: only when the effective cwd, or an ancestor up to the git repo/worktree root, holds a dprint config
+    if (findConfig(root) === null) return {};
     const uri = pathToFileURL(fp).href;
 
     if (args.tool_name === "Write") {

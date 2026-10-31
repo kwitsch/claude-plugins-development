@@ -1,4 +1,4 @@
-// Contract tests for the built plugin/skills/init-dprint/scan-plugins.mjs and a shape test for the
+// Contract tests for the built plugin/skills/dprint/scan-plugins.mjs and a shape test for the
 // shipped dprint-plugins.json. Isolated PATH (only node + git), HOME and git repo per test.
 import { test, beforeEach } from "node:test";
 import assert from "node:assert/strict";
@@ -16,7 +16,7 @@ import { fileURLToPath } from "node:url";
 
 const DIR = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
-  "../plugin/skills/init-dprint",
+  "../plugin/skills/dprint",
 );
 const SCRIPT = path.join(DIR, "scan-plugins.mjs");
 const REF = JSON.parse(
@@ -92,12 +92,33 @@ test("no config file -> exit 11, status=noconfig", () => {
   assert.deepEqual(r.lines, ["status=noconfig config=- missing=-"]);
 });
 
+test("config only in an ancestor of the cwd -> found, header carries only its name, stderr its path", () => {
+  write("dprint.json", config(JSON_URL));
+  const sub = path.join(repo, "sub");
+  mkdirSync(sub);
+  const r = spawnSync(path.join(bin, "node"), [SCRIPT], {
+    cwd: sub,
+    env: { PATH: bin, HOME: home },
+    encoding: "utf8",
+  });
+  assert.match(r.stdout, /config=dprint\.json /);
+  assert.match(r.stderr, /config found above the cwd: .*dprint\.json/);
+});
+
 test("all detected types covered (URL with checksum suffix) -> exit 0", () => {
   write("a.ts");
   write("dprint.json", config(`${TS_URL}@abc`, JSON_URL));
   const r = run();
   assert.equal(r.code, 0);
   assert.deepEqual(r.lines, ["status=ok config=dprint.json missing=0"]);
+});
+
+test("only .config/dprint.json -> it is the config, exit 0", () => {
+  write("a.ts");
+  write(".config/dprint.json", config(TS_URL, JSON_URL));
+  const r = run();
+  assert.equal(r.code, 0);
+  assert.deepEqual(r.lines, ["status=ok config=.config/dprint.json missing=0"]);
 });
 
 test("uncovered types -> exit 10, sorted by file count, candidates from the reference", () => {

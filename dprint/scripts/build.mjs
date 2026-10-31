@@ -52,10 +52,14 @@ if (sources.length) {
   if (tsc.status !== 0) process.exit(tsc.status ?? 1);
   // shipped output is for node, not humans: minify (drops comments, keeps the shebang and export names)
   for (const f of walk(PLUGIN).filter((f) => /\.m?js$/.test(f))) {
+    // function-hooks modules (plugin/hooks/*.mjs) keep their names and shape: Claude Code's static check wants
+    // named hook functions, `$`/`on` spelled as such and no shadowed names, which compress/mangle would break
+    const hooksModule = path.relative(PLUGIN, f).startsWith("hooks" + path.sep);
     const { code } = await minify(readFileSync(f, "utf8"), {
       module: true,
       ecma: 2020,
-      compress: { passes: 2 },
+      compress: hooksModule ? false : { passes: 2 },
+      mangle: !hooksModule,
       format: { comments: false },
     });
     writeFileSync(f, code + "\n");
