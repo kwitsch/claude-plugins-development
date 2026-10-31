@@ -4,8 +4,8 @@
  * `dprint-plugins.json` can format but no plugin in the project's dprint config covers.
  *
  * @remarks
- * File types come from `git ls-files` in the working directory; the config is looked up in the working
- * directory only. Output and exit codes are documented in `scan-plugins.reference.md`. Read-only.
+ * File types come from `git ls-files` in the working directory; the config is found by `findConfig`
+ * (the working directory or the nearest ancestor up to the repository root). Output and exit codes are documented in `scan-plugins.reference.md`. Read-only.
  *
  * @packageDocumentation
  */
