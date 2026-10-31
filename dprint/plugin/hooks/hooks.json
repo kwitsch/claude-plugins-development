@@ -93,6 +93,11 @@
               "session_id": "${session_id}",
               "new_cwd": "${new_cwd}"
             }
+          },
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/mcp/watch-paths.mjs\"",
+            "timeout": 30
           }
         ]
       }
@@ -113,6 +118,17 @@
               "file_path": "${file_path}",
               "event": "${event}"
             }
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/mcp/watch-paths.mjs\"",
+            "timeout": 30
           }
         ]
       }

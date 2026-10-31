@@ -92,12 +92,22 @@ afterEach(() => {
   while (servers.length) servers.pop().kill();
 });
 
-/** (Re)write bin/dprint as a bash wrapper around the stub in the given mode. */
-function stubDprint(mode = "ok") {
+/**
+ * (Re)write bin/dprint as a bash wrapper around the stub in the given mode. `listCmd` is the file-list
+ * subcommand this dprint knows: it prints `$PWD/a.ts` and a path outside the cwd; any other `*file-paths`
+ * subcommand fails like dprint does for an unknown subcommand (exit 10).
+ */
+function stubDprint(mode = "ok", listCmd = "file-paths") {
   const f = path.join(bin, "dprint");
   writeFileSync(
     f,
-    `#!/usr/bin/env bash\nexec node "${path.join(tmp, "stub-lsp.mjs")}" ${mode}\n`,
+    [
+      "#!/usr/bin/env bash",
+      `if [ "$1" = "${listCmd}" ]; then printf '%s\\n' "$PWD/a.ts" /nonexistent-outside/b.ts; exit 0; fi`,
+      `case "$1" in *file-paths) echo "error: unrecognized subcommand '$1'" >&2; exit 10;; esac`,
+      `exec node "${path.join(tmp, "stub-lsp.mjs")}" ${mode}`,
+      "",
+    ].join("\n"),
   );
   chmodSync(f, 0o755);
 }
@@ -511,10 +521,17 @@ test(".mcp.json key matches every hooks.json server id and each hook tool is lis
     .flatMap((m) => m.hooks);
   assert.ok(entries.length > 0);
   for (const e of entries) {
+    if (e.type === "command") {
+      assert.match(e.command, /mcp\/watch-paths\.mjs/);
+      continue;
+    }
     assert.equal(e.type, "mcp_tool");
     assert.equal(e.server, `plugin:dprint:${keys[0]}`);
     assert.ok(tools.includes(e.tool), e.tool);
   }
+  assert.ok(existsSync(path.join(PLUGIN, "mcp/watch-paths.mjs")));
+  assert.equal(hooks.hooks.SessionStart[0].hooks[0].type, "command");
+  assert.equal(hooks.hooks.CwdChanged[0].hooks[1].type, "command");
 });
 
 test("format_pre formats only files whose real path is inside the cwd and outside the scratchpad", async () => {
@@ -668,4 +685,58 @@ test("file_changed leaves a file alone that is unchanged against the git index",
   writeFileSync(c, "y  \n");
   assert.deepEqual(await s.tool("file_changed", ev), {});
   assert.equal(readFileSync(c, "utf8"), "y\n");
+});
+
+const WATCH = path.join(PLUGIN, "mcp/watch-paths.mjs");
+/** Run watch-paths.mjs like Claude Code's command hook: event JSON on stdin, stub PATH. */
+const watch = (input) =>
+  spawnSync(process.execPath, [WATCH], {
+    env: { PATH: bin, HOME: home },
+    input: JSON.stringify(input),
+    encoding: "utf8",
+  });
+
+test("watch-paths.mjs prints the in-cwd dprint file paths as watchPaths on SessionStart and CwdChanged", () => {
+  stubDprint();
+  const start = watch({ hook_event_name: "SessionStart", cwd: repo });
+  assert.equal(start.status, 0, start.stderr);
+  assert.deepEqual(JSON.parse(start.stdout), {
+    hookSpecificOutput: {
+      hookEventName: "SessionStart",
+      watchPaths: [path.join(repo, "a.ts")],
+    },
+  });
+  const cd = watch({
+    hook_event_name: "CwdChanged",
+    cwd: path.join(tmp, "other"),
+    new_cwd: repo,
+  });
+  assert.equal(cd.status, 0, cd.stderr);
+  assert.deepEqual(JSON.parse(cd.stdout), {
+    hookSpecificOutput: {
+      hookEventName: "CwdChanged",
+      watchPaths: [path.join(repo, "a.ts")],
+    },
+  });
+});
+
+test("watch-paths.mjs prints nothing for a cwd without a dprint config", () => {
+  stubDprint();
+  const bare = path.join(tmp, "bare");
+  mkdirSync(bare);
+  const r = watch({ hook_event_name: "SessionStart", cwd: bare });
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.stdout, "");
+});
+
+test("watch-paths.mjs falls back to output-file-paths on dprint 0.50-0.54", () => {
+  stubDprint("ok", "output-file-paths");
+  const r = watch({ hook_event_name: "SessionStart", cwd: repo });
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(JSON.parse(r.stdout), {
+    hookSpecificOutput: {
+      hookEventName: "SessionStart",
+      watchPaths: [path.join(repo, "a.ts")],
+    },
+  });
 });
