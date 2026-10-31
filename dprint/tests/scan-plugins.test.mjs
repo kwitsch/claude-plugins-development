@@ -92,6 +92,18 @@ test("no config file -> exit 11, status=noconfig", () => {
   assert.deepEqual(r.lines, ["status=noconfig config=- missing=-"]);
 });
 
+test("config only in an ancestor of the cwd -> found, reported relative to the cwd", () => {
+  write("dprint.json", config(JSON_URL));
+  const sub = path.join(repo, "sub");
+  mkdirSync(sub);
+  const r = spawnSync(path.join(bin, "node"), [SCRIPT], {
+    cwd: sub,
+    env: { PATH: bin, HOME: home },
+    encoding: "utf8",
+  });
+  assert.match(r.stdout, /config=\.\.\/dprint\.json/);
+});
+
 test("all detected types covered (URL with checksum suffix) -> exit 0", () => {
   write("a.ts");
   write("dprint.json", config(`${TS_URL}@abc`, JSON_URL));

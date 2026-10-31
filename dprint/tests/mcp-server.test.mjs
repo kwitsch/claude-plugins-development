@@ -387,6 +387,19 @@ test("only .config/dprint.jsonc in the cwd -> the Write is formatted", async () 
   assert.equal(out.hookSpecificOutput.updatedInput.content, "x\n");
 });
 
+test("a dprint config only in an ancestor of the cwd -> the Write is formatted", async () => {
+  stubDprint();
+  const sub = path.join(repo, "packages", "foo");
+  mkdirSync(sub, { recursive: true });
+  const s = startServer();
+  const out = await s.call({
+    cwd: sub,
+    tool_name: "Write",
+    tool_input: { file_path: path.join(sub, "a.ts"), content: "x   \n" },
+  });
+  assert.equal(out.hookSpecificOutput.updatedInput.content, "x\n");
+});
+
 test("the config gate follows cwd_changed: config-less dir -> {}, back in the config dir -> formatted", async () => {
   stubDprint();
   const bare = path.join(tmp, "bare");

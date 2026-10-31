@@ -100,12 +100,47 @@ test("each of the six config names in the cwd -> no toast", async () => {
 });
 
 test("EnterWorktree and ExitWorktree check the session cwd after the tool ran", async () => {
-  for (const tool of ["EnterWorktree", "ExitWorktree"]) {
-    const { $, toasts } = engine(dir);
+  for (const [tool, d] of [["EnterWorktree", dir], ["ExitWorktree", other]]) {
+    const { $, toasts } = engine(d);
     await fire("tool.call", tool, $);
     assert.equal(toasts.length, 1, tool);
-    assert.ok(toasts[0].text.includes(dir), tool);
+    assert.ok(toasts[0].text.includes(d), tool);
   }
+});
+
+test("a config in an ancestor of the cwd -> no toast", async () => {
+  writeFileSync(path.join(dir, "dprint.json"), "{}");
+  const sub = path.join(dir, "packages", "foo");
+  mkdirSync(sub, { recursive: true });
+  const { $, toasts } = engine(sub);
+  await fire("session.start", undefined, $);
+  assert.deepEqual(toasts, []);
+});
+
+test("the same dir within 15 s is toasted once even when several hooks fire", async () => {
+  const { $, toasts } = engine(dir);
+  await fire("tool.call", "EnterWorktree", $);
+  await fire("classic.CwdChanged", undefined, $, { new_cwd: dir });
+  assert.equal(toasts.length, 1);
+});
+
+test("worktree tools check the directory their result names, not a stale session cwd", async () => {
+  writeFileSync(path.join(dir, "dprint.json"), "{}");
+  const { $, toasts } = engine(dir); // stale session cwd has a config, the worktree has none
+  await fire("tool.call", "EnterWorktree", $, { tool_response: { worktreePath: other } });
+  assert.equal(toasts.length, 1);
+  assert.ok(toasts[0].text.includes(other), toasts[0].text);
+  const { $: $2, toasts: t2 } = engine(other); // stale cwd has none, restoredCwd has a config
+  await fire("tool.call", "ExitWorktree", $2, { tool_response: { restoredCwd: dir } });
+  assert.deepEqual(t2, []);
+});
+
+test("the module's inlined config names equal the shared CONFIG_NAMES", () => {
+  const src = readFileSync(path.join(PLUGIN, "hooks/notice.mjs"), "utf8");
+  const m = /CONFIG_NAMES=(\[[^\]]*\])/.exec(src);
+  assert.ok(m, "inlined CONFIG_NAMES");
+  assert.deepEqual(JSON.parse(m[1]), [...CONFIG_NAMES]);
+  assert.doesNotMatch(src, /^import/m);
 });
 
 test("classic.CwdChanged checks e.new_cwd, not session.cwd()", async () => {

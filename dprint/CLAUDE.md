@@ -23,8 +23,8 @@ Hook: `plugin/hooks/hooks.json` (hand-written) wires PreToolUse `Write|Edit` as 
 - `lsp.mjs`: `dprint lsp` client (one lazily spawned child per cwd, Content-Length JSON-RPC, 30 s request timeout,
   respawn after a crash, `applyTextEdits`). Needs dprint >= 0.50 (`findDprint` from
   `skills/init-dprint/find-dprint.mjs`: `PATH`, then `~/.dprint/bin`).
-- `format.mjs`: `formatPre` (config gate first: `{}` and no `dprint lsp` spawn unless the effective cwd itself holds
-  one of `CONFIG_NAMES`, no ancestors; Write: `formatting`; Edit: `rangeFormatting` over the edited lines, whole-file
+- `format.mjs`: `formatPre` (config gate first: `{}` and no `dprint lsp` spawn unless `findConfig` finds a config in the
+  effective cwd or an ancestor; Write: `formatting`; Edit: `rangeFormatting` over the edited lines, whole-file
   `formatting` on a JSON-RPC error), `lineDiff` and `trimToEdit` (keep only hunks touching the edit, widen
   `old_string` until it is unique; accepted only if the trimmed file formats like the intended edit, two extra
   whole-document `formatting` calls; CRLF files are trimmed on their LF view), one `DprintLsp` per cwd, per session/agent cwd overrides, and universal-format's
@@ -32,14 +32,16 @@ Hook: `plugin/hooks/hooks.json` (hand-written) wires PreToolUse `Write|Edit` as 
 
 Toast: `plugin/hooks/hooks.json` also lists `"modules": ["./notice.mjs"]` (Claude Code function hooks, early-access
 API). `notice.mjs` hooks `session.start`, `classic.CwdChanged` and `tool.call` for `EnterWorktree`/`ExitWorktree`,
-lets the event run, then checks the new cwd for the `CONFIG_NAMES` with `$.fs.exists` detached (errors swallowed)
-and calls `$.ui.toast(text, { timeoutMs: 15000 })` when none exists. `scripts/hooks.mjs` validates only the
+lets the event run, then checks the resulting cwd (`new_cwd` for CwdChanged, the tool result's `worktreePath`/`restoredCwd` for the
+worktree tools, else `$.session.cwd()`) and its ancestors for the `CONFIG_NAMES` (an inlined copy: the module has no
+imports; a test checks it against `config-names.mts`) with `$.fs.exists` detached (errors swallowed), at most one toast
+per directory per 15 s, and calls `$.ui.toast(text, { timeoutMs: 15000 })` when none exists. `scripts/hooks.mjs` validates only the
 `hooks` map; `claude plugin validate plugin` checks the module and warns "gating hook without .catch" for three of
 its hooks (expected: the check is detached with `.catch`).
 
-`check-dprint.mjs`, `config-names.mjs`, `find-dprint.mjs`, `scan-plugins.mjs`, `plugin/mcp/*.mjs`, `plugin/hooks/notice.mjs`
+`check-dprint.mjs`, `config-names.mjs`, `find-config.mjs`, `find-dprint.mjs`, `scan-plugins.mjs`, `plugin/mcp/*.mjs`, `plugin/hooks/notice.mjs`
 and `plugin/.claude-plugin/plugin.json` are **build output** (`pnpm build`) of
-`src/skills/init-dprint/{check-dprint,config-names,find-dprint,scan-plugins}.mts`, `src/mcp/{server,lsp,format}.mts`,
+`src/skills/init-dprint/{check-dprint,config-names,find-config,find-dprint,scan-plugins}.mts`, `src/mcp/{server,lsp,format}.mts`,
 `src/hooks/notice.mts` and `plugin.json`. Do not edit them here.
 
 ## Sources vs. build output

@@ -11,8 +11,9 @@
  */
 
 import { execFileSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
-import { CONFIG_NAMES } from "./config-names.mjs";
+import { readFileSync } from "node:fs";
+import { relative } from "node:path";
+import { findConfig } from "./find-config.mjs";
 
 /** One plugin entry of `dprint-plugins.json`. */
 interface RefPlugin {
@@ -97,10 +98,11 @@ function scan(args: string[]): ScanResult {
     process.stderr.write("usage: node scan-plugins.mjs (takes no arguments)\n");
     return { code: 2, status: "error", config: "-", lines: [] };
   }
-  const config = CONFIG_NAMES.find((n) => existsSync(n));
-  if (config === undefined) {
+  const configPath = findConfig(process.cwd());
+  if (configPath === null) {
     return { code: 11, status: "noconfig", config: "-", lines: [] };
   }
+  const config = relative(process.cwd(), configPath);
 
   let entries: string[];
   try {
