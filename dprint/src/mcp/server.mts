@@ -10,17 +10,10 @@
  *
  * @packageDocumentation
  */
+import { readFileSync } from "node:fs";
 import process from "node:process";
 import readline from "node:readline";
-import { readFileSync } from "node:fs";
-import {
-  cwdChanged,
-  disposeLsp,
-  formatPre,
-  worktreeEntered,
-  worktreeExited,
-  type HookResult,
-} from "./format.mjs";
+import { cwdChanged, disposeLsp, formatPre, type HookResult, worktreeEntered, worktreeExited } from "./format.mjs";
 import type { HookInputs } from "./hook-inputs.mjs";
 
 /** Server name reported on `initialize`; keep aligned with the `.mcp.json` key. */
@@ -81,8 +74,7 @@ type RpcRequest = {
  * @param e - Anything thrown.
  * @returns `e.message` for an `Error`, else `String(e)`.
  */
-const errMsg = (e: unknown): string =>
-  e instanceof Error ? e.message : String(e);
+const errMsg = (e: unknown): string => e instanceof Error ? e.message : String(e);
 
 /**
  * Serve MCP over stdio until stdin closes, then dispose every `dprint lsp` child and exit.
@@ -90,32 +82,25 @@ const errMsg = (e: unknown): string =>
 function startServer(): void {
   const TOOLS: Tools = {
     format_pre: {
-      description:
-        "PreToolUse Write|Edit: format the write/edit with the project's dprint config via `dprint lsp` before it lands (updatedInput; Edit stays a minimal range-bounded diff).",
+      description: "PreToolUse Write|Edit: format the write/edit with the project's dprint config via `dprint lsp` before it lands (updatedInput; Edit stays a minimal range-bounded diff).",
       handler: formatPre,
     },
     cwd_changed: {
-      description:
-        "CwdChanged: use the new working directory for this session/agent's later format_pre calls.",
+      description: "CwdChanged: use the new working directory for this session/agent's later format_pre calls.",
       handler: cwdChanged,
     },
     worktree_entered: {
-      description:
-        "PostToolUse EnterWorktree: CwdChanged does not fire for it, so capture the worktree path here for later format_pre calls.",
+      description: "PostToolUse EnterWorktree: CwdChanged does not fire for it, so capture the worktree path here for later format_pre calls.",
       handler: worktreeEntered,
     },
     worktree_exited: {
-      description:
-        "PostToolUse ExitWorktree: switch later format_pre calls back to the cwd from before EnterWorktree.",
+      description: "PostToolUse ExitWorktree: switch later format_pre calls back to the cwd from before EnterWorktree.",
       handler: worktreeExited,
     },
   };
-  const send = (msg: unknown) =>
-    process.stdout.write(JSON.stringify(msg) + "\n");
-  const ok = (id: unknown, result: unknown) =>
-    send({ jsonrpc: "2.0", id, result });
-  const fail = (id: unknown, code: number, message: string) =>
-    send({ jsonrpc: "2.0", id, error: { code, message } });
+  const send = (msg: unknown) => process.stdout.write(JSON.stringify(msg) + "\n");
+  const ok = (id: unknown, result: unknown) => send({ jsonrpc: "2.0", id, result });
+  const fail = (id: unknown, code: number, message: string) => send({ jsonrpc: "2.0", id, error: { code, message } });
 
   const handle = async (msg: RpcRequest) => {
     const { id, method, params } = msg;
@@ -141,11 +126,13 @@ function startServer(): void {
         });
       case "tools/call": {
         const name = params?.name;
-        if (typeof name !== "string" || !Object.hasOwn(TOOLS, name))
+        if (typeof name !== "string" || !Object.hasOwn(TOOLS, name)) {
           return fail(id, -32602, `unknown tool: ${String(name)}`);
+        }
         const args = params?.arguments ?? {};
-        if (typeof args !== "object" || args === null || Array.isArray(args))
+        if (typeof args !== "object" || args === null || Array.isArray(args)) {
           return fail(id, -32602, "arguments must be an object");
+        }
         // trust boundary: the object's shape is the hooks.json template that typed this tool's input
         const handler = TOOLS[name as keyof Tools].handler;
         let result;
@@ -188,8 +175,9 @@ function startServer(): void {
         `[${SERVER_NAME}] handler crash: ${e instanceof Error ? e.stack : String(e)}\n`,
       );
       // a request (has an id) must always get a response, or the client hangs
-      if (req.id !== undefined)
+      if (req.id !== undefined) {
         fail(req.id, -32603, `internal error: ${errMsg(e)}`);
+      }
     });
   });
   rl.on("close", () => {

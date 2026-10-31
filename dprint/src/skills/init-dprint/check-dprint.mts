@@ -56,8 +56,9 @@ function check(args: string[]): CheckResult {
     return { code: 2, status: "error", version: "-", path: "-" };
   }
   const path = findDprint();
-  if (path === null)
+  if (path === null) {
     return { code: 10, status: "missing", version: "-", path: "-" };
+  }
 
   let out: string;
   try {

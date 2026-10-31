@@ -10,12 +10,7 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import type {
-  CwdChangedInput,
-  FormatPreInput,
-  WorktreeEnteredInput,
-  WorktreeExitedInput,
-} from "./hook-inputs.mjs";
+import type { CwdChangedInput, FormatPreInput, WorktreeEnteredInput, WorktreeExitedInput } from "./hook-inputs.mjs";
 import { DprintLsp, type LspRange } from "./lsp.mjs";
 
 /** Hook output: empty (`{}`) to let the tool call through unchanged, else the rewritten tool input. */
@@ -60,8 +55,9 @@ export function applyEdit(
   replaceAll: boolean,
 ): string | null {
   if (oldStr === "") return null;
-  if (replaceAll)
+  if (replaceAll) {
     return current.includes(oldStr) ? current.split(oldStr).join(newStr) : null;
+  }
   const idx = current.indexOf(oldStr);
   if (idx === -1) return null;
   if (current.indexOf(oldStr, idx + oldStr.length) !== -1) return null; // non-unique
@@ -86,12 +82,13 @@ export function lineDiff(a: string[], b: string[]): Hunk[] {
   while (pre < a.length && pre < b.length && a[pre] === b[pre]) pre++;
   let suf = 0;
   while (
-    suf < a.length - pre &&
-    suf < b.length - pre &&
-    a[a.length - 1 - suf] === b[b.length - 1 - suf]
-  )
+    suf < a.length - pre
+    && suf < b.length - pre
+    && a[a.length - 1 - suf] === b[b.length - 1 - suf]
+  ) {
     suf++;
-  if (pre > 0 || suf > 0)
+  }
+  if (pre > 0 || suf > 0) {
     return lineDiff(
       a.slice(pre, a.length - suf),
       b.slice(pre, b.length - suf),
@@ -101,6 +98,7 @@ export function lineDiff(a: string[], b: string[]): Hunk[] {
       bStart: h.bStart + pre,
       bEnd: h.bEnd + pre,
     }));
+  }
   if (a.length * b.length > 25_000_000) throw new Error("diff too large");
   const n = a.length;
   const m = b.length;
@@ -108,10 +106,9 @@ export function lineDiff(a: string[], b: string[]): Hunk[] {
   const L = Array.from({ length: n + 1 }, () => new Uint16Array(m + 1));
   for (let i = n - 1; i >= 0; i--) {
     for (let j = m - 1; j >= 0; j--) {
-      L[i][j] =
-        a[i] === b[j]
-          ? L[i + 1][j + 1] + 1
-          : Math.max(L[i + 1][j], L[i][j + 1]);
+      L[i][j] = a[i] === b[j]
+        ? L[i + 1][j + 1] + 1
+        : Math.max(L[i + 1][j], L[i][j + 1]);
     }
   }
   const hunks: Hunk[] = [];
@@ -157,13 +154,13 @@ export function trimToEdit(
   const split = (t: string) => t.match(/[^\n]*\n|[^\n]+/g) ?? [];
   const a = split(original);
   const b = split(formatted);
-  const render = (lines: string[], x: number, y: number) =>
-    lines.slice(x, y).join("");
+  const render = (lines: string[], x: number, y: number) => lines.slice(x, y).join("");
   const hunks = lineDiff(a, b);
   const kept: number[] = [];
   hunks.forEach((h, k) => {
-    if (editLines.some(([s, e]) => h.aStart <= e + 1 && h.aEnd >= s))
+    if (editLines.some(([s, e]) => h.aStart <= e + 1 && h.aEnd >= s)) {
       kept.push(k);
+    }
   });
   if (kept.length === 0) return null;
   const first = kept[0];
@@ -175,13 +172,13 @@ export function trimToEdit(
   // common (LCS-matched) context available on each side, bounded by the neighbouring non-kept hunks
   const lo = hunks[first - 1]?.aEnd ?? 0;
   const hi = hunks[last + 1]?.aStart ?? a.length;
-  for (let up = true; ; up = !up) {
+  for (let up = true;; up = !up) {
     const oldString = render(a, aA, aB);
     const i = original.indexOf(oldString);
     if (
-      oldString !== "" &&
-      i !== -1 &&
-      original.indexOf(oldString, i + 1) === -1
+      oldString !== ""
+      && i !== -1
+      && original.indexOf(oldString, i + 1) === -1
     ) {
       const newString = render(b, bA, bB);
       return oldString === newString ? null : { oldString, newString };
@@ -211,7 +208,7 @@ const clients = new Map<string, DprintLsp>();
  */
 const client = (cwd: string): DprintLsp => {
   let c = clients.get(cwd);
-  if (!c) clients.set(cwd, (c = new DprintLsp({ cwd })));
+  if (!c) clients.set(cwd, c = new DprintLsp({ cwd }));
   return c;
 };
 
@@ -255,8 +252,7 @@ function setCwd(
  * @param args - Hook input with `new_cwd`, `session_id` and `agent_id`.
  * @returns `{}`.
  */
-export const cwdChanged = (args: CwdChangedInput = {}): HookResult =>
-  setCwd(args, args.new_cwd);
+export const cwdChanged = (args: CwdChangedInput = {}): HookResult => setCwd(args, args.new_cwd);
 
 /**
  * PostToolUse EnterWorktree hook: CwdChanged does not fire for it, so take the worktree path from the tool
@@ -265,8 +261,7 @@ export const cwdChanged = (args: CwdChangedInput = {}): HookResult =>
  * @param args - Hook input with `tool_response.worktreePath`, `session_id` and `agent_id`.
  * @returns `{}`.
  */
-export const worktreeEntered = (args: WorktreeEnteredInput = {}): HookResult =>
-  setCwd(args, args.tool_response?.worktreePath);
+export const worktreeEntered = (args: WorktreeEnteredInput = {}): HookResult => setCwd(args, args.tool_response?.worktreePath);
 
 /**
  * PostToolUse ExitWorktree hook: switch to the cwd the session is restored to (`restoredCwd`; the cwd from
@@ -276,8 +271,7 @@ export const worktreeEntered = (args: WorktreeEnteredInput = {}): HookResult =>
  * @param args - Hook input with `tool_response.restoredCwd`, `session_id` and `agent_id`.
  * @returns `{}`.
  */
-export const worktreeExited = (args: WorktreeExitedInput = {}): HookResult =>
-  setCwd(args, args.tool_response?.restoredCwd);
+export const worktreeExited = (args: WorktreeExitedInput = {}): HookResult => setCwd(args, args.tool_response?.restoredCwd);
 
 /**
  * Kill every `dprint lsp` child (called when MCP stdin closes).
@@ -297,13 +291,13 @@ export function disposeLsp(): void {
 const isExcludedPath = (rel: string): boolean => {
   const segs = rel.split(path.sep);
   return (
-    segs.some((s) => s === "node_modules" || s === "vendor" || s === ".git") ||
-    segs.some(
+    segs.some((s) => s === "node_modules" || s === "vendor" || s === ".git")
+    || segs.some(
       (s, i) =>
-        s === ".claude" &&
-        (segs[i + 1] === "worktrees" || segs[i + 1] === "agent-memory"),
-    ) ||
-    segs[segs.length - 1].includes(".local.")
+        s === ".claude"
+        && (segs[i + 1] === "worktrees" || segs[i + 1] === "agent-memory"),
+    )
+    || segs[segs.length - 1].includes(".local.")
   );
 };
 
@@ -320,8 +314,9 @@ const lineOf = (text: string, idx: number): number => {
     let i = text.indexOf("\n");
     i !== -1 && i < idx;
     i = text.indexOf("\n", i + 1)
-  )
+  ) {
     n++;
+  }
   return n;
 };
 
@@ -333,8 +328,7 @@ const lineOf = (text: string, idx: number): number => {
  * @returns The formatted text, or `null` when dprint changed nothing or answered an empty file for non-empty
  * input (treated as a failure).
  */
-const changed = (F: string | null, input: string): string | null =>
-  F === null || F === input || (F === "" && input !== "") ? null : F;
+const changed = (F: string | null, input: string): string | null => F === null || F === input || (F === "" && input !== "") ? null : F;
 
 /**
  * Build the hook output that replaces the tool input.
@@ -383,12 +377,13 @@ export async function formatPre(
     const rel = path.relative(root, fp);
     // outside the lsp's root no dprint.json applies; excluded paths are never ours to format
     if (
-      rel === ".." ||
-      rel.startsWith(".." + path.sep) ||
-      path.isAbsolute(rel) ||
-      isExcludedPath(rel)
-    )
+      rel === ".."
+      || rel.startsWith(".." + path.sep)
+      || path.isAbsolute(rel)
+      || isExcludedPath(rel)
+    ) {
       return {};
+    }
     const uri = pathToFileURL(fp).href;
 
     if (args.tool_name === "Write") {
@@ -417,17 +412,17 @@ export async function formatPre(
         let i = O.indexOf(oldStr);
         i !== -1;
         i = replaceAll ? O.indexOf(oldStr, i + oldStr.length) : -1
-      )
+      ) {
         occ.push(i);
+      }
       const editLines = occ.map((i): [number, number] => [
         lineOf(O, i),
         lineOf(O, i + oldStr.length - 1),
       ]);
 
       // full lines of M from the first replacement to the last inserted char (insertion offset if new is empty)
-      const lastStart =
-        occ[occ.length - 1] +
-        (occ.length - 1) * (newStr.length - oldStr.length);
+      const lastStart = occ[occ.length - 1]
+        + (occ.length - 1) * (newStr.length - oldStr.length);
       const endLine = lineOf(
         M,
         newStr ? lastStart + newStr.length - 1 : lastStart,
@@ -435,10 +430,9 @@ export async function formatPre(
       const mLines = M.split("\n");
       const range: LspRange = {
         start: { line: lineOf(M, occ[0]), character: 0 },
-        end:
-          endLine + 1 < mLines.length
-            ? { line: endLine + 1, character: 0 }
-            : { line: endLine, character: mLines[endLine].length },
+        end: endLine + 1 < mLines.length
+          ? { line: endLine + 1, character: 0 }
+          : { line: endLine, character: mLines[endLine].length },
       };
 
       const lsp = client(root);
@@ -452,8 +446,9 @@ export async function formatPre(
       const R = O.replace(r.oldString, () => r.newString);
       if (
         ((await lsp.format(uri, M)) ?? M) !== ((await lsp.format(uri, R)) ?? R)
-      )
+      ) {
         return {};
+      }
       return done(
         {
           file_path: fp,

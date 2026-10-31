@@ -7,7 +7,7 @@
  *
  * @packageDocumentation
  */
-import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { type ChildProcessWithoutNullStreams, spawn } from "node:child_process";
 import { pathToFileURL } from "node:url";
 import { findDprint } from "../skills/init-dprint/find-dprint.mjs";
 
@@ -148,12 +148,12 @@ export class DprintLsp {
         });
       const edits = range
         ? await this.request<TextEdit[] | null>(
-            "textDocument/rangeFormatting",
-            { textDocument: { uri }, range, options: FORMAT_OPTIONS },
-          ).catch((e: unknown) => {
-            if (!(e instanceof RpcError)) throw e;
-            return whole(); // plugin without range support: one retry on the whole document
-          })
+          "textDocument/rangeFormatting",
+          { textDocument: { uri }, range, options: FORMAT_OPTIONS },
+        ).catch((e: unknown) => {
+          if (!(e instanceof RpcError)) throw e;
+          return whole(); // plugin without range support: one retry on the whole document
+        })
         : await whole();
       return edits && edits.length > 0 ? applyTextEdits(text, edits) : null;
     } finally {
@@ -183,9 +183,7 @@ export class DprintLsp {
       this.failPending(err);
     };
     child.on("error", (e) => dead(e));
-    child.on("exit", (code, signal) =>
-      dead(new Error(`dprint lsp exited (${code ?? signal})`)),
-    );
+    child.on("exit", (code, signal) => dead(new Error(`dprint lsp exited (${code ?? signal})`)));
     const ready = this.request("initialize", {
       processId: process.pid,
       rootUri: pathToFileURL(this.cwd).href,
@@ -259,7 +257,7 @@ export class DprintLsp {
     if (!p) return;
     this.pending.delete(msg.id);
     clearTimeout(p.timer);
-    if (msg.error)
+    if (msg.error) {
       p.reject(
         new RpcError(
           typeof msg.error.message === "string"
@@ -267,7 +265,7 @@ export class DprintLsp {
             : "JSON-RPC error",
         ),
       );
-    else p.resolve(msg.result);
+    } else p.resolve(msg.result);
   }
 
   /**
@@ -280,8 +278,9 @@ export class DprintLsp {
    * `Error` when the child is not running, dies or times out (a timeout also kills the child).
    */
   private request<T = unknown>(method: string, params: unknown): Promise<T> {
-    if (!this.child)
+    if (!this.child) {
       return Promise.reject(new Error("dprint lsp is not running"));
+    }
     const id = this.nextId++;
     return new Promise<T>((resolve, reject) => {
       const timer = setTimeout(() => {
@@ -337,12 +336,12 @@ export class DprintLsp {
  */
 export function applyTextEdits(text: string, edits: TextEdit[]): string {
   const starts = [0];
-  for (let i = text.indexOf("\n"); i !== -1; i = text.indexOf("\n", i + 1))
+  for (let i = text.indexOf("\n"); i !== -1; i = text.indexOf("\n", i + 1)) {
     starts.push(i + 1);
+  }
   const offset = (p: { line: number; character: number }) => {
     if (p.line >= starts.length) return text.length;
-    let lineEnd =
-      p.line + 1 < starts.length ? starts[p.line + 1] - 1 : text.length;
+    let lineEnd = p.line + 1 < starts.length ? starts[p.line + 1] - 1 : text.length;
     if (p.line + 1 < starts.length && text[lineEnd - 1] === "\r") lineEnd--; // CRLF: the line ends before the "\r"
     return Math.min(starts[p.line] + p.character, lineEnd); // LSP: past the line end means the line end
   };
