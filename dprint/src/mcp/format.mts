@@ -14,6 +14,7 @@ import type {
   CwdChangedInput,
   FormatPreInput,
   WorktreeEnteredInput,
+  WorktreeExitedInput,
 } from "./hook-inputs.mjs";
 import { DprintLsp, type LspRange } from "./lsp.mjs";
 
@@ -268,6 +269,16 @@ export const worktreeEntered = (args: WorktreeEnteredInput = {}): HookResult =>
   setCwd(args, args.tool_response?.worktreePath);
 
 /**
+ * PostToolUse ExitWorktree hook: return to the cwd from before EnterWorktree, else the stale worktree root
+ * would skip every file outside it.
+ *
+ * @param args - Hook input with `tool_response.originalCwd`, `session_id` and `agent_id`.
+ * @returns `{}`.
+ */
+export const worktreeExited = (args: WorktreeExitedInput = {}): HookResult =>
+  setCwd(args, args.tool_response?.originalCwd);
+
+/**
  * Kill every `dprint lsp` child (called when MCP stdin closes).
  */
 export function disposeLsp(): void {
@@ -346,8 +357,9 @@ function done(updatedInput: Record<string, unknown>, fp: string): HookResult {
  *
  * @remarks
  * Write: whole-file `formatting` of `content`. Edit: apply the edit in memory, `rangeFormatting` over the
- * edited lines, then {@link trimToEdit} keeps the result a minimal `old_string`/`new_string` pair. Files
- * outside the working directory and {@link isExcludedPath} paths are skipped.
+ * edited lines, then {@link trimToEdit} keeps the result a minimal `old_string`/`new_string` pair, accepted
+ * only when the trimmed result formats (whole document) exactly like the intended edit. Files outside the
+ * working directory, {@link isExcludedPath} paths and CRLF files (Edit only) are skipped.
  *
  * @param args - Hook input: `cwd`, `session_id`, `agent_id`, `tool_name` and `tool_input`.
  * @returns The rewritten tool input, or `{}` on every guard and error (fail open).
@@ -387,6 +399,8 @@ export async function formatPre(
 
     if (args.tool_name === "Edit") {
       const O = readFileSync(fp, "utf8"); // ENOENT -> catch -> {}
+      // Claude Code's Edit matches against LF-normalized content, so an old_string carrying "\r" would miss
+      if (O.includes("\r")) return {};
       const oldStr = ti.old_string ?? "";
       const newStr = ti.new_string ?? "";
       const replaceAll = ti.replace_all === "true"; // template-substituted, so always a string
@@ -423,11 +437,19 @@ export async function formatPre(
             : { line: endLine, character: mLines[endLine].length },
       };
 
-      const F = await client(root).format(uri, M, range);
+      const lsp = client(root);
+      const F = await lsp.format(uri, M, range);
       const out = changed(F, M);
       if (out === null) return {};
       const r = trimToEdit(O, out, editLines);
       if (!r) return {};
+      // the line diff may align part of the edit (or a moved line) into a dropped hunk; a faithful trim formats
+      // exactly like the intended edit, anything else would lose or duplicate content
+      const R = O.replace(r.oldString, () => r.newString);
+      if (
+        ((await lsp.format(uri, M)) ?? M) !== ((await lsp.format(uri, R)) ?? R)
+      )
+        return {};
       return done(
         {
           file_path: fp,

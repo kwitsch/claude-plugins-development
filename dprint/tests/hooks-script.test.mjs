@@ -1,6 +1,6 @@
 // Tests for scripts/hooks.mjs: hooks.json validation and the generated hook input types.
 // Each negative case runs the script against a scratch copy of the plugin with one defect.
-import { test } from "node:test";
+import { after, test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import {
@@ -8,6 +8,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  rmSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -24,8 +25,12 @@ const run = (...args) =>
   spawnSync(process.execPath, [SCRIPT, ...args], { encoding: "utf8" });
 
 /** Scratch plugin root with the real files; `mutate(hooks)` edits a copy of hooks.json first. */
+const dirs = [];
+after(() => dirs.forEach((d) => rmSync(d, { recursive: true, force: true })));
+
 function scratch(mutate = () => {}) {
   const dir = mkdtempSync(path.join(tmpdir(), "dprint-hooks-"));
+  dirs.push(dir);
   mkdirSync(path.join(dir, "plugin/hooks"), { recursive: true });
   mkdirSync(path.join(dir, "src/mcp"), { recursive: true });
   for (const f of [
@@ -61,6 +66,17 @@ test("a placeholder that is not a field of the event's input is rejected", () =>
   );
   assert.equal(r.status, 1);
   assert.match(r.stderr, /placeholder \$\{tool_input\.nope\}/);
+});
+
+test("an input key that is not a TS identifier is rejected", () => {
+  const r = run(
+    "--check",
+    scratch(
+      (h) => (h.hooks.CwdChanged[0].hooks[0].input["new-cwd"] = "${new_cwd}"),
+    ),
+  );
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /new-cwd: input key must be a valid identifier/);
 });
 
 test("a CwdChanged-only field on PreToolUse is rejected", () => {

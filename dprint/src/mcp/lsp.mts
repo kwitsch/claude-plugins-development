@@ -239,7 +239,7 @@ export class DprintLsp {
    */
   private broken(): void {
     this.buf = Buffer.alloc(0);
-    this.child?.kill();
+    this.dispose();
   }
 
   /**
@@ -287,7 +287,7 @@ export class DprintLsp {
       const timer = setTimeout(() => {
         this.pending.delete(id);
         reject(new Error(`dprint lsp: ${method} timed out`));
-        this.child?.kill(); // a hung child must not be reused; the next format() respawns
+        this.dispose(); // detach now, not on the async exit: the next queued format() must respawn
       }, REQUEST_TIMEOUT_MS);
       // the result is trusted to match T: dprint answers per the LSP spec for `method`
       this.pending.set(id, { resolve: (v) => resolve(v as T), reject, timer });

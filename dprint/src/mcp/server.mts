@@ -18,6 +18,7 @@ import {
   disposeLsp,
   formatPre,
   worktreeEntered,
+  worktreeExited,
   type HookResult,
 } from "./format.mjs";
 import type { HookInputs } from "./hook-inputs.mjs";
@@ -102,6 +103,11 @@ function startServer(): void {
       description:
         "PostToolUse EnterWorktree: CwdChanged does not fire for it, so capture the worktree path here for later format_pre calls.",
       handler: worktreeEntered,
+    },
+    worktree_exited: {
+      description:
+        "PostToolUse ExitWorktree: switch later format_pre calls back to the cwd from before EnterWorktree.",
+      handler: worktreeExited,
     },
   };
   const send = (msg: unknown) =>

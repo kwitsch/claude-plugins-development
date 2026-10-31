@@ -42,6 +42,22 @@
             }
           }
         ]
+      },
+      {
+        "matcher": "ExitWorktree",
+        "hooks": [
+          {
+            "type": "mcp_tool",
+            "server": "plugin:dprint:dprint-hooks",
+            "tool": "worktree_exited",
+            "timeout": 60,
+            "input": {
+              "agent_id": "${agent_id}",
+              "session_id": "${session_id}",
+              "tool_response": { "originalCwd": "${tool_response.originalCwd}" }
+            }
+          }
+        ]
       }
     ],
     "CwdChanged": [

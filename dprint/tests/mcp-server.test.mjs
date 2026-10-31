@@ -150,7 +150,7 @@ test("initialize reports dprint-hooks with the manifest version; tools/list has 
   const list = await s.rpc("tools/list", {});
   assert.deepEqual(
     list.result.tools.map((t) => t.name),
-    ["format_pre", "cwd_changed", "worktree_entered"],
+    ["format_pre", "cwd_changed", "worktree_entered", "worktree_exited"],
   );
 });
 
@@ -202,6 +202,15 @@ test("cwd_changed / worktree_entered re-root later format_pre calls for that ses
   });
   assert.equal(
     (await write(third)).hookSpecificOutput.updatedInput.content,
+    "x\n",
+  );
+  await s.rpc("tools/call", {
+    name: "worktree_exited",
+    arguments: { session_id: "s1", tool_response: { originalCwd: other } },
+  });
+  assert.deepEqual(await write(third), {}); // back outside the cwd
+  assert.equal(
+    (await write(other)).hookSpecificOutput.updatedInput.content,
     "x\n",
   );
 });
@@ -291,6 +300,24 @@ test("rangeFormatting JSON-RPC error -> formatted via whole-file fallback", asyn
     new_string: "l5 x\n",
     replace_all: false,
   });
+});
+
+test("Edit whose trim would drop the deleted repeated line -> {} (never loses the edit)", async () => {
+  stubDprint("range-error");
+  const s = startServer();
+  const file = path.join(repo, "g.ts");
+  writeFileSync(file, "a=1  \nx\nx\nx\nb=2  \n");
+  // the line diff aligns the deleted "x" next to "b=2", a hunk not touching the edit, so the trim drops it
+  const out = await s.call({
+    cwd: repo,
+    tool_name: "Edit",
+    tool_input: {
+      file_path: file,
+      old_string: "a=1  \nx\n",
+      new_string: "a=1  \n",
+    },
+  });
+  assert.deepEqual(out, {});
 });
 
 test("no dprint on PATH or in ~/.dprint/bin -> {}", async () => {

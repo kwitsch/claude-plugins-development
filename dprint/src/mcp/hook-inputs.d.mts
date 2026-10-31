@@ -45,6 +45,18 @@ export interface WorktreeEnteredInput {
   };
 }
 
+/** Arguments of MCP tool `worktree_exited` (PostToolUse `ExitWorktree` hook). */
+export interface WorktreeExitedInput {
+  /** Template: `${agent_id}`. */
+  agent_id?: string;
+  /** Template: `${session_id}`. */
+  session_id?: string;
+  tool_response?: {
+    /** Template: `${tool_response.originalCwd}`. */
+    originalCwd?: string;
+  };
+}
+
 /** Arguments of MCP tool `cwd_changed` (CwdChanged hook). */
 export interface CwdChangedInput {
   /** Template: `${agent_id}`. */
@@ -61,6 +73,8 @@ export interface HookInputs {
   format_pre: FormatPreInput;
   /** {@link WorktreeEnteredInput} */
   worktree_entered: WorktreeEnteredInput;
+  /** {@link WorktreeExitedInput} */
+  worktree_exited: WorktreeExitedInput;
   /** {@link CwdChangedInput} */
   cwd_changed: CwdChangedInput;
 }

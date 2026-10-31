@@ -257,6 +257,16 @@ test("formatPre guards fail open with {} before touching dprint", async () => {
     }),
     {},
   );
+  const crlf = path.join(dir, "crlf.ts");
+  writeFileSync(crlf, "const a = 1;\r\n");
+  assert.deepEqual(
+    await formatPre({
+      cwd: dir,
+      tool_name: "Edit",
+      tool_input: { file_path: crlf, old_string: "1", new_string: "2  " },
+    }),
+    {},
+  );
   assert.deepEqual(await formatPre(undefined), {});
 });
 

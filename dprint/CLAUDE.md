@@ -1,9 +1,10 @@
 # dprint
 
-Plugin with one model-invocable skill `init-dprint` (`plugin/skills/init-dprint/SKILL.md`) and one PreToolUse
-format hook.
+Plugin with one model-invocable skill `init-dprint` (`plugin/skills/init-dprint/SKILL.md`), one PreToolUse
+format hook and three cwd-tracking hooks (CwdChanged, PostToolUse EnterWorktree/ExitWorktree).
 
-Skill: two zero-dep scripts and one data file, all in `plugin/skills/init-dprint/`:
+Skill: two zero-dep scripts (plus the shared `find-dprint.mjs`) and one data file, all in
+`plugin/skills/init-dprint/`:
 
 - `check-dprint.mjs`: dprint detection and minimum-version check (contract: `check-dprint.reference.md`).
 - `scan-plugins.mjs`: read-only scan of the project's file types against its dprint config (contract:
@@ -15,14 +16,15 @@ Hook: `plugin/hooks/hooks.json` (hand-written) wires PreToolUse `Write|Edit` as 
 `format_pre` of the MCP server `dprint-hooks` (`plugin/.mcp.json`, hand-written, `command: node`). The server is
 `plugin/mcp/` (zero-dep):
 
-- `server.mjs`: MCP stdio loop (newline-delimited JSON-RPC), tools `format_pre`, `cwd_changed` (CwdChanged hook)
-  and `worktree_entered` (PostToolUse EnterWorktree hook).
-- `lsp.mjs`: `dprint lsp` client (one lazily spawned child, Content-Length JSON-RPC, 30 s request timeout,
+- `server.mjs`: MCP stdio loop (newline-delimited JSON-RPC), tools `format_pre`, `cwd_changed` (CwdChanged hook),
+  `worktree_entered` and `worktree_exited` (PostToolUse EnterWorktree/ExitWorktree hooks).
+- `lsp.mjs`: `dprint lsp` client (one lazily spawned child per cwd, Content-Length JSON-RPC, 30 s request timeout,
   respawn after a crash, `applyTextEdits`). Needs dprint >= 0.50 (`findDprint` from
   `skills/init-dprint/find-dprint.mjs`: `PATH`, then `~/.dprint/bin`).
 - `format.mjs`: `formatPre` (Write: `formatting`; Edit: `rangeFormatting` over the edited lines, whole-file
   `formatting` on a JSON-RPC error), `lineDiff` and `trimToEdit` (keep only hunks touching the edit, widen
-  `old_string` until it is unique), one `DprintLsp` per cwd, per session/agent cwd overrides, and universal-format's
+  `old_string` until it is unique; accepted only if the trimmed file formats like the intended edit, two extra
+  whole-document `formatting` calls; CRLF files fail open), one `DprintLsp` per cwd, per session/agent cwd overrides, and universal-format's
   path exclusions. Every failure returns `{}` (fail open), including a diff above the size guard.
 
 `check-dprint.mjs`, `find-dprint.mjs`, `scan-plugins.mjs`, `plugin/mcp/*.mjs` and `plugin/.claude-plugin/plugin.json` are **build

@@ -80,6 +80,8 @@ function typeOf(value, where, fields) {
 function members(input, where, fields, indent) {
   return Object.entries(input)
     .map(([k, v]) => {
+      if (!/^[A-Za-z_$][\w$]*$/.test(k))
+        fail(`${where}.${k}`, "input key must be a valid identifier");
       const t = typeOf(v, `${where}.${k}`, fields);
       const doc =
         typeof v === "string" ? `${indent}/** Template: \`${v}\`. */\n` : "";
@@ -122,7 +124,11 @@ for (const [event, groups] of Object.entries(hooks.hooks ?? {})) {
     continue;
   }
   groups.forEach((g, gi) => {
-    const names = typeof g.matcher === "string" ? g.matcher.split("|") : [];
+    // Claude Code accepts "|" and "," between tool names, with optional spaces
+    const names =
+      typeof g.matcher === "string"
+        ? g.matcher.split(/[|,]/).map((n) => n.trim())
+        : [];
     const known = names.length > 0 && names.every((n) => n in TOOL_INPUT);
     const groupFields = known
       ? [
@@ -205,14 +211,15 @@ ${map}
 }
 `;
 
+const stale = !existsSync(OUT) || readFileSync(OUT, "utf8") !== text;
 if (check) {
-  if (!existsSync(OUT) || readFileSync(OUT, "utf8") !== text) {
+  if (stale) {
     console.error(
       `hooks: ${path.relative(process.cwd(), OUT)} is stale; run \`node scripts/hooks.mjs\` (or pnpm build)`,
     );
     process.exit(1);
   }
-} else if (!existsSync(OUT) || readFileSync(OUT, "utf8") !== text) {
+} else if (stale) {
   writeFileSync(OUT, text);
   console.log(`hooks: wrote ${path.relative(process.cwd(), OUT)}`);
 }
