@@ -4,10 +4,10 @@
 
 ## Parameters
 
-| #   | Name         | Format                 | Required | Notes                                                                                                                                                             |
-| --- | ------------ | ---------------------- | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 1   | `check\|fmt` | `check` or `fmt`       | yes      | The dprint subcommand to run.                                                                                                                                     |
-| 2   | `scope`      | one non-empty argument | no       | Passed verbatim to dprint after `--`: a file, directory or glob, relative to the working directory. It narrows the config's includes/excludes, never widens them. |
+| #   | Name         | Format                 | Required | Notes                                                                                                                                                                                                                                                                                       |
+| --- | ------------ | ---------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | `check\|fmt` | `check` or `fmt`       | yes      | The dprint subcommand to run.                                                                                                                                                                                                                                                               |
+| 2   | `scope`      | one non-empty argument | no       | Passed verbatim to dprint after `--`: a file, directory or glob, relative to the working directory. dprint may treat an explicit path or glob as overriding the config's `includes` (the `excludes` still apply), so it can reach files the config leaves out; not verified by this plugin. |
 
 ## Environment
 

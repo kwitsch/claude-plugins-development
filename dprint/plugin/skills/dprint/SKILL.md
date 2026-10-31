@@ -14,8 +14,10 @@ Runs one of three actions, selected by the first argument:
 - `check [scope]`: runs `dprint check` (read-only).
 - `fmt [scope]`: runs `dprint fmt`, which rewrites files in place.
 
-Without any argument the skill runs `fmt` on the whole current working directory. `scope` narrows
+Without any argument the skill runs `fmt` on the whole current working directory. `scope` limits
 `check` / `fmt` to one file, directory or glob; without it dprint runs on the current directory.
+dprint may treat an explicit scope as overriding the config's `includes` (the `excludes` still
+apply), so `fmt` with a scope can rewrite files the config leaves out.
 `check` and `fmt` need dprint and a project dprint config (in the current directory or an
 ancestor); when either is missing they run nothing and tell the user to run `/dprint init`
 (`/dprint:dprint init`) first.
