@@ -414,6 +414,9 @@ export function inScope(
  */
 const written = new Map<string, string>();
 
+/** Strict UTF-8 decoder: throws on invalid bytes. */
+const utf8 = new TextDecoder("utf-8", { fatal: true });
+
 /** `execFile` returning a promise of `{ stdout, stderr }`. */
 const execFileAsync = promisify(execFile);
 
@@ -458,7 +461,8 @@ export async function fileChanged(
     const sc = scopeOf(args);
     const s = sc && inScope(sc, args.file_path ?? "");
     if (!sc || !s || findConfig(sc.root) === null) return {};
-    const text = readFileSync(s.fp, "utf8");
+    // fatal decoder: a non-UTF-8 file throws (fails open) instead of being rewritten with U+FFFD
+    const text = utf8.decode(readFileSync(s.fp));
     // shortcut: CR/CRLF files are skipped, a whole-file write would need formatPre's LF-view handling; add it when a CRLF project needs FileChanged formatting
     if (text.includes("\r")) return {};
     if (written.get(s.real) === text) return {};
@@ -480,7 +484,9 @@ export async function fileChanged(
     );
     if (out === null) return {};
     // a write that landed while dprint was formatting wins
-    if (readFileSync(s.fp, "utf8") !== text) return {};
+    if (utf8.decode(readFileSync(s.fp)) !== text) return {};
+    // an Edit/Write record that landed during the awaits wins (keeps trimToEdit's minimal diff)
+    if (written.get(s.real) === text) return {};
     writeFileSync(s.fp, out);
     written.set(s.real, out); // after the write: a failed write records nothing
     return {};
