@@ -9,6 +9,7 @@
  * @packageDocumentation
  */
 import { execFile } from "node:child_process";
+import { createHash } from "node:crypto";
 import { lstatSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -208,13 +209,34 @@ const clients = new Map<string, DprintLsp>();
  * Get the lsp client for a working directory, creating it on first use.
  *
  * @param cwd - Working directory (LSP root).
+ * @param key - Cache key; {@link fileChanged} passes its own so its whole-file formats never queue in front of
+ * a `format_pre` call.
  * @returns The cached or new client.
  */
-const client = (cwd: string): DprintLsp => {
-  let c = clients.get(cwd);
-  if (!c) clients.set(cwd, c = new DprintLsp({ cwd }));
+const client = (cwd: string, key = cwd): DprintLsp => {
+  let c = clients.get(key);
+  if (c) clients.delete(key); // re-insert below: Map order = least recently used first
+  else {
+    c = new DprintLsp({ cwd });
+    // evict the idle children of cwds the session left long ago
+    for (const [k, old] of clients) {
+      if (clients.size < MAX_CLIENTS) break;
+      old.dispose();
+      clients.delete(k);
+    }
+  }
+  clients.set(key, c);
   return c;
 };
+
+/** Most `dprint lsp` children kept alive; the least recently used one is disposed beyond it. */
+const MAX_CLIENTS = 8;
+
+/** FileChanged events formatted at once; later ones are dropped, so a burst cannot grow an unbounded backlog. */
+const MAX_PENDING_CHANGES = 50;
+
+/** FileChanged events currently inside {@link fileChanged}. */
+let pendingChanges = 0;
 
 /**
  * Working directory per session or subagent, set by `cwd_changed`/`worktree_entered`: EnterWorktree and
@@ -238,7 +260,8 @@ const overrideKey = (args: {
  * Record a cwd override for the payload's session or subagent.
  *
  * @param args - Hook input (supplies the key).
- * @param cwd - New working directory; ignored when empty.
+ * @param cwd - New working directory; empty (a tool response without the field) drops the override, so the
+ * payload's `cwd` applies again instead of a stale worktree root.
  * @returns `{}`: these hooks never change the tool call.
  */
 function setCwd(
@@ -246,7 +269,10 @@ function setCwd(
   cwd: string | undefined,
 ): HookResult {
   const key = overrideKey(args);
-  if (key && cwd) cwdOverrides.set(key, cwd);
+  if (key) {
+    if (cwd) cwdOverrides.set(key, cwd);
+    else cwdOverrides.delete(key);
+  }
   return {};
 }
 
@@ -414,6 +440,14 @@ export function inScope(
  */
 const written = new Map<string, string>();
 
+/**
+ * Digest of a file's text, what {@link written} stores instead of the text itself.
+ *
+ * @param text - File content.
+ * @returns Base64 SHA-256 of `text`.
+ */
+const digest = (text: string): string => createHash("sha256").update(text).digest("base64");
+
 /** Strict UTF-8 decoder: throws on invalid bytes. */
 const utf8 = new TextDecoder("utf-8", { fatal: true });
 
@@ -430,7 +464,10 @@ export function fileWritten(args: FileWrittenInput = {}): HookResult {
   try {
     const sc = scopeOf(args);
     const s = sc && inScope(sc, args.tool_input?.file_path ?? "");
-    if (s) written.set(s.real, readFileSync(s.fp, "utf8"));
+    // without a dprint config file_changed never formats here, so there is nothing to remember
+    if (sc && s && findConfig(sc.root) !== null) {
+      written.set(s.real, digest(readFileSync(s.fp, "utf8")));
+    }
   } catch (e) {
     process.stderr.write(
       `[dprint-hooks] file_written failed open: ${e instanceof Error ? e.message : String(e)}\n`,
@@ -443,10 +480,12 @@ export function fileWritten(args: FileWrittenInput = {}): HookResult {
  * FileChanged hook: format a watched file inside the cwd on disk after a change not made by Edit/Write.
  *
  * @remarks
- * Skips `unlink` events, files out of {@link inScope}, cwds without a dprint config, CR/CRLF files, content equal
- * to the {@link written} entry, and (user decision) files unchanged against the git index
- * (`git status --porcelain` empty, e.g. after checkout/pull/reset/stash); when git fails or is absent the file is
- * formatted.
+ * Skips `unlink` events, files out of {@link inScope}, cwds without a dprint config, files with a lone `\r`,
+ * content equal to the {@link written} digest, and (user decision) tracked files unchanged against the git index
+ * (`git status --porcelain --ignored` empty, e.g. after checkout/pull/reset/stash; gitignored files are
+ * formatted like Write/Edit would); when git fails or is absent the file is formatted. CRLF files are formatted
+ * on their LF view and written back with CRLF. At most {@link MAX_PENDING_CHANGES} events run at once (the rest
+ * are dropped) on a `dprint lsp` of their own.
  * The whole file is formatted via `textDocument/formatting` and written in place only when dprint changed it and
  * the file did not change meanwhile. Never returns `watchPaths`, so Claude Code keeps its watch list.
  *
@@ -456,6 +495,9 @@ export function fileWritten(args: FileWrittenInput = {}): HookResult {
 export async function fileChanged(
   args: FileChangedInput = {},
 ): Promise<HookResult> {
+  // a burst (codegen, formatter run) must not build an unbounded backlog: later events are dropped
+  if (pendingChanges >= MAX_PENDING_CHANGES) return {};
+  pendingChanges++;
   try {
     if (args.event === "unlink") return {};
     const sc = scopeOf(args);
@@ -463,38 +505,44 @@ export async function fileChanged(
     if (!sc || !s || findConfig(sc.root) === null) return {};
     // fatal decoder: a non-UTF-8 file throws (fails open) instead of being rewritten with U+FFFD
     const text = utf8.decode(readFileSync(s.fp));
-    // shortcut: CR/CRLF files are skipped, a whole-file write would need formatPre's LF-view handling; add it when a CRLF project needs FileChanged formatting
-    if (text.includes("\r")) return {};
-    if (written.get(s.real) === text) return {};
-    // user decision: a file equal to the git index (git restored it) is left alone; --no-optional-locks keeps
-    // .git/index.lock free for the user's git, cwd = dirname picks the nearest repository (nested repos, submodules)
+    if (written.get(s.real) === digest(text)) return {};
+    // CRLF files are formatted on their LF view (as formatPre's Edit does) and written back with CRLF; a lone "\r" fails open
+    const lf = text.replaceAll("\r\n", "\n");
+    if (lf.includes("\r")) return {};
+    // user decision: a tracked file equal to the git index (git restored it) is left alone; --ignored keeps
+    // gitignored files in (as for Write/Edit), --no-optional-locks keeps .git/index.lock free for the user's git,
+    // cwd = dirname picks the nearest repository (nested repos, submodules)
     try {
       const { stdout } = await execFileAsync(
         "git",
-        ["--no-optional-locks", "status", "--porcelain", "--", s.fp],
+        ["--no-optional-locks", "status", "--porcelain", "--ignored", "--", s.fp],
         { cwd: path.dirname(s.fp), encoding: "utf8", timeout: 10_000 },
       );
       if (stdout === "") return {};
     } catch {
       // no git, not a repository or timeout: format
     }
+    // own client: whole-file formats here never queue in front of a Write/Edit format_pre call
     const out = changed(
-      await client(sc.root).format(pathToFileURL(s.fp).href, text),
-      text,
+      await client(sc.root, sc.root + "\0file_changed").format(pathToFileURL(s.fp).href, lf),
+      lf,
     );
     if (out === null) return {};
+    const final = text === lf ? out : out.replaceAll("\n", "\r\n");
     // a write that landed while dprint was formatting wins
     if (utf8.decode(readFileSync(s.fp)) !== text) return {};
     // an Edit/Write record that landed during the awaits wins (keeps trimToEdit's minimal diff)
-    if (written.get(s.real) === text) return {};
-    writeFileSync(s.fp, out);
-    written.set(s.real, out); // after the write: a failed write records nothing
+    if (written.get(s.real) === digest(text)) return {};
+    writeFileSync(s.fp, final);
+    written.set(s.real, digest(final)); // after the write: a failed write records nothing
     return {};
   } catch (e) {
     process.stderr.write(
       `[dprint-hooks] file_changed failed open: ${e instanceof Error ? e.message : String(e)}\n`,
     );
     return {};
+  } finally {
+    pendingChanges--;
   }
 }
 

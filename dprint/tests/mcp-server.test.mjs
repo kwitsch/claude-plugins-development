@@ -241,6 +241,16 @@ test("cwd_changed / worktree_entered re-root later format_pre calls for that ses
     (await write(other)).hookSpecificOutput.updatedInput.content,
     "x\n",
   );
+  // an ExitWorktree response without restoredCwd drops the override: the payload cwd applies again
+  await s.rpc("tools/call", {
+    name: "worktree_exited",
+    arguments: { session_id: "s1", tool_response: { restoredCwd: "" } },
+  });
+  assert.deepEqual(await write(other), {});
+  assert.equal(
+    (await write(repo)).hookSpecificOutput.updatedInput.content,
+    "x\n",
+  );
 });
 
 test("Write with trailing spaces -> updatedInput.content stripped + notice", async () => {
@@ -602,7 +612,7 @@ test("format_pre without a cwd skips instead of using the server's own cwd", asy
   );
 });
 
-test("file_changed formats an in-cwd file on disk; unlink, outside and CRLF files are left alone", async () => {
+test("file_changed formats an in-cwd file on disk (CRLF files keep CRLF); unlink, outside and lone-CR files are left alone", async () => {
   stubDprint();
   const s = startServer();
   const changedEv = (file, event = "change") =>
@@ -625,9 +635,13 @@ test("file_changed formats an in-cwd file on disk; unlink, outside and CRLF file
   assert.deepEqual(await changedEv(outside), {});
   assert.equal(readFileSync(outside, "utf8"), "x  \n");
   const crlf = path.join(repo, "crlf.ts");
-  writeFileSync(crlf, "x  \r\n");
+  writeFileSync(crlf, "x  \r\ny  \r\n");
   assert.deepEqual(await changedEv(crlf), {});
-  assert.equal(readFileSync(crlf, "utf8"), "x  \r\n");
+  assert.equal(readFileSync(crlf, "utf8"), "x\r\ny\r\n");
+  const cr = path.join(repo, "cr.ts");
+  writeFileSync(cr, "x  \ry  \r");
+  assert.deepEqual(await changedEv(cr), {});
+  assert.equal(readFileSync(cr, "utf8"), "x  \ry  \r");
 });
 
 test("file_written records the Edit/Write result: file_changed leaves it alone, also on repeated events", async () => {
@@ -685,6 +699,12 @@ test("file_changed leaves a file alone that is unchanged against the git index",
   writeFileSync(c, "y  \n");
   assert.deepEqual(await s.tool("file_changed", ev), {});
   assert.equal(readFileSync(c, "utf8"), "y\n");
+  // a gitignored file prints nothing in plain `git status --porcelain`, but is formatted like Write/Edit would
+  writeFileSync(path.join(repo, ".gitignore"), "ignored.ts\n");
+  const ig = path.join(repo, "ignored.ts");
+  writeFileSync(ig, "z  \n");
+  assert.deepEqual(await s.tool("file_changed", { ...ev, file_path: ig }), {});
+  assert.equal(readFileSync(ig, "utf8"), "z\n");
 });
 
 const WATCH = path.join(PLUGIN, "mcp/watch-paths.mjs");
