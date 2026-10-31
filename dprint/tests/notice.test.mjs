@@ -150,6 +150,13 @@ test("the same dir within 15 s is toasted once even when several hooks fire", as
   assert.equal(toasts.length, 1);
 });
 
+test("a trailing separator does not bypass the dedupe", async () => {
+  const { $, toasts } = engine(dir);
+  await fire("classic.CwdChanged", undefined, $, { new_cwd: dir });
+  await fire("classic.CwdChanged", undefined, $, { new_cwd: dir + "/" });
+  assert.equal(toasts.length, 1);
+});
+
 test("worktree tools check the directory their result names, not a stale session cwd", async () => {
   writeFileSync(path.join(dir, "dprint.json"), "{}");
   const { $, toasts } = engine(dir); // stale session cwd has a config, the worktree has none

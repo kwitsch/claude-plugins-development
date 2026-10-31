@@ -26,6 +26,10 @@ The first stdout line is always:
 status=<ok|missing|noconfig|error> config=<config file name|-> missing=<count|->
 ```
 
+`config` is only the config's name relative to the directory holding it (for example `dprint.json` or
+`.config/dprint.jsonc`), never a path. A config found above the cwd (up to the git root) is reported on stderr
+(`scan-plugins: config found above the cwd: <path>`).
+
 When `status=missing`, it is followed by one line per uncovered file type, most files first (equal
 counts sorted by type):
 

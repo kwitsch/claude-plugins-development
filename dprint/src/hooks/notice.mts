@@ -28,7 +28,7 @@ const CONFIG_NAMES = [
 /** How long the missing-config toast stays, in ms: long enough to read, short enough not to nag; a UX default, safe to change. */
 const TOAST_MS = 15_000;
 
-/** When each directory last got a toast; one action can fire several of the hooks below. */
+/** When each directory (trailing separators stripped) last got a toast, pruned after {@link TOAST_MS}; one action can fire several of the hooks below. */
 const shown = new Map<string, number>();
 
 /** The part of the engine interface `$` this module uses. */
@@ -96,9 +96,10 @@ async function warnIfNoConfig($: Engine, dir: string): Promise<void> {
     if (await $.fs.exists(base + ".git")) break; // repository or worktree root: never search above it
   }
   const now = Date.now();
-  const last = shown.get(dir);
-  if (last !== undefined && now - last < TOAST_MS) return;
-  shown.set(dir, now);
+  for (const [k, t] of shown) if (now - t >= TOAST_MS) shown.delete(k); // expired entries never dedupe again
+  const key = dir.replace(/[\\/]+$/, "") || dir; // `/a/b` and `/a/b/` are one dir
+  if (shown.has(key)) return;
+  shown.set(key, now);
   $.ui.toast(
     `dprint: no dprint config in ${dir} or above (up to the git root), formatting is off (${CONFIG_NAMES.join(", ")})`,
     { timeoutMs: TOAST_MS },

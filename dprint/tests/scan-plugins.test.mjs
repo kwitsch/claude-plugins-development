@@ -92,7 +92,7 @@ test("no config file -> exit 11, status=noconfig", () => {
   assert.deepEqual(r.lines, ["status=noconfig config=- missing=-"]);
 });
 
-test("config only in an ancestor of the cwd -> found, reported relative to the cwd", () => {
+test("config only in an ancestor of the cwd -> found, header carries only its name, stderr its path", () => {
   write("dprint.json", config(JSON_URL));
   const sub = path.join(repo, "sub");
   mkdirSync(sub);
@@ -101,7 +101,8 @@ test("config only in an ancestor of the cwd -> found, reported relative to the c
     env: { PATH: bin, HOME: home },
     encoding: "utf8",
   });
-  assert.match(r.stdout, /config=\.\.\/dprint\.json/);
+  assert.match(r.stdout, /config=dprint\.json /);
+  assert.match(r.stderr, /config found above the cwd: .*dprint\.json/);
 });
 
 test("all detected types covered (URL with checksum suffix) -> exit 0", () => {
