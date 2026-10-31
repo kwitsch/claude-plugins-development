@@ -59,3 +59,19 @@ test("README documents the format_pre hook and its dprint lsp requirement", () =
   assert.ok(min);
   assert.ok(readme.includes(`dprint >= ${min}`));
 });
+
+test("README documents the config gate, the 15 s toast module and all six config names; line 3 mirrors plugin.json", async () => {
+  const readme = readFileSync(path.join(ROOT, "plugin/README.md"), "utf8");
+  const { CONFIG_NAMES } = await import(
+    "../plugin/skills/init-dprint/config-names.mjs"
+  );
+  assert.match(readme, /hooks\/notice\.mjs/);
+  assert.match(readme, /15 s toast/);
+  assert.match(readme, /only when the working directory has a dprint config/);
+  for (const n of CONFIG_NAMES) assert.ok(readme.includes(`\`${n}\``), n);
+  const manifest = JSON.parse(
+    readFileSync(path.join(ROOT, "plugin.json"), "utf8"),
+  );
+  assert.equal(readme.split("\n")[2], manifest.description);
+  assert.match(manifest.description, /shows a toast when it has none/);
+});
