@@ -44,6 +44,9 @@ const EVENT_FIELDS = {
     "duration_ms",
   ],
   CwdChanged: [...COMMON, "old_cwd", "new_cwd"],
+  // Claude Code 2.1.316: file_path is absolute, event is change|add|unlink
+  FileChanged: [...COMMON, "file_path", "event"],
+  SessionStart: [...COMMON, "source"],
 };
 // tool_input fields of the tools a matcher may name; matchers naming other tools allow any tool_input field
 const TOOL_INPUT = {
@@ -138,10 +141,21 @@ for (const [event, groups] of Object.entries(hooks.hooks ?? {})) {
       : fields;
     (Array.isArray(g.hooks) ? g.hooks : []).forEach((h, hi) => {
       const where = `${event}[${gi}].hooks[${hi}]`;
+      if (
+        h.timeout !== undefined &&
+        !(Number.isInteger(h.timeout) && h.timeout > 0)
+      )
+        fail(where, "timeout must be a positive integer (seconds)");
+      // command hooks get the raw event on stdin: no server, tool, input or placeholders, so no generated types
+      if (h.type === "command") {
+        if (typeof h.command !== "string" || !h.command)
+          fail(where, "command must be a non-empty string");
+        return;
+      }
       if (h.type !== "mcp_tool")
         return fail(
           where,
-          `type must be "mcp_tool" (got ${JSON.stringify(h.type)})`,
+          `type must be "mcp_tool" or "command" (got ${JSON.stringify(h.type)})`,
         );
       if (!servers.has(h.server))
         fail(
@@ -153,11 +167,6 @@ for (const [event, groups] of Object.entries(hooks.hooks ?? {})) {
           where,
           `tool must be a snake_case name (got ${JSON.stringify(h.tool)})`,
         );
-      if (
-        h.timeout !== undefined &&
-        !(Number.isInteger(h.timeout) && h.timeout > 0)
-      )
-        fail(where, "timeout must be a positive integer (seconds)");
       if (!h.input || typeof h.input !== "object" || Array.isArray(h.input))
         return fail(
           where,
