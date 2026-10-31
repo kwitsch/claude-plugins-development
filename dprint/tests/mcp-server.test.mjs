@@ -5,6 +5,7 @@ import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
 import {
   chmodSync,
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -81,6 +82,8 @@ beforeEach(() => {
     if (src) symlinkSync(src, path.join(bin, t));
   }
   writeFileSync(path.join(tmp, "stub-lsp.mjs"), STUB_LSP);
+  // format_pre only formats when the cwd holds a dprint config
+  writeFileSync(path.join(repo, "dprint.json"), "{}");
 });
 
 afterEach(() => {
@@ -179,7 +182,10 @@ test("cwd_changed / worktree_entered re-root later format_pre calls for that ses
   const s = startServer();
   const other = path.join(tmp, "other");
   const third = path.join(tmp, "third");
-  for (const d of [other, third]) mkdirSync(d);
+  for (const d of [other, third]) {
+    mkdirSync(d);
+    writeFileSync(path.join(d, "dprint.json"), "{}");
+  }
   const write = (dir) =>
     s.call({
       cwd: repo,
@@ -336,6 +342,75 @@ test("Edit whose trim would drop the deleted repeated line -> {} (never loses th
     },
   });
   assert.deepEqual(out, {});
+});
+
+test("cwd without any dprint config -> Write returns {} and no dprint lsp is spawned", async () => {
+  // a dprint that would format, but logs every spawn
+  const log = path.join(tmp, "spawned.log");
+  const f = path.join(bin, "dprint");
+  writeFileSync(
+    f,
+    `#!/usr/bin/env bash\necho spawned >> "${log}"\nexec node "${path.join(tmp, "stub-lsp.mjs")}" ok\n`,
+  );
+  chmodSync(f, 0o755);
+  const bare = path.join(tmp, "bare");
+  mkdirSync(bare);
+  const s = startServer();
+  const out = await s.call({
+    cwd: bare,
+    tool_name: "Write",
+    tool_input: { file_path: path.join(bare, "a.ts"), content: "x   \n" },
+  });
+  assert.deepEqual(out, {});
+  assert.equal(existsSync(log), false);
+  // same server, cwd with a config: the logging stub is spawned and formats
+  const ok = await s.call({
+    cwd: repo,
+    tool_name: "Write",
+    tool_input: { file_path: path.join(repo, "a.ts"), content: "x   \n" },
+  });
+  assert.equal(ok.hookSpecificOutput.updatedInput.content, "x\n");
+  assert.equal(existsSync(log), true);
+});
+
+test("only .config/dprint.jsonc in the cwd -> the Write is formatted", async () => {
+  stubDprint();
+  const dir = path.join(tmp, "dotconfig");
+  mkdirSync(path.join(dir, ".config"), { recursive: true });
+  writeFileSync(path.join(dir, ".config/dprint.jsonc"), "{}");
+  const s = startServer();
+  const out = await s.call({
+    cwd: dir,
+    tool_name: "Write",
+    tool_input: { file_path: path.join(dir, "a.ts"), content: "x   \n" },
+  });
+  assert.equal(out.hookSpecificOutput.updatedInput.content, "x\n");
+});
+
+test("the config gate follows cwd_changed: config-less dir -> {}, back in the config dir -> formatted", async () => {
+  stubDprint();
+  const bare = path.join(tmp, "bare");
+  mkdirSync(bare);
+  const s = startServer();
+  const write = (dir) =>
+    s.call({
+      cwd: repo,
+      session_id: "s1",
+      tool_name: "Write",
+      tool_input: { file_path: path.join(dir, "a.ts"), content: "x   \n" },
+    });
+  const cd = (dir) =>
+    s.rpc("tools/call", {
+      name: "cwd_changed",
+      arguments: { session_id: "s1", new_cwd: dir },
+    });
+  await cd(bare);
+  assert.deepEqual(await write(bare), {});
+  await cd(repo);
+  assert.equal(
+    (await write(repo)).hookSpecificOutput.updatedInput.content,
+    "x\n",
+  );
 });
 
 test("no dprint on PATH or in ~/.dprint/bin -> {}", async () => {
