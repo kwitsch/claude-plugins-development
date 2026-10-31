@@ -92,18 +92,30 @@ afterEach(() => {
   while (servers.length) servers.pop().kill();
 });
 
-/** (Re)write bin/dprint as a bash wrapper around the stub in the given mode. */
-function stubDprint(mode = "ok") {
+/**
+ * (Re)write bin/dprint as a bash wrapper around the stub in the given mode. `listCmd` is the file-list
+ * subcommand this dprint knows: it prints `$PWD/a.ts` and a path outside the cwd; any other `*file-paths`
+ * subcommand fails like dprint does for an unknown subcommand (exit 10).
+ */
+function stubDprint(mode = "ok", listCmd = "file-paths") {
   const f = path.join(bin, "dprint");
   writeFileSync(
     f,
-    `#!/usr/bin/env bash\nexec node "${path.join(tmp, "stub-lsp.mjs")}" ${mode}\n`,
+    [
+      "#!/usr/bin/env bash",
+      `if [ "$1" = "${listCmd}" ]; then printf '%s\\n' "$PWD/a.ts" /nonexistent-outside/b.ts; exit 0; fi`,
+      `case "$1" in *file-paths) echo "error: unrecognized subcommand '$1'" >&2; exit 10;; esac`,
+      `exec node "${path.join(tmp, "stub-lsp.mjs")}" ${mode}`,
+      "",
+    ].join("\n"),
   );
   chmodSync(f, 0o755);
 }
 
-function startServer() {
+/** Spawn the built server; `opts.cwd` sets its process cwd (default: the test's). */
+function startServer(opts = {}) {
   const child = spawn(path.join(bin, "node"), [SERVER], {
+    cwd: opts.cwd,
     env: { PATH: bin, HOME: home },
     stdio: ["pipe", "pipe", "pipe"],
   });
@@ -124,10 +136,11 @@ function startServer() {
         JSON.stringify({ jsonrpc: "2.0", id, method, params }) + "\n",
       );
     });
-  const call = async (args) =>
-    (await rpc("tools/call", { name: "format_pre", arguments: args })).result
+  const tool = async (name, args) =>
+    (await rpc("tools/call", { name, arguments: args })).result
       .structuredContent;
-  return { rpc, call };
+  const call = (args) => tool("format_pre", args);
+  return { rpc, call, tool };
 }
 
 const lines = (n) => Array.from({ length: n }, (_, i) => `l${i}`);
@@ -155,7 +168,14 @@ test("initialize reports dprint-hooks with the manifest version; tools/list has 
   const list = await s.rpc("tools/list", {});
   assert.deepEqual(
     list.result.tools.map((t) => t.name),
-    ["format_pre", "cwd_changed", "worktree_entered", "worktree_exited"],
+    [
+      "format_pre",
+      "cwd_changed",
+      "worktree_entered",
+      "worktree_exited",
+      "file_written",
+      "file_changed",
+    ],
   );
 });
 
@@ -219,6 +239,16 @@ test("cwd_changed / worktree_entered re-root later format_pre calls for that ses
   assert.deepEqual(await write(third), {}); // back outside the cwd
   assert.equal(
     (await write(other)).hookSpecificOutput.updatedInput.content,
+    "x\n",
+  );
+  // an ExitWorktree response without restoredCwd drops the override: the payload cwd applies again
+  await s.rpc("tools/call", {
+    name: "worktree_exited",
+    arguments: { session_id: "s1", tool_response: { restoredCwd: "" } },
+  });
+  assert.deepEqual(await write(other), {});
+  assert.equal(
+    (await write(repo)).hookSpecificOutput.updatedInput.content,
     "x\n",
   );
 });
@@ -501,8 +531,265 @@ test(".mcp.json key matches every hooks.json server id and each hook tool is lis
     .flatMap((m) => m.hooks);
   assert.ok(entries.length > 0);
   for (const e of entries) {
+    if (e.type === "command") {
+      assert.match(e.command, /mcp\/watch-paths\.mjs/);
+      continue;
+    }
     assert.equal(e.type, "mcp_tool");
     assert.equal(e.server, `plugin:dprint:${keys[0]}`);
     assert.ok(tools.includes(e.tool), e.tool);
   }
+  assert.ok(existsSync(path.join(PLUGIN, "mcp/watch-paths.mjs")));
+  assert.equal(hooks.hooks.SessionStart[0].hooks[0].type, "command");
+  assert.equal(hooks.hooks.CwdChanged[0].hooks[1].type, "command");
+});
+
+test("format_pre formats only files whose real path is inside the cwd and outside the scratchpad", async () => {
+  stubDprint();
+  const s = startServer();
+  const other = path.join(tmp, "other");
+  mkdirSync(other);
+  const write = (file, extra = {}) =>
+    s.call({
+      cwd: repo,
+      ...extra,
+      tool_name: "Write",
+      tool_input: { file_path: file, content: "x   \n" },
+    });
+  // positive control: a plain file in the cwd is formatted
+  assert.equal(
+    (await write(path.join(repo, "a.ts"))).hookSpecificOutput.updatedInput
+      .content,
+    "x\n",
+  );
+  // a file in another directory
+  assert.deepEqual(await write(path.join(other, "a.ts")), {});
+  // a symlink inside the cwd to a file elsewhere: Write and Edit
+  writeFileSync(path.join(other, "t.ts"), "l0\nl1\n");
+  symlinkSync(path.join(other, "t.ts"), path.join(repo, "link.ts"));
+  assert.deepEqual(await write(path.join(repo, "link.ts")), {});
+  assert.deepEqual(
+    await s.call({
+      cwd: repo,
+      tool_name: "Edit",
+      tool_input: {
+        file_path: path.join(repo, "link.ts"),
+        old_string: "l1",
+        new_string: "l1 x   ",
+      },
+    }),
+    {},
+  );
+  // a dangling symlink inside the cwd
+  symlinkSync(path.join(other, "missing.ts"), path.join(repo, "dl.ts"));
+  assert.deepEqual(await write(path.join(repo, "dl.ts")), {});
+  // the session scratchpad inside the cwd is skipped, the rest of the cwd is not
+  const scratch = path.join(repo, "scratch");
+  mkdirSync(scratch);
+  assert.deepEqual(
+    await write(path.join(scratch, "a.ts"), { scratchpad_dir: scratch }),
+    {},
+  );
+  assert.equal(
+    (await write(path.join(repo, "b.ts"), { scratchpad_dir: scratch }))
+      .hookSpecificOutput.updatedInput.content,
+    "x\n",
+  );
+});
+
+test("format_pre without a cwd skips instead of using the server's own cwd", async () => {
+  stubDprint();
+  const s = startServer({ cwd: repo });
+  const args = {
+    tool_name: "Write",
+    tool_input: { file_path: path.join(repo, "a.ts"), content: "x   \n" },
+  };
+  assert.deepEqual(await s.call(args), {});
+  assert.equal(
+    (await s.call({ ...args, cwd: repo })).hookSpecificOutput.updatedInput
+      .content,
+    "x\n",
+  );
+});
+
+test("file_changed formats an in-cwd file on disk (CRLF files keep CRLF); unlink, outside and lone-CR files are left alone", async () => {
+  stubDprint();
+  const s = startServer();
+  const changedEv = (file, event = "change") =>
+    s.tool("file_changed", { cwd: repo, file_path: file, event });
+  // git is not on the stub PATH: the git guard fails open and the file is formatted
+  const a = path.join(repo, "a.ts");
+  writeFileSync(a, "x  \n");
+  assert.deepEqual(await changedEv(a), {});
+  assert.equal(readFileSync(a, "utf8"), "x\n");
+  const added = path.join(repo, "added.ts");
+  writeFileSync(added, "z  \n");
+  assert.deepEqual(await changedEv(added, "add"), {});
+  assert.equal(readFileSync(added, "utf8"), "z\n");
+  const u = path.join(repo, "u.ts");
+  writeFileSync(u, "x  \n");
+  assert.deepEqual(await changedEv(u, "unlink"), {});
+  assert.equal(readFileSync(u, "utf8"), "x  \n");
+  const outside = path.join(tmp, "outside.ts");
+  writeFileSync(outside, "x  \n");
+  assert.deepEqual(await changedEv(outside), {});
+  assert.equal(readFileSync(outside, "utf8"), "x  \n");
+  const crlf = path.join(repo, "crlf.ts");
+  writeFileSync(crlf, "x  \r\ny  \r\n");
+  assert.deepEqual(await changedEv(crlf), {});
+  assert.equal(readFileSync(crlf, "utf8"), "x\r\ny\r\n");
+  const cr = path.join(repo, "cr.ts");
+  writeFileSync(cr, "x  \ry  \r");
+  assert.deepEqual(await changedEv(cr), {});
+  assert.equal(readFileSync(cr, "utf8"), "x  \ry  \r");
+});
+
+test("file_written records the Edit/Write result: file_changed leaves it alone, also on repeated events", async () => {
+  stubDprint();
+  const s = startServer();
+  const b = path.join(repo, "b.ts");
+  writeFileSync(b, "x  \n");
+  assert.deepEqual(
+    await s.tool("file_written", { cwd: repo, tool_input: { file_path: b } }),
+    {},
+  );
+  for (let i = 0; i < 2; i++) {
+    assert.deepEqual(
+      await s.tool("file_changed", { cwd: repo, file_path: b, event: "change" }),
+      {},
+    );
+  }
+  assert.equal(readFileSync(b, "utf8"), "x  \n");
+  // positive control: a later change by another tool is formatted
+  writeFileSync(b, "y  \n");
+  await s.tool("file_changed", { cwd: repo, file_path: b, event: "change" });
+  assert.equal(readFileSync(b, "utf8"), "y\n");
+});
+
+test("file_changed leaves a file alone that is unchanged against the git index", async (t) => {
+  const git = spawnSync("which", ["git"], { encoding: "utf8" }).stdout?.trim();
+  if (!git) return t.skip("git not on PATH");
+  symlinkSync(git, path.join(bin, "git"));
+  stubDprint();
+  const g = (...args) => {
+    const r = spawnSync(
+      git,
+      [
+        "-c",
+        "user.name=t",
+        "-c",
+        "user.email=t@t",
+        "-c",
+        "commit.gpgsign=false",
+        ...args,
+      ],
+      { cwd: repo, encoding: "utf8" },
+    );
+    assert.equal(r.status, 0, r.stderr);
+  };
+  const c = path.join(repo, "c.ts");
+  writeFileSync(c, "x  \n");
+  g("init", "-q");
+  g("add", "c.ts");
+  g("commit", "-qm", "c");
+  const s = startServer();
+  const ev = { cwd: repo, file_path: c, event: "change" };
+  assert.deepEqual(await s.tool("file_changed", ev), {});
+  assert.equal(readFileSync(c, "utf8"), "x  \n");
+  writeFileSync(c, "y  \n");
+  assert.deepEqual(await s.tool("file_changed", ev), {});
+  assert.equal(readFileSync(c, "utf8"), "y\n");
+  // gitignored files are never formatted: not by file_changed, not by Write, not by Edit
+  writeFileSync(path.join(repo, ".gitignore"), "ignored.ts\nignored-dir/\n");
+  const ig = path.join(repo, "ignored.ts");
+  writeFileSync(ig, "z  \n");
+  assert.deepEqual(await s.tool("file_changed", { ...ev, file_path: ig }), {});
+  assert.equal(readFileSync(ig, "utf8"), "z  \n");
+  assert.deepEqual(
+    await s.call({
+      cwd: repo,
+      tool_name: "Write",
+      tool_input: { file_path: ig, content: "z  \n" },
+    }),
+    {},
+  );
+  assert.deepEqual(
+    await s.call({
+      cwd: repo,
+      tool_name: "Write",
+      tool_input: { file_path: path.join(repo, "ignored-dir", "new", "n.ts"), content: "z  \n" },
+    }),
+    {},
+  );
+  assert.deepEqual(
+    await s.call({
+      cwd: repo,
+      tool_name: "Edit",
+      tool_input: { file_path: ig, old_string: "z", new_string: "w" },
+    }),
+    {},
+  );
+  // positive control: the same Write to a non-ignored file is formatted
+  assert.equal(
+    (await s.call({
+      cwd: repo,
+      tool_name: "Write",
+      tool_input: { file_path: path.join(repo, "n.ts"), content: "z  \n" },
+    })).hookSpecificOutput.updatedInput.content,
+    "z\n",
+  );
+});
+
+const WATCH = path.join(PLUGIN, "mcp/watch-paths.mjs");
+/** Run watch-paths.mjs like Claude Code's command hook: event JSON on stdin, stub PATH. */
+const watch = (input) =>
+  spawnSync(process.execPath, [WATCH], {
+    env: { PATH: bin, HOME: home },
+    input: JSON.stringify(input),
+    encoding: "utf8",
+  });
+
+test("watch-paths.mjs prints the in-cwd dprint file paths as watchPaths on SessionStart and CwdChanged", () => {
+  stubDprint();
+  const start = watch({ hook_event_name: "SessionStart", cwd: repo });
+  assert.equal(start.status, 0, start.stderr);
+  assert.deepEqual(JSON.parse(start.stdout), {
+    hookSpecificOutput: {
+      hookEventName: "SessionStart",
+      watchPaths: [path.join(repo, "a.ts")],
+    },
+  });
+  const cd = watch({
+    hook_event_name: "CwdChanged",
+    cwd: path.join(tmp, "other"),
+    new_cwd: repo,
+  });
+  assert.equal(cd.status, 0, cd.stderr);
+  assert.deepEqual(JSON.parse(cd.stdout), {
+    hookSpecificOutput: {
+      hookEventName: "CwdChanged",
+      watchPaths: [path.join(repo, "a.ts")],
+    },
+  });
+});
+
+test("watch-paths.mjs prints nothing for a cwd without a dprint config", () => {
+  stubDprint();
+  const bare = path.join(tmp, "bare");
+  mkdirSync(bare);
+  const r = watch({ hook_event_name: "SessionStart", cwd: bare });
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.stdout, "");
+});
+
+test("watch-paths.mjs falls back to output-file-paths on dprint 0.50-0.54", () => {
+  stubDprint("ok", "output-file-paths");
+  const r = watch({ hook_event_name: "SessionStart", cwd: repo });
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(JSON.parse(r.stdout), {
+    hookSpecificOutput: {
+      hookEventName: "SessionStart",
+      watchPaths: [path.join(repo, "a.ts")],
+    },
+  });
 });

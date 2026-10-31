@@ -1,5 +1,6 @@
 /**
- * The `format_pre`, `cwd_changed` and `worktree_entered` hook handlers plus the pure helpers behind them.
+ * The `format_pre`, `file_written`, `file_changed`, `cwd_changed`, `worktree_entered` and `worktree_exited` hook
+ * handlers plus the pure helpers behind them.
  *
  * @remarks
  * Helpers: {@link applyEdit} (Claude Code's Edit semantics, copied from universal-format), {@link lineDiff}
@@ -7,11 +8,14 @@
  *
  * @packageDocumentation
  */
-import { readFileSync } from "node:fs";
+import { execFile } from "node:child_process";
+import { createHash } from "node:crypto";
+import { existsSync, lstatSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
+import { promisify } from "node:util";
 import { findConfig } from "../skills/dprint/find-config.mjs";
-import type { CwdChangedInput, FormatPreInput, WorktreeEnteredInput, WorktreeExitedInput } from "./hook-inputs.mjs";
+import type { CwdChangedInput, FileChangedInput, FileWrittenInput, FormatPreInput, WorktreeEnteredInput, WorktreeExitedInput } from "./hook-inputs.mjs";
 import { DprintLsp, type LspRange } from "./lsp.mjs";
 
 /** Hook output: empty (`{}`) to let the tool call through unchanged, else the rewritten tool input. */
@@ -205,13 +209,34 @@ const clients = new Map<string, DprintLsp>();
  * Get the lsp client for a working directory, creating it on first use.
  *
  * @param cwd - Working directory (LSP root).
+ * @param key - Cache key; {@link fileChanged} passes its own so its whole-file formats never queue in front of
+ * a `format_pre` call.
  * @returns The cached or new client.
  */
-const client = (cwd: string): DprintLsp => {
-  let c = clients.get(cwd);
-  if (!c) clients.set(cwd, c = new DprintLsp({ cwd }));
+const client = (cwd: string, key = cwd): DprintLsp => {
+  let c = clients.get(key);
+  if (c) clients.delete(key); // re-insert below: Map order = least recently used first
+  else {
+    c = new DprintLsp({ cwd });
+    // evict the idle children of cwds the session left long ago
+    for (const [k, old] of clients) {
+      if (clients.size < MAX_CLIENTS) break;
+      old.dispose();
+      clients.delete(k);
+    }
+  }
+  clients.set(key, c);
   return c;
 };
+
+/** Most `dprint lsp` children kept alive; the least recently used one is disposed beyond it. */
+const MAX_CLIENTS = 8;
+
+/** FileChanged events formatted at once; later ones are dropped, so a burst cannot grow an unbounded backlog. */
+const MAX_PENDING_CHANGES = 50;
+
+/** FileChanged events currently inside {@link fileChanged}. */
+let pendingChanges = 0;
 
 /**
  * Working directory per session or subagent, set by `cwd_changed`/`worktree_entered`: EnterWorktree and
@@ -235,7 +260,8 @@ const overrideKey = (args: {
  * Record a cwd override for the payload's session or subagent.
  *
  * @param args - Hook input (supplies the key).
- * @param cwd - New working directory; ignored when empty.
+ * @param cwd - New working directory; empty (a tool response without the field) drops the override, so the
+ * payload's `cwd` applies again instead of a stale worktree root.
  * @returns `{}`: these hooks never change the tool call.
  */
 function setCwd(
@@ -243,7 +269,10 @@ function setCwd(
   cwd: string | undefined,
 ): HookResult {
   const key = overrideKey(args);
-  if (key && cwd) cwdOverrides.set(key, cwd);
+  if (key) {
+    if (cwd) cwdOverrides.set(key, cwd);
+    else cwdOverrides.delete(key);
+  }
   return {};
 }
 
@@ -303,6 +332,243 @@ const isExcludedPath = (rel: string): boolean => {
 };
 
 /**
+ * Real path of `p`, also for a path that does not exist yet (the new file of a Write).
+ *
+ * @remarks
+ * A missing path resolves through its nearest existing ancestor. A dangling symlink, or a link that cannot be
+ * resolved (`ELOOP`, `EACCES`), throws: falling back to the lexical path of a dangling link would let a Write
+ * follow it out of the cwd.
+ *
+ * @param p - Path to resolve.
+ * @returns The real path of `p`, or of its nearest existing ancestor joined with the missing rest.
+ */
+const realish = (p: string): string => {
+  try {
+    return realpathSync(p);
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw e;
+    try {
+      lstatSync(p);
+    } catch {
+      const dir = path.dirname(p);
+      return dir === p ? p : path.join(realish(dir), path.basename(p));
+    }
+    throw e; // p itself exists: a dangling symlink
+  }
+};
+
+/** Effective working directory of one hook call, resolved once for many {@link inScope} checks. */
+type Scope = {
+  /** Lexical effective cwd: the `dprint lsp` root and the `findConfig` start. */
+  root: string;
+  /** Real path of `root`. */
+  realRoot: string;
+  /** Real path of the session's `scratchpad_dir`, or `null` when the payload has none. */
+  realScratch: string | null;
+};
+
+/**
+ * Resolve the effective cwd of a hook payload.
+ *
+ * @remarks
+ * The cwd override of the session/subagent ({@link cwdOverrides}), else the payload's `cwd`; never the MCP
+ * server's own `process.cwd()`.
+ *
+ * @param args - Hook input: `cwd`, `agent_id`, `session_id`, `scratchpad_dir`.
+ * @returns The scope, or `null` when no cwd is known or a path cannot be resolved (callers skip).
+ */
+export function scopeOf(
+  args: {
+    cwd?: string;
+    agent_id?: string;
+    session_id?: string;
+    scratchpad_dir?: string;
+  } = {},
+): Scope | null {
+  const key = overrideKey(args);
+  const root = (key && cwdOverrides.get(key)) || args.cwd || "";
+  if (!root) return null;
+  try {
+    return {
+      root,
+      realRoot: realish(root),
+      realScratch: args.scratchpad_dir ? realish(args.scratchpad_dir) : null,
+    };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Decide whether a file belongs to the scope and may be formatted.
+ *
+ * @param sc - Scope from {@link scopeOf}.
+ * @param file - File path, absolute or relative to `sc.root`.
+ * @returns `fp` (the path as Claude used it, resolved against `sc.root`) and `real` (its real path) when the
+ * real path is strictly inside `sc.realRoot`, not an {@link isExcludedPath} path and not inside the scratchpad;
+ * else `null` (also for an empty path, the cwd itself, or a dangling/unresolvable link).
+ */
+export function inScope(
+  sc: Scope,
+  file: string,
+): { fp: string; real: string } | null {
+  if (!file) return null;
+  const fp = path.resolve(sc.root, file);
+  let real: string;
+  try {
+    real = realish(fp);
+  } catch {
+    return null;
+  }
+  const outside = (rel: string) => rel === ".." || rel.startsWith(".." + path.sep) || path.isAbsolute(rel);
+  const rel = path.relative(sc.realRoot, real);
+  if (rel === "" || outside(rel) || isExcludedPath(rel)) return null;
+  if (sc.realScratch !== null) {
+    const sp = path.relative(sc.realScratch, real);
+    if (sp === "" || !outside(sp)) return null;
+  }
+  return { fp, real };
+}
+
+/**
+ * Content last written per real path, by Edit/Write (recorded by {@link fileWritten}) or by {@link fileChanged}.
+ *
+ * @remarks
+ * FileChanged must not re-format Edit/Write results or its own writes, so {@link fileChanged} skips a file whose
+ * content equals the entry. Entries are kept on a match, so duplicate and add-then-change events are skipped too.
+ * shortcut: entries stay until the server exits; prune if memory ever matters.
+ */
+const written = new Map<string, string>();
+
+/**
+ * Digest of a file's text, what {@link written} stores instead of the text itself.
+ *
+ * @param text - File content.
+ * @returns Base64 SHA-256 of `text`.
+ */
+const digest = (text: string): string => createHash("sha256").update(text).digest("base64");
+
+/** Strict UTF-8 decoder: throws on invalid bytes. */
+const utf8 = new TextDecoder("utf-8", { fatal: true });
+
+/** `execFile` returning a promise of `{ stdout, stderr }`. */
+const execFileAsync = promisify(execFile);
+
+/**
+ * Whether git ignores a file (`git check-ignore`); tracked files never count as ignored.
+ *
+ * @remarks
+ * Runs in the nearest existing ancestor directory of the file, so a nested repository or submodule applies its own
+ * ignore rules and a Write to a new directory still resolves. No git, no repository or a timeout mean "not ignored".
+ *
+ * @param fp - Absolute file path.
+ * @returns `true` only when git reports the file as ignored (exit 0).
+ */
+async function isGitIgnored(fp: string): Promise<boolean> {
+  let cwd = path.dirname(fp);
+  while (!existsSync(cwd) && cwd !== path.dirname(cwd)) cwd = path.dirname(cwd);
+  try {
+    await execFileAsync("git", ["--no-optional-locks", "check-ignore", "-q", "--", fp], { cwd, timeout: 10_000 });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * PostToolUse `Write|Edit` hook: remember the content Edit/Write wrote, so {@link fileChanged} leaves it alone.
+ *
+ * @param args - Hook input: `cwd`, `agent_id`, `session_id`, `scratchpad_dir` and `tool_input.file_path`.
+ * @returns `{}` (fail open on every error).
+ */
+export function fileWritten(args: FileWrittenInput = {}): HookResult {
+  try {
+    const sc = scopeOf(args);
+    const s = sc && inScope(sc, args.tool_input?.file_path ?? "");
+    // without a dprint config file_changed never formats here, so there is nothing to remember
+    if (sc && s && findConfig(sc.root) !== null) {
+      written.set(s.real, digest(readFileSync(s.fp, "utf8")));
+    }
+  } catch (e) {
+    process.stderr.write(
+      `[dprint-hooks] file_written failed open: ${e instanceof Error ? e.message : String(e)}\n`,
+    );
+  }
+  return {};
+}
+
+/**
+ * FileChanged hook: format a watched file inside the cwd on disk after a change not made by Edit/Write.
+ *
+ * @remarks
+ * Skips `unlink` events, files out of {@link inScope}, cwds without a dprint config, files with a lone `\r`,
+ * content equal to the {@link written} digest, and (user decision) gitignored files and tracked files unchanged
+ * against the git index (`git status --porcelain` empty, e.g. after checkout/pull/reset/stash); when git fails or
+ * is absent the file is formatted. CRLF files are formatted
+ * on their LF view and written back with CRLF. At most {@link MAX_PENDING_CHANGES} events run at once (the rest
+ * are dropped) on a `dprint lsp` of their own.
+ * The whole file is formatted via `textDocument/formatting` and written in place only when dprint changed it and
+ * the file did not change meanwhile. Never returns `watchPaths`, so Claude Code keeps its watch list.
+ *
+ * @param args - Hook input: `cwd`, `agent_id`, `session_id`, `scratchpad_dir`, `file_path` and `event`.
+ * @returns `{}` (fail open on every error).
+ */
+export async function fileChanged(
+  args: FileChangedInput = {},
+): Promise<HookResult> {
+  // a burst (codegen, formatter run) must not build an unbounded backlog: later events are dropped
+  if (pendingChanges >= MAX_PENDING_CHANGES) return {};
+  pendingChanges++;
+  try {
+    if (args.event === "unlink") return {};
+    const sc = scopeOf(args);
+    const s = sc && inScope(sc, args.file_path ?? "");
+    if (!sc || !s || findConfig(sc.root) === null) return {};
+    // fatal decoder: a non-UTF-8 file throws (fails open) instead of being rewritten with U+FFFD
+    const text = utf8.decode(readFileSync(s.fp));
+    if (written.get(s.real) === digest(text)) return {};
+    // CRLF files are formatted on their LF view (as formatPre's Edit does) and written back with CRLF; a lone "\r" fails open
+    const lf = text.replaceAll("\r\n", "\n");
+    if (lf.includes("\r")) return {};
+    // user decision: gitignored files are never formatted
+    if (await isGitIgnored(s.fp)) return {};
+    // user decision: a tracked file equal to the git index (git restored it) is left alone; --no-optional-locks
+    // keeps .git/index.lock free for the user's git, cwd = dirname picks the nearest repository (nested repos, submodules)
+    try {
+      const { stdout } = await execFileAsync(
+        "git",
+        ["--no-optional-locks", "status", "--porcelain", "--", s.fp],
+        { cwd: path.dirname(s.fp), encoding: "utf8", timeout: 10_000 },
+      );
+      if (stdout === "") return {};
+    } catch {
+      // no git, not a repository or timeout: format
+    }
+    // own client: whole-file formats here never queue in front of a Write/Edit format_pre call
+    const out = changed(
+      await client(sc.root, sc.root + "\0file_changed").format(pathToFileURL(s.fp).href, lf),
+      lf,
+    );
+    if (out === null) return {};
+    const final = text === lf ? out : out.replaceAll("\n", "\r\n");
+    // a write that landed while dprint was formatting wins
+    if (utf8.decode(readFileSync(s.fp)) !== text) return {};
+    // an Edit/Write record that landed during the awaits wins (keeps trimToEdit's minimal diff)
+    if (written.get(s.real) === digest(text)) return {};
+    writeFileSync(s.fp, final);
+    written.set(s.real, digest(final)); // after the write: a failed write records nothing
+    return {};
+  } catch (e) {
+    process.stderr.write(
+      `[dprint-hooks] file_changed failed open: ${e instanceof Error ? e.message : String(e)}\n`,
+    );
+    return {};
+  } finally {
+    pendingChanges--;
+  }
+}
+
+/**
  * Zero-based line of a character offset, without copying the prefix.
  *
  * @param text - Document.
@@ -354,12 +620,15 @@ function done(updatedInput: Record<string, unknown>, fp: string): HookResult {
  * @remarks
  * Write: whole-file `formatting` of `content`. Edit: apply the edit in memory, `rangeFormatting` over the
  * edited lines, then {@link trimToEdit} keeps the result a minimal `old_string`/`new_string` pair, accepted
- * only when the trimmed result formats (whole document) exactly like the intended edit. Files outside the
- * working directory and {@link isExcludedPath} paths are skipped. Nothing is formatted (and no `dprint lsp`
+ * only when the trimmed result formats (whole document) exactly like the intended edit. Only files
+ * {@link inScope} of {@link scopeOf} are formatted: real path (symlinks resolved, dangling links rejected)
+ * inside the effective cwd, not an {@link isExcludedPath} path, not gitignored ({@link isGitIgnored}) and not
+ * inside the session scratchpad; without
+ * a known cwd nothing is formatted. Nothing is formatted (and no `dprint lsp`
  * spawned) unless the effective cwd or an ancestor holds one of `CONFIG_NAMES` (`findConfig`, never above the git repository or worktree root). Edits on CRLF files are trimmed on the
  * LF-normalized text Claude Code's Edit matches against.
  *
- * @param args - Hook input: `cwd`, `session_id`, `agent_id`, `tool_name` and `tool_input`.
+ * @param args - Hook input: `cwd`, `session_id`, `agent_id`, `scratchpad_dir`, `tool_name` and `tool_input`.
  * @returns The rewritten tool input, or `{}` on every guard and error (fail open).
  */
 export async function formatPre(
@@ -367,27 +636,16 @@ export async function formatPre(
 ): Promise<HookResult> {
   try {
     const ti = args.tool_input ?? {};
-    let fp = ti.file_path ?? "";
-    if (!fp) return {};
-    const key = overrideKey(args);
-    const cwd = (key && cwdOverrides.get(key)) || args.cwd || "";
-    if (!path.isAbsolute(fp)) {
-      if (!cwd) return {};
-      fp = path.resolve(cwd, fp);
-    }
-    const root = cwd || process.cwd();
-    const rel = path.relative(root, fp);
-    // outside the lsp's root no dprint.json applies; excluded paths are never ours to format
-    if (
-      rel === ".."
-      || rel.startsWith(".." + path.sep)
-      || path.isAbsolute(rel)
-      || isExcludedPath(rel)
-    ) {
-      return {};
-    }
+    // only files whose real path is inside the effective cwd and outside the scratchpad; no known cwd: skip
+    const sc = scopeOf(args);
+    const s = sc && inScope(sc, ti.file_path ?? "");
+    if (!sc || !s) return {};
+    const root = sc.root;
+    const fp = s.fp;
     // formatting is opt-in: only when the effective cwd, or an ancestor up to the git repo/worktree root, holds a dprint config
     if (findConfig(root) === null) return {};
+    // user decision: gitignored files are never formatted
+    if (await isGitIgnored(fp)) return {};
     const uri = pathToFileURL(fp).href;
 
     if (args.tool_name === "Write") {

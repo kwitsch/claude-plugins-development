@@ -17,6 +17,8 @@ export interface FormatPreInput {
   agent_id?: string;
   /** Template: `${session_id}`. */
   session_id?: string;
+  /** Template: `${scratchpad_dir}`. */
+  scratchpad_dir?: string;
   /** Template: `${tool_name}`. */
   tool_name?: string;
   tool_input?: {
@@ -57,6 +59,22 @@ export interface WorktreeExitedInput {
   };
 }
 
+/** Arguments of MCP tool `file_written` (PostToolUse `Write|Edit` hook). */
+export interface FileWrittenInput {
+  /** Template: `${cwd}`. */
+  cwd?: string;
+  /** Template: `${agent_id}`. */
+  agent_id?: string;
+  /** Template: `${session_id}`. */
+  session_id?: string;
+  /** Template: `${scratchpad_dir}`. */
+  scratchpad_dir?: string;
+  tool_input?: {
+    /** Template: `${tool_input.file_path}`. */
+    file_path?: string;
+  };
+}
+
 /** Arguments of MCP tool `cwd_changed` (CwdChanged hook). */
 export interface CwdChangedInput {
   /** Template: `${agent_id}`. */
@@ -67,6 +85,22 @@ export interface CwdChangedInput {
   new_cwd?: string;
 }
 
+/** Arguments of MCP tool `file_changed` (FileChanged hook). */
+export interface FileChangedInput {
+  /** Template: `${cwd}`. */
+  cwd?: string;
+  /** Template: `${agent_id}`. */
+  agent_id?: string;
+  /** Template: `${session_id}`. */
+  session_id?: string;
+  /** Template: `${scratchpad_dir}`. */
+  scratchpad_dir?: string;
+  /** Template: `${file_path}`. */
+  file_path?: string;
+  /** Template: `${event}`. */
+  event?: string;
+}
+
 /** Tool name to argument type, for every tool `hooks.json` calls (the server must implement exactly these). */
 export interface HookInputs {
   /** {@link FormatPreInput} */
@@ -75,6 +109,10 @@ export interface HookInputs {
   worktree_entered: WorktreeEnteredInput;
   /** {@link WorktreeExitedInput} */
   worktree_exited: WorktreeExitedInput;
+  /** {@link FileWrittenInput} */
+  file_written: FileWrittenInput;
   /** {@link CwdChangedInput} */
   cwd_changed: CwdChangedInput;
+  /** {@link FileChangedInput} */
+  file_changed: FileChangedInput;
 }
