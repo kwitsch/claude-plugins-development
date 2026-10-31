@@ -158,7 +158,14 @@ test("initialize reports dprint-hooks with the manifest version; tools/list has 
   const list = await s.rpc("tools/list", {});
   assert.deepEqual(
     list.result.tools.map((t) => t.name),
-    ["format_pre", "cwd_changed", "worktree_entered", "worktree_exited"],
+    [
+      "format_pre",
+      "cwd_changed",
+      "worktree_entered",
+      "worktree_exited",
+      "file_written",
+      "file_changed",
+    ],
   );
 });
 
@@ -576,4 +583,89 @@ test("format_pre without a cwd skips instead of using the server's own cwd", asy
       .content,
     "x\n",
   );
+});
+
+test("file_changed formats an in-cwd file on disk; unlink, outside and CRLF files are left alone", async () => {
+  stubDprint();
+  const s = startServer();
+  const changedEv = (file, event = "change") =>
+    s.tool("file_changed", { cwd: repo, file_path: file, event });
+  // git is not on the stub PATH: the git guard fails open and the file is formatted
+  const a = path.join(repo, "a.ts");
+  writeFileSync(a, "x  \n");
+  assert.deepEqual(await changedEv(a), {});
+  assert.equal(readFileSync(a, "utf8"), "x\n");
+  const added = path.join(repo, "added.ts");
+  writeFileSync(added, "z  \n");
+  assert.deepEqual(await changedEv(added, "add"), {});
+  assert.equal(readFileSync(added, "utf8"), "z\n");
+  const u = path.join(repo, "u.ts");
+  writeFileSync(u, "x  \n");
+  assert.deepEqual(await changedEv(u, "unlink"), {});
+  assert.equal(readFileSync(u, "utf8"), "x  \n");
+  const outside = path.join(tmp, "outside.ts");
+  writeFileSync(outside, "x  \n");
+  assert.deepEqual(await changedEv(outside), {});
+  assert.equal(readFileSync(outside, "utf8"), "x  \n");
+  const crlf = path.join(repo, "crlf.ts");
+  writeFileSync(crlf, "x  \r\n");
+  assert.deepEqual(await changedEv(crlf), {});
+  assert.equal(readFileSync(crlf, "utf8"), "x  \r\n");
+});
+
+test("file_written records the Edit/Write result: file_changed leaves it alone, also on repeated events", async () => {
+  stubDprint();
+  const s = startServer();
+  const b = path.join(repo, "b.ts");
+  writeFileSync(b, "x  \n");
+  assert.deepEqual(
+    await s.tool("file_written", { cwd: repo, tool_input: { file_path: b } }),
+    {},
+  );
+  for (let i = 0; i < 2; i++) {
+    assert.deepEqual(
+      await s.tool("file_changed", { cwd: repo, file_path: b, event: "change" }),
+      {},
+    );
+  }
+  assert.equal(readFileSync(b, "utf8"), "x  \n");
+  // positive control: a later change by another tool is formatted
+  writeFileSync(b, "y  \n");
+  await s.tool("file_changed", { cwd: repo, file_path: b, event: "change" });
+  assert.equal(readFileSync(b, "utf8"), "y\n");
+});
+
+test("file_changed leaves a file alone that is unchanged against the git index", async (t) => {
+  const git = spawnSync("which", ["git"], { encoding: "utf8" }).stdout?.trim();
+  if (!git) return t.skip("git not on PATH");
+  symlinkSync(git, path.join(bin, "git"));
+  stubDprint();
+  const g = (...args) => {
+    const r = spawnSync(
+      git,
+      [
+        "-c",
+        "user.name=t",
+        "-c",
+        "user.email=t@t",
+        "-c",
+        "commit.gpgsign=false",
+        ...args,
+      ],
+      { cwd: repo, encoding: "utf8" },
+    );
+    assert.equal(r.status, 0, r.stderr);
+  };
+  const c = path.join(repo, "c.ts");
+  writeFileSync(c, "x  \n");
+  g("init", "-q");
+  g("add", "c.ts");
+  g("commit", "-qm", "c");
+  const s = startServer();
+  const ev = { cwd: repo, file_path: c, event: "change" };
+  assert.deepEqual(await s.tool("file_changed", ev), {});
+  assert.equal(readFileSync(c, "utf8"), "x  \n");
+  writeFileSync(c, "y  \n");
+  assert.deepEqual(await s.tool("file_changed", ev), {});
+  assert.equal(readFileSync(c, "utf8"), "y\n");
 });

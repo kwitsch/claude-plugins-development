@@ -180,9 +180,10 @@ test("command hooks on SessionStart and FileChanged pass and generate no types",
     h.hooks.SessionStart = [
       { hooks: [{ type: "command", command: "node x.mjs", timeout: 30 }] },
     ];
-    h.hooks.FileChanged = [
-      { hooks: [{ type: "command", command: "node y.mjs" }] },
-    ];
+    // appended: replacing the shipped FileChanged mcp_tool group would drop FileChangedInput from the types
+    (h.hooks.FileChanged ??= []).push({
+      hooks: [{ type: "command", command: "node y.mjs" }],
+    });
   });
   const r = run("--check", dir);
   assert.equal(r.status, 0, r.stderr);
