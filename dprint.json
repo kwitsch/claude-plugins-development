@@ -4,17 +4,8 @@
   "useTabs": false,
   "typescript": {
     "quoteStyle": "preferDouble",
-    "module.sortImportDeclarations": "maintain",
-    "module.sortExportDeclarations": "maintain",
-    "importDeclaration.sortNamedImports": "maintain",
-    "exportDeclaration.sortNamedExports": "maintain",
     "importDeclaration.preferSingleLine": false,
     "exportDeclaration.preferSingleLine": false,
-    "ifStatement.useBraces": "maintain",
-    "forStatement.useBraces": "maintain",
-    "forInStatement.useBraces": "maintain",
-    "forOfStatement.useBraces": "maintain",
-    "whileStatement.useBraces": "maintain",
     "binaryExpression.operatorPosition": "sameLine"
   },
   "json": {
@@ -31,9 +22,6 @@
     "**/*-lock.json",
     "**/pnpm-lock.yaml",
     ".claude/worktrees",
-    "./README.md",
-    ".claude/skills/scaffold-plugin/templates",
-    "*/plugin/.claude-plugin/plugin.json",
     "*/src/mcp/hook-inputs.d.mts",
     "**/*.mjs"
   ],
