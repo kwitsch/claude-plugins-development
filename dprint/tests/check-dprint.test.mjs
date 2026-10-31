@@ -10,7 +10,9 @@ import { fileURLToPath } from "node:url";
 
 const PLUGIN = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../plugin");
 const SCRIPT = path.join(PLUGIN, "skills/init-dprint/check-dprint.mjs");
-const MIN = /^const MIN_VERSION = "([0-9.]+)";$/m.exec(readFileSync(SCRIPT, "utf8"))?.[1];
+// the built script is minified; MIN_VERSION is read from its source
+const SOURCE = path.resolve(PLUGIN, "../src/skills/init-dprint/check-dprint.mts");
+const MIN = /^const MIN_VERSION = "([0-9.]+)";$/m.exec(readFileSync(SOURCE, "utf8"))?.[1];
 
 let bin, home;
 beforeEach(() => {
@@ -44,7 +46,7 @@ function run(...args) {
 
 test("MIN_VERSION is defined exactly once", () => {
   assert.ok(MIN);
-  assert.equal(readFileSync(SCRIPT, "utf8").match(/MIN_VERSION = /g).length, 1);
+  assert.equal(readFileSync(SOURCE, "utf8").match(/MIN_VERSION = /g).length, 1);
 });
 
 test("no dprint anywhere -> exit 10, status=missing", () => {

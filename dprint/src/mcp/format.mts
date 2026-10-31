@@ -1,27 +1,52 @@
-// format.mts — the format_pre hook handler plus its pure helpers: applyEdit (copied from
-// universal-format), lineDiff (line LCS) and trimToEdit (keep only the diff hunks that touch the edit).
+/**
+ * The `format_pre`, `cwd_changed` and `worktree_entered` hook handlers plus the pure helpers behind them.
+ *
+ * @remarks
+ * Helpers: {@link applyEdit} (Claude Code's Edit semantics, copied from universal-format), {@link lineDiff}
+ * (line LCS) and {@link trimToEdit} (keep only the diff hunks that touch the edit).
+ *
+ * @packageDocumentation
+ */
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { DprintLsp, type LspRange } from "./lsp.mjs";
 
+/** Hook output: empty (`{}`) to let the tool call through unchanged, else the rewritten tool input. */
 export type HookResult = {
+  /** PreToolUse output; absent when the hook leaves the tool call alone. */
   hookSpecificOutput?: {
+    /** Always `PreToolUse`. */
     hookEventName: "PreToolUse";
+    /** Replacement for the whole `Write`/`Edit` tool input. */
     updatedInput: Record<string, unknown>;
+    /** Notice to the model that the file was reformatted on purpose. */
     additionalContext: string;
   };
 };
 
-/** a[aStart, aEnd) was replaced by b[bStart, bEnd); half-open line indices. */
+/** One diff hunk: `a[aStart, aEnd)` was replaced by `b[bStart, bEnd)`; half-open line indices. */
 type Hunk = {
+  /** First replaced line in `a`. */
   aStart: number;
+  /** First line in `a` after the replaced lines. */
   aEnd: number;
+  /** First inserted line in `b`. */
   bStart: number;
+  /** First line in `b` after the inserted lines. */
   bEnd: number;
 };
 
-/** Claude Code's Edit semantics: null when oldStr is empty, not found, or (without replaceAll) non-unique. */
+/**
+ * Apply an Edit exactly as Claude Code's Edit tool would.
+ *
+ * @param current - File content before the edit.
+ * @param oldStr - `old_string`.
+ * @param newStr - `new_string`.
+ * @param replaceAll - `replace_all`.
+ * @returns The edited content, or `null` when `oldStr` is empty, not found, or (without `replaceAll`) not
+ * unique.
+ */
 export function applyEdit(
   current: string,
   oldStr: string,
@@ -37,7 +62,18 @@ export function applyEdit(
   return current.slice(0, idx) + newStr + current.slice(idx + oldStr.length);
 }
 
-/** LCS line diff: ordered, non-overlapping hunks separated by at least one common line. */
+/**
+ * LCS line diff.
+ *
+ * @remarks
+ * shortcut: O(n·m) memory on the lines between the common prefix and suffix; fine for source files, upgrade
+ * to Myers if a \>20k-line file shows up.
+ *
+ * @param a - Original lines.
+ * @param b - New lines.
+ * @returns Ordered, non-overlapping hunks separated by at least one common line. Throws when the changed
+ * middle exceeds 25M line pairs (the caller fails open instead of producing a near whole-file edit).
+ */
 export function lineDiff(a: string[], b: string[]): Hunk[] {
   // the table only needs the changed middle: strip the common prefix and suffix first
   let pre = 0;
@@ -59,9 +95,7 @@ export function lineDiff(a: string[], b: string[]): Hunk[] {
       bStart: h.bStart + pre,
       bEnd: h.bEnd + pre,
     }));
-  // too big for the table: throw, formatPre fails open ({}) instead of returning a near whole-file edit
   if (a.length * b.length > 25_000_000) throw new Error("diff too large");
-  // shortcut: O(n·m) memory on lines; fine for source files, upgrade to Myers if a >20k-line file shows up
   const n = a.length;
   const m = b.length;
   // L[i][j] = LCS length of a[i..] and b[j..]; min(n, m) <= 5000 under the guard, so 16 bits suffice
@@ -95,9 +129,18 @@ export function lineDiff(a: string[], b: string[]): Hunk[] {
 }
 
 /**
- * Keep only the hunks of diff(original, formatted) that intersect or touch an edited line range
- * (inclusive [start, end] line indices in original) and return them as one Edit whose oldString is
- * verbatim original text occurring exactly once; null when nothing is kept or no unique oldString exists.
+ * Reduce a whole-file reformat to the part that touches the edit.
+ *
+ * @remarks
+ * Keeps only the hunks of `diff(original, formatted)` that intersect or touch an edited line range, then
+ * widens the kept span by common lines (alternating, upward first) until its original text occurs exactly
+ * once in `original`.
+ *
+ * @param original - File content before the edit (on disk).
+ * @param formatted - Edited and formatted content.
+ * @param editLines - Inclusive `[start, end]` line indices in `original` covered by the edit.
+ * @returns One Edit whose `oldString` is verbatim, unique `original` text, or `null` when nothing is kept or
+ * no unique `oldString` exists.
  */
 export function trimToEdit(
   original: string,
@@ -151,16 +194,33 @@ export function trimToEdit(
   }
 }
 
-// One `dprint lsp` per working directory (rootUri decides which dprint.json applies), created lazily.
+/** One `dprint lsp` per working directory (its `rootUri` decides which dprint config applies), created lazily. */
 const clients = new Map<string, DprintLsp>();
-const client = (cwd: string) => {
+
+/**
+ * Get the lsp client for a working directory, creating it on first use.
+ *
+ * @param cwd - Working directory (LSP root).
+ * @returns The cached or new client.
+ */
+const client = (cwd: string): DprintLsp => {
   let c = clients.get(cwd);
   if (!c) clients.set(cwd, (c = new DprintLsp({ cwd })));
   return c;
 };
 
-// EnterWorktree / CwdChanged move a session's or subagent's cwd without the hook payload's `cwd` following.
+/**
+ * Working directory per session or subagent, set by `cwd_changed`/`worktree_entered`: EnterWorktree and
+ * CwdChanged move a cwd without the hook payload's `cwd` following.
+ */
 const cwdOverrides = new Map<string, string>();
+
+/**
+ * Key of {@link cwdOverrides} for a hook payload.
+ *
+ * @param args - Hook input.
+ * @returns `agent_id` inside a subagent, else `session_id`, else `""` (no override possible).
+ */
 const overrideKey = (args: any): string =>
   typeof args?.agent_id === "string" && args.agent_id
     ? args.agent_id
@@ -168,27 +228,53 @@ const overrideKey = (args: any): string =>
       ? args.session_id
       : "";
 
+/**
+ * Record a cwd override for the payload's session or subagent.
+ *
+ * @param args - Hook input (supplies the key).
+ * @param cwd - New working directory; ignored unless a non-empty string.
+ * @returns `{}`: these hooks never change the tool call.
+ */
 function setCwd(args: any, cwd: unknown): HookResult {
   const key = overrideKey(args);
   if (key && typeof cwd === "string" && cwd) cwdOverrides.set(key, cwd);
   return {};
 }
 
-/** CwdChanged: use `new_cwd` for this session/agent's later format_pre calls. */
+/**
+ * CwdChanged hook: use `new_cwd` for this session's or subagent's later `format_pre` calls.
+ *
+ * @param args - Hook input with `new_cwd`, `session_id` and `agent_id`.
+ * @returns `{}`.
+ */
 export const cwdChanged = (args: any): HookResult =>
   setCwd(args, args?.new_cwd);
 
-/** PostToolUse EnterWorktree: CwdChanged does not fire for it, so take the worktree path from the tool response. */
+/**
+ * PostToolUse EnterWorktree hook: CwdChanged does not fire for it, so take the worktree path from the tool
+ * response.
+ *
+ * @param args - Hook input with `tool_response.worktreePath`, `session_id` and `agent_id`.
+ * @returns `{}`.
+ */
 export const worktreeEntered = (args: any): HookResult =>
   setCwd(args, args?.tool_response?.worktreePath);
 
-/** Kill every dprint lsp child (MCP stdin closed). */
+/**
+ * Kill every `dprint lsp` child (called when MCP stdin closes).
+ */
 export function disposeLsp(): void {
   for (const c of clients.values()) c.dispose();
   clients.clear();
 }
 
-// Same exclusions as universal-format: dependency/VCS dirs, other agents' worktrees, personal *.local.* files.
+/**
+ * Paths never formatted, same as universal-format: dependency and VCS dirs, other agents' worktrees and
+ * memory, personal `*.local.*` files.
+ *
+ * @param rel - Path relative to the working directory.
+ * @returns `true` when the path must be left alone.
+ */
 const isExcludedPath = (rel: string): boolean => {
   const segs = rel.split(path.sep);
   return (
@@ -202,8 +288,14 @@ const isExcludedPath = (rel: string): boolean => {
   );
 };
 
-/** Index of the line containing text[idx] (number of "\n" before idx), without copying the prefix. */
-const lineOf = (text: string, idx: number) => {
+/**
+ * Zero-based line of a character offset, without copying the prefix.
+ *
+ * @param text - Document.
+ * @param idx - Character offset in `text`.
+ * @returns Number of `\n` before `idx`.
+ */
+const lineOf = (text: string, idx: number): number => {
   let n = 0;
   for (
     let i = text.indexOf("\n");
@@ -214,10 +306,24 @@ const lineOf = (text: string, idx: number) => {
   return n;
 };
 
-/** The formatted text, or null when dprint changed nothing or answered an empty file for non-empty input (a failure). */
+/**
+ * Filter dprint's answer down to a real change.
+ *
+ * @param F - dprint's result (`null` for no edits).
+ * @param input - Text that was formatted.
+ * @returns The formatted text, or `null` when dprint changed nothing or answered an empty file for non-empty
+ * input (treated as a failure).
+ */
 const changed = (F: string | null, input: string): string | null =>
   F === null || F === input || (F === "" && input !== "") ? null : F;
 
+/**
+ * Build the hook output that replaces the tool input.
+ *
+ * @param updatedInput - New `Write`/`Edit` tool input.
+ * @param fp - Absolute file path, named in the notice.
+ * @returns The PreToolUse output with the reformat notice.
+ */
 function done(updatedInput: Record<string, unknown>, fp: string): HookResult {
   return {
     hookSpecificOutput: {
@@ -228,7 +334,17 @@ function done(updatedInput: Record<string, unknown>, fp: string): HookResult {
   };
 }
 
-/** PreToolUse Write|Edit: format via dprint lsp and return updatedInput. {} on every guard/error (fail open). */
+/**
+ * PreToolUse `Write|Edit` hook: format the write or edit via `dprint lsp` before it lands.
+ *
+ * @remarks
+ * Write: whole-file `formatting` of `content`. Edit: apply the edit in memory, `rangeFormatting` over the
+ * edited lines, then {@link trimToEdit} keeps the result a minimal `old_string`/`new_string` pair. Files
+ * outside the working directory and {@link isExcludedPath} paths are skipped.
+ *
+ * @param args - Hook input: `cwd`, `session_id`, `agent_id`, `tool_name` and `tool_input`.
+ * @returns The rewritten tool input, or `{}` on every guard and error (fail open).
+ */
 export async function formatPre(args: any): Promise<HookResult> {
   try {
     const ti = args?.tool_input ?? {};

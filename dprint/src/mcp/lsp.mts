@@ -1,47 +1,95 @@
-// lsp.mts — minimal `dprint lsp` client: one lazily spawned child speaking Content-Length framed
-// JSON-RPC over stdio, one format() at a time (promise-chain mutex), respawned after a crash.
+/**
+ * Minimal `dprint lsp` client.
+ *
+ * @remarks
+ * One lazily spawned child per {@link DprintLsp} speaks Content-Length framed JSON-RPC over stdio. Calls to
+ * {@link DprintLsp.format} run one at a time (promise-chain mutex) and the child is respawned after a crash.
+ *
+ * @packageDocumentation
+ */
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { pathToFileURL } from "node:url";
 import { findDprint } from "../skills/init-dprint/find-dprint.mjs";
 
+/** LSP range: zero-based line and UTF-16 character offsets, end exclusive. */
 export type LspRange = {
+  /** First position inside the range. */
   start: { line: number; character: number };
+  /** First position after the range. */
   end: { line: number; character: number };
 };
-type TextEdit = { range: LspRange; newText: string };
 
+/** LSP `TextEdit`: replace `range` with `newText`. */
+type TextEdit = {
+  /** Range of the original document to replace. */
+  range: LspRange;
+  /** Replacement text. */
+  newText: string;
+};
+
+/** Per-request timeout; a request that exceeds it kills the child, the next format respawns it. */
 const REQUEST_TIMEOUT_MS = 30_000;
+/** Required by the LSP formatting requests; dprint takes its real settings from the project config. */
 const FORMAT_OPTIONS = { tabSize: 2, insertSpaces: true };
 
 /** A JSON-RPC error response (as opposed to a timeout or a dead child). */
 class RpcError extends Error {}
 
+/** An in-flight request awaiting its response. */
 type Pending = {
+  /** Settles the request with the response `result`. */
   resolve: (v: any) => void;
+  /** Settles the request with an error response, a timeout or the child's death. */
   reject: (e: Error) => void;
+  /** Timeout of the request. */
   timer: NodeJS.Timeout;
 };
 
+/** Client for one `dprint lsp` child rooted at one working directory. */
 export class DprintLsp {
+  /** Working directory and `rootUri` of the child; decides which dprint config applies. */
   private readonly cwd: string;
+  /** The running child, or `null` before the first format and after it died. */
   private child: ChildProcessWithoutNullStreams | null = null;
+  /** Settles once `initialize` succeeded; `null` until the child is (re)started. */
   private ready: Promise<void> | null = null;
+  /** Unconsumed stdout bytes (an incomplete frame). */
   private buf: Buffer = Buffer.alloc(0);
+  /** Id of the next request. */
   private nextId = 1;
+  /** In-flight requests by id. */
   private readonly pending = new Map<number, Pending>();
+  /** Tail of the format queue; every format waits for the previous one. */
   private queue: Promise<unknown> = Promise.resolve();
 
+  /**
+   * Create a client; the child is spawned lazily on the first {@link DprintLsp.format}.
+   *
+   * @param opts - Client options; `cwd` is the working directory and LSP root of the child.
+   */
   constructor(opts: { cwd: string }) {
     this.cwd = opts.cwd;
   }
 
-  /** Formatted text, or null when dprint returns no edits (already formatted). Rejects on any failure. */
+  /**
+   * Format a document, or a range of it, as dprint would format the file at `uri`.
+   *
+   * @param uri - `file://` URI of the document; dprint picks the plugin by its extension.
+   * @param text - Document content (sent via `didOpen`, nothing is read from disk).
+   * @param range - Range to format; whole document when omitted. A plugin without range support falls back
+   * to formatting the whole document.
+   * @returns The formatted text, or `null` when dprint returns no edits (already formatted).
+   * Rejects on any failure: dprint missing, crash, timeout or error response.
+   */
   format(uri: string, text: string, range?: LspRange): Promise<string | null> {
     const run = this.queue.then(() => this.formatNow(uri, text, range));
     this.queue = run.catch(() => {}); // a failed call must not block the next one
     return run;
   }
 
+  /**
+   * Kill the child, if any, and reject every in-flight request.
+   */
   dispose(): void {
     const child = this.child;
     this.child = null;
@@ -50,6 +98,11 @@ export class DprintLsp {
     this.failPending(new Error("dprint lsp disposed")); // the exit handler ignores a disposed child
   }
 
+  /**
+   * Reject and forget every in-flight request.
+   *
+   * @param err - Rejection reason.
+   */
   private failPending(err: Error): void {
     for (const p of this.pending.values()) {
       clearTimeout(p.timer);
@@ -58,6 +111,14 @@ export class DprintLsp {
     this.pending.clear();
   }
 
+  /**
+   * Body of {@link DprintLsp.format}, run under the queue.
+   *
+   * @param uri - `file://` URI of the document.
+   * @param text - Document content.
+   * @param range - Range to format, or `undefined` for the whole document.
+   * @returns The formatted text, or `null` when there are no edits.
+   */
   private async formatNow(
     uri: string,
     text: string,
@@ -89,6 +150,11 @@ export class DprintLsp {
     }
   }
 
+  /**
+   * Spawn and initialize the child unless it is already running.
+   *
+   * @returns Settles once the child answered `initialize`; rejects when dprint is missing or fails to start.
+   */
   private start(): Promise<void> {
     if (this.ready) return this.ready;
     const bin = findDprint();
@@ -124,6 +190,11 @@ export class DprintLsp {
     return ready;
   }
 
+  /**
+   * Split stdout into Content-Length frames and dispatch each complete message.
+   *
+   * @param chunk - Bytes just read from the child's stdout.
+   */
   private onData(chunk: Buffer): void {
     this.buf = Buffer.concat([this.buf, chunk]);
     for (;;) {
@@ -132,7 +203,10 @@ export class DprintLsp {
       const len = /content-length:\s*(\d+)/i.exec(
         this.buf.subarray(0, sep).toString("ascii"),
       )?.[1];
-      if (len === undefined) return this.broken();
+      if (len === undefined) {
+        this.broken();
+        return;
+      }
       const end = sep + 4 + Number(len);
       if (this.buf.length < end) return;
       const body = this.buf.subarray(sep + 4, end).toString("utf8");
@@ -141,18 +215,28 @@ export class DprintLsp {
       try {
         msg = JSON.parse(body);
       } catch {
-        return this.broken();
+        this.broken();
+        return;
       }
       this.onMessage(msg);
     }
   }
 
-  /** Unparseable frame: the stream is out of sync; kill the child so pending requests reject now. */
+  /**
+   * Handle an unparseable frame: the stream is out of sync, so kill the child and let pending requests
+   * reject now instead of timing out.
+   */
   private broken(): void {
     this.buf = Buffer.alloc(0);
     this.child?.kill();
   }
 
+  /**
+   * Route one JSON-RPC message from the child.
+   *
+   * @param msg - Parsed message: a response settles its pending request, a server-to-client request is
+   * answered with `null`, a notification is ignored.
+   */
   private onMessage(msg: any): void {
     if (msg?.id === undefined || msg.id === null) return; // server notification
     if (msg.method !== undefined) {
@@ -168,6 +252,14 @@ export class DprintLsp {
     else p.resolve(msg.result);
   }
 
+  /**
+   * Send a request and wait for its response.
+   *
+   * @param method - JSON-RPC method.
+   * @param params - Method parameters.
+   * @returns The response `result`; rejects with {@link RpcError} on an error response, or with a plain
+   * `Error` when the child is not running, dies or times out (a timeout also kills the child).
+   */
   private request(method: string, params: unknown): Promise<any> {
     if (!this.child)
       return Promise.reject(new Error("dprint lsp is not running"));
@@ -183,10 +275,21 @@ export class DprintLsp {
     });
   }
 
+  /**
+   * Send a notification (no response expected).
+   *
+   * @param method - JSON-RPC method.
+   * @param params - Method parameters.
+   */
   private notify(method: string, params: unknown): void {
     this.send({ jsonrpc: "2.0", method, params });
   }
 
+  /**
+   * Write one Content-Length framed message to the child's stdin; a no-op when no child runs.
+   *
+   * @param msg - JSON-RPC message.
+   */
   private send(msg: unknown): void {
     const body = Buffer.from(JSON.stringify(msg), "utf8");
     this.child?.stdin.write(
@@ -198,7 +301,20 @@ export class DprintLsp {
   }
 }
 
-// shortcut: positions assume "\n" or "\r\n" line breaks and UTF-16 offsets (LSP default); upgrade if dprint ever negotiates positionEncoding
+/**
+ * Apply LSP text edits to a document.
+ *
+ * @remarks
+ * Positions past a line's end clamp to the line end (before a CRLF's `\r`); lines past the end clamp to the
+ * document end. Edits starting at the same position are applied in array order.
+ *
+ * shortcut: positions assume `\n` or `\r\n` line breaks and UTF-16 offsets (LSP default); upgrade if dprint
+ * ever negotiates `positionEncoding`.
+ *
+ * @param text - Original document.
+ * @param edits - Non-overlapping edits against `text`, in any order.
+ * @returns The edited document.
+ */
 export function applyTextEdits(text: string, edits: TextEdit[]): string {
   const starts = [0];
   for (let i = text.indexOf("\n"); i !== -1; i = text.indexOf("\n", i + 1))

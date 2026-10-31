@@ -1,7 +1,15 @@
 #!/usr/bin/env node
-// server.mts — dprint-hooks MCP stdio server (newline-delimited JSON-RPC 2.0; loop copied from
-// universal-format's server.ts). stdout = JSON-RPC only; logs -> stderr.
-//   format_pre (PreToolUse Write|Edit) — format via `dprint lsp`, return updatedInput
+/**
+ * `dprint-hooks` MCP stdio server: newline-delimited JSON-RPC 2.0, loop copied from universal-format's
+ * `server.ts`.
+ *
+ * @remarks
+ * stdout carries JSON-RPC only; logs go to stderr. Each tool backs one hook in `hooks/hooks.json`:
+ * `format_pre` (PreToolUse `Write|Edit`) formats via `dprint lsp` and returns `updatedInput`;
+ * `cwd_changed` (CwdChanged) and `worktree_entered` (PostToolUse `EnterWorktree`) track the session's cwd.
+ *
+ * @packageDocumentation
+ */
 import process from "node:process";
 import readline from "node:readline";
 import { readFileSync } from "node:fs";
@@ -13,10 +21,18 @@ import {
   type HookResult,
 } from "./format.mjs";
 
-const SERVER_NAME = "dprint-hooks"; // keep aligned with the .mcp.json key
+/** Server name reported on `initialize`; keep aligned with the `.mcp.json` key. */
+const SERVER_NAME = "dprint-hooks";
+/** `serverInfo` reported on `initialize`. */
 const SERVER_INFO = { name: SERVER_NAME, version: readVersion() };
-const DEFAULT_PROTOCOL = "2025-11-25"; // only used if the client omits protocolVersion
+/** Protocol version answered when the client's `initialize` omits one. */
+const DEFAULT_PROTOCOL = "2025-11-25";
 
+/**
+ * Read the plugin version from the generated manifest next to this server.
+ *
+ * @returns The manifest `version`, or `0.0.0` when the manifest is missing or unreadable.
+ */
 function readVersion(): string {
   try {
     return (
@@ -32,13 +48,21 @@ function readVersion(): string {
   }
 }
 
+/** One MCP tool: its `tools/list` entry plus the hook handler behind `tools/call`. */
 type ToolDef = {
+  /** Tool name referenced by `hooks.json`. */
   name: string;
+  /** Human-readable purpose shown in `tools/list`. */
   description: string;
+  /** Accepts any object: Claude Code builds the hook input from the `hooks.json` templates. */
   inputSchema: { type: string; additionalProperties: boolean };
+  /** Hook handler; its result becomes the tool call's `structuredContent`. */
   handler: (args: any) => HookResult | Promise<HookResult>;
 };
 
+/**
+ * Serve MCP over stdio until stdin closes, then dispose every `dprint lsp` child and exit.
+ */
 function startServer(): void {
   const TOOLS: ToolDef[] = [
     {

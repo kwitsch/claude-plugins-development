@@ -29,8 +29,19 @@ Hook: `plugin/hooks/hooks.json` (hand-written) wires PreToolUse `Write|Edit` as 
 output** (`pnpm build`) of `src/skills/init-dprint/{check-dprint,find-dprint,scan-plugins}.mts`,
 `src/mcp/{server,lsp,format}.mts` and `plugin.json`. Do not edit them here.
 
+## Sources vs. build output
+
+- `src/**/*.{mts,ts}` are written for humans: every function, method, class, type, type member and
+  module-level constant carries a TSDoc comment (`@param name - text`, `@returns`, `@remarks`, one blank line
+  before the first tag). `pnpm lint` (ESLint + typescript-eslint, `eslint-plugin-tsdoc`, `eslint-plugin-jsdoc`;
+  config `eslint.config.mjs`) enforces it; CI runs it. `plugin/` is ignored by the linter.
+- `pnpm build` compiles with `tsc` (`.mts` → `.mjs`, `.ts` → `.js`) and then minifies every emitted file with
+  terser: no comments, mangled locals, shebang and export names kept. The output is optimized for size and
+  load time, not for reading; debug against `src/`.
+
 `MIN_VERSION` is defined only in the `.mts` source. Changing it: edit there, update the
-"Minimum dprint version" line in `README.md`, rebuild. Tests read the value from the built script.
+"Minimum dprint version" line in `README.md`, rebuild. Tests read the value from that source (the built
+script is minified).
 
 ## Refreshing `dprint-plugins.json`
 
