@@ -8,7 +8,7 @@ export type LspRange = {
   start: { line: number; character: number };
   end: { line: number; character: number };
 };
-export type TextEdit = { range: LspRange; newText: string };
+type TextEdit = { range: LspRange; newText: string };
 
 const REQUEST_TIMEOUT_MS = 30_000;
 const FORMAT_OPTIONS = { tabSize: 2, insertSpaces: true };
@@ -68,26 +68,21 @@ export class DprintLsp {
       textDocument: { uri, languageId: "", version: 1, text },
     });
     try {
-      let edits: TextEdit[] | null;
-      try {
-        edits = range
-          ? await this.request("textDocument/rangeFormatting", {
-              textDocument: { uri },
-              range,
-              options: FORMAT_OPTIONS,
-            })
-          : await this.request("textDocument/formatting", {
-              textDocument: { uri },
-              options: FORMAT_OPTIONS,
-            });
-      } catch (e) {
-        if (!range || !(e instanceof RpcError)) throw e;
-        // plugin without range support: one retry on the whole document
-        edits = await this.request("textDocument/formatting", {
+      const whole = (): Promise<TextEdit[] | null> =>
+        this.request("textDocument/formatting", {
           textDocument: { uri },
           options: FORMAT_OPTIONS,
         });
-      }
+      const edits: TextEdit[] | null = range
+        ? await this.request("textDocument/rangeFormatting", {
+            textDocument: { uri },
+            range,
+            options: FORMAT_OPTIONS,
+          }).catch((e) => {
+            if (!(e instanceof RpcError)) throw e;
+            return whole(); // plugin without range support: one retry on the whole document
+          })
+        : await whole();
       return edits && edits.length > 0 ? applyTextEdits(text, edits) : null;
     } finally {
       this.notify("textDocument/didClose", { textDocument: { uri } });
@@ -222,8 +217,13 @@ export function applyTextEdits(text: string, edits: TextEdit[]): string {
       t: e.newText,
       i,
     }))
-    .sort((x, y) => y.s - x.s || y.i - x.i); // same start: later edit first, so inserts land in array order
-  let out = text;
-  for (const { s, e, t } of spans) out = out.slice(0, s) + t + out.slice(e);
-  return out;
+    .sort((x, y) => x.s - y.s || x.i - y.i); // same start: array order, so inserts land as listed
+  const parts: string[] = [];
+  let pos = 0;
+  for (const { s, e, t } of spans) {
+    parts.push(text.slice(pos, s), t);
+    pos = e;
+  }
+  parts.push(text.slice(pos));
+  return parts.join("");
 }

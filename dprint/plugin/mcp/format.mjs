@@ -150,9 +150,9 @@ function setCwd(args, cwd) {
     return {};
 }
 /** CwdChanged: use `new_cwd` for this session/agent's later format_pre calls. */
-export const cwdChanged = (args) => Promise.resolve(setCwd(args, args?.new_cwd));
+export const cwdChanged = (args) => setCwd(args, args?.new_cwd);
 /** PostToolUse EnterWorktree: CwdChanged does not fire for it, so take the worktree path from the tool response. */
-export const worktreeEntered = (args) => Promise.resolve(setCwd(args, args?.tool_response?.worktreePath));
+export const worktreeEntered = (args) => setCwd(args, args?.tool_response?.worktreePath);
 /** Kill every dprint lsp child (MCP stdin closed). */
 export function disposeLsp() {
     for (const c of clients.values())
@@ -167,7 +167,15 @@ const isExcludedPath = (rel) => {
             (segs[i + 1] === "worktrees" || segs[i + 1] === "agent-memory")) ||
         segs[segs.length - 1].includes(".local."));
 };
-const lineOf = (text, idx) => text.slice(0, idx).split("\n").length - 1;
+/** Index of the line containing text[idx] (number of "\n" before idx), without copying the prefix. */
+const lineOf = (text, idx) => {
+    let n = 0;
+    for (let i = text.indexOf("\n"); i !== -1 && i < idx; i = text.indexOf("\n", i + 1))
+        n++;
+    return n;
+};
+/** The formatted text, or null when dprint changed nothing or answered an empty file for non-empty input (a failure). */
+const changed = (F, input) => F === null || F === input || (F === "" && input !== "") ? null : F;
 function done(updatedInput, fp) {
     return {
         hookSpecificOutput: {
@@ -204,9 +212,10 @@ export async function formatPre(args) {
         if (args.tool_name === "Write") {
             const content = typeof ti.content === "string" ? ti.content : "";
             const F = await client(root).format(uri, content);
-            if (F === null || F === content || (F === "" && content !== ""))
+            const out = changed(F, content);
+            if (out === null)
                 return {};
-            return done({ file_path: fp, content: F }, fp);
+            return done({ file_path: fp, content: out }, fp);
         }
         if (args.tool_name === "Edit") {
             const O = readFileSync(fp, "utf8"); // ENOENT -> catch -> {}
@@ -236,9 +245,10 @@ export async function formatPre(args) {
                     : { line: endLine, character: mLines[endLine].length },
             };
             const F = await client(root).format(uri, M, range);
-            if (F === null || F === M || (F === "" && M !== ""))
+            const out = changed(F, M);
+            if (out === null)
                 return {};
-            const r = trimToEdit(O, F, editLines);
+            const r = trimToEdit(O, out, editLines);
             if (!r)
                 return {};
             return done({

@@ -14,7 +14,7 @@ export type HookResult = {
 };
 
 /** a[aStart, aEnd) was replaced by b[bStart, bEnd); half-open line indices. */
-export type Hunk = {
+type Hunk = {
   aStart: number;
   aEnd: number;
   bStart: number;
@@ -175,12 +175,12 @@ function setCwd(args: any, cwd: unknown): HookResult {
 }
 
 /** CwdChanged: use `new_cwd` for this session/agent's later format_pre calls. */
-export const cwdChanged = (args: any): Promise<HookResult> =>
-  Promise.resolve(setCwd(args, args?.new_cwd));
+export const cwdChanged = (args: any): HookResult =>
+  setCwd(args, args?.new_cwd);
 
 /** PostToolUse EnterWorktree: CwdChanged does not fire for it, so take the worktree path from the tool response. */
-export const worktreeEntered = (args: any): Promise<HookResult> =>
-  Promise.resolve(setCwd(args, args?.tool_response?.worktreePath));
+export const worktreeEntered = (args: any): HookResult =>
+  setCwd(args, args?.tool_response?.worktreePath);
 
 /** Kill every dprint lsp child (MCP stdin closed). */
 export function disposeLsp(): void {
@@ -202,8 +202,21 @@ const isExcludedPath = (rel: string): boolean => {
   );
 };
 
-const lineOf = (text: string, idx: number) =>
-  text.slice(0, idx).split("\n").length - 1;
+/** Index of the line containing text[idx] (number of "\n" before idx), without copying the prefix. */
+const lineOf = (text: string, idx: number) => {
+  let n = 0;
+  for (
+    let i = text.indexOf("\n");
+    i !== -1 && i < idx;
+    i = text.indexOf("\n", i + 1)
+  )
+    n++;
+  return n;
+};
+
+/** The formatted text, or null when dprint changed nothing or answered an empty file for non-empty input (a failure). */
+const changed = (F: string | null, input: string): string | null =>
+  F === null || F === input || (F === "" && input !== "") ? null : F;
 
 function done(updatedInput: Record<string, unknown>, fp: string): HookResult {
   return {
@@ -243,9 +256,9 @@ export async function formatPre(args: any): Promise<HookResult> {
     if (args.tool_name === "Write") {
       const content: string = typeof ti.content === "string" ? ti.content : "";
       const F = await client(root).format(uri, content);
-      if (F === null || F === content || (F === "" && content !== ""))
-        return {};
-      return done({ file_path: fp, content: F }, fp);
+      const out = changed(F, content);
+      if (out === null) return {};
+      return done({ file_path: fp, content: out }, fp);
     }
 
     if (args.tool_name === "Edit") {
@@ -289,8 +302,9 @@ export async function formatPre(args: any): Promise<HookResult> {
       };
 
       const F = await client(root).format(uri, M, range);
-      if (F === null || F === M || (F === "" && M !== "")) return {};
-      const r = trimToEdit(O, F, editLines);
+      const out = changed(F, M);
+      if (out === null) return {};
+      const r = trimToEdit(O, out, editLines);
       if (!r) return {};
       return done(
         {

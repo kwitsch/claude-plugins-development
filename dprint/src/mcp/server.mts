@@ -36,7 +36,7 @@ type ToolDef = {
   name: string;
   description: string;
   inputSchema: { type: string; additionalProperties: boolean };
-  handler: (args: any) => Promise<HookResult>;
+  handler: (args: any) => HookResult | Promise<HookResult>;
 };
 
 function startServer(): void {
