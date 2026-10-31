@@ -110,7 +110,7 @@ test("a non-mcp_tool hook and a missing input are rejected", () => {
   const dir = scratch((h) => {
     h.hooks.PreToolUse.push({
       matcher: "Write",
-      hooks: [{ type: "command", command: "x" }],
+      hooks: [{ type: "http" }],
     });
     delete h.hooks.CwdChanged[0].hooks[0].input;
   });
@@ -147,4 +147,43 @@ test("a changed input template makes the types stale until regenerated", () => {
     readFileSync(path.join(dir, "src/mcp/hook-inputs.d.mts"), "utf8"),
     /old_cwd\?: string;/,
   );
+});
+
+test("a command hook needs a non-empty command", () => {
+  for (const hook of [{ type: "command" }, { type: "command", command: "" }]) {
+    const r = run(
+      "--check",
+      scratch((h) => h.hooks.CwdChanged[0].hooks.push(hook)),
+    );
+    assert.equal(r.status, 1, JSON.stringify(hook));
+    assert.match(r.stderr, /command must be a non-empty string/);
+  }
+});
+
+test("a command hook's timeout is still checked", () => {
+  const r = run(
+    "--check",
+    scratch((h) =>
+      h.hooks.CwdChanged[0].hooks.push({
+        type: "command",
+        command: "x",
+        timeout: 0,
+      }),
+    ),
+  );
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /timeout must be a positive integer/);
+});
+
+test("command hooks on SessionStart and FileChanged pass and generate no types", () => {
+  const dir = scratch((h) => {
+    h.hooks.SessionStart = [
+      { hooks: [{ type: "command", command: "node x.mjs", timeout: 30 }] },
+    ];
+    h.hooks.FileChanged = [
+      { hooks: [{ type: "command", command: "node y.mjs" }] },
+    ];
+  });
+  const r = run("--check", dir);
+  assert.equal(r.status, 0, r.stderr);
 });
