@@ -15,6 +15,7 @@
     "**/*-lock.json",
     "**/pnpm-lock.yaml",
     ".claude/worktrees",
+    ".claude/skills/scaffold-plugin/templates",
     "*/src/mcp/hook-inputs.d.mts",
     "**/*.mjs"
   ],

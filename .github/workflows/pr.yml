@@ -34,9 +34,14 @@ jobs:
         env:
           PLUGINS: ${{ steps.changed.outputs.plugins }}
           BASE: ${{ github.base_ref }}
+          AUTHOR: ${{ github.event.pull_request.user.login }}
         run: |
           rc=0
           for p in $PLUGINS; do
+            # Dependabot only touches dev tooling; the freshness check below still fails if the shipped build changes
+            if [ "$AUTHOR" = "dependabot[bot]" ] && git diff --quiet "origin/$BASE...HEAD" -- "$p/plugin/"; then
+              echo "::notice::$p: dependabot update leaves $p/plugin/ unchanged, no version bump required"; continue
+            fi
             v=$(jq -r .version "$p/plugin.json")
             # sort -V is not semver-aware for pre-release suffixes, so only plain X.Y.Z is allowed
             if ! [[ "$v" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
