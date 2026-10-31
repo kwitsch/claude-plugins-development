@@ -75,3 +75,19 @@ test("README documents the config gate, the 15 s toast module and all six config
   assert.equal(readme.split("\n")[2], manifest.description);
   assert.match(manifest.description, /shows a toast when it has none/);
 });
+
+test("SKILL.md frontmatter: argument-hint lists the three actions", () => {
+  assert.match(SKILL, /^argument-hint: "\[init\|check\|fmt\] \[scope\]"$/m);
+});
+
+test("SKILL.md runs check/fmt via run-dprint, points to /dprint init and can create a config", () => {
+  assert.match(SKILL, /\$\{CLAUDE_SKILL_DIR\}\/run-dprint\.mjs/);
+  assert.match(SKILL, /run-dprint\.reference\.md/);
+  assert.match(SKILL, /\/dprint init/);
+  assert.match(SKILL, / init -y/);
+});
+
+test("SKILL.md uses the arguments placeholder exactly once and no indexed placeholders", () => {
+  assert.equal(SKILL.split("$ARGUMENTS").length, 2);
+  assert.doesNotMatch(SKILL, /\$[01]\b/);
+});
