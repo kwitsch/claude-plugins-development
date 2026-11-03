@@ -142,7 +142,7 @@ export function lineDiff(a: string[], b: string[]): Hunk[] {
  * @remarks
  * Keeps only the hunks of `diff(original, formatted)` that intersect or touch an edited line range, then
  * widens the kept span by common lines (alternating, upward first) until its original text occurs exactly
- * once in `original`. Gives up (`null`) after 1000 widening steps.
+ * once in `original`. After 1000 single-line widening steps it jumps to the widest span available at once.
  *
  * @param original - File content before the edit (on disk).
  * @param formatted - Edited and formatted content.
@@ -179,8 +179,14 @@ export function trimToEdit(
   const hi = hunks[last + 1]?.aStart ?? a.length;
   let steps = 0;
   for (let up = true;; up = !up) {
-    // shortcut: at most 1000 widening steps (realistic files need < 50); on highly repetitive files the Edit fails open unformatted; raise only with a faster uniqueness search
-    if (++steps > 1000) return null;
+    // shortcut: at most 1000 single-line widening steps (realistic files need < 50), then one jump to the widest
+    // span so a highly repetitive file still formats (as a large Edit) instead of costing a search per line
+    if (++steps === 1001) {
+      bA -= aA - lo;
+      aA = lo;
+      bB += hi - aB;
+      aB = hi;
+    }
     const oldString = render(a, aA, aB);
     const i = original.indexOf(oldString);
     if (
@@ -562,14 +568,15 @@ export async function fileChanged(
       process.stderr.write(`[dprint-hooks] file_changed skipped (over ${MAX_CHANGED_BYTES} bytes): ${s.fp}\n`);
       return {};
     }
-    // fatal decoder: a non-UTF-8 file throws (fails open) instead of being rewritten with U+FFFD
-    const text = utf8.decode(readFileSync(s.fp));
-    if (written.get(s.real) === digest(text)) return {};
-    // CRLF files are formatted on their LF view (as formatPre's Edit does) and written back with CRLF; a lone "\r" fails open
-    const lf = text.replaceAll("\r\n", "\n");
-    if (lf.includes("\r")) return {};
     if (!(await acquireChangeSlot(s.fp))) return {};
     try {
+      // read after the slot is held: waiting events must not each keep up to 1 MiB of text alive
+      // fatal decoder: a non-UTF-8 file throws (fails open) instead of being rewritten with U+FFFD
+      const text = utf8.decode(readFileSync(s.fp));
+      if (written.get(s.real) === digest(text)) return {};
+      // CRLF files are formatted on their LF view (as formatPre's Edit does) and written back with CRLF; a lone "\r" fails open
+      const lf = text.replaceAll("\r\n", "\n");
+      if (lf.includes("\r")) return {};
       // user decision: gitignored files (`!!`) and tracked files equal to the index (empty output) are left alone;
       // one spawn answers both. --untracked-files=normal is required: under status.showUntrackedFiles=no git
       // rejects --ignored otherwise. --no-optional-locks keeps .git/index.lock free for the user's git,

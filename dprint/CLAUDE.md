@@ -30,8 +30,8 @@ Hook: `plugin/hooks/hooks.json` (hand-written) wires PreToolUse `Write|Edit` as 
   `worktree_entered` and `worktree_exited` (PostToolUse EnterWorktree/ExitWorktree hooks), `file_written`
   (PostToolUse Write|Edit) and `file_changed` (FileChanged).
 - `lsp.mjs`: `dprint lsp` client (one lazily spawned child per cwd, Content-Length JSON-RPC, 30 s request timeout
-  (`DPRINT_LSP_TIMEOUT_MS` overrides it, tests only), a 60 s cooldown after a request timeout during which that
-  client's formats fail at once, a 30 s pause before `findDprint` is retried after dprint was not found, stdout of a
+  (constructor option `timeoutMs`, tests only), a 60 s cooldown after a request timeout during which formats of
+  that document fail at once, a 30 s per-client pause before `findDprint` is retried after dprint was not found, stdout of a
   replaced child ignored, respawn after a crash, `applyTextEdits`). Needs dprint >= 0.50 (`findDprint` from
   `skills/dprint/find-dprint.mjs`: `PATH`, then `~/.dprint/bin`).
 - `format.mjs`: scope via `scopeOf` (effective cwd: override, else payload `cwd`, never `process.cwd()`) and
@@ -41,7 +41,7 @@ Hook: `plugin/hooks/hooks.json` (hand-written) wires PreToolUse `Write|Edit` as 
   (a single `git --no-optional-locks status --porcelain --untracked-files=normal --ignored=matching`: `!!` or empty output skips; git failure means format); it uses its own `dprint lsp`, runs at most 8 events at once (git + dprint), queues up to 1000 more and drops beyond that with a stderr line; skips files above 1 MiB; at most 8 `dprint lsp` children live, the least recently used is disposed; `formatPre` (config gate first, then the gitignore check (`git check-ignore`; Write/Edit skip ignored files): `{}` and no `dprint lsp` spawn unless `findConfig` finds a config in the
   effective cwd or an ancestor (never above the nearest dir holding `.git`: repo root or worktree root); Write: `formatting`; Edit: whole-file
   `formatting` of the edited text), `lineDiff` and `trimToEdit` (keep only hunks touching the edit, widen
-  `old_string` until it is unique, at most 1000 widening steps; accepted only if the trimmed file formats like the intended edit, skipped when the trim reproduces dprint's output, else one extra
+  `old_string` until it is unique, at most 1000 single-line widening steps, then one jump to the widest span; accepted only if the trimmed file formats like the intended edit, skipped when the trim reproduces dprint's output, else one extra
   whole-document `formatting`; CRLF files are trimmed on their LF view), one `DprintLsp` per cwd, per session/agent cwd overrides, and universal-format's
   path exclusions. Every failure returns `{}` (fail open), including a diff above the size guard.
 - `watch-paths.mjs`: `command` hook for SessionStart and CwdChanged (SessionStart `mcp_tool` hooks are skipped while

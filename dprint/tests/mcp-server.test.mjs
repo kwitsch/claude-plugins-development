@@ -16,7 +16,8 @@ import {
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { createInterface } from "node:readline";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import { DprintLsp } from "../plugin/mcp/lsp.mjs";
 
 const PLUGIN = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -515,21 +516,26 @@ test("crashing dprint -> {}, then a working dprint is respawned -> formatted", a
   assert.equal(out.hookSpecificOutput.updatedInput.content, "x\n");
 });
 
-test("lsp timeout -> later formats of that cwd fail fast for the cooldown", { timeout: 10_000 }, async () => {
+test("lsp timeout -> later formats of that document fail fast for the cooldown, other documents do not", { timeout: 10_000 }, async () => {
   stubDprint("hang");
-  const s = startServer({ env: { DPRINT_LSP_TIMEOUT_MS: "300" } });
-  const write = (f) =>
-    s.call({
-      cwd: repo,
-      tool_name: "Write",
-      tool_input: { file_path: path.join(repo, f), content: "x   \n" },
-    });
-  let t0 = Date.now();
-  assert.deepEqual(await write("h1.ts"), {});
-  assert.ok(Date.now() - t0 >= 300, "the first Write waits for the request timeout");
-  t0 = Date.now();
-  assert.deepEqual(await write("h2.ts"), {});
-  assert.ok(Date.now() - t0 < 250, "the second Write fails at once (cooldown)");
+  const oldPath = process.env.PATH;
+  process.env.PATH = bin; // findDprint resolves the stub
+  const lsp = new DprintLsp({ cwd: repo, timeoutMs: 300 });
+  try {
+    const u = (f) => pathToFileURL(path.join(repo, f)).href;
+    let t0 = Date.now();
+    await assert.rejects(lsp.format(u("h1.ts"), "x   \n"), /timed out/);
+    assert.ok(Date.now() - t0 >= 300, "the first format waits for the request timeout");
+    t0 = Date.now();
+    await assert.rejects(lsp.format(u("h1.ts"), "x   \n"), /cooling down/);
+    assert.ok(Date.now() - t0 < 250, "the same document fails at once (cooldown)");
+    t0 = Date.now();
+    await assert.rejects(lsp.format(u("h2.ts"), "x   \n"), /timed out/);
+    assert.ok(Date.now() - t0 >= 300, "another document is not cooling down");
+  } finally {
+    lsp.dispose();
+    process.env.PATH = oldPath;
+  }
 });
 
 test(".mcp.json key matches every hooks.json server id and each hook tool is listed", async () => {
