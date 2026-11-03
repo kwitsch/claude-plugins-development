@@ -26,7 +26,7 @@ const SERVER = path.join(PLUGIN, "mcp/server.mjs");
 
 // Stub `dprint lsp`: formatting and rangeFormatting answer one whole-document TextEdit with trailing
 // spaces stripped and exactly one final newline. argv mode "range-error" fails rangeFormatting with a
-// JSON-RPC error (exec-plugin case); "crash" exits at once.
+// JSON-RPC error (exec-plugin case); "hang" never answers textDocument/formatting; "crash" exits at once.
 const STUB_LSP = `
 const MODE = process.argv[2] ?? "ok";
 if (MODE === "crash") process.exit(1);
@@ -53,6 +53,8 @@ process.stdin.on("data", (chunk) => {
       docs.set(p.textDocument.uri, p.textDocument.text);
     } else if (msg.method === "textDocument/didClose") {
       docs.delete(p.textDocument.uri);
+    } else if (msg.method === "textDocument/formatting" && MODE === "hang") {
+      // never answer: the client's request timeout must fire
     } else if (msg.method === "textDocument/rangeFormatting" && MODE === "range-error") {
       send({ jsonrpc: "2.0", id: msg.id, error: { code: -32601, message: "range formatting not supported" } });
     } else if (msg.method === "textDocument/formatting" || msg.method === "textDocument/rangeFormatting") {
@@ -112,11 +114,11 @@ function stubDprint(mode = "ok", listCmd = "file-paths") {
   chmodSync(f, 0o755);
 }
 
-/** Spawn the built server; `opts.cwd` sets its process cwd (default: the test's). */
+/** Spawn the built server; `opts.cwd` sets its process cwd (default: the test's), `opts.env` adds env vars. */
 function startServer(opts = {}) {
   const child = spawn(path.join(bin, "node"), [SERVER], {
     cwd: opts.cwd,
-    env: { PATH: bin, HOME: home },
+    env: { PATH: bin, HOME: home, ...opts.env },
     stdio: ["pipe", "pipe", "pipe"],
   });
   servers.push(child);
@@ -511,6 +513,23 @@ test("crashing dprint -> {}, then a working dprint is respawned -> formatted", a
   stubDprint();
   const out = await s.call(args);
   assert.equal(out.hookSpecificOutput.updatedInput.content, "x\n");
+});
+
+test("lsp timeout -> later formats of that cwd fail fast for the cooldown", { timeout: 10_000 }, async () => {
+  stubDprint("hang");
+  const s = startServer({ env: { DPRINT_LSP_TIMEOUT_MS: "300" } });
+  const write = (f) =>
+    s.call({
+      cwd: repo,
+      tool_name: "Write",
+      tool_input: { file_path: path.join(repo, f), content: "x   \n" },
+    });
+  let t0 = Date.now();
+  assert.deepEqual(await write("h1.ts"), {});
+  assert.ok(Date.now() - t0 >= 300, "the first Write waits for the request timeout");
+  t0 = Date.now();
+  assert.deepEqual(await write("h2.ts"), {});
+  assert.ok(Date.now() - t0 < 250, "the second Write fails at once (cooldown)");
 });
 
 test(".mcp.json key matches every hooks.json server id and each hook tool is listed", async () => {

@@ -27,8 +27,15 @@ type TextEdit = {
   newText: string;
 };
 
-/** Per-request timeout; a request that exceeds it kills the child, the next format respawns it. */
-const REQUEST_TIMEOUT_MS = 30_000;
+/**
+ * Per-request timeout; a request that exceeds it kills the child, the next format respawns it.
+ *
+ * @remarks
+ * `DPRINT_LSP_TIMEOUT_MS` overrides it (tests); unset, empty, zero or non-numeric means 30 s.
+ */
+const REQUEST_TIMEOUT_MS = Number(process.env.DPRINT_LSP_TIMEOUT_MS) || 30_000;
+/** After a request timeout, formats of this client fail at once for this long (offline plugin host). */
+const COOLDOWN_MS = 60_000;
 /** Required by the LSP formatting requests; dprint takes its real settings from the project config. */
 const FORMAT_OPTIONS = { tabSize: 2, insertSpaces: true };
 
@@ -57,6 +64,9 @@ type Pending = {
   timer: NodeJS.Timeout;
 };
 
+/** `Date.now()` until which {@link DprintLsp.start} does not search for dprint again after a miss. */
+let noDprintUntil = 0;
+
 /** Client for one `dprint lsp` child rooted at one working directory. */
 export class DprintLsp {
   /** Working directory and `rootUri` of the child; decides which dprint config applies. */
@@ -73,6 +83,8 @@ export class DprintLsp {
   private readonly pending = new Map<number, Pending>();
   /** Tail of the format queue; every format waits for the previous one. */
   private queue: Promise<unknown> = Promise.resolve();
+  /** `Date.now()` of the last request timeout; 0 when none. */
+  private failedAt = 0;
 
   /**
    * Create a client; the child is spawned lazily on the first {@link DprintLsp.format}.
@@ -130,12 +142,18 @@ export class DprintLsp {
    * @param text - Document content.
    * @param range - Range to format, or `undefined` for the whole document.
    * @returns The formatted text, or `null` when there are no edits.
+   *
+   * @remarks
+   * Fails at once for {@link COOLDOWN_MS} after a request timeout.
    */
   private async formatNow(
     uri: string,
     text: string,
     range?: LspRange,
   ): Promise<string | null> {
+    if (Date.now() - this.failedAt < COOLDOWN_MS) {
+      throw new Error("dprint lsp: cooling down after a timeout");
+    }
     await this.start();
     this.notify("textDocument/didOpen", {
       textDocument: { uri, languageId: "", version: 1, text },
@@ -164,18 +182,25 @@ export class DprintLsp {
   /**
    * Spawn and initialize the child unless it is already running.
    *
-   * @returns Settles once the child answered `initialize`; rejects when dprint is missing or fails to start.
+   * @returns Settles once the child answered `initialize`; rejects when dprint is missing (not searched again
+   * for 30 s after a miss) or fails to start.
    */
   private start(): Promise<void> {
     if (this.ready) return this.ready;
+    if (Date.now() < noDprintUntil) return Promise.reject(new Error("dprint not found"));
     const bin = findDprint();
-    if (!bin) return Promise.reject(new Error("dprint not found"));
+    if (!bin) {
+      noDprintUntil = Date.now() + 30_000; // a dprint installed mid-session is picked up within 30 s
+      return Promise.reject(new Error("dprint not found"));
+    }
     const child = spawn(bin, ["lsp"], { cwd: this.cwd, stdio: "pipe" });
     this.child = child;
     this.buf = Buffer.alloc(0);
     child.stdin.on("error", () => {}); // EPIPE after a crash; the crash itself surfaces via exit/error
     child.stderr.on("data", (d: Buffer) => process.stderr.write(d));
-    child.stdout.on("data", (d: Buffer) => this.onData(d));
+    child.stdout.on("data", (d: Buffer) => {
+      if (this.child === child) this.onData(d); // a replaced child's late bytes must not corrupt the new buffer
+    });
     const dead = (err: Error) => {
       if (this.child !== child) return;
       this.child = null;
@@ -285,6 +310,7 @@ export class DprintLsp {
     return new Promise<T>((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pending.delete(id);
+        this.failedAt = Date.now();
         reject(new Error(`dprint lsp: ${method} timed out`));
         this.dispose(); // detach now, not on the async exit: the next queued format() must respawn
       }, REQUEST_TIMEOUT_MS);
