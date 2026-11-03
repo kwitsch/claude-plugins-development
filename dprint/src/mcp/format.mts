@@ -142,7 +142,7 @@ export function lineDiff(a: string[], b: string[]): Hunk[] {
  * @remarks
  * Keeps only the hunks of `diff(original, formatted)` that intersect or touch an edited line range, then
  * widens the kept span by common lines (alternating, upward first) until its original text occurs exactly
- * once in `original`.
+ * once in `original`. Gives up (`null`) after 1000 widening steps.
  *
  * @param original - File content before the edit (on disk).
  * @param formatted - Edited and formatted content.
@@ -177,7 +177,10 @@ export function trimToEdit(
   // common (LCS-matched) context available on each side, bounded by the neighbouring non-kept hunks
   const lo = hunks[first - 1]?.aEnd ?? 0;
   const hi = hunks[last + 1]?.aStart ?? a.length;
+  let steps = 0;
   for (let up = true;; up = !up) {
+    // shortcut: at most 1000 widening steps (realistic files need < 50); on highly repetitive files the Edit fails open unformatted; raise only with a faster uniqueness search
+    if (++steps > 1000) return null;
     const oldString = render(a, aA, aB);
     const i = original.indexOf(oldString);
     if (
