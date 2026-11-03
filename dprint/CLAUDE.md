@@ -28,7 +28,7 @@ Hook: `plugin/hooks/hooks.json` (hand-written) wires PreToolUse `Write|Edit` as 
 
 - `server.mjs`: MCP stdio loop (newline-delimited JSON-RPC), tools `format_pre`, `cwd_changed` (CwdChanged hook),
   `worktree_entered` and `worktree_exited` (PostToolUse EnterWorktree/ExitWorktree hooks), `file_written`
-  (PostToolUse Write|Edit) and `file_changed` (FileChanged).
+  (PostToolUse Write|Edit), `file_changed` (FileChanged), `bash_started`/`bash_finished` (PreToolUse/PostToolUse `Bash`) and `drain_notices` (PreToolUse `Edit|Write|Read|Bash|MultiEdit`, UserPromptSubmit).
 - `lsp.mjs`: `dprint lsp` client (one lazily spawned child per cwd, Content-Length JSON-RPC, 30 s request timeout
   (constructor option `timeoutMs`, tests only), a 60 s cooldown after a request timeout during which formats of
   that document fail at once, a 30 s per-client pause before `findDprint` is retried after dprint was not found, stdout of a
@@ -43,7 +43,8 @@ Hook: `plugin/hooks/hooks.json` (hand-written) wires PreToolUse `Write|Edit` as 
   `formatting` of the edited text), `lineDiff` and `trimToEdit` (keep only hunks touching the edit, widen
   `old_string` until it is unique, at most 1000 single-line widening steps, then one jump to the widest span; accepted only if the trimmed file formats like the intended edit, skipped when the trim reproduces dprint's output, else one extra
   whole-document `formatting`; CRLF files are trimmed on their LF view), one `DprintLsp` per cwd, per session/agent cwd overrides, and universal-format's
-  path exclusions. Every failure returns `{}` (fail open), including a diff above the size guard.
+  path exclusions. `formatOnDisk` is the shared core of `fileChanged` (queues the file for `drainNotices`) and `bashFinished` (reports directly; it formats every cached watch-list file with mtime > `bash_started` − 1 s, so the Bash result is not stale; the digest in `written` makes the later FileChanged a no-op); all three keyed by `overrideKey`. Every failure returns `{}` (fail open), including a diff above the size guard.
+- `watch-list.mjs`: `dprintFilePaths` (`dprint file-paths` + `WATCH_LIMIT`), shared by `watch-paths.mjs` and `bashFinished`; imports neither `server.mjs` nor `format.mjs`.
 - `watch-paths.mjs`: `command` hook for SessionStart and CwdChanged (SessionStart `mcp_tool` hooks are skipped while
   the server connects). Runs `dprint file-paths` (fallback `output-file-paths` for dprint 0.50-0.54) in the cwd,
   filters through `inScope`, caps at `WATCH_LIMIT` (5000; above it nothing is watched) and prints
@@ -62,7 +63,7 @@ its hooks (expected: the check is detached with `.catch`).
 `plugin/mcp/*.mjs`, `plugin/hooks/notice.mjs` and `plugin/.claude-plugin/plugin.json` are **build output**
 (`pnpm build`) of
 `src/skills/dprint/{check-dprint,config-names,find-config,find-dprint,run-dprint,scan-plugins}.mts`,
-`src/mcp/{server,lsp,format,watch-paths}.mts`, `src/hooks/notice.mts` and `plugin.json`. Do not edit them here.
+`src/mcp/{server,lsp,format,watch-list,watch-paths}.mts`, `src/hooks/notice.mts` and `plugin.json`. Do not edit them here.
 
 ## Sources vs. build output
 

@@ -35,6 +35,26 @@ export interface FormatPreInput {
   };
 }
 
+/** Arguments of MCP tool `bash_started` (PreToolUse `Bash` hook). */
+export interface BashStartedInput {
+  /** Template: `${agent_id}`. */
+  agent_id?: string;
+  /** Template: `${session_id}`. */
+  session_id?: string;
+}
+
+/** Arguments of MCP tool `drain_notices` (PreToolUse `Edit|Write|Read|Bash|MultiEdit` hook). */
+export interface DrainNoticesInput {
+  /** Template: `${hook_event_name}`. */
+  hook_event_name?: string;
+  /** Template: `${cwd}`. */
+  cwd?: string;
+  /** Template: `${agent_id}`. */
+  agent_id?: string;
+  /** Template: `${session_id}`. */
+  session_id?: string;
+}
+
 /** Arguments of MCP tool `worktree_entered` (PostToolUse `EnterWorktree` hook). */
 export interface WorktreeEnteredInput {
   /** Template: `${agent_id}`. */
@@ -75,6 +95,18 @@ export interface FileWrittenInput {
   };
 }
 
+/** Arguments of MCP tool `bash_finished` (PostToolUse `Bash` hook). */
+export interface BashFinishedInput {
+  /** Template: `${cwd}`. */
+  cwd?: string;
+  /** Template: `${agent_id}`. */
+  agent_id?: string;
+  /** Template: `${session_id}`. */
+  session_id?: string;
+  /** Template: `${scratchpad_dir}`. */
+  scratchpad_dir?: string;
+}
+
 /** Arguments of MCP tool `cwd_changed` (CwdChanged hook). */
 export interface CwdChangedInput {
   /** Template: `${agent_id}`. */
@@ -105,12 +137,18 @@ export interface FileChangedInput {
 export interface HookInputs {
   /** {@link FormatPreInput} */
   format_pre: FormatPreInput;
+  /** {@link BashStartedInput} */
+  bash_started: BashStartedInput;
+  /** {@link DrainNoticesInput} */
+  drain_notices: DrainNoticesInput;
   /** {@link WorktreeEnteredInput} */
   worktree_entered: WorktreeEnteredInput;
   /** {@link WorktreeExitedInput} */
   worktree_exited: WorktreeExitedInput;
   /** {@link FileWrittenInput} */
   file_written: FileWrittenInput;
+  /** {@link BashFinishedInput} */
+  bash_finished: BashFinishedInput;
   /** {@link CwdChangedInput} */
   cwd_changed: CwdChangedInput;
   /** {@link FileChangedInput} */

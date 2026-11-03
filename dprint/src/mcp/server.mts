@@ -8,14 +8,16 @@
  * `format_pre` (PreToolUse `Write|Edit`) formats via `dprint lsp` and returns `updatedInput`;
  * `cwd_changed` (CwdChanged), `worktree_entered` and `worktree_exited` (PostToolUse `EnterWorktree`/`ExitWorktree`)
  * track the session's cwd; `file_written` (PostToolUse `Write|Edit`) records Edit/Write results and
- * `file_changed` (FileChanged) formats watched files changed by other tools on disk.
+ * `file_changed` (FileChanged) formats watched files changed by other tools on disk; `bash_started`/`bash_finished`
+ * (PreToolUse/PostToolUse `Bash`) format what a Bash call changed before the model reads its output, and
+ * `drain_notices` (PreToolUse, UserPromptSubmit) tells the model about reformats nobody announced yet.
  *
  * @packageDocumentation
  */
 import { readFileSync } from "node:fs";
 import process from "node:process";
 import readline from "node:readline";
-import { cwdChanged, disposeLsp, fileChanged, fileWritten, formatPre, type HookResult, worktreeEntered, worktreeExited } from "./format.mjs";
+import { bashFinished, bashStarted, cwdChanged, disposeLsp, drainNotices, fileChanged, fileWritten, formatPre, type HookResult, worktreeEntered, worktreeExited } from "./format.mjs";
 import type { HookInputs } from "./hook-inputs.mjs";
 
 /** Server name reported on `initialize`; keep aligned with the `.mcp.json` key. */
@@ -106,6 +108,18 @@ function startServer(): void {
     file_changed: {
       description: "FileChanged: format a watched file inside the cwd on disk after a change not made by Edit/Write.",
       handler: fileChanged,
+    },
+    bash_started: {
+      description: "PreToolUse Bash: remember when the Bash call started, for bash_finished.",
+      handler: bashStarted,
+    },
+    bash_finished: {
+      description: "PostToolUse Bash: format the watched files the Bash call changed and tell the model its tool output predates the formatting.",
+      handler: bashFinished,
+    },
+    drain_notices: {
+      description: "PreToolUse and UserPromptSubmit: tell the model once about files file_changed reformatted since the last notice.",
+      handler: drainNotices,
     },
   };
   const send = (msg: unknown) => process.stdout.write(JSON.stringify(msg) + "\n");
