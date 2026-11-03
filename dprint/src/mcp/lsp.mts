@@ -149,7 +149,12 @@ export class DprintLsp {
     if (now - (this.failedAt.get(uri) ?? 0) < COOLDOWN_MS) {
       throw new Error("dprint lsp: cooling down after a timeout");
     }
-    await this.start();
+    try {
+      await this.start();
+    } catch (e) {
+      this.noteTimeout(uri, e, now); // an initialize timeout starts the cooldown too
+      throw e;
+    }
     this.notify("textDocument/didOpen", {
       textDocument: { uri, languageId: "", version: 1, text },
     });
@@ -160,14 +165,24 @@ export class DprintLsp {
       );
       return edits && edits.length > 0 ? applyTextEdits(text, edits) : null;
     } catch (e) {
-      if (e instanceof TimeoutError) {
-        for (const [u, t] of this.failedAt) if (now - t >= COOLDOWN_MS) this.failedAt.delete(u);
-        this.failedAt.set(uri, Date.now());
-      }
+      this.noteTimeout(uri, e, now);
       throw e;
     } finally {
       this.notify("textDocument/didClose", { textDocument: { uri } });
     }
+  }
+
+  /**
+   * Start the cooldown of a document after a request timeout; other errors are ignored.
+   *
+   * @param uri - `file://` URI of the document whose request failed.
+   * @param e - The error the request rejected with.
+   * @param now - `Date.now()` at the start of the format, for pruning expired entries.
+   */
+  private noteTimeout(uri: string, e: unknown, now: number): void {
+    if (!(e instanceof TimeoutError)) return;
+    for (const [u, t] of this.failedAt) if (now - t >= COOLDOWN_MS) this.failedAt.delete(u);
+    this.failedAt.set(uri, Date.now());
   }
 
   /**
