@@ -22,8 +22,8 @@ import { dprintFilePaths } from "./watch-list.mjs";
  * @param scratchpadDir - Session scratchpad (excluded), if any.
  * @returns Absolute paths as dprint printed them, see {@link dprintFilePaths}, minus out-of-scope ones.
  */
-function watchList(cwd: string, scratchpadDir: string | undefined): string[] {
-  const lines = dprintFilePaths(cwd);
+async function watchList(cwd: string, scratchpadDir: string | undefined): Promise<string[]> {
+  const lines = await dprintFilePaths(cwd);
   const sc = scopeOf({ cwd, scratchpad_dir: scratchpadDir });
   if (sc === null) return [];
   return lines.filter((p) => inScope(sc, p) !== null);
@@ -32,7 +32,7 @@ function watchList(cwd: string, scratchpadDir: string | undefined): string[] {
 /**
  * Read the hook event from stdin and print the watch list; fails open (stderr line, empty stdout, exit 0).
  */
-function main(): void {
+async function main(): Promise<void> {
   try {
     const input = JSON.parse(readFileSync(0, "utf8")) as {
       hook_event_name?: string;
@@ -42,7 +42,7 @@ function main(): void {
     };
     const ev = input.hook_event_name;
     if (ev !== "SessionStart" && ev !== "CwdChanged") return;
-    const watchPaths = watchList(
+    const watchPaths = await watchList(
       input.new_cwd || input.cwd || "",
       input.scratchpad_dir,
     );
@@ -58,4 +58,4 @@ function main(): void {
   }
 }
 
-main();
+await main();

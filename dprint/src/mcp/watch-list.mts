@@ -7,7 +7,8 @@
  *
  * @packageDocumentation
  */
-import { execFileSync } from "node:child_process";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import { findConfig } from "../skills/dprint/find-config.mjs";
 import { findDprint } from "../skills/dprint/find-dprint.mjs";
 
@@ -25,27 +26,27 @@ export const WATCH_LIMIT = 5000;
  *
  * @param cwd - Working directory.
  * @returns Absolute paths as dprint printed them; `[]` without a cwd, a dprint config, a dprint binary, or above
- * {@link WATCH_LIMIT}. Throws when dprint fails.
+ * {@link WATCH_LIMIT}. Rejects when dprint fails.
  */
-export function dprintFilePaths(cwd: string): string[] {
+export async function dprintFilePaths(cwd: string): Promise<string[]> {
   if (!cwd || findConfig(cwd) === null) return [];
   const bin = findDprint();
   if (bin === null) return [];
-  const run = (sub: string): string =>
-    execFileSync(bin, [sub], {
+  // async: the MCP server must keep answering other hooks while dprint lists the files
+  const run = async (sub: string): Promise<string> =>
+    (await promisify(execFile)(bin, [sub], {
       cwd,
       encoding: "utf8",
-      stdio: ["ignore", "pipe", "pipe"],
       timeout: 10_000,
       maxBuffer: 16 * 1024 * 1024,
-    });
+    })).stdout;
   let out: string;
   try {
-    out = run("file-paths");
+    out = await run("file-paths");
   } catch (e) {
     // dprint 0.50-0.54 call it output-file-paths (renamed in 0.55.0)
     if (!/unrecognized subcommand/.test((e as { stderr?: string }).stderr ?? "")) throw e;
-    out = run("output-file-paths");
+    out = await run("output-file-paths");
   }
   const lines = out.split("\n").filter(Boolean);
   if (lines.length > WATCH_LIMIT) {

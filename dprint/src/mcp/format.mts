@@ -726,12 +726,12 @@ export function bashStarted(args: BashStartedInput = {}): HookResult {
  * @param sc - Scope of the hook call.
  * @returns The files; `[]` (also cached, so a failing dprint cannot stall every Bash call) on a dprint failure.
  */
-function cachedWatchList(sc: Scope): Array<{ fp: string; real: string }> {
+async function cachedWatchList(sc: Scope): Promise<Array<{ fp: string; real: string }>> {
   let list = watchCache.get(sc.root);
   if (!list) {
     list = [];
     try {
-      for (const p of dprintFilePaths(sc.root)) {
+      for (const p of await dprintFilePaths(sc.root)) {
         const s = inScope(sc, p);
         if (s) list.push(s);
       }
@@ -763,7 +763,7 @@ export async function bashFinished(args: BashFinishedInput = {}): Promise<HookRe
     bashStart.delete(k);
     const sc = scopeOf(args);
     if (since === undefined || !sc || findConfig(sc.root) === null) return {};
-    const touched = cachedWatchList(sc).filter((f) => {
+    const touched = (await cachedWatchList(sc)).filter((f) => {
       try {
         return statSync(f.fp).mtimeMs > since - 1000;
       } catch {
