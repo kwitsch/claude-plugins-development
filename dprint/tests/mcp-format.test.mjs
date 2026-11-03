@@ -284,3 +284,15 @@ test("applyTextEdits: a position past the end of a CRLF line clamps before the \
     "a\r\nb\r\n",
   );
 });
+
+test("trimToEdit: a highly repetitive file gives up after the widening step cap instead of blocking", () => {
+  // 10 identical 2000-line blocks: no span under ~18000 lines is unique
+  const block = Array.from({ length: 2000 }, (_, i) => `l${i}\n`).join("");
+  const O = block.repeat(10);
+  const L = O.split("\n");
+  L[11_000] = "changed";
+  const F = L.join("\n");
+  const t0 = Date.now();
+  assert.equal(trimToEdit(O, F, [[11_000, 11_000]]), null);
+  assert.ok(Date.now() - t0 < 1000, `took ${Date.now() - t0} ms`);
+});
