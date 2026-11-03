@@ -31,11 +31,13 @@ type TextEdit = {
  * Per-request timeout; a request that exceeds it kills the child, the next format respawns it.
  *
  * @remarks
- * `DPRINT_LSP_TIMEOUT_MS` overrides it (tests); unset, empty, zero or non-numeric means 30 s.
+ * `DPRINT_LSP_TIMEOUT_MS` overrides it (tests); unset, empty, zero, negative or non-numeric means 30 s.
  */
-const REQUEST_TIMEOUT_MS = Number(process.env.DPRINT_LSP_TIMEOUT_MS) || 30_000;
+const REQUEST_TIMEOUT_MS = Number(process.env.DPRINT_LSP_TIMEOUT_MS) > 0 ? Number(process.env.DPRINT_LSP_TIMEOUT_MS) : 30_000;
 /** After a request timeout, formats of this client fail at once for this long (offline plugin host). */
 const COOLDOWN_MS = 60_000;
+/** After dprint was not found, {@link DprintLsp.start} does not search again for this long (a dprint installed mid-session is picked up). */
+const NOT_FOUND_RETRY_MS = 30_000;
 /** Required by the LSP formatting requests; dprint takes its real settings from the project config. */
 const FORMAT_OPTIONS = { tabSize: 2, insertSpaces: true };
 
@@ -173,7 +175,7 @@ export class DprintLsp {
     if (Date.now() < noDprintUntil) return Promise.reject(new Error("dprint not found"));
     const bin = findDprint();
     if (!bin) {
-      noDprintUntil = Date.now() + 30_000; // a dprint installed mid-session is picked up within 30 s
+      noDprintUntil = Date.now() + NOT_FOUND_RETRY_MS;
       return Promise.reject(new Error("dprint not found"));
     }
     const child = spawn(bin, ["lsp"], { cwd: this.cwd, stdio: "pipe" });
