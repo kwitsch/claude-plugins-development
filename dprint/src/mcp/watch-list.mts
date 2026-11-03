@@ -50,7 +50,7 @@ export function dprintFilePaths(cwd: string): string[] {
   const lines = out.split("\n").filter(Boolean);
   if (lines.length > WATCH_LIMIT) {
     process.stderr.write(
-      `[dprint-hooks] watch-paths: ${lines.length} files above ${WATCH_LIMIT}, FileChanged formatting off\n`,
+      `[dprint-hooks] file list: ${lines.length} files above ${WATCH_LIMIT}, FileChanged and Bash formatting off\n`,
     );
     return [];
   }

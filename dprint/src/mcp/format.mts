@@ -711,7 +711,15 @@ export async function bashFinished(args: BashFinishedInput = {}): Promise<HookRe
     const sc = scopeOf(args);
     if (since === undefined || !sc || findConfig(sc.root) === null) return {};
     let list = watchCache.get(sc.root);
-    if (!list) watchCache.set(sc.root, list = dprintFilePaths(sc.root));
+    if (!list) {
+      try {
+        list = dprintFilePaths(sc.root);
+      } catch (e) {
+        list = []; // cached: a failing dprint must not stall every later Bash call
+        process.stderr.write(`[dprint-hooks] bash_finished watch list failed: ${e instanceof Error ? e.message : String(e)}\n`);
+      }
+      watchCache.set(sc.root, list);
+    }
     const touched = list.filter((p) => {
       try {
         return statSync(p).mtimeMs > since - 1000;
@@ -724,6 +732,9 @@ export async function bashFinished(args: BashFinishedInput = {}): Promise<HookRe
       const s = inScope(sc, p);
       if (s && (await formatOnDisk(sc, s))) formatted.push(s.fp);
     }));
+    // a FileChanged that fired mid-Bash formatted first and queued its notice: report it here, next to the Bash result
+    for (const f of notices.get(k) ?? []) if (!formatted.includes(f)) formatted.push(f);
+    notices.delete(k);
     return formatted.length ? notice(args, "PostToolUse", formatted.sort()) : {};
   } catch (e) {
     process.stderr.write(

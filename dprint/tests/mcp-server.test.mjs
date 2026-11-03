@@ -906,3 +906,15 @@ test("drain_notices reports a file_changed reformat once, to its own session/age
   assert.match(r.hookSpecificOutput.additionalContext, /: a\.ts\./);
   assert.deepEqual(await drain(SESSION), {});
 });
+
+test("bash_finished also reports a reformat file_changed already made mid-Bash", async () => {
+  stubDprint();
+  const s = startServer();
+  const a = path.join(repo, "a.ts");
+  await s.tool("bash_started", SESSION);
+  writeFileSync(a, "x  \n");
+  await s.tool("file_changed", { cwd: repo, file_path: a, event: "change", ...SESSION });
+  const r = await s.tool("bash_finished", { cwd: repo, ...SESSION });
+  assert.match(r.hookSpecificOutput.additionalContext, /: a\.ts\./);
+  assert.deepEqual(await s.tool("drain_notices", { hook_event_name: "PreToolUse", cwd: repo, ...SESSION }), {});
+});
