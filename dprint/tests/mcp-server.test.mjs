@@ -25,8 +25,8 @@ const PLUGIN = path.resolve(
 const SERVER = path.join(PLUGIN, "mcp/server.mjs");
 
 // Stub `dprint lsp`: formatting and rangeFormatting answer one whole-document TextEdit with trailing
-// spaces stripped and exactly one final newline. argv mode "range-error" fails rangeFormatting with a
-// JSON-RPC error (exec-plugin case); "hang" never answers textDocument/formatting; "crash" exits at once.
+// spaces stripped and exactly one final newline. argv mode "range-null" answers rangeFormatting with
+// `result: null` (like dprint-plugin-yaml); "hang" never answers textDocument/formatting; "crash" exits at once.
 const STUB_LSP = `
 const MODE = process.argv[2] ?? "ok";
 if (MODE === "crash") process.exit(1);
@@ -55,8 +55,8 @@ process.stdin.on("data", (chunk) => {
       docs.delete(p.textDocument.uri);
     } else if (msg.method === "textDocument/formatting" && MODE === "hang") {
       // never answer: the client's request timeout must fire
-    } else if (msg.method === "textDocument/rangeFormatting" && MODE === "range-error") {
-      send({ jsonrpc: "2.0", id: msg.id, error: { code: -32601, message: "range formatting not supported" } });
+    } else if (msg.method === "textDocument/rangeFormatting" && MODE === "range-null") {
+      send({ jsonrpc: "2.0", id: msg.id, result: null });
     } else if (msg.method === "textDocument/formatting" || msg.method === "textDocument/rangeFormatting") {
       const text = docs.get(p.textDocument.uri);
       const end = { line: text.split("\\n").length, character: 0 };
@@ -342,8 +342,8 @@ test("Edit: whole-file reformat by the stub -> far hunks dropped", async () => {
   assert.ok(O.replace(u.old_string, () => u.new_string).includes("l1   \n"));
 });
 
-test("rangeFormatting JSON-RPC error -> formatted via whole-file fallback", async () => {
-  stubDprint("range-error");
+test("rangeFormatting answering null (yaml plugin) -> Edit still formatted", async () => {
+  stubDprint("range-null");
   const s = startServer();
   const file = path.join(repo, "d.ts");
   writeFileSync(file, lines(10).join("\n") + "\n");
@@ -361,7 +361,7 @@ test("rangeFormatting JSON-RPC error -> formatted via whole-file fallback", asyn
 });
 
 test("Edit whose trim would drop the deleted repeated line -> {} (never loses the edit)", async () => {
-  stubDprint("range-error");
+  stubDprint("range-null");
   const s = startServer();
   const file = path.join(repo, "g.ts");
   writeFileSync(file, "a=1  \nx\nx\nx\nb=2  \n");

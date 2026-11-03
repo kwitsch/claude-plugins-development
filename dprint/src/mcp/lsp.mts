@@ -96,17 +96,15 @@ export class DprintLsp {
   }
 
   /**
-   * Format a document, or a range of it, as dprint would format the file at `uri`.
+   * Format a document as dprint would format the file at `uri`.
    *
    * @param uri - `file://` URI of the document; dprint picks the plugin by its extension.
    * @param text - Document content (sent via `didOpen`, nothing is read from disk).
-   * @param range - Range to format; whole document when omitted. A plugin without range support falls back
-   * to formatting the whole document.
    * @returns The formatted text, or `null` when dprint returns no edits (already formatted).
-   * Rejects on any failure: dprint missing, crash, timeout or error response.
+   * Rejects on any failure: dprint missing, crash, timeout, cooldown or error response.
    */
-  format(uri: string, text: string, range?: LspRange): Promise<string | null> {
-    const run = this.queue.then(() => this.formatNow(uri, text, range));
+  format(uri: string, text: string): Promise<string | null> {
+    const run = this.queue.then(() => this.formatNow(uri, text));
     this.queue = run.catch(() => {}); // a failed call must not block the next one
     return run;
   }
@@ -140,17 +138,12 @@ export class DprintLsp {
    *
    * @param uri - `file://` URI of the document.
    * @param text - Document content.
-   * @param range - Range to format, or `undefined` for the whole document.
    * @returns The formatted text, or `null` when there are no edits.
    *
    * @remarks
    * Fails at once for {@link COOLDOWN_MS} after a request timeout.
    */
-  private async formatNow(
-    uri: string,
-    text: string,
-    range?: LspRange,
-  ): Promise<string | null> {
+  private async formatNow(uri: string, text: string): Promise<string | null> {
     if (Date.now() - this.failedAt < COOLDOWN_MS) {
       throw new Error("dprint lsp: cooling down after a timeout");
     }
@@ -159,20 +152,10 @@ export class DprintLsp {
       textDocument: { uri, languageId: "", version: 1, text },
     });
     try {
-      const whole = () =>
-        this.request<TextEdit[] | null>("textDocument/formatting", {
-          textDocument: { uri },
-          options: FORMAT_OPTIONS,
-        });
-      const edits = range
-        ? await this.request<TextEdit[] | null>(
-          "textDocument/rangeFormatting",
-          { textDocument: { uri }, range, options: FORMAT_OPTIONS },
-        ).catch((e: unknown) => {
-          if (!(e instanceof RpcError)) throw e;
-          return whole(); // plugin without range support: one retry on the whole document
-        })
-        : await whole();
+      const edits = await this.request<TextEdit[] | null>(
+        "textDocument/formatting",
+        { textDocument: { uri }, options: FORMAT_OPTIONS },
+      );
       return edits && edits.length > 0 ? applyTextEdits(text, edits) : null;
     } finally {
       this.notify("textDocument/didClose", { textDocument: { uri } });
