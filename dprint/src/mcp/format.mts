@@ -16,7 +16,7 @@ import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 import { findConfig } from "../skills/dprint/find-config.mjs";
 import type { CwdChangedInput, FileChangedInput, FileWrittenInput, FormatPreInput, WorktreeEnteredInput, WorktreeExitedInput } from "./hook-inputs.mjs";
-import { DprintLsp, type LspRange } from "./lsp.mjs";
+import { DprintLsp } from "./lsp.mjs";
 
 /** Hook output: empty (`{}`) to let the tool call through unchanged, else the rewritten tool input. */
 export type HookResult = {
@@ -569,22 +569,22 @@ export async function fileChanged(
 }
 
 /**
- * Zero-based line of a character offset, without copying the prefix.
+ * Line counter for ascending offsets: one forward scan over the document for all calls.
  *
  * @param text - Document.
- * @param idx - Character offset in `text`.
- * @returns Number of `\n` before `idx`.
+ * @returns Function mapping a character offset to its zero-based line (number of `\n` before it); offsets must
+ * not decrease between calls.
  */
-const lineOf = (text: string, idx: number): number => {
+const lineCursor = (text: string): (idx: number) => number => {
   let n = 0;
-  for (
-    let i = text.indexOf("\n");
-    i !== -1 && i < idx;
-    i = text.indexOf("\n", i + 1)
-  ) {
-    n++;
-  }
-  return n;
+  let nl = text.indexOf("\n");
+  return (idx) => {
+    while (nl !== -1 && nl < idx) {
+      n++;
+      nl = text.indexOf("\n", nl + 1);
+    }
+    return n;
+  };
 };
 
 /**
@@ -618,9 +618,9 @@ function done(updatedInput: Record<string, unknown>, fp: string): HookResult {
  * PreToolUse `Write|Edit` hook: format the write or edit via `dprint lsp` before it lands.
  *
  * @remarks
- * Write: whole-file `formatting` of `content`. Edit: apply the edit in memory, `rangeFormatting` over the
- * edited lines, then {@link trimToEdit} keeps the result a minimal `old_string`/`new_string` pair, accepted
- * only when the trimmed result formats (whole document) exactly like the intended edit. Only files
+ * Write: whole-file `formatting` of `content`. Edit: apply the edit in memory, whole-document `formatting` of
+ * the edited text, then {@link trimToEdit} keeps the result a minimal `old_string`/`new_string` pair, accepted
+ * when it reproduces dprint's output, or else formats exactly like it (one extra whole-document format). Only files
  * {@link inScope} of {@link scopeOf} are formatted: real path (symlinks resolved, dangling links rejected)
  * inside the effective cwd, not an {@link isExcludedPath} path, not gitignored ({@link isGitIgnored}) and not
  * inside the session scratchpad; without
@@ -677,28 +677,12 @@ export async function formatPre(
       ) {
         occ.push(i);
       }
-      const editLines = occ.map((i): [number, number] => [
-        lineOf(O, i),
-        lineOf(O, i + oldStr.length - 1),
-      ]);
-
-      // full lines of M from the first replacement to the last inserted char (insertion offset if new is empty)
-      const lastStart = occ[occ.length - 1]
-        + (occ.length - 1) * (newStr.length - oldStr.length);
-      const endLine = lineOf(
-        M,
-        newStr ? lastStart + newStr.length - 1 : lastStart,
-      );
-      const mLines = M.split("\n");
-      const range: LspRange = {
-        start: { line: lineOf(M, occ[0]), character: 0 },
-        end: endLine + 1 < mLines.length
-          ? { line: endLine + 1, character: 0 }
-          : { line: endLine, character: mLines[endLine].length },
-      };
+      // occ is ascending and non-overlapping and oldStr is non-empty, so the cursor offsets never decrease
+      const lineAt = lineCursor(O);
+      const editLines = occ.map((i): [number, number] => [lineAt(i), lineAt(i + oldStr.length - 1)]);
 
       const lsp = client(root);
-      const F = await lsp.format(uri, M, range);
+      const F = await lsp.format(uri, M);
       const out = changed(F, M);
       if (out === null) return {};
       const r = trimToEdit(O, out, editLines);
@@ -706,11 +690,8 @@ export async function formatPre(
       // the line diff may align part of the edit (or a moved line) into a dropped hunk; a faithful trim formats
       // exactly like the intended edit, anything else would lose or duplicate content
       const R = O.replace(r.oldString, () => r.newString);
-      if (
-        ((await lsp.format(uri, M)) ?? M) !== ((await lsp.format(uri, R)) ?? R)
-      ) {
-        return {};
-      }
+      // out is format(M) (non-null here); R === out is a lossless trim and needs no extra formats
+      if (R !== out && out !== ((await lsp.format(uri, R)) ?? R)) return {};
       return done(
         {
           file_path: fp,
