@@ -510,6 +510,29 @@ export function fileWritten(args: FileWrittenInput = {}): HookResult {
 }
 
 /**
+ * Take a FileChanged slot: a burst (codegen, formatter run) waits in arrival order; only a backlog beyond
+ * {@link MAX_WAITING_CHANGES} is dropped.
+ *
+ * @param fp - File path, for the drop message.
+ * @returns `true` when a slot is held (pair with {@link releaseChangeSlot}), `false` when the event was dropped.
+ */
+async function acquireChangeSlot(fp: string): Promise<boolean> {
+  if (activeChanges < MAX_ACTIVE_CHANGES) activeChanges++;
+  else if (waitingChanges.length >= MAX_WAITING_CHANGES) {
+    process.stderr.write(`[dprint-hooks] file_changed dropped (${MAX_WAITING_CHANGES} waiting): ${fp}\n`);
+    return false;
+  } else await new Promise<void>((wake) => waitingChanges.push(wake)); // the slot is handed over, not re-counted
+  return true;
+}
+
+/** Give back a FileChanged slot: hand it to the oldest waiting event, else free it. */
+function releaseChangeSlot(): void {
+  const next = waitingChanges.shift();
+  if (next) next();
+  else activeChanges--;
+}
+
+/**
  * FileChanged hook: format a watched file inside the cwd on disk after a change not made by Edit/Write.
  *
  * @remarks
@@ -545,12 +568,7 @@ export async function fileChanged(
     // CRLF files are formatted on their LF view (as formatPre's Edit does) and written back with CRLF; a lone "\r" fails open
     const lf = text.replaceAll("\r\n", "\n");
     if (lf.includes("\r")) return {};
-    // a burst (codegen, formatter run) waits for a slot in arrival order; only a backlog beyond the cap is dropped
-    if (activeChanges < MAX_ACTIVE_CHANGES) activeChanges++;
-    else if (waitingChanges.length >= MAX_WAITING_CHANGES) {
-      process.stderr.write(`[dprint-hooks] file_changed dropped (${MAX_WAITING_CHANGES} waiting): ${s.fp}\n`);
-      return {};
-    } else await new Promise<void>((wake) => waitingChanges.push(wake)); // the slot is handed over, not re-counted
+    if (!(await acquireChangeSlot(s.fp))) return {};
     try {
       // user decision: gitignored files (`!!`) and tracked files equal to the index (empty output) are left alone;
       // one spawn answers both. --untracked-files=normal is required: under status.showUntrackedFiles=no git
@@ -581,9 +599,7 @@ export async function fileChanged(
       written.set(s.real, digest(final)); // after the write: a failed write records nothing
       return {};
     } finally {
-      const next = waitingChanges.shift();
-      if (next) next();
-      else activeChanges--;
+      releaseChangeSlot();
     }
   } catch (e) {
     process.stderr.write(
