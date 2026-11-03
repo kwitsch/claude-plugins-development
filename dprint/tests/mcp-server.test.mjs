@@ -685,6 +685,31 @@ test("file_written records the Edit/Write result: file_changed leaves it alone, 
   assert.equal(readFileSync(b, "utf8"), "y\n");
 });
 
+test("60 concurrent file_changed events are all formatted", async () => {
+  stubDprint();
+  const s = startServer();
+  const files = Array.from({ length: 60 }, (_, i) => path.join(repo, `f${i}.ts`));
+  for (const f of files) writeFileSync(f, "x  \n");
+  const res = await Promise.all(
+    files.map((f) => s.tool("file_changed", { cwd: repo, file_path: f, event: "change" })),
+  );
+  for (const r of res) assert.deepEqual(r, {});
+  for (const f of files) assert.equal(readFileSync(f, "utf8"), "x\n", f);
+});
+
+test("file_changed skips files above 1 MiB", async () => {
+  stubDprint();
+  const s = startServer();
+  const big = path.join(repo, "big.ts");
+  const content = "x" + " ".repeat(1024 * 1024 - 1) + "\n"; // 1024*1024 + 1 bytes, trailing spaces
+  writeFileSync(big, content);
+  assert.deepEqual(
+    await s.tool("file_changed", { cwd: repo, file_path: big, event: "change" }),
+    {},
+  );
+  assert.equal(readFileSync(big, "utf8"), content);
+});
+
 test("file_changed leaves a file alone that is unchanged against the git index", async (t) => {
   const git = spawnSync("which", ["git"], { encoding: "utf8" }).stdout?.trim();
   if (!git) return t.skip("git not on PATH");
@@ -757,6 +782,14 @@ test("file_changed leaves a file alone that is unchanged against the git index",
     })).hookSpecificOutput.updatedInput.content,
     "z\n",
   );
+  // status.showUntrackedFiles=no must neither break the ignore check nor hide untracked files
+  g("config", "status.showUntrackedFiles", "no");
+  assert.deepEqual(await s.tool("file_changed", { ...ev, file_path: ig }), {});
+  assert.equal(readFileSync(ig, "utf8"), "z  \n");
+  const un = path.join(repo, "u.ts");
+  writeFileSync(un, "u  \n");
+  assert.deepEqual(await s.tool("file_changed", { ...ev, file_path: un }), {});
+  assert.equal(readFileSync(un, "utf8"), "u\n");
 });
 
 const WATCH = path.join(PLUGIN, "mcp/watch-paths.mjs");
