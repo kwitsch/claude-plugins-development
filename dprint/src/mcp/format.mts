@@ -281,17 +281,39 @@ const overrideKey = (args: {
  */
 const notices = new Map<string, Set<string>>();
 
+/**
+ * Queue a reformatted file for the next {@link drainNotices}.
+ *
+ * @param k - {@link overrideKey} of the session or subagent.
+ * @param fp - Absolute path.
+ */
+const queueNotice = (k: string, fp: string): void => {
+  notices.set(k, (notices.get(k) ?? new Set()).add(fp));
+};
+
+/**
+ * Take (and forget) the queued files of a session or subagent.
+ *
+ * @param k - {@link overrideKey} of the session or subagent.
+ * @returns The queued absolute paths; empty when none.
+ */
+const takeNotices = (k: string): Set<string> => {
+  const files = notices.get(k) ?? new Set<string>();
+  notices.delete(k);
+  return files;
+};
+
 /** Start time (ms) of the running Bash call per {@link overrideKey}, set by {@link bashStarted}. */
 const bashStart = new Map<string, number>();
 
 /**
- * Watch list per effective cwd, read lazily by {@link bashFinished}.
+ * In-scope watch list per effective cwd, read lazily by {@link cachedWatchList}.
  *
  * @remarks
  * shortcut: files created after the first read are missing until a cwd change clears the cache (the same
  * limit as the FileChanged watch list), upgrade with F24.
  */
-const watchCache = new Map<string, string[]>();
+const watchCache = new Map<string, Array<{ fp: string; real: string }>>();
 
 /**
  * Record a cwd override for the payload's session or subagent.
@@ -310,7 +332,7 @@ function setCwd(
     if (cwd) cwdOverrides.set(key, cwd);
     else cwdOverrides.delete(key);
   }
-  watchCache.clear(); // the new cwd's list is read on the next bash_finished
+  if (cwd) watchCache.delete(cwd); // entering a directory re-reads its list on the next bash_finished
   return {};
 }
 
@@ -486,6 +508,14 @@ const written = new Map<string, string>();
  */
 const digest = (text: string): string => createHash("sha256").update(text).digest("base64");
 
+/**
+ * Message of a caught value.
+ *
+ * @param e - Anything thrown.
+ * @returns `e.message` for an `Error`, else `String(e)`.
+ */
+const errText = (e: unknown): string => e instanceof Error ? e.message : String(e);
+
 /** Strict UTF-8 decoder: throws on invalid bytes. */
 const utf8 = new TextDecoder("utf-8", { fatal: true });
 
@@ -529,7 +559,7 @@ export function fileWritten(args: FileWrittenInput = {}): HookResult {
     }
   } catch (e) {
     process.stderr.write(
-      `[dprint-hooks] file_written failed open: ${e instanceof Error ? e.message : String(e)}\n`,
+      `[dprint-hooks] file_written failed open: ${errText(e)}\n`,
     );
   }
   return {};
@@ -578,7 +608,7 @@ function releaseChangeSlot(): void {
 async function formatOnDisk(sc: Scope, s: { fp: string; real: string }): Promise<boolean> {
   try {
     if (statSync(s.fp).size > MAX_CHANGED_BYTES) {
-      process.stderr.write(`[dprint-hooks] file_changed skipped (over ${MAX_CHANGED_BYTES} bytes): ${s.fp}\n`);
+      process.stderr.write(`[dprint-hooks] format skipped (over ${MAX_CHANGED_BYTES} bytes): ${s.fp}\n`);
       return false;
     }
     if (!(await acquireChangeSlot(s.fp))) return false;
@@ -623,7 +653,7 @@ async function formatOnDisk(sc: Scope, s: { fp: string; real: string }): Promise
     }
   } catch (e) {
     process.stderr.write(
-      `[dprint-hooks] file_changed failed open: ${e instanceof Error ? e.message : String(e)}\n`,
+      `[dprint-hooks] format_on_disk failed open: ${errText(e)}\n`,
     );
     return false;
   }
@@ -669,11 +699,11 @@ export async function fileChanged(
     if (!sc || !s || findConfig(sc.root) === null) return {};
     if (await formatOnDisk(sc, s)) {
       const k = overrideKey(args);
-      notices.set(k, (notices.get(k) ?? new Set()).add(s.fp));
+      queueNotice(k, s.fp);
     }
   } catch (e) {
     process.stderr.write(
-      `[dprint-hooks] file_changed failed open: ${e instanceof Error ? e.message : String(e)}\n`,
+      `[dprint-hooks] file_changed failed open: ${errText(e)}\n`,
     );
   }
   return {};
@@ -688,6 +718,29 @@ export async function fileChanged(
 export function bashStarted(args: BashStartedInput = {}): HookResult {
   bashStart.set(overrideKey(args), Date.now());
   return {};
+}
+
+/**
+ * The in-scope files dprint formats in a cwd, cached per root.
+ *
+ * @param sc - Scope of the hook call.
+ * @returns The files; `[]` (also cached, so a failing dprint cannot stall every Bash call) on a dprint failure.
+ */
+function cachedWatchList(sc: Scope): Array<{ fp: string; real: string }> {
+  let list = watchCache.get(sc.root);
+  if (!list) {
+    list = [];
+    try {
+      for (const p of dprintFilePaths(sc.root)) {
+        const s = inScope(sc, p);
+        if (s) list.push(s);
+      }
+    } catch (e) {
+      process.stderr.write(`[dprint-hooks] watch list failed: ${errText(e)}\n`);
+    }
+    watchCache.set(sc.root, list);
+  }
+  return list;
 }
 
 /**
@@ -710,35 +763,21 @@ export async function bashFinished(args: BashFinishedInput = {}): Promise<HookRe
     bashStart.delete(k);
     const sc = scopeOf(args);
     if (since === undefined || !sc || findConfig(sc.root) === null) return {};
-    let list = watchCache.get(sc.root);
-    if (!list) {
+    const touched = cachedWatchList(sc).filter((f) => {
       try {
-        list = dprintFilePaths(sc.root);
-      } catch (e) {
-        list = []; // cached: a failing dprint must not stall every later Bash call
-        process.stderr.write(`[dprint-hooks] bash_finished watch list failed: ${e instanceof Error ? e.message : String(e)}\n`);
-      }
-      watchCache.set(sc.root, list);
-    }
-    const touched = list.filter((p) => {
-      try {
-        return statSync(p).mtimeMs > since - 1000;
+        return statSync(f.fp).mtimeMs > since - 1000;
       } catch {
         return false; // deleted meanwhile
       }
     });
-    const formatted: string[] = [];
-    await Promise.all(touched.map(async (p) => {
-      const s = inScope(sc, p);
-      if (s && (await formatOnDisk(sc, s))) formatted.push(s.fp);
+    const formatted = new Set<string>(takeNotices(k)); // a FileChanged that fired mid-Bash queued its notice already
+    await Promise.all(touched.map(async (f) => {
+      if (await formatOnDisk(sc, f)) formatted.add(f.fp);
     }));
-    // a FileChanged that fired mid-Bash formatted first and queued its notice: report it here, next to the Bash result
-    for (const f of notices.get(k) ?? []) if (!formatted.includes(f)) formatted.push(f);
-    notices.delete(k);
-    return formatted.length ? notice(args, "PostToolUse", formatted.sort()) : {};
+    return formatted.size ? notice(args, "PostToolUse", [...formatted].sort()) : {};
   } catch (e) {
     process.stderr.write(
-      `[dprint-hooks] bash_finished failed open: ${e instanceof Error ? e.message : String(e)}\n`,
+      `[dprint-hooks] bash_finished failed open: ${errText(e)}\n`,
     );
     return {};
   }
@@ -752,10 +791,9 @@ export async function bashFinished(args: BashFinishedInput = {}): Promise<HookRe
  */
 export function drainNotices(args: DrainNoticesInput = {}): HookResult {
   const k = overrideKey(args);
-  const files = notices.get(k);
-  if (!files?.size || !args.hook_event_name) return {};
-  notices.delete(k);
-  return notice(args, args.hook_event_name, [...files].sort());
+  if (!args.hook_event_name) return {};
+  const files = takeNotices(k);
+  return files.size ? notice(args, args.hook_event_name, [...files].sort()) : {};
 }
 
 /**
@@ -896,7 +934,7 @@ export async function formatPre(
     return {};
   } catch (e) {
     process.stderr.write(
-      `[dprint-hooks] format_pre failed open: ${e instanceof Error ? e.message : String(e)}\n`,
+      `[dprint-hooks] format_pre failed open: ${errText(e)}\n`,
     );
     return {};
   }
