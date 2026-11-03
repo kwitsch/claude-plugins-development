@@ -29,18 +29,20 @@ Hook: `plugin/hooks/hooks.json` (hand-written) wires PreToolUse `Write|Edit` as 
 - `server.mjs`: MCP stdio loop (newline-delimited JSON-RPC), tools `format_pre`, `cwd_changed` (CwdChanged hook),
   `worktree_entered` and `worktree_exited` (PostToolUse EnterWorktree/ExitWorktree hooks), `file_written`
   (PostToolUse Write|Edit) and `file_changed` (FileChanged).
-- `lsp.mjs`: `dprint lsp` client (one lazily spawned child per cwd, Content-Length JSON-RPC, 30 s request timeout,
-  respawn after a crash, `applyTextEdits`). Needs dprint >= 0.50 (`findDprint` from
+- `lsp.mjs`: `dprint lsp` client (one lazily spawned child per cwd, Content-Length JSON-RPC, 30 s request timeout
+  (constructor option `timeoutMs`, tests only), a 60 s cooldown after a request timeout during which formats of
+  that document fail at once, a 30 s per-client pause before `findDprint` is retried after dprint was not found, stdout of a
+  replaced child ignored, respawn after a crash, `applyTextEdits`). Needs dprint >= 0.50 (`findDprint` from
   `skills/dprint/find-dprint.mjs`: `PATH`, then `~/.dprint/bin`).
 - `format.mjs`: scope via `scopeOf` (effective cwd: override, else payload `cwd`, never `process.cwd()`) and
   `inScope` (real path strictly inside the real cwd, not excluded, not inside `scratchpad_dir`; dangling links
   rejected); `fileWritten` records Edit/Write content per real path; `fileChanged` formats a watched file whole on
-  disk unless it is out of scope, has a lone CR (CRLF files are formatted on their LF view), equals the recorded content (a SHA-256 digest; `fileWritten` records only where a config exists), is gitignored (`git check-ignore`), or is tracked and unchanged against the git index
-  (`git --no-optional-locks status --porcelain` empty; git failure means format); it uses its own `dprint lsp` and drops events beyond 50 in flight; at most 8 `dprint lsp` children live, the least recently used is disposed; `formatPre` (config gate first, then the gitignore check (`git check-ignore`; Write/Edit skip ignored files): `{}` and no `dprint lsp` spawn unless `findConfig` finds a config in the
-  effective cwd or an ancestor (never above the nearest dir holding `.git`: repo root or worktree root); Write: `formatting`; Edit: `rangeFormatting` over the edited lines, whole-file
-  `formatting` on a JSON-RPC error), `lineDiff` and `trimToEdit` (keep only hunks touching the edit, widen
-  `old_string` until it is unique; accepted only if the trimmed file formats like the intended edit, two extra
-  whole-document `formatting` calls; CRLF files are trimmed on their LF view), one `DprintLsp` per cwd, per session/agent cwd overrides, and universal-format's
+  disk unless it is out of scope, has a lone CR (CRLF files are formatted on their LF view), equals the recorded content (a SHA-256 digest; `fileWritten` records only where a config exists), is gitignored, or is tracked and unchanged against the git index
+  (a single `git --no-optional-locks status --porcelain --untracked-files=normal --ignored=matching`: `!!` or empty output skips; git failure means format); it uses its own `dprint lsp`, runs at most 8 events at once (git + dprint), queues up to 1000 more and drops beyond that with a stderr line; skips files above 1 MiB; at most 8 `dprint lsp` children live, the least recently used is disposed; `formatPre` (config gate first, then the gitignore check (`git check-ignore`; Write/Edit skip ignored files): `{}` and no `dprint lsp` spawn unless `findConfig` finds a config in the
+  effective cwd or an ancestor (never above the nearest dir holding `.git`: repo root or worktree root); Write: `formatting`; Edit: whole-file
+  `formatting` of the edited text), `lineDiff` and `trimToEdit` (keep only hunks touching the edit, widen
+  `old_string` until it is unique, at most 1000 single-line widening steps, then one jump to the widest span; accepted only if the trimmed file formats like the intended edit, skipped when the trim reproduces dprint's output, else one extra
+  whole-document `formatting`; CRLF files are trimmed on their LF view), one `DprintLsp` per cwd, per session/agent cwd overrides, and universal-format's
   path exclusions. Every failure returns `{}` (fail open), including a diff above the size guard.
 - `watch-paths.mjs`: `command` hook for SessionStart and CwdChanged (SessionStart `mcp_tool` hooks are skipped while
   the server connects). Runs `dprint file-paths` (fallback `output-file-paths` for dprint 0.50-0.54) in the cwd,

@@ -12,7 +12,7 @@ import { pathToFileURL } from "node:url";
 import { findDprint } from "../skills/dprint/find-dprint.mjs";
 
 /** LSP range: zero-based line and UTF-16 character offsets, end exclusive. */
-export type LspRange = {
+type LspRange = {
   /** First position inside the range. */
   start: { line: number; character: number };
   /** First position after the range. */
@@ -27,13 +27,17 @@ type TextEdit = {
   newText: string;
 };
 
-/** Per-request timeout; a request that exceeds it kills the child, the next format respawns it. */
+/** Default per-request timeout; a request that exceeds it kills the child, the next format respawns it. */
 const REQUEST_TIMEOUT_MS = 30_000;
+/** After a request timeout, formats of the same document fail at once for this long (offline plugin host). */
+const COOLDOWN_MS = 60_000;
+/** After dprint was not found, {@link DprintLsp.start} does not search again for this long (a dprint installed mid-session is picked up). */
+const NOT_FOUND_RETRY_MS = 30_000;
 /** Required by the LSP formatting requests; dprint takes its real settings from the project config. */
 const FORMAT_OPTIONS = { tabSize: 2, insertSpaces: true };
 
-/** A JSON-RPC error response (as opposed to a timeout or a dead child). */
-class RpcError extends Error {}
+/** A request that got no response in time (as opposed to an error response or a dead child). */
+class TimeoutError extends Error {}
 
 /** A JSON-RPC message from the child, as far as this client reads it; every field is checked before use. */
 type RpcMessage = {
@@ -73,28 +77,34 @@ export class DprintLsp {
   private readonly pending = new Map<number, Pending>();
   /** Tail of the format queue; every format waits for the previous one. */
   private queue: Promise<unknown> = Promise.resolve();
+  /** Request timeout in ms. */
+  private readonly timeoutMs: number;
+  /** `Date.now()` of the last request timeout by document URI; pruned when it grows. */
+  private readonly failedAt = new Map<string, number>();
+  /** `Date.now()` until which {@link DprintLsp.start} does not search for dprint again after a miss. */
+  private noDprintUntil = 0;
 
   /**
    * Create a client; the child is spawned lazily on the first {@link DprintLsp.format}.
    *
-   * @param opts - Client options; `cwd` is the working directory and LSP root of the child.
+   * @param opts - Client options; `cwd` is the working directory and LSP root of the child, `timeoutMs`
+   * (default 30 s; tests) the request timeout.
    */
-  constructor(opts: { cwd: string }) {
+  constructor(opts: { cwd: string; timeoutMs?: number }) {
     this.cwd = opts.cwd;
+    this.timeoutMs = opts.timeoutMs ?? REQUEST_TIMEOUT_MS;
   }
 
   /**
-   * Format a document, or a range of it, as dprint would format the file at `uri`.
+   * Format a document as dprint would format the file at `uri`.
    *
    * @param uri - `file://` URI of the document; dprint picks the plugin by its extension.
    * @param text - Document content (sent via `didOpen`, nothing is read from disk).
-   * @param range - Range to format; whole document when omitted. A plugin without range support falls back
-   * to formatting the whole document.
    * @returns The formatted text, or `null` when dprint returns no edits (already formatted).
-   * Rejects on any failure: dprint missing, crash, timeout or error response.
+   * Rejects on any failure: dprint missing, crash, timeout, cooldown or error response.
    */
-  format(uri: string, text: string, range?: LspRange): Promise<string | null> {
-    const run = this.queue.then(() => this.formatNow(uri, text, range));
+  format(uri: string, text: string): Promise<string | null> {
+    const run = this.queue.then(() => this.formatNow(uri, text));
     this.queue = run.catch(() => {}); // a failed call must not block the next one
     return run;
   }
@@ -128,54 +138,75 @@ export class DprintLsp {
    *
    * @param uri - `file://` URI of the document.
    * @param text - Document content.
-   * @param range - Range to format, or `undefined` for the whole document.
    * @returns The formatted text, or `null` when there are no edits.
+   *
+   * @remarks
+   * Fails at once for {@link COOLDOWN_MS} after a request timeout for the same `uri`; other documents are
+   * not affected.
    */
-  private async formatNow(
-    uri: string,
-    text: string,
-    range?: LspRange,
-  ): Promise<string | null> {
-    await this.start();
+  private async formatNow(uri: string, text: string): Promise<string | null> {
+    const now = Date.now();
+    if (now - (this.failedAt.get(uri) ?? 0) < COOLDOWN_MS) {
+      throw new Error("dprint lsp: cooling down after a timeout");
+    }
+    try {
+      await this.start();
+    } catch (e) {
+      this.noteTimeout(uri, e, now); // an initialize timeout starts the cooldown too
+      throw e;
+    }
     this.notify("textDocument/didOpen", {
       textDocument: { uri, languageId: "", version: 1, text },
     });
     try {
-      const whole = () =>
-        this.request<TextEdit[] | null>("textDocument/formatting", {
-          textDocument: { uri },
-          options: FORMAT_OPTIONS,
-        });
-      const edits = range
-        ? await this.request<TextEdit[] | null>(
-          "textDocument/rangeFormatting",
-          { textDocument: { uri }, range, options: FORMAT_OPTIONS },
-        ).catch((e: unknown) => {
-          if (!(e instanceof RpcError)) throw e;
-          return whole(); // plugin without range support: one retry on the whole document
-        })
-        : await whole();
+      const edits = await this.request<TextEdit[] | null>(
+        "textDocument/formatting",
+        { textDocument: { uri }, options: FORMAT_OPTIONS },
+      );
       return edits && edits.length > 0 ? applyTextEdits(text, edits) : null;
+    } catch (e) {
+      this.noteTimeout(uri, e, now);
+      throw e;
     } finally {
       this.notify("textDocument/didClose", { textDocument: { uri } });
     }
   }
 
   /**
+   * Start the cooldown of a document after a request timeout; other errors are ignored.
+   *
+   * @param uri - `file://` URI of the document whose request failed.
+   * @param e - The error the request rejected with.
+   * @param now - `Date.now()` at the start of the format, for pruning expired entries.
+   */
+  private noteTimeout(uri: string, e: unknown, now: number): void {
+    if (!(e instanceof TimeoutError)) return;
+    for (const [u, t] of this.failedAt) if (now - t >= COOLDOWN_MS) this.failedAt.delete(u);
+    this.failedAt.set(uri, Date.now());
+  }
+
+  /**
    * Spawn and initialize the child unless it is already running.
    *
-   * @returns Settles once the child answered `initialize`; rejects when dprint is missing or fails to start.
+   * @returns Settles once the child answered `initialize`; rejects when dprint is missing (not searched again
+   * for 30 s after a miss) or fails to start.
    */
   private start(): Promise<void> {
     if (this.ready) return this.ready;
+    if (Date.now() < this.noDprintUntil) return Promise.reject(new Error("dprint not found"));
     const bin = findDprint();
-    if (!bin) return Promise.reject(new Error("dprint not found"));
+    if (!bin) {
+      this.noDprintUntil = Date.now() + NOT_FOUND_RETRY_MS;
+      return Promise.reject(new Error("dprint not found"));
+    }
     const child = spawn(bin, ["lsp"], { cwd: this.cwd, stdio: "pipe" });
     this.child = child;
     this.buf = Buffer.alloc(0);
     child.stdin.on("error", () => {}); // EPIPE after a crash; the crash itself surfaces via exit/error
     child.stderr.on("data", (d: Buffer) => process.stderr.write(d));
-    child.stdout.on("data", (d: Buffer) => this.onData(d));
+    child.stdout.on("data", (d: Buffer) => {
+      if (this.child === child) this.onData(d); // a replaced child's late bytes must not corrupt the new buffer
+    });
     const dead = (err: Error) => {
       if (this.child !== child) return;
       this.child = null;
@@ -259,7 +290,7 @@ export class DprintLsp {
     clearTimeout(p.timer);
     if (msg.error) {
       p.reject(
-        new RpcError(
+        new Error(
           typeof msg.error.message === "string"
             ? msg.error.message
             : "JSON-RPC error",
@@ -274,8 +305,8 @@ export class DprintLsp {
    * @typeParam T - Type of the response `result` (the LSP spec's result type for `method`; not checked).
    * @param method - JSON-RPC method.
    * @param params - Method parameters.
-   * @returns The response `result`; rejects with {@link RpcError} on an error response, or with a plain
-   * `Error` when the child is not running, dies or times out (a timeout also kills the child).
+   * @returns The response `result`; rejects with an `Error` on an error response or when the child is not running or dies, with a
+   * {@link TimeoutError} on a timeout (which also kills the child).
    */
   private request<T = unknown>(method: string, params: unknown): Promise<T> {
     if (!this.child) {
@@ -285,9 +316,9 @@ export class DprintLsp {
     return new Promise<T>((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pending.delete(id);
-        reject(new Error(`dprint lsp: ${method} timed out`));
+        reject(new TimeoutError(`dprint lsp: ${method} timed out`));
         this.dispose(); // detach now, not on the async exit: the next queued format() must respawn
-      }, REQUEST_TIMEOUT_MS);
+      }, this.timeoutMs);
       // the result is trusted to match T: dprint answers per the LSP spec for `method`
       this.pending.set(id, { resolve: (v) => resolve(v as T), reject, timer });
       this.send({ jsonrpc: "2.0", id, method, params });

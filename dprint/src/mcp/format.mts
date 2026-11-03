@@ -10,13 +10,13 @@
  */
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, lstatSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, readFileSync, realpathSync, statSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 import { findConfig } from "../skills/dprint/find-config.mjs";
 import type { CwdChangedInput, FileChangedInput, FileWrittenInput, FormatPreInput, WorktreeEnteredInput, WorktreeExitedInput } from "./hook-inputs.mjs";
-import { DprintLsp, type LspRange } from "./lsp.mjs";
+import { DprintLsp } from "./lsp.mjs";
 
 /** Hook output: empty (`{}`) to let the tool call through unchanged, else the rewritten tool input. */
 export type HookResult = {
@@ -142,7 +142,7 @@ export function lineDiff(a: string[], b: string[]): Hunk[] {
  * @remarks
  * Keeps only the hunks of `diff(original, formatted)` that intersect or touch an edited line range, then
  * widens the kept span by common lines (alternating, upward first) until its original text occurs exactly
- * once in `original`.
+ * once in `original`. After 1000 single-line widening steps it jumps to the widest span available at once.
  *
  * @param original - File content before the edit (on disk).
  * @param formatted - Edited and formatted content.
@@ -177,7 +177,16 @@ export function trimToEdit(
   // common (LCS-matched) context available on each side, bounded by the neighbouring non-kept hunks
   const lo = hunks[first - 1]?.aEnd ?? 0;
   const hi = hunks[last + 1]?.aStart ?? a.length;
+  let steps = 0;
   for (let up = true;; up = !up) {
+    // shortcut: at most 1000 single-line widening steps (realistic files need < 50), then one jump to the widest
+    // span so a highly repetitive file still formats (as a large Edit) instead of costing a search per line
+    if (++steps === 1001) {
+      bA -= aA - lo;
+      aA = lo;
+      bB += hi - aB;
+      aB = hi;
+    }
     const oldString = render(a, aA, aB);
     const i = original.indexOf(oldString);
     if (
@@ -232,11 +241,20 @@ const client = (cwd: string, key = cwd): DprintLsp => {
 /** Most `dprint lsp` children kept alive; the least recently used one is disposed beyond it. */
 const MAX_CLIENTS = 8;
 
-/** FileChanged events formatted at once; later ones are dropped, so a burst cannot grow an unbounded backlog. */
-const MAX_PENDING_CHANGES = 50;
+/** FileChanged events running git and dprint at once; later ones wait in arrival order. */
+const MAX_ACTIVE_CHANGES = 8;
 
-/** FileChanged events currently inside {@link fileChanged}. */
-let pendingChanges = 0;
+/** Most FileChanged events waiting for a slot; beyond it events are dropped with one stderr line each. */
+const MAX_WAITING_CHANGES = 1000;
+
+/** FileChanged events currently holding a slot. */
+let activeChanges = 0;
+
+/** Wake-ups of the waiting FileChanged events, oldest first. */
+const waitingChanges: Array<() => void> = [];
+
+/** Largest file FileChanged formats; bigger ones are generated data, and formatting them parks GBs in the lsp child. */
+const MAX_CHANGED_BYTES = 1024 * 1024;
 
 /**
  * Working directory per session or subagent, set by `cwd_changed`/`worktree_entered`: EnterWorktree and
@@ -498,15 +516,40 @@ export function fileWritten(args: FileWrittenInput = {}): HookResult {
 }
 
 /**
+ * Take a FileChanged slot: a burst (codegen, formatter run) waits in arrival order; only a backlog beyond
+ * {@link MAX_WAITING_CHANGES} is dropped.
+ *
+ * @param fp - File path, for the drop message.
+ * @returns `true` when a slot is held (pair with {@link releaseChangeSlot}), `false` when the event was dropped.
+ */
+async function acquireChangeSlot(fp: string): Promise<boolean> {
+  if (activeChanges < MAX_ACTIVE_CHANGES) activeChanges++;
+  else if (waitingChanges.length >= MAX_WAITING_CHANGES) {
+    process.stderr.write(`[dprint-hooks] file_changed dropped (${MAX_WAITING_CHANGES} waiting): ${fp}\n`);
+    return false;
+  } else await new Promise<void>((wake) => waitingChanges.push(wake)); // the slot is handed over, not re-counted
+  return true;
+}
+
+/** Give back a FileChanged slot: hand it to the oldest waiting event, else free it. */
+function releaseChangeSlot(): void {
+  const next = waitingChanges.shift();
+  if (next) next();
+  else activeChanges--;
+}
+
+/**
  * FileChanged hook: format a watched file inside the cwd on disk after a change not made by Edit/Write.
  *
  * @remarks
- * Skips `unlink` events, files out of {@link inScope}, cwds without a dprint config, files with a lone `\r`,
- * content equal to the {@link written} digest, and (user decision) gitignored files and tracked files unchanged
- * against the git index (`git status --porcelain` empty, e.g. after checkout/pull/reset/stash); when git fails or
- * is absent the file is formatted. CRLF files are formatted
- * on their LF view and written back with CRLF. At most {@link MAX_PENDING_CHANGES} events run at once (the rest
- * are dropped) on a `dprint lsp` of their own.
+ * Skips `unlink` events, files out of {@link inScope}, cwds without a dprint config, files above
+ * {@link MAX_CHANGED_BYTES}, files with a lone `\r`, content equal to the {@link written} digest, and (user
+ * decision) gitignored files and tracked files unchanged against the git index (one
+ * `git status --porcelain --untracked-files=normal --ignored=matching`: `!!` or empty output, e.g. after
+ * checkout/pull/reset/stash);
+ * when git fails or is absent the file is formatted. CRLF files are formatted on their LF view and written back
+ * with CRLF. At most {@link MAX_ACTIVE_CHANGES} events run git and dprint at once, the rest wait in order (beyond
+ * {@link MAX_WAITING_CHANGES} waiting they are dropped with a stderr line), on a `dprint lsp` of their own.
  * The whole file is formatted via `textDocument/formatting` and written in place only when dprint changed it and
  * the file did not change meanwhile. Never returns `watchPaths`, so Claude Code keeps its watch list.
  *
@@ -516,75 +559,80 @@ export function fileWritten(args: FileWrittenInput = {}): HookResult {
 export async function fileChanged(
   args: FileChangedInput = {},
 ): Promise<HookResult> {
-  // a burst (codegen, formatter run) must not build an unbounded backlog: later events are dropped
-  if (pendingChanges >= MAX_PENDING_CHANGES) return {};
-  pendingChanges++;
   try {
     if (args.event === "unlink") return {};
     const sc = scopeOf(args);
     const s = sc && inScope(sc, args.file_path ?? "");
     if (!sc || !s || findConfig(sc.root) === null) return {};
-    // fatal decoder: a non-UTF-8 file throws (fails open) instead of being rewritten with U+FFFD
-    const text = utf8.decode(readFileSync(s.fp));
-    if (written.get(s.real) === digest(text)) return {};
-    // CRLF files are formatted on their LF view (as formatPre's Edit does) and written back with CRLF; a lone "\r" fails open
-    const lf = text.replaceAll("\r\n", "\n");
-    if (lf.includes("\r")) return {};
-    // user decision: gitignored files are never formatted
-    if (await isGitIgnored(s.fp)) return {};
-    // user decision: a tracked file equal to the git index (git restored it) is left alone; --no-optional-locks
-    // keeps .git/index.lock free for the user's git, cwd = dirname picks the nearest repository (nested repos, submodules)
-    try {
-      const { stdout } = await execFileAsync(
-        "git",
-        ["--no-optional-locks", "status", "--porcelain", "--", s.fp],
-        { cwd: path.dirname(s.fp), encoding: "utf8", timeout: 10_000 },
-      );
-      if (stdout === "") return {};
-    } catch {
-      // no git, not a repository or timeout: format
+    if (statSync(s.fp).size > MAX_CHANGED_BYTES) {
+      process.stderr.write(`[dprint-hooks] file_changed skipped (over ${MAX_CHANGED_BYTES} bytes): ${s.fp}\n`);
+      return {};
     }
-    // own client: whole-file formats here never queue in front of a Write/Edit format_pre call
-    const out = changed(
-      await client(sc.root, sc.root + "\0file_changed").format(pathToFileURL(s.fp).href, lf),
-      lf,
-    );
-    if (out === null) return {};
-    const final = text === lf ? out : out.replaceAll("\n", "\r\n");
-    // a write that landed while dprint was formatting wins
-    if (utf8.decode(readFileSync(s.fp)) !== text) return {};
-    // an Edit/Write record that landed during the awaits wins (keeps trimToEdit's minimal diff)
-    if (written.get(s.real) === digest(text)) return {};
-    writeFileSync(s.fp, final);
-    written.set(s.real, digest(final)); // after the write: a failed write records nothing
-    return {};
+    if (!(await acquireChangeSlot(s.fp))) return {};
+    try {
+      // read after the slot is held: waiting events must not each keep up to 1 MiB of text alive
+      // fatal decoder: a non-UTF-8 file throws (fails open) instead of being rewritten with U+FFFD
+      const text = utf8.decode(readFileSync(s.fp));
+      if (written.get(s.real) === digest(text)) return {};
+      // CRLF files are formatted on their LF view (as formatPre's Edit does) and written back with CRLF; a lone "\r" fails open
+      const lf = text.replaceAll("\r\n", "\n");
+      if (lf.includes("\r")) return {};
+      // user decision: gitignored files (`!!`) and tracked files equal to the index (empty output) are left alone;
+      // one spawn answers both. --untracked-files=normal is required: under status.showUntrackedFiles=no git
+      // rejects --ignored otherwise. --no-optional-locks keeps .git/index.lock free for the user's git,
+      // cwd = dirname picks the nearest repository (nested repos, submodules)
+      try {
+        const { stdout } = await execFileAsync(
+          "git",
+          ["--no-optional-locks", "status", "--porcelain", "--untracked-files=normal", "--ignored=matching", "--", s.fp],
+          { cwd: path.dirname(s.fp), encoding: "utf8", timeout: 10_000 },
+        );
+        if (stdout === "" || stdout.startsWith("!!")) return {};
+      } catch {
+        // no git, not a repository or timeout: format
+      }
+      // own client: whole-file formats here never queue in front of a Write/Edit format_pre call
+      const out = changed(
+        await client(sc.root, sc.root + "\0file_changed").format(pathToFileURL(s.fp).href, lf),
+        lf,
+      );
+      if (out === null) return {};
+      const final = text === lf ? out : out.replaceAll("\n", "\r\n");
+      // a write that landed while dprint was formatting (or while the event waited) wins
+      if (utf8.decode(readFileSync(s.fp)) !== text) return {};
+      // an Edit/Write record that landed during the awaits wins (keeps trimToEdit's minimal diff)
+      if (written.get(s.real) === digest(text)) return {};
+      writeFileSync(s.fp, final);
+      written.set(s.real, digest(final)); // after the write: a failed write records nothing
+      return {};
+    } finally {
+      releaseChangeSlot();
+    }
   } catch (e) {
     process.stderr.write(
       `[dprint-hooks] file_changed failed open: ${e instanceof Error ? e.message : String(e)}\n`,
     );
     return {};
-  } finally {
-    pendingChanges--;
   }
 }
 
 /**
- * Zero-based line of a character offset, without copying the prefix.
+ * Line counter for ascending offsets: one forward scan over the document for all calls.
  *
  * @param text - Document.
- * @param idx - Character offset in `text`.
- * @returns Number of `\n` before `idx`.
+ * @returns Function mapping a character offset to its zero-based line (number of `\n` before it); offsets must
+ * not decrease between calls.
  */
-const lineOf = (text: string, idx: number): number => {
+const lineCursor = (text: string): (idx: number) => number => {
   let n = 0;
-  for (
-    let i = text.indexOf("\n");
-    i !== -1 && i < idx;
-    i = text.indexOf("\n", i + 1)
-  ) {
-    n++;
-  }
-  return n;
+  let nl = text.indexOf("\n");
+  return (idx) => {
+    while (nl !== -1 && nl < idx) {
+      n++;
+      nl = text.indexOf("\n", nl + 1);
+    }
+    return n;
+  };
 };
 
 /**
@@ -618,9 +666,9 @@ function done(updatedInput: Record<string, unknown>, fp: string): HookResult {
  * PreToolUse `Write|Edit` hook: format the write or edit via `dprint lsp` before it lands.
  *
  * @remarks
- * Write: whole-file `formatting` of `content`. Edit: apply the edit in memory, `rangeFormatting` over the
- * edited lines, then {@link trimToEdit} keeps the result a minimal `old_string`/`new_string` pair, accepted
- * only when the trimmed result formats (whole document) exactly like the intended edit. Only files
+ * Write: whole-file `formatting` of `content`. Edit: apply the edit in memory, whole-document `formatting` of
+ * the edited text, then {@link trimToEdit} keeps the result a minimal `old_string`/`new_string` pair, accepted
+ * when it reproduces dprint's output, or else formats exactly like it (one extra whole-document format). Only files
  * {@link inScope} of {@link scopeOf} are formatted: real path (symlinks resolved, dangling links rejected)
  * inside the effective cwd, not an {@link isExcludedPath} path, not gitignored ({@link isGitIgnored}) and not
  * inside the session scratchpad; without
@@ -677,28 +725,12 @@ export async function formatPre(
       ) {
         occ.push(i);
       }
-      const editLines = occ.map((i): [number, number] => [
-        lineOf(O, i),
-        lineOf(O, i + oldStr.length - 1),
-      ]);
-
-      // full lines of M from the first replacement to the last inserted char (insertion offset if new is empty)
-      const lastStart = occ[occ.length - 1]
-        + (occ.length - 1) * (newStr.length - oldStr.length);
-      const endLine = lineOf(
-        M,
-        newStr ? lastStart + newStr.length - 1 : lastStart,
-      );
-      const mLines = M.split("\n");
-      const range: LspRange = {
-        start: { line: lineOf(M, occ[0]), character: 0 },
-        end: endLine + 1 < mLines.length
-          ? { line: endLine + 1, character: 0 }
-          : { line: endLine, character: mLines[endLine].length },
-      };
+      // occ is ascending and non-overlapping and oldStr is non-empty, so the cursor offsets never decrease
+      const lineAt = lineCursor(O);
+      const editLines = occ.map((i): [number, number] => [lineAt(i), lineAt(i + oldStr.length - 1)]);
 
       const lsp = client(root);
-      const F = await lsp.format(uri, M, range);
+      const F = await lsp.format(uri, M);
       const out = changed(F, M);
       if (out === null) return {};
       const r = trimToEdit(O, out, editLines);
@@ -706,11 +738,8 @@ export async function formatPre(
       // the line diff may align part of the edit (or a moved line) into a dropped hunk; a faithful trim formats
       // exactly like the intended edit, anything else would lose or duplicate content
       const R = O.replace(r.oldString, () => r.newString);
-      if (
-        ((await lsp.format(uri, M)) ?? M) !== ((await lsp.format(uri, R)) ?? R)
-      ) {
-        return {};
-      }
+      // out is format(M) (non-null here); R === out is a lossless trim and needs no extra formats
+      if (R !== out && out !== ((await lsp.format(uri, R)) ?? R)) return {};
       return done(
         {
           file_path: fp,

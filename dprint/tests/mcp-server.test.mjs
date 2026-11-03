@@ -16,7 +16,8 @@ import {
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { createInterface } from "node:readline";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import { DprintLsp } from "../plugin/mcp/lsp.mjs";
 
 const PLUGIN = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -25,8 +26,8 @@ const PLUGIN = path.resolve(
 const SERVER = path.join(PLUGIN, "mcp/server.mjs");
 
 // Stub `dprint lsp`: formatting and rangeFormatting answer one whole-document TextEdit with trailing
-// spaces stripped and exactly one final newline. argv mode "range-error" fails rangeFormatting with a
-// JSON-RPC error (exec-plugin case); "crash" exits at once.
+// spaces stripped and exactly one final newline. argv mode "range-null" answers rangeFormatting with
+// `result: null` (like dprint-plugin-yaml); "hang" never answers textDocument/formatting; "crash" exits at once.
 const STUB_LSP = `
 const MODE = process.argv[2] ?? "ok";
 if (MODE === "crash") process.exit(1);
@@ -53,8 +54,10 @@ process.stdin.on("data", (chunk) => {
       docs.set(p.textDocument.uri, p.textDocument.text);
     } else if (msg.method === "textDocument/didClose") {
       docs.delete(p.textDocument.uri);
-    } else if (msg.method === "textDocument/rangeFormatting" && MODE === "range-error") {
-      send({ jsonrpc: "2.0", id: msg.id, error: { code: -32601, message: "range formatting not supported" } });
+    } else if (msg.method === "textDocument/formatting" && MODE === "hang") {
+      // never answer: the client's request timeout must fire
+    } else if (msg.method === "textDocument/rangeFormatting" && MODE === "range-null") {
+      send({ jsonrpc: "2.0", id: msg.id, result: null });
     } else if (msg.method === "textDocument/formatting" || msg.method === "textDocument/rangeFormatting") {
       const text = docs.get(p.textDocument.uri);
       const end = { line: text.split("\\n").length, character: 0 };
@@ -112,11 +115,11 @@ function stubDprint(mode = "ok", listCmd = "file-paths") {
   chmodSync(f, 0o755);
 }
 
-/** Spawn the built server; `opts.cwd` sets its process cwd (default: the test's). */
+/** Spawn the built server; `opts.cwd` sets its process cwd (default: the test's), `opts.env` adds env vars. */
 function startServer(opts = {}) {
   const child = spawn(path.join(bin, "node"), [SERVER], {
     cwd: opts.cwd,
-    env: { PATH: bin, HOME: home },
+    env: { PATH: bin, HOME: home, ...opts.env },
     stdio: ["pipe", "pipe", "pipe"],
   });
   servers.push(child);
@@ -340,8 +343,8 @@ test("Edit: whole-file reformat by the stub -> far hunks dropped", async () => {
   assert.ok(O.replace(u.old_string, () => u.new_string).includes("l1   \n"));
 });
 
-test("rangeFormatting JSON-RPC error -> formatted via whole-file fallback", async () => {
-  stubDprint("range-error");
+test("rangeFormatting answering null (yaml plugin) -> Edit still formatted", async () => {
+  stubDprint("range-null");
   const s = startServer();
   const file = path.join(repo, "d.ts");
   writeFileSync(file, lines(10).join("\n") + "\n");
@@ -359,7 +362,7 @@ test("rangeFormatting JSON-RPC error -> formatted via whole-file fallback", asyn
 });
 
 test("Edit whose trim would drop the deleted repeated line -> {} (never loses the edit)", async () => {
-  stubDprint("range-error");
+  stubDprint("range-null");
   const s = startServer();
   const file = path.join(repo, "g.ts");
   writeFileSync(file, "a=1  \nx\nx\nx\nb=2  \n");
@@ -511,6 +514,28 @@ test("crashing dprint -> {}, then a working dprint is respawned -> formatted", a
   stubDprint();
   const out = await s.call(args);
   assert.equal(out.hookSpecificOutput.updatedInput.content, "x\n");
+});
+
+test("lsp timeout -> later formats of that document fail fast for the cooldown, other documents do not", { timeout: 10_000 }, async () => {
+  stubDprint("hang");
+  const oldPath = process.env.PATH;
+  process.env.PATH = bin; // findDprint resolves the stub
+  const lsp = new DprintLsp({ cwd: repo, timeoutMs: 300 });
+  try {
+    const u = (f) => pathToFileURL(path.join(repo, f)).href;
+    let t0 = Date.now();
+    await assert.rejects(lsp.format(u("h1.ts"), "x   \n"), /timed out/);
+    assert.ok(Date.now() - t0 >= 300, "the first format waits for the request timeout");
+    t0 = Date.now();
+    await assert.rejects(lsp.format(u("h1.ts"), "x   \n"), /cooling down/);
+    assert.ok(Date.now() - t0 < 250, "the same document fails at once (cooldown)");
+    t0 = Date.now();
+    await assert.rejects(lsp.format(u("h2.ts"), "x   \n"), /timed out/);
+    assert.ok(Date.now() - t0 >= 300, "another document is not cooling down");
+  } finally {
+    lsp.dispose();
+    process.env.PATH = oldPath;
+  }
 });
 
 test(".mcp.json key matches every hooks.json server id and each hook tool is listed", async () => {
@@ -666,6 +691,31 @@ test("file_written records the Edit/Write result: file_changed leaves it alone, 
   assert.equal(readFileSync(b, "utf8"), "y\n");
 });
 
+test("60 concurrent file_changed events are all formatted", async () => {
+  stubDprint();
+  const s = startServer();
+  const files = Array.from({ length: 60 }, (_, i) => path.join(repo, `f${i}.ts`));
+  for (const f of files) writeFileSync(f, "x  \n");
+  const res = await Promise.all(
+    files.map((f) => s.tool("file_changed", { cwd: repo, file_path: f, event: "change" })),
+  );
+  for (const r of res) assert.deepEqual(r, {});
+  for (const f of files) assert.equal(readFileSync(f, "utf8"), "x\n", f);
+});
+
+test("file_changed skips files above 1 MiB", async () => {
+  stubDprint();
+  const s = startServer();
+  const big = path.join(repo, "big.ts");
+  const content = "x" + " ".repeat(1024 * 1024 - 1) + "\n"; // 1024*1024 + 1 bytes, trailing spaces
+  writeFileSync(big, content);
+  assert.deepEqual(
+    await s.tool("file_changed", { cwd: repo, file_path: big, event: "change" }),
+    {},
+  );
+  assert.equal(readFileSync(big, "utf8"), content);
+});
+
 test("file_changed leaves a file alone that is unchanged against the git index", async (t) => {
   const git = spawnSync("which", ["git"], { encoding: "utf8" }).stdout?.trim();
   if (!git) return t.skip("git not on PATH");
@@ -738,6 +788,14 @@ test("file_changed leaves a file alone that is unchanged against the git index",
     })).hookSpecificOutput.updatedInput.content,
     "z\n",
   );
+  // status.showUntrackedFiles=no must neither break the ignore check nor hide untracked files
+  g("config", "status.showUntrackedFiles", "no");
+  assert.deepEqual(await s.tool("file_changed", { ...ev, file_path: ig }), {});
+  assert.equal(readFileSync(ig, "utf8"), "z  \n");
+  const un = path.join(repo, "u.ts");
+  writeFileSync(un, "u  \n");
+  assert.deepEqual(await s.tool("file_changed", { ...ev, file_path: un }), {});
+  assert.equal(readFileSync(un, "utf8"), "u\n");
 });
 
 const WATCH = path.join(PLUGIN, "mcp/watch-paths.mjs");
