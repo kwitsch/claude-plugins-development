@@ -14,7 +14,7 @@
 
 import { spawnSync } from "node:child_process";
 import { findConfig } from "./find-config.mjs";
-import { findDprint } from "./find-dprint.mjs";
+import { dprintArgv, findDprint } from "./find-dprint.mjs";
 
 /**
  * Validate the arguments, check that dprint is set up and run it.
@@ -22,7 +22,7 @@ import { findDprint } from "./find-dprint.mjs";
  * @param args - Command-line arguments after the script path: `check` or `fmt`, then an optional non-empty scope.
  * @returns The exit code: 2 usage error or spawn failure, 3 not set up, otherwise dprint's own exit code.
  */
-function run(args: string[]): number {
+async function run(args: string[]): Promise<number> {
   const sub = args[0];
   if (
     args.length < 1
@@ -34,9 +34,9 @@ function run(args: string[]): number {
     return 2;
   }
 
-  const dprint = findDprint();
-  if (dprint === null || findConfig(process.cwd()) === null) {
-    const missing = dprint === null;
+  const cmd = await findDprint();
+  if (cmd === null || findConfig(process.cwd()) === null) {
+    const missing = cmd === null;
     process.stdout.write(`status=notsetup reason=${missing ? "missing" : "noconfig"}\n`);
     process.stderr.write(
       `dprint is not set up here (${missing ? "no dprint found" : "no dprint config found in this directory or its ancestors up to the git root"}): run /dprint init (/dprint:dprint init) first\n`,
@@ -45,13 +45,13 @@ function run(args: string[]): number {
   }
 
   // no shell: the scope reaches dprint byte-for-byte; `--` keeps a scope starting with `-` from being an option
-  const r = spawnSync(dprint, args.length === 2 ? [sub, "--", args[1]] : [sub], { stdio: "inherit" });
+  const r = spawnSync(...dprintArgv(cmd, args.length === 2 ? [sub, "--", args[1]] : [sub]), { stdio: "inherit" });
   if (r.error || r.status === null) {
-    process.stderr.write(`run-dprint: '${dprint} ${sub}' failed: ${r.error?.message ?? String(r.signal)}\n`);
+    process.stderr.write(`run-dprint: '${cmd.join(" ")} ${sub}' failed: ${r.error?.message ?? String(r.signal)}\n`);
     return 2;
   }
   return r.status;
 }
 
 /** Exit code of this run; set instead of calling `process.exit()` so dprint's inherited output is not cut. */
-process.exitCode = run(process.argv.slice(2));
+process.exitCode = await run(process.argv.slice(2));

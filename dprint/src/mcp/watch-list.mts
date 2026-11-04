@@ -10,7 +10,7 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { findConfig } from "../skills/dprint/find-config.mjs";
-import { findDprint } from "../skills/dprint/find-dprint.mjs";
+import { dprintArgv, findDprint } from "../skills/dprint/find-dprint.mjs";
 
 /**
  * Most files watched per cwd.
@@ -25,16 +25,16 @@ export const WATCH_LIMIT = 5000;
  * Files of the cwd that dprint formats, before any scope filter.
  *
  * @param cwd - Working directory.
- * @returns Absolute paths as dprint printed them; `[]` without a cwd, a dprint config, a dprint binary, or above
- * {@link WATCH_LIMIT}. Rejects when dprint fails.
+ * @returns Absolute paths as dprint printed them; `[]` without a cwd, a dprint config, a way to run dprint
+ * (binary or npx), or above {@link WATCH_LIMIT}. Rejects when dprint fails.
  */
 export async function dprintFilePaths(cwd: string): Promise<string[]> {
   if (!cwd || findConfig(cwd) === null) return [];
-  const bin = findDprint();
-  if (bin === null) return [];
+  const cmd = await findDprint();
+  if (cmd === null) return [];
   // async: the MCP server must keep answering other hooks while dprint lists the files
   const run = async (sub: string): Promise<string> =>
-    (await promisify(execFile)(bin, [sub], {
+    (await promisify(execFile)(...dprintArgv(cmd, [sub]), {
       cwd,
       encoding: "utf8",
       timeout: 10_000,

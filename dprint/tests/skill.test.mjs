@@ -120,3 +120,18 @@ test("README documents the cwd scope, FileChanged formatting and the watch-list 
     /formats every Write and Edit inside the working directory, and files changed there by other tools, with the project's dprint config via hooks/,
   );
 });
+
+test("npx fallback is documented: manifest, README, SKILL.md and both script references", () => {
+  const readme = readFileSync(path.join(ROOT, "plugin/README.md"), "utf8");
+  const { description } = JSON.parse(readFileSync(path.join(ROOT, "plugin.json"), "utf8"));
+  assert.match(description, /needs node and dprint >= 0\.50 on PATH, or npx\)\.$/);
+  assert.ok(readme.includes("npx --yes dprint"));
+  assert.ok(SKILL.includes("`npx --yes dprint` when `path` is `npx`"));
+  assert.doesNotMatch(SKILL, /<path> (init -y|config add)/);
+  assert.match(SKILL, /<dprint> init -y/);
+  assert.match(SKILL, /<dprint> config add/);
+  assert.match(SKILL, /It takes precedence over npx\./);
+  const ref = (n) => readFileSync(path.join(ROOT, `plugin/skills/dprint/${n}.reference.md`), "utf8");
+  assert.ok(ref("check-dprint").includes("path=<absolute path|npx|->"));
+  assert.ok(ref("run-dprint").includes("npx --yes dprint"));
+});

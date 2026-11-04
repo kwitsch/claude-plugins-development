@@ -5,14 +5,15 @@
  *
  * @remarks
  * Prints exactly one line
- * `status=<ok|missing|outdated|error> version=<X.Y.Z|-> min=<MIN> path=<abs|->` and exits with the code
- * documented in `check-dprint.reference.md`. Read-only: never installs anything.
+ * `status=<ok|missing|outdated|error> version=<X.Y.Z|-> min=<MIN> path=<abs|npx|->` and exits with the code
+ * documented in `check-dprint.reference.md`. Read-only: never installs dprint; when only npx can run it, the npx
+ * probe may fill the npm cache.
  *
  * @packageDocumentation
  */
 
 import { execFileSync } from "node:child_process";
-import { findDprint } from "./find-dprint.mjs";
+import { dprintArgv, findDprint } from "./find-dprint.mjs";
 
 /** Lowest supported dprint version; the only definition (README and tests read it from here). */
 const MIN_VERSION = "0.50.0";
@@ -25,7 +26,7 @@ interface CheckResult {
   status: string;
   /** Detected `X.Y.Z`, or `-` when unknown. */
   version: string;
-  /** Absolute path of the dprint binary, or `-` when none was found. */
+  /** Absolute path of the dprint binary, or `npx` when dprint runs through `npx --yes dprint`, or `-` when none was found. */
   path: string;
 }
 
@@ -50,20 +51,21 @@ function compareToMin(version: string): number {
  * @param args - Command-line arguments after the script path; any argument is a usage error.
  * @returns The status line fields and the exit code.
  */
-function check(args: string[]): CheckResult {
+async function check(args: string[]): Promise<CheckResult> {
   if (args.length > 0) {
     process.stderr.write("usage: node check-dprint.mjs (takes no arguments)\n");
     return { code: 2, status: "error", version: "-", path: "-" };
   }
-  const path = findDprint();
-  if (path === null) {
+  const cmd = await findDprint();
+  if (cmd === null) {
     return { code: 10, status: "missing", version: "-", path: "-" };
   }
+  const path = cmd.length > 1 ? "npx" : cmd[0];
 
   let out: string;
   try {
     out = String(
-      execFileSync(path, ["--version"], {
+      execFileSync(...dprintArgv(cmd, ["--version"]), {
         encoding: "utf8",
         timeout: 10000,
         stdio: ["ignore", "pipe", "pipe"],
@@ -71,14 +73,14 @@ function check(args: string[]): CheckResult {
     );
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
-    process.stderr.write(`check-dprint: '${path} --version' failed: ${msg}\n`);
+    process.stderr.write(`check-dprint: '${cmd.join(" ")} --version' failed: ${msg}\n`);
     return { code: 2, status: "error", version: "-", path };
   }
 
   const m = /^dprint (\d+)\.(\d+)\.(\d+)(-\S+)?/.exec(out.trim());
   if (!m) {
     process.stderr.write(
-      `check-dprint: unparseable '${path} --version' output: ${JSON.stringify(out.trim())}\n`,
+      `check-dprint: unparseable '${cmd.join(" ")} --version' output: ${JSON.stringify(out.trim())}\n`,
     );
     return { code: 2, status: "error", version: "-", path };
   }
@@ -91,7 +93,7 @@ function check(args: string[]): CheckResult {
 }
 
 /** Result of this run, printed as the single status line. */
-const r = check(process.argv.slice(2));
+const r = await check(process.argv.slice(2));
 process.stdout.write(
   `status=${r.status} version=${r.version} min=${MIN_VERSION} path=${r.path}\n`,
 );

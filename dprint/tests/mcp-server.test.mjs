@@ -97,12 +97,11 @@ afterEach(() => {
 });
 
 /**
- * (Re)write bin/dprint as a bash wrapper around the stub in the given mode. `listCmd` is the file-list
+ * (Re)write `f` (default bin/dprint) as a bash wrapper around the stub in the given mode. `listCmd` is the file-list
  * subcommand this dprint knows: it prints `$PWD/a.ts` and a path outside the cwd; any other `*file-paths`
  * subcommand fails like dprint does for an unknown subcommand (exit 10).
  */
-function stubDprint(mode = "ok", listCmd = "file-paths") {
-  const f = path.join(bin, "dprint");
+function stubDprint(mode = "ok", listCmd = "file-paths", f = path.join(bin, "dprint")) {
   writeFileSync(
     f,
     [
@@ -110,6 +109,29 @@ function stubDprint(mode = "ok", listCmd = "file-paths") {
       `if [ "$1" = "${listCmd}" ]; then printf '%s\\n' "$PWD/a.ts" /nonexistent-outside/b.ts; exit 0; fi`,
       `case "$1" in *file-paths) echo "error: unrecognized subcommand '$1'" >&2; exit 10;; esac`,
       `exec node "${path.join(tmp, "stub-lsp.mjs")}" ${mode}`,
+      "",
+    ].join("\n"),
+  );
+  chmodSync(f, 0o755);
+}
+
+/**
+ * Make dprint reachable only through bin/npx: a stubDprint wrapper outside PATH ($tmp/dprint) and a bin/npx that
+ * appends its argv to $HOME/npx-argv, accepts only `--yes dprint ...`, answers `--version` and execs the wrapper.
+ */
+function stubNpx() {
+  const real = path.join(tmp, "dprint");
+  stubDprint("ok", "file-paths", real);
+  const f = path.join(bin, "npx");
+  writeFileSync(
+    f,
+    [
+      "#!/usr/bin/env bash",
+      `printf '%s\\n' "$@" >> "$HOME/npx-argv"`,
+      '[ "$1 $2" = "--yes dprint" ] || exit 9',
+      "shift 2",
+      'if [ "$1" = "--version" ]; then echo "dprint 0.64.3"; exit 0; fi',
+      `exec "${real}" "$@"`,
       "",
     ].join("\n"),
   );
@@ -506,6 +528,18 @@ test("no dprint on PATH or in ~/.dprint/bin -> {}", async () => {
   assert.deepEqual(out, {});
 });
 
+test("no dprint binary, npx runs dprint lsp -> Write formatted", async () => {
+  stubNpx();
+  const s = startServer();
+  const out = await s.call({
+    cwd: repo,
+    tool_name: "Write",
+    tool_input: { file_path: path.join(repo, "e.ts"), content: "x   \n" },
+  });
+  assert.equal(out.hookSpecificOutput.updatedInput.content, "x\n");
+  assert.ok(readFileSync(path.join(home, "npx-argv"), "utf8").includes("\nlsp\n"));
+});
+
 test("crashing dprint -> {}, then a working dprint is respawned -> formatted", async () => {
   stubDprint("crash");
   const s = startServer();
@@ -842,6 +876,18 @@ test("watch-paths.mjs prints nothing for a cwd without a dprint config", () => {
   const r = watch({ hook_event_name: "SessionStart", cwd: bare });
   assert.equal(r.status, 0, r.stderr);
   assert.equal(r.stdout, "");
+});
+
+test("watch-paths.mjs lists the files through npx when no dprint binary is installed", () => {
+  stubNpx();
+  const r = watch({ hook_event_name: "SessionStart", cwd: repo });
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(JSON.parse(r.stdout), {
+    hookSpecificOutput: {
+      hookEventName: "SessionStart",
+      watchPaths: [path.join(repo, "a.ts")],
+    },
+  });
 });
 
 test("watch-paths.mjs falls back to output-file-paths on dprint 0.50-0.54", () => {
