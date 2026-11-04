@@ -34,9 +34,9 @@ function run(args: string[]): number {
     return 2;
   }
 
-  const dprint = findDprint();
-  if (dprint === null || findConfig(process.cwd()) === null) {
-    const missing = dprint === null;
+  const cmd = findDprint();
+  if (cmd === null || findConfig(process.cwd()) === null) {
+    const missing = cmd === null;
     process.stdout.write(`status=notsetup reason=${missing ? "missing" : "noconfig"}\n`);
     process.stderr.write(
       `dprint is not set up here (${missing ? "no dprint found" : "no dprint config found in this directory or its ancestors up to the git root"}): run /dprint init (/dprint:dprint init) first\n`,
@@ -44,10 +44,11 @@ function run(args: string[]): number {
     return 3;
   }
 
+  const [file, ...pre] = cmd;
   // no shell: the scope reaches dprint byte-for-byte; `--` keeps a scope starting with `-` from being an option
-  const r = spawnSync(dprint, args.length === 2 ? [sub, "--", args[1]] : [sub], { stdio: "inherit" });
+  const r = spawnSync(file, [...pre, ...(args.length === 2 ? [sub, "--", args[1]] : [sub])], { stdio: "inherit" });
   if (r.error || r.status === null) {
-    process.stderr.write(`run-dprint: '${dprint} ${sub}' failed: ${r.error?.message ?? String(r.signal)}\n`);
+    process.stderr.write(`run-dprint: '${cmd.join(" ")} ${sub}' failed: ${r.error?.message ?? String(r.signal)}\n`);
     return 2;
   }
   return r.status;

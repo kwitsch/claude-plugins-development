@@ -194,12 +194,14 @@ export class DprintLsp {
   private start(): Promise<void> {
     if (this.ready) return this.ready;
     if (Date.now() < this.noDprintUntil) return Promise.reject(new Error("dprint not found"));
-    const bin = findDprint();
-    if (!bin) {
+    const cmd = findDprint();
+    if (!cmd) {
       this.noDprintUntil = Date.now() + NOT_FOUND_RETRY_MS;
       return Promise.reject(new Error("dprint not found"));
     }
-    const child = spawn(bin, ["lsp"], { cwd: this.cwd, stdio: "pipe" });
+    const [file, ...pre] = cmd;
+    // via npx the child is npx; killing it also ends the dprint lsp it started
+    const child = spawn(file, [...pre, "lsp"], { cwd: this.cwd, stdio: "pipe" });
     this.child = child;
     this.buf = Buffer.alloc(0);
     child.stdin.on("error", () => {}); // EPIPE after a crash; the crash itself surfaces via exit/error
