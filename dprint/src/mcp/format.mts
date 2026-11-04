@@ -15,18 +15,19 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 import { findConfig } from "../skills/dprint/find-config.mjs";
-import type { CwdChangedInput, FileChangedInput, FileWrittenInput, FormatPreInput, WorktreeEnteredInput, WorktreeExitedInput } from "./hook-inputs.mjs";
+import type { BashFinishedInput, BashStartedInput, CwdChangedInput, DrainNoticesInput, FileChangedInput, FileWrittenInput, FormatPreInput, WorktreeEnteredInput, WorktreeExitedInput } from "./hook-inputs.mjs";
 import { DprintLsp } from "./lsp.mjs";
+import { dprintFilePaths } from "./watch-list.mjs";
 
-/** Hook output: empty (`{}`) to let the tool call through unchanged, else the rewritten tool input. */
+/** Hook output: empty (`{}`) to let the event through unchanged, else a notice and, for `format_pre`, the rewritten tool input. */
 export type HookResult = {
-  /** PreToolUse output; absent when the hook leaves the tool call alone. */
+  /** Output for the hook's event; absent when the hook has nothing to say. */
   hookSpecificOutput?: {
-    /** Always `PreToolUse`. */
-    hookEventName: "PreToolUse";
-    /** Replacement for the whole `Write`/`Edit` tool input. */
-    updatedInput: Record<string, unknown>;
-    /** Notice to the model that the file was reformatted on purpose. */
+    /** The event the output belongs to (`PreToolUse`, `PostToolUse` or `UserPromptSubmit`). */
+    hookEventName: string;
+    /** Replacement for the whole `Write`/`Edit` tool input (`format_pre` only). */
+    updatedInput?: Record<string, unknown>;
+    /** Notice to the model: a reformat it did not make itself. */
     additionalContext: string;
   };
 };
@@ -275,6 +276,46 @@ const overrideKey = (args: {
 }): string => args.agent_id || args.session_id || "";
 
 /**
+ * Files {@link fileChanged} reformatted that the model does not know about yet, per {@link overrideKey}; drained by
+ * {@link drainNotices}. Absolute paths.
+ */
+const notices = new Map<string, Set<string>>();
+
+/**
+ * Queue a reformatted file for the next {@link drainNotices}.
+ *
+ * @param k - {@link overrideKey} of the session or subagent.
+ * @param fp - Absolute path.
+ */
+const queueNotice = (k: string, fp: string): void => {
+  notices.set(k, (notices.get(k) ?? new Set()).add(fp));
+};
+
+/**
+ * Take (and forget) the queued files of a session or subagent.
+ *
+ * @param k - {@link overrideKey} of the session or subagent.
+ * @returns The queued absolute paths; empty when none.
+ */
+const takeNotices = (k: string): Set<string> => {
+  const files = notices.get(k) ?? new Set<string>();
+  notices.delete(k);
+  return files;
+};
+
+/** Start time (ms) of the running Bash call per {@link overrideKey}, set by {@link bashStarted}. */
+const bashStart = new Map<string, number>();
+
+/**
+ * In-scope watch list per effective cwd, read lazily by {@link cachedWatchList}.
+ *
+ * @remarks
+ * shortcut: files created after the first read are missing until a cwd change clears the cache (the same
+ * limit as the FileChanged watch list), upgrade with F24.
+ */
+const watchCache = new Map<string, Array<{ fp: string; real: string }>>();
+
+/**
  * Record a cwd override for the payload's session or subagent.
  *
  * @param args - Hook input (supplies the key).
@@ -291,6 +332,7 @@ function setCwd(
     if (cwd) cwdOverrides.set(key, cwd);
     else cwdOverrides.delete(key);
   }
+  if (cwd) watchCache.delete(cwd); // entering a directory re-reads its list on the next bash_finished
   return {};
 }
 
@@ -466,6 +508,14 @@ const written = new Map<string, string>();
  */
 const digest = (text: string): string => createHash("sha256").update(text).digest("base64");
 
+/**
+ * Message of a caught value.
+ *
+ * @param e - Anything thrown.
+ * @returns `e.message` for an `Error`, else `String(e)`.
+ */
+const errText = (e: unknown): string => e instanceof Error ? e.message : String(e);
+
 /** Strict UTF-8 decoder: throws on invalid bytes. */
 const utf8 = new TextDecoder("utf-8", { fatal: true });
 
@@ -509,7 +559,7 @@ export function fileWritten(args: FileWrittenInput = {}): HookResult {
     }
   } catch (e) {
     process.stderr.write(
-      `[dprint-hooks] file_written failed open: ${e instanceof Error ? e.message : String(e)}\n`,
+      `[dprint-hooks] file_written failed open: ${errText(e)}\n`,
     );
   }
   return {};
@@ -539,19 +589,102 @@ function releaseChangeSlot(): void {
 }
 
 /**
+ * Format one file on disk after a change not made by Edit/Write.
+ *
+ * @remarks
+ * Skips files above {@link MAX_CHANGED_BYTES}, files with a lone `\r`, content equal to the {@link written} digest, and
+ * (user decision) gitignored files and tracked files unchanged against the git index (one
+ * `git status --porcelain --untracked-files=normal --ignored=matching`: `!!` or empty output, e.g. after
+ * checkout/pull/reset/stash); when git fails or is absent the file is formatted. CRLF files are formatted on their LF
+ * view and written back with CRLF. At most {@link MAX_ACTIVE_CHANGES} calls run git and dprint at once, the rest wait
+ * in order (beyond {@link MAX_WAITING_CHANGES} waiting they are dropped with a stderr line), on a `dprint lsp` of
+ * their own. The whole file is formatted via `textDocument/formatting` and written in place only when dprint changed
+ * it and the file did not change meanwhile.
+ *
+ * @param sc - Scope of the hook call.
+ * @param s - The file, from {@link inScope}.
+ * @returns `true` when the file was rewritten, `false` on every skip and error (fail open).
+ */
+async function formatOnDisk(sc: Scope, s: { fp: string; real: string }): Promise<boolean> {
+  try {
+    if (statSync(s.fp).size > MAX_CHANGED_BYTES) {
+      process.stderr.write(`[dprint-hooks] format skipped (over ${MAX_CHANGED_BYTES} bytes): ${s.fp}\n`);
+      return false;
+    }
+    if (!(await acquireChangeSlot(s.fp))) return false;
+    try {
+      // read after the slot is held: waiting events must not each keep up to 1 MiB of text alive
+      // fatal decoder: a non-UTF-8 file throws (fails open) instead of being rewritten with U+FFFD
+      const text = utf8.decode(readFileSync(s.fp));
+      if (written.get(s.real) === digest(text)) return false;
+      // CRLF files are formatted on their LF view (as formatPre's Edit does) and written back with CRLF; a lone "\r" fails open
+      const lf = text.replaceAll("\r\n", "\n");
+      if (lf.includes("\r")) return false;
+      // user decision: gitignored files (`!!`) and tracked files equal to the index (empty output) are left alone;
+      // one spawn answers both. --untracked-files=normal is required: under status.showUntrackedFiles=no git
+      // rejects --ignored otherwise. --no-optional-locks keeps .git/index.lock free for the user's git,
+      // cwd = dirname picks the nearest repository (nested repos, submodules)
+      try {
+        const { stdout } = await execFileAsync(
+          "git",
+          ["--no-optional-locks", "status", "--porcelain", "--untracked-files=normal", "--ignored=matching", "--", s.fp],
+          { cwd: path.dirname(s.fp), encoding: "utf8", timeout: 10_000 },
+        );
+        if (stdout === "" || stdout.startsWith("!!")) return false;
+      } catch {
+        // no git, not a repository or timeout: format
+      }
+      // own client: whole-file formats here never queue in front of a Write/Edit format_pre call
+      const out = changed(
+        await client(sc.root, sc.root + "\0file_changed").format(pathToFileURL(s.fp).href, lf),
+        lf,
+      );
+      if (out === null) return false;
+      const final = text === lf ? out : out.replaceAll("\n", "\r\n");
+      // a write that landed while dprint was formatting (or while the event waited) wins
+      if (utf8.decode(readFileSync(s.fp)) !== text) return false;
+      // an Edit/Write record that landed during the awaits wins (keeps trimToEdit's minimal diff)
+      if (written.get(s.real) === digest(text)) return false;
+      writeFileSync(s.fp, final);
+      written.set(s.real, digest(final)); // after the write: a failed write records nothing
+      return true;
+    } finally {
+      releaseChangeSlot();
+    }
+  } catch (e) {
+    process.stderr.write(
+      `[dprint-hooks] format_on_disk failed open: ${errText(e)}\n`,
+    );
+    return false;
+  }
+}
+
+/**
+ * Build the notice for files dprint reformatted outside Edit/Write.
+ *
+ * @param args - Hook input: `hook_event_name` (or the fixed event), `cwd` and the session keys.
+ * @param event - Event the output belongs to.
+ * @param files - Absolute paths.
+ * @returns A PostToolUse/PreToolUse/UserPromptSubmit output with plain facts (no instructions to the system).
+ */
+function notice(args: { cwd?: string; agent_id?: string; session_id?: string }, event: string, files: string[]): HookResult {
+  const root = scopeOf(args)?.root;
+  const rel = files.map((p) => root ? path.relative(root, p) : p).join(", ");
+  return {
+    hookSpecificOutput: {
+      hookEventName: event,
+      additionalContext: `dprint reformatted after a change outside Edit/Write: ${rel}. Tool output from before this notice (cat, line lengths, diffs) shows the state BEFORE the formatting. Re-read the file before stating anything about its content and before further string-based edits.`,
+    },
+  };
+}
+
+/**
  * FileChanged hook: format a watched file inside the cwd on disk after a change not made by Edit/Write.
  *
  * @remarks
- * Skips `unlink` events, files out of {@link inScope}, cwds without a dprint config, files above
- * {@link MAX_CHANGED_BYTES}, files with a lone `\r`, content equal to the {@link written} digest, and (user
- * decision) gitignored files and tracked files unchanged against the git index (one
- * `git status --porcelain --untracked-files=normal --ignored=matching`: `!!` or empty output, e.g. after
- * checkout/pull/reset/stash);
- * when git fails or is absent the file is formatted. CRLF files are formatted on their LF view and written back
- * with CRLF. At most {@link MAX_ACTIVE_CHANGES} events run git and dprint at once, the rest wait in order (beyond
- * {@link MAX_WAITING_CHANGES} waiting they are dropped with a stderr line), on a `dprint lsp` of their own.
- * The whole file is formatted via `textDocument/formatting` and written in place only when dprint changed it and
- * the file did not change meanwhile. Never returns `watchPaths`, so Claude Code keeps its watch list.
+ * Skips `unlink` events, files out of {@link inScope} and cwds without a dprint config; the rest is
+ * {@link formatOnDisk}. A rewrite is queued for {@link drainNotices}, since FileChanged has no channel to the model.
+ * Never returns `watchPaths`, so Claude Code keeps its watch list.
  *
  * @param args - Hook input: `cwd`, `agent_id`, `session_id`, `scratchpad_dir`, `file_path` and `event`.
  * @returns `{}` (fail open on every error).
@@ -564,56 +697,103 @@ export async function fileChanged(
     const sc = scopeOf(args);
     const s = sc && inScope(sc, args.file_path ?? "");
     if (!sc || !s || findConfig(sc.root) === null) return {};
-    if (statSync(s.fp).size > MAX_CHANGED_BYTES) {
-      process.stderr.write(`[dprint-hooks] file_changed skipped (over ${MAX_CHANGED_BYTES} bytes): ${s.fp}\n`);
-      return {};
-    }
-    if (!(await acquireChangeSlot(s.fp))) return {};
-    try {
-      // read after the slot is held: waiting events must not each keep up to 1 MiB of text alive
-      // fatal decoder: a non-UTF-8 file throws (fails open) instead of being rewritten with U+FFFD
-      const text = utf8.decode(readFileSync(s.fp));
-      if (written.get(s.real) === digest(text)) return {};
-      // CRLF files are formatted on their LF view (as formatPre's Edit does) and written back with CRLF; a lone "\r" fails open
-      const lf = text.replaceAll("\r\n", "\n");
-      if (lf.includes("\r")) return {};
-      // user decision: gitignored files (`!!`) and tracked files equal to the index (empty output) are left alone;
-      // one spawn answers both. --untracked-files=normal is required: under status.showUntrackedFiles=no git
-      // rejects --ignored otherwise. --no-optional-locks keeps .git/index.lock free for the user's git,
-      // cwd = dirname picks the nearest repository (nested repos, submodules)
-      try {
-        const { stdout } = await execFileAsync(
-          "git",
-          ["--no-optional-locks", "status", "--porcelain", "--untracked-files=normal", "--ignored=matching", "--", s.fp],
-          { cwd: path.dirname(s.fp), encoding: "utf8", timeout: 10_000 },
-        );
-        if (stdout === "" || stdout.startsWith("!!")) return {};
-      } catch {
-        // no git, not a repository or timeout: format
-      }
-      // own client: whole-file formats here never queue in front of a Write/Edit format_pre call
-      const out = changed(
-        await client(sc.root, sc.root + "\0file_changed").format(pathToFileURL(s.fp).href, lf),
-        lf,
-      );
-      if (out === null) return {};
-      const final = text === lf ? out : out.replaceAll("\n", "\r\n");
-      // a write that landed while dprint was formatting (or while the event waited) wins
-      if (utf8.decode(readFileSync(s.fp)) !== text) return {};
-      // an Edit/Write record that landed during the awaits wins (keeps trimToEdit's minimal diff)
-      if (written.get(s.real) === digest(text)) return {};
-      writeFileSync(s.fp, final);
-      written.set(s.real, digest(final)); // after the write: a failed write records nothing
-      return {};
-    } finally {
-      releaseChangeSlot();
+    if (await formatOnDisk(sc, s)) {
+      const k = overrideKey(args);
+      queueNotice(k, s.fp);
     }
   } catch (e) {
     process.stderr.write(
-      `[dprint-hooks] file_changed failed open: ${e instanceof Error ? e.message : String(e)}\n`,
+      `[dprint-hooks] file_changed failed open: ${errText(e)}\n`,
+    );
+  }
+  return {};
+}
+
+/**
+ * PreToolUse `Bash` hook: remember when the Bash call started.
+ *
+ * @param args - Hook input: `session_id` and `agent_id`.
+ * @returns `{}`.
+ */
+export function bashStarted(args: BashStartedInput = {}): HookResult {
+  bashStart.set(overrideKey(args), Date.now());
+  return {};
+}
+
+/**
+ * The in-scope files dprint formats in a cwd, cached per root.
+ *
+ * @param sc - Scope of the hook call.
+ * @returns The files; `[]` (also cached, so a failing dprint cannot stall every Bash call) on a dprint failure.
+ */
+async function cachedWatchList(sc: Scope): Promise<Array<{ fp: string; real: string }>> {
+  let list = watchCache.get(sc.root);
+  if (!list) {
+    list = [];
+    try {
+      for (const p of await dprintFilePaths(sc.root)) {
+        const s = inScope(sc, p);
+        if (s) list.push(s);
+      }
+    } catch (e) {
+      process.stderr.write(`[dprint-hooks] watch list failed: ${errText(e)}\n`);
+    }
+    watchCache.set(sc.root, list);
+  }
+  return list;
+}
+
+/**
+ * PostToolUse `Bash` hook: format the watched files the Bash call changed, right now, and tell the model.
+ *
+ * @remarks
+ * FileChanged fires only after the Bash call ended, so its tool output shows the unformatted state. Every file of
+ * the (cached) watch list with an mtime after the {@link bashStarted} time (minus 1 s for coarse file systems) goes
+ * through {@link formatOnDisk}; false positives end at its digest and git checks. {@link fileChanged} later sees the
+ * recorded digest and stays silent, so nothing is formatted or reported twice. Does nothing without a preceding
+ * `bash_started`, a dprint config or a watch list.
+ *
+ * @param args - Hook input: `cwd`, `agent_id`, `session_id` and `scratchpad_dir`.
+ * @returns A PostToolUse notice naming the reformatted files, else `{}` (fail open).
+ */
+export async function bashFinished(args: BashFinishedInput = {}): Promise<HookResult> {
+  try {
+    const k = overrideKey(args);
+    const since = bashStart.get(k);
+    bashStart.delete(k);
+    const sc = scopeOf(args);
+    if (since === undefined || !sc || findConfig(sc.root) === null) return {};
+    const touched = (await cachedWatchList(sc)).filter((f) => {
+      try {
+        return statSync(f.fp).mtimeMs > since - 1000;
+      } catch {
+        return false; // deleted meanwhile
+      }
+    });
+    const formatted = new Set<string>(takeNotices(k)); // a FileChanged that fired mid-Bash queued its notice already
+    await Promise.all(touched.map(async (f) => {
+      if (await formatOnDisk(sc, f)) formatted.add(f.fp);
+    }));
+    return formatted.size ? notice(args, "PostToolUse", [...formatted].sort()) : {};
+  } catch (e) {
+    process.stderr.write(
+      `[dprint-hooks] bash_finished failed open: ${errText(e)}\n`,
     );
     return {};
   }
+}
+
+/**
+ * PreToolUse and UserPromptSubmit hook: hand the model the reformats {@link fileChanged} queued since the last drain.
+ *
+ * @param args - Hook input: `hook_event_name`, `cwd`, `agent_id` and `session_id`.
+ * @returns A notice naming the files, else `{}`; each file is reported once, and only to the session/agent it was queued for.
+ */
+export function drainNotices(args: DrainNoticesInput = {}): HookResult {
+  const k = overrideKey(args);
+  if (!args.hook_event_name) return {};
+  const files = takeNotices(k);
+  return files.size ? notice(args, args.hook_event_name, [...files].sort()) : {};
 }
 
 /**
@@ -754,7 +934,7 @@ export async function formatPre(
     return {};
   } catch (e) {
     process.stderr.write(
-      `[dprint-hooks] format_pre failed open: ${e instanceof Error ? e.message : String(e)}\n`,
+      `[dprint-hooks] format_pre failed open: ${errText(e)}\n`,
     );
     return {};
   }

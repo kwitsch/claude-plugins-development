@@ -188,3 +188,13 @@ test("command hooks on SessionStart and FileChanged pass and generate no types",
   const r = run("--check", dir);
   assert.equal(r.status, 0, r.stderr);
 });
+
+test("UserPromptSubmit is a known event: ${prompt} passes, a tool field is rejected", () => {
+  const drain = (h) => h.hooks.UserPromptSubmit[0].hooks[0];
+  const ok = run("--check", scratch((h) => (drain(h).input.prompt = "${prompt}")));
+  assert.equal(ok.status, 1); // stale types only
+  assert.doesNotMatch(ok.stderr, /placeholder/);
+  const r = run("--check", scratch((h) => (drain(h).input.t = "${tool_name}")));
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /placeholder \$\{tool_name\}/);
+});

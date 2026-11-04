@@ -4,6 +4,7 @@ import { test, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
 import {
+  utimesSync,
   chmodSync,
   existsSync,
   mkdirSync,
@@ -178,6 +179,9 @@ test("initialize reports dprint-hooks with the manifest version; tools/list has 
       "worktree_exited",
       "file_written",
       "file_changed",
+      "bash_started",
+      "bash_finished",
+      "drain_notices",
     ],
   );
 });
@@ -850,4 +854,67 @@ test("watch-paths.mjs falls back to output-file-paths on dprint 0.50-0.54", () =
       watchPaths: [path.join(repo, "a.ts")],
     },
   });
+});
+
+const SESSION = { session_id: "s1", agent_id: "" };
+
+test("bash_finished formats a file the Bash call changed and names it; a later file_changed stays silent", async () => {
+  stubDprint();
+  const s = startServer();
+  const a = path.join(repo, "a.ts"); // the stub's watch list is $PWD/a.ts
+  const ctx = { cwd: repo, ...SESSION };
+  await s.tool("bash_started", SESSION);
+  writeFileSync(a, "x  \n");
+  const r = await s.tool("bash_finished", ctx);
+  assert.equal(r.hookSpecificOutput.hookEventName, "PostToolUse");
+  assert.match(r.hookSpecificOutput.additionalContext, /: a\.ts\. Tool output from before/);
+  assert.equal(readFileSync(a, "utf8"), "x\n");
+  // the FileChanged event for the same write finds its digest: no second format, no queued notice
+  assert.deepEqual(await s.tool("file_changed", { cwd: repo, file_path: a, event: "change" }), {});
+  assert.deepEqual(await s.tool("drain_notices", { hook_event_name: "UserPromptSubmit", cwd: repo, ...SESSION }), {});
+});
+
+test("bash_finished: already formatted, stale mtime and missing bash_started give {}", async () => {
+  stubDprint();
+  const s = startServer();
+  const a = path.join(repo, "a.ts");
+  const ctx = { cwd: repo, ...SESSION };
+  assert.deepEqual(await s.tool("bash_finished", ctx), {}); // no bash_started
+  await s.tool("bash_started", SESSION);
+  writeFileSync(a, "x\n");
+  assert.deepEqual(await s.tool("bash_finished", ctx), {});
+  await s.tool("bash_started", SESSION);
+  writeFileSync(a, "x  \n");
+  utimesSync(a, new Date(Date.now() - 60_000), new Date(Date.now() - 60_000));
+  assert.deepEqual(await s.tool("bash_finished", ctx), {});
+  assert.equal(readFileSync(a, "utf8"), "x  \n");
+  // bash_finished consumed the start time: a second finish without a new start does nothing
+  assert.deepEqual(await s.tool("bash_finished", ctx), {});
+});
+
+test("drain_notices reports a file_changed reformat once, to its own session/agent only", async () => {
+  stubDprint();
+  const s = startServer();
+  const a = path.join(repo, "a.ts");
+  writeFileSync(a, "x  \n");
+  await s.tool("file_changed", { cwd: repo, file_path: a, event: "change", ...SESSION });
+  const drain = (extra) => s.tool("drain_notices", { hook_event_name: "PreToolUse", cwd: repo, ...extra });
+  assert.deepEqual(await drain({ session_id: "s1", agent_id: "sub" }), {});
+  assert.deepEqual(await drain({ session_id: "s2", agent_id: "" }), {});
+  const r = await drain(SESSION);
+  assert.equal(r.hookSpecificOutput.hookEventName, "PreToolUse");
+  assert.match(r.hookSpecificOutput.additionalContext, /: a\.ts\./);
+  assert.deepEqual(await drain(SESSION), {});
+});
+
+test("bash_finished also reports a reformat file_changed already made mid-Bash", async () => {
+  stubDprint();
+  const s = startServer();
+  const a = path.join(repo, "a.ts");
+  await s.tool("bash_started", SESSION);
+  writeFileSync(a, "x  \n");
+  await s.tool("file_changed", { cwd: repo, file_path: a, event: "change", ...SESSION });
+  const r = await s.tool("bash_finished", { cwd: repo, ...SESSION });
+  assert.match(r.hookSpecificOutput.additionalContext, /: a\.ts\./);
+  assert.deepEqual(await s.tool("drain_notices", { hook_event_name: "PreToolUse", cwd: repo, ...SESSION }), {});
 });

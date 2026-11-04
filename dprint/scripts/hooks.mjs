@@ -47,6 +47,7 @@ const EVENT_FIELDS = {
   // Claude Code 2.1.316: file_path is absolute, event is change|add|unlink
   FileChanged: [...COMMON, "file_path", "event"],
   SessionStart: [...COMMON, "source"],
+  UserPromptSubmit: [...COMMON, "prompt"],
 };
 // tool_input fields of the tools a matcher may name; matchers naming other tools allow any tool_input field
 const TOOL_INPUT = {
