@@ -30,6 +30,7 @@ for f in plugin.json package.json tsconfig.json; do
   sed -e "s/__NAME__/$name/g" -e "s/__DESCRIPTION__/<description>/g" -e "s/__AUTHOR__/$(git config user.name)/g" "$T/$f" > "$name/$f"
 done
 cp "$T/build.mjs" "$name/scripts/build.mjs"
+cp "$T/eslint.config.mjs" "$name/eslint.config.mjs"
 sed "s/__NAME__/$name/g" "$T/CLAUDE.md" > "$name/CLAUDE.md"
 sed "s/__NAME__/$name/g" "$T/README.md" > "$name/plugin/README.md"
 ```
@@ -48,11 +49,12 @@ If no `src/` files were created, still keep `src/`, `scripts/` and the `package.
 ```bash
 pnpm install
 pnpm --filter <name> build
+pnpm --filter <name> lint
 pnpm --filter <name> test
 claude plugin validate <name>/plugin
 ```
 
-All three must pass. Fix template substitutions, never hand-edit `plugin/**/*.mjs` or `plugin/.claude-plugin/plugin.json`.
+All four must pass. Fix template substitutions, never hand-edit `plugin/**/*.mjs` or `plugin/.claude-plugin/plugin.json`.
 
 ## Step 4 — Report
 

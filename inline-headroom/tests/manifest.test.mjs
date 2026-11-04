@@ -1,5 +1,5 @@
 // Manifest and wiring contract of the built plugin/ (ported from claude-plugins' test/inline-headroom/test.bats).
-import { test } from "node:test";
+import { test } from "vitest";
 import assert from "node:assert/strict";
 import { existsSync, readFileSync, statSync } from "node:fs";
 
@@ -55,9 +55,9 @@ test("mcp/server.mjs is an executable node program", () => {
   assert.equal(readFileSync(server, "utf8").split("\n")[0], "#!/usr/bin/env node");
 });
 
-test("hooks.json is exactly the mods module list, and the module and its wiring tests exist", () => {
-  assert.deepEqual(json("hooks/hooks.json"), { modules: ["./register.ts"] });
-  for (const f of ["hooks/register.ts", "hooks/policy.mjs", "hooks/policy.d.mts", "tests/inline-headroom.test.ts"]) {
+test("hooks.json is exactly the mods module list, and the built modules exist", () => {
+  assert.deepEqual(json("hooks/hooks.json"), { modules: ["./register.mjs"] });
+  for (const f of ["hooks/register.mjs", "hooks/policy.mjs"]) {
     assert.ok(existsSync(new URL(`../plugin/${f}`, import.meta.url)), f);
   }
 });

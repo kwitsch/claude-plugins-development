@@ -18,6 +18,15 @@ jobs:
             | while read -r d; do [ -f "$d/plugin.json" ] && echo "$d"; done | tr '\n' ' ')
           echo "plugins=$plugins" >> "$GITHUB_OUTPUT"
           echo "changed: ${plugins:-none}"
+          # the shared test engine is no plugin: a change to it re-tests every plugin using it (no version bump)
+          tested=$plugins
+          if ! git diff --quiet "origin/${{ github.base_ref }}...HEAD" -- claude-engine-vitest/; then
+            echo "engine=true" >> "$GITHUB_OUTPUT"
+            tested="$tested $(grep -l '"claude-engine-vitest"' */package.json | grep -v '^claude-engine-vitest/' | xargs -rn1 dirname | tr '\n' ' ')"
+          fi
+          tested=$(echo $tested | tr ' ' '\n' | sort -u | tr '\n' ' ')
+          echo "tested=$tested" >> "$GITHUB_OUTPUT"
+          echo "tested: ${tested:-none}"
 
       - name: Versions in package.json and plugin.json must match
         if: steps.changed.outputs.plugins != ''
@@ -64,21 +73,25 @@ jobs:
       # Toolchain only when something must be built: setup-node's post step
       # fails when `cache: pnpm` is set but `pnpm install` never ran.
       - uses: pnpm/action-setup@v6
-        if: steps.changed.outputs.plugins != ''
+        if: steps.changed.outputs.tested != '' || steps.changed.outputs.engine == 'true'
       - uses: actions/setup-node@v7
-        if: steps.changed.outputs.plugins != ''
+        if: steps.changed.outputs.tested != '' || steps.changed.outputs.engine == 'true'
         with:
           node-version: 24
           cache: pnpm
 
       - name: Install
-        if: steps.changed.outputs.plugins != ''
+        if: steps.changed.outputs.tested != '' || steps.changed.outputs.engine == 'true'
         run: pnpm install --frozen-lockfile
 
+      - name: Test the shared test engine
+        if: steps.changed.outputs.engine == 'true'
+        run: pnpm --filter claude-engine-vitest test
+
       - name: Build and test changed plugins
-        if: steps.changed.outputs.plugins != ''
+        if: steps.changed.outputs.tested != ''
         run: |
-          for p in ${{ steps.changed.outputs.plugins }}; do
+          for p in ${{ steps.changed.outputs.tested }}; do
             pnpm --filter "$p" run --if-present lint
             pnpm --filter "$p" build
             pnpm --filter "$p" test

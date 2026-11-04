@@ -1,48 +1,157 @@
-import type { EngineInterface, Register, Timer } from "claude-code";
+/**
+ * Claude Code function-hooks module of inline-headroom: every hook and every `$` use. The pure logic lives in
+ * `policy.mts`, which must never touch `$`.
+ *
+ * @remarks
+ * EARLY ACCESS API. No engine type import (`claude-code` typings are not in the repo): the used `$` members and
+ * events are typed structurally below. `scripts/build.mjs` keeps `hooks/*.mjs` unmangled and uncompressed, since
+ * the engine's static check wants `$`/`on` spelled as such and no `$.<noun>` passed as a bare value.
+ *
+ * @packageDocumentation
+ */
 import { cacheHitRatio, CELL_WIDTHS, crushQuery, dayKey, foldPending, isCacheDrop, isOwnStorageCall, isToolError, pct, resetCorpus, RETAIN_DAYS, RETRIEVE_NAME, RETRIEVE_TOOL, retrieveKey, rewriteToolResults, ROWS, statsTables, stepEffort, storeOffloaded, tableText, toCount, wantsQuery, windowStart, zeroCounters } from "./policy.mjs";
 import type { Counters, DedupState } from "./policy.mjs";
 
+/** A `$.clock.every` handle. */
+type Timer = { cancel(): void };
+/** A step's token usage, as `cacheHitRatio` reads it. */
+type Usage = Parameters<typeof cacheHitRatio>[0];
+/** A tool-result row's message content, as `rewriteToolResults` takes it. */
+type Content = Parameters<typeof rewriteToolResults>[0];
+/** A conversation's messages, as `crushQuery` takes them. */
+type Messages = Parameters<typeof crushQuery>[0];
+/** The part of the engine interface `$` this module uses. */
+type Engine = {
+  clock: { now(): Promise<number>; every(ms: number, fn: () => void): Timer };
+  command: { register(spec: { name: string; description: string }): Promise<unknown> };
+  tool: { register(spec: typeof RETRIEVE_SPEC): Promise<{ tool?: string }> };
+  mcp: {
+    connect(key: string): Promise<{ isConnected: true; server: string } | { isConnected: false; reason: string; message: string }>;
+    call(server: string, tool: string, args: Record<string, unknown>): Promise<{ content: { text?: string }[]; isError?: boolean; structuredContent?: unknown }>;
+  };
+  session: { messages(opts?: { agentId: string }): Promise<unknown> };
+  ui: {
+    invalidate(event: "ui.render"): void;
+    log(text: string): void;
+    open(args: { id: string; title: string; focus: true; closeOnEscape: true; rows: number }): Promise<{ isPlaced: boolean }>;
+    // The element factories are plain functions, called detached from the object (`const { Box, Text } = …`).
+    resolve(e: unknown): { Box: (props: Record<string, unknown>) => unknown; Text: (props: Record<string, unknown>) => unknown };
+  };
+};
+/** Continues the hook chain with an event. */
+type Next<E, R> = (e: E) => Promise<R>;
+/** A function hook taking event `E` and resolving `R`. */
+type Hook<E, R> = ($: Engine, e: E, next: Next<E, R>) => Promise<R>;
+/** A `tool.call` event. */
+type ToolCall = { tool: string; agentId?: string } & Record<string, unknown>;
+/** A `tool.call` result. */
+type ToolResult = Record<string, unknown>;
+/** A `session.append` tool-result row. */
+type AppendRow = { agentId?: string; origin: { kind: string; tool: string }; message: { content: Content } & Record<string, unknown> } & Record<string, unknown>;
+/** A `turn.step` event. */
+type Step = { index: number; effort?: unknown; agentId?: string } & Record<string, unknown>;
+/** What a `turn.step` run returns when it ends. */
+type StepResult = { usage?: Usage | null } | undefined;
+/** A `turn.step` run: the step's stream, ending in its result. */
+type StepRun = AsyncGenerator<unknown, StepResult, unknown>;
+/** An event that may come from a subagent. */
+type AgentEvent = { agentId?: string } & Record<string, unknown>;
+/** The `on` the engine passes to `register`, one overload per hooked event. */
+type On = {
+  (event: "session.start" | "session.end", hook: Hook<unknown, unknown>): void;
+  (event: "command.run", matcher: { command: string }, hook: ($: Engine) => Promise<{ text?: string }>): void;
+  (event: "ui.render", matcher: { component: "Pane"; requestId: string }, hook: ($: Engine, e: unknown) => Promise<unknown>): void;
+  (event: "ui.close", matcher: { id: string }, hook: Hook<unknown, { deny?: string }>): void;
+  (event: "tool.call", hook: Hook<ToolCall, ToolResult>): void;
+  (event: "session.append", matcher: { door: "tool-result" }, hook: Hook<AppendRow, unknown>): void;
+  (event: "session.compact", hook: Hook<AgentEvent & { trigger?: string }, { skip?: unknown }>): void;
+  (event: "turn.step", hook: ($: Engine, e: Step, next: (e: Step) => StepRun) => StepRun): void;
+  (event: "tool.check", hook: ($: Engine, e: { tool: string }, next: Next<{ tool: string }, unknown> & { origin: { plugin: string } }) => Promise<unknown>): void;
+  (event: "turn.complete", hook: Hook<AgentEvent, unknown>): void;
+};
 // Module state resets on hot reload and on an options change (the engine reloads the module).
 // Persisted totals survive: each load writes its own rows under a new WRITER.
-let toolErrored = false; // any main-loop tool error since the last main-loop step
-const agentErrored = new Set<string>(); // subagents with a tool error since their own last step; an entry ends with that agent's turn
-const subagents = { steps: 0, clamped: 0 }; // this session's subagent steps: its own row in memory; the persisted day rows count them with the main loop's
-const crush = { dropped: 0, saved: 0 }; // this session's SmartCrusher savings: in memory only, never persisted (the stats schema has no columns for them)
-const dedup = { spans: 0, saved: 0 }; // this session's cross-turn dedup savings: in memory only, never persisted
-const elide = { lines: 0, saved: 0 }; // this session's dense line elider savings: in memory only, never persisted
-const compact = { arrays: 0, saved: 0 }; // this session's lossless compaction savings: in memory only, never persisted
-const config = { texts: 0, saved: 0 }; // this session's config compressor savings: in memory only, never persisted
-const extract = { pages: 0, saved: 0 }; // this session's HTML extractor savings: in memory only, never persisted
-const log = { texts: 0, saved: 0 }; // this session's log compressor savings: in memory only, never persisted
-const search = { texts: 0, saved: 0 }; // this session's search compressor savings: in memory only, never persisted
-const diff = { texts: 0, saved: 0 }; // this session's diff compressor savings: in memory only, never persisted
-const textcrush = { texts: 0, saved: 0 }; // this session's text crusher savings: in memory only, never persisted
-const split = { texts: 0, saved: 0 }; // this session's relevance split savings: in memory only, never persisted
-const dedupStates = new Map<string, DedupState>(); // conversation ("" main, else agentId) → its dedup corpus; reset on session.end
-// Starts one conversation's dedup corpus over (its ordinals keep counting): what it indexes left the model's context.
+/** Any main-loop tool error since the last main-loop step. */
+let toolErrored = false;
+/** Subagents with a tool error since their own last step; an entry ends with that agent's turn. */
+const agentErrored = new Set<string>();
+/** This session's subagent steps: its own row in memory; the persisted day rows count them with the main loop's. */
+const subagents = { steps: 0, clamped: 0 };
+/** This session's SmartCrusher savings: in memory only, never persisted (the stats schema has no columns for them). */
+const crush = { dropped: 0, saved: 0 };
+/** This session's cross-turn dedup savings: in memory only, never persisted. */
+const dedup = { spans: 0, saved: 0 };
+/** This session's dense line elider savings: in memory only, never persisted. */
+const elide = { lines: 0, saved: 0 };
+/** This session's lossless compaction savings: in memory only, never persisted. */
+const compact = { arrays: 0, saved: 0 };
+/** This session's config compressor savings: in memory only, never persisted. */
+const config = { texts: 0, saved: 0 };
+/** This session's HTML extractor savings: in memory only, never persisted. */
+const extract = { pages: 0, saved: 0 };
+/** This session's log compressor savings: in memory only, never persisted. */
+const log = { texts: 0, saved: 0 };
+/** This session's search compressor savings: in memory only, never persisted. */
+const search = { texts: 0, saved: 0 };
+/** This session's diff compressor savings: in memory only, never persisted. */
+const diff = { texts: 0, saved: 0 };
+/** This session's text crusher savings: in memory only, never persisted. */
+const textcrush = { texts: 0, saved: 0 };
+/** This session's relevance split savings: in memory only, never persisted. */
+const split = { texts: 0, saved: 0 };
+/** Conversation (`""` main, else agentId) → its dedup corpus; reset on session.end. */
+const dedupStates = new Map<string, DedupState>();
+/**
+ * Starts one conversation's dedup corpus over (its ordinals keep counting): what it indexes left the model's context.
+ *
+ * @param key - The conversation: `""` for the main loop, else the agentId.
+ */
 const dropCorpus = (key: string): void => {
   const st = dedupStates.get(key);
   if (st) resetCorpus(st);
 };
-let retrieveReady = false; // session.start registered headroom_retrieve under its expected name in this module load
-const offloaded = new Map<string, string>(); // CCR hash → original text (crushed array JSON, elided block): the only copy, oldest first (storeOffloaded evicts)
-// A second store, so dedup churn never evicts a sole copy above: a folded run's earlier copy is still in the transcript until a compaction.
-const folded = new Map<string, string>(); // CCR hash → a folded dedup run's text, oldest first
-// The session row: this session's counters, in memory.
+/** Session.start registered headroom_retrieve under its expected name in this module load. */
+let retrieveReady = false;
+/** CCR hash → original text (crushed array JSON, elided block): the only copy, oldest first (storeOffloaded evicts). */
+const offloaded = new Map<string, string>();
+/**
+ * CCR hash → a folded dedup run's text, oldest first. A second store, so dedup churn never evicts a sole copy in
+ * {@link offloaded}: a folded run's earlier copy is still in the transcript until a compaction.
+ */
+const folded = new Map<string, string>();
+/** The session row: this session's counters, in memory. */
 const session: Counters = zeroCounters();
-let lastHit: number | undefined; // the last main-loop step's cache-hit ratio
-const WRITER = Math.random().toString(36).slice(2).padEnd(8, "0"); // this module instance's stats rows
-const pending: Counters = zeroCounters(); // counter deltas since the last fold
-const days: Record<string, Counters> = {}; // this writer's per-day totals that may still need writing
-let flushing: Promise<void> = Promise.resolve(); // serializes stats_put: a newer snapshot always lands after an older one
-let sums: { data?: Counters[]; error?: string } | undefined; // the today / 7 days / 30 days totals (ROWS order after session), fetched outside render
-let loading: Promise<void> | undefined; // the fetch in flight: a tick never stacks on a slow stats_sum (a cold service start takes up to 3 s)
-let poll: Timer | undefined; // the open pane's 10 s refresh
-let stale = false; // the refresh ticked: the pane's next render fetches the storage rows
-let paneOpen = false; // the /headroom pane has rendered and not closed since: subagent steps redraw only then
+/** The last main-loop step's cache-hit ratio. */
+let lastHit: number | undefined;
+/** This module instance's stats rows. */
+const WRITER = Math.random().toString(36).slice(2).padEnd(8, "0");
+/** Counter deltas since the last fold. */
+const pending: Counters = zeroCounters();
+/** This writer's per-day totals that may still need writing. */
+const days: Record<string, Counters> = {};
+/** Serializes stats_put: a newer snapshot always lands after an older one. */
+let flushing: Promise<void> = Promise.resolve();
+/** The today / 7 days / 30 days totals (ROWS order after session), fetched outside render. */
+let sums: { data?: Counters[]; error?: string } | undefined;
+/** The fetch in flight: a tick never stacks on a slow stats_sum (a cold service start takes up to 3 s). */
+let loading: Promise<void> | undefined;
+/** The open pane's 10 s refresh. */
+let poll: Timer | undefined;
+/** The refresh ticked: the pane's next render fetches the storage rows. */
+let stale = false;
+/** The /headroom pane has rendered and not closed since: subagent steps redraw only then. */
+let paneOpen = false;
 
-const PANE = "headroom"; // the /headroom pane's id (1-64 of letters, digits, _ and -)
+/** The /headroom pane's id (1-64 of letters, digits, _ and -). */
+const PANE = "headroom";
+/**
+ * An error's message.
+ *
+ * @param err - Anything thrown.
+ * @returns Its message, or its string form when it is no `Error`.
+ */
 const message = (err: unknown): string => (err instanceof Error ? err.message : String(err));
+/** The `headroom_retrieve` tool spec `session.start` registers. */
 const RETRIEVE_SPEC = {
   name: RETRIEVE_NAME,
   description: "Retrieve original uncompressed content that was compressed to save tokens. Use this when you need more data than what's shown in compressed tool results. The hash is in compression markers like <<ccr:abc123def456 40_rows_offloaded>> or hash=abc123def456.",
@@ -57,22 +166,39 @@ const RETRIEVE_SPEC = {
     required: ["hash"],
   },
 };
-// headroom_retrieve's answer: the original text, or a deny the model reads as a failed call.
+/**
+ * Answers a headroom_retrieve call.
+ *
+ * @param hash - The call's `hash` argument, in any marker form `retrieveKey` accepts.
+ * @returns The original text, or a deny the model reads as a failed call.
+ */
 const retrieve = (hash: unknown) => {
   const key = retrieveKey(hash);
   const original = key === undefined ? undefined : (offloaded.get(key) ?? folded.get(key));
   return original === undefined ? { deny: `headroom_retrieve: no stored content under hash ${String(hash)} (evicted, or the mod reloaded)` } : { result: original };
 };
 
-// Moves one counter in the session row and in the deltas still to persist.
+/**
+ * Moves one counter in the session row and in the deltas still to persist.
+ *
+ * @param k - The counter.
+ * @param n - The amount to add.
+ */
 const count = (k: keyof Counters, n = 1): void => {
   session[k] += n;
   pending[k] += n;
 };
 
 // The engine refuses $.<noun> as a bare value, so same-file helpers take the whole $.
-// Resolves the op's result; rejects with the server's message on a refusal or an error result.
-const callStorage = async ($: EngineInterface, tool: string, args: Record<string, unknown>): Promise<unknown> => {
+/**
+ * Calls one storage server op.
+ *
+ * @param $ - The engine interface.
+ * @param tool - The op's tool name.
+ * @param args - The op's arguments.
+ * @returns The op's result; rejects with the server's message on a refusal or an error result.
+ */
+const callStorage = async ($: Engine, tool: string, args: Record<string, unknown>): Promise<unknown> => {
   const c = await $.mcp.connect("storage"); // the key in this plugin's .mcp.json; the engine namespaces it and returns the namespaced `server` that `call` takes
   if (!c.isConnected) throw new Error(c.message);
   const r = await $.mcp.call(c.server, tool, args);
@@ -81,11 +207,18 @@ const callStorage = async ($: EngineInterface, tool: string, args: Record<string
   return r.structuredContent ?? JSON.parse(r.content[0]?.text ?? "null");
 };
 
-// Reads the storage rows into `sums` and redraws the pane. Never rejects.
-// Every storage call is awaited by a running hook: core checks $.mcp.call like a tool call, and this mod's tool.check
-// sees, and allows, only calls raised while one of its hooks runs. A call made after its hook returned (a clock
-// callback, an unawaited chain) skips the mod's own hooks, so a session in default mode asks and a headless one denies.
-const loadSums = async ($: EngineInterface): Promise<void> => {
+/**
+ * Reads the storage rows into {@link sums} and redraws the pane. Never rejects.
+ *
+ * @remarks
+ * Every storage call is awaited by a running hook: core checks $.mcp.call like a tool call, and this mod's tool.check
+ * sees, and allows, only calls raised while one of its hooks runs. A call made after its hook returned (a clock
+ * callback, an unawaited chain) skips the mod's own hooks, so a session in default mode asks and a headless one denies.
+ *
+ * @param $ - The engine interface.
+ * @returns Once the rows are read (or failed) and the redraw is asked for.
+ */
+const loadSums = async ($: Engine): Promise<void> => {
   let fetched: typeof sums;
   try {
     const today = dayKey(await $.clock.now()); // read per fetch, so the rows roll over at midnight
@@ -106,12 +239,22 @@ const loadSums = async ($: EngineInterface): Promise<void> => {
   }
 };
 
-// A call made while a fetch runs joins it instead of starting another: the engine re-arms every period at callback start, so a slow fetch would overlap the next tick.
-const refresh = ($: EngineInterface): Promise<void> => (loading ??= loadSums($).finally(() => (loading = undefined)));
+/**
+ * Runs {@link loadSums}. A call made while a fetch runs joins it instead of starting another: the engine re-arms
+ * every period at callback start, so a slow fetch would overlap the next tick.
+ *
+ * @param $ - The engine interface.
+ * @returns The fetch in flight.
+ */
+const refresh = ($: Engine): Promise<void> => (loading ??= loadSums($).finally(() => (loading = undefined)));
 
-// Starts the open pane's 10 s refresh unless one runs: the command and the first redraw after a hot reload both call it.
-// A tick only marks the rows stale and redraws; the render hook fetches them (see loadSums).
-const arm = ($: EngineInterface): void => {
+/**
+ * Starts the open pane's 10 s refresh unless one runs: the command and the first redraw after a hot reload both call it.
+ * A tick only marks the rows stale and redraws; the render hook fetches them (see {@link loadSums}).
+ *
+ * @param $ - The engine interface.
+ */
+const arm = ($: Engine): void => {
   if (poll !== undefined) return;
   poll = $.clock.every(10_000, () => {
     stale = true;
@@ -119,7 +262,13 @@ const arm = ($: EngineInterface): void => {
   });
 };
 
-export const register: Register = (on, options) => {
+/**
+ * The module entry the engine calls on load: registers every hook the enabled levers need.
+ *
+ * @param on - Registers a hook.
+ * @param options - The plugin's userConfig values.
+ */
+export const register = (on: On, options: Record<string, unknown>): void => {
   const effortOn = options.effort_routing_enabled !== false;
   // Subagent and Workflow-agent steps: their own toggle, active only while effort routing is on.
   const subOn = effortOn && options.subagent_effort_routing_enabled !== false;
@@ -353,7 +502,7 @@ export const register: Register = (on, options) => {
           try {
             // A subagent row's query comes from that agent's own conversation; a { deny } leaves it empty.
             const m = e.agentId ? await $.session.messages({ agentId: e.agentId }) : await $.session.messages();
-            if (Array.isArray(m)) query = crushQuery(m);
+            if (Array.isArray(m)) query = crushQuery(m as Messages);
           } catch {
             // crush without query signals, as upstream does with no context
           }

@@ -29,11 +29,17 @@ function walk(dir) {
   });
 }
 
-// 1. remove stale build output (plugin/ holds no hand-written .mjs/.js/.d.mts)
-for (const f of walk(PLUGIN)) if (/\.(m?js|d\.mts)$/.test(f)) rmSync(f);
+// 0. plugin/ ships only build output and hand-written plugin files (.claude/rules/plugin-build-output.md)
+const stray = walk(PLUGIN).filter((f) => /\.m?ts$|\.test\.|(^|\/)CLAUDE\.md$|\/tests\//.test(f.split(path.sep).join("/")));
+if (stray.length) {
+  console.error(`plugin/ holds sources/tests that belong in src/ or tests/:\n  ${stray.join("\n  ")}`);
+  process.exit(1);
+}
 
-// 2. compile (only if there are sources): .mts -> .mjs + .d.mts (the hand-written hooks/register.ts imports
-// policy's types from ./policy.mjs, which resolves to policy.d.mts)
+// 1. remove stale build output (plugin/ holds no hand-written .mjs/.js)
+for (const f of walk(PLUGIN)) if (/\.m?js$/.test(f)) rmSync(f);
+
+// 2. compile (only if there are sources): .mts -> .mjs
 const sources = walk(path.join(ROOT, "src")).filter((f) => /\.m?ts$/.test(f));
 if (sources.length) {
   const tsc = spawnSync("pnpm", ["exec", "tsc", "-p", "tsconfig.json"], {

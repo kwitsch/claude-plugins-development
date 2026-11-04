@@ -7,3 +7,9 @@ test -z "$(git status --porcelain -- "$p/plugin")" || {
   echo "::error::$p/plugin is stale or has untracked build output; run pnpm --filter $p build and commit"
   exit 1
 }
+# plugin/ ships only build output and hand-written plugin files (.claude/rules/plugin-build-output.md)
+bad=$(find "$p/plugin" \( -name '*.ts' -o -name '*.mts' -o -name '*.test.*' -o -name CLAUDE.md -o -path '*/tests' \) -print)
+test -z "$bad" || {
+  echo "::error::$p/plugin holds sources/tests that belong in src/ or tests/: $bad"
+  exit 1
+}

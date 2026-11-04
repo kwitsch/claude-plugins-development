@@ -1,4 +1,4 @@
-import { test } from "node:test";
+import { test } from "vitest";
 import assert from "node:assert/strict";
 import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
@@ -242,7 +242,7 @@ function sandbox(t) {
   const fronts = [];
   /** @type {any[]} */
   const fakes = [];
-  t.after(async () => {
+  t.onTestFinished(async () => {
     for (const fe of fronts) fe.stdin.end();
     for (const fake of fakes) fake.kill("SIGTERM");
     const deadline = Date.now() + 5000;

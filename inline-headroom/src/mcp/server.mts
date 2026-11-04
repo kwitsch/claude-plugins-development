@@ -13,22 +13,28 @@
 //
 // PROTOCOL must be bumped on any op or schema change. MIGRATIONS is append-only and additive:
 // never edit, reorder or remove an entry.
-import { spawn } from "node:child_process";
+import { type ChildProcess, spawn } from "node:child_process";
 import { closeSync, existsSync, mkdirSync, openSync, readFileSync, realpathSync, unlinkSync } from "node:fs";
 import net from "node:net";
 import path from "node:path";
 import process from "node:process";
+// Type-only, erased by tsc: the front-end never loads node:sqlite (runService imports it dynamically).
+import type { DatabaseSync, SQLOutputValue } from "node:sqlite";
 import { setTimeout as sleep } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 
+/** Absolute path of this file: the `--service` spawn target and the main-module check. */
 const SELF = fileURLToPath(import.meta.url);
 
 /**
- * The plugin version, read from plugin.json (its only home). "0.0.0" when unreadable.
+ * The plugin version, read from plugin.json (its only home).
+ *
+ * @returns The manifest `version`, or "0.0.0" when unreadable.
  */
 function readVersion(): string {
   try {
-    return String(JSON.parse(readFileSync(path.join(path.dirname(SELF), "..", ".claude-plugin", "plugin.json"), "utf8")).version ?? "0.0.0");
+    const manifest = JSON.parse(readFileSync(path.join(path.dirname(SELF), "..", ".claude-plugin", "plugin.json"), "utf8")) as { version?: string };
+    return String(manifest.version ?? "0.0.0");
   } catch {
     return "0.0.0";
   }
@@ -36,10 +42,13 @@ function readVersion(): string {
 
 /** Plugin version: lets a front-end retire an older long-lived service after a plugin update. */
 export const VERSION = readVersion();
-const SERVER_NAME = "storage"; // keep aligned with the .mcp.json key
+/** MCP server name; keep aligned with the .mcp.json key. */
+const SERVER_NAME = "storage";
+/** `serverInfo` reported on `initialize`. */
 const SERVER_INFO = { name: SERVER_NAME, version: VERSION };
-const DEFAULT_PROTOCOL = "2025-11-25"; // MCP version; only used if the client omits protocolVersion
-/** Front-end <-> service wire protocol. Bump on any op or schema change. */
+/** MCP protocol version answered when the client's `initialize` omits one. */
+const DEFAULT_PROTOCOL = "2025-11-25";
+/** Wire protocol between front-end and service. Bump on any op or schema change. */
 export const PROTOCOL = 2;
 /** Append-only schema migrations; entry i takes PRAGMA user_version from i to i+1. */
 export const MIGRATIONS = [
@@ -56,36 +65,64 @@ export const MIGRATIONS = [
     PRIMARY KEY (day, writer)
   ) STRICT`,
 ];
+/** How long a front-end waits for a spawned service to answer. */
 const START_TIMEOUT_MS = 3000;
+/** Delay between connection attempts while a service starts or is replaced. */
 const POLL_MS = 50;
+/** Minimum gap between two spawns by one front-end. */
 const SPAWN_RETRY_MS = 500;
+/** Per-connection timeout, on both sides of the socket. */
 const REQUEST_TIMEOUT_MS = 5000;
+/** How long a failed service start blocks further spawns. */
 const FAILURE_COOLDOWN_MS = 60000;
+/** The service exits after this long without a request. */
 const IDLE_MS = 600000;
+/** Largest request line the service reads (2 MiB). */
 const MAX_REQUEST_BYTES = 2097152;
+/** Largest serialized kv value (1 MiB). */
 const MAX_VALUE_BYTES = 1048576;
+/** Longest kv key, in code points. */
 const MAX_KEY_LENGTH = 512;
-const MAX_SOCKET_PATH_BYTES = 103; // macOS sun_path limit; Linux allows 107
+/** Longest socket path: the macOS sun_path limit (Linux allows 107). */
+const MAX_SOCKET_PATH_BYTES = 103;
+/** SQLite's primary result code for a locked database. */
 const SQLITE_BUSY = 5;
+/** How long a shutting-down service lets accepted connections finish. */
 const DRAIN_MS = 1000;
+/** Wait before a service that lost the election checks for a live winner. */
 const ELECTION_PROBE_MS = 300;
-// SQLite stores a lone UTF-16 surrogate as U+FFFD, so distinct keys would collapse to one row: reject them.
-// (String#isWellFormed is not in the tsconfig's ES2022 lib.)
+/**
+ * A lone UTF-16 surrogate. SQLite stores one as U+FFFD, so distinct keys would collapse to one row: reject them.
+ * (String#isWellFormed is not in the tsconfig's ES2022 lib.)
+ */
 const LONE_SURROGATE = /[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/;
-// The persisted /headroom counters in stats column order. hooks/policy.mjs COUNTER_KEYS repeats them
-// (this file stays import-free); test/inline-headroom/storage.test.mjs pins both orders.
-const STATS_KEYS = ["steps", "clamped", "cache_drops", "input_tokens", "cache_read_input_tokens", "cache_creation_input_tokens"];
-const MAX_STATS_ROWS = 31; // one stats_put transaction's bound; the mod sends at most the 30 days of its window
+/**
+ * The persisted /headroom counters in stats column order. hooks/policy.mjs COUNTER_KEYS repeats them
+ * (this file stays import-free); tests/storage.test.mjs pins both orders.
+ */
+const STATS_KEYS = ["steps", "clamped", "cache_drops", "input_tokens", "cache_read_input_tokens", "cache_creation_input_tokens"] as const;
+/** One validated stats_put row: a day plus every counter. */
+type StatsRow = { day: string } & Record<(typeof STATS_KEYS)[number], number>;
+/** One stats_put transaction's bound; the mod sends at most the 30 days of its window. */
+const MAX_STATS_ROWS = 31;
+/** Shape of a YYYY-MM-DD day; `isDay` also checks the calendar. */
 const DAY_RE = /^\d{4}-\d{2}-\d{2}$/;
+/** A stats writer id. */
 const WRITER_RE = /^[A-Za-z0-9_-]{1,64}$/;
-// Built once from STATS_KEYS, so the column order and the binding order cannot drift.
+/** Built once from STATS_KEYS, so the column order and the binding order cannot drift. */
 const STATS_PUT_SQL = `INSERT OR REPLACE INTO stats(day, writer, ${STATS_KEYS.join(", ")}) VALUES (${["day", "writer", ...STATS_KEYS].map(() => "?").join(", ")})`;
+/** Sums every counter from a day on, one column per STATS_KEYS entry. */
 const STATS_SUM_SQL = `SELECT ${STATS_KEYS.map((k) => `COALESCE(SUM(${k}), 0) AS ${k}`).join(", ")} FROM stats WHERE day >= ?`;
 
+/** JSON schema of a kv key. */
 const KEY_SCHEMA = { type: "string", minLength: 1, maxLength: MAX_KEY_LENGTH };
+/** Input schema of the key-only kv tools. */
 const KEY_INPUT = { type: "object", properties: { key: KEY_SCHEMA }, required: ["key"], additionalProperties: false };
+/** JSON schema of a YYYY-MM-DD day. */
 const DAY_SCHEMA = { type: "string", pattern: "^\\d{4}-\\d{2}-\\d{2}$" };
+/** JSON schema of a stats counter. */
 const COUNT_SCHEMA = { type: "integer", minimum: 0 };
+/** The `tools/list` answer while storage is enabled. */
 const TOOLS = [
   { name: "kv_get", description: "inline-headroom persistent storage: read the JSON value stored under key", inputSchema: KEY_INPUT },
   {
@@ -140,6 +177,9 @@ const TOOLS = [
 /**
  * userConfig storage_enabled, fail-closed: only the trimmed literal "true" enables, because an
  * enabled store creates files and a host-wide process.
+ *
+ * @param value - The interpolated userConfig value.
+ * @returns Whether storage is enabled.
  */
 export function isStorageEnabled(value: string | undefined): boolean {
   return String(value ?? "").trim() === "true";
@@ -147,6 +187,9 @@ export function isStorageEnabled(value: string | undefined): boolean {
 
 /**
  * Storage paths under CLAUDE_PLUGIN_DATA. No fallback dir: data must survive plugin updates.
+ *
+ * @param dataDirValue - The CLAUDE_PLUGIN_DATA value.
+ * @returns The data dir and its database, socket and log paths.
  */
 export function resolveStorage(dataDirValue: string | undefined): { dataDir: string; db: string; sock: string; log: string } {
   const dataDir = typeof dataDirValue === "string" ? dataDirValue.trim() : "";
@@ -161,11 +204,15 @@ export function resolveStorage(dataDirValue: string | undefined): { dataDir: str
 
 /**
  * Numeric dotted-version comparison (x.y.z); missing or non-numeric parts count as 0.
- * @returns negative when a < b, 0 when equal, positive when a > b
+ *
+ * @param a - The first version.
+ * @param b - The second version.
+ * @returns Negative when a is older, 0 when equal, positive when a is newer.
  */
 export function compareVersions(a: unknown, b: unknown): number {
+  // String(undefined) and String(null) parse to the same single 0 part as "0".
   const part = (v: unknown) =>
-    String(v ?? "0")
+    String(v)
       .split(".")
       .map((n) => Number.parseInt(n, 10) || 0);
   const [x, y] = [part(a), part(b)];
@@ -179,6 +226,9 @@ export function compareVersions(a: unknown, b: unknown): number {
 /**
  * Whether a pid reported over the socket may be SIGTERMed: a sane pid that, where /proc exists,
  * is really a `server.mjs --service` process (no /proc, e.g. macOS: the owner-only socket is the trust anchor).
+ *
+ * @param pid - The pid from a service reply.
+ * @returns Whether the pid may be signalled.
  */
 export function isStorageService(pid: unknown): boolean {
   if (typeof pid !== "number" || !Number.isInteger(pid) || pid <= 1) return false;
@@ -193,11 +243,12 @@ export function isStorageService(pid: unknown): boolean {
 
 /**
  * Applies every missing MIGRATIONS entry, one transaction each. Never downgrades.
- * @param db - a node:sqlite DatabaseSync
- * @returns the schema version after migration
+ *
+ * @param db - The open storage database.
+ * @returns The schema version after migration.
  */
-export function migrate(db: any): number {
-  const v = Number(db.prepare("PRAGMA user_version").get().user_version);
+export function migrate(db: DatabaseSync): number {
+  const v = Number((db.prepare("PRAGMA user_version").get() as { user_version: SQLOutputValue }).user_version);
   if (v > MIGRATIONS.length) throw new Error(`database schema v${v} is newer than this plugin (v${MIGRATIONS.length}); update inline-headroom`);
   for (let i = v; i < MIGRATIONS.length; i++) {
     db.exec("BEGIN");
@@ -215,8 +266,11 @@ export function migrate(db: any): number {
 
 /**
  * True for a real calendar day written as YYYY-MM-DD (rejects 2026-02-30, 2026-13-45).
+ *
+ * @param s - The value to check.
+ * @returns Whether `s` is such a day.
  */
-function isDay(s: unknown): boolean {
+function isDay(s: unknown): s is string {
   if (typeof s !== "string" || !DAY_RE.test(s)) return false;
   const t = Date.parse(`${s}T00:00:00Z`);
   return !Number.isNaN(t) && new Date(t).toISOString().startsWith(s);
@@ -224,9 +278,13 @@ function isDay(s: unknown): boolean {
 
 /**
  * Runs one data op: the single trust boundary, validating every key, value, day, writer and counter.
- * @param db - a node:sqlite DatabaseSync
+ *
+ * @param db - The open, migrated storage database.
+ * @param op - The op name; a raw socket client may send a non-string.
+ * @param args - The op's arguments, unvalidated.
+ * @returns The op's result object.
  */
-export function execOp(db: any, op: string, args: Record<string, unknown>): Record<string, unknown> {
+export function execOp(db: DatabaseSync, op: string, args: Record<string, unknown>): Record<string, unknown> {
   const key = args.key;
   // typeof: a raw socket client may send a non-string op, which must reach "unknown op", not a TypeError.
   if (typeof op === "string" && op.startsWith("kv_")) {
@@ -234,10 +292,11 @@ export function execOp(db: any, op: string, args: Record<string, unknown>): Reco
       throw new Error(`key must be a non-empty string of at most ${MAX_KEY_LENGTH} characters`);
     }
   }
+  // The kv_ cases below cast key: the check above has validated it for every kv_ op.
   switch (op) {
     case "kv_get": {
-      const row = db.prepare("SELECT value FROM kv WHERE key = ?").get(key);
-      return row === undefined ? { found: false } : { found: true, value: JSON.parse(row.value) };
+      const row = db.prepare("SELECT value FROM kv WHERE key = ?").get(key as string);
+      return row === undefined ? { found: false } : { found: true, value: JSON.parse(row.value as string) as unknown };
     }
     case "kv_set": {
       let text = "";
@@ -247,25 +306,28 @@ export function execOp(db: any, op: string, args: Record<string, unknown>): Reco
         /* cyclic or BigInt: not serializable */
       }
       if (text === "" || Buffer.byteLength(text) > MAX_VALUE_BYTES) throw new Error(`value must be JSON-serializable and at most ${MAX_VALUE_BYTES} bytes`);
-      db.prepare("INSERT INTO kv(key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run(key, text);
+      db.prepare("INSERT INTO kv(key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run(key as string, text);
       return { ok: true };
     }
     case "kv_delete":
-      return { deleted: Number(db.prepare("DELETE FROM kv WHERE key = ?").run(key).changes) > 0 };
+      return { deleted: Number(db.prepare("DELETE FROM kv WHERE key = ?").run(key as string).changes) > 0 };
     case "stats_put": {
       const { writer, purgeBefore, rows } = args;
       if (typeof writer !== "string" || !WRITER_RE.test(writer)) throw new Error("writer must be 1-64 of letters, digits, _ and -");
       if (!isDay(purgeBefore)) throw new Error("purgeBefore must be a YYYY-MM-DD day");
       if (!Array.isArray(rows) || rows.length < 1 || rows.length > MAX_STATS_ROWS) throw new Error(`rows must hold 1-${MAX_STATS_ROWS} rows`);
+      const list: unknown[] = rows;
       // Load-bearing, not left to the table: STRICT coerces the string "7" into an INTEGER column and accepts 2**53.
-      for (const row of rows) {
-        const valid = row !== null && typeof row === "object" && !Array.isArray(row) && isDay(row.day) && STATS_KEYS.every((k) => Number.isSafeInteger(row[k]) && row[k] >= 0);
-        if (!valid) throw new Error(`each row needs a YYYY-MM-DD day and non-negative integer ${STATS_KEYS.join(", ")}`);
-      }
+      const isRow = (row: unknown): row is StatsRow => {
+        if (row === null || typeof row !== "object" || Array.isArray(row)) return false;
+        const r = row as Record<string, unknown>;
+        return isDay(r.day) && STATS_KEYS.every((k) => Number.isSafeInteger(r[k]) && (r[k] as number) >= 0);
+      };
+      if (!list.every(isRow)) throw new Error(`each row needs a YYYY-MM-DD day and non-negative integer ${STATS_KEYS.join(", ")}`);
       db.exec("BEGIN");
       try {
         const put = db.prepare(STATS_PUT_SQL);
-        for (const row of rows) put.run(row.day, writer, ...STATS_KEYS.map((k) => row[k]));
+        for (const row of list) put.run(row.day, writer, ...STATS_KEYS.map((k) => row[k]));
         // ponytail: the purge trusts the caller's day and is global across writers, so a writer whose clock
         // runs ahead purges early. Upgrade path: clamp purgeBefore to the newest stored day if skew ever matters.
         const purged = Number(db.prepare("DELETE FROM stats WHERE day < ?").run(purgeBefore).changes);
@@ -282,7 +344,8 @@ export function execOp(db: any, op: string, args: Record<string, unknown>): Reco
       // ERR_OUT_OF_RANGE, which would leave the window unreadable until its rows age out.
       const sumStmt = db.prepare(STATS_SUM_SQL);
       sumStmt.setReadBigInts(true);
-      const row = sumStmt.get(args.since);
+      // An aggregate without GROUP BY always yields one row.
+      const row = sumStmt.get(args.since) as Record<string, SQLOutputValue>;
       // A plain object: .get() returns a null-prototype one.
       return Object.fromEntries(STATS_KEYS.map((k) => [k, Number(row[k])]));
     }
@@ -291,19 +354,64 @@ export function execOp(db: any, op: string, args: Record<string, unknown>): Reco
   }
 }
 
+/**
+ * Message of a caught value.
+ *
+ * @param e - Anything thrown.
+ * @returns `e.message` for an `Error`, else `String(e)`.
+ */
+function errMsg(e: unknown): string {
+  return e instanceof Error ? e.message : String(e);
+}
+
+/**
+ * Stack of a caught value, for debug output.
+ *
+ * @param e - Anything thrown.
+ * @returns `e.stack` for an `Error` (its message when it has none), else `String(e)`.
+ */
+function errStack(e: unknown): string {
+  return e instanceof Error ? (e.stack ?? e.message) : String(e);
+}
+
+/**
+ * Error code of a caught value (a Node system error's `code`, node:sqlite's `errcode`).
+ *
+ * @param e - Anything thrown.
+ * @param field - The property holding the code.
+ * @returns The property's value, or undefined when `e` has none.
+ */
+function errField(e: unknown, field: "code" | "errcode"): unknown {
+  return (e as Record<string, unknown> | null | undefined)?.[field];
+}
+
 // ------------------------------------------------------------------ front-end
 
+/** A service reply line; every field but `protocol` is checked before use. */
+type ServiceReply = { protocol: number; pid?: unknown; version?: unknown; error?: unknown; result?: unknown };
+
+/** A parsed JSON-RPC message from the client; every field is checked before use. */
+type RpcRequest = { id?: unknown; method?: unknown; params?: { protocolVersion?: unknown; name?: unknown; arguments?: unknown } | null };
+
+/** Whether userConfig storage_enabled is on for this front-end. */
 const ENABLED = isStorageEnabled(process.env.INLINE_HEADROOM_STORAGE_ENABLED);
-/** the service this front-end spawned, until it exits */
-let child: any = null;
+/** The service this front-end spawned, until it exits. */
+let child: ChildProcess | null = null;
+/** Earliest time of this front-end's next spawn. */
 let nextSpawnAt = 0;
+/** Spawning is blocked until this time after a failed service start. */
 let coolDownUntil = 0;
+/** Why spawning is cooling down; thrown while it is. */
 let coolDownReason = "";
 
 /**
  * One request over a fresh connection: writes one JSON line, resolves with the first reply line.
+ *
+ * @param sockPath - The service socket.
+ * @param msg - The request object.
+ * @returns The parsed reply, which always carries a numeric `protocol`.
  */
-function roundTrip(sockPath: string, msg: Record<string, unknown>): Promise<any> {
+function roundTrip(sockPath: string, msg: Record<string, unknown>): Promise<ServiceReply> {
   return new Promise((resolve, reject) => {
     let buf = "";
     const sock = net.connect(sockPath);
@@ -316,7 +424,7 @@ function roundTrip(sockPath: string, msg: Record<string, unknown>): Promise<any>
       if (nl === -1) return;
       sock.destroy();
       try {
-        const reply = JSON.parse(buf.slice(0, nl));
+        const reply = JSON.parse(buf.slice(0, nl)) as ServiceReply | null;
         if (typeof reply?.protocol !== "number") throw new Error("no protocol");
         resolve(reply);
       } catch {
@@ -330,6 +438,8 @@ function roundTrip(sockPath: string, msg: Record<string, unknown>): Promise<any>
 
 /**
  * Starts the detached service: not a child that dies with this session.
+ *
+ * @param storage - The data dir and the service log path.
  */
 function spawnService(storage: { dataDir: string; log: string }): void {
   mkdirSync(storage.dataDir, { recursive: true, mode: 0o700 });
@@ -358,9 +468,9 @@ function spawnService(storage: { dataDir: string; log: string }): void {
     // 0 = lost the election (normal); null = killed by a signal (the next call respawns)
     if (code) coolDown(`storage service exited with code ${code}; see ${storage.log}`);
   });
-  child.on("error", (e: any) => {
+  child.on("error", (e: Error) => {
     child = null;
-    coolDown(`cannot spawn storage service: ${e?.message ?? e}`);
+    coolDown(`cannot spawn storage service: ${e.message}`);
   });
 }
 
@@ -370,8 +480,12 @@ function spawnService(storage: { dataDir: string; log: string }): void {
  * (stats_put replaces absolute rows and purges by date; kv_delete may report deleted:false when the first
  * attempt had already applied), so a retry is safe.
  * A failure cool-down only gates spawning: a live service is always tried first.
+ *
+ * @param op - The op name.
+ * @param args - The op's arguments.
+ * @returns The op's result.
  */
-async function callService(op: string, args: Record<string, unknown>): Promise<any> {
+async function callService(op: string, args: Record<string, unknown>): Promise<unknown> {
   if (!ENABLED) throw new Error("storage is disabled (userConfig storage_enabled is not true)");
   // The transport is a path-based Unix socket; native-Windows listen() would need a \\.\pipe\ name instead.
   if (process.platform === "win32") throw new Error("storage is unsupported on native Windows (it needs a Unix domain socket); use WSL2");
@@ -379,11 +493,11 @@ async function callService(op: string, args: Record<string, unknown>): Promise<a
   const deadline = Date.now() + START_TIMEOUT_MS;
   const startTimeout = () => new Error(`storage service did not start within ${START_TIMEOUT_MS} ms; see ${storage.log}`);
   for (;;) {
-    let res: any;
+    let res: ServiceReply;
     try {
       res = await roundTrip(storage.sock, { protocol: PROTOCOL, op, args });
     } catch (e) {
-      const code = (e as any)?.code;
+      const code = errField(e, "code");
       if (code !== "ENOENT" && code !== "ECONNREFUSED" && code !== "ECONNRESET" && code !== "ECLOSED") throw e;
       if (Date.now() < coolDownUntil) throw new Error(coolDownReason, { cause: e });
       if (Date.now() > deadline) throw startTimeout();
@@ -400,11 +514,11 @@ async function callService(op: string, args: Record<string, unknown>): Promise<a
     if (res.protocol < PROTOCOL) {
       // An older service answered "protocol mismatch" without executing the request: replace it.
       if (Date.now() > deadline) throw startTimeout();
-      if (!retire(res.pid)) throw new Error(`storage service on the socket reported an unusable pid (${res.pid}); not replacing it`);
+      if (!retire(res.pid)) throw new Error(`storage service on the socket reported an unusable pid (${String(res.pid)}); not replacing it`);
       await sleep(POLL_MS);
       continue;
     }
-    if ("error" in res) throw new Error(res.error);
+    if ("error" in res) throw new Error(String(res.error));
     // Same protocol, older plugin version (a fix shipped without a PROTOCOL bump): the request already ran,
     // so retire the old service best-effort; the next call spawns the current one. Never the reverse, or two
     // sessions on different versions would kill each other's service.
@@ -415,7 +529,9 @@ async function callService(op: string, args: Record<string, unknown>): Promise<a
 
 /**
  * SIGTERMs an older service (it drains in-flight requests first) when its pid checks out.
- * @returns false when the pid is not a storage service and was left alone
+ *
+ * @param pid - The pid from the service's reply.
+ * @returns False when the pid is not a storage service and was left alone.
  */
 function retire(pid: unknown): boolean {
   if (!isStorageService(pid)) return false;
@@ -427,13 +543,16 @@ function retire(pid: unknown): boolean {
   return true;
 }
 
+/**
+ * Serves MCP over stdio (newline-delimited JSON-RPC 2.0) until stdin closes.
+ */
 function startServer(): void {
-  const send = (msg: any) => process.stdout.write(JSON.stringify(msg) + "\n");
-  const ok = (id: any, result: any) => send({ jsonrpc: "2.0", id, result });
-  const fail = (id: any, code: number, message: string) => send({ jsonrpc: "2.0", id, error: { code, message } });
+  const send = (msg: unknown) => process.stdout.write(JSON.stringify(msg) + "\n");
+  const ok = (id: unknown, result: unknown) => send({ jsonrpc: "2.0", id, result });
+  const fail = (id: unknown, code: number, message: string) => send({ jsonrpc: "2.0", id, error: { code, message } });
 
-  const handle = async (msg: any): Promise<unknown> => {
-    const { id, method, params } = msg ?? {};
+  const handle = async (msg: RpcRequest | null): Promise<unknown> => {
+    const { id, method, params }: RpcRequest = msg ?? {};
     switch (method) {
       case "initialize":
         return ok(id, { protocolVersion: params?.protocolVersion ?? DEFAULT_PROTOCOL, capabilities: { tools: {} }, serverInfo: SERVER_INFO });
@@ -443,35 +562,37 @@ function startServer(): void {
         return ok(id, { tools: ENABLED ? TOOLS : [] });
       case "tools/call": {
         const name = params?.name;
-        if (!TOOLS.some((tool) => tool.name === name)) return fail(id, -32602, `unknown tool: ${name}`);
-        const args = params?.arguments ?? {};
-        if (process.env.MCP_HOOK_DEBUG) process.stderr.write(`[${SERVER_NAME}] tools/call ${name} args=${JSON.stringify(args)}\n`);
+        const tool = TOOLS.find((t) => t.name === name);
+        if (!tool) return fail(id, -32602, `unknown tool: ${String(name)}`);
+        // The service's execOp validates every argument; the MCP client is not trusted to.
+        const args = (params?.arguments ?? {}) as Record<string, unknown>;
+        if (process.env.MCP_HOOK_DEBUG) process.stderr.write(`[${SERVER_NAME}] tools/call ${tool.name} args=${JSON.stringify(args)}\n`);
         try {
-          const result = await callService(name, args);
+          const result = await callService(tool.name, args);
           return ok(id, { content: [{ type: "text", text: JSON.stringify(result) }], structuredContent: result });
         } catch (e) {
-          return ok(id, { content: [{ type: "text", text: `inline-headroom storage: ${(e as any)?.message ?? e}` }], isError: true });
+          return ok(id, { content: [{ type: "text", text: `inline-headroom storage: ${errMsg(e)}` }], isError: true });
         }
       }
       default:
         if (id === undefined) return; // notifications/*
-        return fail(id, -32601, `method not found: ${method}`);
+        return fail(id, -32601, `method not found: ${String(method)}`);
     }
   };
 
   const onLine = (line: string) => {
     const trimmed = line.trim();
     if (trimmed === "") return;
-    let msg: any;
+    let msg: RpcRequest | null;
     try {
-      msg = JSON.parse(trimmed);
+      msg = JSON.parse(trimmed) as RpcRequest | null;
     } catch {
       process.stderr.write(`[${SERVER_NAME}] non-JSON line ignored\n`);
       return;
     }
-    handle(msg).catch((e) => {
-      process.stderr.write(`[${SERVER_NAME}] handler crash: ${e?.stack ?? e}\n`);
-      if (msg?.id !== undefined) fail(msg.id, -32603, `internal error: ${e?.message ?? e}`);
+    handle(msg).catch((e: unknown) => {
+      process.stderr.write(`[${SERVER_NAME}] handler crash: ${errStack(e)}\n`);
+      if (msg?.id !== undefined) fail(msg.id, -32603, `internal error: ${errMsg(e)}`);
     });
   };
 
@@ -494,12 +615,14 @@ function startServer(): void {
 /**
  * The detached singleton: wins the storage.db exclusive lock or exits 0, migrates, then serves one
  * JSON line per connection on storage.sock until 10 idle minutes pass or SIGTERM/SIGINT arrives.
+ *
+ * @param dataDirValue - The data dir from the command line.
  */
 async function runService(dataDirValue: string | undefined): Promise<void> {
   process.umask(0o077);
   const storage = resolveStorage(dataDirValue);
   mkdirSync(storage.dataDir, { recursive: true, mode: 0o700 });
-  let sqlite: any;
+  let sqlite: typeof import("node:sqlite");
   try {
     sqlite = await import("node:sqlite");
   } catch (e) {
@@ -509,7 +632,7 @@ async function runService(dataDirValue: string | undefined): Promise<void> {
   try {
     db.exec("PRAGMA locking_mode=EXCLUSIVE; PRAGMA journal_mode=WAL; BEGIN EXCLUSIVE; COMMIT");
   } catch (e) {
-    if ((e as any)?.errcode !== SQLITE_BUSY) throw e;
+    if (errField(e, "errcode") !== SQLITE_BUSY) throw e;
     // Lost the election, or a foreign process (a sqlite3 shell) holds the DB. Stay silent when a live service
     // answers; otherwise leave one line in service.log so the front-end's "see service.log" points somewhere.
     await sleep(ELECTION_PROBE_MS);
@@ -524,12 +647,12 @@ async function runService(dataDirValue: string | undefined): Promise<void> {
   try {
     unlinkSync(storage.sock); // only the lock holder gets here, so any socket file is stale
   } catch (e) {
-    if ((e as any)?.code !== "ENOENT") throw e;
+    if (errField(e, "code") !== "ENOENT") throw e;
   }
 
-  let idle: any = null;
+  let idle: NodeJS.Timeout | undefined;
   let closing = false;
-  const open: Set<any> = new Set();
+  const open = new Set<net.Socket>();
   const finish = () => {
     try {
       unlinkSync(storage.sock);
@@ -551,22 +674,23 @@ async function runService(dataDirValue: string | undefined): Promise<void> {
   };
 
   const respond = (line: string): Record<string, unknown> => {
-    let req: any;
+    let req: { protocol?: unknown; op?: unknown; args?: unknown } | null;
     try {
-      req = JSON.parse(line);
+      req = JSON.parse(line) as typeof req;
     } catch {
       return { error: "malformed request" };
     }
     if (req?.protocol !== PROTOCOL) return { error: "protocol mismatch" }; // never executed
     if (req.op === "storage_status") return { result: { pid: process.pid, protocol: PROTOCOL, version: VERSION, schemaVersion, dataDir: storage.dataDir } };
     try {
-      return { result: execOp(db, req.op, req.args ?? {}) };
+      // Casts only: execOp is the trust boundary and rejects a non-string op or bad args itself.
+      return { result: execOp(db, req.op as string, (req.args ?? {}) as Record<string, unknown>) };
     } catch (e) {
-      return { error: (e as any)?.message ?? String(e) };
+      return { error: errMsg(e) };
     }
   };
 
-  const onConnection = (sock: any) => {
+  const onConnection = (sock: net.Socket) => {
     let buf = "";
     let bytes = 0;
     let answered = false;
@@ -605,6 +729,11 @@ async function runService(dataDirValue: string | undefined): Promise<void> {
   process.on("SIGINT", shutdown);
 }
 
+/**
+ * Whether this file runs as the program rather than as an import (tests import its pure exports).
+ *
+ * @returns True when argv[1] resolves to this file.
+ */
 function isMainModule(): boolean {
   try {
     return realpathSync(process.argv[1]) === realpathSync(SELF);
@@ -615,9 +744,9 @@ function isMainModule(): boolean {
 
 if (isMainModule()) {
   if (process.argv[2] === "--service") {
-    runService(process.argv[3]).catch((e) => {
+    runService(process.argv[3]).catch((e: unknown) => {
       // One line per failed start (the mod's per-turn write can trigger one every cool-down); the stack only when debugging.
-      process.stderr.write(`[storage] ${(process.env.MCP_HOOK_DEBUG ? e?.stack : e?.message) ?? e}\n`);
+      process.stderr.write(`[storage] ${process.env.MCP_HOOK_DEBUG ? errStack(e) : errMsg(e)}\n`);
       process.exit(1);
     });
   } else {

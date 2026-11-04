@@ -24,8 +24,7 @@ It also ships a host-wide SQLite storage MCP server behind the fail-closed
 ## Layout
 
 `plugin.json`, `package.json`, `tsconfig.json` and `scripts/build.mjs` follow the repo layout (root `CLAUDE.md`).
-`pnpm build` compiles `src/**/*.mts` to `plugin/**/*.mjs` plus `.d.mts` declarations (minified, except
-`plugin/hooks/`), and copies `plugin.json` to `plugin/.claude-plugin/plugin.json`.
+`pnpm build` compiles `src/**/*.mts` to `plugin/**/*.mjs` (minified; `plugin/hooks/` unmangled and uncompressed), and copies `plugin.json` to `plugin/.claude-plugin/plugin.json`.
 
 - `plugin/.mcp.json` (hand-written) — registers `src/mcp/server.mts` directly (no wrapper, no args) under
   the key `storage`, with env `INLINE_HEADROOM_STORAGE_ENABLED` =
@@ -37,34 +36,28 @@ It also ships a host-wide SQLite storage MCP server behind the fail-closed
   (`isStorageEnabled`, `resolveStorage`, `migrate`, `execOp`, `PROTOCOL`,
   `MIGRATIONS`) are tested by `tests/storage.test.mjs`; an
   `isMainModule()` guard keeps that import free of side effects.
-- `plugin/hooks/hooks.json` (hand-written) — exactly `{"modules": ["./register.ts"]}`.
-- `plugin/hooks/register.ts` (hand-written, **not** build output: the engine loads the `.ts` itself) — every
-  hook and every `$` use, typed via `import type { EngineInterface, Register } from 'claude-code'`
-  (engine-provided types, so `tsc` here cannot check it; `claude plugin test` does). No `any`, no
-  `import()` (a module holding `import()` does not load). It imports `./policy.mjs`; its
-  `import type`s from there resolve to the emitted `policy.d.mts`.
+- `plugin/hooks/hooks.json` (hand-written) — exactly `{"modules": ["./register.mjs"]}`.
+- `src/hooks/register.mts` → `plugin/hooks/register.mjs` — every hook and every `$` use. No `claude-code`
+  type import: the used `$` members and events are typed structurally at the top of the file. No `any`, no
+  `import()` (a module holding `import()` does not load). It imports `./policy.mjs`. Tested by
+  `tests/register.test.mjs` (kit-style tests on the workspace package `claude-engine-vitest`).
 - `src/hooks/policy.mts` → `plugin/hooks/policy.mjs` — pure, zero-dep logic with no clock reads
   (time comes in as arguments). It must never reference `$`: the engine rejects
   passing the mods API into functions imported from another file. It also
   rejects `$.<noun>` as a bare value (bound, passed or read), so same-file
-  helpers in `register.ts` take the whole `$` typed `EngineInterface`.
+  helpers in `register.mts` take the whole `$` typed `Engine`.
   Tested by `tests/policy.test.mjs`. It also holds the content router and
   the SmartCrusher (with its lossless compaction stage), cross-turn dedup,
   dense line elider, config compressor, HTML extractor, log compressor, search
   compressor, diff compressor, text crusher and relevance split ports, and the
   tag protector (see their sections).
-- `plugin/tests/inline-headroom.test.ts` (hand-written) — hook-wiring tests for `claude plugin test`.
-  Local only: CI runners have no `claude` CLI.
-- `plugin/.claude-plugin/types/` is written by the engine (typings + tsconfig) at every
-  `claude --plugin-dir` load and is gitignored (`*/plugin/.claude-plugin/types/`).
 
 ## Tests
 
 ```bash
-# CI (Node 24): build, then policy, storage server and manifest tests (tests/*.test.mjs) against plugin/
-pnpm --filter inline-headroom build && pnpm --filter inline-headroom test
-# local only (needs the claude CLI)
-claude plugin validate inline-headroom/plugin && claude plugin test inline-headroom/plugin
+# CI (Node 24): lint src/, build, then register, policy, storage server and manifest tests (vitest, tests/*.test.mjs) against plugin/
+pnpm --filter inline-headroom lint && pnpm --filter inline-headroom build && pnpm --filter inline-headroom test
+claude plugin validate inline-headroom/plugin
 ```
 
 `storage.test.mjs` needs `node:sqlite` and spawns processes. Its cleanup SIGTERMs every `--service` process for
@@ -136,7 +129,7 @@ query adds a new `MIGRATIONS` entry and op plus a `PROTOCOL` bump.
 `/headroom` counters live in the `stats` table (`MIGRATIONS[1]`), not in kv:
 primary key `(day, writer)`; `day` is the mod's local calendar day `YYYY-MM-DD`
 (computed in the mod, never by the service); `writer` is a random id per module
-load (`WRITER` in `register.ts`); the counter columns are `steps`, `clamped`,
+load (`WRITER` in `register.mts`); the counter columns are `steps`, `clamped`,
 `cache_drops`, `input_tokens`, `cache_read_input_tokens` and
 `cache_creation_input_tokens`, the order `STATS_KEYS` (`server.mjs`) and
 `COUNTER_KEYS` (`policy.mjs`) share and a storage test pins. Rows hold absolute
@@ -286,11 +279,11 @@ default) a JSON text holding a custom tag (see `## Tag protector`) runs without
 the lossy stage, so no row or item of it is dropped; lossless compaction may
 still rewrite it, every string staying verbatim in a cell.
 
-Wiring in `register.ts`, shared by every compression lever:
+Wiring in `register.mts`, shared by every compression lever:
 
 - One `session.append` hook with the matcher `{ door: "tool-result" }`,
   registered while any compression lever is on (`compressOn` in
-  `register.ts`), rewrites each tool-result row before it is
+  `register.mts`), rewrites each tool-result row before it is
   first stored and sent, so the model, the transcript file and every later
   request read one form (prompt-cache safe). `rewriteToolResults` (pure, in
   `policy.mjs`) labels each text with `detectContentType`, runs that type's
@@ -315,7 +308,7 @@ Wiring in `register.ts`, shared by every compression lever:
   subagent row; a `{ deny }` means an empty query), so the transcript is read
   only for a row holding a JSON document the crusher may rewrite or, while the
   search compressor, the diff compressor, the text crusher or the relevance
-  split is on, any non-Read text of 300+ characters (`register.ts` passes its
+  split is on, any non-Read text of 300+ characters (`register.mts` passes its
   `levers` as `wantsQuery`'s third argument); a failed fetch compresses without
   query signals (the relevance split then declines).
 - `next` is called exactly once on every path and its answer is returned
@@ -471,7 +464,7 @@ Deviations from upstream:
 
 - Incremental at append time instead of a per-request batch. The corpus is per
   conversation (the main loop, or one `agentId`) and lives in module memory
-  (`dedupStates` in `register.ts`). It is capped at `DEDUP_MAX_CHARS`
+  (`dedupStates` in `register.mts`). It is capped at `DEDUP_MAX_CHARS`
   (4,000,000) indexed characters across conversations, emptying the least
   recently appended conversation first (`resetCorpus`), or the current one when
   it alone exceeds the cap. An emptied conversation keeps its ordinal counter,
@@ -1232,7 +1225,7 @@ Decisions:
   per-type label counts stay omitted: a label alone saves nothing.
 
 Adding a compressor: name a new `RouteStep`, add its case in `rewriteRow`'s
-`shrink`, a `Levers` flag fed by its own `*_enabled` toggle in `register.ts`
+`shrink`, a `Levers` flag fed by its own `*_enabled` toggle in `register.mts`
 (plus its term in `compressOn`), a `RowRewrite` accumulator and `/headroom`
 table if it reports savings, and its step in the `ROUTES` entries of the types
 it fits, deciding whether `elide` still runs on its rewrite (put the step in
@@ -1302,12 +1295,6 @@ it fits, deciding whether `elide` still runs on its rewrite (put the step in
   - `$.tool.register` in the first `session.start` (which is awaited) is listed
     by turn one; a reload's `session.start` registers again; `/clear` fires
     none.
-  - The test kit's `$` is engine-origin (`next.origin.plugin === "engine"`).
-- Test kit: every `on(...)` stub must be registered before the test's first `$`
-  call; a later one throws `on("<event>") after the test first called $`. The
-  crusher tests stub `command.register`, `tool.register` and `session.messages`
-  (answering `{ value }`) plus a bottom `session.start`, then fire
-  `$.session.start({ cwd, surface, isInteractive })`.
 - `$.ui.open(PaneOpenArgs)` resolves to `UiOpenResult`
   (`{ isPlaced: true } | { isPlaced: false, reason }`). `focus`/`closeOnEscape`
   accept only `true`. One pane per id, and re-opening retitles it.
@@ -1315,16 +1302,6 @@ it fits, deciding whether `elide` still runs on its rewrite (put the step in
   pane and scopes `$.ui.invalidate("ui.render")` to it. Elements come from
   `$.ui.resolve(e)` as plain function calls (`Box({...})`, `Text({ children: [...] })`),
   so the module stays `.ts` without JSX.
-- Test kit: `$.ui.open` needs an `on("ui.open", ...)` stub answering
-  `{ value: { isPlaced: true } }`, registered before the test's first `$` call.
-  The kit answers `$.ui.invalidate` itself. Panes are asserted with
-  `$.ui.mount(...)` and `find({ type: "Text", text })`; a string `text` is a
-  substring match (`"1"` also finds `17`), so anchor a regex (`/^17$/`) to
-  find one cell. A test's own `$` has no `ui.close`: a test closes a pane
-  through an inline helper plugin (`test(name, { plugins: [closer] }, ...)`)
-  whose command calls `$.ui.close({ id })`, plus a mandatory bottom
-  `on("ui.close", ...)` stub answering `{ value: undefined }` or `{ deny }`
-  (without one the kit fails with `no implementation for ui.close`).
 - `session.end` input is `{ reason, sessionId, resume: { id } }` and `next(e)`
   resolves `{ sessionId }`; `reason: "clear"` is a `/clear` (the process goes on
   under a new session id).
@@ -1340,19 +1317,12 @@ it fits, deciding whether `elide` still runs on its rewrite (put the step in
   `This plugin's manifest lists no MCP server named "<key>".`
   `$.mcp.call(server, tool, args)` resolves
   `{ content, isError, structuredContent? }`; `structuredContent` is typed only
-  for tools with an `outputSchema`. Kit stubs: `on("mcp.connect", ...)` and
-  `on("mcp.call", ...)` answering `{ value: ... }`; the connect stub must answer
-  only for the bare key, as `stubStorage` does.
+  for tools with an `outputSchema`.
 - `claude plugin validate` refuses `$.mcp` (any `$.<noun>`) as a bare value; a
   same-file helper taking the whole `$: EngineInterface` validates, and its calls
   are listed as `$.mcp.call (via callStorage)`.
 - `Box` `flexDirection`/`width`/`justifyContent`/`gap` and `Text`
   `bold`/`dimColor` mount and validate in a Pane.
-- Test kit: `$.clock.now()` needs `mock.clock(on, { now })` (from
-  `claude-code/testing`). `clock.advance(ms)` fires a module's `$.clock.every`
-  periods exactly on the boundary (`advance(9_999)` fires none of a 10 s
-  period, a further `advance(1)` fires one). A refresh tick fetches through the
-  pane's render, so a test that counts tick fetches mounts the pane.
 - Live-run on 2.1.296 for the earlier levers (headless `claude -p`, an
   interactive session in tmux, a `claude --bg` session, a throwaway probe mod;
   evidence: `--debug-file` logs and, for effort, the `/v1/messages` request
@@ -1418,15 +1388,10 @@ it fits, deciding whether `elide` still runs on its rewrite (put the step in
     `tool.call` hook answered it with `agentId` set.
   - Every model tool call, in subagents too, carries `next.origin`
     `{ plugin: "engine", tier: "core" }`.
-- Test kit: the test's own
-  `$.session.append({ message, door, origin, uuid, agentId? })` raises a row
-  through the plugin's `session.append` hooks; the kit's bottom stores it with
-  the pinned blocks put back and resolves `{ message, uuid }` (the kit tests'
-  `appendResult`).
 
-## Not yet live-verified (kit only)
+## Not yet live-verified (unit tests only)
 
-Shipped on kit and typings evidence only. The user-run live check in the PR
+Shipped on unit-test and typings evidence only. The user-run live check in the PR
 moves each confirmed entry into the section above and records any failure here;
 delete this heading once it is empty.
 
@@ -1467,4 +1432,3 @@ its steps and clamps also go into the persisted `steps` and `clamped` columns
 (no schema change), so the storage rows count main-loop and subagent steps
 while the `session` row stays main-loop. An agent's `turn.complete` writes the
 pending totals too, so a background agent's steps need no main-loop turn.
-

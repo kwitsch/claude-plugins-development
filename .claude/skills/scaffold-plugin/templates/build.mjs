@@ -18,6 +18,13 @@ function walk(dir) {
   });
 }
 
+// 0. plugin/ ships only build output and hand-written plugin files (.claude/rules/plugin-build-output.md)
+const stray = walk(PLUGIN).filter((f) => /\.m?ts$|\.test\.|(^|\/)CLAUDE\.md$|\/tests\//.test(f.split(path.sep).join("/")));
+if (stray.length) {
+  console.error(`plugin/ holds sources/tests that belong in src/ or tests/:\n  ${stray.join("\n  ")}`);
+  process.exit(1);
+}
+
 // 1. remove stale build output
 for (const f of walk(PLUGIN)) if (f.endsWith(".mjs")) rmSync(f);
 

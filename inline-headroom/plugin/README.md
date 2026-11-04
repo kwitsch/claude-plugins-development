@@ -848,5 +848,4 @@ Sources live in [kwitsch/claude-plugins-development](https://github.com/kwitsch/
 pnpm install && pnpm --filter inline-headroom build && pnpm --filter inline-headroom test
 claude --plugin-dir inline-headroom/plugin
 claude plugin validate inline-headroom/plugin
-claude plugin test inline-headroom/plugin
 ```

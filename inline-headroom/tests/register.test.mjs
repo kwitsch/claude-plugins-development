@@ -1,31 +1,24 @@
-import type { TurnStepInput } from "claude-code";
-import { expect, mock, type Plugin, test, type TestBody } from "claude-code/testing";
-import { dayKey, RETRIEVE_TOOL, windowStart } from "../hooks/policy.mjs";
+// Hook-wiring tests for the built plugin/hooks/register.mjs (Claude Code function-hooks module): a near-verbatim port
+// of the former `claude plugin test` suite onto claude-engine-vitest, the workspace's vitest stand-in for the
+// official `claude-code/testing` kit (types dropped, `expect` from vitest, `test`/`mock` from createKit).
+import { expect } from "vitest";
+import { createKit } from "claude-engine-vitest";
+import { dayKey, RETRIEVE_TOOL, windowStart } from "../plugin/hooks/policy.mjs";
 
-type Engine = Parameters<TestBody>[0];
-type On = Parameters<TestBody>[1];
-type Usage = {
-  input_tokens: number;
-  output_tokens: number;
-  cache_read_input_tokens: number;
-  cache_creation_input_tokens: number;
-  model: string;
-};
-type StepState = { seen: unknown; usage: Usage | null };
-type StorageCall = { tool: string; args: Record<string, unknown> };
+const { test, mock } = createKit({ module: new URL("../plugin/hooks/register.mjs", import.meta.url), plugin: "inline-headroom" });
 
 const MODEL = "claude-sonnet-5-5";
 const NOW = Date.UTC(2026, 9, 3, 12);
 // What stats_sum answers in the pane tests: cache hit 900 / 1000 = 90%.
 const SUMS = { steps: 5, clamped: 2, cache_drops: 1, input_tokens: 100, cache_read_input_tokens: 900, cache_creation_input_tokens: 0 };
 // What stats_sum answers per window start in the pane tests: distinct numbers, so each cell is findable by its text.
-const windowSums = (today: string): Record<string, typeof SUMS> => ({
+const windowSums = (today) => ({
   [today]: { ...SUMS, steps: 5, clamped: 2 }, // hit 90%, drops 1
   [windowStart(today, 7)]: { ...SUMS, steps: 17, clamped: 9, cache_drops: 3 },
   [windowStart(today, 30)]: { ...SUMS, steps: 41, clamped: 23, cache_drops: 11, cache_read_input_tokens: 300 }, // hit 75%
 });
 // A main-loop turn that ended with an answer.
-const DONE = { answer: "", durationMs: 1, isAborted: false, turnId: "t1", reason: "answer" as const };
+const DONE = { answer: "", durationMs: 1, isAborted: false, turnId: "t1", reason: "answer" };
 // The five router compressors of 0.7.0 off: tests of the earlier levers keep seeing the text those levers saw before.
 // Declared up here because test options are read at module load, before the compression tests further down.
 const NEW_LEVERS_OFF = {
@@ -50,10 +43,10 @@ const PANE = {
     scroll: { offset: 0, bodyRows: 10 },
     view: {},
   },
-} as const;
+};
 
 // Usage whose cache-hit ratio is exactly `hit` (1000-token prompt).
-const usageAt = (hit: number): Usage => ({
+const usageAt = (hit) => ({
   input_tokens: Math.round((1 - hit) * 1000),
   output_tokens: 10,
   cache_read_input_tokens: Math.round(hit * 1000),
@@ -62,8 +55,8 @@ const usageAt = (hit: number): Usage => ({
 });
 
 // Bottom turn.step hook (stands for the engine): records the effort that reached it.
-function bottomStep(on: On): StepState {
-  const st: StepState = { seen: "not-called", usage: null };
+function bottomStep(on) {
+  const st = { seen: "not-called", usage: null };
   on("turn.step", async function*(_$, e) {
     st.seen = e.effort;
     return {
@@ -71,7 +64,7 @@ function bottomStep(on: On): StepState {
       index: e.index,
       answer: "",
       toolUses: [],
-      stopReason: "end_turn" as const,
+      stopReason: "end_turn",
       usage: st.usage,
     };
   });
@@ -80,20 +73,20 @@ function bottomStep(on: On): StepState {
 
 // Stands for the storage MCP server: connect answers only for the bare key `storage`, like the engine;
 // records every call; `answer`'s value is the tool's result, an Error an error result.
-function stubStorage(on: On, answer: (tool: string, args: Record<string, unknown>) => unknown): StorageCall[] {
-  const calls: StorageCall[] = [];
+function stubStorage(on, answer) {
+  const calls = [];
   on("mcp.connect", async (_$, e) =>
     e.server === "storage"
       ? {
         value: {
-          isConnected: true as const,
+          isConnected: true,
           server: "plugin:inline-headroom:storage",
         },
       }
       : {
         value: {
-          isConnected: false as const,
-          reason: "unlisted" as const,
+          isConnected: false,
+          reason: "unlisted",
           message: `This plugin's manifest lists no MCP server named "${e.server}".`,
         },
       });
@@ -107,15 +100,15 @@ function stubStorage(on: On, answer: (tool: string, args: Record<string, unknown
 }
 
 // stubStorage for the pane tests: stats_sum answers `windows()` per window start (read per call, so a test can change it), every write answers ok.
-function stubWindows(on: On, windows: () => Record<string, typeof SUMS>): StorageCall[] {
+function stubWindows(on, windows) {
   return stubStorage(on, (tool, args) => (tool === "stats_sum" ? windows()[String(args.since)] : { ok: true, purged: 0 }));
 }
 
 // One pane cell by its exact text: an unanchored string is a substring match ("1" also finds 17).
-const cell = (ui: Awaited<ReturnType<Engine["ui"]["mount"]>>, text: string) => ui.find({ type: "Text", text: new RegExp(`^${text}$`) });
+const cell = (ui, text) => ui.find({ type: "Text", text: new RegExp(`^${text}$`) });
 
-async function step($: Engine, index: number, effort: TurnStepInput["effort"], agentId?: string): Promise<void> {
-  const input: TurnStepInput = {
+async function step($, index, effort, agentId) {
+  const input = {
     turnId: "t1",
     index,
     model: MODEL,
@@ -129,17 +122,17 @@ async function step($: Engine, index: number, effort: TurnStepInput["effort"], a
 }
 
 // One Read call, from the main loop or (with agentId) from that subagent.
-async function callRead($: Engine, agentId?: string): Promise<void> {
+async function callRead($, agentId) {
   await $.tool.call({ tool: "Read", file_path: "README.md", ...(agentId === undefined ? {} : { agentId }) });
 }
 
-async function readOk($: Engine, on: On, agentId?: string): Promise<void> {
+async function readOk($, on, agentId) {
   on("tool.call", () => ({ result: "file contents" }));
   await callRead($, agentId);
 }
 
 // Closes the pane the way Esc does, from a plugin: a test's own $ has no ui.close. Self-contained: the kit loads register on its own.
-const closer: Plugin = {
+const closer = {
   name: "closer",
   register(on) {
     on("command.run", { command: "closer" }, async ($) => {
@@ -168,7 +161,7 @@ test("(b) index 0 keeps high", async ($, on) => {
 
 test("(c) a tool error keeps high on the next step", async ($, on) => {
   const st = bottomStep(on);
-  on("tool.call", () => ({ isError: true as const, result: "boom" }));
+  on("tool.call", () => ({ isError: true, result: "boom" }));
   await $.tool.call({ tool: "Read", file_path: "README.md" });
   await step($, 1, "high");
   expect(st.seen).toBe("high");
@@ -208,10 +201,10 @@ test("(h) a cache-hit drop from 90% to 10% is counted", { options: { effort_rout
 });
 
 test("(i) /headroom opens the headroom pane and prints nothing", async ($, on) => {
-  const opened: unknown[] = [];
+  const opened = [];
   on("ui.open", async (_$, e) => {
     opened.push(e);
-    return { value: { isPlaced: true as const } };
+    return { value: { isPlaced: true } };
   });
   const out = await $.command.run({ command: "headroom" });
   expect(out.text).toBeUndefined();
@@ -224,7 +217,7 @@ test("(i2) /headroom falls back to the stats tables as text when the pane is not
   const clock = mock.clock(on, { now: NOW });
   const today = dayKey(NOW);
   stubWindows(on, () => windowSums(today));
-  on("ui.open", async () => ({ value: { isPlaced: false as const, reason: "no surface" } }));
+  on("ui.open", async () => ({ value: { isPlaced: false, reason: "no surface" } }));
   const run = $.command.run({ command: "headroom" });
   await clock.settle(); // lets the one storage read finish
   const out = await run;
@@ -262,7 +255,7 @@ test("(l) /headroom fills the tables at once and refreshes them every 10 s while
   const today = dayKey(NOW);
   let w = windowSums(today);
   const calls = stubWindows(on, () => w);
-  on("ui.open", async () => ({ value: { isPlaced: true as const } }));
+  on("ui.open", async () => ({ value: { isPlaced: true } }));
   await $.command.run({ command: "headroom" });
   await clock.settle(); // the first fetch runs unawaited after the hook returned
   const ui = await $.ui.mount({ ...PANE, surface: "terminal" });
@@ -275,7 +268,7 @@ test("(l) /headroom fills the tables at once and refreshes them every 10 s while
   expect(await cell(ui, "11")).toBeDefined();
   expect(await ui.findAll({ type: "Button" })).toHaveLength(0);
   // the three calls run in parallel: compare in window order, not arrival order
-  const bySince = (a: StorageCall, b: StorageCall): number => String(a.args.since).localeCompare(String(b.args.since));
+  const bySince = (a, b) => String(a.args.since).localeCompare(String(b.args.since));
   expect([...calls].sort(bySince)).toEqual([
     { tool: "stats_sum", args: { since: windowStart(today, 30) } },
     { tool: "stats_sum", args: { since: windowStart(today, 7) } },
@@ -295,7 +288,7 @@ test("(n) storage_enabled false: the storage rows say storage is off and nothing
   const calls = stubStorage(on, () => SUMS);
   bottomStep(on);
   on("turn.complete", async () => ({ text: "" }));
-  on("ui.open", async () => ({ value: { isPlaced: true as const } }));
+  on("ui.open", async () => ({ value: { isPlaced: true } }));
   await $.command.run({ command: "headroom" });
   const ui = await $.ui.mount({ ...PANE, surface: "terminal" });
   expect(await ui.find({ type: "Text", text: /storage is off/ })).toBeDefined();
@@ -311,7 +304,7 @@ test("(n) storage_enabled false: the storage rows say storage is off and nothing
 test("(o) a storage error result shows as storage unavailable", async ($, on) => {
   const clock = mock.clock(on, { now: NOW });
   stubStorage(on, () => new Error("inline-headroom storage: storage is disabled (userConfig storage_enabled is not true)"));
-  on("ui.open", async () => ({ value: { isPlaced: true as const } }));
+  on("ui.open", async () => ({ value: { isPlaced: true } }));
   await $.command.run({ command: "headroom" });
   await clock.settle();
   const ui = await $.ui.mount({ ...PANE, surface: "terminal" });
@@ -321,7 +314,7 @@ test("(o) a storage error result shows as storage unavailable", async ($, on) =>
 
 test("(s) a clock failure shows as storage unavailable instead of loading forever", async ($, on) => {
   stubStorage(on, () => SUMS);
-  on("ui.open", async () => ({ value: { isPlaced: false as const, reason: "no surface" } }));
+  on("ui.open", async () => ({ value: { isPlaced: false, reason: "no surface" } }));
   const out = await $.command.run({ command: "headroom" }); // no mock.clock: the kit refuses $.clock.now()
   expect(out.text).toMatch(/storage unavailable: /);
 });
@@ -358,7 +351,7 @@ test("(r) a usage with a missing token field still writes integer counters", asy
   const st = bottomStep(on);
   on("turn.complete", async () => ({ text: "" }));
   const { cache_read_input_tokens: _missing, ...partial } = usageAt(0.5);
-  st.usage = partial as unknown as Usage; // a provider shape without one field
+  st.usage = partial; // a provider shape without one field
   await step($, 0, "high");
   await $.turn.complete(DONE);
   await clock.advance(0);
@@ -387,7 +380,7 @@ test("(t) a second /headroom never stacks the refresh, and closing the pane stop
   const clock = mock.clock(on, { now: NOW });
   const today = dayKey(NOW);
   const calls = stubWindows(on, () => windowSums(today));
-  on("ui.open", async () => ({ value: { isPlaced: true as const } }));
+  on("ui.open", async () => ({ value: { isPlaced: true } }));
   on("ui.close", async () => ({ value: undefined })); // the bottom of the close chain: the pane closes
   await $.command.run({ command: "headroom" });
   await clock.settle();
@@ -413,7 +406,7 @@ test("(v) a refresh that finds unchanged totals does not redraw the pane again",
     redraws++;
     return { value: undefined };
   });
-  on("ui.open", async () => ({ value: { isPlaced: true as const } }));
+  on("ui.open", async () => ({ value: { isPlaced: true } }));
   await $.command.run({ command: "headroom" });
   await clock.settle();
   expect(redraws).toBe(1); // the first numbers
@@ -425,7 +418,7 @@ test("(u) a refused close keeps the refresh running", { plugins: [closer] }, asy
   const clock = mock.clock(on, { now: NOW });
   const today = dayKey(NOW);
   const calls = stubWindows(on, () => windowSums(today));
-  on("ui.open", async () => ({ value: { isPlaced: true as const } }));
+  on("ui.open", async () => ({ value: { isPlaced: true } }));
   on("ui.close", async () => ({ deny: "kept by test" })); // a hook beneath keeps the pane open
   await $.command.run({ command: "headroom" });
   await clock.settle();
@@ -454,7 +447,7 @@ test("(x) a failed refresh keeps the last numbers under the storage note", async
   const today = dayKey(NOW);
   let fail = false;
   stubStorage(on, (tool, args) => (fail ? new Error("database is locked") : tool === "stats_sum" ? windowSums(today)[String(args.since)] : { ok: true, purged: 0 }));
-  on("ui.open", async () => ({ value: { isPlaced: true as const } }));
+  on("ui.open", async () => ({ value: { isPlaced: true } }));
   await $.command.run({ command: "headroom" });
   await clock.settle();
   fail = true;
@@ -468,7 +461,7 @@ test("(x) a failed refresh keeps the last numbers under the storage note", async
 test("(y) the effort routing table is shown only while effort_routing_enabled is on", { options: { effort_routing_enabled: false } }, async ($, on) => {
   const clock = mock.clock(on, { now: NOW });
   stubWindows(on, () => windowSums(dayKey(NOW)));
-  on("ui.open", async () => ({ value: { isPlaced: true as const } }));
+  on("ui.open", async () => ({ value: { isPlaced: true } }));
   await $.command.run({ command: "headroom" });
   await clock.settle();
   const ui = await $.ui.mount({ ...PANE, surface: "terminal" });
@@ -480,7 +473,7 @@ test("(y) the effort routing table is shown only while effort_routing_enabled is
 test("(z) the cache aligner table is shown only while cache_aligner_enabled is on", { options: { cache_aligner_enabled: false } }, async ($, on) => {
   const clock = mock.clock(on, { now: NOW });
   stubWindows(on, () => windowSums(dayKey(NOW)));
-  on("ui.open", async () => ({ value: { isPlaced: true as const } }));
+  on("ui.open", async () => ({ value: { isPlaced: true } }));
   await $.command.run({ command: "headroom" });
   await clock.settle();
   const ui = await $.ui.mount({ ...PANE, surface: "terminal" });
@@ -507,7 +500,7 @@ test(
   async ($, on) => {
     const clock = mock.clock(on, { now: NOW });
     const calls = stubWindows(on, () => windowSums(dayKey(NOW)));
-    on("ui.open", async () => ({ value: { isPlaced: true as const } }));
+    on("ui.open", async () => ({ value: { isPlaced: true } }));
     await $.command.run({ command: "headroom" });
     await clock.advance(30_000); // no refresh timer runs
     const ui = await $.ui.mount({ ...PANE, surface: "terminal" });
@@ -528,7 +521,7 @@ test(
   { options: { subagent_effort_routing_enabled: false, storage_enabled: false } },
   async ($, on) => {
     const st = bottomStep(on);
-    on("ui.open", async () => ({ value: { isPlaced: false as const, reason: "no surface" } }));
+    on("ui.open", async () => ({ value: { isPlaced: false, reason: "no surface" } }));
     await readOk($, on);
     await step($, 1, "high", "agent-1");
     expect(st.seen).toBe("high");
@@ -555,7 +548,7 @@ test("(ad) a subagent's index 0 keeps high", async ($, on) => {
 
 test("(ae) a subagent's tool error keeps only that agent at high until its next step", async ($, on) => {
   const st = bottomStep(on);
-  on("tool.call", (_$, e) => (e.agentId === "a1" ? { isError: true as const, result: "boom" } : { result: "ok" }));
+  on("tool.call", (_$, e) => (e.agentId === "a1" ? { isError: true, result: "boom" } : { result: "ok" }));
   await callRead($, "a1");
   await callRead($, "a2");
   await callRead($);
@@ -571,7 +564,7 @@ test("(ae) a subagent's tool error keeps only that agent at high until its next 
 
 test("(af) a main-loop tool error does not keep a subagent at high", async ($, on) => {
   const st = bottomStep(on);
-  on("tool.call", (_$, e) => (e.agentId ? { result: "ok" } : { isError: true as const, result: "boom" }));
+  on("tool.call", (_$, e) => (e.agentId ? { result: "ok" } : { isError: true, result: "boom" }));
   await callRead($);
   await step($, 1, "high", "a1");
   expect(st.seen).toBe("low");
@@ -583,7 +576,7 @@ for (const storage_enabled of [true, false]) {
   test(`(ag) a finished agent's turn.complete drops its error (storage ${storage_enabled ? "on" : "off"})`, { options: { storage_enabled } }, async ($, on) => {
     const st = bottomStep(on);
     on("turn.complete", async () => ({ text: "" }));
-    on("tool.call", (_$, e) => (e.agentId === "a1" ? { isError: true as const, result: "boom" } : { result: "ok" }));
+    on("tool.call", (_$, e) => (e.agentId === "a1" ? { isError: true, result: "boom" } : { result: "ok" }));
     await callRead($, "a1");
     await $.turn.complete({ ...DONE, agentId: "a1" }); // with storage on, the kit refuses $.clock.now() (no mock.clock) and the write is skipped
     await step($, 1, "high", "a1");
@@ -594,7 +587,7 @@ for (const storage_enabled of [true, false]) {
 test("(ah) the subagents row counts this session's subagent steps and clamps, and session.end starts it over", { options: { storage_enabled: false } }, async ($, on) => {
   bottomStep(on);
   on("tool.call", () => ({ result: "ok" }));
-  on("ui.open", async () => ({ value: { isPlaced: false as const, reason: "no surface" } }));
+  on("ui.open", async () => ({ value: { isPlaced: false, reason: "no surface" } }));
   on("session.end", async (_$, e) => ({ sessionId: e.sessionId }));
   await step($, 0, "high", "a1");
   await step($, 1, "high", "a1");
@@ -623,33 +616,33 @@ const POINTER = /^\[↑(\d+)L same as result (\d+)(?: [+-]\d+L)?: ".*" hash=([0-
 // A minified bundle: one 2500-character line without a space, then a short line.
 const DENSE = `${"x".repeat(2500)}\nexit 0`;
 // The pane is not placed (headless): /headroom answers with the tables as text.
-const notPlaced = async () => ({ value: { isPlaced: false as const, reason: "no surface" } });
+const notPlaced = async () => ({ value: { isPlaced: false, reason: "no surface" } });
 
 // Raises session.start, which registers headroom_retrieve, with the ops it needs stubbed: tool.register answers
 // `registeredAs` and records each spec. Call it after the test's other stubs: the kit refuses on() once $ was called.
 // `userText` is the one user message session.messages answers with: "" (a tool result) gives an empty query.
-async function startCrusher(on: On, $: Engine, registeredAs: string = RETRIEVE_TOOL, userText = ""): Promise<unknown[]> {
-  const registered: unknown[] = [];
+async function startCrusher(on, $, registeredAs = RETRIEVE_TOOL, userText = "") {
+  const registered = [];
   on("command.register", async (_$, e) => ({ value: { command: e.name } }));
   on("tool.register", async (_$, e) => {
     registered.push(e);
     return { value: { tool: registeredAs } };
   });
-  on("session.messages", async () => ({ value: [{ role: "user" as const, text: userText, toolUses: [] }] }));
+  on("session.messages", async () => ({ value: [{ role: "user", text: userText, toolUses: [] }] }));
   on("session.start", async (_$, e) => ({ cwd: e.cwd }));
   await $.session.start({ cwd: "/tmp", surface: "terminal", isInteractive: true });
   return registered;
 }
 
 // One Bash call from the main loop; the test's bottom tool.call stub answers it.
-async function callBash($: Engine) {
+async function callBash($) {
   return $.tool.call({ tool: "Bash", command: "cat rows.json" });
 }
 
 let rowSeq = 0; // a fresh tool_use id and row uuid per raised row
 // Raises one tool-result row through the test's own $.session.append, as the engine appends a tool's result (door
 // tool-result, origin the tool), and resolves to the stored tool_result's content: what the model reads.
-async function appendResult($: Engine, tool: string, content: unknown, opts: { agentId?: string; isError?: boolean } = {}): Promise<unknown> {
+async function appendResult($, tool, content, opts = {}) {
   const n = ++rowSeq;
   const r = await $.session.append({
     message: { type: "user", role: "user", content: [{ type: "tool_result", tool_use_id: `toolu_${n}`, content, ...(opts.isError ? { is_error: true } : {}) }] },
@@ -662,8 +655,8 @@ async function appendResult($: Engine, tool: string, content: unknown, opts: { a
 }
 
 // The rows a crushed document holds, and its sentinel's hash and dropped-row count.
-function crushedRows(text: unknown): { rows: Record<string, unknown>[]; hash: string; dropped: number } {
-  const parsed = JSON.parse(String(text)) as Record<string, unknown>[];
+function crushedRows(text) {
+  const parsed = JSON.parse(String(text));
   const [, hash = "", dropped = "0"] = SENTINEL.exec(String(parsed.at(-1)?._ccr_dropped)) ?? [];
   return { rows: parsed, hash, dropped: Number(dropped) };
 }
@@ -695,7 +688,7 @@ test("(sc2) headroom_retrieve returns the original rows, and an unknown hash is 
 
 test("(sc3) an error row is stored untouched, and tool.call error and deny results come back untouched", async ($, on) => {
   const st = bottomStep(on);
-  let answer: { isError: true; result: unknown } | { deny: string } = { isError: true, result: "boom" };
+  let answer = { isError: true, result: "boom" };
   on("tool.call", () => answer);
   await startCrusher(on, $);
   expect(await appendResult($, "Bash", BIG, { isError: true })).toBe(BIG);
@@ -767,7 +760,7 @@ test(
 test("(sc5) a row's array content gets only its JSON text block rewritten", { options: LOSSY }, async ($, on) => {
   const image = { type: "image", source: { type: "base64", media_type: "image/png", data: "iVBORw0KGgo=" } };
   await startCrusher(on, $);
-  const content = (await appendResult($, "mcp__srv__list", [{ type: "text", text: BIG }, image])) as { text?: string }[];
+  const content = (await appendResult($, "mcp__srv__list", [{ type: "text", text: BIG }, image]));
   expect(crushedRows(content[0].text).rows.length).toBeLessThan(200);
   expect(content[1]).toEqual(image);
 });
@@ -823,7 +816,7 @@ test(
   async ($, on) => {
     const clock = mock.clock(on, { now: NOW });
     const calls = stubWindows(on, () => windowSums(dayKey(NOW)));
-    on("ui.open", async () => ({ value: { isPlaced: true as const } }));
+    on("ui.open", async () => ({ value: { isPlaced: true } }));
     await startCrusher(on, $);
     expect(crushedRows(await appendResult($, "Bash", BIG)).rows.length).toBeLessThan(200);
     await $.command.run({ command: "headroom" });
@@ -845,7 +838,7 @@ test("(sc11) a crush redraws an open /headroom pane", { options: { ...LOSSY, sto
     redraws++;
     return { value: undefined };
   });
-  on("ui.open", async () => ({ value: { isPlaced: true as const } }));
+  on("ui.open", async () => ({ value: { isPlaced: true } }));
   await startCrusher(on, $);
   await $.command.run({ command: "headroom" });
   const ui = await $.ui.mount({ ...PANE, surface: "terminal" });
@@ -871,10 +864,10 @@ test(
     },
   },
   async ($, on) => {
-    const opened: { rows?: number }[] = [];
+    const opened = [];
     on("ui.open", async (_$, e) => {
       opened.push(e);
-      return { value: { isPlaced: true as const } };
+      return { value: { isPlaced: true } };
     });
     await startCrusher(on, $);
     await $.command.run({ command: "headroom" });
@@ -941,14 +934,14 @@ test("(dd4) session.end starts the dedup row and its corpus over", { options: { 
 });
 
 // The kit raises session.compact with exactly the args it is given, so a test passes the engine's own fields (trigger, agentId, messages) too.
-const SUMMARY = { role: "user" as const, text: "summary", toolUses: [] };
-const compact = ($: Engine, trigger: string, agentId?: string) => $.session.compact({ trigger, messages: [SUMMARY], ...(agentId === undefined ? {} : { agentId }) } as never);
+const SUMMARY = { role: "user", text: "summary", toolUses: [] };
+const compact = ($, trigger, agentId) => $.session.compact({ trigger, messages: [SUMMARY], ...(agentId === undefined ? {} : { agentId }) });
 
 test(
   "(dd5) a compaction starts only the compacting loop's dedup corpus over and keeps its ordinals, a skipped or precompute one keeps it",
   { options: { ...NEW_LEVERS_OFF, storage_enabled: false } },
   async ($, on) => {
-    let skip: string | undefined;
+    let skip;
     on("session.compact", async () => (skip === undefined ? { messages: [SUMMARY] } : { skip }));
     await startCrusher(on, $);
     await appendResult($, "Bash", TEN); // main result 1
@@ -969,12 +962,12 @@ test(
 );
 
 // `n` distinct 3-line runs numbered from `from`, each followed by a separator line: two rows with the same runs and different `sep` fold each run into its own pointer.
-const runsRow = (n: number, from: number, sep: string) =>
+const runsRow = (n, from, sep) =>
   Array.from({ length: n }, (_, i) => {
     const k = from + i;
     return [`run ${k} line one of the shared text`, `run ${k} line two of the shared text`, `run ${k} line three of the shared text`, `separator ${sep} ${k}`].join("\n");
   }).join("\n");
-const hashesOf = (text: unknown): string[] => [...String(text).matchAll(/ hash=([0-9a-f]{12})\]/g)].map((m) => m[1]);
+const hashesOf = (text) => [...String(text).matchAll(/ hash=([0-9a-f]{12})\]/g)].map((m) => m[1]);
 
 test("(dd7) dedup runs have a store of their own, so a flood of them never evicts a crushed original", { options: { ...NEW_LEVERS_OFF, ...LOSSY, storage_enabled: false } }, async ($, on) => {
   await startCrusher(on, $);
@@ -1038,7 +1031,7 @@ test("(lc1) by default a uniform JSON array is stored as a lossless table, count
   on("ui.open", notPlaced);
   await startCrusher(on, $);
   const stored = String(await appendResult($, "Bash", BIG));
-  const table = JSON.parse(stored) as unknown; // a JSON string literal, upstream's wrapper for a top-level array
+  const table = JSON.parse(stored); // a JSON string literal, upstream's wrapper for a top-level array
   expect(typeof table).toBe("string");
   expect(String(table).startsWith("[200]{id:int,note:string,status:string}\n")).toBe(true);
   expect(String(table).split("\n").includes("150,same text,error")).toBe(true);

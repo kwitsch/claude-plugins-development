@@ -3,35 +3,47 @@
 // from another file. All `$` use lives inside hooks in register.ts. No clock
 // reads either: time comes in as arguments.
 
+/** A reasoning effort level, lowest first as in EFFORT_ORDER. */
 type Effort = "low" | "medium" | "high" | "xhigh" | "max";
-type Counters = { steps: number; clamped: number; cache_drops: number; input_tokens: number; cache_read_input_tokens: number; cache_creation_input_tokens: number };
+/** The persisted /headroom counters of one day (or one pending batch), in COUNTER_KEYS order. */
+export type Counters = { steps: number; clamped: number; cache_drops: number; input_tokens: number; cache_read_input_tokens: number; cache_creation_input_tokens: number };
+/** One /headroom table row's counters, optionally with a precomputed cache hit ratio. */
 type Row = Counters & { hit?: number };
+/** A transcript message as crushQuery reads it: its role, its text and its tool calls' inputs. */
 type QueryMessage = { role: "user" | "assistant"; text: string; toolUses: readonly { input: Record<string, unknown> }[] };
 /**
  * A crushed document: compact text, rows and items lost, arrays rendered losslessly and the characters those tables saved,
  * [hash, original text (a crushed array's JSON, an elided block, a folded span)] per crushed array.
  */
 type CrushOutcome = { text: string; rowsDropped: number; compacted: number; compactSaved: number; offloaded: [string, string][] };
+/** The running totals one crush accumulates while it walks a document. */
 type CrushAcc = { rowsDropped: number; compacted: number; compactSaved: number; offloaded: [string, string][] };
+/** Which crusher stages run: the lossy SmartCrusher path and the lossless compaction. */
 type CrushModes = { lossy: boolean; lossless: boolean };
+/** One compaction column: its name, type tag and whether a row may miss or null it. */
 type FieldSpec = { name: string; type: string; nullable: boolean };
 /**
  * One compaction cell (upstream CellValue without OpaqueRef): a scalar (any JSON value), a missing key, or a nested compaction.
  */
 type Cell = { s: unknown } | { m: true } | { n: Compaction };
+/** One discriminator bucket of a compaction: its key value, columns and rows. */
 type Bucket = { key: string; fields: FieldSpec[]; rows: Cell[][] };
 /**
  * The compaction IR (upstream Compaction without OpaqueRef): a table, buckets split by a discriminator, or the items untouched.
  */
 type Compaction = { kind: "table"; fields: FieldSpec[]; rows: Cell[][] } | { kind: "buckets"; disc: string; buckets: Bucket[] } | { kind: "untouched"; value: unknown };
+/** A mutable work allowance, decremented per unit of work; below 0 means exhausted. */
 type WorkBudget = { left: number };
+/** The dense line elider's result: the text, the lines elided and the originals to store. */
 type Elision = { text: string; lines: number; offloaded: [string, string][] };
 /**
  * One conversation's dedup corpus: the last ordinal handed out, each indexed block's verbatim lines (null where folded) by
  * ordinal, the anchor index (match key → [ordinal, line] first-seen, at most 16), and the indexed characters.
  */
-type DedupState = { turn: number; corpus: Map<number, (string | null)[]>; index: Map<string, [number, number][]>; chars: number };
+export type DedupState = { turn: number; corpus: Map<number, (string | null)[]>; index: Map<string, [number, number][]>; chars: number };
+/** A cross-turn dedup result: the text, the runs folded and the originals to store. */
 type Fold = { text: string; spans: number; offloaded: [string, string][] };
+/** A message content block: its `type` plus any other fields. */
 type ContentBlock = { type: string } & Record<string, unknown>;
 /**
  * Upstream ContentType tags (as_str); 'tabular' is git status here, 'structured_config' is Python's (Rust has no such tag).
@@ -42,7 +54,9 @@ type ContentType = "json_array" | "diff" | "html" | "tabular" | "search" | "buil
  * lossless fold, which belongs to that compressor's lever.
  */
 type RouteStep = "crush" | "config" | "extract" | "elide" | "split" | "logfold" | "log" | "searchfold" | "search" | "difffold" | "diff" | "textfold" | "textcrush";
+/** A lexed tag: whether it closes, where its name ends, where it ends and whether it self-closes. */
 type TagToken = { close: boolean; nameEnd: number; end: number; selfClosing: boolean };
+/** The structured-config flavors the config compressor tells apart. */
 type ConfigFlavor = "yaml" | "toml" | "ini";
 /**
  * Which levers rewrite this row; dedup names the conversations map and this row's key ("" main, else agentId).
@@ -112,7 +126,9 @@ type Analysis = { fields: FieldStats[]; strategy: "skip" | "time_series" | "clus
  */
 type CrushPlan = { items: Record<string, unknown>[]; strings: string[]; canon: string[]; analysis: Analysis; query: string; max: number };
 
+/** Effort levels in ascending order. */
 export const EFFORT_ORDER = ["low", "medium", "high", "xhigh", "max"] as const;
+/** A cache hit ratio below this, after one at or above it, counts as a cache drop. */
 export const CACHE_DROP_THRESHOLD = 0.6;
 /** The /headroom table rows, top to bottom. `days`: the rolling window, today included; 0 = this session, in memory. */
 export const ROWS = [
@@ -142,15 +158,21 @@ export const CCR_MAX_CHARS = 16_000_000;
 /** Upstream ERROR_KEYWORDS: a row whose lowercased JSON holds one is never dropped. */
 export const ERROR_KEYWORDS = ["error", "exception", "failed", "failure", "critical", "fatal", "crash", "panic", "abort", "timeout", "denied", "rejected"] as const;
 
+/** A canonical 8-4-4-4-12 hex UUID. */
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-// The persisted counters in mcp/server.mjs STATS_KEYS order. That file stays import-free, so the list is
-// repeated on purpose; test/inline-headroom/storage.test.mjs pins both orders.
+/**
+ * The persisted counters in mcp/server.mjs STATS_KEYS order.
+ *
+ * That file stays import-free, so the list is repeated on purpose; tests/storage.test.mjs pins both orders.
+ */
 const COUNTER_KEYS = ["steps", "clamped", "cache_drops", "input_tokens", "cache_read_input_tokens", "cache_creation_input_tokens"] as const;
+/** One day in milliseconds. */
 const DAY_MS = 86400000;
-// SmartCrusher defaults: upstream SmartCrusherConfig::default() and compute_optimal_k's min_k.
+/** Most rows a crushed array keeps (upstream SmartCrusherConfig::default()). */
 const MAX_ITEMS_AFTER_CRUSH = 15;
+/** Fewest rows a crushed array keeps (upstream compute_optimal_k's min_k). */
 const MIN_K = 3;
-// CJK code point ranges (kana, ideographs, Hangul), as upstream's is_cjk_char.
+/** CJK code point ranges (kana, ideographs, Hangul), as upstream's is_cjk_char. */
 const CJK_RANGES = [
   [0x3040, 0x30ff],
   [0x3400, 0x4dbf],
@@ -158,127 +180,237 @@ const CJK_RANGES = [
   [0xac00, 0xd7af],
   [0xf900, 0xfaff],
 ];
+/** An array needs at least this many items to be analyzed. */
 const MIN_ITEMS_TO_ANALYZE = 5;
+/** Change points must shift the mean by more than this many standard deviations. */
 const VARIANCE_THRESHOLD = 2.0;
+/** A row scoring at least this against the query counts as relevant. */
 const RELEVANCE_THRESHOLD = 0.3;
+/** Deepest nesting the crusher descends into. */
 const MAX_PROCESS_DEPTH = 50;
-// Lossless compaction: upstream SmartCrusherConfig::default() (lossless_min_savings_ratio) and CompactConfig::default().
+/**
+ * Least savings ratio a lossless table must reach to win (upstream SmartCrusherConfig::default() lossless_min_savings_ratio).
+ *
+ * The COMPACT_* constants below are upstream CompactConfig::default().
+ */
 const LOSSLESS_MIN_SAVINGS = 0.15;
+/** Fewest items a compaction takes. */
 const COMPACT_MIN_ITEMS = 2;
+/** A field present in at least this share of the rows is a core field. */
 const COMPACT_CORE_FIELD_FRACTION = 0.8;
+/** Below this share of core keys, a compaction tries discriminator buckets. */
 const COMPACT_HETEROGENEOUS_CORE_RATIO = 0.6;
+/** Most inner keys a uniform nested object may have to be flattened into columns. */
 const COMPACT_MAX_FLATTEN_INNER_KEYS = 6;
+/** Fewest buckets a discriminator must split the rows into. */
 const COMPACT_MIN_BUCKETS = 2;
+/** Most buckets a discriminator may split the rows into. */
 const COMPACT_MAX_BUCKETS = 8;
+/** Highest unique-value ratio a discriminator may have. */
 const COMPACT_MAX_DISCRIMINATOR_RATIO = 0.7;
-// Deviation: a column name holding one of these would make the `[N]{name:type,…}` header undecodable (upstream leaves names unescaped).
+/**
+ * Characters that keep a column name out of a compaction.
+ *
+ * Deviation: such a name would make the `[N]{name:type,…}` header undecodable (upstream leaves names unescaped).
+ */
 const COMPACT_BAD_NAME_RE = /[,:{}?\n\r]/;
-// String, number and mixed-array crushers: upstream SmartCrusherConfig::default() first_fraction and last_fraction.
+/** Share of K the string, number and mixed-array crushers keep from the front (upstream SmartCrusherConfig::default() first_fraction). */
 const K_FIRST_FRACTION = 0.3;
+/** Share of K those crushers keep from the back (upstream last_fraction). */
 const K_LAST_FRACTION = 0.15;
+/** A string starting with an ISO date and time. */
 const ISO_DATETIME_RE = /^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}/;
+/** A string that is exactly an ISO date. */
 const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
-// shortcut: Python int() also takes `_` digit separators; add them if a payload needs it.
+/**
+ * A string Python int() accepts: optional sign and whitespace around ASCII digits.
+ *
+ * shortcut: Python int() also takes `_` digit separators; add them if a payload needs it.
+ */
 const PY_INT_RE = /^\s*[+-]?\d+\s*$/;
-// Anchor weights (front, middle, back) per planner, from upstream AnchorConfig::default(). The search pattern's
-// weights are left out: the top_n planner selects no anchors.
+/**
+ * Anchor weights (front, middle, back) per planner, from upstream AnchorConfig::default().
+ *
+ * The search pattern's weights are left out: the top_n planner selects no anchors.
+ */
 const ANCHOR_WEIGHTS = {
   smart_sample: [0.5, 0.1, 0.4],
   cluster: [0.15, 1 - 0.15 - 0.75, 0.75],
   time_series: [0.45, 0.1, 0.45],
 };
+/** Query words that favour the newest rows. */
 const RECENCY_WORDS = ["latest", "recent", "last", "newest", "current", "now"];
+/** Query words that favour the oldest rows. */
 const HISTORICAL_WORDS = ["first", "oldest", "earliest", "original", "initial", "beginning"];
-// Query anchors (upstream anchors.rs); JS \b is ASCII-only where Rust's is Unicode.
+/** Query anchor: a UUID (upstream anchors.rs; JS `\b` is ASCII-only where Rust's is Unicode). */
 const ANCHOR_UUID_RE = /\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b/g;
+/** Query anchor: a number of 4 or more digits. */
 const ANCHOR_NUMBER_RE = /\b\d{4,}\b/g;
+/** Query anchor: a hostname-like dotted name. */
 const ANCHOR_HOST_RE = /\b[a-zA-Z0-9][-a-zA-Z0-9]*\.[a-zA-Z0-9][-a-zA-Z0-9]*(?:\.[a-zA-Z]{2,})?\b/g;
+/** Query anchor: a quoted string of 1 to 50 characters. */
 const ANCHOR_QUOTED_RE = /['"]([^'"]{1,50})['"]/g;
+/** Query anchor: an email address. */
 const ANCHOR_EMAIL_RE = /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b/g;
+/** BM25 tokens: a UUID, a number of 4 or more digits, or a lowercase word. */
 const BM25_TOKEN_RE = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|\b\d{4,}\b|[a-z0-9_]+/g;
-// The mod's own storage tools are never crushed: a kv_get → edit → kv_set would write the row loss back to storage.db.
+/**
+ * Name prefix of the mod's own storage tools, which are never crushed.
+ *
+ * A `kv_get` → edit → `kv_set` would write the row loss back to storage.db.
+ */
 const OWN_STORAGE_PREFIX = `mcp__plugin_${PLUGIN}_storage__`;
+/** Name suffix of headroom_retrieve under any MCP namespace. */
 const RETRIEVE_SUFFIX = `__${RETRIEVE_NAME}`;
-// Dense line elider: upstream dense_line_elider.py.
+/** A line needs at least this many characters to be dense (upstream dense_line_elider.py MIN_LINE_CHARS). */
 const DENSE_MIN_LINE_CHARS = 300;
+/** A line with at least this share of spaces is not dense. */
 const DENSE_MAX_SPACE_RATIO = 0.06;
+/** A text needs at least this many characters in dense lines to be elided. */
 const DENSE_MIN_TOTAL_CHARS = 2000;
+/** Characters an elided line keeps from its start. */
 const DENSE_HEAD_CHARS = 160;
+/** Characters an elided line keeps from its end. */
 const DENSE_TAIL_CHARS = 80;
-// JSON span scan work budget: upstream recursive_json.py.
+/** JSON span scan work per character (upstream recursive_json.py). */
 const SCAN_BUDGET_PER_CHAR = 4;
+/** JSON span scan work every scan gets on top of the per-character share. */
 const SCAN_BUDGET_FLOOR = 4096;
-// Cross-turn dedup: upstream cross_turn_dedup.py.
+/** Fewest lines a dedup run folds (upstream cross_turn_dedup.py). */
 const DEDUP_MIN_LINES = 3;
+/** Fewest characters a dedup run folds. */
 const DEDUP_MIN_CHARS = 40;
+/** Most anchor candidates kept per match key, in first-seen order. */
 const DEDUP_MAX_ANCHOR_CANDIDATES = 16;
-// Deviation: a `:` separator must not be followed by a digit (`10:15:03`, `8080:80`), where the leading integer is a time or port, not a line number.
+/**
+ * A line-numbered line: number, separator, rest.
+ *
+ * Deviation: a `:` separator must not be followed by a digit (`10:15:03`, `8080:80`), where the leading integer is a time or port, not a line number.
+ */
 const DEDUP_LINENO_RE = /^([1-9]\d*)(:(?!\d)|\t)([\s\S]*)$/;
+/** Lines too trivial to anchor a dedup run. */
 const DEDUP_TRIVIAL = new Set(["return", "pass", "else:", "try:", "except:", "finally:", "break", "continue", "});", "})", "],", "),", "\"\"\"", "'''", "..."]);
 // shortcut: about a 1M-token context at 4 chars per token; older content has left the model's window. Raise it if long sessions stop folding.
 /** Indexed dedup characters kept across all conversations, least recently appended conversation dropped first. Deviation: upstream rebuilds per request and needs no cap. */
 export const DEDUP_MAX_CHARS = 4_000_000;
-// Content detector: upstream content_detector.py, branch order of content_detector.rs (read 2026-10-11 at 976aa71).
+/**
+ * A JSON wrapper's bulk must be at least this share of the text (upstream content_detector.py).
+ *
+ * The content detector follows the branch order of content_detector.rs (read 2026-10-11 at 976aa71).
+ */
 const JSON_MIN_BULK_FRACTION = 0.6;
+/** Each sampled line is cut to this many characters before the detector's regexes run. */
 const DETECT_MAX_LINE_CHARS = 1000;
+/** A diff header line. */
 const DIFF_HEADER_RE = /^(?:diff --git|diff --combined |diff --cc |--- a\/|@@\s+-\d+,\d+\s+\+\d+,\d+\s+@@|@@@+\s+-\d+(?:,\d+)?\s+(?:-\d+(?:,\d+)?\s+)+\+\d+(?:,\d+)?\s+@@@+)/;
+/** A diff change line. */
 const DIFF_CHANGE_RE = /^[+-][^+-]/;
+/** An HTML doctype. */
 const HTML_DOCTYPE_RE = /^\s*<!doctype\s+html/i;
+/** An HTML html tag. */
 const HTML_TAG_RE = /<html[\s>]/i;
+/** An HTML head tag. */
 const HTML_HEAD_RE = /<head[\s>]/i;
+/** An HTML body tag. */
 const HTML_BODY_RE = /<body[\s>]/i;
-// Global, so only ever used through String.prototype.match, which resets lastIndex.
+/**
+ * Structural HTML tags.
+ *
+ * Global, so only ever used through String.prototype.match, which resets lastIndex.
+ */
 const HTML_STRUCTURAL_RE = /<(?:div|span|script|style|link|meta|nav|header|footer|aside|article|section|main)[\s>]/gi;
+/** The section headings of git status. */
 const GIT_STATUS_HEADERS = new Set(["Changes to be committed:", "Changes not staged for commit:", "Untracked files:", "Unmerged paths:"]);
+/** A git status entry line. */
 const GIT_STATUS_ENTRY_RE = /^\s+(?:new file|modified|deleted|renamed|copied|typechange|both modified|both added|both deleted|added by us|deleted by us|added by them|deleted by them):\s+\S/;
-// The separators of Python's str.splitlines(), used by git status only.
+/** The separators of Python's str.splitlines(), used by git status only. */
 // eslint-disable-next-line no-control-regex -- \x1c-\x1e are splitlines() separators, matched on purpose
 const LINE_BREAK_RE = /\r\n|[\n\r\v\f\x1c-\x1e\x85\u{2028}\u{2029}]/u;
-// Upstream lossless_compaction.py _TIMESTAMP_ROW_RE: a timestamped log row is never a grep line.
+/** Upstream lossless_compaction.py _TIMESTAMP_ROW_RE: a timestamped log row is never a grep line. */
 const TIMESTAMP_ROW_RE = /^\s*\[?(?:\d{4}-\d{2}-\d{2}[ T]\d{1,2}:\d{2}|\d{2}\/\d{2}\/\d{2,4}[ T]\d{1,2}:\d{2}|[A-Z][a-z]{2}\s+\d{1,2}\s+\d{1,2}:\d{2}|\d{1,2}:\d{2}:\d{2}(?:[.,]\d+)?(?:\s|\]|$))/;
+/** A grep match line: `path:N:`. */
 const SEARCH_LINE_RE = /^[^\s:]+:\d+:/;
-// Compiler and linter diagnostics (`f.c:3:5: error:`, `f.py:3: warning:`, `f.py:3:1: F401 `, `f.py:3:0: C0114:`) share grep's
-// `path:N:` shape; compressSearch declines them, as its selection would drop errors and every code-frame line.
+/**
+ * Compiler and linter diagnostics (`f.c:3:5: error:`, `f.py:3: warning:`, `f.py:3:1: F401 `, `f.py:3:0: C0114:`).
+ *
+ * They share grep's `path:N:` shape; compressSearch declines them, as its selection would drop errors and every code-frame line.
+ */
 const DIAGNOSTIC_ROW_RE = /^[^\s:]+:\d+(?::\d+)?:\s+(?:(?:fatal error|error|warning|note)\b|[A-Z]{1,4}\d{2,5}\b)/;
+/** A grep context line in the `path:N-` form. */
 const GREP_COLON_DASH_RE = /^[^\s:]+:\d+-/;
+/** A grep context line in the `path-N-` form. */
 const GREP_CONTEXT_RE = /^([^\s:]+?)-\d+-/;
-// Structured config: upstream content_detector.py _CONFIG_*/_TOML_*/_YAML_* patterns (_INI_ASSIGN_RE is the isIniAssign scanner).
+/**
+ * A config section header (upstream content_detector.py `_CONFIG_SECTION_RE`).
+ *
+ * The structured-config regexes port its `_CONFIG_*`, `_TOML_*` and `_YAML_*` patterns; `_INI_ASSIGN_RE` is the isIniAssign scanner.
+ */
 const CONFIG_SECTION_RE = /^\s*\[\[?[\w.\-"' ]+\]\]?\s*$/;
+/** A TOML assignment with a value. */
 const TOML_ASSIGN_RE = /^\s*(?:[\w.-]+|"[^"]+"|'[^']+')\s*=\s*\S/;
+/** A TOML key followed by `=`. */
 const TOML_KEY_RE = /^\s*(?:[\w.-]+|"[^"]+"|'[^']+')\s*=/;
+/** A YAML key line, optionally a list item. */
 const YAML_KEY_RE = /^\s*(?:-\s+)?(?:[\w./-]+|"[^"]+"|'[^']+')\s*:(?:\s|$)/;
+/** A YAML list item. */
 const YAML_LIST_RE = /^\s*-\s+\S/;
+/** A YAML document marker. */
 const YAML_DOC_RE = /^---\s*$|^\.\.\.\s*$/;
+/** A config comment line. */
 const CONFIG_COMMENT_RE = /^\s*[#;]/;
+/** A markdown heading (front-matter guard). */
 const MARKDOWN_HEADING_RE = /^#{2,6}\s+\S/;
+/** One character of an INI key. */
 const INI_KEY_CHAR_RE = /[\w.\-@ ]/;
-// What the TOML flavor check accepts as a value (it stands in for tomllib): strings, numbers, booleans, dates/times, arrays, tables.
+/**
+ * A TOML string value.
+ *
+ * The TOML_* value regexes stand in for tomllib in the flavor check: strings, numbers, booleans, dates/times, arrays, tables.
+ */
 const TOML_STRING_RE = /^(?:"(?:[^"\\]|\\.)*"|'[^']*')\s*(?:#.*)?$/;
+/** A TOML number value. */
 const TOML_NUMBER_RE = /^[+-]?(?:\d[\d_]*(?:\.\d[\d_]*)?(?:[eE][+-]?\d[\d_]*)?|0x[\dA-Fa-f_]+|0o[0-7_]+|0b[01_]+|inf|nan)$/;
+/** A TOML date, time or date-time value. */
 const TOML_DATETIME_RE = /^\d{4}-\d{2}-\d{2}(?:[Tt ]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:[Zz]|[+-]\d{2}:\d{2})?)?$|^\d{2}:\d{2}:\d{2}(?:\.\d+)?$/;
+/** A line carrying an `N\t` line number (Read output, `cat -n`). */
 const LINE_NUMBERED_RE = /^\s*[1-9]\d*\t/;
+/** A text longer than this never reads as TOML or INI. */
 const CONFIG_MAX_CHARS = 1_000_000;
-// Config compressor: upstream config_compressor.py and lossless_compaction.py (collapse_runs, fold_repeated_blocks).
+/** A YAML block scalar opener (upstream config_compressor.py; lossless_compaction.py collapse_runs and fold_repeated_blocks). */
 const YAML_BLOCK_SCALAR_RE = /(?::\s*|^\s*-\s+)[|>][+-]?\d*\s*$/m; // `key: |` or a sequence item `- |`
+/** A TOML multi-line string delimiter. */
 const TOML_MULTILINE_RE = /"""|'''/;
+/** A collapse_runs marker line. */
 const RUN_MARKER_RE = /^\.\.\. \(repeated (\d+) times\)$/;
+/** A fold_repeated_blocks marker line. */
 const BLOCK_MARKER_RE = /^\.\.\. \(repeats (\d+) lines from (\d+) lines back\)$/;
+/** Fewest lines a repeated block fold covers. */
 const FOLD_MIN_BLOCK = 3;
+/** Most lines a repeated block fold covers. */
 const FOLD_MAX_BLOCK = 64;
+/** Recent positions kept per distinct line for block folding. */
 const FOLD_MAX_CANDIDATES = 8;
+/** A text over this many lines is never block-folded. */
 const FOLD_MAX_LINES = 20_000;
-// HTML extractor: a bounded stand-in for upstream html_extractor.py (trafilatura, images and comments off).
-// Skipped whole, open tag to close tag: boilerplate and non-text content.
+/**
+ * Elements the HTML extractor skips whole, open tag to close tag: boilerplate and non-text content.
+ *
+ * The extractor is a bounded stand-in for upstream html_extractor.py (trafilatura, images and comments off).
+ */
 const HTML_DROP = new Set("head script style noscript template svg math iframe object embed canvas audio video picture nav footer aside button select textarea".split(" "));
-// A new line at open and close.
+/** Elements that start a new line at open and close. */
 const HTML_BLOCK = new Set("p div section article main header ul ol dl dt dd table thead tbody tfoot tr blockquote pre figure figcaption address details summary hgroup search hr".split(" "));
+/** A heading element name, capturing its level. */
 const HTML_HEADING_RE = /^h([1-6])$/;
+/** An href attribute in any quoting. */
 const HTML_HREF_RE = /\shref\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/i;
+/** The HTML entities the extractor decodes: decimal, hex and a few named ones. */
 const HTML_ENTITY_RE = /&(?:#(\d{1,7})|#[xX]([\da-fA-F]{1,6})|(amp|lt|gt|quot|apos|nbsp));/g;
+/** Named HTML entities and their text. */
 const HTML_ENTITIES: Record<string, string> = { amp: "&", lt: "<", gt: ">", quot: "\"", apos: "'", nbsp: " " };
-// One cached `</name\s*>` search per dropped element name (global, so a search starts at lastIndex).
+/** One cached `</name\s*>` search per dropped element name (global, so a search starts at lastIndex). */
 const HTML_CLOSE_RES: Map<string, RegExp> = new Map();
-// Tag protector: upstream tag_protector.rs HTML5_TAGS, element for element; every other tag name is a custom (workflow) tag.
+/** Upstream tag_protector.rs HTML5_TAGS, element for element; every other tag name is a custom (workflow) tag. */
 const HTML5_TAGS = new Set(
   (
     "html base head link meta style title body address article aside footer h1 h2 h3 h4 h5 h6 header hgroup main nav section search "
@@ -288,7 +420,7 @@ const HTML5_TAGS = new Set(
     + "legend meter optgroup option output progress select textarea details dialog summary slot template"
   ).split(" "),
 );
-// Upstream _LOG_PATTERNS in order, each tried with search(); indexes 0 and 1 are the error / warn patterns.
+/** Upstream `_LOG_PATTERNS` in order, each tried with search(); indexes 0 and 1 are the error and warn patterns. */
 const LOG_PATTERNS = [
   /\b(?:ERROR|FAIL|FAILED|FATAL|CRITICAL)\b/i,
   /\b(?:WARN|WARNING)\b/i,
@@ -315,7 +447,11 @@ const LOG_PATTERNS = [
   /^\s*\.\.\. \d+ more$/,
   /^<!\[LOG\[/,
 ];
-// Upstream _CODE_PATTERNS in dict order. Python calls pattern.match(line), so every pattern is anchored with ^.
+/**
+ * Upstream `_CODE_PATTERNS` in dict order.
+ *
+ * Python calls pattern.match(line), so every pattern is anchored with `^`.
+ */
 const CODE_PATTERNS: [string, RegExp[]][] = [
   ["python", [/^\s*(?:def|class|import|from|async def)\s+\w+/, /^\s*@\w+/, /^\s*"""/, /^\s*if __name__\s*==/]],
   ["javascript", [/^\s*(?:function|const|let|var|class|import|export)\s+/, /^\s*(?:async\s+function|=>\s*\{)/, /^\s*module\.exports/]],
@@ -336,18 +472,26 @@ const CODE_PATTERNS: [string, RegExp[]][] = [
 ];
 
 /**
- * Whether a tool.check decides this mod's own storage call: the mods API's `mcp.call` reaches core's permission step as a
- * `tool.call` (live on 2.1.296, although the typings promise no prompt), so without an allow rule a headless
- * session denies every `/headroom` write and an interactive one asks. The model's own storage calls are not covered.
+ * Whether a tool.check decides this mod's own storage call.
+ *
+ * The mods API's `mcp.call` reaches core's permission step as a `tool.call` (live on 2.1.296, although the typings promise no prompt),
+ * so without an allow rule a headless session denies every `/headroom` write and an interactive one asks.
+ * The model's own storage calls are not covered.
+ *
  * @param originPlugin - `next.origin.plugin`
+ * @param tool - the called tool's full name
+ * @returns true for this plugin's own storage tools
  */
 export function isOwnStorageCall(originPlugin: string, tool: string): boolean {
   return originPlugin === PLUGIN && tool.startsWith(OWN_STORAGE_PREFIX);
 }
 
 /**
- * Clamp-only: returns `target` only when `current` is a known effort level
- * strictly above it; otherwise undefined (absent, numeric, unknown, at/below).
+ * Clamp-only: returns `target` only when `current` is a known effort level strictly above it.
+ *
+ * @param current - the step's current effort
+ * @param target - the effort to clamp to
+ * @returns `target`, or undefined (absent, numeric, unknown, at or below)
  */
 export function clampEffort(current: unknown, target: Effort = "low"): Effort | undefined {
   if (typeof current !== "string") return undefined;
@@ -356,8 +500,8 @@ export function clampEffort(current: unknown, target: Effort = "low"): Effort | 
 }
 
 /**
- * The routing rule shared by the main loop and every subagent: a mechanical
- * step (after index 0, no tool error since the loop's last step) is clamped.
+ * The routing rule shared by the main loop and every subagent: a mechanical step (after index 0, no tool error since the loop's last step) is clamped.
+ *
  * @param index - the step's index in its loop (0 = the ask step)
  * @param errored - a tool error since that loop's last step
  * @param effort - the step's current effort
@@ -369,11 +513,20 @@ export function stepEffort(index: number, errored: boolean, effort: unknown): Ef
 
 /**
  * A tool.call result is a failure when it is errored or denied.
+ *
+ * @param result - the tool.call result
+ * @returns whether it failed
  */
 export function isToolError(result: Record<string, unknown>): boolean {
   return result.isError === true || typeof result.deny === "string";
 }
 
+/**
+ * The share of a step's input tokens read from the prompt cache.
+ *
+ * @param usage - the step's token usage
+ * @returns the ratio, or undefined when there were no input tokens
+ */
 export function cacheHitRatio(usage: { input_tokens: number; cache_read_input_tokens: number; cache_creation_input_tokens: number }): number | undefined {
   const read = usage.cache_read_input_tokens;
   const total = usage.input_tokens + read + usage.cache_creation_input_tokens;
@@ -382,32 +535,53 @@ export function cacheHitRatio(usage: { input_tokens: number; cache_read_input_to
 
 /**
  * A ratio as a whole percentage, "–" when there is none.
+ *
+ * @param n - the ratio
+ * @returns the percentage text
  */
 export function pct(n: number | undefined): string {
   return n === undefined ? "–" : `${Math.round(n * 100)}%`;
 }
 
+/**
+ * Whether the cache hit ratio fell from at or above CACHE_DROP_THRESHOLD to below it.
+ *
+ * @param prev - the previous step's ratio
+ * @param hit - this step's ratio
+ * @returns true on a drop
+ */
 export function isCacheDrop(prev: number | undefined, hit: number): boolean {
   return prev !== undefined && prev >= CACHE_DROP_THRESHOLD && hit < CACHE_DROP_THRESHOLD;
 }
 
 /**
- * A usage field as a persistable counter delta: a non-negative safe integer, else 0. One missing or
- * odd field (undefined, NaN, a fraction) must not poison the running totals, because the server
- * rejects every stats_put that carries such a row.
+ * A usage field as a persistable counter delta: a non-negative safe integer, else 0.
+ *
+ * One missing or odd field (undefined, NaN, a fraction) must not poison the running totals,
+ * because the server rejects every stats_put that carries such a row.
+ *
+ * @param n - the usage field
+ * @returns the delta
  */
 export function toCount(n: unknown): number {
   return typeof n === "number" && Number.isSafeInteger(n) && n >= 0 ? n : 0;
 }
 
-/** @returns all six counters at 0 */
+/**
+ * Fresh counters.
+ *
+ * @returns all six counters at 0
+ */
 export function zeroCounters(): Counters {
   return (Object.fromEntries(COUNTER_KEYS.map((k) => [k, 0])) as Counters);
 }
 
 /**
  * Local calendar day of an epoch-ms instant as YYYY-MM-DD.
+ *
+ * @param ms - the instant in epoch milliseconds
  * @param offsetMin - minutes UTC minus local (Date#getTimezoneOffset); defaults to this runtime's offset at `ms`
+ * @returns the day
  */
 export function dayKey(ms: number, offsetMin: number = new Date(ms).getTimezoneOffset()): string {
   return new Date(ms - offsetMin * 60000).toISOString().slice(0, 10);
@@ -415,20 +589,27 @@ export function dayKey(ms: number, offsetMin: number = new Date(ms).getTimezoneO
 
 /**
  * First day of a rolling window of `days` calendar days ending with (and including) `day`.
+ *
  * Calendar arithmetic in UTC, so DST never shifts it.
+ *
  * @param day - YYYY-MM-DD
- * @param days - >= 1
+ * @param days - the window length, at least 1
+ * @returns the first day as YYYY-MM-DD
  */
 export function windowStart(day: string, days: number): string {
   return new Date(Date.parse(`${day}T00:00:00Z`) - (days - 1) * DAY_MS).toISOString().slice(0, 10);
 }
 
 /**
- * Adds `pending` to `days[today]` (creating it), zeroes `pending` in place, drops every day outside
- * [purgeBefore, today], and returns each remaining day as a stats_put row (copies, so later folds
- * never change a queued write). Mutates `days` and `pending`.
+ * Adds `pending` to `days[today]` (creating it), zeroes `pending` in place and drops every day outside [purgeBefore, today].
+ *
+ * Mutates `days` and `pending`.
+ *
+ * @param days - per-day counters, keyed YYYY-MM-DD
+ * @param pending - counters not yet folded in
  * @param today - YYYY-MM-DD
  * @param purgeBefore - YYYY-MM-DD
+ * @returns each remaining day as a stats_put row (copies, so later folds never change a queued write)
  */
 export function foldPending(days: Record<string, Counters>, pending: Counters, today: string, purgeBefore: string): (Counters & { day: string })[] {
   const total = (days[today] ??= zeroCounters());
@@ -442,11 +623,16 @@ export function foldPending(days: Record<string, Counters>, pending: Counters, t
 }
 
 /**
- * The /headroom tables as rows of cells. Each table starts with its header row (heading, then the column names), then one row per ROWS entry.
+ * The /headroom tables as rows of cells.
+ *
+ * Each table starts with its header row (heading, then the column names), then one row per ROWS entry.
  * A row without counters (still loading, storage off or failing) shows `blank` in every value cell. The in-memory session-only
  * counters add a `subagents` row under effort routing's session row, and the smart crusher, dedup, line elider, compaction,
  * config, html extractor, logs, search, diff, text crusher and relevance split tables, which have only a session row.
+ *
  * @param counters - one per ROWS entry, in ROWS order
+ * @param blank - the value cell text of a row without counters
+ * @param memory - the in-memory session-only counters
  * @returns effort routing, cache aligner, smart crusher, dedup, line elider, compaction, config, html extractor,
  *   logs, search, diff, text crusher, relevance split
  */
@@ -466,7 +652,13 @@ export function statsTables(counters: readonly (Row | undefined)[], blank: strin
     split = { texts: 0, saved: 0 },
   } = memory;
   /**
+   * One table: its header row, then one row per ROWS entry.
+   *
+   * @param heading - the table's heading cell
+   * @param columns - the value column names
+   * @param cells - a row's value cells from its counters
    * @param underSession - rows right under the session row
+   * @returns the table's rows
    */
   const table = (heading: string, columns: string[], cells: (c: Row) => string[], underSession: string[][] = []): string[][] => [
     [heading, ...columns],
@@ -529,6 +721,9 @@ export function statsTables(counters: readonly (Row | undefined)[], blank: strin
 
 /**
  * One table as plain text: the label column padded on the right, the value columns right-aligned.
+ *
+ * @param rows - the table's rows of cells
+ * @returns the table text, one line per row
  */
 export function tableText(rows: readonly (readonly string[])[]): string {
   return rows.map((r) => r.map((s, i) => (i ? s.padStart(CELL_WIDTHS[i]) : s.padEnd(CELL_WIDTHS[i]))).join("")).join("\n");
@@ -537,8 +732,11 @@ export function tableText(rows: readonly (readonly string[])[]): string {
 // SmartCrusher: a port of headroom's dict-array lossy path (crates/headroom-core/src/transforms/smart_crusher).
 
 /**
- * Two 32-bit lanes of a cyrb53-style hash over UTF-16 code units: the pure-JS stand-in for upstream's
- * MD5 (simhash grams) and SHA-256 (CCR hash), since a mods module is not known to load node:crypto.
+ * Two 32-bit lanes of a cyrb53-style hash over UTF-16 code units.
+ *
+ * The pure-JS stand-in for upstream's MD5 (simhash grams) and SHA-256 (CCR hash), since a mods module is not known to load node:crypto.
+ *
+ * @param s - the text to hash
  * @returns two unsigned 32-bit lanes
  */
 function hash64(s: string): [number, number] {
@@ -557,6 +755,8 @@ function hash64(s: string): [number, number] {
 }
 
 /**
+ * Counts the set bits of a 32-bit integer.
+ *
  * @param x - a 32-bit integer
  * @returns its set bits
  */
@@ -568,6 +768,8 @@ function popcount(x: number): number {
 
 /**
  * Upstream simhash: every lowercased 4-code-point gram (the whole string when it has 3 or fewer) votes ±1 per hash bit.
+ *
+ * @param text - the text to fingerprint
  * @returns the 64-bit fingerprint as two 32-bit halves
  */
 function simhash(text: string): [number, number] {
@@ -592,8 +794,10 @@ function simhash(text: string): [number, number] {
 
 /**
  * Upstream count_unique_simhash: greedy clusters of fingerprints within Hamming distance 3.
+ *
+ * @param items - the texts to cluster
  * @param budget - charged 1 per fingerprint comparison
- * @returns undefined once the budget runs out
+ * @returns the cluster count, or undefined once the budget runs out
  */
 function countUniqueSimhash(items: readonly string[], budget: WorkBudget = { left: Infinity }): number | undefined {
   const reps: [number, number][] = [];
@@ -613,8 +817,12 @@ function countUniqueSimhash(items: readonly string[], budget: WorkBudget = { lef
 }
 
 /**
- * Upstream compute_unique_bigram_curve: the running count of unique lowercased word bigrams
- * (a lone word pairs with "", a spaceless CJK word yields character bigrams, an empty item counts once).
+ * Upstream compute_unique_bigram_curve: the running count of unique lowercased word bigrams.
+ *
+ * A lone word pairs with "", a spaceless CJK word yields character bigrams, an empty item counts once.
+ *
+ * @param items - the texts, in order
+ * @returns the unique bigram count after each item
  */
 function bigramCurve(items: readonly string[]): number[] {
   const seen: Set<string> = new Set();
@@ -638,7 +846,10 @@ function bigramCurve(items: readonly string[]): number[] {
 }
 
 /**
- * Upstream find_knee (Kneedle): 1 + the index farthest above the diagonal; undefined under 0.05 or below 3 points.
+ * Upstream find_knee (Kneedle): 1 + the index farthest above the diagonal.
+ *
+ * @param curve - a non-decreasing coverage curve
+ * @returns the knee, or undefined under 0.05 or below 3 points
  */
 function findKnee(curve: readonly number[]): number | undefined {
   const n = curve.length;
@@ -659,10 +870,15 @@ function findKnee(curve: readonly number[]): number | undefined {
 }
 
 /**
- * Upstream compute_optimal_k (bias 1; the crusher's min_k 3, max_k 15 by default): how many items to keep, from simhash
- * diversity and the knee of the items' bigram coverage curve. As upstream, 8 or fewer items keep them all, even above maxK.
+ * Upstream compute_optimal_k: how many items to keep, from simhash diversity and the knee of the items' bigram coverage curve.
+ *
+ * Bias 1; the crusher's min_k 3 and max_k 15 by default. As upstream, 8 or fewer items keep them all, even above maxK.
+ *
  * @param itemStrings - each item's text (a row's compact JSON, a log line, a search match)
+ * @param minK - fewest items to keep
+ * @param maxK - most items to keep
  * @param budget - charged 1 per simhash comparison; exhausted means maxK
+ * @returns the number of items to keep
  */
 export function computeOptimalK(itemStrings: readonly string[], minK: number = MIN_K, maxK: number = MAX_ITEMS_AFTER_CRUSH, budget?: WorkBudget): number {
   const n = itemStrings.length;
@@ -681,12 +897,15 @@ export function computeOptimalK(itemStrings: readonly string[], minK: number = M
 }
 
 /**
- * Stores offloaded originals for headroom_retrieve: a re-put moves its hash to the newest position, and the
- * oldest entries go while the store holds more than CCR_CAPACITY entries or CCR_MAX_CHARS characters. Never an entry
- * of `entries` itself: the row that carries their markers is stored next, so a batch may leave the store over a cap until
- * the next call with entries. Mutates `store`.
+ * Stores offloaded originals for headroom_retrieve; mutates `store`.
+ *
+ * A re-put moves its hash to the newest position, and the oldest entries go while the store holds more than CCR_CAPACITY
+ * entries or CCR_MAX_CHARS characters. Never an entry of `entries` itself: the row that carries their markers is stored next,
+ * so a batch may leave the store over a cap until the next call with entries.
  * shortcut: no idle TTL (upstream: 30 min); add one with a time argument from register.ts if memory becomes a concern.
+ *
  * @param store - hash → original text (a crushed array's JSON, an elided block, a folded span), oldest first
+ * @param entries - the new [hash, original] pairs
  */
 export function storeOffloaded(store: Map<string, string>, entries: readonly [string, string][]): void {
   if (entries.length === 0) return; // nothing to add: skip the O(store) size pass, as most rows carry no entry for one of the two stores
@@ -706,10 +925,13 @@ export function storeOffloaded(store: Map<string, string>, entries: readonly [st
 }
 
 /**
- * The CCR key in what the model passed to headroom_retrieve: the bare hash, or one copied with its marker's `hash=` or
- * `<<ccr:` prefix (the tool's description cites both forms) and, as a pointer or elider line ends in `]` and a CCR
- * marker in `>>`, that closing bracket. Anything else is returned trimmed, as is.
- * @returns undefined unless `hash` is a string
+ * The CCR key in what the model passed to headroom_retrieve.
+ *
+ * The bare hash, or one copied with its marker's `hash=` or `<<ccr:` prefix (the tool's description cites both forms) and,
+ * as a pointer or elider line ends in `]` and a CCR marker in `>>`, that closing bracket. Anything else is returned trimmed, as is.
+ *
+ * @param hash - the tool call's `hash` argument
+ * @returns the key, or undefined unless `hash` is a string
  */
 export function retrieveKey(hash: unknown): string | undefined {
   return typeof hash === "string"
@@ -722,12 +944,14 @@ export function retrieveKey(hash: unknown): string | undefined {
 }
 
 /**
- * The crusher's query (upstream _extract_context_from_messages): newest first, the text of the last five
- * user messages with text and each assistant tool call's input JSON. Deviation: upstream counts every user message,
- * but a Claude Code tool result is a user message with empty text, so the real request would age out after five calls.
- * Deviation: the tool-call inputs keep at most CRUSH_QUERY_INPUT_CHARS characters in all, newest first. A subagent has
- * one user message, so the walk would otherwise stringify every input back to its start on each JSON result.
+ * The crusher's query (upstream _extract_context_from_messages): newest first, the text of the last five user messages with text and each assistant tool call's input JSON.
+ *
+ * Deviation: upstream counts every user message, but a Claude Code tool result is a user message with empty text, so the real
+ * request would age out after five calls. Deviation: the tool-call inputs keep at most CRUSH_QUERY_INPUT_CHARS characters in all,
+ * newest first. A subagent has one user message, so the walk would otherwise stringify every input back to its start on each JSON result.
+ *
  * @param messages - chronological, as the session.messages op returns them
+ * @returns the query text
  */
 export function crushQuery(messages: readonly QueryMessage[]): string {
   const parts: string[] = [];
@@ -752,7 +976,10 @@ export function crushQuery(messages: readonly QueryMessage[]): string {
 }
 
 /**
- * @returns a JSON object (not an array, not null)
+ * Whether a value is a JSON object.
+ *
+ * @param v - the value
+ * @returns true for an object that is not an array and not null
  */
 function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === "object" && v !== null && !Array.isArray(v);
@@ -760,6 +987,10 @@ function isRecord(v: unknown): v is Record<string, unknown> {
 
 /**
  * An own property only: a row without `constructor` must not read Object.prototype's.
+ *
+ * @param o - the object
+ * @param k - the key
+ * @returns the own value, or undefined
  */
 function own(o: Record<string, unknown>, k: string): unknown {
   return Object.hasOwn(o, k) ? o[k] : undefined;
@@ -767,6 +998,9 @@ function own(o: Record<string, unknown>, k: string): unknown {
 
 /**
  * Sorted-key compact JSON: the equality key upstream hashes (MD5 of sort_keys JSON) for dedup.
+ *
+ * @param v - the JSON value
+ * @returns its canonical JSON
  */
 function canonicalJson(v: unknown): string {
   if (Array.isArray(v)) return `[${v.map(canonicalJson).join(",")}]`;
@@ -783,6 +1017,9 @@ function canonicalJson(v: unknown): string {
 
 /**
  * The 12-hex CCR hash of an original array's compact JSON (upstream: a SHA-256 prefix).
+ *
+ * @param s - the original text
+ * @returns the hash
  */
 function contentHash(s: string): string {
   const [a, b] = hash64(s);
@@ -791,6 +1028,9 @@ function contentHash(s: string): string {
 
 /**
  * Python str() as upstream's analyzer counts distinct values: None/True/False, bare strings, JSON for containers.
+ *
+ * @param v - the JSON value
+ * @returns its Python str() form
  */
 function pyStr(v: unknown): string {
   if (v === null) return "None";
@@ -800,6 +1040,9 @@ function pyStr(v: unknown): string {
 
 /**
  * Python repr as upstream's anchors.rs renders a row for query-anchor matching: single-quoted strings, ", " and ": ".
+ *
+ * @param v - the JSON value
+ * @returns its Python repr form
  */
 function pythonRepr(v: unknown): string {
   if (v === null) return "None";
@@ -813,11 +1056,14 @@ function pythonRepr(v: unknown): string {
         .join(", ")
     }}`;
   }
-  return String(v);
+  return `${v as number}`;
 }
 
 /**
- * Upstream stats_math::mean: undefined when empty or not finite.
+ * Upstream stats_math::mean.
+ *
+ * @param xs - the values
+ * @returns the mean, or undefined when empty or not finite
  */
 function mean(xs: readonly number[]): number | undefined {
   if (!xs.length) return undefined;
@@ -828,7 +1074,10 @@ function mean(xs: readonly number[]): number | undefined {
 }
 
 /**
- * Upstream sample_variance (n − 1): undefined below two values or when not finite.
+ * Upstream sample_variance (n − 1).
+ *
+ * @param xs - the values
+ * @returns the variance, or undefined below two values or when not finite
  */
 function sampleVariance(xs: readonly number[]): number | undefined {
   const m = xs.length < 2 ? undefined : mean(xs);
@@ -840,8 +1089,9 @@ function sampleVariance(xs: readonly number[]): number | undefined {
 }
 
 /**
- * Upstream detect_change_points (window 5): where the means of the 5 values before and after differ by more
- * than 2σ, each kept point more than 5 past the previous one.
+ * Upstream detect_change_points (window 5): where the means of the 5 values before and after differ by more than 2σ, each kept point more than 5 past the previous one.
+ *
+ * @param xs - the values
  * @returns indices into `xs`
  */
 function changePoints(xs: readonly number[]): number[] {
@@ -858,8 +1108,11 @@ function changePoints(xs: readonly number[]): number[] {
 }
 
 /**
- * Upstream analyze_field: type from the first non-null value, distinct values over all rows (a missing key is
- * null), numeric min/max/mean/variance/change points, and a string field's mean length in code points.
+ * Upstream analyze_field: type from the first non-null value, distinct values over all rows (a missing key is null), numeric min/max/mean/variance/change points, and a string field's mean length in code points.
+ *
+ * @param name - the field name
+ * @param items - the rows
+ * @returns the field's statistics
  */
 function analyzeField(name: string, items: readonly Record<string, unknown>[]): FieldStats {
   const values = items.map((o) => own(o, name) ?? null);
@@ -893,15 +1146,19 @@ function analyzeField(name: string, items: readonly Record<string, unknown>[]): 
       Object.assign(f, { min, max, mean: m, variance, changePoints: changePoints(nums).map((k) => rows[k]) });
     } else f.variance = 0;
   } else if (f.type === "string") {
-    f.avgLen = mean((nonNull.filter((v) => typeof v === "string") as string[]).map((s) => Array.from(s).length));
+    f.avgLen = mean(nonNull.filter((v): v is string => typeof v === "string").map((s) => Array.from(s).length));
   }
   return f;
 }
 
 /**
- * Upstream detect_sequential_pattern with check_order (both callers pass true): at least 5 numbers (one a real
- * JSON number, plain-integer strings count too) whose sorted gaps average 0.5..2 with over 80% in that range,
- * and over 70% of neighbours ascending in the original order.
+ * Upstream detect_sequential_pattern with check_order (both callers pass true).
+ *
+ * At least 5 numbers (one a real JSON number, plain-integer strings count too) whose sorted gaps average 0.5..2 with over 80%
+ * in that range, and over 70% of neighbours ascending in the original order.
+ *
+ * @param values - the field's values
+ * @returns whether they look sequential
  */
 function isSequential(values: readonly unknown[]): boolean {
   const nums: number[] = [];
@@ -923,6 +1180,9 @@ function isSequential(values: readonly unknown[]): boolean {
 
 /**
  * Upstream calculate_string_entropy: Shannon entropy over code points, normalized to 0..1.
+ *
+ * @param s - the string
+ * @returns the normalized entropy
  */
 function stringEntropy(s: string): number {
   const cps = Array.from(s);
@@ -936,13 +1196,16 @@ function stringEntropy(s: string): number {
 }
 
 /**
- * Upstream detect_id_field_statistically: the confidence that a field is a row id, 0 when it is not.
+ * Upstream detect_id_field_statistically: the confidence that a field is a row id.
+ *
+ * @param f - the field's statistics
  * @param values - the field per row, a missing key as null
+ * @returns the confidence, 0 when it is not an id
  */
 function idConfidence(f: FieldStats, values: readonly unknown[]): number {
   if (f.ratio < 0.9) return 0;
   if (f.type === "string") {
-    const sample = values.slice(0, 20).filter((v) => typeof v === "string") as string[];
+    const sample = values.slice(0, 20).filter((v): v is string => typeof v === "string");
     if (sample.length) {
       if (sample.filter((s) => UUID_RE.test(s)).length / sample.length > 0.8) return 0.95;
       if (sample.reduce((a, s) => a + stringEntropy(s), 0) / sample.length > 0.7 && f.ratio > 0.95) return 0.8;
@@ -956,8 +1219,11 @@ function idConfidence(f: FieldStats, values: readonly unknown[]): number {
 }
 
 /**
- * Upstream detect_score_field_statistically: the confidence (capped at 0.95) that a bounded, non-sequential
- * numeric field ranks the rows, 0 when it is not a score (below 0.4).
+ * Upstream detect_score_field_statistically: the confidence (capped at 0.95) that a bounded, non-sequential numeric field ranks the rows.
+ *
+ * @param f - the field's statistics
+ * @param items - the rows
+ * @returns the confidence, 0 when it is not a score (below 0.4)
  */
 function scoreConfidence(f: FieldStats, items: readonly Record<string, unknown>[]): number {
   if (f.type !== "numeric" || f.min === undefined || f.max === undefined) return 0;
@@ -986,8 +1252,11 @@ function scoreConfidence(f: FieldStats, items: readonly Record<string, unknown>[
 }
 
 /**
- * Upstream detect_temporal_field: a string field mostly ISO dates in its first 10 rows, or a numeric field whose
- * minimum looks like epoch seconds or milliseconds.
+ * Upstream detect_temporal_field: a string field mostly ISO dates in its first 10 rows, or a numeric field whose minimum looks like epoch seconds or milliseconds.
+ *
+ * @param fields - the fields' statistics
+ * @param items - the rows
+ * @returns whether such a field exists
  */
 function hasTemporalField(fields: readonly FieldStats[], items: readonly Record<string, unknown>[]): boolean {
   for (const f of fields) {
@@ -995,7 +1264,7 @@ function hasTemporalField(fields: readonly FieldStats[], items: readonly Record<
       const sample = items
         .slice(0, 10)
         .map((o) => own(o, f.name))
-        .filter((v) => typeof v === "string") as string[];
+        .filter((v): v is string => typeof v === "string");
       if (sample.length && sample.filter((s) => ISO_DATETIME_RE.test(s) || ISO_DATE_RE.test(s)).length / sample.length > 0.5) return true;
     } else if (f.type === "numeric" && f.min !== undefined && ((f.min >= 1e9 && f.min <= 2e9) || (f.min >= 1e12 && f.min <= 2e12))) return true;
   }
@@ -1004,6 +1273,10 @@ function hasTemporalField(fields: readonly FieldStats[], items: readonly Record<
 
 /**
  * Upstream detect_pattern: time_series, logs, search_results or generic.
+ *
+ * @param fields - the array's field stats
+ * @param items - the array's rows
+ * @returns the detected pattern
  */
 function detectPattern(fields: readonly FieldStats[], items: readonly Record<string, unknown>[]): "time_series" | "logs" | "search_results" | "generic" {
   if (fields.some((f) => f.type === "numeric" && (f.variance ?? 0) > 0) && hasTemporalField(fields, items)) return "time_series";
@@ -1021,6 +1294,10 @@ function detectPattern(fields: readonly FieldStats[], items: readonly Record<str
 /**
  * Upstream detect_rare_status_values for one common field: with 2..50 distinct non-null values, the fewest most
  * frequent values covering 80% of the rows that hold the key; if at most 5 do, the rows holding any other value.
+ *
+ * @param items - the array's rows
+ * @param name - the field name
+ * @returns the indices of the rows holding a rare value
  */
 function rareStatusRows(items: readonly Record<string, unknown>[], name: string): number[] {
   const key = (v: unknown) => (v === null ? "__none__" : typeof v === "string" ? v : JSON.stringify(v));
@@ -1045,6 +1322,9 @@ function rareStatusRows(items: readonly Record<string, unknown>[], name: string)
 /**
  * Upstream detect_structural_outliers (5+ rows): rows holding a key present in under 20% of the rows, and rows
  * with a rare value in a key present in at least 80% of them.
+ *
+ * @param items - the array's rows
+ * @returns the outlier row indices
  */
 function structuralOutliers(items: readonly Record<string, unknown>[]): Set<number> {
   const n = items.length;
@@ -1062,7 +1342,11 @@ function structuralOutliers(items: readonly Record<string, unknown>[]): Set<numb
 }
 
 /**
- * Upstream numeric anomalies: rows more than 2σ from a numeric field's mean (fields with variance > 0).
+ * Upstream numeric anomalies: rows more than 2σ from a numeric field's mean (fields with a variance above 0).
+ *
+ * @param fields - the array's field stats
+ * @param items - the array's rows
+ * @returns the anomalous row indices
  */
 function anomalyRows(fields: readonly FieldStats[], items: readonly Record<string, unknown>[]): Set<number> {
   const out: Set<number> = new Set();
@@ -1081,7 +1365,10 @@ function anomalyRows(fields: readonly FieldStats[], items: readonly Record<strin
 /**
  * Upstream analyze_array: field stats, the crushability gate (analyze_crushability) and the strategy
  * (select_strategy). Errors, structural outliers and anomalies are kept for the planners, which recompute the same sets upstream.
+ *
+ * @param items - the array's rows
  * @param strings - each row's compact JSON
+ * @returns the array's analysis
  */
 function analyzeArray(items: readonly Record<string, unknown>[], strings: readonly string[]): Analysis {
   const fields = [...new Set(items.flatMap((o) => Object.keys(o)))].sort().map((k) => analyzeField(k, items));
@@ -1124,6 +1411,10 @@ function analyzeArray(items: readonly Record<string, unknown>[], strings: readon
 /**
  * Upstream calculate_information_score over a region: 0.4 value rareness + 0.3 relative length + 0.3 structural
  * uniqueness (holding rare keys, missing common ones), clamped to 0..1.
+ *
+ * @param item - the scored row
+ * @param region - the rows it is compared against
+ * @returns the score, 0..1
  */
 function informationScore(item: Record<string, unknown>, region: readonly Record<string, unknown>[]): number {
   const n = region.length;
@@ -1135,7 +1426,7 @@ function informationScore(item: Record<string, unknown>, region: readonly Record
   let maxLen = -Infinity;
   for (const o of region) {
     for (const k of Object.keys(o)) {
-      const counts = values.get(k) ?? new Map();
+      const counts = values.get(k) ?? new Map<string, number>();
       values.set(k, counts);
       counts.set(valueKey(o[k]), (counts.get(valueKey(o[k])) ?? 0) + 1);
       keys.set(k, (keys.get(k) ?? 0) + 1);
@@ -1163,6 +1454,10 @@ function informationScore(item: Record<string, unknown>, region: readonly Record
  * Upstream AnchorSelector::select_anchors for an array longer than K: position anchors (25% of K, 3..12 slots)
  * split over the front, middle and back by the planner's weights, shifted by recency or history words in the
  * query; the middle picks by information density, and rows with the same content are taken once.
+ *
+ * @param p - the array's planning inputs
+ * @param planner - the planner whose anchor weights apply
+ * @returns the anchor row indices
  */
 function selectAnchors(p: CrushPlan, planner: "smart_sample" | "cluster" | "time_series"): number[] {
   const { items, canon, max, query } = p;
@@ -1190,7 +1485,14 @@ function selectAnchors(p: CrushPlan, planner: "smart_sample" | "cluster" | "time
     if (excess > cut) backSlots = Math.max(1, backSlots - (excess - cut));
   }
   const seen: Set<string> = new Set();
-  /** evenly spaced picks; a duplicate tries +1, −1, +2, −2 */
+  /**
+   * Evenly spaced picks; a duplicate tries +1, −1, +2, −2.
+   *
+   * @param start - the region's first index
+   * @param end - the index past the region
+   * @param slots - how many picks to make
+   * @returns the picked row indices
+   */
   const region: (start: number, end: number, slots: number) => number[] = (start, end, slots): number[] => {
     const picked: number[] = [];
     const size = end - start;
@@ -1239,6 +1541,9 @@ function selectAnchors(p: CrushPlan, planner: "smart_sample" | "cluster" | "time
 
 /**
  * Upstream extract_query_anchors: UUIDs, 4+ digit numbers, host names, short quoted strings and emails, lowercased.
+ *
+ * @param text - the query
+ * @returns the anchors found
  */
 function queryAnchors(text: string): Set<string> {
   const out: Set<string> = new Set();
@@ -1254,11 +1559,19 @@ function queryAnchors(text: string): Set<string> {
  * Whether a term found in `hits` of `n` rows singles rows out. Deviation: upstream counts any match, so a term in
  * every row (a key name, a shared host) marks every row relevant and the crush degrades to the head rows; here,
  * as where classic BM25's idf turns non-positive, a term in more than half the rows is ignored.
+ *
+ * @param hits - the rows holding the term
+ * @param n - all rows
+ * @returns true when the term is in at most half the rows
  */
 const isSelective = (hits: number, n: number): boolean => hits * 2 <= n;
 
 /**
  * Upstream item_matches_anchors: rows whose lowercased Python repr contains a selective query anchor.
+ *
+ * @param items - the array's rows
+ * @param query - the conversation query
+ * @returns the matching row indices
  */
 function anchorRows(items: readonly Record<string, unknown>[], query: string): number[] {
   const anchors = [...queryAnchors(query)];
@@ -1273,11 +1586,17 @@ function anchorRows(items: readonly Record<string, unknown>[], query: string): n
 
 /**
  * Upstream BM25Scorer.tokenize: TOKEN_PATTERN's matches in the lowercased text.
+ *
+ * @param s - the text
+ * @returns its tokens
  */
 const bm25Tokens = (s: string): string[] => s.toLowerCase().match(BM25_TOKEN_RE) ?? [];
 
 /**
  * A query's BM25 term counts.
+ *
+ * @param query - the conversation query
+ * @returns term → its count in the query
  */
 function queryFreq(query: string): Map<string, number> {
   const qf: Map<string, number> = new Map();
@@ -1289,8 +1608,10 @@ function queryFreq(query: string): Map<string, number> {
  * Upstream BM25Scorer.score_batch's core (k1 1.5, b 0.75, ln 2 idf, normalized by 10, +0.3 for a matched term of 8+ chars).
  * A document's matched terms are its unique tokens the query holds, summed in sorted order (upstream's BTreeMap), so the
  * float sums match; no document-frequency work, so it stays linear in the tokens.
+ *
  * @param all - each document's tokens
  * @param qf - query term → its count in the query
+ * @returns per document its score and its matched terms
  */
 function bm25Batch(all: readonly (readonly string[])[], qf: ReadonlyMap<string, number>): { score: number; matched: string[] }[] {
   const avg = all.reduce((a, d) => a + d.length, 0) / Math.max(all.length, 1);
@@ -1313,7 +1634,9 @@ function bm25Batch(all: readonly (readonly string[])[], qf: ReadonlyMap<string, 
 /**
  * Upstream HybridScorer::score_batch without embeddings (bm25Batch), then the BM25-only boost: a match scores at least 0.3,
  * two or more add 0.2. Only selective query tokens (isSelective) count as matches.
+ *
  * @param docs - each row's compact JSON
+ * @param query - the conversation query
  * @returns one score per row, 0..1
  */
 export function relevanceScores(docs: readonly string[], query: string): number[] {
@@ -1332,6 +1655,9 @@ export function relevanceScores(docs: readonly string[], query: string): number[
 /**
  * Upstream BM25Scorer.score_batch's plain scores (TextCrusher's and the relevance split's relevance): bm25Batch over every
  * query term, no selective filter and no boost. An empty query scores every document 0.
+ *
+ * @param docs - the documents to score
+ * @param query - the conversation query
  * @returns one score per document, 0..1
  */
 export function bm25Scores(docs: readonly string[], query: string): number[] {
@@ -1341,8 +1667,10 @@ export function bm25Scores(docs: readonly string[], query: string): number[] {
 }
 
 /**
- * Upstream apply_query_signals: rows matching a query anchor (in their Python repr) or scoring relevance >= 0.3.
- * @param keep - mutated
+ * Upstream apply_query_signals: rows matching a query anchor (in their Python repr) or scoring relevance of at least 0.3.
+ *
+ * @param p - the array's planning inputs
+ * @param keep - the kept row indices, mutated
  */
 function addQuerySignals(p: CrushPlan, keep: Set<number>): void {
   if (!p.query) return;
@@ -1356,6 +1684,10 @@ function addQuerySignals(p: CrushPlan, keep: Set<number>): void {
  * Upstream prioritize_indices: one row per content (the lowest index), topped up to K by an interleaved stride over
  * the rest; over K, errors, structural outliers and anomalies stay whatever the budget, then the first 3 and last 2
  * rows and the remaining picks in index order fill what is left.
+ *
+ * @param p - the array's planning inputs
+ * @param keep - the planner's kept row indices
+ * @returns the final kept row indices
  */
 function prioritize(p: CrushPlan, keep: Set<number>): Set<number> {
   const { canon, analysis: a, max } = p;
@@ -1397,6 +1729,9 @@ function prioritize(p: CrushPlan, keep: Set<number>): Set<number> {
 
 /**
  * Upstream create_plan and its four planners, as the set of row indices to keep.
+ *
+ * @param p - the array's planning inputs
+ * @returns the kept row indices
  */
 function createPlan(p: CrushPlan): Set<number> {
   const { items, analysis: a, max, query } = p;
@@ -1477,6 +1812,9 @@ function createPlan(p: CrushPlan): Set<number> {
 /**
  * Upstream type_tag_for: a JSON value's compaction type. Deviation: a number is `int` when it is a safe integer, since
  * JSON.parse keeps no lexeme (`1.0` reads `int` here, `float` upstream).
+ *
+ * @param v - a JSON value
+ * @returns its type tag
  */
 function typeTag(v: unknown): string {
   if (v === null) return "null";
@@ -1489,11 +1827,15 @@ function typeTag(v: unknown): string {
  * Upstream cell_from_value with classify_cell's opaque markers off: an array of 2+ objects nests a compaction, a string
  * holding a JSON object or array (no `<<ccr:` marker in it) is replaced by its parsed value or a nested compaction, and
  * everything else is a scalar. Deviation: a stringified value JSON.parse would not render back the same (isLossy) stays a string.
+ *
+ * @param v - the row's value
+ * @param budget - the compaction's work budget
+ * @returns the cell
  */
 function cellFrom(v: unknown, budget: WorkBudget): Cell {
   if (Array.isArray(v)) return v.length >= 2 && v.every(isRecord) ? { n: compactRows(v, budget) } : { s: v };
   if (typeof v !== "string" || v.includes("<<ccr:") || !/^[{[]/.test(v.trimStart())) return { s: v };
-  let parsed;
+  let parsed: unknown;
   try {
     parsed = JSON.parse(v);
   } catch {
@@ -1506,7 +1848,11 @@ function cellFrom(v: unknown, budget: WorkBudget): Cell {
 /**
  * Upstream detect_discriminator: the key present in every row, all its values strings, with 2..8 distinct values and at most
  * 70% of the row count; most buckets wins, the first in key order on ties. Only keys in every row are read (linear work).
+ *
+ * @param rows - the rows
  * @param keys - sorted
+ * @param freq - key → the rows holding it
+ * @returns the discriminator key, or undefined
  */
 function discriminator(rows: readonly Record<string, unknown>[], keys: readonly string[], freq: Map<string, number>): string | undefined {
   const n = rows.length;
@@ -1532,6 +1878,11 @@ function discriminator(rows: readonly Record<string, unknown>[], keys: readonly 
 /**
  * Upstream uniform_object_keys: the inner key list (order-sensitive) every present cell of column `col` shares, when each is an
  * object and the column is not already dotted.
+ *
+ * @param fields - the table's columns
+ * @param rows - the table's cells
+ * @param col - the column index
+ * @returns the shared inner keys, or undefined
  */
 function uniformObjectKeys(fields: readonly FieldSpec[], rows: readonly Cell[][], col: number): string[] | undefined {
   if (fields[col].name.includes(".")) return undefined;
@@ -1551,6 +1902,9 @@ function uniformObjectKeys(fields: readonly FieldSpec[], rows: readonly Cell[][]
  * Upstream flatten_uniform_nested: a column of objects sharing 1..6 inner keys becomes `parent.key` columns, their types and
  * nullability re-inferred from the cells. Deviation: inner keys holding a header-breaking character keep the column nested.
  * Mutates `fields` and `rows`.
+ *
+ * @param fields - the table's columns
+ * @param rows - the table's cells
  */
 function flattenUniformNested(fields: FieldSpec[], rows: Cell[][]): void {
   for (let i = 0; i < fields.length;) {
@@ -1564,7 +1918,7 @@ function flattenUniformNested(fields: FieldSpec[], rows: Cell[][]): void {
     for (const row of rows) {
       const cell = row[i];
       const obj = "s" in cell && isRecord(cell.s) ? cell.s : undefined;
-      row.splice(i, 1, ...inner.map((k) => (obj && Object.hasOwn(obj, k) ? { s: obj[k] } : { m: true } as Cell)));
+      row.splice(i, 1, ...inner.map((k): Cell => (obj && Object.hasOwn(obj, k) ? { s: obj[k] } : { m: true })));
     }
     for (let off = 0; off < inner.length; off++) {
       let type = "string";
@@ -1588,7 +1942,12 @@ function flattenUniformNested(fields: FieldSpec[], rows: Cell[][]): void {
 /**
  * Upstream build_homogeneous_table: columns by descending frequency, then name; a column's type is its first non-null value's
  * (`json` on a conflict, `string` when all null); nullable when a row lacks it or holds null. Charges rows × columns to `budget`.
+ *
+ * @param rows - the rows
  * @param keys - sorted
+ * @param freq - key → the rows holding it
+ * @param budget - the compaction's work budget
+ * @returns the table
  */
 function homogeneousTable(rows: Record<string, unknown>[], keys: readonly string[], freq: Map<string, number>, budget: WorkBudget): Compaction {
   const n = rows.length;
@@ -1618,6 +1977,11 @@ function homogeneousTable(rows: Record<string, unknown>[], keys: readonly string
 /**
  * Upstream bucket_by: rows grouped by the discriminator's value in sorted order, each group compacted on its own; a group that
  * is not a table becomes a one-column `value:json` table of its raw rows.
+ *
+ * @param rows - the rows
+ * @param disc - the discriminator key
+ * @param budget - the compaction's work budget
+ * @returns the buckets
  */
 function bucketBy(rows: Record<string, unknown>[], disc: string, budget: WorkBudget): Compaction {
   const groups: Map<string, Record<string, unknown>[]> = new Map();
@@ -1642,7 +2006,10 @@ function bucketBy(rows: Record<string, unknown>[], disc: string, budget: WorkBud
  * the keys are in 80% of the rows and a discriminator splits them; anything else stays untouched. Deviation: a key holding
  * `,` `:` `{` `}` `?` or a line break leaves the items untouched, and an exhausted work budget (key reads plus table cells)
  * does too. Keys sort by UTF-16 code units where upstream's BTreeMap sorts UTF-8 bytes.
+ *
+ * @param items - the array's items
  * @param budget - unbounded when absent
+ * @returns the compaction
  */
 export function compactRows(items: readonly unknown[], budget: WorkBudget = { left: Infinity }): Compaction {
   const untouched: Compaction = { kind: "untouched", value: items };
@@ -1665,13 +2032,19 @@ export function compactRows(items: readonly unknown[], budget: WorkBudget = { le
 }
 
 /**
- * @returns `s` in double quotes, inner quotes doubled (upstream csv_quote)
+ * Upstream csv_quote.
+ *
+ * @param s - the text
+ * @returns `s` in double quotes, inner quotes doubled
  */
 const csvQuote = (s: string): string => `"${s.replaceAll("\"", "\"\"")}"`;
 
 /**
  * Upstream json_scalar_to_csv: null, booleans and numbers bare; a string quoted when empty, `null` or holding `,` `"` or a line
  * break; an object or array as quoted JSON.
+ *
+ * @param v - a JSON value
+ * @returns its CSV field
  */
 function csvScalar(v: unknown): string {
   if (v === null) return "null";
@@ -1684,6 +2057,9 @@ function csvScalar(v: unknown): string {
 /**
  * Upstream is_ambiguous_json_text: JSON could read `s` as something other than the string (after JSON whitespace it starts
  * with `[` `{` `"` `-` or a digit, or is a bare literal Python accepts).
+ *
+ * @param s - the string
+ * @returns true when it is ambiguous
  */
 function isAmbiguousJsonText(s: string): boolean {
   let a = 0;
@@ -1697,6 +2073,10 @@ function isAmbiguousJsonText(s: string): boolean {
 /**
  * Upstream format_cell: a missing key is empty, an ambiguous string in a `json` column is a quoted JSON literal, a nested
  * compaction is quoted compactionJson, everything else csvScalar.
+ *
+ * @param cell - the cell
+ * @param jsonColumn - its column's type is `json`
+ * @returns its CSV field
  */
 function csvCell(cell: Cell, jsonColumn: boolean): string {
   if ("m" in cell) return "";
@@ -1706,6 +2086,10 @@ function csvCell(cell: Cell, jsonColumn: boolean): string {
 
 /**
  * Upstream write_table: `[N]{name:type,name:type?,…}` then one CSV row per record, each line ending in `\n`.
+ *
+ * @param fields - the table's columns
+ * @param rows - the table's cells
+ * @returns the table text
  */
 function csvTable(fields: readonly FieldSpec[], rows: readonly Cell[][]): string {
   const json = fields.map((f) => f.type === "json");
@@ -1718,6 +2102,9 @@ function csvTable(fields: readonly FieldSpec[], rows: readonly Cell[][]): string
  * Upstream CsvSchemaFormatter (include_drop_summary false): a table, `__buckets:<disc>` then `__key:<value>` and a table per
  * bucket, or an untouched value as compact JSON. Field names are not escaped (upstream's documented exposure; compactRows
  * refuses the names that would break the header).
+ *
+ * @param c - the compaction
+ * @returns its csv-schema text
  */
 export function formatCsvSchema(c: Compaction): string {
   if (c.kind === "table") return csvTable(c.fields, c.rows);
@@ -1727,6 +2114,9 @@ export function formatCsvSchema(c: Compaction): string {
 
 /**
  * Upstream compaction_to_json (the JSON a nested cell renders as), key order as upstream: a missing cell reads null.
+ *
+ * @param c - the compaction
+ * @returns its JSON value
  */
 export function compactionJson(c: Compaction): unknown {
   const schema = (fields: readonly FieldSpec[]) => fields.map((f) => (f.nullable ? { name: f.name, type: f.type, nullable: true } : { name: f.name, type: f.type }));
@@ -1749,6 +2139,11 @@ export function compactionJson(c: Compaction): unknown {
  * in UTF-16 units here); without `modes.lossy`, the array itself (upstream lossless_only); the array itself when the
  * crushability gate skips it; else the kept rows in index order. The compaction's work is charged to a budget of 4 per
  * character of that JSON + 4096 and abandoned when it runs out.
+ *
+ * @param items - the dict array
+ * @param query - the conversation query
+ * @param modes - which stages run
+ * @returns the table string, the array or its kept rows, or undefined
  */
 function crushDictArray(items: Record<string, unknown>[], query: string, modes: CrushModes): string | Record<string, unknown>[] | undefined {
   const strings = items.map((o) => JSON.stringify(o));
@@ -1773,6 +2168,9 @@ function crushDictArray(items: Record<string, unknown>[], query: string, modes: 
 
 /**
  * Python round / Rust round_ties_even: the nearest integer, a tie going to the even one.
+ *
+ * @param x - the number
+ * @returns it rounded
  */
 export function roundHalfEven(x: number): number {
   const r = Math.round(x);
@@ -1782,6 +2180,7 @@ export function roundHalfEven(x: number): number {
 /**
  * Upstream compute_k_split with the BUG #4 clamp: the adaptive K, then the first 30% and the last 15% of it (each at least 1),
  * clamped so first + last never pass K.
+ *
  * @param strings - the items as strings (a string as is, a number as String(n))
  * @returns K, first, last
  */
@@ -1793,6 +2192,11 @@ function kSplit(strings: readonly string[]): [number, number, number] {
 }
 
 /**
+ * The boundary indices a crusher always keeps.
+ *
+ * @param n - the item count
+ * @param first - how many leading indices
+ * @param last - how many trailing indices
  * @returns the first `first` and the last `last` indices of `n`
  */
 function boundaryIndices(n: number, first: number, last: number): number[] {
@@ -1806,6 +2210,8 @@ function boundaryIndices(n: number, first: number, last: number): number[] {
  * Upstream crush_string_array: 8 or fewer items pass through; otherwise every error-keyword item, every length anomaly (code
  * points more than 2 sample σ from the mean) and the first and last K items stay, and a stride over the rest tops the kept set up
  * to K plus the errors and anomalies, skipping exact repeats of a kept string. The kept items keep their order.
+ *
+ * @param items - the string array
  * @returns `items` itself when nothing was dropped
  */
 export function crushStringArray(items: readonly string[]): readonly string[] {
@@ -1841,7 +2247,10 @@ export function crushStringArray(items: readonly string[]): readonly string[] {
 /**
  * Upstream crush_number_array's change points: with more than 10 numbers, each index i in 5..n−6 where the means of the 5 numbers
  * before and the 5 from i differ by more than 2σ (`sd`). Unlike changePoints (the dict analyzer's), no minimum spacing.
+ *
+ * @param items - the number array
  * @param sd - the sample standard deviation of `items`
+ * @returns the change point indices
  */
 export function numberChangePoints(items: readonly number[], sd: number): number[] {
   const w = 5;
@@ -1858,6 +2267,8 @@ export function numberChangePoints(items: readonly number[], sd: number): number
  * Upstream crush_number_array without its strategy string: 8 or fewer items pass through; otherwise every outlier (more than 2
  * sample σ from the mean), every change point and the first and last K numbers stay, and a stride tops the kept set up to K plus
  * the outliers. The kept numbers keep their order.
+ *
+ * @param items - the number array
  * @returns `items` itself when nothing was dropped
  */
 export function crushNumberArray(items: readonly number[]): readonly number[] {
@@ -1880,6 +2291,9 @@ export function crushNumberArray(items: readonly number[]): readonly number[] {
 
 /**
  * Upstream group_key: the JSON type of a value, as crush_mixed_array groups by it.
+ *
+ * @param v - a JSON value
+ * @returns its group key
  */
 function jsonType(v: unknown): "dict" | "str" | "bool" | "number" | "list" | "none" {
   if (v === null) return "none";
@@ -1892,6 +2306,9 @@ function jsonType(v: unknown): "dict" | "str" | "bool" | "number" | "list" | "no
 /**
  * Upstream classify_array: a non-empty array of one JSON type is a dict, string or number array; bool-only, nested-only and empty
  * arrays are `other`; any mix, or any null, is `mixed`.
+ *
+ * @param v - the array
+ * @returns its class
  */
 function classifyArray(v: readonly unknown[]): "dict" | "string" | "number" | "mixed" | "other" {
   if (v.length === 0) return "other";
@@ -1905,6 +2322,10 @@ function classifyArray(v: readonly unknown[]): "dict" | "string" | "number" | "m
  * group of fewer than 5 is kept whole. The dict group goes through crushDictArray with the caller's modes (a winning table, a skip
  * or an array within K keeps it whole; dropped rows are matched back by sorted-key JSON), the string group keeps every item equal
  * to a string crushStringArray kept, the number group keeps its first and last K plus its outliers, and every other group is kept.
+ *
+ * @param items - the mixed array
+ * @param query - the conversation query
+ * @param modes - which stages run
  * @returns `items` itself when nothing was dropped
  */
 function crushMixedArray(items: readonly unknown[], query: string, modes: CrushModes): readonly unknown[] {
@@ -1945,6 +2366,8 @@ function crushMixedArray(items: readonly unknown[], query: string, modes: CrushM
 
 /**
  * A number lexeme as sign, significant digits and a power of ten, so two spellings of one decimal compare equal.
+ *
+ * @param lexeme - the number as written in the JSON text
  * @returns undefined when it is not a decimal ("Infinity")
  */
 function canonNumber(lexeme: string): string | undefined {
@@ -1957,6 +2380,9 @@ function canonNumber(lexeme: string): string | undefined {
 }
 
 /**
+ * Counts object keys recursively.
+ *
+ * @param v - a JSON value
  * @returns the object keys at every depth of `v`
  */
 function countKeys(v: unknown): number {
@@ -1969,8 +2395,10 @@ function countKeys(v: unknown): number {
 /**
  * True when JSON.stringify(value) would not say what `text` says: a number whose double prints as another decimal
  * (more than 17 significant digits, an integer past 2^53, an overflow to Infinity), a -0, or a duplicate object key.
+ *
  * @param text - valid JSON
  * @param value - JSON.parse(text)
+ * @returns true when a round trip would change the document
  */
 function isLossy(text: string, value: unknown): boolean {
   let keys = 0; // key tokens in the text: more than the parsed objects hold means a later duplicate won
@@ -1996,6 +2424,12 @@ function isLossy(text: string, value: unknown): boolean {
  * array of 5+ items (a `… N more items <<ccr:HASH N_items_offloaded>>` string closes one that lost items), and never descends
  * into such an array either way; recurses into everything else, keeps every object key, and parses stringified JSON
  * containers (process_string, which uses a table string as is). Depth 50 and below is left as is.
+ *
+ * @param v - a JSON value
+ * @param depth - its nesting depth
+ * @param query - the conversation query
+ * @param acc - the running totals and offloaded originals, mutated
+ * @param modes - which stages run
  * @returns `v` itself when nothing below it changed
  */
 function processValue(v: unknown, depth: number, query: string, acc: CrushAcc, modes: CrushModes): unknown {
@@ -2003,7 +2437,7 @@ function processValue(v: unknown, depth: number, query: string, acc: CrushAcc, m
   if (typeof v === "string") {
     // A stringified JSON object or array is crushed too and re-emitted as a string (opaque-blob CCR is deferred).
     if (!/^[{[]/.test(v.trimStart())) return v;
-    let parsed;
+    let parsed: unknown;
     try {
       parsed = JSON.parse(v);
     } catch {
@@ -2062,8 +2496,11 @@ function processValue(v: unknown, depth: number, query: string, acc: CrushAcc, m
  * key JSON.parse cannot keep, nothing changed, or output that is not shorter (a table's `\n` escapes can fail this after it
  * passed the 15% gate, as upstream). Deviation: upstream also minifies a pretty-printed document that lost no rows; here such
  * a result keeps its original bytes.
+ *
+ * @param text - the tool-result text
  * @param query - the conversation context (crushQuery), "" for none
  * @param modes - the lossy path alone when absent
+ * @returns the crushed document, or undefined
  */
 export function crushJson(text: string, query: string, modes: CrushModes = { lossy: true, lossless: false }): CrushOutcome | undefined {
   if (text.length <= CRUSH_MIN_CHARS) return undefined;
@@ -2083,6 +2520,8 @@ export function crushJson(text: string, query: string, modes: CrushModes = { los
 
 /**
  * A candidate parses, so a build log that starts with "[" never costs the hook a transcript fetch.
+ *
+ * @param s - the text
  * @returns more than CRUSH_MIN_CHARS and a JSON object or array
  */
 function looksLikeJsonDoc(s: string): boolean {
@@ -2095,7 +2534,9 @@ function looksLikeJsonDoc(s: string): boolean {
   }
 }
 
+/** parseJson's memo: the last trimmed text and its parse outcome. */
 let lastParse: { key: string; ok: boolean; value: unknown; err: unknown } | undefined;
+/** The whitespace JSON.parse skips around a value: space, tab, LF and CR. */
 const JSON_WS = /^[ \t\n\r]*$/;
 
 /**
@@ -2103,6 +2544,8 @@ const JSON_WS = /^[ \t\n\r]*$/;
  * about the same result, so a large document is parsed once. Keyed by the trimmed text so detectContentType's trimmed
  * form hits too; JSON.parse skips only space, tab, LF and CR around a value, so other trimmed whitespace still throws.
  * shortcut: holds one parsed value until the next text or a `take`; a per-row cache would need the row threaded through.
+ *
+ * @param text - the JSON text
  * @param take - the caller owns the value (crushJson rewrites from it), so the memo drops it
  * @returns the parsed value; throws what JSON.parse throws
  */
@@ -2127,6 +2570,9 @@ function parseJson(text: string, take: boolean = false): unknown {
 }
 
 /**
+ * Whether `b` is a text content block.
+ *
+ * @param b - a content block
  * @returns a text content block (an MCP result's or a Messages-API tool_result's)
  */
 function isTextBlock(b: unknown): b is { type: "text"; text: string } {
@@ -2137,6 +2583,10 @@ function isTextBlock(b: unknown): b is { type: "text"; text: string } {
 
 /**
  * A cut at `i` would split a surrogate pair: a low surrogate at `i` preceded by a high one.
+ *
+ * @param s - the text
+ * @param i - the cut index
+ * @returns true when the cut splits a pair
  */
 function splitsPair(s: string, i: number): boolean {
   if (i <= 0 || i >= s.length) return false;
@@ -2147,6 +2597,10 @@ function splitsPair(s: string, i: number): boolean {
 
 /**
  * The end of a head cut `s.slice(0, i)` that leaves no lone surrogate (one unit shorter when `i` splits a pair).
+ *
+ * @param s - the text
+ * @param i - the wanted end
+ * @returns the safe end
  */
 function pairSafeEnd(s: string, i: number): number {
   return splitsPair(s, i) ? i - 1 : i;
@@ -2154,6 +2608,10 @@ function pairSafeEnd(s: string, i: number): number {
 
 /**
  * The start of a tail cut `s.slice(i)` that leaves no lone surrogate (one unit later when `i` splits a pair).
+ *
+ * @param s - the text
+ * @param i - the wanted start
+ * @returns the safe start
  */
 function pairSafeStart(s: string, i: number): number {
   return splitsPair(s, i) ? i + 1 : i;
@@ -2162,7 +2620,11 @@ function pairSafeStart(s: string, i: number): number {
 /**
  * Upstream _scan_from: walks one bracket span from `start` outside strings, records every container it pushed
  * in `known` (its end, or null when it never closes) and returns the span's end (or null) and the characters walked.
- * @param start - the index of a "[" or "{"
+ *
+ * @param text - the text
+ * @param start - the index of a `[` or `{`
+ * @param known - container start → its end (null when unclosed), filled in
+ * @returns the span's end (or null) and the characters walked
  */
 function scanFrom(text: string, start: number, known: Map<number, number | null>): [number | null, number] {
   const stack: number[] = [];
@@ -2198,6 +2660,9 @@ function scanFrom(text: string, start: number, known: Map<number, number | null>
  * Upstream scan_json_documents read as `complete and not spans`: no balanced bracket span (nested ones included)
  * parses as a JSON object or array. An exhausted walk or parse budget, or a parse failure other than a SyntaxError
  * (upstream: RecursionError), means the scan is incomplete, so false.
+ *
+ * @param text - the text
+ * @returns true when the scan completed and found no JSON span
  */
 function noJsonSpans(text: string): boolean {
   const n = text.length;
@@ -2228,7 +2693,7 @@ function noJsonSpans(text: string): boolean {
     if (typeof end !== "number") continue;
     if (parsed + end - start > budget) return false;
     parsed += end - start;
-    let v;
+    let v: unknown;
     try {
       v = JSON.parse(text.slice(start, end));
     } catch (err) {
@@ -2243,6 +2708,9 @@ function noJsonSpans(text: string): boolean {
 /**
  * Upstream is_dense_line: at least 300 characters, no tab, under 6% spaces (U+0020), not JSON-shaped once trimmed,
  * and holding no JSON document (a label may precede compact JSON, which only the SmartCrusher may rewrite).
+ *
+ * @param line - the line
+ * @returns true when it is dense
  */
 function isDenseLine(line: string): boolean {
   const n = line.length;
@@ -2262,7 +2730,10 @@ function isDenseLine(line: string): boolean {
  * up to at least 2000 characters; the block then ends with a retrieval line and its original goes to the CCR store.
  * A line a tag span touches is never dense (the tag protector, a mod-side guard). Undefined when nothing is dense or the
  * result is not shorter.
+ *
+ * @param text - the tool-result text
  * @param spans - tagSpans(text), none when absent
+ * @returns the elided text, its line count and the original to offload, or undefined
  */
 export function elideDense(text: string, spans: readonly [number, number][] = []): Elision | undefined {
   if (text.length < DENSE_MIN_LINE_CHARS) return undefined;
@@ -2292,6 +2763,9 @@ export function elideDense(text: string, spans: readonly [number, number][] = []
  * Upstream _num_and_key: a leading unpadded line number, the match key (the line without that number, its separator
  * kept, so the same content at another line number shares a key) and the content after the separator.
  * Deviation: a number beyond Number.MAX_SAFE_INTEGER counts as no number (Python ints are unbounded).
+ *
+ * @param line - the line
+ * @returns the line number (or null), the match key and the content
  */
 function numAndKey(line: string): [number | null, string, string] {
   const m = DEDUP_LINENO_RE.exec(line);
@@ -2302,6 +2776,9 @@ function numAndKey(line: string): [number | null, string, string] {
 
 /**
  * Upstream _is_trivial: a line too short or too common to anchor a match on its own.
+ *
+ * @param content - the line's content after any line number
+ * @returns true when it is trivial
  */
 function isTrivial(content: string): boolean {
   const s = content.trim();
@@ -2311,7 +2788,10 @@ function isTrivial(content: string): boolean {
 /**
  * Upstream _index_lines: records each surviving non-trivial line as [ordinal, line] under its match key, first-seen
  * order, at most DEDUP_MAX_ANCHOR_CANDIDATES per key. Folded lines (null) are skipped (keep-earliest).
+ *
+ * @param verbatim - the block's lines, null where folded
  * @param turn - the block's ordinal
+ * @param st - the conversation's corpus, mutated
  */
 function indexLines(verbatim: readonly (string | null)[], turn: number, st: DedupState): void {
   verbatim.forEach((ln, li) => {
@@ -2328,7 +2808,12 @@ function indexLines(verbatim: readonly (string | null)[], turn: number, st: Dedu
  * Upstream _longest_match: the longest run of `cur` from `start` found in one earlier block, its line keys equal and
  * every numbered pair under one uniform line-number shift (non-numbered lines must match exactly). A longer run wins;
  * a tie keeps the earliest candidate. Undefined when no run starts here.
+ *
+ * @param cur - the block's lines
  * @param curKeys - numAndKey of each line of `cur`, computed once per block
+ * @param start - the line the run starts at
+ * @param st - the conversation's corpus
+ * @returns the run's length, the earlier block's ordinal, its start line and the line-number shift
  */
 function longestMatch(cur: readonly string[], curKeys: readonly [number | null, string, string][], start: number, st: DedupState): { len: number; turn: number; li: number; delta: number } | undefined {
   const candidates = st.index.get(curKeys[start][1]);
@@ -2361,7 +2846,12 @@ function longestMatch(cur: readonly string[], curKeys: readonly [number | null, 
 /**
  * Upstream _pointer plus a ` hash=H` CCR suffix: `[↑nL same as result K: "anchor" hash=H]`, with ` ±dL` after K when
  * the run's line numbers are shifted. The anchor is the run's first non-blank line's content, at most 20 code points.
+ *
+ * @param span - the folded run's lines
  * @param refTurn - the earlier block's ordinal
+ * @param delta - the line-number shift
+ * @param hash - the run's CCR hash
+ * @returns the pointer line
  */
 function pointer(span: readonly string[], refTurn: number, delta: number, hash: string): string {
   const first = span.find((ln) => ln.trim() !== "");
@@ -2375,6 +2865,8 @@ function pointer(span: readonly string[], refTurn: number, delta: number, hash: 
 /**
  * Empties a conversation's dedup corpus and keeps its ordinal counter, so a later pointer's "result N" never repeats
  * the number of a result that left the corpus. Mutates `st`.
+ *
+ * @param st - the conversation's corpus
  */
 export function resetCorpus(st: DedupState): void {
   st.corpus.clear();
@@ -2390,9 +2882,13 @@ export function resetCorpus(st: DedupState): void {
  * a mod-side guard), but is indexed like any other. The block is then indexed, and the oldest conversations are emptied
  * (resetCorpus, their ordinals kept) while all corpora hold more than DEDUP_MAX_CHARS. Mutates `states`. Undefined when
  * nothing folded.
+ *
  * @param states - conversation key → corpus, least recently appended first
  * @param key - "" for the main loop, else the agentId
+ * @param text - the tool-result text
+ * @param isProtected - index only, never fold
  * @param spans - tagSpans(text), none when absent
+ * @returns the folded text, its span count and the runs to store, or undefined
  */
 export function dedupBlock(states: Map<string, DedupState>, key: string, text: string, isProtected: boolean, spans: readonly [number, number][] = []): Fold | undefined {
   const st = states.get(key) ?? { turn: 0, corpus: new Map(), index: new Map(), chars: 0 };
@@ -2458,7 +2954,9 @@ export function dedupBlock(states: Map<string, DedupState>, key: string, text: s
 /**
  * Upstream _decode_concatenated_json read for objects: `s` is a run of 2+ JSON objects separated only by whitespace.
  * A SyntaxError means no; any other parse failure propagates (upstream: RecursionError).
- * @param s - trimmed text starting with "{"
+ *
+ * @param s - trimmed text starting with `{`
+ * @returns true for such a run
  */
 function isObjectRun(s: string): boolean {
   let idx = 0;
@@ -2485,9 +2983,11 @@ function isObjectRun(s: string): boolean {
 
 /**
  * Upstream _try_detect_json as a verdict: `s` parses as an object or array (never a bare scalar), else is a run of
- * 2+ whitespace-separated objects, else holds one bracket span, from the first "{" or "[", that parses and spans at
+ * 2+ whitespace-separated objects, else holds one bracket span, from the first `{` or `[`, that parses and spans at
  * least JSON_MIN_BULK_FRACTION of it. A parse failure other than a SyntaxError (upstream: RecursionError) means not JSON.
+ *
  * @param s - trimmed, non-empty text
+ * @returns true when it reads as JSON
  */
 function isJsonPayload(s: string): boolean {
   try {
@@ -2512,7 +3012,9 @@ function isJsonPayload(s: string): boolean {
 
 /**
  * Upstream _try_detect_diff's confidence, 0 without a header line.
+ *
  * @param lines - the first 500 lines
+ * @returns the confidence, 0..1
  */
 function diffConfidence(lines: readonly string[]): number {
   let headers = 0;
@@ -2526,7 +3028,9 @@ function diffConfidence(lines: readonly string[]): number {
 
 /**
  * Upstream _try_detect_html's confidence, 0 where it returns None.
+ *
  * @param sample - the first 3000 characters
+ * @returns the confidence, 0..1
  */
 function htmlConfidence(sample: string): number {
   const doctype = HTML_DOCTYPE_RE.test(sample);
@@ -2545,6 +3049,9 @@ function htmlConfidence(sample: string): number {
 
 /**
  * Upstream _try_detect_git_status: a `git status` first line, then a section heading and a path entry under it.
+ *
+ * @param text - the text
+ * @returns true for git status output
  */
 function isGitStatus(text: string): boolean {
   const nl = text.indexOf("\n");
@@ -2567,6 +3074,9 @@ function isGitStatus(text: string): boolean {
 
 /**
  * Upstream _prefix_looks_like_path: no markup tag and no key=value prefix.
+ *
+ * @param prefix - the text before the line number
+ * @returns true when it may be a path
  */
 function pathLike(prefix: string): boolean {
   return !/[<>=]/.test(prefix);
@@ -2575,6 +3085,9 @@ function pathLike(prefix: string): boolean {
 /**
  * Upstream _is_search_result_line: `path:N:` or `path:N-` with a path-shaped prefix, or a grep context line `path-N-`
  * whose path holds a "/" or "."; never a timestamped log row.
+ *
+ * @param line - the line
+ * @returns true for a search result line
  */
 function isSearchLine(line: string): boolean {
   if (TIMESTAMP_ROW_RE.test(line)) return false;
@@ -2585,7 +3098,9 @@ function isSearchLine(line: string): boolean {
 
 /**
  * Upstream _try_detect_search's confidence, 0 below 2 matching lines or a 0.3 ratio.
+ *
  * @param lines - the first 100 lines
+ * @returns the confidence, 0..1
  */
 function searchConfidence(lines: readonly string[]): number {
   let matching = 0;
@@ -2602,7 +3117,9 @@ function searchConfidence(lines: readonly string[]): number {
 
 /**
  * Upstream _try_detect_log's confidence: one LOG_PATTERNS match per line at most, 0 below a 0.1 ratio.
+ *
  * @param lines - the first 200 lines
+ * @returns the confidence, 0..1
  */
 function logConfidence(lines: readonly string[]): number {
   let matches = 0;
@@ -2622,7 +3139,9 @@ function logConfidence(lines: readonly string[]): number {
 
 /**
  * Upstream _try_detect_code's confidence from the best language's line score, 0 below a score of 3.
+ *
  * @param lines - the first 100 lines
+ * @returns the confidence, 0..1
  */
 function codeConfidence(lines: readonly string[]): number {
   const best = Math.max(...CODE_PATTERNS.map(([, patterns]) => lines.filter((line) => patterns.some((re) => re.test(line))).length));
@@ -2635,6 +3154,9 @@ function codeConfidence(lines: readonly string[]): number {
  * Upstream _INI_ASSIGN_RE (`^\s*[\w.\-@ ]+?\s*[=:]\s*`) as a linear scanner: before the first `=` or `:` stand optional
  * whitespace, a run of word characters, `.`, `-`, `@` and spaces, and optional whitespace. The regex's lazy run plus `\s*`
  * backtracks quadratically on whitespace-heavy lines.
+ *
+ * @param line - the line
+ * @returns true for an INI assignment
  */
 export function isIniAssign(line: string): boolean {
   const k = line.search(/[=:]/);
@@ -2653,7 +3175,9 @@ export function isIniAssign(line: string): boolean {
  * Whether a TOML assignment's value lexeme is one tomllib would read: a basic or literal string (multi-line openers too), a
  * number, `inf`, `nan`, a boolean, an RFC 3339 date/time, or an array or inline table opener. Deviation: a line-level stand-in
  * for parsing the whole document.
+ *
  * @param raw - the text after the `=`
+ * @returns true for a TOML value
  */
 function isTomlValue(raw: string): boolean {
   const v = raw.trim();
@@ -2668,7 +3192,10 @@ function isTomlValue(raw: string): boolean {
  * assignment is a TOML key with a TOML value, else INI when every one is an INI assignment (deviation: line checks stand in
  * for tomllib and configparser); otherwise YAML by key, list and document-marker share with the prose, front-matter and
  * structure guards. Runs over the first 200 sampled lines.
+ *
+ * @param text - the whole text
  * @param head - the line-capped sample lines (detectHead)
+ * @returns the flavor, or undefined for no config
  */
 export function configFlavor(text: string, head: readonly string[]): ConfigFlavor | undefined {
   const first = text.trimStart().slice(0, 1);
@@ -2714,20 +3241,26 @@ export function configFlavor(text: string, head: readonly string[]): ConfigFlavo
 }
 
 /**
+ * Upstream is_name_start.
+ *
  * @param c - a UTF-16 code unit
- * @returns an ASCII letter or `_` (upstream is_name_start)
+ * @returns an ASCII letter or `_`
  */
 const isTagNameStart = (c: number): boolean => (c >= 65 && c <= 90) || (c >= 97 && c <= 122) || c === 95;
 
 /**
+ * Upstream is_name_cont.
+ *
  * @param c - a UTF-16 code unit
- * @returns an ASCII letter, digit, `_`, `-`, `.` or `:` (upstream is_name_cont)
+ * @returns an ASCII letter, digit, `_`, `-`, `.` or `:`
  */
 const isTagNameCont = (c: number): boolean => isTagNameStart(c) || (c >= 48 && c <= 57) || c === 45 || c === 46 || c === 58;
 
 /**
+ * Rust's is_ascii_whitespace.
+ *
  * @param c - a UTF-16 code unit
- * @returns ASCII whitespace as Rust's is_ascii_whitespace (space, tab, LF, FF, CR)
+ * @returns true for space, tab, LF, FF or CR
  */
 const isAsciiSpace = (c: number): boolean => c === 32 || c === 9 || c === 10 || c === 12 || c === 13;
 
@@ -2736,7 +3269,11 @@ const isAsciiSpace = (c: number): boolean => c === 32 || c === 9 || c === 10 || 
  * `</name>` with optional whitespace before `>`, or `<name …>` whose attributes run to the first `>` outside quotes (an
  * unterminated quote is no tag; a `/` sets self-closing, whitespace or a quoted value clears it). Each scanned character
  * costs one unit of `budget`, so retrying every `<` of an unterminated tag cannot go quadratic unnoticed.
+ *
+ * @param text - the text
  * @param i - the index of a `<`
+ * @param budget - the scan's work budget, charged per character
+ * @returns the tag, or undefined when none starts at `i`
  */
 function tagAt(text: string, i: number, budget: WorkBudget): TagToken | undefined {
   const n = text.length;
@@ -2778,6 +3315,8 @@ function tagAt(text: string, i: number, budget: WorkBudget): TagToken | undefine
 }
 
 /**
+ * A cached close-tag search for a dropped element.
+ *
  * @param name - a lowercase HTML element name (letters and digits only)
  * @returns its cached global, case-insensitive `</name\s*>` search
  */
@@ -2794,6 +3333,8 @@ function closeTagRe(name: string): RegExp {
  * never protected. Deviation: the content of an HTML5 `<svg>` or `<math>` element is not scanned (SVG and MathML children
  * are no workflow tags; an unclosed one skips nothing). The scanned characters and every stack entry a close examines share a budget of 4 per character
  * + 4096; null when it runs out, and such a text must be passed through whole (upstream walks without a bound).
+ *
+ * @param text - the text
  * @returns sorted, disjoint spans; null when the text is unprotectable
  */
 export function tagSpans(text: string): [number, number][] | null {
@@ -2842,11 +3383,14 @@ export function tagSpans(text: string): [number, number][] | null {
 }
 
 /**
- * For each line of `lines` (the text split on "\n"), whether a span touches it.
+ * For each line of `lines` (the text split on `\n`), whether a span touches it.
+ *
+ * @param lines - the text's lines
  * @param spans - sorted and disjoint, as tagSpans returns them
+ * @returns one flag per line
  */
 function spanLines(lines: readonly string[], spans: readonly [number, number][]): boolean[] {
-  const touched = new Array(lines.length).fill(false);
+  const touched = new Array<boolean>(lines.length).fill(false);
   let s = 0;
   let start = 0;
   for (let i = 0; i < lines.length && s < spans.length; i++) {
@@ -2860,12 +3404,15 @@ function spanLines(lines: readonly string[], spans: readonly [number, number][])
 
 /**
  * Decodes `&amp; &lt; &gt; &quot; &apos; &nbsp;` and decimal or hex character references; anything else stays as written.
+ *
+ * @param s - the text
+ * @returns the decoded text
  */
 function decodeEntities(s: string): string {
   return s.includes("&")
-    ? s.replace(HTML_ENTITY_RE, (m, dec, hex, name) => {
+    ? s.replace(HTML_ENTITY_RE, (m: string, dec: string | undefined, hex: string | undefined, name: string | undefined) => {
       if (name) return HTML_ENTITIES[name];
-      const cp = dec ? Number(dec) : parseInt(hex, 16);
+      const cp = dec ? Number(dec) : parseInt(hex as string, 16);
       return cp > 0 && cp <= 0x10ffff && (cp < 0xd800 || cp > 0xdfff) ? String.fromCodePoint(cp) : m;
     })
     : s;
@@ -2879,6 +3426,9 @@ function decodeEntities(s: string): string {
  * whole pass draws on a budget of 4 per character + 4096. Undefined when the budget runs out, nothing is left (upstream
  * #3609: fall through, never discard) or the result with its retrieval line is not shorter; else the extraction plus
  * `[HTML extracted to text: N characters of markup removed. Retrieve original: hash=H]`, the original under `offloaded`.
+ *
+ * @param text - the HTML page
+ * @returns the extraction and the original to offload, or undefined
  */
 export function extractHtml(text: string): { text: string; offloaded: [string, string][] } | undefined {
   const n = text.length;
@@ -2977,6 +3527,9 @@ export function extractHtml(text: string): { text: string; offloaded: [string, s
 
 /**
  * The detector's sample: the first 500 lines, each cut to DETECT_MAX_LINE_CHARS.
+ *
+ * @param text - the text to sample
+ * @returns at most 500 lines, each at most DETECT_MAX_LINE_CHARS long
  */
 function detectHead(text: string): string[] {
   return text.split("\n", 500).map((line) => (line.length > DETECT_MAX_LINE_CHARS ? line.slice(0, DETECT_MAX_LINE_CHARS) : line));
@@ -2986,7 +3539,9 @@ function detectHead(text: string): string[] {
  * Upstream detect_content_type's tag: the category set and branch order of content_detector.rs, each branch's
  * heuristics and thresholds from content_detector.py, plus Python's structured-config branch in its place (after log, before
  * code; the tabular branch Python checks in between stays omitted). Pure; never throws.
+ *
  * @param text - a tool-result text
+ * @returns the content type tag
  */
 export function detectContentType(text: string): ContentType {
   const s = text.trim();
@@ -3008,6 +3563,9 @@ export function detectContentType(text: string): ContentType {
 
 /**
  * Upstream _split_keep_trailing: the lines without a trailing newline's empty last one, and whether it was there.
+ *
+ * @param text - the text to split on `\n`
+ * @returns the lines, and whether the text ended in a newline
  */
 function splitKeepTrailing(text: string): [string[], boolean] {
   if (text === "") return [[], false];
@@ -3016,12 +3574,19 @@ function splitKeepTrailing(text: string): [string[], boolean] {
 }
 
 /**
- * @returns the lines joined, with the trailing newline put back (upstream _join)
+ * The lines joined, with the trailing newline put back (upstream _join).
+ *
+ * @param lines - the lines to join
+ * @param trailing - whether to append a final newline
+ * @returns the joined text
  */
 const joinLines = (lines: readonly string[], trailing: boolean): string => lines.join("\n") + (trailing ? "\n" : "");
 
 /**
  * Upstream collapse_runs: 2+ identical consecutive lines become the line once plus `... (repeated N times)`.
+ *
+ * @param text - the text to collapse
+ * @returns the collapsed text
  */
 export function collapseRuns(text: string): string {
   const [lines, trailing] = splitKeepTrailing(text);
@@ -3040,7 +3605,10 @@ export function collapseRuns(text: string): string {
 /**
  * Upstream expand_runs (collapseRuns' exact inverse). Deviation: gives up once the output would pass `maxLines`, so a marker
  * with a huge count in the input never allocates it.
- * @returns undefined past maxLines
+ *
+ * @param text - collapsed text
+ * @param maxLines - the most lines the expansion may produce
+ * @returns the expanded text, or undefined past maxLines
  */
 export function expandRuns(text: string, maxLines: number = Infinity): string | undefined {
   const [lines, trailing] = splitKeepTrailing(text);
@@ -3057,9 +3625,12 @@ export function expandRuns(text: string, maxLines: number = Infinity): string | 
 }
 
 /**
- * Upstream fold_repeated_blocks: a run of K >= 3 lines that repeats the K lines D lines back (K <= D, original coordinates)
- * becomes `... (repeats K lines from D lines back)` when its characters exceed the marker's; at most 8 recent positions per
- * distinct line and 64 lines per block are tried, and a text under 6 or over 20,000 lines is left alone.
+ * Upstream fold_repeated_blocks: a run of K (at least 3) lines that repeats the K lines D lines back (K at most D, original
+ * coordinates) becomes `... (repeats K lines from D lines back)` when its characters exceed the marker's; at most 8 recent
+ * positions per distinct line and 64 lines per block are tried, and a text under 6 or over 20,000 lines is left alone.
+ *
+ * @param text - the text to fold
+ * @returns the folded text
  */
 export function foldRepeatedBlocks(text: string): string {
   const [lines, trailing] = splitKeepTrailing(text);
@@ -3103,10 +3674,13 @@ export function foldRepeatedBlocks(text: string): string {
 }
 
 /**
- * Upstream unfold_repeated_blocks (foldRepeatedBlocks' exact inverse); a marker it could not have emitted (K > D, or reaching
- * before the start) stays as is. Deviation: gives up once the output would pass `maxLines`, so nested markers in the input
- * never double it repeatedly.
- * @returns undefined past maxLines
+ * Upstream unfold_repeated_blocks (foldRepeatedBlocks' exact inverse); a marker it could not have emitted (K above D, or
+ * reaching before the start) stays as is. Deviation: gives up once the output would pass `maxLines`, so nested markers in the
+ * input never double it repeatedly.
+ *
+ * @param text - folded text
+ * @param maxLines - the most lines the unfolded text may have
+ * @returns the unfolded text, or undefined past maxLines
  */
 export function unfoldRepeatedBlocks(text: string, maxLines: number = Infinity): string | undefined {
   const [lines, trailing] = splitKeepTrailing(text);
@@ -3130,6 +3704,9 @@ export function unfoldRepeatedBlocks(text: string, maxLines: number = Infinity):
 /**
  * Upstream compact_lossless(text, "config"): single-line runs, then repeated stanzas; kept only when the inverse gives the text
  * back exactly and the result is shorter.
+ *
+ * @param text - a structured config text
+ * @returns the compacted text, or `text` itself when nothing was kept
  */
 export function compactConfigLossless(text: string): string {
   if (!text) return text;
@@ -3143,6 +3720,10 @@ export function compactConfigLossless(text: string): string {
 /**
  * Upstream ConfigCompressor._elision_safe: false when a `#` line could be data (a YAML block scalar; a TOML multi-line string).
  * Deviation: INI refuses `"""` / `'''` too, since its flavor is not parser-confirmed.
+ *
+ * @param text - the config text
+ * @param flavor - its detected flavor
+ * @returns whether comment lines may be elided
  */
 function elisionSafe(text: string, flavor: ConfigFlavor): boolean {
   return flavor === "yaml" ? !YAML_BLOCK_SCALAR_RE.test(text) : !TOML_MULTILINE_RE.test(text);
@@ -3151,6 +3732,9 @@ function elisionSafe(text: string, flavor: ConfigFlavor): boolean {
 /**
  * Upstream ConfigCompressor._strip_comment_lines: whole-line comments and, outside INI, blank lines go (INI drops only
  * column-0 `#`/`;` lines, as its values can continue on indented lines); a trailing newline stays.
+ *
+ * @param text - the config text
+ * @param flavor - its detected flavor
  * @returns the text left, the lines elided
  */
 function stripCommentLines(text: string, flavor: ConfigFlavor): [string, number] {
@@ -3164,6 +3748,9 @@ function stripCommentLines(text: string, flavor: ConfigFlavor): [string, number]
  * Upstream ConfigCompressor.compress without Tier 3 (the TOML schema fold): Tier 2 drops whole-line comments and blank lines
  * behind `[N comment/blank lines elided. Retrieve original: hash=H]` (the original goes to `offloaded`), then Tier 1 folds
  * repeated lines and stanzas losslessly. Undefined when the text is no structured config or nothing was saved.
+ *
+ * @param text - a tool-result text
+ * @returns the compressed text and its offloaded originals, or undefined
  */
 export function compressConfig(text: string): { text: string; offloaded: [string, string][] } | undefined {
   const flavor = configFlavor(text, detectHead(text));
@@ -3192,28 +3779,40 @@ export function compressConfig(text: string): { text: string; offloaded: [string
 // Log compressor: a port of headroom's log_compressor.rs (compress_with_store with LogCompressorConfig::default()) and the
 // "log" kind of lossless_compaction.py compact_lossless.
 
+/** A log line's level, as upstream's LevelClassifier names it. */
 type LogLevel = "error" | "fail" | "warn" | "info" | "debug" | "trace" | "unknown";
+/** The stack-trace flavors upstream's StackTraceDetector recognizes. */
 type TraceFlavor = "python" | "js" | "java" | "rust_error" | "rust_backtrace" | "go_panic" | "dotnet";
+/** One parsed log line: its 0-based number, text, level, stack-trace and summary membership, and score. */
 type LogLine = { n: number; content: string; level: LogLevel; stack: boolean; summary: boolean; score: number };
+/** A pytest short-summary scan: entry ids by line, the sections' totals lines, and the first section's header line. */
 type PytestSummary = { entries: Map<number, string>; totals: Set<number>; header: number | undefined };
 
 // Upstream LogCompressorConfig::default(); keep_first_error, keep_last_error, dedupe_warnings, keep_summary_lines and
 // collapse_runtime_frames are true there and inlined here.
+/** At most this many error lines (and as many fail lines) are kept. */
 const LOG_MAX_ERRORS = 10;
+/** Context lines kept on each side of a kept line. */
 const LOG_ERROR_CONTEXT = 3;
+/** At most this many stack traces are kept. */
 const LOG_MAX_STACK_TRACES = 3;
+/** Lines per kept stack trace; a longer trace has its runtime frames collapsed. */
 const LOG_STACK_TRACE_MAX_LINES = 20;
+/** At most this many deduplicated warnings are kept. */
 const LOG_MAX_WARNINGS = 5;
+/** The adaptive line cap's upper bound. */
 const LOG_MAX_TOTAL_LINES = 100;
+/** A log with fewer lines is left alone. */
 const LOG_MIN_LINES = 50;
+/** Leading frames a collapsed trace always keeps. */
 const LOG_TRACE_HEAD_FRAMES = 3;
+/** App-code frames a collapsed trace keeps beyond the head frames. */
 const LOG_TRACE_APP_FRAMES = 5;
 // Upstream _ANSI_RE (CSI SGR colour and style): dropped one-way by the log fold, as non-semantic.
+/** An ANSI SGR colour or style sequence. */
 // eslint-disable-next-line no-control-regex -- \x1b is the escape that starts an ANSI colour sequence, matched on purpose
 const ANSI_RE = /\x1b\[[0-9;]*m/g;
-// Upstream LevelClassifier's exact-casing words. One alternation, longest first, so at the leftmost match the longest word wins
-// (aho-corasick LeftmostLongest); \b is its ASCII word-boundary post-filter (a word that fails it cannot be followed by a
-// shorter word at the same start that passes, nor by one starting inside it).
+/** Upstream LevelClassifier's exact-casing words, each mapped to its level. */
 const LOG_LEVEL_WORDS: ReadonlyMap<string, LogLevel> = new Map(
   ([
     ["error", "ERROR error Error FATAL fatal Fatal CRITICAL critical"],
@@ -3224,19 +3823,35 @@ const LOG_LEVEL_WORDS: ReadonlyMap<string, LogLevel> = new Map(
     ["trace", "TRACE trace Trace"],
   ] as [LogLevel, string][]).flatMap(([level, words]) => words.split(" ").map((w) => ([w, level] as [string, LogLevel]))),
 );
+/**
+ * Upstream LevelClassifier's exact-casing words as one alternation, longest first, so at the leftmost match the longest word
+ * wins (aho-corasick LeftmostLongest); `\b` is its ASCII word-boundary post-filter (a word that fails it cannot be followed by
+ * a shorter word at the same start that passes, nor by one starting inside it).
+ */
 const LOG_LEVEL_RE = new RegExp(`\\b(?:${[...LOG_LEVEL_WORDS.keys()].sort((a, b) => b.length - a.length).join("|")})\\b`);
+/** A `:line:col` location, as a JS frame carries. */
 const LOG_LINE_COL_RE = /:\d+:\d/;
+/** A Rust backtrace frame: `N: 0xHEX`. */
 const LOG_RUST_FRAME_RE = /^\d+: *0x[0-9a-fA-F]/;
+/** A Go goroutine header: `goroutine N [`. */
 const LOG_GOROUTINE_RE = /^goroutine \d+ \[/;
+/** Java's `... N more` trace tail. */
 const LOG_JAVA_MORE_RE = /^\.\.\. \d+\s*more\s*$/;
+/** A line starting with an uppercase letter. */
 const LOG_UPPER_START_RE = /^\p{Uppercase}/u;
+/** A Java frame's dotted symbol. */
 const LOG_JAVA_SYMBOL_RE = /^[A-Za-z0-9._$/]+$/;
+/** A Go call frame's package-qualified symbol. */
 const LOG_GO_SYMBOL_RE = /^[A-Za-z0-9._/*]+$/;
+/** A .NET exception head's type name. */
 const LOG_DOTNET_HEAD_RE = /^[A-Za-z0-9._`+]+$/;
+/** An error label: a dotted identifier. */
 const LOG_LABEL_RE = /^[A-Za-z0-9_.]+$/;
+/** A cargo error code's alphanumerics. */
 const LOG_CODE_RE = /^[A-Za-z0-9]+$/;
-// Upstream RUNTIME_FRAME_PREFIXES (start of the trimmed line) and RUNTIME_FRAME_MARKERS (anywhere).
+/** Upstream RUNTIME_FRAME_PREFIXES: a trimmed frame starting with one is a runtime or stdlib frame. */
 const LOG_RUNTIME_PREFIXES = ["at java.", "at jdk.", "at sun.", "at javax.", "at scala.", "at System.", "at Microsoft.", "runtime.", "created by runtime."];
+/** Upstream RUNTIME_FRAME_MARKERS: a frame holding one anywhere is a runtime or stdlib frame. */
 const LOG_RUNTIME_MARKERS = [
   "site-packages/",
   "/usr/lib/python",
@@ -3256,27 +3871,63 @@ const LOG_RUNTIME_MARKERS = [
 
 /**
  * Upstream LevelClassifier.classify: the level of the first word-boundary-valid level word by position.
+ *
+ * @param line - a log line
+ * @returns its level, "unknown" when it holds no level word
  */
 function logLevel(line: string): LogLevel {
   const m = LOG_LEVEL_RE.exec(line);
   return m ? (LOG_LEVEL_WORDS.get(m[0]) ?? "unknown") : "unknown";
 }
 
-/** @returns upstream is_python_file_frame: `File "<name>", line <N>` */
+/**
+ * Upstream is_python_file_frame: `File "<name>", line <N>`.
+ *
+ * @param s - a trimmed line
+ * @returns whether it is such a frame
+ */
 const isPythonFileFrame = (s: string): boolean => s.startsWith("File \"") && s.includes("\", line ") && /\d$/.test(s);
-/** @returns upstream is_js_at_frame */
+/**
+ * Upstream is_js_at_frame: `at …(…:line:col)`.
+ *
+ * @param s - a trimmed line
+ * @returns whether it is such a frame
+ */
 const isJsAtFrame = (s: string): boolean => s.startsWith("at ") && s.includes("(") && s.includes(")") && LOG_LINE_COL_RE.test(s);
-/** @returns upstream is_java_at_frame: `at <dotted symbol>(` */
+/**
+ * Upstream is_java_at_frame: `at <dotted symbol>(`.
+ *
+ * @param s - a trimmed line
+ * @returns whether it is such a frame
+ */
 const isJavaAtFrame = (s: string): boolean => s.startsWith("at ") && s.includes("(") && LOG_JAVA_SYMBOL_RE.test(s.slice(3, s.indexOf("(")));
-/** @returns upstream is_dotnet_frame: `at <symbol>(<args>) in <file>:line <N>` */
+/**
+ * Upstream is_dotnet_frame: `at <symbol>(<args>) in <file>:line <N>`.
+ *
+ * @param s - a trimmed line
+ * @returns whether it is such a frame
+ */
 const isDotnetFrame = (s: string): boolean => s.startsWith("at ") && s.includes(") in ") && s.includes(":line ");
-/** @returns upstream is_rust_backtrace_frame: `<digits>: 0x<hex>` */
+/**
+ * Upstream is_rust_backtrace_frame: `<digits>: 0x<hex>`.
+ *
+ * @param s - a line
+ * @returns whether it is such a frame
+ */
 const isRustBacktraceFrame = (s: string): boolean => LOG_RUST_FRAME_RE.test(s.trimStart());
-/** @returns upstream is_go_file_frame: a tab-indented `.go:` line with ` +0x` */
+/**
+ * Upstream is_go_file_frame: a tab-indented `.go:` line with ` +0x`.
+ *
+ * @param line - a raw line
+ * @returns whether it is such a frame
+ */
 const isGoFileFrame = (line: string): boolean => line.startsWith("\t") && line.includes(".go:") && line.includes(" +0x");
 
 /**
  * Upstream is_go_call_frame: `created by …`, or a column-0 `pkg.func(...)` call line.
+ *
+ * @param line - a raw line
+ * @returns whether it is such a frame
  */
 function isGoCallFrame(line: string): boolean {
   if (line.startsWith("created by ")) return true;
@@ -3289,6 +3940,9 @@ function isGoCallFrame(line: string): boolean {
 
 /**
  * Upstream is_dotnet_exception_head: `System.InvalidOperationException: message`.
+ *
+ * @param trimmed - a trimmed line
+ * @returns whether it opens a .NET exception
  */
 function isDotnetExceptionHead(trimmed: string): boolean {
   const colon = trimmed.indexOf(":");
@@ -3299,6 +3953,9 @@ function isDotnetExceptionHead(trimmed: string): boolean {
 
 /**
  * Upstream StackTraceDetector::flavor_for: the trace a line opens, if any.
+ *
+ * @param line - a raw line
+ * @returns the flavor it opens, or undefined
  */
 function traceFlavor(line: string): TraceFlavor | undefined {
   const t = line.trimStart();
@@ -3315,6 +3972,11 @@ function traceFlavor(line: string): TraceFlavor | undefined {
 
 /**
  * Upstream StackTraceDetector::terminates: whether `line` ends the active trace of `flavor`, which has claimed `sofar` lines.
+ *
+ * @param flavor - the active trace's flavor
+ * @param line - the next raw line
+ * @param sofar - lines the trace has claimed
+ * @returns whether the trace ends before `line`
  */
 function traceEnds(flavor: TraceFlavor, line: string, sofar: number): boolean {
   const t = line.trimStart();
@@ -3352,28 +4014,48 @@ function traceEnds(flavor: TraceFlavor, line: string, sofar: number): boolean {
   return true;
 }
 
-/** @returns upstream is_frame_line: a stack frame, not a message or chain head */
+/**
+ * Upstream is_frame_line: a stack frame, not a message or chain head.
+ *
+ * @param line - a trace line
+ * @returns whether it is a frame
+ */
 const isFrameLine = (line: string): boolean => {
   const t = line.trimStart();
   return t.startsWith("at ") || (t.startsWith("File \"") && t.includes("\", line ")) || isRustBacktraceFrame(line) || isGoFileFrame(line) || isGoCallFrame(line);
 };
 
-/** @returns upstream is_chain_head_line: chain heads and markers a collapse always keeps */
+/**
+ * Upstream is_chain_head_line: chain heads and markers a collapse always keeps.
+ *
+ * @param line - a trace line
+ * @returns whether it is a chain head or marker
+ */
 const isChainHead = (line: string): boolean => {
   const t = line.trimStart();
   return ["Caused by:", "Suppressed:", "... ", "--->", "--- End of", "During handling", "The above exception"].some((p) => t.startsWith(p));
 };
 
-/** @returns upstream is_runtime_frame: a runtime or stdlib frame */
+/**
+ * Upstream is_runtime_frame: a runtime or stdlib frame.
+ *
+ * @param line - a trace line
+ * @returns whether it is a runtime frame
+ */
 const isRuntimeFrame = (line: string): boolean => {
   const t = line.trimStart();
   return LOG_RUNTIME_PREFIXES.some((p) => t.startsWith(p)) || LOG_RUNTIME_MARKERS.some((m) => line.includes(m));
 };
 
 /**
- * Upstream collapse_trace_frames: keep every message and chain-head line, the first `head` frames and up to `app` app-code frames;
- * each contiguous dropped run becomes one `      [... N frames collapsed]` line in its first line's slot (score 0.8, a stack line).
- * An indented continuation of a dropped frame drops with it.
+ * Upstream collapse_trace_frames: keep every message and chain-head line, the first `head` frames and up to `app` app-code
+ * frames; each contiguous dropped run becomes one `      [... N frames collapsed]` line in its first line's slot (score 0.8, a
+ * stack line). An indented continuation of a dropped frame drops with it.
+ *
+ * @param stack - one stack trace's lines
+ * @param head - frames always kept from the start
+ * @param app - app-code frames kept beyond those
+ * @returns the kept lines (collapse markers included) and the dropped line numbers
  */
 function collapseTraceFrames(stack: readonly LogLine[], head: number, app: number): { kept: LogLine[]; dropped: number[] } {
   const kept: LogLine[] = [];
@@ -3419,6 +4101,9 @@ function collapseTraceFrames(stack: readonly LogLine[], head: number, app: numbe
 
 /**
  * Upstream is_summary_line: separators, `N passed`-style counts, `Tests: N`, TOTAL/Summary, and build/test outcome lines.
+ *
+ * @param line - a log line
+ * @returns whether it is a summary line
  */
 function isSummaryLine(line: string): boolean {
   if (line.startsWith("===") || line.startsWith("---")) return true;
@@ -3435,9 +4120,12 @@ function isSummaryLine(line: string): boolean {
 }
 
 /**
- * Upstream scan_pytest_short_summary: a section opens on a whole `=== … short test summary info … ===` line (a trailing \r
+ * Upstream scan_pytest_short_summary: a section opens on a whole `=== … short test summary info … ===` line (a trailing `\r`
  * ignored) and closes at the next `===` line, its totals line; inside, `FAILED <id>` / `ERROR <id>` lines are entries, the id
  * cut at ` - `.
+ *
+ * @param lines - the log's lines
+ * @returns the entries, totals lines and first header
  */
 function scanPytestSummary(lines: readonly string[]): PytestSummary {
   const scan: PytestSummary = { entries: new Map(), totals: new Set(), header: undefined };
@@ -3463,6 +4151,11 @@ function scanPytestSummary(lines: readonly string[]): PytestSummary {
 
 /**
  * Upstream score_log_line: the level's base, +0.3 in a stack trace, +0.4 on a summary line, at most 1.
+ *
+ * @param level - the line's level
+ * @param stack - whether it is in a stack trace
+ * @param summary - whether it is a summary line
+ * @returns the score, 0 to 1
  */
 function logScore(level: LogLevel, stack: boolean, summary: boolean): number {
   const base = level === "error" || level === "fail" ? 1 : level === "warn" ? 0.5 : level === "debug" ? 0.05 : level === "trace" ? 0.02 : 0.1;
@@ -3473,7 +4166,10 @@ function logScore(level: LogLevel, stack: boolean, summary: boolean): number {
  * Upstream LogCompressor::parse_lines: each line's level, summary membership, score and stack-trace membership, through the
  * per-flavor trace state machine (a trace ends on its flavor's terminator or after 20 lines, where a continuing line opens the
  * next run).
+ *
+ * @param lines - the log's lines
  * @param entries - the pytest short-summary entries
+ * @returns one LogLine per line
  */
 function parseLogLines(lines: readonly string[], entries: ReadonlyMap<number, string>): LogLine[] {
   let active: TraceFlavor | undefined;
@@ -3517,6 +4213,10 @@ function parseLogLines(lines: readonly string[], entries: ReadonlyMap<number, st
 
 /**
  * Upstream select_with_first_last: all when within `max`, else the first, the last, then the best by (score desc, line asc).
+ *
+ * @param lines - the candidates, in line order
+ * @param max - how many to keep
+ * @returns the kept lines
  */
 function firstLastBest(lines: readonly LogLine[], max: number): LogLine[] {
   if (lines.length <= max) return [...lines];
@@ -3534,6 +4234,9 @@ function firstLastBest(lines: readonly LogLine[], max: number): LogLine[] {
 /**
  * Upstream normalize_for_dedupe: the text up to the first `:` or `=` verbatim, then digits → N, `0x…` → ADDR and `/…/` →
  * /PATH/, in that order (so a `0x` address has already lost its 0, as upstream).
+ *
+ * @param content - a warning line
+ * @returns its dedupe key
  */
 function dedupeKey(content: string): string {
   const at = content.search(/[:=]/);
@@ -3551,6 +4254,10 @@ function dedupeKey(content: string): string {
 /**
  * Upstream pytest_cap_reserve: the lines a binding cap keeps while a short summary competes for it, each section's totals line
  * and the first `E ` line before the first section.
+ *
+ * @param logLines - the parsed log
+ * @param scan - its pytest short-summary scan
+ * @returns the reserved line numbers
  */
 function pytestReserve(logLines: readonly LogLine[], scan: PytestSummary): Set<number> {
   const reserved = new Set(scan.totals);
@@ -3563,8 +4270,11 @@ function pytestReserve(logLines: readonly LogLine[], scan: PytestSummary): Set<n
  * Upstream LogCompressor::select_lines: errors and fails (first, last, best 10 each), 5 deduplicated warnings, the first 3 stack
  * traces (20 lines each; a longer one with runtime frames collapsed), every summary line, ±3 context lines (never a collapsed
  * frame), then the adaptive cap by (reserved, score, short-summary entry, line). A line number is taken once, first come.
+ *
+ * @param logLines - the parsed log
+ * @param scan - its pytest short-summary scan
  * @param budget - computeOptimalK's simhash budget
- * @returns in line order
+ * @returns the kept lines, in line order
  */
 function selectLogLines(logLines: readonly LogLine[], scan: PytestSummary, budget: WorkBudget): LogLine[] {
   const cap = computeOptimalK(
@@ -3641,6 +4351,9 @@ function selectLogLines(logLines: readonly LogLine[], scan: PytestSummary, budge
 /**
  * Upstream extract_error_label: a cargo `error[E0425]` code, or an exception type ending in Error, Exception or Warning
  * before a colon (after pytest's `E ` marker), never a bare `ERROR:`.
+ *
+ * @param line - a log line
+ * @returns the label, or undefined
  */
 function errorLabel(line: string): string | undefined {
   const t = line.trim();
@@ -3657,6 +4370,9 @@ function errorLabel(line: string): string | undefined {
 
 /**
  * Upstream extract_source_file: a Python `File "…"` name, or a `--> file:line:col` file holding a dot.
+ *
+ * @param line - a log line
+ * @returns the file, or undefined
  */
 function sourceFile(line: string): string | undefined {
   const t = line.trim();
@@ -3673,6 +4389,10 @@ function sourceFile(line: string): string | undefined {
 /**
  * Upstream summarize_omitted: the dropped lines' distinct files and exception types (at most 5 named) that no kept line shows,
  * as `: K file(s), M exception type(s) (A, B, …)`, or "" when there are none.
+ *
+ * @param all - every parsed line
+ * @param selected - the kept lines
+ * @returns the descriptor
  */
 function omittedDescriptor(all: readonly LogLine[], selected: readonly LogLine[]): string {
   const kept = new Set(selected.map((l) => l.n));
@@ -3705,6 +4425,11 @@ function omittedDescriptor(all: readonly LogLine[], selected: readonly LogLine[]
 /**
  * Upstream LogCompressor::format_output: the kept lines, then `[N lines omitted: E ERROR, F FAIL, W WARN, I INFO; omitted: …]`
  * (counts over every line, levels with none left out, up to 5 omitted pytest short-summary ids named) when lines were omitted.
+ *
+ * @param selected - the kept lines
+ * @param all - every parsed line
+ * @param entries - the pytest short-summary entries
+ * @returns the compressed log text
  */
 function formatLogOutput(selected: readonly LogLine[], all: readonly LogLine[], entries: ReadonlyMap<number, string>): string {
   const out = selected.map((l) => l.content);
@@ -3733,6 +4458,9 @@ function formatLogOutput(selected: readonly LogLine[], all: readonly LogLine[], 
 /**
  * The log fold (upstream compact_lossless "log"): ANSI colour dropped one-way, then runs of identical lines collapsed to
  * `... (repeated N times)`, kept only when it expands back to the de-coloured text and is shorter than the input.
+ *
+ * @param text - a log text
+ * @returns the folded text (nothing offloaded), or undefined
  */
 export function foldLog(text: string): { text: string; offloaded: [string, string][] } | undefined {
   const baseline = text.replace(ANSI_RE, "");
@@ -3748,6 +4476,9 @@ export function foldLog(text: string): { text: string; offloaded: [string, strin
  * the retrieval line is always added ("Retrieve original", no 0.5 ratio gate), the hash is contentHash, the simhash diversity
  * count is budgeted (an exhausted budget keeps 100), and the format detector (cosmetic) is not ported. Undefined under 50
  * lines or when the result is not shorter.
+ *
+ * @param text - a log text
+ * @returns the compressed text and the stored original, or undefined
  */
 export function compressLog(text: string): { text: string; offloaded: [string, string][] } | undefined {
   const lines = text.split("\n");
@@ -3765,25 +4496,37 @@ export function compressLog(text: string): { text: string; offloaded: [string, s
 // Search compressor: a port of headroom's search_compressor.rs (compress_with_store with SearchCompressorConfig::default()) and
 // the "search" kind of lossless_compaction.py compact_lossless (search_heading, search_dir_heading and their inverses).
 
+/** One parsed grep match: its file, line number, content and score. */
 type SearchMatch = { file: string; line: number; content: string; score: number };
 
 // Upstream SearchCompressorConfig::default(): always_keep_first and always_keep_last are true there and inlined here.
+/** At most this many matches are kept per file. */
 const SEARCH_MAX_PER_FILE = 5;
+/** The adaptive match cap's upper bound. */
 const SEARCH_MAX_TOTAL = 30;
+/** At most this many files are kept. */
 const SEARCH_MAX_FILES = 15;
+/** The adaptive match cap's lower bound. */
 const SEARCH_MIN_K = 5;
 // Upstream lossless_compaction.py _GREP_ROW_RE, _HEADING_ROW_RE and _DIR_DATA_RE; [^\n]* stands in for Python's `.`, which,
 // unlike JS's, also matches a \r.
+/** A `file:line:content` grep row. */
 const GREP_ROW_RE = /^([^\n:]+):(\d+):([^\n]*)$/;
+/** A `line:content` row under a file heading. */
 const HEADING_ROW_RE = /^(\d+):([^\n]*)$/;
+/** A `name:line:content` row under a directory heading. */
 const DIR_DATA_RE = /^([^/\n:]+):(\d+):([^\n]*)$/;
 // Upstream KeywordDetector in ImportanceContext::Search: the leftmost whole-word error or importance keyword decides (longest
 // first at one start, case-insensitive); warning words count only when neither matched.
+/** The error keywords; the leftmost whole-word error or importance keyword decides a match's bonus. */
 const SEARCH_ERROR_WORDS = new Set(["error", "exception", "fail", "failed", "failure", "fatal", "critical", "crash", "panic", "abort", "timeout", "denied", "rejected"]);
+/** The error and importance keywords as one case-insensitive whole-word alternation, longest first. */
 const SEARCH_UNIVERSAL_RE = new RegExp(`\\b(?:${[...SEARCH_ERROR_WORDS, "important", "note", "todo", "fixme", "hack", "xxx", "bug", "fix"].sort((a, b) => b.length - a.length).join("|")})\\b`, "i");
+/** The warning words, which count only when no error or importance keyword matched. */
 const SEARCH_WARN_RE = /\b(?:warning|warn)\b/i;
+/** A Windows drive prefix (`C:\` or `C:/`). */
 const WINDOWS_DRIVE_RE = /^[A-Za-z]:[\\/]/;
-// Context-word substring matching (search and diff scoring) does at most about this many character comparisons.
+/** Context-word substring matching (search and diff scoring) does at most about this many character comparisons. */
 const CONTEXT_MATCH_BUDGET = 16_777_216;
 
 /**
@@ -3791,7 +4534,10 @@ const CONTEXT_MATCH_BUDGET = 16_777_216;
  * longer than 2 code points, deduped in first-seen (newest-first) order, and at most CONTEXT_MATCH_BUDGET / chars of them, so
  * matching them against `chars` characters stays bounded. Deviation: upstream matches every word (the diff compressor even
  * counts a repeated word twice).
+ *
+ * @param query - the conversation query
  * @param chars - the characters the words will be matched against
+ * @returns the context words
  */
 function contextWords(query: string, chars: number): string[] {
   const words = [
@@ -3807,6 +4553,9 @@ function contextWords(query: string, chars: number): string[] {
 
 /**
  * Upstream has_extension_dot: a dot followed by a run of 1 to 8 ASCII alphanumerics holding a letter (`.md`, `.7z`, not `.3`).
+ *
+ * @param tok - a path token
+ * @returns whether it holds an extension dot
  */
 function hasExtensionDot(tok: string): boolean {
   for (let i = tok.indexOf("."); i >= 0 && i + 1 < tok.length; i = tok.indexOf(".", i + 1)) {
@@ -3823,8 +4572,13 @@ function hasExtensionDot(tok: string): boolean {
 }
 
 /**
- * Upstream last_segment_has_extension over line[0, end): the path's last `/` or `\` segment carries an extension. The scan is
- * charged to `budget`.
+ * Upstream last_segment_has_extension over `line[0, end)`: the path's last `/` or `\` segment carries an extension. The scan
+ * is charged to `budget`.
+ *
+ * @param line - a trimmed grep line
+ * @param end - where the path ends
+ * @param budget - charged per character scanned
+ * @returns whether the last segment has an extension
  */
 function lastSegmentHasExtension(line: string, end: number, budget: WorkBudget): boolean {
   let s = end;
@@ -3834,8 +4588,13 @@ function lastSegmentHasExtension(line: string, end: number, budget: WorkBudget):
 }
 
 /**
- * Upstream path_continues over line[from…]: the first whitespace-free token after the marker still holds path structure
+ * Upstream path_continues over `line[from…]`: the first whitespace-free token after the marker still holds path structure
  * (a `/`, a `\` or an extension dot). The scan is charged to `budget`.
+ *
+ * @param line - a trimmed grep line
+ * @param from - where the token starts
+ * @param budget - charged per character scanned
+ * @returns whether the path continues
  */
 function pathContinues(line: string, from: number, budget: WorkBudget): boolean {
   let a = from;
@@ -3851,7 +4610,11 @@ function pathContinues(line: string, from: number, budget: WorkBudget): boolean 
  * Upstream scan_marker: one tier's `<sep><digits><sep>` marker in a trimmed grep line as [path end, digits start, digits end],
  * and whether the dash tier positively confirmed it as the path/body boundary (else it is the leftmost). The colon and dash
  * tiers only look inside the leading whitespace-free run; a separator right after another one never opens a marker.
+ *
+ * @param line - a trimmed grep line
+ * @param tier - which separator tier to scan
  * @param budget - charged for the dash tier's path checks
+ * @returns the marker and whether it is confirmed, or undefined
  */
 function scanMarker(line: string, tier: "colon" | "dash" | "any", budget: WorkBudget): [[number, number, number], boolean] | undefined {
   const n = line.length;
@@ -3895,8 +4658,10 @@ function scanMarker(line: string, tier: "colon" | "dash" | "any", budget: WorkBu
  * Upstream parse_match_line: the colon tier wins, unless the dash tier confirmed a boundary before its marker (a `-` context
  * line whose body holds `name:N:`); else the dash tier; else the permissive leftmost marker. Deviation: a line number beyond
  * Number.MAX_SAFE_INTEGER leaves the line unparsed (upstream: u64).
+ *
  * @param line - a trimmed line
- * @returns file, line number, content
+ * @param budget - charged by the dash tier's path checks
+ * @returns file, line number, content; undefined when the line does not parse
  */
 function parseMatchLine(line: string, budget: WorkBudget): [string, number, string] | undefined {
   const colon = scanMarker(line, "colon", budget);
@@ -3911,6 +4676,9 @@ function parseMatchLine(line: string, budget: WorkBudget): [string, number, stri
 /**
  * Upstream KeywordDetector.score in ImportanceContext::Search as score_matches boosts it: an error word 0.5, an importance word
  * 0.3, else a warning word 0.4.
+ *
+ * @param content - a match's content
+ * @returns the boost, 0 when no keyword matches
  */
 function searchBoost(content: string): number {
   const m = SEARCH_UNIVERSAL_RE.exec(content);
@@ -3921,6 +4689,9 @@ function searchBoost(content: string): number {
 /**
  * Upstream search_heading: consecutive `path:line:content` rows of one path become the path once, then `line:content` rows.
  * A timestamped log row is no grep row.
+ *
+ * @param text - grep output
+ * @returns the headed text
  */
 function searchHeading(text: string): string {
   const [lines, trailing] = splitKeepTrailing(text);
@@ -3946,6 +4717,9 @@ function searchHeading(text: string): string {
 /**
  * Upstream search_unheading (searchHeading's exact inverse): a line that is no `line:content` row and is followed by one is a
  * header, prefixed onto the rows under it.
+ *
+ * @param text - searchHeading output
+ * @returns the grep rows
  */
 function searchUnheading(text: string): string {
   const [lines, trailing] = splitKeepTrailing(text);
@@ -3967,6 +4741,9 @@ function searchUnheading(text: string): string {
 /**
  * Upstream search_dir_heading: consecutive grep rows whose paths share a directory become the directory once (ending in `/`),
  * then `base:line:content` rows. Rows whose path has no `/` pass through.
+ *
+ * @param text - grep output
+ * @returns the directory-headed text
  */
 function searchDirHeading(text: string): string {
   const [lines, trailing] = splitKeepTrailing(text);
@@ -3994,6 +4771,9 @@ function searchDirHeading(text: string): string {
 /**
  * Upstream search_dir_unheading (searchDirHeading's exact inverse): a line ending in `/` followed by a `base:line:content` row is
  * a header, prefixed onto the rows under it.
+ *
+ * @param text - searchDirHeading output
+ * @returns the grep rows
  */
 function searchDirUnheading(text: string): string {
   const [lines, trailing] = splitKeepTrailing(text);
@@ -4015,6 +4795,9 @@ function searchDirUnheading(text: string): string {
 /**
  * The search fold (upstream compact_lossless "search"): the file-heading and directory-heading folds, each kept only when its
  * inverse gives the text back exactly; the smaller one wins when it is shorter than the text.
+ *
+ * @param text - grep output
+ * @returns the folded text (nothing offloaded), or undefined when no fold is shorter
  */
 export function foldSearch(text: string): { text: string; offloaded: [string, string][] } | undefined {
   let best = text;
@@ -4039,7 +4822,10 @@ export function foldSearch(text: string): { text: string; offloaded: [string, st
  * contentHash, context words are capped (contextWords) and CJK query bigrams are not added, and the parse's path checks and
  * the simhash count are budgeted (an exhausted parse declines), and a text holding a compiler or linter diagnostic row
  * (DIAGNOSTIC_ROW_RE) declines. Undefined when nothing parses or the result is not shorter.
+ *
+ * @param text - grep or ripgrep output
  * @param query - the conversation context (crushQuery), "" for none
+ * @returns the compressed text and its stored original, or undefined
  */
 export function compressSearch(text: string, query: string): { text: string; offloaded: [string, string][] } | undefined {
   const budget = { left: SCAN_BUDGET_PER_CHAR * text.length + SCAN_BUDGET_FLOOR };
@@ -4113,6 +4899,7 @@ export function compressSearch(text: string, query: string): { text: string; off
 // Diff compressor: a port of headroom's diff_compressor.rs (compress_with_store with DiffCompressorConfig::default()) and the
 // "diff" kind of lossless_compaction.py compact_lossless (diff_strip_index).
 
+/** One hunk: its header line, its lines, its `+`/`-` counts and its score (upstream DiffHunk). */
 type DiffHunk = { header: string; lines: string[]; additions: number; deletions: number; score: number };
 /**
  * One file section: its header, `---`/`+++` lines (or ""), hunks, binary/new/deleted flags and rename lines (upstream DiffFile).
@@ -4120,19 +4907,25 @@ type DiffHunk = { header: string; lines: string[]; additions: number; deletions:
 type DiffFile = { header: string; prefix: string[]; oldFile: string; newFile: string; hunks: DiffHunk[]; binary: boolean; added: boolean; deleted: boolean; renames: string[] };
 
 // Upstream DiffCompressorConfig::default() (min_lines_for_ccr gates the whole compression) and its score constants.
+/** At most this many context lines around a change. */
 const DIFF_MAX_CONTEXT = 2;
+/** At most this many hunks per file. */
 const DIFF_MAX_HUNKS = 10;
+/** At most this many files. */
 const DIFF_MAX_FILES = 20;
-// The footer names at most this many files the cap dropped.
+/** The footer names at most this many files the cap dropped. */
 const DIFF_OMITTED_NAMES = 10;
+/** A diff under this many lines is left alone (upstream min_lines_for_ccr). */
 const DIFF_MIN_LINES = 50;
-// Upstream _DIFF_INDEX_RE: git's blob bookkeeping line, which a diff does not need to apply.
+/** Upstream _DIFF_INDEX_RE: git's blob bookkeeping line, which a diff does not need to apply. */
 const DIFF_INDEX_RE = /^index [0-9a-fA-F]+\.\.[0-9a-fA-F]+( [0-7]+)?$/;
-// Upstream hunk_header_regex: @@ (regular), @@@ (3-way) and @@@@ (4-way merge) headers; 5 or more @ fall through as content.
+/** Upstream hunk_header_regex: `@@` (regular), `@@@` (3-way) and `@@@@` (4-way merge) headers; 5 or more `@` fall through as content. */
 const DIFF_HUNK_RE = /^(?:@@ -\d+(?:,\d+)? \+\d+(?:,\d+)? @@|@@@ -\d+(?:,\d+)? -\d+(?:,\d+)? \+\d+(?:,\d+)? @@@|@@@@ -\d+(?:,\d+)? -\d+(?:,\d+)? -\d+(?:,\d+)? \+\d+(?:,\d+)? @@@@)/;
+/** The first `+N` of a hunk header: its new start line. */
 const DIFF_NEW_START_RE = /\+(\d+)/;
+/** A binary-file line of a diff. */
 const DIFF_BINARY_RE = /^Binary files [^\n]+ differ$/;
-// Upstream priority_patterns (PRIORITY_PATTERNS_DIFF): one +0.3 when any matches the lowercased hunk.
+/** Upstream priority_patterns (PRIORITY_PATTERNS_DIFF): one +0.3 when any matches the lowercased hunk. */
 const DIFF_PRIORITY_RES = [
   /\b(?:error|exception|fail(?:ed|ure)?|fatal|critical|crash|panic)\b/i,
   /\b(?:important|note|todo|fixme|hack|xxx|bug|fix)\b/i,
@@ -4142,6 +4935,9 @@ const DIFF_PRIORITY_RES = [
 /**
  * Upstream is_diff_header: `diff --git a/<x> b/<y>`, `diff --combined <path>` or `diff --cc <path>`. Hand-checked: the
  * `^diff --git a/(.+) b/(.+)$` regex would backtrack quadratically on a long line with many ` b/`.
+ *
+ * @param line - one diff line
+ * @returns whether it starts a file section
  */
 function isDiffHeader(line: string): boolean {
   // Deviation: a path holding a non-ASCII or special byte is quoted (`"a/f\303\274r.txt"`).
@@ -4150,7 +4946,7 @@ function isDiffHeader(line: string): boolean {
   return (line.startsWith("diff --combined ") && line.length > 16) || (line.startsWith("diff --cc ") && line.length > 10);
 }
 
-// A commit line of a multi-commit patch series (`commit <sha>`, optionally decorated).
+/** A commit line of a multi-commit patch series (`commit <sha>`, optionally decorated). */
 const DIFF_COMMIT_RE = /^commit [0-9a-f]{7,64}(?: \(.*\))?$/;
 
 /**
@@ -4159,6 +4955,9 @@ const DIFF_COMMIT_RE = /^commit [0-9a-f]{7,64}(?: \(.*\))?$/;
  * count, and every line is kept. Other header lines outside a hunk (`index`, `old mode`, `new mode`) are dropped, as upstream.
  * Deviation: a `commit <sha>` line after a file starts a commit header, kept with its Author, Date and message lines as the
  * next file's `prefix` (or in `post` when no file follows), so a multi-commit log keeps every commit's header.
+ *
+ * @param lines - the diff's lines
+ * @returns the pre-diff lines, the file sections and any trailing commit header lines
  */
 function parseDiff(lines: readonly string[]): { pre: string[]; files: DiffFile[]; post: string[] } {
   const pre: string[] = [];
@@ -4221,7 +5020,9 @@ function parseDiff(lines: readonly string[]): { pre: string[]; files: DiffFile[]
 /**
  * Upstream score_hunks: min(0.3, changes × 0.03), +0.2 per query context word in the lowercased hunk, +0.3 once for a priority
  * pattern, at most 1. Deviations: context words are deduped and capped (contextWords), no CJK bigrams.
+ *
  * @param files - mutated: each hunk's score
+ * @param query - the conversation context (crushQuery), "" for none
  * @param chars - the text's length, for contextWords' cap
  */
 function scoreHunks(files: readonly DiffFile[], query: string, chars: number): void {
@@ -4239,6 +5040,9 @@ function scoreHunks(files: readonly DiffFile[], query: string, chars: number): v
 
 /**
  * Upstream extract_line_number: the first `+N` in a hunk header, else 0.
+ *
+ * @param header - a hunk header line
+ * @returns the new start line
  */
 function hunkNewStart(header: string): number {
   const n = Number(DIFF_NEW_START_RE.exec(header)?.[1] ?? 0);
@@ -4248,6 +5052,9 @@ function hunkNewStart(header: string): number {
 /**
  * Upstream select_hunks: over 10 hunks, the first, the last and the 8 best middle hunks by score (stable), re-sorted (stably) by
  * their header's new start line.
+ *
+ * @param hunks - one file's hunks
+ * @returns the kept hunks
  */
 function selectHunks(hunks: DiffHunk[]): DiffHunk[] {
   if (hunks.length <= DIFF_MAX_HUNKS) return hunks;
@@ -4261,6 +5068,9 @@ function selectHunks(hunks: DiffHunk[]): DiffHunk[] {
 /**
  * Upstream reduce_context: the lines within 2 of a `+`/`-` line, plus every `\` line, in order; a hunk without changes keeps its
  * first 2 lines.
+ *
+ * @param h - the hunk
+ * @returns a copy with the trimmed lines
  */
 function reduceContext(h: DiffHunk): DiffHunk {
   const n = h.lines.length;
@@ -4278,6 +5088,9 @@ function reduceContext(h: DiffHunk): DiffHunk {
 /**
  * The diff fold (upstream compact_lossless "diff"): `index <sha>..<sha> [mode]` lines dropped, when that shortens the text. No
  * inverse check, as upstream; the router only calls it on diff-labelled text.
+ *
+ * @param text - a diff
+ * @returns the stripped text (nothing offloaded), or undefined when that does not shorten it
  */
 export function foldDiff(text: string): { text: string; offloaded: [string, string][] } | undefined {
   const [lines, trailing] = splitKeepTrailing(text);
@@ -4291,13 +5104,16 @@ export function foldDiff(text: string): { text: string; offloaded: [string, stri
 /**
  * Upstream DiffCompressor::compress_with_store with its default config: a diff of 50+ lines keeps its pre-diff lines, at most 20
  * files (past 20 the most-changed, in that order), per file at most 10 hunks (the first, the last and the best-scored middle
- * ones) trimmed to 2 context lines around each change, with mode lines normalised to 100644 and binary lines to `Binary files
- * differ`, then `[N files changed, +A -D lines, H hunks omitted]` and `[N lines compressed to M. Retrieve original: hash=H]`
+ * ones) trimmed to 2 context lines around each change, with mode lines normalised to 100644 and binary lines to
+ * `Binary files differ`, then `[N files changed, +A -D lines, H hunks omitted]` and `[N lines compressed to M. Retrieve original: hash=H]`
  * with the input stored under H. Deviations: the retrieval line is always added ("Retrieve original", no 0.8 line-ratio gate,
  * so a result is returned only when shorter), the hash is contentHash, hunks are scored only when a file has more than 10 (the
  * score is read nowhere else), and context words are deduped and capped. Undefined under 50 lines, without a file header, or
  * when the result is not shorter.
+ *
+ * @param text - a diff
  * @param query - the conversation context (crushQuery), "" for none
+ * @returns the compressed diff and its stored original, or undefined
  */
 export function compressDiff(text: string, query: string): { text: string; offloaded: [string, string][] } | undefined {
   const lines = text.split("\n"); // "\n" only: a "\r" stays on its line, as upstream
@@ -4357,27 +5173,44 @@ export function compressDiff(text: string, query: string): { text: string; offlo
 // and the "text" kind of lossless_compaction.py compact_lossless. It stands in for upstream's Kompress (ML) on prose.
 
 // Upstream TextCrusherConfig::default() (target_ratio is a constant here, not clamped per call).
+/** Kept characters as a fraction of the input (upstream target_ratio). */
 const TEXT_TARGET_RATIO = 0.5;
+/** Score weight of a segment's position. */
 const TEXT_W_RECENCY = 1.0;
+/** Score weight of a segment's BM25 relevance. */
 const TEXT_W_RELEVANCE = 2.0;
+/** Score weight of a segment's salient-word share. */
 const TEXT_W_SALIENCE = 1.5;
+/** A segment under this many characters scores × 0.25. */
 const TEXT_MIN_SEGMENT_CHARS = 12;
+/** A segment whose shingles are covered this much by kept ones is skipped as a near duplicate. */
 const TEXT_NEAR_DUP = 0.85;
+/** A text under this many segments passes through. */
 const TEXT_MIN_SEGMENTS = 6;
-// Upstream is_cjk exactly: CJK punctuation, kana, ideographs (BMP and astral), Hangul and half/full-width forms. CJK_RANGES
-// (bigramCurve's) is narrower and stays as it is.
+/**
+ * Upstream is_cjk exactly: CJK punctuation, kana, ideographs (BMP and astral), Hangul and half/full-width forms. CJK_RANGES
+ * (bigramCurve's) is narrower and stays as it is.
+ */
 const TEXT_CJK_RE = /[\u{3000}-\u{303f}\u{3040}-\u{30ff}\u{3400}-\u{4dbf}\u{4e00}-\u{9fff}\u{ac00}-\u{d7af}\u{f900}-\u{faff}\u{ff00}-\u{ffef}\u{20000}-\u{2fa1f}]/u;
-// Upstream tokens_ascii: runs of Rust is_alphanumeric (Alphabetic or Numeric) or `_`, lowercased. Not BM25_TOKEN_RE.
+/** Upstream tokens_ascii: runs of Rust is_alphanumeric (Alphabetic or Numeric) or `_`, lowercased. Not BM25_TOKEN_RE. */
 const TEXT_TOKEN_RE = /[\p{Alphabetic}\p{N}_]+/gu;
+/** One alphanumeric code point (Rust is_alphanumeric), for trimToWord. */
 const TEXT_WORD_CHAR_RE = /[\p{Alphabetic}\p{N}]/u;
+/** Every letter of a word, for isSalient's ALLCAPS check. */
 const TEXT_LETTER_RE = /\p{Alphabetic}/gu;
+/** One uppercase letter. */
 const TEXT_UPPER_RE = /^\p{Uppercase}$/u;
+/** A dotted identifier part's first character: a letter or `_`. */
 const TEXT_IDENT_START_RE = /^[\p{Alphabetic}_]/u;
+/** Upstream is_salient's error/status keywords. */
 const TEXT_KEYWORDS = new Set(["error", "exception", "failed", "failure", "fail", "warning", "traceback", "assert", "todo", "fixme"]);
 
 /**
  * Upstream split_segments_ascii: each trimmed non-empty line, cut after `.`, `!` or `?` and the whitespace that follows it,
  * each piece trimmed, empty pieces dropped.
+ *
+ * @param text - the prose
+ * @returns the segments, in order
  */
 function splitSegments(text: string): string[] {
   const segs: string[] = [];
@@ -4409,6 +5242,9 @@ function splitSegments(text: string): string[] {
  * Whether a text reads as prose: at least half its non-empty lines hold a sentence end (`.`, `!` or `?` before whitespace or
  * the line end). Deviation (user decision): the text crusher and the relevance split run only on prose, since upstream's
  * one-segment-per-line fallback would halve a Glob, find, ls or `git log --oneline` listing. One linear pass.
+ *
+ * @param text - a tool-result text
+ * @returns true for prose
  */
 export function isProse(text: string): boolean {
   let lines = 0;
@@ -4431,6 +5267,9 @@ export function isProse(text: string): boolean {
 /**
  * Upstream trim_matches(|c| !c.is_alphanumeric()), by code points and without a regex (a backtracking one would be quadratic on
  * a long run of punctuation).
+ *
+ * @param word - a whitespace-separated word
+ * @returns the word without its leading and trailing non-alphanumerics
  */
 function trimToWord(word: string): string {
   const cps = Array.from(word);
@@ -4444,6 +5283,9 @@ function trimToWord(word: string): string {
 /**
  * Upstream is_salient: a word carrying hard-to-reconstruct information, holding an ASCII digit, being an error/status keyword
  * once trimmed of non-alphanumerics, ALLCAPS (2+ letters, all uppercase), or a dotted identifier (`foo.bar`).
+ *
+ * @param word - a whitespace-separated word
+ * @returns true when salient
  */
 function isSalient(word: string): boolean {
   if (/[0-9]/.test(word)) return true;
@@ -4455,7 +5297,10 @@ function isSalient(word: string): boolean {
 }
 
 /**
- * Upstream shingles(words, 3): the 3-token windows joined by \u0001; a segment of 1 or 2 tokens gives all its sub-windows.
+ * Upstream shingles(words, 3): the 3-token windows joined by `\u0001`; a segment of 1 or 2 tokens gives all its sub-windows.
+ *
+ * @param words - a segment's tokens
+ * @returns the shingle set
  */
 function shingles(words: readonly string[]): Set<string> {
   const set: Set<string> = new Set();
@@ -4467,6 +5312,9 @@ function shingles(words: readonly string[]): Set<string> {
 /**
  * The text fold (upstream compact_lossless "text"): runs of identical lines collapsed to `... (repeated N times)`, kept only when
  * it expands back to the text and is shorter.
+ *
+ * @param text - a tool-result text
+ * @returns the folded text (nothing offloaded), or undefined
  */
 export function foldText(text: string): { text: string; offloaded: [string, string][] } | undefined {
   const cand = collapseRuns(text);
@@ -4478,11 +5326,14 @@ export function foldText(text: string): { text: string; offloaded: [string, stri
  * Upstream TextCrusher::compress (the ASCII path, default config): prose split into sentence segments, each scored by recency
  * (1.0 × (i+1)/n), BM25 relevance to the query (2.0 ×) and salience (1.5 × salient words / (words + 1)), × 0.25 under 12 chars;
  * then, best first, segments are kept until half the characters are, skipping one whose 3-token shingles are 85% covered by kept
- * ones. The kept segments, in order and joined by \n, end with `[Text crushed: K of N segments kept. Retrieve original: hash=H]`
+ * ones. The kept segments, in order and joined by `\n`, end with `[Text crushed: K of N segments kept. Retrieve original: hash=H]`
  * and the input is stored under H. Deviations: text holding a CJK character declines (upstream's ICU path is not ported), lengths
  * count UTF-16 units where upstream counts UTF-8 bytes, and the retrieval line is the mod's own. Undefined under 6 segments or
  * when the result is not shorter.
+ *
+ * @param text - the prose
  * @param query - the conversation context (crushQuery), "" for none
+ * @returns the crushed text and its stored original, or undefined
  */
 export function crushText(text: string, query: string): { text: string; offloaded: [string, string][] } | undefined {
   if (TEXT_CJK_RE.test(text)) return undefined;
@@ -4524,16 +5375,23 @@ export function crushText(text: string, query: string): { text: string; offloade
 // Relevance split: a port of headroom's relevance_split.py (segment, _otsu_threshold, adaptive_threshold, plan_relevance_split)
 // and content_router.py _relevance_split_compress, routed on prose only (user decision; upstream splits LOG and SEARCH output).
 
+/** Upstream segment's default window: lines per record. */
 const SPLIT_WINDOW = 8;
+/** Upstream segment's default max_chars: characters per record. */
 const SPLIT_MAX_CHARS = 1200;
-// Upstream RelevanceScorerConfig.relevance_threshold: the KEEP cut's floor.
+/** Upstream RelevanceScorerConfig.relevance_threshold: the KEEP cut's floor. */
 const SPLIT_FLOOR = 0.25;
 
 /**
  * Upstream segment(content, window, max_chars): a lossless partition (`segs.join("") === text`) into blank-line-delimited
  * blocks, each packed into windows of at most `window` lines, an indented continuation line held past that, and at most
- * `maxChars` characters; a single longer line stays whole. Deviation: lines split on \n only (Python's splitlines also splits on
- * \r, \v, \f, \x1c-\x1e, \x85, U+2028 and U+2029).
+ * `maxChars` characters; a single longer line stays whole. Deviation: lines split on `\n` only (Python's splitlines also splits on
+ * `\r`, `\v`, `\f`, `\x1c`-`\x1e`, `\x85`, U+2028 and U+2029).
+ *
+ * @param text - the text to partition
+ * @param window - at most this many lines per record
+ * @param maxChars - at most this many characters per record
+ * @returns the records, joining back to `text`
  */
 export function segmentRecords(text: string, window: number = SPLIT_WINDOW, maxChars: number = SPLIT_MAX_CHARS): string[] {
   const lines: string[] = [];
@@ -4572,7 +5430,9 @@ export function segmentRecords(text: string, window: number = SPLIT_WINDOW, maxC
 
 /**
  * Upstream _otsu_threshold: the midpoint of the adjacent sorted pair that maximises the between-class variance.
+ *
  * @param values - at least one
+ * @returns the cut
  */
 export function otsuThreshold(values: readonly number[]): number {
   const xs = [...values].sort((a, b) => a - b);
@@ -4598,6 +5458,10 @@ export function otsuThreshold(values: readonly number[]): number {
 /**
  * Upstream adaptive_threshold: `floor` when fewer than 2 distinct values remain after rounding to 9 decimals, else the Otsu cut
  * of the raw values, at least `floor`.
+ *
+ * @param values - the records' scores
+ * @param floor - the lowest cut
+ * @returns the cut
  */
 export function adaptiveThreshold(values: readonly number[], floor: number): number {
   if (new Set(values.map((v) => Math.round(v * 1e9) / 1e9)).size < 2) return floor;
@@ -4609,7 +5473,10 @@ export function adaptiveThreshold(values: readonly number[], floor: number): num
  * The outer walk is noJsonSpans' (budget 4 per character + 4096, the `known` memo reused); spans and cuts are merged in one
  * linear pass. An exhausted budget counts as straddling. Deviation: any balanced span counts (upstream protects only spans that
  * parse as JSON documents or record arrays), which errs on keeping the text whole; one-line spans never straddle.
+ *
+ * @param text - the segmented text
  * @param segs - segmentRecords(text)
+ * @returns true when a span straddles a cut or the budget ran out
  */
 function jsonStraddles(text: string, segs: readonly string[]): boolean {
   const n = text.length;
@@ -4655,8 +5522,11 @@ function jsonStraddles(text: string, segs: readonly string[]): boolean {
  * Adopted only when strictly shorter than the baseline: foldText's whole-text fold while `foldOn` (or the text when it
  * declines), else the text. Undefined for an empty query, a single record, a multi-line bracket span across a cut, no KEEP run
  * (never an all-DROP output; user decision) or no DROP run.
+ *
+ * @param text - the prose
  * @param query - the conversation context (crushQuery)
  * @param foldOn - whether the text crusher's lever, the owner of foldText, is on
+ * @returns the split text and its stored original, or undefined
  */
 export function splitRelevance(text: string, query: string, foldOn: boolean): { text: string; offloaded: [string, string][] } | undefined {
   if (query.trim() === "") return undefined;
@@ -4724,23 +5594,29 @@ const ROUTES: Readonly<Record<ContentType, readonly RouteStep[]>> = {
   text: ["split", "textcrush", "textfold", "elide"],
 };
 
-// The router-wide floor: a shorter text skips detection and every step. The elider returns early below its line minimum and
-// the crusher wants more; the new steps' own upstream floors are lower (search none, the split 2 records, log and diff 50
-// lines, prose_field 256 bytes), but under 300 characters a retrieval line would eat most of any saving.
+/**
+ * The router-wide floor: a shorter text skips detection and every step. The elider returns early below its line minimum and
+ * the crusher wants more; the new steps' own upstream floors are lower (search none, the split 2 records, log and diff 50
+ * lines, prose_field 256 bytes), but under 300 characters a retrieval line would eat most of any saving.
+ */
 const ROUTE_MIN_CHARS = Math.min(CRUSH_MIN_CHARS, DENSE_MIN_LINE_CHARS);
-// The steps whose rewrite the route goes on with (upstream _DENSE_ELIDE_AFTER's HTML, LOG, SEARCH and TEXT members): the
-// elider then runs on the extraction or the lossy output. The SmartCrusher, the config compressor, the diff compressor, every
-// fold and the relevance split end the route, as upstream leaves SMART_CRUSHER, CONFIG and DIFF out and returns a kept fold
-// or a split before its elision point.
+/**
+ * The steps whose rewrite the route goes on with (upstream _DENSE_ELIDE_AFTER's HTML, LOG, SEARCH and TEXT members): the
+ * elider then runs on the extraction or the lossy output. The SmartCrusher, the config compressor, the diff compressor, every
+ * fold and the relevance split end the route, as upstream leaves SMART_CRUSHER, CONFIG and DIFF out and returns a kept fold
+ * or a split before its elision point.
+ */
 const ELIDE_AFTER: ReadonlySet<RouteStep> = new Set(["extract", "log", "search", "textcrush"]);
-// Upstream _DEFAULT_LOSSY_MIN_EXTRA_SAVINGS: a lossy step must save this fraction beyond its kind's fold.
+/** Upstream _DEFAULT_LOSSY_MIN_EXTRA_SAVINGS: a lossy step must save this fraction beyond its kind's fold. */
 const LOSSY_MIN_EXTRA_SAVINGS = 0.05;
 
 /**
  * Upstream's lossless_then_lossy gate: a lossy result is kept only when it is at most (1 - LOSSY_MIN_EXTRA_SAVINGS) of its kind's
  * fold (the floor); when the fold declined, the step's own strictly-shorter contract has already decided.
+ *
  * @param r - the lossy step's result
  * @param floor - the kind's fold of the same text, undefined when it declined
+ * @returns whether the lossy result is adopted
  */
 function overFold(r: { text: string }, floor: { text: string } | undefined): boolean {
   return floor === undefined || r.text.length <= floor.text.length * (1 - LOSSY_MIN_EXTRA_SAVINGS);
@@ -4750,6 +5626,9 @@ function overFold(r: { text: string }, floor: { text: string } | undefined): boo
 
 /**
  * A tool_result block's texts as the model reads them: string content, or each text block of array content.
+ *
+ * @param block - a tool_result block
+ * @returns its texts, empty when it holds none
  */
 function resultTexts(block: Record<string, unknown>): string[] {
   const c = block.content;
@@ -4761,21 +5640,26 @@ function resultTexts(block: Record<string, unknown>): string[] {
  * A row whose result is never rewritten: a headroom_retrieve result (the original text itself, so rewriting it again
  * would loop; matched by name in any namespace, as a row's `origin.tool` is not live-verified to carry the full one) and
  * the mod's own storage tools.
+ *
  * @param tool - a row's origin tool
+ * @returns true for a protected tool
  */
 function isProtectedTool(tool: string): boolean {
   return tool === RETRIEVE_NAME || tool.endsWith(RETRIEVE_SUFFIX) || tool.startsWith(OWN_STORAGE_PREFIX);
 }
 
-// Tools whose results the model reads back verbatim to build its next Edit: a Read file, an Edit/Write `cat -n` snippet.
+/** Tools whose results the model reads back verbatim to build its next Edit: a Read file, an Edit/Write `cat -n` snippet. */
 const VERBATIM_TOOLS = new Set(["Read", "Edit", "Write", "NotebookEdit"]);
-// An Agent/Task hand-back report carries the agentId the model resumes it with: never cut by the text crusher or the split.
+/** An Agent/Task hand-back report carries the agentId the model resumes it with: never cut by the text crusher or the split. */
 const REPORT_TOOLS = new Set(["Agent", "Task"]);
 
 /**
  * A tool_result block whose texts are never rewritten (dedup still indexes them): an error, or a protected tool's row.
  * wantsQuery and rewriteRow share it so the fetch gate and the rewrite never disagree.
+ *
+ * @param block - a tool_result block
  * @param tool - a row's origin tool
+ * @returns true when the block is protected
  */
 function isProtectedBlock(block: Record<string, unknown>, tool: string): boolean {
   return block.is_error === true || isProtectedTool(tool);
@@ -4786,9 +5670,11 @@ function isProtectedBlock(block: Record<string, unknown>, tool: string): boolean
  * a JSON document for the SmartCrusher, or, for the search and diff compressors, the text crusher and the relevance split,
  * any non-Read text of at least ROUTE_MIN_CHARS. A cheap pre-check: no content detection. The default levers are the
  * two-argument call's (the SmartCrusher alone).
+ *
  * @param content - the row's blocks
  * @param tool - the row's origin tool
  * @param levers - the row's levers; only crush and the query-reading prose levers count
+ * @returns true when the transcript is worth fetching
  */
 export function wantsQuery(content: readonly ContentBlock[], tool: string, levers: { crush?: boolean; log?: boolean; search?: boolean; diff?: boolean; textcrush?: boolean; split?: boolean } = { crush: true }): boolean {
   const prose = !!(levers.search || levers.diff || levers.textcrush || levers.split) && !VERBATIM_TOOLS.has(tool);
@@ -4804,9 +5690,12 @@ export function wantsQuery(content: readonly ContentBlock[], tool: string, lever
  * own-storage rows are never rewritten (dedup still indexes them). Undefined when no block changed. Mutates
  * levers.dedup.states; a throw starts that conversation's corpus over, since a block indexed before it belongs to a row
  * that is then stored as made.
+ *
  * @param content - the row's blocks
  * @param tool - the row's origin tool
+ * @param levers - which levers rewrite this row, and the dedup corpus
  * @param query - the conversation context (crushQuery), "" for none
+ * @returns the rewritten blocks, offloaded originals and savings, or undefined
  */
 export function rewriteToolResults(content: readonly ContentBlock[], tool: string, levers: Levers, query: string): RowRewrite | undefined {
   try {
@@ -4821,6 +5710,12 @@ export function rewriteToolResults(content: readonly ContentBlock[], tool: strin
 
 /**
  * rewriteToolResults without its failure handling.
+ *
+ * @param content - the row's blocks
+ * @param tool - the row's origin tool
+ * @param levers - which levers rewrite this row, and the dedup corpus
+ * @param query - the conversation context (crushQuery), "" for none
+ * @returns the rewrite, or undefined when no block changed
  */
 function rewriteRow(content: readonly ContentBlock[], tool: string, levers: Levers, query: string): RowRewrite | undefined {
   const acc: Omit<RowRewrite, "content"> = {
@@ -4844,7 +5739,11 @@ function rewriteRow(content: readonly ContentBlock[], tool: string, levers: Leve
   const verbatimTool = VERBATIM_TOOLS.has(tool);
   /**
    * Books a router compressor's adopted rewrite (its lossy step's or its fold's) in its table and returns the rewritten text.
+   *
+   * @param slot - the compressor's `/headroom` counters, incremented
    * @param from - the step's input
+   * @param r - the adopted result; its originals go to the offloaded store
+   * @returns the rewritten text
    */
   const adopt = (slot: { texts: number; saved: number }, from: string, r: { text: string; offloaded: [string, string][] }): string => {
     slot.texts += 1;
@@ -4867,6 +5766,9 @@ function rewriteRow(content: readonly ContentBlock[], tool: string, levers: Leve
      * the config compressor, the HTML extractor and the router compressors decline it, the elider skips its lines, and an
      * unprotectable text (tagSpans null) passes through whole. The router compressors also leave Read and line-numbered
      * (`N\t`, `cat -n`) text whole: the Edit tool must still match it.
+     *
+     * @param text - one unprotected tool-result text
+     * @returns the route's output, `text` itself when no step rewrote it
      */
     const shrink = (text: string): string => {
       if (prot || !(routed || levers.elide) || text.length < ROUTE_MIN_CHARS) return text;
@@ -4962,6 +5864,9 @@ function rewriteRow(content: readonly ContentBlock[], tool: string, levers: Leve
     /**
      * Cross-turn dedup of a result's final text; a protected text, and with the tag protector on an unprotectable one, is
      * only indexed, and a tagged line never folds.
+     *
+     * @param text - the result's final text
+     * @returns the text with repeated runs folded into pointers, or `text` unchanged
      */
     const fold = (text: string): string => {
       if (!levers.dedup) return text;
@@ -4984,7 +5889,7 @@ function rewriteRow(content: readonly ContentBlock[], tool: string, levers: Leve
     }
     if (!Array.isArray(c)) return b;
     let touched = false;
-    const items: unknown[] = c.map((x) => {
+    const items: unknown[] = (c as unknown[]).map((x) => {
       if (!isTextBlock(x)) return x;
       const text = shrink(x.text);
       if (text === x.text) return x;

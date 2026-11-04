@@ -1,4 +1,4 @@
-import { test } from "node:test";
+import { test } from "vitest";
 import assert from "node:assert/strict";
 import {
   CACHE_DROP_THRESHOLD,
@@ -1131,7 +1131,7 @@ test("wantsQuery with levers also asks for any non-Read text of 300+ characters 
 });
 
 // Upstream tests/parity/fixtures/content_detector/*.json at 976aa71: [input, output.content_type], file name prefix.
-/* eslint-disable max-len -- the fixture inputs are verbatim upstream strings */
+ 
 const PARITY = [
   ["diff --combined merged.py\nindex aaa..bbb..ccc 100644\n--- a/merged.py\n+++ b/merged.py\n@@@ -1,4 -1,4 +1,5 @@@\n  unchanged\n- branch_a_only\n -branch_b_only\n++merge_added\n", "diff"], // 247811aecfdec556
   ['package com.example;\n\npublic class Foo {\n    @Override\n    public String toString() { return "foo"; }\n}\n\nprivate interface Bar {}\nprotected enum Baz { A, B }\n', "source_code"], // 37c86907c057e293
@@ -1165,7 +1165,7 @@ const PARITY = [
   ["[1, 2, 3, 4, 5]", "json_array"], // cabc55445af63e2f
   ["<!DOCTYPE html>\n<html>\n<head><title>x</title></head>\n<body><div><span>hi</span></div></body>\n</html>", "html"], // d100a9ac7a3671da
 ];
-/* eslint-enable max-len */
+ 
 
 test("detectContentType matches upstream's recorded parity fixtures, a JSON object aside", () => {
   assert.equal(PARITY.length, 21);
