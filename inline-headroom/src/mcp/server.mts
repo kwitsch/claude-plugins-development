@@ -195,7 +195,7 @@ export function resolveStorage(dataDirValue: string | undefined): { dataDir: str
   const dataDir = typeof dataDirValue === "string" ? dataDirValue.trim() : "";
   if (dataDir === "" || dataDir.includes("${")) throw new Error("CLAUDE_PLUGIN_DATA is unset or unresolved; storage unavailable");
   const sock = path.join(dataDir, "storage.sock");
-  // ponytail: the socket path is capped at 103 bytes (macOS sun_path), so a very long data dir fails
+  // shortcut: the socket path is capped at 103 bytes (macOS sun_path), so a very long data dir fails
   // closed. Upgrade path: a per-uid 0700 dir under os.tmpdir() keyed by a hash of the data dir.
   const n = Buffer.byteLength(sock);
   if (n > MAX_SOCKET_PATH_BYTES) throw new Error(`socket path too long (${n} bytes > ${MAX_SOCKET_PATH_BYTES}): ${sock}`);
@@ -328,7 +328,7 @@ export function execOp(db: DatabaseSync, op: string, args: Record<string, unknow
       try {
         const put = db.prepare(STATS_PUT_SQL);
         for (const row of list) put.run(row.day, writer, ...STATS_KEYS.map((k) => row[k]));
-        // ponytail: the purge trusts the caller's day and is global across writers, so a writer whose clock
+        // shortcut: the purge trusts the caller's day and is global across writers, so a writer whose clock
         // runs ahead purges early. Upgrade path: clamp purgeBefore to the newest stored day if skew ever matters.
         const purged = Number(db.prepare("DELETE FROM stats WHERE day < ?").run(purgeBefore).changes);
         db.exec("COMMIT");
@@ -443,7 +443,7 @@ function roundTrip(sockPath: string, msg: Record<string, unknown>): Promise<Serv
  */
 function spawnService(storage: { dataDir: string; log: string }): void {
   mkdirSync(storage.dataDir, { recursive: true, mode: 0o700 });
-  // ponytail: service.log is never rotated; it only gets fatal service errors (one line per failed
+  // shortcut: service.log is never rotated; it only gets fatal service errors (one line per failed
   // start, and the mod's per-turn stats write or an open /headroom pane's refresh can trigger one per
   // session every FAILURE_COOLDOWN_MS on a host that cannot run the service). Upgrade path: rotate it if it ever grows noticeably.
   const fd = openSync(storage.log, "a", 0o600);

@@ -8,8 +8,4 @@ test -z "$(git status --porcelain -- "$p/plugin")" || {
   exit 1
 }
 # plugin/ ships only build output and hand-written plugin files (.claude/rules/plugin-build-output.md)
-bad=$(find "$p/plugin" \( -name '*.ts' -o -name '*.mts' -o -name '*.test.*' -o -name CLAUDE.md -o -path '*/tests' \) -print)
-test -z "$bad" || {
-  echo "::error::$p/plugin holds sources/tests that belong in src/ or tests/: $bad"
-  exit 1
-}
+node "$(dirname "$0")/check-plugin-layout.mjs" "$p"

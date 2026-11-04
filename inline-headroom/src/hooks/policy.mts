@@ -1,6 +1,6 @@
 // Pure policy for inline-headroom. Never reference the mods `$` here: the
 // engine's validation rejects passing the mods API into functions imported
-// from another file. All `$` use lives inside hooks in register.ts. No clock
+// from another file. All `$` use lives inside hooks in register.mts. No clock
 // reads either: time comes in as arguments.
 
 /** A reasoning effort level, lowest first as in EFFORT_ORDER. */
@@ -141,10 +141,10 @@ export const ROWS = [
 export const CELL_WIDTHS = [16, 8, 8] as const;
 /** Persisted days kept: the longest row's window, never less. */
 export const RETAIN_DAYS = 30;
-/** The name register.ts registers the retrieval tool under. */
+/** The name register.mts registers the retrieval tool under. */
 export const RETRIEVE_NAME = "headroom_retrieve";
 /** This plugin's name, as `next.origin.plugin` reads it for the mod's own `$` calls. */
-export const PLUGIN = "inline-headroom";
+const PLUGIN = "inline-headroom";
 /** headroom_retrieve's full name: the tool.register op serves a mod tool as `mcp__<plugin>__<name>`. */
 export const RETRIEVE_TOOL = `mcp__${PLUGIN}__${RETRIEVE_NAME}`;
 /** A JSON document is crushed only above this many characters (upstream min_tokens_to_crush 200 × 4 chars per token: the mod has no tokenizer). */
@@ -615,7 +615,7 @@ export function foldPending(days: Record<string, Counters>, pending: Counters, t
   const total = (days[today] ??= zeroCounters());
   for (const k of COUNTER_KEYS) {
     total[k] += pending[k];
-    pending[k] = 0; // in place: register.ts holds pending in a const
+    pending[k] = 0; // in place: register.mts holds pending in a const
   }
   // Days after today go too, so a clock moved backwards never grows a stats_put past the window.
   for (const day of Object.keys(days)) if (day < purgeBefore || day > today) delete days[day];
@@ -902,7 +902,7 @@ export function computeOptimalK(itemStrings: readonly string[], minK: number = M
  * A re-put moves its hash to the newest position, and the oldest entries go while the store holds more than CCR_CAPACITY
  * entries or CCR_MAX_CHARS characters. Never an entry of `entries` itself: the row that carries their markers is stored next,
  * so a batch may leave the store over a cap until the next call with entries.
- * shortcut: no idle TTL (upstream: 30 min); add one with a time argument from register.ts if memory becomes a concern.
+ * shortcut: no idle TTL (upstream: 30 min); add one with a time argument from register.mts if memory becomes a concern.
  *
  * @param store - hash → original text (a crushed array's JSON, an elided block, a folded span), oldest first
  * @param entries - the new [hash, original] pairs
@@ -5705,6 +5705,8 @@ export function rewriteToolResults(content: readonly ContentBlock[], tool: strin
     const st = d && d.states.get(d.key);
     if (st) resetCorpus(st);
     throw err;
+  } finally {
+    lastParse = undefined; // the parse memo serves one row: never pin a large result past it
   }
 }
 

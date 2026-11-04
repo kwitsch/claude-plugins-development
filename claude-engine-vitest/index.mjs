@@ -402,7 +402,7 @@ export function createKit(cfg) {
    */
   function test(name, ...rest) {
     const [opts, body] = rest.length === 1 ? [{}, rest[0]] : rest;
-    (cfg.runner ?? vitestTest)(name, { timeout: opts.timeoutMs ?? opts.timeout ?? 5000 }, async () => {
+    (cfg.runner ?? vitestTest)(name, { timeout: opts.timeoutMs ?? 5000 }, async () => {
       const engine = new Engine({ ...cfg, options: { ...cfg.options, ...opts.options }, plugins: opts.plugins });
       engines.set(engine.stubOn, engine);
       try {

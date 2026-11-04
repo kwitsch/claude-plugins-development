@@ -30,17 +30,14 @@ function walk(dir) {
 }
 
 // 0. plugin/ ships only build output and hand-written plugin files (.claude/rules/plugin-build-output.md)
-const stray = walk(PLUGIN).filter((f) => /\.m?ts$|\.test\.|(^|\/)CLAUDE\.md$|\/tests\//.test(f.split(path.sep).join("/")));
-if (stray.length) {
-  console.error(`plugin/ holds sources/tests that belong in src/ or tests/:\n  ${stray.join("\n  ")}`);
-  process.exit(1);
-}
+const layout = spawnSync(process.execPath, [path.join(ROOT, "../.github/scripts/check-plugin-layout.mjs"), ROOT], { stdio: "inherit" });
+if (layout.status !== 0) process.exit(layout.status ?? 1);
 
-// 1. remove stale build output (plugin/ holds no hand-written .mjs/.js)
-for (const f of walk(PLUGIN)) if (/\.m?js$/.test(f)) rmSync(f);
+// 1. remove stale build output (plugin/ holds no hand-written .mjs)
+for (const f of walk(PLUGIN)) if (f.endsWith(".mjs")) rmSync(f);
 
 // 2. compile (only if there are sources): .mts -> .mjs
-const sources = walk(path.join(ROOT, "src")).filter((f) => /\.m?ts$/.test(f));
+const sources = walk(path.join(ROOT, "src")).filter((f) => f.endsWith(".mts"));
 if (sources.length) {
   const tsc = spawnSync("pnpm", ["exec", "tsc", "-p", "tsconfig.json"], {
     cwd: ROOT,
@@ -48,7 +45,7 @@ if (sources.length) {
   });
   if (tsc.status !== 0) process.exit(tsc.status ?? 1);
   // shipped output is for node, not humans: minify (drops comments, keeps the shebang and export names)
-  for (const f of walk(PLUGIN).filter((f) => /\.m?js$/.test(f))) {
+  for (const f of walk(PLUGIN).filter((f) => f.endsWith(".mjs"))) {
     // function-hooks modules (plugin/hooks/*.mjs) keep their names and shape: Claude Code's static check wants
     // named hook functions, `$`/`on` spelled as such and no shadowed names, which compress/mangle would break
     const hooksModule = path.relative(PLUGIN, f).startsWith("hooks" + path.sep);

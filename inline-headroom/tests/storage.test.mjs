@@ -230,9 +230,9 @@ async function waitDead(pid) {
 }
 
 /**
- * A temp CLAUDE_PLUGIN_DATA with storage enabled. Its t.after closes every front-end, kills every
+ * A temp CLAUDE_PLUGIN_DATA with storage enabled. Its onTestFinished closes every front-end, kills every
  * fake, SIGTERMs every --service process for this data dir until none is left, and removes the dir.
- * @param {any} t node:test context
+ * @param {any} t vitest test context
  */
 function sandbox(t) {
   const dir = mkdtempSync(path.join(os.tmpdir(), "ih-"));

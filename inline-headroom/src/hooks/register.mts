@@ -262,6 +262,12 @@ const arm = ($: Engine): void => {
   });
 };
 
+/** Stops the open pane's 10 s refresh, if one runs. */
+const disarm = (): void => {
+  poll?.cancel();
+  poll = undefined;
+};
+
 /**
  * The module entry the engine calls on load: registers every hook the enabled levers need.
  *
@@ -288,7 +294,9 @@ export const register = (on: On, options: Record<string, unknown>): void => {
   const splitOn = options.relevance_split_enabled !== false;
   // The tag protector only narrows what the levers above rewrite: no compressOn term, no table.
   const tagsOn = options.tag_protector_enabled !== false;
-  const compressOn = crusherOn || compactOn || dedupOn || elideOn || configOn || htmlOn || logOn || searchOn || diffOn || textOn || splitOn;
+  // Which statsTables table each lever shows, in statsTables' order; every lever after the first two compresses.
+  const shown = [effortOn, cacheOn, crusherOn, dedupOn, elideOn, compactOn, configOn, htmlOn, logOn, searchOn, diffOn, textOn, splitOn];
+  const compressOn = shown.slice(2).some(Boolean);
   // Subagent and Workflow-agent tool results: their own toggle, active only while a compression lever is on.
   const subCompressOn = compressOn && options.subagent_compression_enabled !== false;
   // Unset means the manifest default (true), like the sibling toggles; the server stays fail-closed.
@@ -327,8 +335,8 @@ export const register = (on: On, options: Record<string, unknown>): void => {
   // Each table is shown only while the lever it counts is on; the storage rows sit in both.
   // The subagents row and the compression counts are session-only: persisting them needs new stats columns and a storage PROTOCOL bump (deferred).
   // Subagent steps and clamps still reach the storage rows, inside the main loop's steps and clamped columns.
-  const tables = (): string[][][] => {
-    const [effort, cache, crusher, deduper, elider, compactor, configs, extractor, logs, searches, diffs, crushedTexts, splits] = statsTables(
+  const tables = (): string[][][] =>
+    statsTables(
       [{ ...session, hit: lastHit }, ...(sums?.data ?? [])],
       note() === undefined ? "…" : "–",
       {
@@ -345,32 +353,15 @@ export const register = (on: On, options: Record<string, unknown>): void => {
         textcrush,
         split,
       },
-    );
-    return [
-      ...(effortOn ? [effort] : []),
-      ...(cacheOn ? [cache] : []),
-      ...(crusherOn ? [crusher] : []),
-      ...(dedupOn ? [deduper] : []),
-      ...(elideOn ? [elider] : []),
-      ...(compactOn ? [compactor] : []),
-      ...(configOn ? [configs] : []),
-      ...(htmlOn ? [extractor] : []),
-      ...(logOn ? [logs] : []),
-      ...(searchOn ? [searches] : []),
-      ...(diffOn ? [diffs] : []),
-      ...(textOn ? [crushedTexts] : []),
-      ...(splitOn ? [splits] : []),
-    ];
-  };
+    ).filter((_, i) => shown[i]);
   // With every lever off there is nothing to show, so nothing is read from storage either.
-  const idle = (): string | undefined =>
-    effortOn || cacheOn || compressOn
-      ? undefined
-      : "effort routing, cache aligner, smart crusher, lossless compaction, cross-turn dedup, dense line elider, config compressor, HTML extractor, log compressor, search compressor, diff compressor, text crusher and relevance split are off: nothing to show";
+  const idle = effortOn || cacheOn || compressOn
+    ? undefined
+    : "effort routing, cache aligner, smart crusher, lossless compaction, cross-turn dedup, dense line elider, config compressor, HTML extractor, log compressor, search compressor, diff compressor, text crusher and relevance split are off: nothing to show";
   // Body height asked for when seated inline, mirroring the render: every table, a line for the storage note
   // wherever one can show, and a gap between each.
   const paneRows = (): number => {
-    if (idle() !== undefined) return 1; // the one "nothing to show" line
+    if (idle !== undefined) return 1; // the one "nothing to show" line
     const blocks = [...tables().map((t) => t.length), ...(storageTables ? [1] : [])];
     return blocks.reduce((a, b) => a + b, 0) + blocks.length - 1;
   };
@@ -380,16 +371,14 @@ export const register = (on: On, options: Record<string, unknown>): void => {
     if (r.isPlaced) {
       // Pane placed: print nothing (no transcript line, nothing in the model's context).
       if (rowsShown) {
-        poll?.cancel(); // re-opening an open pane restarts its refresh instead of stacking a second one
-        poll = undefined;
+        disarm(); // re-opening an open pane restarts its refresh instead of stacking a second one
         arm($);
         await refresh($); // the first numbers now, inside this hook (see loadSums)
       }
       return {};
     }
     // Not placed (headless/SDK, narrow terminal): the same tables as text, read from storage once.
-    const off = idle();
-    if (off !== undefined) return { text: off };
+    if (idle !== undefined) return { text: idle };
     if (rowsShown) await refresh($);
     const n = note();
     return { text: [tables().map(tableText).join("\n\n"), ...(n === undefined ? [] : [n])].join("\n") };
@@ -422,8 +411,7 @@ export const register = (on: On, options: Record<string, unknown>): void => {
           })
         ),
       });
-    const off = idle();
-    if (off !== undefined) return Box({ flexDirection: "column", children: [Text({ dimColor: true, children: [off] })] });
+    if (idle !== undefined) return Box({ flexDirection: "column", children: [Text({ dimColor: true, children: [idle] })] });
     const n = note();
     return Box({
       flexDirection: "column",
@@ -441,8 +429,7 @@ export const register = (on: On, options: Record<string, unknown>): void => {
     // { deny }: a hook beneath kept the pane open, so its refresh keeps running too.
     if (r.deny === undefined) {
       paneOpen = false;
-      poll?.cancel();
-      poll = undefined;
+      disarm();
       sums = undefined; // a reopened pane shows "…" until fresh numbers land, not the last session's
     }
     return r;
@@ -459,10 +446,10 @@ export const register = (on: On, options: Record<string, unknown>): void => {
       else if (subOn) agentErrored.add(agentId);
     };
     on("tool.call", async (_$, e, next) => {
-      let r: Awaited<ReturnType<typeof next>>;
+      let r: ToolResult;
       try {
         // headroom_retrieve is answered here (a call no hook answers fails); every other call runs beneath.
-        r = e.tool === RETRIEVE_TOOL ? retrieve((e as Record<string, unknown>).hash) : await next(e);
+        r = e.tool === RETRIEVE_TOOL ? retrieve(e.hash) : await next(e);
       } catch (err) {
         failed(e.agentId); // a tool that throws instead of returning an error result is still a failure
         throw err;
@@ -473,6 +460,20 @@ export const register = (on: On, options: Record<string, unknown>): void => {
   }
 
   if (compressOn) {
+    // The rewrite levers; only the dedup conversation key differs per row.
+    const baseLevers = {
+      crush: crusherOn,
+      compact: compactOn,
+      elide: elideOn,
+      config: configOn,
+      extract: htmlOn,
+      log: logOn,
+      search: searchOn,
+      diff: diffOn,
+      textcrush: textOn,
+      split: splitOn,
+      tags: tagsOn,
+    };
     // One session.append hook, on tool results only: crushes, elides and folds a result before it is first stored and sent,
     // so the model, the transcript file and every later request read one form (prompt-cache safe). The screen's tool row
     // (toolUseResult) keeps the original. Every throw before next passes the row through unchanged (fail open).
@@ -482,20 +483,7 @@ export const register = (on: On, options: Record<string, unknown>): void => {
       const tool = e.origin.tool;
       let rw: ReturnType<typeof rewriteToolResults>;
       try {
-        const levers = {
-          crush: crusherOn,
-          compact: compactOn,
-          elide: elideOn,
-          config: configOn,
-          extract: htmlOn,
-          log: logOn,
-          search: searchOn,
-          diff: diffOn,
-          textcrush: textOn,
-          split: splitOn,
-          tags: tagsOn,
-          dedup: dedupOn ? { states: dedupStates, key: e.agentId ?? "" } : undefined,
-        };
+        const levers = { ...baseLevers, dedup: dedupOn ? { states: dedupStates, key: e.agentId ?? "" } : undefined };
         let query = "";
         // levers.crush carries crusherOn: the two-argument call's SmartCrusher check is one term of the levers form.
         if (wantsQuery(e.message.content, tool, levers)) {
@@ -591,7 +579,7 @@ export const register = (on: On, options: Record<string, unknown>): void => {
     count("steps");
     try {
       let ev = e;
-      // ponytail: mid-turn user input (a queued command) arriving at index > 0 is
+      // shortcut: mid-turn user input (a queued command) arriving at index > 0 is
       // still treated as mechanical; detect it via a prompt/queue event if that matters.
       const to = effortOn ? stepEffort(e.index, toolErrored, e.effort) : undefined;
       if (to !== undefined) {
