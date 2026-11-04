@@ -13,7 +13,7 @@
  */
 
 import { execFileSync } from "node:child_process";
-import { findDprint } from "./find-dprint.mjs";
+import { dprintArgv, findDprint } from "./find-dprint.mjs";
 
 /** Lowest supported dprint version; the only definition (README and tests read it from here). */
 const MIN_VERSION = "0.50.0";
@@ -51,22 +51,21 @@ function compareToMin(version: string): number {
  * @param args - Command-line arguments after the script path; any argument is a usage error.
  * @returns The status line fields and the exit code.
  */
-function check(args: string[]): CheckResult {
+async function check(args: string[]): Promise<CheckResult> {
   if (args.length > 0) {
     process.stderr.write("usage: node check-dprint.mjs (takes no arguments)\n");
     return { code: 2, status: "error", version: "-", path: "-" };
   }
-  const cmd = findDprint();
+  const cmd = await findDprint();
   if (cmd === null) {
     return { code: 10, status: "missing", version: "-", path: "-" };
   }
-  const [file, ...pre] = cmd;
-  const path = pre.length > 0 ? "npx" : file;
+  const path = cmd.length > 1 ? "npx" : cmd[0];
 
   let out: string;
   try {
     out = String(
-      execFileSync(file, [...pre, "--version"], {
+      execFileSync(...dprintArgv(cmd, ["--version"]), {
         encoding: "utf8",
         timeout: 10000,
         stdio: ["ignore", "pipe", "pipe"],
@@ -94,7 +93,7 @@ function check(args: string[]): CheckResult {
 }
 
 /** Result of this run, printed as the single status line. */
-const r = check(process.argv.slice(2));
+const r = await check(process.argv.slice(2));
 process.stdout.write(
   `status=${r.status} version=${r.version} min=${MIN_VERSION} path=${r.path}\n`,
 );

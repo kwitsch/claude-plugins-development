@@ -18,7 +18,7 @@ dprint config file names in `CONFIG_NAMES`) and one data file, all in
 - `dprint-plugins.json`: hand-written plugin reference data read by `scan-plugins.mjs`. It is **not** build
   output; edit it in place.
 
-`find-dprint.mjs` exports `findDprint` (`PATH`, then `~/.dprint/bin`, then `npx --yes dprint` (probed once per process); returns the argv prefix); `find-config.mjs` exports `findConfig`
+`find-dprint.mjs` exports `findDprint` (`PATH`, then `~/.dprint/bin`, then `npx --yes dprint` (async probe, a failure re-probed after 30 s); `findDprint` is async, `dprintArgv` builds the spawn arguments from the returned argv prefix); `find-config.mjs` exports `findConfig`
 (first of `CONFIG_NAMES` in a directory or its ancestors, never above the git/worktree root), shared by
 `run-dprint.mjs`, `scan-plugins.mjs` and `mcp/format.mjs`.
 
@@ -33,7 +33,7 @@ Hook: `plugin/hooks/hooks.json` (hand-written) wires PreToolUse `Write|Edit` as 
   (constructor option `timeoutMs`, tests only), a 60 s cooldown after a request timeout during which formats of
   that document fail at once, a 30 s per-client pause before `findDprint` is retried after dprint was not found, stdout of a
   replaced child ignored, respawn after a crash, `applyTextEdits`). Needs dprint >= 0.50 (`findDprint` from
-  `skills/dprint/find-dprint.mjs`: `PATH`, then `~/.dprint/bin`, then `npx --yes dprint` (probed once per process); returns the argv prefix).
+  `skills/dprint/find-dprint.mjs`: `PATH`, then `~/.dprint/bin`, then `npx --yes dprint` (async probe, a failure re-probed after 30 s); `findDprint` is async, `dprintArgv` builds the spawn arguments from the returned argv prefix).
 - `format.mjs`: scope via `scopeOf` (effective cwd: override, else payload `cwd`, never `process.cwd()`) and
   `inScope` (real path strictly inside the real cwd, not excluded, not inside `scratchpad_dir`; dangling links
   rejected); `fileWritten` records Edit/Write content per real path; `fileChanged` formats a watched file whole on

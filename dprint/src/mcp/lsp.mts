@@ -9,7 +9,7 @@
  */
 import { type ChildProcessWithoutNullStreams, spawn } from "node:child_process";
 import { pathToFileURL } from "node:url";
-import { findDprint } from "../skills/dprint/find-dprint.mjs";
+import { dprintArgv, findDprint } from "../skills/dprint/find-dprint.mjs";
 
 /** LSP range: zero-based line and UTF-16 character offsets, end exclusive. */
 type LspRange = {
@@ -191,17 +191,17 @@ export class DprintLsp {
    * @returns Settles once the child answered `initialize`; rejects when dprint is missing (not searched again
    * for 30 s after a miss) or fails to start.
    */
-  private start(): Promise<void> {
+  private async start(): Promise<void> {
     if (this.ready) return this.ready;
-    if (Date.now() < this.noDprintUntil) return Promise.reject(new Error("dprint not found"));
-    const cmd = findDprint();
+    if (Date.now() < this.noDprintUntil) throw new Error("dprint not found");
+    const cmd = await findDprint();
+    if (this.ready) return this.ready; // another caller started the child while the lookup (an npx probe) ran
     if (!cmd) {
       this.noDprintUntil = Date.now() + NOT_FOUND_RETRY_MS;
-      return Promise.reject(new Error("dprint not found"));
+      throw new Error("dprint not found");
     }
-    const [file, ...pre] = cmd;
-    // via npx the child is npx; killing it also ends the dprint lsp it started
-    const child = spawn(file, [...pre, "lsp"], { cwd: this.cwd, stdio: "pipe" });
+    // via npx the child is npx; killing it also ends the dprint lsp it started (checked: npx -> sh -> dprint)
+    const child = spawn(...dprintArgv(cmd, ["lsp"]), { cwd: this.cwd, stdio: "pipe" });
     this.child = child;
     this.buf = Buffer.alloc(0);
     child.stdin.on("error", () => {}); // EPIPE after a crash; the crash itself surfaces via exit/error
