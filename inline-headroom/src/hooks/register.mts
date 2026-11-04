@@ -604,8 +604,12 @@ export const register = (on: On, options: Record<string, unknown>): void => {
       }
       return result;
     } finally {
-      // also on a failed or aborted step: steps/clamped moved before it
-      $.ui.invalidate("ui.render"); // redraw an open /headroom pane with the new stats
+      // also on a failed or aborted step: steps/clamped moved before it; a refused $ never replaces the step's result
+      try {
+        $.ui.invalidate("ui.render"); // redraw an open /headroom pane with the new stats
+      } catch {
+        // nothing is left to redraw with
+      }
     }
   });
 
@@ -673,7 +677,11 @@ export const register = (on: On, options: Record<string, unknown>): void => {
     dedupStates.clear(); // the next session's results get their own corpus and ordinals
     agentErrored.clear(); // an aborted agent whose turn.complete never came
     lastHit = undefined;
-    $.ui.invalidate("ui.render");
+    try {
+      $.ui.invalidate("ui.render");
+    } catch {
+      // a refused $ never stops the session.end chain or the flush wait below
+    }
     const r = await next(e);
     // A turn cut off before its turn.complete hook finished may leave a stats_put running: let it finish.
     // `flushing` never rejects, and the engine's ~1.5 s end bound cuts the wait; core's end step already ran.

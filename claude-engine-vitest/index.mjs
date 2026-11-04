@@ -438,7 +438,10 @@ export function createKit(cfg) {
         new Promise((resolve) => {
           const w = { due: now + ms, seq: engine.seq++, resolve };
           waits.push(w);
-          signal?.addEventListener("abort", () => waits.splice(waits.indexOf(w), 1), { once: true });
+          signal?.addEventListener("abort", () => {
+            const i = waits.indexOf(w);
+            if (i >= 0) waits.splice(i, 1); // a wait that already resolved is gone: never drop another timer's
+          }, { once: true });
         });
       on("clock.now", () => ({ value: now }));
       for (const ev of ["clock.sleep", "clock.after", "clock.every"]) on(ev, async (_$, e, next) => (await wait(e.ms, next.signal), { value: undefined }));

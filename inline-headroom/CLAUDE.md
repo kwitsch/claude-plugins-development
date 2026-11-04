@@ -930,10 +930,10 @@ Deviations:
   ranges) declines: upstream's ICU segmentation path is not ported.
 - Eligibility: every `text`-labelled result of 300+ characters (the router's
   floor, above upstream `prose_field`'s 256) that is not Read output,
-  line-numbered or tagged, subagent reports and markdown output included.
+  line-numbered or tagged, markdown output included (never an `Agent` or `Task`
+  report, see the gates above).
   Upstream reaches TextCrusher only past a 50,000-token Kompress gate (opt-in);
-  here it stands in for Kompress wherever Kompress would run. No tool-name
-  exception for `Agent` reports (upstream runs Kompress on them too).
+  here it stands in for Kompress wherever Kompress would run.
 - The kept text ends with the mod's own `[Text crushed: K of N segments kept.
   Retrieve original: hash=H]`; a result that is not shorter declines.
 - `target_ratio` is a constant (upstream clamps a per-call value to 0.05–1.0);
@@ -945,8 +945,8 @@ declined), adopted only through `overFold` against `foldText`; then `textfold`
 (only on the route's input), then `elide`. An adopted crush is handed on to the
 elider; an adopted fold ends the route.
 
-Behaviour change (0.8.0): prose tool results of 6+ sentences (Agent hand-back
-reports, WebFetch summaries, markdown command output) now reach the model as
+Behaviour change (0.8.0): prose tool results of 6+ sentences (WebFetch
+summaries, markdown command output; never Agent or Task reports) now reach the model as
 about half their characters, without their line breaks and indentation, and
 cross-turn dedup indexes that crushed form (a repeated report is crushed the
 same way, then folded into a pointer). `text_crusher_enabled: false` restores

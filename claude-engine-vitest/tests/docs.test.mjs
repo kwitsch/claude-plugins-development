@@ -59,6 +59,15 @@ const mod = (name) => new URL(`./mods/${name}.mjs`, import.meta.url);
     await clock.set(6000);
     expect(toasts).toEqual([6000]);
   });
+  test("a timer cancelled in its own callback leaves another pending timer running", async ($, on) => {
+    const clock = mock.clock(on);
+    const toasts = [];
+    on("ui.toast", ($, e) => (toasts.push(clock.now()), { value: undefined }));
+    await $.command.run({ command: "countdown", args: "3" }); // toasts at 3000
+    await $.command.run({ command: "countdown", args: "1" }); // cancels itself at 1000
+    await clock.advance(5000);
+    expect(toasts).toEqual([1000, 3000]);
+  });
 }
 
 {
