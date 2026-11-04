@@ -5,8 +5,9 @@
  *
  * @remarks
  * Prints exactly one line
- * `status=<ok|missing|outdated|error> version=<X.Y.Z|-> min=<MIN> path=<abs|->` and exits with the code
- * documented in `check-dprint.reference.md`. Read-only: never installs anything.
+ * `status=<ok|missing|outdated|error> version=<X.Y.Z|-> min=<MIN> path=<abs|npx|->` and exits with the code
+ * documented in `check-dprint.reference.md`. Read-only: never installs dprint; when only npx can run it, the npx
+ * probe may fill the npm cache.
  *
  * @packageDocumentation
  */
@@ -25,7 +26,7 @@ interface CheckResult {
   status: string;
   /** Detected `X.Y.Z`, or `-` when unknown. */
   version: string;
-  /** Absolute path of the dprint binary, or `-` when none was found. */
+  /** Absolute path of the dprint binary, or `npx` when dprint runs through `npx --yes dprint`, or `-` when none was found. */
   path: string;
 }
 
@@ -55,15 +56,17 @@ function check(args: string[]): CheckResult {
     process.stderr.write("usage: node check-dprint.mjs (takes no arguments)\n");
     return { code: 2, status: "error", version: "-", path: "-" };
   }
-  const path = findDprint();
-  if (path === null) {
+  const cmd = findDprint();
+  if (cmd === null) {
     return { code: 10, status: "missing", version: "-", path: "-" };
   }
+  const [file, ...pre] = cmd;
+  const path = pre.length > 0 ? "npx" : file;
 
   let out: string;
   try {
     out = String(
-      execFileSync(path, ["--version"], {
+      execFileSync(file, [...pre, "--version"], {
         encoding: "utf8",
         timeout: 10000,
         stdio: ["ignore", "pipe", "pipe"],
@@ -71,14 +74,14 @@ function check(args: string[]): CheckResult {
     );
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
-    process.stderr.write(`check-dprint: '${path} --version' failed: ${msg}\n`);
+    process.stderr.write(`check-dprint: '${cmd.join(" ")} --version' failed: ${msg}\n`);
     return { code: 2, status: "error", version: "-", path };
   }
 
   const m = /^dprint (\d+)\.(\d+)\.(\d+)(-\S+)?/.exec(out.trim());
   if (!m) {
     process.stderr.write(
-      `check-dprint: unparseable '${path} --version' output: ${JSON.stringify(out.trim())}\n`,
+      `check-dprint: unparseable '${cmd.join(" ")} --version' output: ${JSON.stringify(out.trim())}\n`,
     );
     return { code: 2, status: "error", version: "-", path };
   }

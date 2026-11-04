@@ -35,6 +35,11 @@ const stubDprint = (file = path.join(bin, "dprint"), ...lines) => stub(file, `pr
 const argv = () => readFileSync(path.join(home, "argv"), "utf8").split("\n").slice(0, -1);
 /** whether the stub was called at all */
 const ran = () => existsSync(path.join(home, "argv"));
+/** bin/npx stub: appends its argv to $HOME/npx-argv, accepts only `--yes dprint ...`, then runs `lines` with the rest as "$@" */
+const stubNpx = (...lines) =>
+  stub(path.join(bin, "npx"), `printf '%s\\n' "$@" >> "$HOME/npx-argv"`, '[ "$1 $2" = "--yes dprint" ] || exit 9', "shift 2", ...lines);
+/** every argv the npx stub was called with, concatenated, one argument per line */
+const npxArgv = () => readFileSync(path.join(home, "npx-argv"), "utf8").split("\n").slice(0, -1);
 /** create proj/<rel> as an empty dprint config */
 function conf(rel = "dprint.json") {
   const f = path.join(proj, rel);
@@ -144,4 +149,21 @@ test("dprint's exit code and output are passed through", () => {
   const r = run(["check"]);
   assert.equal(r.code, 20);
   assert.match(r.out, /unformatted: a\.ts/);
+});
+
+test("dprint only via npx -> runs npx --yes dprint fmt -- scope, exit code passed through", () => {
+  stubNpx('if [ "$1" = "--version" ]; then echo "dprint 0.64.3"; exit 0; fi', "exit 7");
+  conf();
+  const r = run(["fmt", "src/a.ts"]);
+  assert.equal(r.code, 7, r.err);
+  assert.deepEqual(npxArgv(), ["--yes", "dprint", "--version", "--yes", "dprint", "fmt", "--", "src/a.ts"]);
+});
+
+test("npx failing -> exit 3, reason=missing", () => {
+  stubNpx('echo "npm error code ENOTCACHED" >&2', "exit 1");
+  conf();
+  const r = run(["check"]);
+  assert.equal(r.code, 3);
+  assert.equal(r.out, "status=notsetup reason=missing\n");
+  assert.match(r.err, /treating dprint as not installed/);
 });
