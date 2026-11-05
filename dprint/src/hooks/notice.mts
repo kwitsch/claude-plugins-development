@@ -5,8 +5,10 @@
  * EARLY ACCESS API (Claude Code 2.1.316 declarations). Fires after `session.start`, `classic.CwdChanged` and the
  * `EnterWorktree`/`ExitWorktree` tool calls. The check runs detached after the event and swallows every error,
  * so it never blocks, delays or alters the event. A directory without a dprint config is left alone and nothing is
- * spawned; with one, `$.process.run` probes for a runnable dprint in the order of `find-dprint.mts`, and only a
- * failed probe toasts. No imports at all (hooks modules run without Node and the engine's declaration file is not
+ * spawned; with one, the module picks the one dprint `find-dprint.mts` would pick (first `<PATH entry>/dprint` that
+ * exists, else `~/.dprint/bin/dprint`, else the npx cache), runs `--version` on it via `$.process.run`, and only an
+ * unusable pick (cannot start, exits non-zero, prints no version, older than `MIN_VERSION`) toasts, naming the
+ * cause. No imports at all (hooks modules run without Node and the engine's declaration file is not
  * in the repo), so the used engine members are typed structurally below. The engine's static check wants every
  * hook a named function literal, `$` and `on` spelled as such, and no shadowed names, which is why
  * `scripts/build.mjs` does not mangle or compress `hooks/*.mjs`.
@@ -36,14 +38,20 @@ const PROBE_TIMEOUT_MS = 10_000;
 /** How long a failed probe stays cached before the next event re-probes, in ms (same as `NPX_RETRY_MS` in `find-dprint.mts`). */
 const PROBE_RETRY_MS = 30_000;
 
+/** Minimum dprint version the format hooks need (`dprint lsp`). A copy of `MIN_VERSION` (`skills/dprint/check-dprint.mts`); `tests/notice.test.mjs` fails on drift. */
+const MIN_VERSION = "0.50.0";
+
+/** The reason when no dprint exists on PATH, in `~/.dprint/bin` or in the npx cache (the wording lives only here). */
+const NOT_INSTALLED = "no dprint is installed (none on PATH, in ~/.dprint/bin or in the npx cache)";
+
 /** When the last toast was shown (`Date.now()`); the cause is machine-wide, so one toast per {@link TOAST_MS} covers every directory. */
 let shownAt: number | undefined;
 
 /** One dprint probe, in flight or settled. */
 type Probe = {
-  /** Whether a dprint runs on this machine. */
-  ok: Promise<boolean>;
-  /** When the probe resolved false or rejected (`Date.now()`); unset while in flight and after a success. */
+  /** Why the dprint `findDprint` would pick is not usable, `null` when it is. */
+  problem: Promise<string | null>;
+  /** When the probe resolved with a problem or rejected (`Date.now()`); unset while in flight and after a success. */
   failedAt?: number;
 };
 
@@ -124,61 +132,84 @@ function parentOf(dir: string): string {
 }
 
 /**
- * Whether `argv` runs and prints a dprint version, read as `find-dprint.mts` reads it: exit code 0 and stdout
- * starting with `dprint ` and a digit. A rejected run (program not found, timeout) counts as a failure.
+ * Judge one dprint: it must start and answer `--version` within {@link PROBE_TIMEOUT_MS}, exit 0, print
+ * `dprint X.Y.Z` (the regex and compare rule of `check-dprint.mts`; a prerelease of an equal version sorts below)
+ * and be at least {@link MIN_VERSION}.
  *
  * @param $ - Engine interface.
  * @param argv - Program and arguments, run without a shell.
  * @param cwd - Working directory of the run.
- * @returns Whether that dprint runs.
+ * @param name - How the toast names this dprint (its path, or `npx`).
+ * @returns Why it is not usable, `null` when it is.
  */
-async function runsDprint($: Engine, argv: string[], cwd: string): Promise<boolean> {
+async function judge($: Engine, argv: string[], cwd: string, name: string): Promise<string | null> {
+  let r: Awaited<ReturnType<Engine["process"]["run"]>>;
   try {
-    const r = await $.process.run(argv, { cwd, timeoutMs: PROBE_TIMEOUT_MS });
-    return r.exitCode === 0 && /^dprint \d/.test(r.stdout.trim());
+    r = await $.process.run(argv, { cwd, timeoutMs: PROBE_TIMEOUT_MS });
   } catch {
-    return false;
+    // shortcut: timeout and cannot-start share one text, the engine's rejection shape is not in the repo; split when it is
+    return `${name} could not start or took over ${PROBE_TIMEOUT_MS / 1000} s to answer --version`;
   }
+  if (r.exitCode !== 0) return `${name} --version exited ${r.exitCode}`;
+  const m = /^dprint (\d+)\.(\d+)\.(\d+)(-\S+)?/.exec(r.stdout.trim());
+  if (!m) return `${name} --version printed no dprint version`;
+  const min = MIN_VERSION.split(".").map(Number);
+  let cmp = 0;
+  for (let i = 0; i < 3 && cmp === 0; i++) cmp = Number(m[i + 1]) - min[i];
+  if (cmp === 0 && m[4]) cmp = -1; // a prerelease of the minimum sorts below it
+  return cmp < 0 ? `${name} is dprint ${m[1]}.${m[2]}.${m[3]}${m[4] ?? ""}, the plugin needs >= ${MIN_VERSION}` : null;
 }
 
 /**
- * Whether a dprint can run on this machine, in the order of `find-dprint.mts`: `dprint` on PATH, then
- * `~/.dprint/bin/dprint`, then a dprint already in the npx cache. Unlike `find-dprint.mts` (which runs on a format
+ * Why the dprint the MCP server's `findDprint` would pick is not usable, `null` when it is. Picks exactly one, in
+ * `find-dprint.mts`'s order: the first `<PATH entry>/dprint` that exists, else `$HOME/.dprint/bin/dprint` if it
+ * exists, else the npx cache; only the pick is run (`--version`), so a broken PATH dprint is never masked by a
+ * working later one, as `findDprint` would not mask it either. Unlike `find-dprint.mts` (which runs on a format
  * request) this runs unprompted on every session start and cd, so npx gets `--no` (no download) and every probe runs
  * in HOME (else `/`), never in the project, whose `node_modules/.bin` npx would prefer. Concurrent callers share one
  * probe; a success is cached for the life of the module, a failure for {@link PROBE_RETRY_MS}.
  *
  * @param $ - Engine interface.
- * @returns Whether any of the three runs dprint.
+ * @returns Why the pick is unusable, `null` when it is usable.
  */
-function hasDprint($: Engine): Promise<boolean> {
-  if (probe && (probe.failedAt === undefined || withinMs(probe.failedAt, PROBE_RETRY_MS))) return probe.ok;
+function dprintProblem($: Engine): Promise<string | null> {
+  if (probe && (probe.failedAt === undefined || withinMs(probe.failedAt, PROBE_RETRY_MS))) return probe.problem;
   const entry: Probe = {
-    ok: (async () => {
-      const home = await $.env.get("HOME");
+    problem: (async () => {
+      const [home, pathVar] = await Promise.all([$.env.get("HOME"), $.env.get("PATH")]);
       const cwd = home || "/";
-      if (await runsDprint($, ["dprint", "--version"], cwd)) return true;
-      if (home && (await runsDprint($, [`${home}/.dprint/bin/dprint`, "--version"], cwd))) return true;
+      // shortcut: existence is weaker than findDprint's executable-file check (a non-executable `dprint` earlier on PATH is picked here), upgrade when the engine offers an executable check
+      // shortcut: relative PATH entries are skipped (findDprint resolves them against the MCP server's cwd, unknown here), upgrade if the hook can learn that cwd
+      const candidates = (pathVar ?? "")
+        .split(":")
+        .filter((d) => d.startsWith("/"))
+        .map((d) => `${d.replace(/\/+$/, "")}/dprint`);
+      const found = await Promise.all(candidates.map((p) => $.fs.exists(p)));
+      let pick = candidates.find((_, i) => found[i]);
+      if (!pick && home && (await $.fs.exists(`${home}/.dprint/bin/dprint`))) pick = `${home}/.dprint/bin/dprint`;
+      if (pick) return judge($, [pick, "--version"], cwd, pick);
       // `--` keeps npx from reading --version as its own flag once --no is given; --prefer-offline: npx checks a
       // name-only spec against the registry's latest, which offline or after a new release fails a cached dprint
-      return runsDprint($, ["npx", "--no", "--prefer-offline", "--", "dprint", "--version"], cwd);
+      const npx = await judge($, ["npx", "--no", "--prefer-offline", "--", "dprint", "--version"], cwd, "npx");
+      // `npx --no` exits non-zero when nothing is cached, so only "too old" says more than "not installed"
+      return npx === null || npx.startsWith("npx is dprint ") ? npx : NOT_INSTALLED;
     })(),
   };
-  // a rejected chain (env.get) is retried like a failed one, never cached for good
+  // a rejected chain (env.get, fs.exists) is retried like a failed one, never cached for good
   const fail = () => {
     entry.failedAt = Date.now();
   };
-  entry.ok.then((ok) => {
-    if (ok) dprintRuns = true;
+  entry.problem.then((problem) => {
+    if (problem === null) dprintRuns = true;
     else fail();
   }, fail);
   probe = entry;
-  return entry.ok;
+  return entry.problem;
 }
 
 /**
  * Show the cannot-run toast when `dir` or an ancestor up to the git repository or worktree root (as for the format
- * gate) holds one of {@link CONFIG_NAMES} but no dprint runs. No config: nothing is probed and no toast. At most one
+ * gate) holds one of {@link CONFIG_NAMES} but the dprint the hooks would use is unusable (the toast names why). No config: nothing is probed and no toast. At most one
  * toast per {@link TOAST_MS}.
  *
  * @param $ - Engine interface.
@@ -198,13 +229,11 @@ async function warnIfNoDprint($: Engine, dir: string): Promise<void> {
     if (git) break; // repository or worktree root: never search above it
   }
   if (!found) return; // the project does not use dprint: nothing to warn about, nothing spawned
-  if (await hasDprint($)) return; // before the dedupe, so a dir whose probe succeeds never takes a slot
+  const problem = await dprintProblem($);
+  if (problem === null) return; // before the dedupe, so a dir whose probe succeeds never takes a slot
   if (recentlyShown()) return; // a concurrent event may have toasted while the probe ran
   shownAt = Date.now();
-  $.ui.toast(
-    `dprint: ${dir} has a dprint config but no dprint is installed (none on PATH, in ~/.dprint/bin or in the npx cache); run /dprint:dprint init`,
-    { timeoutMs: TOAST_MS },
-  );
+  $.ui.toast(`dprint: ${dir} has a dprint config but ${problem}; run /dprint:dprint init`, { timeoutMs: TOAST_MS });
 }
 
 /**
