@@ -5,13 +5,10 @@
   "type": "module",
   "scripts": {
     "build": "node scripts/build.mjs",
-    "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run --config ../vitest.config.mjs",
-    "lint": "eslint"
+    "lint": "oxlint -c ../.oxlintrc.json"
   },
   "devDependencies": {
-    "@types/node": "^24.0.0",
-    "terser": "^5.51.2",
-    "typescript": "^6.0.3"
+    "@types/node": "^24.0.0"
   }
 }

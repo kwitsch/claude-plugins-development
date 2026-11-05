@@ -90,8 +90,8 @@ via `node:assert/strict`; the shared config sets `testTimeout: 30_000` for the f
 
 - `src/**/*.{mts,ts}` are written for humans: every function, method, class, type, type member and
   module-level constant carries a TSDoc comment (`@param name - text`, `@returns`, `@remarks`, one blank line
-  before the first tag). `pnpm lint` (ESLint + typescript-eslint, `eslint-plugin-tsdoc`, `eslint-plugin-jsdoc`;
-  workspace config `../eslint.config.mjs`, type-checked rules incl. `no-explicit-any`/`no-unsafe-*`) enforces it; CI runs
+  before the first tag). `pnpm lint` (oxlint type-aware + type check, `eslint-plugin-tsdoc`, `eslint-plugin-jsdoc` as jsPlugins;
+  workspace config `../.oxlintrc.json`, type-checked rules incl. `no-explicit-any`/`no-unsafe-*`) enforces it; CI runs
   it. `plugin/` is ignored by the linter.
 - `plugin/hooks/hooks.json` is the hook-input contract. `scripts/hooks.mjs` validates it (`mcp_tool` hooks, plus
   `command` hooks (non-empty `command`, timeout checked, no input, no generated types), `server` =
@@ -101,8 +101,8 @@ via `node:assert/strict`; the shared config sets `testTimeout: 30_000` for the f
   `server.mts` types its tool table by `HookInputs`, so a tool missing on either side is a compile error.
   `pnpm build` regenerates the file; `pnpm lint` runs `scripts/hooks.mjs --check` first and fails while it is
   stale. Never edit the `.d.mts` by hand. A new hook event needs its input fields in `EVENT_FIELDS` there.
-- `pnpm build` compiles with `tsc` (`.mts` → `.mjs`, `.ts` → `.js`) and then minifies every emitted file with
-  terser: no comments, mangled locals, shebang and export names kept. `plugin/hooks/*.mjs` (function-hooks modules) are neither compressed nor mangled: Claude Code's static
+- `pnpm build` strips types with oxc-transform (`.mts` → `.mjs`, `.ts` → `.js`) and then minifies every emitted file with
+  oxc-minify: no comments, mangled locals, shebang and export names kept. `plugin/hooks/*.mjs` (function-hooks modules) are neither compressed nor mangled: Claude Code's static
   module check needs named hook functions, `$`/`on` spelled as such and no shadowed names. The output is optimized for size and
   load time, not for reading; debug against `src/`.
 

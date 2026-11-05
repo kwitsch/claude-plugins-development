@@ -5,14 +5,11 @@
   "type": "module",
   "scripts": {
     "build": "node scripts/build.mjs",
-    "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run --config ../vitest.config.mjs",
-    "lint": "node scripts/hooks.mjs --check && eslint"
+    "lint": "node scripts/hooks.mjs --check && oxlint -c ../.oxlintrc.json"
   },
   "devDependencies": {
     "@types/node": "^26.6.6",
-    "claude-engine-vitest": "workspace:*",
-    "terser": "^5.51.2",
-    "typescript": "^6.0.3"
+    "claude-engine-vitest": "workspace:*"
   }
 }

@@ -13,18 +13,20 @@ Development repository for Claude Code plugins. One top-level directory per plug
 | `src/`         | TypeScript sources (`*.mts`). `pnpm build` compiles them to `plugin/**/*.mjs` (same relative path).                                          |
 | `tests/`       | Integration tests (`*.test.mjs`, vitest), run against `plugin/`.                                                                             |
 | `scripts/`     | Build scripts (`build.mjs`).                                                                                                                 |
-| `package.json` | Per-plugin pnpm scripts: `build`, `test`, `typecheck`, `lint`.                                                                               |
+| `package.json` | Per-plugin pnpm scripts: `build`, `test`, `lint`.                                                                                            |
 | `CLAUDE.md`    | Developer notes for the plugin. Not inside `plugin/` (a plugin-root CLAUDE.md is not loaded and triggers a validate warning).                |
 
 Hand-written plugin content that is not generated (`SKILL.md`, `hooks/hooks.json`, `agents/*.md`, `README.md`) lives directly in `plugin/` and is edited there.
 
 ## Workspace-wide lint and test config
 
-One config for all packages, at the repo root; no per-plugin `eslint.config.mjs` or `vitest.config.mjs`.
+One config for all packages, at the repo root; no per-plugin lint or vitest config. Formatting stays with dprint (`dprint.json`); everything else is oxc.
 
-- `eslint.config.mjs`: TypeScript-first (typescript-eslint type-checked, TSDoc/JSDoc rules) for `*/src/**/*.{ts,mts}`; `*/plugin/**` is ignored. A plugin's `eslint` finds it by walking up. Lint tooling (`eslint`, plugins, `globals`, `typescript-eslint`) is a root devDependency only.
+- `.oxlintrc.json`: oxlint, TypeScript-first, for each plugin's `src/` (`plugin/`, `tests/`, `scripts/` and `*.mjs` are ignored). `options.typeAware` + `options.typeCheck` run tsgolint (TypeScript 7) with each plugin's `tsconfig.json`, so `pnpm lint` is also the type check (no `tsc`, no `typecheck` script). `eslint-plugin-jsdoc` (as `jsdoc-js`) and `eslint-plugin-tsdoc` run as oxlint jsPlugins. Each plugin's `lint` script is `oxlint -c ../.oxlintrc.json`.
+- Build: `scripts/build.mjs` uses oxc-transform (type stripping) and oxc-minify.
+- Tooling (`oxlint`, `oxlint-tsgolint`, `oxc-transform`, `oxc-minify`, the two jsdoc/tsdoc plugins, `vitest`) is a root devDependency only.
 - `vitest.config.mjs`: every package's `test` script is `vitest run --config ../vitest.config.mjs`. `vitest` is a root devDependency only.
-- CI re-checks every package when the root `eslint.config.mjs`, `vitest.config.mjs`, `package.json` or `pnpm-lock.yaml` changes.
+- CI re-checks every package when the root `.oxlintrc.json`, `vitest.config.mjs`, `package.json` or `pnpm-lock.yaml` changes.
 
 ## Commands
 

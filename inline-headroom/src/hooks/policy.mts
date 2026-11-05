@@ -324,7 +324,7 @@ const GIT_STATUS_HEADERS = new Set(["Changes to be committed:", "Changes not sta
 /** A git status entry line. */
 const GIT_STATUS_ENTRY_RE = /^\s+(?:new file|modified|deleted|renamed|copied|typechange|both modified|both added|both deleted|added by us|deleted by us|added by them|deleted by them):\s+\S/;
 /** The separators of Python's str.splitlines(), used by git status only. */
-// eslint-disable-next-line no-control-regex -- \x1c-\x1e are splitlines() separators, matched on purpose
+// oxlint-disable-next-line no-control-regex -- \x1c-\x1e are splitlines() separators, matched on purpose
 const LINE_BREAK_RE = /\r\n|[\n\r\v\f\x1c-\x1e\x85\u{2028}\u{2029}]/u;
 /** Upstream lossless_compaction.py _TIMESTAMP_ROW_RE: a timestamped log row is never a grep line. */
 const TIMESTAMP_ROW_RE = /^\s*\[?(?:\d{4}-\d{2}-\d{2}[ T]\d{1,2}:\d{2}|\d{2}\/\d{2}\/\d{2,4}[ T]\d{1,2}:\d{2}|[A-Z][a-z]{2}\s+\d{1,2}\s+\d{1,2}:\d{2}|\d{1,2}:\d{2}:\d{2}(?:[.,]\d+)?(?:\s|\]|$))/;
@@ -3810,7 +3810,7 @@ const LOG_TRACE_HEAD_FRAMES = 3;
 const LOG_TRACE_APP_FRAMES = 5;
 // Upstream _ANSI_RE (CSI SGR colour and style): dropped one-way by the log fold, as non-semantic.
 /** An ANSI SGR colour or style sequence. */
-// eslint-disable-next-line no-control-regex -- \x1b is the escape that starts an ANSI colour sequence, matched on purpose
+// oxlint-disable-next-line no-control-regex -- \x1b is the escape that starts an ANSI colour sequence, matched on purpose
 const ANSI_RE = /\x1b\[[0-9;]*m/g;
 /** Upstream LevelClassifier's exact-casing words, each mapped to its level. */
 const LOG_LEVEL_WORDS: ReadonlyMap<string, LogLevel> = new Map(

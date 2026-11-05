@@ -1,0 +1,220 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "plugins": [
+    "eslint",
+    "typescript"
+  ],
+  "jsPlugins": [
+    {
+      "name": "jsdoc-js",
+      "specifier": "eslint-plugin-jsdoc"
+    },
+    "eslint-plugin-tsdoc"
+  ],
+  "categories": {
+    "correctness": "off"
+  },
+  "options": {
+    "typeAware": true,
+    "typeCheck": true
+  },
+  "env": {
+    "builtin": true,
+    "node": true
+  },
+  "settings": {
+    "jsdoc": {
+      "mode": "typescript",
+      "tagNamePreference": {
+        "template": "typeParam"
+      }
+    }
+  },
+  "ignorePatterns": [
+    ".claude/**",
+    "**/plugin/**",
+    "**/node_modules/**",
+    "**/tests/**",
+    "**/scripts/**",
+    "claude-engine-vitest/**",
+    "**/*.mjs",
+    "**/*.js"
+  ],
+  "rules": {
+    "for-direction": "error",
+    "no-async-promise-executor": "error",
+    "no-case-declarations": "error",
+    "no-compare-neg-zero": "error",
+    "no-cond-assign": "error",
+    "no-constant-binary-expression": "error",
+    "no-constant-condition": "error",
+    "no-control-regex": "error",
+    "no-debugger": "error",
+    "no-delete-var": "error",
+    "no-dupe-else-if": "error",
+    "no-duplicate-case": "error",
+    "no-empty": "error",
+    "no-empty-character-class": "error",
+    "no-empty-pattern": "error",
+    "no-empty-static-block": "error",
+    "no-ex-assign": "error",
+    "no-extra-boolean-cast": "error",
+    "no-fallthrough": "error",
+    "no-global-assign": "error",
+    "no-invalid-regexp": "error",
+    "no-irregular-whitespace": "error",
+    "no-loss-of-precision": "error",
+    "no-misleading-character-class": "error",
+    "no-nonoctal-decimal-escape": "error",
+    "no-prototype-builtins": "error",
+    "no-regex-spaces": "error",
+    "no-self-assign": "error",
+    "no-shadow-restricted-names": "error",
+    "no-sparse-arrays": "error",
+    "no-unassigned-vars": "error",
+    "no-unexpected-multiline": "error",
+    "no-unsafe-finally": "error",
+    "no-unsafe-optional-chaining": "error",
+    "no-unused-labels": "error",
+    "no-unused-private-class-members": "error",
+    "no-unused-vars": "error",
+    "no-useless-backreference": "error",
+    "no-useless-catch": "error",
+    "no-useless-escape": "error",
+    "preserve-caught-error": "error",
+    "require-yield": "error",
+    "use-isnan": "error",
+    "valid-typeof": "error",
+    "no-var": "error",
+    "prefer-const": "error",
+    "prefer-rest-params": "error",
+    "prefer-spread": "error",
+    "no-array-constructor": "error",
+    "no-unused-expressions": "error",
+    "typescript/await-thenable": "error",
+    "typescript/ban-ts-comment": "error",
+    "typescript/no-array-delete": "error",
+    "typescript/no-base-to-string": "error",
+    "typescript/no-duplicate-enum-values": "error",
+    "typescript/no-duplicate-type-constituents": "error",
+    "typescript/no-empty-object-type": "error",
+    "typescript/no-explicit-any": "error",
+    "typescript/no-extra-non-null-assertion": "error",
+    "typescript/no-floating-promises": "error",
+    "typescript/no-for-in-array": "error",
+    "typescript/no-implied-eval": "error",
+    "typescript/no-misused-new": "error",
+    "typescript/no-misused-promises": "error",
+    "typescript/no-namespace": "error",
+    "typescript/no-non-null-asserted-optional-chain": "error",
+    "typescript/no-redundant-type-constituents": "error",
+    "typescript/no-require-imports": "error",
+    "typescript/no-this-alias": "error",
+    "typescript/no-unnecessary-type-assertion": "error",
+    "typescript/no-unnecessary-type-constraint": "error",
+    "typescript/no-unsafe-argument": "error",
+    "typescript/no-unsafe-assignment": "error",
+    "typescript/no-unsafe-call": "error",
+    "typescript/no-unsafe-declaration-merging": "error",
+    "typescript/no-unsafe-enum-comparison": "error",
+    "typescript/no-unsafe-function-type": "error",
+    "typescript/no-unsafe-member-access": "error",
+    "typescript/no-unsafe-return": "error",
+    "typescript/no-unsafe-unary-minus": "error",
+    "typescript/no-wrapper-object-types": "error",
+    "typescript/only-throw-error": "error",
+    "typescript/prefer-as-const": "error",
+    "typescript/prefer-namespace-keyword": "error",
+    "typescript/prefer-promise-reject-errors": "error",
+    "typescript/require-await": "error",
+    "typescript/restrict-plus-operands": "error",
+    "typescript/restrict-template-expressions": "error",
+    "typescript/triple-slash-reference": "error",
+    "typescript/unbound-method": "error",
+    "tsdoc/syntax": "error",
+    "jsdoc-js/check-access": "error",
+    "jsdoc-js/check-alignment": "error",
+    "jsdoc-js/check-param-names": [
+      "error",
+      {
+        "checkDestructured": false
+      }
+    ],
+    "jsdoc-js/check-property-names": "error",
+    "jsdoc-js/check-tag-names": [
+      "error",
+      {
+        "typed": true
+      }
+    ],
+    "jsdoc-js/check-types": "error",
+    "jsdoc-js/check-values": "error",
+    "jsdoc-js/empty-tags": "error",
+    "jsdoc-js/escape-inline-tags": "error",
+    "jsdoc-js/implements-on-classes": "error",
+    "jsdoc-js/multiline-blocks": "error",
+    "jsdoc-js/no-defaults": "error",
+    "jsdoc-js/no-multi-asterisks": "error",
+    "jsdoc-js/no-types": "error",
+    "jsdoc-js/reject-any-type": "error",
+    "jsdoc-js/reject-function-type": "error",
+    "jsdoc-js/require-jsdoc": [
+      "error",
+      {
+        "publicOnly": false,
+        "require": {
+          "FunctionDeclaration": true,
+          "MethodDefinition": true,
+          "ClassDeclaration": true,
+          "ArrowFunctionExpression": false,
+          "FunctionExpression": false
+        },
+        "contexts": [
+          "Program > VariableDeclaration",
+          "ExportNamedDeclaration[declaration.type=\"VariableDeclaration\"]",
+          "TSTypeAliasDeclaration",
+          "TSInterfaceDeclaration",
+          "ClassBody > PropertyDefinition"
+        ],
+        "checkConstructors": false
+      }
+    ],
+    "jsdoc-js/require-next-type": "error",
+    "jsdoc-js/require-param": [
+      "error",
+      {
+        "checkDestructured": false
+      }
+    ],
+    "jsdoc-js/require-param-description": "error",
+    "jsdoc-js/require-param-name": "error",
+    "jsdoc-js/require-property": "error",
+    "jsdoc-js/require-property-description": "error",
+    "jsdoc-js/require-property-name": "error",
+    "jsdoc-js/require-returns": "error",
+    "jsdoc-js/require-returns-check": "error",
+    "jsdoc-js/require-returns-description": "error",
+    "jsdoc-js/require-throws-type": "error",
+    "jsdoc-js/require-yields": "error",
+    "jsdoc-js/require-yields-check": "error",
+    "jsdoc-js/require-yields-type": "error",
+    "jsdoc-js/tag-lines": [
+      "error",
+      "any",
+      {
+        "startLines": 1
+      }
+    ],
+    "jsdoc-js/ts-no-empty-object-type": "error",
+    "jsdoc-js/valid-types": "error",
+    "jsdoc-js/require-hyphen-before-param-description": "error",
+    "jsdoc-js/require-description": [
+      "error",
+      {
+        "contexts": [
+          "any"
+        ]
+      }
+    ]
+  }
+}

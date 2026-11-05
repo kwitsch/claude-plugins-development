@@ -392,7 +392,8 @@ plainTest("the module's inlined config names equal the shared CONFIG_NAMES; no i
   const src = readFileSync(path.join(PLUGIN, "hooks/notice.mjs"), "utf8");
   const m = /CONFIG_NAMES=(\[[^\]]*\])/.exec(src);
   assert.ok(m, "inlined CONFIG_NAMES");
-  assert.deepEqual(JSON.parse(m[1]), [...CONFIG_NAMES]);
+  // the minifier may print the strings with backticks
+  assert.deepEqual(JSON.parse(m[1].replaceAll("`", '"')), [...CONFIG_NAMES]);
   assert.doesNotMatch(src, /^import/m);
 });
 
@@ -424,6 +425,6 @@ plainTest("built module keeps the names Claude Code's static check needs (no man
   assert.match(src, /\$\.ui\.toast\(/);
   assert.match(src, /\$\.session\.cwd\(\)/);
   assert.match(src, /\$\.process\.run\(/);
-  assert.match(src, /\$\.env\.get\("HOME"\)/);
-  assert.match(src, /\$\.env\.get\("PATH"\)/);
+  assert.match(src, /\$\.env\.get\(["`]HOME["`]\)/);
+  assert.match(src, /\$\.env\.get\(["`]PATH["`]\)/);
 });
