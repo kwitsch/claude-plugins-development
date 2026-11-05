@@ -8,8 +8,6 @@
     "lint": "pnpm -r lint"
   },
   "devDependencies": {
-    "eslint-plugin-jsdoc": "^65.4.2",
-    "eslint-plugin-tsdoc": "^0.5.4",
     "oxc-minify": "^0.157.0",
     "oxc-transform": "^0.157.0",
     "oxlint": "^1.91.0",

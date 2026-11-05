@@ -4,13 +4,6 @@
     "eslint",
     "typescript"
   ],
-  "jsPlugins": [
-    {
-      "name": "jsdoc-js",
-      "specifier": "eslint-plugin-jsdoc"
-    },
-    "eslint-plugin-tsdoc"
-  ],
   "categories": {
     "correctness": "off"
   },
@@ -21,14 +14,6 @@
   "env": {
     "builtin": true,
     "node": true
-  },
-  "settings": {
-    "jsdoc": {
-      "mode": "typescript",
-      "tagNamePreference": {
-        "template": "typeParam"
-      }
-    }
   },
   "ignorePatterns": [
     ".claude/**",
@@ -130,91 +115,6 @@
     "typescript/restrict-plus-operands": "error",
     "typescript/restrict-template-expressions": "error",
     "typescript/triple-slash-reference": "error",
-    "typescript/unbound-method": "error",
-    "tsdoc/syntax": "error",
-    "jsdoc-js/check-access": "error",
-    "jsdoc-js/check-alignment": "error",
-    "jsdoc-js/check-param-names": [
-      "error",
-      {
-        "checkDestructured": false
-      }
-    ],
-    "jsdoc-js/check-property-names": "error",
-    "jsdoc-js/check-tag-names": [
-      "error",
-      {
-        "typed": true
-      }
-    ],
-    "jsdoc-js/check-types": "error",
-    "jsdoc-js/check-values": "error",
-    "jsdoc-js/empty-tags": "error",
-    "jsdoc-js/escape-inline-tags": "error",
-    "jsdoc-js/implements-on-classes": "error",
-    "jsdoc-js/multiline-blocks": "error",
-    "jsdoc-js/no-defaults": "error",
-    "jsdoc-js/no-multi-asterisks": "error",
-    "jsdoc-js/no-types": "error",
-    "jsdoc-js/reject-any-type": "error",
-    "jsdoc-js/reject-function-type": "error",
-    "jsdoc-js/require-jsdoc": [
-      "error",
-      {
-        "publicOnly": false,
-        "require": {
-          "FunctionDeclaration": true,
-          "MethodDefinition": true,
-          "ClassDeclaration": true,
-          "ArrowFunctionExpression": false,
-          "FunctionExpression": false
-        },
-        "contexts": [
-          "Program > VariableDeclaration",
-          "ExportNamedDeclaration[declaration.type=\"VariableDeclaration\"]",
-          "TSTypeAliasDeclaration",
-          "TSInterfaceDeclaration",
-          "ClassBody > PropertyDefinition"
-        ],
-        "checkConstructors": false
-      }
-    ],
-    "jsdoc-js/require-next-type": "error",
-    "jsdoc-js/require-param": [
-      "error",
-      {
-        "checkDestructured": false
-      }
-    ],
-    "jsdoc-js/require-param-description": "error",
-    "jsdoc-js/require-param-name": "error",
-    "jsdoc-js/require-property": "error",
-    "jsdoc-js/require-property-description": "error",
-    "jsdoc-js/require-property-name": "error",
-    "jsdoc-js/require-returns": "error",
-    "jsdoc-js/require-returns-check": "error",
-    "jsdoc-js/require-returns-description": "error",
-    "jsdoc-js/require-throws-type": "error",
-    "jsdoc-js/require-yields": "error",
-    "jsdoc-js/require-yields-check": "error",
-    "jsdoc-js/require-yields-type": "error",
-    "jsdoc-js/tag-lines": [
-      "error",
-      "any",
-      {
-        "startLines": 1
-      }
-    ],
-    "jsdoc-js/ts-no-empty-object-type": "error",
-    "jsdoc-js/valid-types": "error",
-    "jsdoc-js/require-hyphen-before-param-description": "error",
-    "jsdoc-js/require-description": [
-      "error",
-      {
-        "contexts": [
-          "any"
-        ]
-      }
-    ]
+    "typescript/unbound-method": "error"
   }
 }

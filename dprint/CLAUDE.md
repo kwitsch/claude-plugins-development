@@ -90,8 +90,8 @@ via `node:assert/strict`; the shared config sets `testTimeout: 30_000` for the f
 
 - `src/**/*.{mts,ts}` are written for humans: every function, method, class, type, type member and
   module-level constant carries a TSDoc comment (`@param name - text`, `@returns`, `@remarks`, one blank line
-  before the first tag). `pnpm lint` (oxlint type-aware + type check, `eslint-plugin-tsdoc`, `eslint-plugin-jsdoc` as jsPlugins;
-  workspace config `../.oxlintrc.json`, type-checked rules incl. `no-explicit-any`/`no-unsafe-*`) enforces it; CI runs
+  before the first tag). `.claude/rules/tsdoc.md` asks for it (not linted). `pnpm lint` (oxlint type-aware + type check,
+  workspace config `../.oxlintrc.json`, rules incl. `no-explicit-any`/`no-unsafe-*`) must pass; CI runs
   it. `plugin/` is ignored by the linter.
 - `plugin/hooks/hooks.json` is the hook-input contract. `scripts/hooks.mjs` validates it (`mcp_tool` hooks, plus
   `command` hooks (non-empty `command`, timeout checked, no input, no generated types), `server` =

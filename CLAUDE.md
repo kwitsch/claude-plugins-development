@@ -22,9 +22,9 @@ Hand-written plugin content that is not generated (`SKILL.md`, `hooks/hooks.json
 
 One config for all packages, at the repo root; no per-plugin lint or vitest config. Formatting stays with dprint (`dprint.json`); everything else is oxc.
 
-- `.oxlintrc.json`: oxlint, TypeScript-first, for each plugin's `src/` (`plugin/`, `tests/`, `scripts/` and `*.mjs` are ignored). `options.typeAware` + `options.typeCheck` run tsgolint (TypeScript 7) with each plugin's `tsconfig.json`, so `pnpm lint` is also the type check (no `tsc`, no `typecheck` script). `eslint-plugin-jsdoc` (as `jsdoc-js`) and `eslint-plugin-tsdoc` run as oxlint jsPlugins. Each plugin's `lint` script is `oxlint -c ../.oxlintrc.json`.
+- `.oxlintrc.json`: oxlint, TypeScript-first, for each plugin's `src/` (`plugin/`, `tests/`, `scripts/` and `*.mjs` are ignored). `options.typeAware` + `options.typeCheck` run tsgolint (TypeScript 7) with each plugin's `tsconfig.json`, so `pnpm lint` is also the type check (no `tsc`, no `typecheck` script). Doc comments are not linted; `.claude/rules/tsdoc.md` covers them. Each plugin's `lint` script is `oxlint -c ../.oxlintrc.json`.
 - Build: `scripts/build.mjs` uses oxc-transform (type stripping) and oxc-minify.
-- Tooling (`oxlint`, `oxlint-tsgolint`, `oxc-transform`, `oxc-minify`, the two jsdoc/tsdoc plugins, `vitest`) is a root devDependency only.
+- Tooling (`oxlint`, `oxlint-tsgolint`, `oxc-transform`, `oxc-minify` `vitest`) is a root devDependency only.
 - `vitest.config.mjs`: every package's `test` script is `vitest run --config ../vitest.config.mjs`. `vitest` is a root devDependency only.
 - CI re-checks every package when the root `.oxlintrc.json`, `vitest.config.mjs`, `package.json` or `pnpm-lock.yaml` changes.
 
