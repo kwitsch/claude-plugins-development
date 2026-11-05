@@ -2,17 +2,7 @@
 // Build: src/**/*.mts -> plugin/**/*.mjs via oxc-transform (type stripping; type checks run in `pnpm lint`), minified with oxc-minify, then sync plugin.json into plugin/.claude-plugin/.
 // Generated .mjs files and plugin/.claude-plugin/plugin.json must never be edited by hand.
 import { spawnSync } from "node:child_process";
-import {
-  chmodSync,
-  copyFileSync,
-  existsSync,
-  mkdirSync,
-  readFileSync,
-  readdirSync,
-  rmSync,
-  statSync,
-  writeFileSync,
-} from "node:fs";
+import { chmodSync, copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { minifySync } from "oxc-minify";
@@ -21,8 +11,13 @@ import { transformSync } from "oxc-transform";
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const PLUGIN = path.join(ROOT, "plugin");
 
-/** @param {string} dir @returns {string[]} */
-function walk(dir) {
+/**
+ * Every file below a directory, recursively.
+ *
+ * @param dir - Directory to walk; a missing one yields no files.
+ * @returns The file paths.
+ */
+function walk(dir: string): string[] {
   if (!existsSync(dir)) return [];
   return readdirSync(dir).flatMap((n) => {
     const p = path.join(dir, n);
@@ -30,20 +25,14 @@ function walk(dir) {
   });
 }
 
-// 1. remove stale build output (plugin/ holds no hand-written .mjs/.js)
-for (const f of walk(PLUGIN)) if (/\.m?js$/.test(f)) rmSync(f);
+// 0. plugin/ ships only build output and hand-written plugin files (.claude/rules/plugin-build-output.md)
+const layout = spawnSync(process.execPath, [path.join(ROOT, "../.github/scripts/check-plugin-layout.mjs"), ROOT], { stdio: "inherit" });
+if (layout.status !== 0) process.exit(layout.status ?? 1);
 
-// 2. validate hooks.json and regenerate the hook input types (src/mcp/hook-inputs.d.mts) from it
-const hooks = spawnSync(
-  process.execPath,
-  [path.join(ROOT, "scripts/hooks.mjs")],
-  {
-    stdio: "inherit",
-  },
-);
-if (hooks.status !== 0) process.exit(hooks.status ?? 1);
+// 1. remove stale build output (plugin/ holds no hand-written .mjs)
+for (const f of walk(PLUGIN)) if (f.endsWith(".mjs")) rmSync(f);
 
-// 3. compile (only if there are sources): strip types file by file (.mts -> .mjs, .ts -> .js), then minify.
+// 2. compile (only if there are sources): strip types file by file (.mts -> .mjs, .ts -> .js), then minify.
 // Type checking is not part of the build: `pnpm lint` (oxlint --type-check) does it.
 const SRC = path.join(ROOT, "src");
 const sources = walk(SRC).filter((f) => /\.m?ts$/.test(f) && !/\.d\.m?ts$/.test(f));
@@ -73,17 +62,17 @@ for (const src of sources) {
   if (m.code.startsWith("#!")) chmodSync(out, 0o755);
 }
 
-// 4. manifest: <name>/plugin.json is the source of truth
+// 3. manifest: <name>/plugin.json is the source of truth
 const manifest = JSON.parse(
   readFileSync(path.join(ROOT, "plugin.json"), "utf8"),
-);
-for (const k of ["name", "version", "description"]) {
+) as Partial<Record<"name" | "version" | "description", string>>;
+for (const k of ["name", "version", "description"] as const) {
   if (!manifest[k]) {
     console.error(`plugin.json: missing "${k}"`);
     process.exit(1);
   }
 }
-const pkg = JSON.parse(readFileSync(path.join(ROOT, "package.json"), "utf8"));
+const pkg = JSON.parse(readFileSync(path.join(ROOT, "package.json"), "utf8")) as { version?: string };
 if (pkg.version !== manifest.version) {
   console.error(
     `version mismatch: package.json ${pkg.version} != plugin.json ${manifest.version}`,

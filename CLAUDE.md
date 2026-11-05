@@ -12,7 +12,7 @@ Development repository for Claude Code plugins. One top-level directory per plug
 | `plugin/`      | The finished, installable plugin. `plugin/.claude-plugin/plugin.json` and every `plugin/**/*.mjs` are **build output** — never edit by hand. |
 | `src/`         | TypeScript sources (`*.mts`). `pnpm build` compiles them to `plugin/**/*.mjs` (same relative path).                                          |
 | `tests/`       | Integration tests (`*.test.mjs`, vitest), run against `plugin/`.                                                                             |
-| `scripts/`     | Build scripts (`build.mjs`).                                                                                                                 |
+| `scripts/`     | Build scripts (`build.mts`), TypeScript run directly by Node 24 (built-in type stripping), never compiled.                                   |
 | `package.json` | Per-plugin pnpm scripts: `build`, `test`, `lint`.                                                                                            |
 | `CLAUDE.md`    | Developer notes for the plugin. Not inside `plugin/` (a plugin-root CLAUDE.md is not loaded and triggers a validate warning).                |
 
@@ -22,8 +22,8 @@ Hand-written plugin content that is not generated (`SKILL.md`, `hooks/hooks.json
 
 One config for all packages, at the repo root; no per-plugin lint or vitest config. Formatting stays with dprint (`dprint.json`); everything else is oxc.
 
-- `.oxlintrc.json`: oxlint, TypeScript-first, for each plugin's `src/` (`plugin/`, `tests/`, `scripts/` and `*.mjs` are ignored). `options.typeAware` + `options.typeCheck` run tsgolint (TypeScript 7) with the root `tsconfig.json` (type check only, `noEmit`; no per-plugin tsconfig; `@types/node` is a root devDependency), so `pnpm lint` is also the type check (no `tsc`, no `typecheck` script). Doc comments are not linted; `.claude/rules/tsdoc.md` covers them. Each plugin's `lint` script is `oxlint -c ../.oxlintrc.json`.
-- Build: `scripts/build.mjs` uses oxc-transform (type stripping) and oxc-minify.
+- `.oxlintrc.json`: oxlint, TypeScript-first, for each plugin's `src/` and `scripts/` (`plugin/`, `tests/` and `*.mjs` are ignored). `options.typeAware` + `options.typeCheck` run tsgolint (TypeScript 7) with the root `tsconfig.json` (type check only, `noEmit`; no per-plugin tsconfig; `@types/node` is a root devDependency), so `pnpm lint` is also the type check (no `tsc`, no `typecheck` script). Doc comments are not linted; `.claude/rules/tsdoc.md` covers them. Each plugin's `lint` script is `oxlint -c ../.oxlintrc.json`.
+- Build: `scripts/build.mts` uses oxc-transform (type stripping) and oxc-minify.
 - Tooling (`oxlint`, `oxlint-tsgolint`, `oxc-transform`, `oxc-minify` `vitest`) is a root devDependency only.
 - `vitest.config.mjs`: every package's `test` script is `vitest run --config ../vitest.config.mjs`. `vitest` is a root devDependency only.
 - CI re-checks every package when the root `.oxlintrc.json`, `tsconfig.json`, `vitest.config.mjs`, `package.json` or `pnpm-lock.yaml` changes.

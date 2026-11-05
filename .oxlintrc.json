@@ -20,7 +20,6 @@
     "**/plugin/**",
     "**/node_modules/**",
     "**/tests/**",
-    "**/scripts/**",
     "claude-engine-vitest/**",
     "**/*.mjs",
     "**/*.js"

@@ -4,7 +4,7 @@
  *
  * @remarks
  * EARLY ACCESS API. No engine type import (`claude-code` typings are not in the repo): the used `$` members and
- * events are typed structurally below. `scripts/build.mjs` keeps `hooks/*.mjs` unmangled and uncompressed, since
+ * events are typed structurally below. `scripts/build.mts` keeps `hooks/*.mjs` unmangled and uncompressed, since
  * the engine's static check wants `$`/`on` spelled as such and no `$.<noun>` passed as a bare value.
  *
  * @packageDocumentation

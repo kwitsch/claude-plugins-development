@@ -7,7 +7,7 @@ paths:
 
 # Rule: src / scripts / tests
 
-- TypeScript lives only in `src/**/*.mts`; `scripts/build.mjs` strips types file by file with oxc-transform (`isolatedModules`) into `plugin/<same path>.mjs` and minifies it with oxc-minify (`hooks/*.mjs` neither compressed nor mangled). No type check in the build, no `declaration` output.
+- TypeScript lives in `src/**/*.mts` (compiled) and `scripts/*.mts` (run as-is by Node's type stripping: erasable syntax only, no `enum`/`namespace`/parameter properties; imports name the `.mts` file); `scripts/build.mts` strips types file by file with oxc-transform (`isolatedModules`) into `plugin/<same path>.mjs` and minifies it with oxc-minify (`hooks/*.mjs` neither compressed nor mangled). No type check in the build, no `declaration` output.
 - Function-hooks modules (`src/hooks/*.mts`) import no engine types (`claude-code`): type the used `$`/`on` members structurally (template: `dprint/src/hooks/notice.mts`).
 - Executable scripts start with `#!/usr/bin/env node`; build sets 0755.
 - Import only `node:` builtins in `src/`.

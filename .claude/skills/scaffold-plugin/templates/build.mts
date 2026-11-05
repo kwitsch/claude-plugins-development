@@ -21,8 +21,13 @@ import { transformSync } from "oxc-transform";
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const PLUGIN = path.join(ROOT, "plugin");
 
-/** @param {string} dir @returns {string[]} */
-function walk(dir) {
+/**
+ * Every file below a directory, recursively.
+ *
+ * @param dir - Directory to walk; a missing one yields no files.
+ * @returns The file paths.
+ */
+function walk(dir: string): string[] {
   if (!existsSync(dir)) return [];
   return readdirSync(dir).flatMap((n) => {
     const p = path.join(dir, n);
@@ -70,14 +75,14 @@ for (const src of sources) {
 // 3. manifest: <name>/plugin.json is the source of truth
 const manifest = JSON.parse(
   readFileSync(path.join(ROOT, "plugin.json"), "utf8"),
-);
-for (const k of ["name", "version", "description"]) {
+) as Partial<Record<"name" | "version" | "description", string>>;
+for (const k of ["name", "version", "description"] as const) {
   if (!manifest[k]) {
     console.error(`plugin.json: missing "${k}"`);
     process.exit(1);
   }
 }
-const pkg = JSON.parse(readFileSync(path.join(ROOT, "package.json"), "utf8"));
+const pkg = JSON.parse(readFileSync(path.join(ROOT, "package.json"), "utf8")) as { version?: string };
 if (pkg.version !== manifest.version) {
   console.error(
     `version mismatch: package.json ${pkg.version} != plugin.json ${manifest.version}`,

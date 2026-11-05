@@ -68,7 +68,7 @@ not installed, `<pick>` could not start or took over 10 s, exited N, printed no 
 exit as not installed, since `npx --no` exits 1 when nothing is cached; its other causes keep their own text; `judge`
 returns `{ kind, text }`, so no logic depends on the wording). A success is cached for the module's life, a failure for
 30 s (its own cache, separate from the MCP server's `findDprint`). Only when the pick is unusable it calls
-`$.ui.toast(text, { timeoutMs: 15000 })`, at most once per 15 s overall (the cause is machine-wide). `scripts/hooks.mjs` validates only the
+`$.ui.toast(text, { timeoutMs: 15000 })`, at most once per 15 s overall (the cause is machine-wide). `scripts/hooks.mts` validates only the
 `hooks` map; `claude plugin validate plugin` checks the module, lists `process.run`, `env.get` and the env vars `HOME` and `PATH`
 among its uses, and warns "gating hook without .catch" for three of its hooks (expected: the check is detached with
 `.catch`).
@@ -93,13 +93,13 @@ via `node:assert/strict`; the shared config sets `testTimeout: 30_000` for the f
   before the first tag). `.claude/rules/tsdoc.md` asks for it (not linted). `pnpm lint` (oxlint type-aware + type check,
   workspace config `../.oxlintrc.json`, rules incl. `no-explicit-any`/`no-unsafe-*`) must pass; CI runs
   it. `plugin/` is ignored by the linter.
-- `plugin/hooks/hooks.json` is the hook-input contract. `scripts/hooks.mjs` validates it (`mcp_tool` hooks, plus
+- `plugin/hooks/hooks.json` is the hook-input contract. `scripts/hooks.mts` validates it (`mcp_tool` hooks, plus
   `command` hooks (non-empty `command`, timeout checked, no input, no generated types), `server` =
   `plugin:dprint:<.mcp.json key>`, every `${…}` placeholder a real input field of its event
   and, for `Write`/`Edit` matchers, of those tools, one input shape per tool) and generates
   `src/mcp/hook-inputs.d.mts` (one interface per tool plus the `HookInputs` map) from the `input` templates.
   `server.mts` types its tool table by `HookInputs`, so a tool missing on either side is a compile error.
-  `pnpm build` regenerates the file; `pnpm lint` runs `scripts/hooks.mjs --check` first and fails while it is
+  `pnpm build` regenerates the file; `pnpm lint` runs `scripts/hooks.mts --check` first and fails while it is
   stale. Never edit the `.d.mts` by hand. A new hook event needs its input fields in `EVENT_FIELDS` there.
 - `pnpm build` strips types with oxc-transform (`.mts` → `.mjs`, `.ts` → `.js`) and then minifies every emitted file with
   oxc-minify: no comments, mangled locals, shebang and export names kept. `plugin/hooks/*.mjs` (function-hooks modules) are neither compressed nor mangled: Claude Code's static

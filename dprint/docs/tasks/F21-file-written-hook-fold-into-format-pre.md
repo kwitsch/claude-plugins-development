@@ -35,7 +35,7 @@ Prototype FIRST in a scratch copy; decision it gates: whether to delete the hook
 
 1. In `formatPre`, after computing the content that will be written, `written.set(real, digest(<exact bytes Claude Code will write>))`. Edit: apply the returned old/new to the file text yourself and render with the file's own line endings; compare against the actual on-disk result in a real headless `claude -p` session (CRLF file, non-unique old_string, replace_all, file with BOM).
 2. Safer alternative from the analysis: keep `file_written` and record in `formatPre` as well (belt and braces); gains only the closed race, not the 15 ms.
-3. Only if the record is provably byte-identical in all cases, delete the PostToolUse hook group and the `file_written` tool (hooks.json, server.mts tool table; `scripts/hooks.mjs` regenerates hook-inputs.d.mts). Update CLAUDE.md and tests that call `file_written`.
+3. Only if the record is provably byte-identical in all cases, delete the PostToolUse hook group and the `file_written` tool (hooks.json, server.mts tool table; `scripts/hooks.mts` regenerates hook-inputs.d.mts). Update CLAUDE.md and tests that call `file_written`.
    Trap: a record made at PreToolUse time must not outlive a failed Edit in a way that suppresses a real later change; the digest mismatch makes this safe only if the digest is of the exact post-write bytes.
 
 ## Verification
