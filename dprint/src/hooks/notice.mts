@@ -186,7 +186,8 @@ function dprintProblem($: Engine): Promise<string | null> {
   const entry: Probe = {
     problem: (async () => {
       const [home, pathVar] = await Promise.all([$.env.get("HOME"), $.env.get("PATH")]);
-      const cwd = home || "/";
+      // a HOME that does not exist would make every spawn fail and the toast blame dprint
+      const cwd = home && (await $.fs.exists(home)) ? home : "/";
       // shortcut: existence is weaker than findDprint's executable-file check (a non-executable `dprint` earlier on PATH is picked here), upgrade when the engine offers an executable check
       // shortcut: relative PATH entries are skipped (findDprint resolves them against the MCP server's cwd, unknown here), upgrade if the hook can learn that cwd
       const candidates = (pathVar ?? "")
@@ -242,7 +243,7 @@ async function warnIfNoDprint($: Engine, dir: string): Promise<void> {
   if (problem === null) return; // before the dedupe, so a dir whose probe succeeds never takes a slot
   if (recentlyShown()) return; // a concurrent event may have toasted while the probe ran
   shownAt = Date.now();
-  $.ui.toast(`dprint: ${dir} has a dprint config but ${problem}; run /dprint:dprint init`, { timeoutMs: TOAST_MS });
+  $.ui.toast(`dprint: ${dir} (or a parent up to the git root) has a dprint config but ${problem}; run /dprint:dprint init`, { timeoutMs: TOAST_MS });
 }
 
 /**

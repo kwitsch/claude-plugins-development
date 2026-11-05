@@ -61,7 +61,7 @@ else `$HOME/.dprint/bin/dprint` if it exists (`$.env.get("HOME")`), else `npx --
 (cached package only: unlike `findDprint`, which runs on a format request, this runs unprompted, so it never downloads;
 `--prefer-offline` so a name-only spec is not checked against the registry's latest, which fails offline or after a release).
 Only the pick is run (`<pick> --version`), never a later candidate, so a broken PATH dprint toasts even when `~/.dprint/bin` works
-(as `findDprint` would fail on it too), each in `cwd` HOME (else `/`, never the project, whose `node_modules/.bin` npx would prefer), 10 s timeout.
+(as `findDprint` would fail on it too), each in `cwd` HOME (else, or when that dir does not exist, `/`, never the project, whose `node_modules/.bin` npx would prefer), 10 s timeout.
 Usable = exit 0, stdout `dprint X.Y.Z` (check-dprint's regex) and X.Y.Z >= the inlined `MIN_VERSION` copy (`0.50.0`; a prerelease of it
 sorts below; `tests/notice.test.mjs` fails when it or the regex drifts from `check-dprint.mts`). The toast text names the cause:
 not installed, `<pick>` could not start or took over 10 s, exited N, printed no dprint version, or is too old (the npx leg reads a non-zero

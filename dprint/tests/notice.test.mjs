@@ -59,7 +59,7 @@ function withConfig(dir, name = "dprint.json") {
 }
 
 /** The toast text the module shows for `dir`; `problem` is the part after "but". */
-const toastText = (dir, problem = NOT_INSTALLED_TEXT) => `dprint: ${dir} has a dprint config but ${problem}; run /dprint:dprint init`;
+const toastText = (dir, problem = NOT_INSTALLED_TEXT) => `dprint: ${dir} (or a parent up to the git root) has a dprint config but ${problem}; run /dprint:dprint init`;
 
 /**
  * Registers every stub (before the test's first `$` call, as the kit requires) and returns what the module did.
@@ -68,7 +68,7 @@ const toastText = (dir, problem = NOT_INSTALLED_TEXT) => `dprint: ${dir} has a d
  * `bins` are the fake executables fs.exists reports (every other path is answered by node:fs).
  */
 function setup($, on, { cwd = "", exists, run = () => OK, home = HOME, path: pathVar = PATH_DIRS, bins = [PATH_DPRINT] } = {}) {
-  const exist = exists ?? ((p) => ({ value: bins.includes(p) || existsSync(p) }));
+  const exist = exists ?? ((p) => ({ value: p === HOME || bins.includes(p) || existsSync(p) }));
   const toasts = [];
   const runs = [];
   const envGets = [];
@@ -177,6 +177,14 @@ test("HOME unset -> the ~/.dprint/bin step is skipped, npx is probed; probes run
   const { fire, runs, toasts } = setup($, on, { cwd: dir, home: null, bins: [] });
   await fire("session.start");
   assert.deepEqual(runs, [{ argv: NPX_ARGV, init: { cwd: "/", timeoutMs: 10000 } }]);
+  assert.deepEqual(toasts, []);
+});
+
+test("HOME set to a dir that does not exist -> probes run in /, not in the missing HOME", async ($, on) => {
+  const dir = withConfig(repo());
+  const { fire, runs, toasts } = setup($, on, { cwd: dir, home: "/nonexistent-dprint-home" });
+  await fire("session.start");
+  assert.deepEqual(runs, [{ argv: [PATH_DPRINT, "--version"], init: { cwd: "/", timeoutMs: 10000 } }]);
   assert.deepEqual(toasts, []);
 });
 
@@ -297,6 +305,15 @@ test("worktree tools check the dir their result names; CwdChanged checks new_cwd
   await fire("classic.CwdChanged", { new_cwd: moved });
   assert.deepEqual(toasts.map((t) => t.text), [toastText(restored, COULD_NOT_START), toastText(moved, COULD_NOT_START)]);
 });
+
+for (const tool of ["EnterWorktree", "ExitWorktree"]) {
+  test(`${tool} without a dir in its result falls back to the session cwd`, async ($, on) => {
+    const dir = withConfig(repo());
+    const { fire, toasts } = setup($, on, { cwd: dir, run: () => DENY });
+    await fire("tool.call", { tool });
+    assert.deepEqual(toasts.map((t) => t.text), [toastText(dir, COULD_NOT_START)]);
+  });
+}
 
 test("a successful probe is cached: a second config dir spawns nothing", async ($, on) => {
   const a = withConfig(repo());
