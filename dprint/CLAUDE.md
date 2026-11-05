@@ -81,7 +81,7 @@ among its uses, and warns "gating hook without .catch" for three of its hooks (e
 
 ## Tests
 
-`pnpm --filter dprint test` runs vitest (`vitest run`, workspace config `../vitest.config.mts`) over `tests/*.test.mts` against the built `plugin/`; asserts
+`pnpm --filter dprint test` runs vitest (`vitest run`, workspace config `vitest.config.mts` at the repo root) over `tests/*.test.mts` against the built `plugin/`; asserts
 via `node:assert/strict`; the shared config sets `testTimeout: 30_000` for the files that spawn processes. `tests/notice.test.mts` drives the built hooks module through `createKit` from the workspace package
 `claude-engine-vitest` (stubs for `fs.exists`, `session.cwd`, `env.get`, `process.run`, `ui.toast`;
 `mock.clock(on).settle()` waits for the detached check).

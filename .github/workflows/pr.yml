@@ -74,8 +74,8 @@ jobs:
       - name: Lint
         run: pnpm exec oxlint
 
-      # changed workspace packages plus everything depending on them (a development/vitest/claude-engine
-      # (claude-engine-vitest) change re-tests its plugins without a version bump). A change in the root package
+      # changed workspace packages plus everything depending on them (a claude-engine-vitest change re-tests its
+      # plugins without a version bump). A change in the root package
       # (shared config, root tooling, lockfile, development/scripts, .github/) re-checks every package. Plugins get
       # the full check, other packages their tests.
       - name: Build and test changed packages and their dependents
