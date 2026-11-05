@@ -1,6 +1,6 @@
 // Tests for scripts/hooks.mjs: hooks.json validation and the generated hook input types.
 // Each negative case runs the script against a scratch copy of the plugin with one defect.
-import { after, test } from "node:test";
+import { afterAll, test } from "vitest";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import {
@@ -15,6 +15,8 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+const IT = { timeout: 30_000 };
+
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const SCRIPT = path.join(ROOT, "scripts/hooks.mjs");
 const HOOKS = JSON.parse(
@@ -26,7 +28,7 @@ const run = (...args) =>
 
 /** Scratch plugin root with the real files; `mutate(hooks)` edits a copy of hooks.json first. */
 const dirs = [];
-after(() => dirs.forEach((d) => rmSync(d, { recursive: true, force: true })));
+afterAll(() => dirs.forEach((d) => rmSync(d, { recursive: true, force: true })));
 
 function scratch(mutate = () => {}) {
   const dir = mkdtempSync(path.join(tmpdir(), "dprint-hooks-"));
@@ -50,16 +52,16 @@ function scratch(mutate = () => {}) {
 
 const formatPre = (h) => h.hooks.PreToolUse[0].hooks[0];
 
-test("the committed hooks.json is valid and its generated types are current", () => {
+test("the committed hooks.json is valid and its generated types are current", IT, () => {
   const r = run("--check");
   assert.equal(r.status, 0, r.stderr);
 });
 
-test("an unchanged scratch copy passes --check", () => {
+test("an unchanged scratch copy passes --check", IT, () => {
   assert.equal(run("--check", scratch()).status, 0);
 });
 
-test("a placeholder that is not a field of the event's input is rejected", () => {
+test("a placeholder that is not a field of the event's input is rejected", IT, () => {
   const r = run(
     "--check",
     scratch((h) => (formatPre(h).input.tool_input.nope = "${tool_input.nope}")),
@@ -68,7 +70,7 @@ test("a placeholder that is not a field of the event's input is rejected", () =>
   assert.match(r.stderr, /placeholder \$\{tool_input\.nope\}/);
 });
 
-test("an input key that is not a TS identifier is rejected", () => {
+test("an input key that is not a TS identifier is rejected", IT, () => {
   const r = run(
     "--check",
     scratch(
@@ -79,7 +81,7 @@ test("an input key that is not a TS identifier is rejected", () => {
   assert.match(r.stderr, /new-cwd: input key must be a valid identifier/);
 });
 
-test("a CwdChanged-only field on PreToolUse is rejected", () => {
+test("a CwdChanged-only field on PreToolUse is rejected", IT, () => {
   const r = run(
     "--check",
     scratch((h) => (formatPre(h).input.cwd = "${new_cwd}")),
@@ -88,7 +90,7 @@ test("a CwdChanged-only field on PreToolUse is rejected", () => {
   assert.match(r.stderr, /placeholder \$\{new_cwd\}/);
 });
 
-test("a bare .mcp.json key as server is rejected (must be plugin:<name>:<key>)", () => {
+test("a bare .mcp.json key as server is rejected (must be plugin:<name>:<key>)", IT, () => {
   const r = run(
     "--check",
     scratch((h) => (formatPre(h).server = "dprint-hooks")),
@@ -97,7 +99,7 @@ test("a bare .mcp.json key as server is rejected (must be plugin:<name>:<key>)",
   assert.match(r.stderr, /plugin:dprint:dprint-hooks/);
 });
 
-test("an event without known input fields is rejected", () => {
+test("an event without known input fields is rejected", IT, () => {
   const r = run(
     "--check",
     scratch((h) => (h.hooks.Stop = [{ hooks: [] }])),
@@ -106,7 +108,7 @@ test("an event without known input fields is rejected", () => {
   assert.match(r.stderr, /Stop: event not known/);
 });
 
-test("a non-mcp_tool hook and a missing input are rejected", () => {
+test("a non-mcp_tool hook and a missing input are rejected", IT, () => {
   const dir = scratch((h) => {
     h.hooks.PreToolUse.push({
       matcher: "Write",
@@ -120,7 +122,7 @@ test("a non-mcp_tool hook and a missing input are rejected", () => {
   assert.match(r.stderr, /input must be an object/);
 });
 
-test("one tool called with two different input shapes is rejected", () => {
+test("one tool called with two different input shapes is rejected", IT, () => {
   const r = run(
     "--check",
     scratch((h) =>
@@ -134,7 +136,7 @@ test("one tool called with two different input shapes is rejected", () => {
   assert.match(r.stderr, /format_pre is also called/);
 });
 
-test("a changed input template makes the types stale until regenerated", () => {
+test("a changed input template makes the types stale until regenerated", IT, () => {
   const dir = scratch(
     (h) => (h.hooks.CwdChanged[0].hooks[0].input.old_cwd = "${old_cwd}"),
   );
@@ -149,7 +151,7 @@ test("a changed input template makes the types stale until regenerated", () => {
   );
 });
 
-test("a command hook needs a non-empty command", () => {
+test("a command hook needs a non-empty command", IT, () => {
   for (const hook of [{ type: "command" }, { type: "command", command: "" }]) {
     const r = run(
       "--check",
@@ -160,7 +162,7 @@ test("a command hook needs a non-empty command", () => {
   }
 });
 
-test("a command hook's timeout is still checked", () => {
+test("a command hook's timeout is still checked", IT, () => {
   const r = run(
     "--check",
     scratch((h) =>
@@ -175,7 +177,7 @@ test("a command hook's timeout is still checked", () => {
   assert.match(r.stderr, /timeout must be a positive integer/);
 });
 
-test("command hooks on SessionStart and FileChanged pass and generate no types", () => {
+test("command hooks on SessionStart and FileChanged pass and generate no types", IT, () => {
   const dir = scratch((h) => {
     h.hooks.SessionStart = [
       { hooks: [{ type: "command", command: "node x.mjs", timeout: 30 }] },
@@ -189,7 +191,7 @@ test("command hooks on SessionStart and FileChanged pass and generate no types",
   assert.equal(r.status, 0, r.stderr);
 });
 
-test("UserPromptSubmit is a known event: ${prompt} passes, a tool field is rejected", () => {
+test("UserPromptSubmit is a known event: ${prompt} passes, a tool field is rejected", IT, () => {
   const drain = (h) => h.hooks.UserPromptSubmit[0].hooks[0];
   const ok = run("--check", scratch((h) => (drain(h).input.prompt = "${prompt}")));
   assert.equal(ok.status, 1); // stale types only

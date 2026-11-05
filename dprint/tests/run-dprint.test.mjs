@@ -1,13 +1,15 @@
 // Contract tests for the built plugin/skills/dprint/run-dprint.mjs.
 // Isolated PATH (only bash + node), HOME and project dir per test; dprint is stubbed and logs its argv.
 // Every run passes a cwd inside proj: otherwise findConfig walks up to the repo-root dprint.json (it stops at the nearest `.git`).
-import { test, beforeEach } from "node:test";
+import { test, beforeEach } from "vitest";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+
+const IT = { timeout: 30_000 };
 
 const SCRIPT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../plugin/skills/dprint/run-dprint.mjs");
 
@@ -55,7 +57,7 @@ function run(args, cwd = proj) {
   return { code: r.status, out: r.stdout, err: r.stderr };
 }
 
-test("usage errors -> exit 2, dprint not run", () => {
+test("usage errors -> exit 2, dprint not run", IT, () => {
   stubDprint();
   conf();
   for (const args of [[], ["lint"], ["check", "a", "b"], ["check", ""]]) {
@@ -66,7 +68,7 @@ test("usage errors -> exit 2, dprint not run", () => {
   assert.equal(ran(), false);
 });
 
-test("no dprint on PATH nor in ~/.dprint/bin -> exit 3, reason=missing", () => {
+test("no dprint on PATH nor in ~/.dprint/bin -> exit 3, reason=missing", IT, () => {
   conf();
   const r = run(["check"]);
   assert.equal(r.code, 3);
@@ -74,7 +76,7 @@ test("no dprint on PATH nor in ~/.dprint/bin -> exit 3, reason=missing", () => {
   assert.match(r.err, /\/dprint init/);
 });
 
-test("dprint but no config in proj or its ancestors -> exit 3, reason=noconfig, dprint not run", () => {
+test("dprint but no config in proj or its ancestors -> exit 3, reason=noconfig, dprint not run", IT, () => {
   stubDprint();
   const r = run(["fmt"]);
   assert.equal(r.code, 3);
@@ -83,7 +85,7 @@ test("dprint but no config in proj or its ancestors -> exit 3, reason=noconfig, 
   assert.equal(ran(), false);
 });
 
-test("dprint.json in cwd, check -> dprint check without file arguments, exit 0", () => {
+test("dprint.json in cwd, check -> dprint check without file arguments, exit 0", IT, () => {
   stubDprint();
   conf();
   const r = run(["check"]);
@@ -92,7 +94,7 @@ test("dprint.json in cwd, check -> dprint check without file arguments, exit 0",
   assert.deepEqual(argv(), ["check"]);
 });
 
-test("config only in the parent directory -> found by walk-up, dprint runs", () => {
+test("config only in the parent directory -> found by walk-up, dprint runs", IT, () => {
   stubDprint();
   conf(".dprint.jsonc");
   mkdirSync(path.join(proj, "sub"));
@@ -101,7 +103,7 @@ test("config only in the parent directory -> found by walk-up, dprint runs", () 
   assert.deepEqual(argv(), ["fmt"]);
 });
 
-test("config above the git root does not count (same lookup as the format hook) -> exit 3, noconfig", () => {
+test("config above the git root does not count (same lookup as the format hook) -> exit 3, noconfig", IT, () => {
   stubDprint();
   writeFileSync(path.join(path.dirname(proj), "dprint.json"), "{}\n");
   mkdirSync(path.join(proj, ".git"));
@@ -111,7 +113,7 @@ test("config above the git root does not count (same lookup as the format hook) 
   assert.equal(ran(), false);
 });
 
-test("only .config/dprint.json -> it counts as config, dprint runs", () => {
+test("only .config/dprint.json -> it counts as config, dprint runs", IT, () => {
   stubDprint();
   conf(".config/dprint.json");
   const r = run(["check"]);
@@ -119,7 +121,7 @@ test("only .config/dprint.json -> it counts as config, dprint runs", () => {
   assert.deepEqual(argv(), ["check"]);
 });
 
-test("glob scope is passed verbatim after --, not expanded", () => {
+test("glob scope is passed verbatim after --, not expanded", IT, () => {
   stubDprint();
   conf();
   const r = run(["check", "src/**/*.ts"]);
@@ -127,7 +129,7 @@ test("glob scope is passed verbatim after --, not expanded", () => {
   assert.deepEqual(argv(), ["check", "--", "src/**/*.ts"]);
 });
 
-test("scope starting with - and containing a space stays one argument after --", () => {
+test("scope starting with - and containing a space stays one argument after --", IT, () => {
   stubDprint();
   conf();
   const r = run(["fmt", "-x y"]);
@@ -135,7 +137,7 @@ test("scope starting with - and containing a space stays one argument after --",
   assert.deepEqual(argv(), ["fmt", "--", "-x y"]);
 });
 
-test("dprint only in ~/.dprint/bin -> that one is used", () => {
+test("dprint only in ~/.dprint/bin -> that one is used", IT, () => {
   stubDprint(path.join(home, ".dprint/bin/dprint"));
   conf();
   const r = run(["check"]);
@@ -143,7 +145,7 @@ test("dprint only in ~/.dprint/bin -> that one is used", () => {
   assert.deepEqual(argv(), ["check"]);
 });
 
-test("dprint's exit code and output are passed through", () => {
+test("dprint's exit code and output are passed through", IT, () => {
   stubDprint(undefined, 'echo "unformatted: a.ts"', "exit 20");
   conf();
   const r = run(["check"]);
@@ -151,7 +153,7 @@ test("dprint's exit code and output are passed through", () => {
   assert.match(r.out, /unformatted: a\.ts/);
 });
 
-test("dprint only via npx -> runs npx --yes dprint fmt -- scope, exit code passed through", () => {
+test("dprint only via npx -> runs npx --yes dprint fmt -- scope, exit code passed through", IT, () => {
   stubNpx('if [ "$1" = "--version" ]; then echo "dprint 0.64.3"; exit 0; fi', "exit 7");
   conf();
   const r = run(["fmt", "src/a.ts"]);
@@ -159,7 +161,7 @@ test("dprint only via npx -> runs npx --yes dprint fmt -- scope, exit code passe
   assert.deepEqual(npxArgv(), ["--yes", "dprint", "--version", "--yes", "dprint", "fmt", "--", "src/a.ts"]);
 });
 
-test("npx failing -> exit 3, reason=missing", () => {
+test("npx failing -> exit 3, reason=missing", IT, () => {
   stubNpx('echo "npm error code ENOTCACHED" >&2', "exit 1");
   conf();
   const r = run(["check"]);
