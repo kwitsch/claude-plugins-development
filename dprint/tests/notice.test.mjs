@@ -48,14 +48,14 @@ const toastText = (dir) =>
 /**
  * Registers every stub (before the test's first `$` call, as the kit requires) and returns what the module did.
  * `cwd`: session.cwd's answer, a string or a `{ deny }`; `exists(path)` and `run(argv)` return a stub result;
- * `home: null` leaves HOME unset.
+ * `home: null` leaves HOME unset, `home: { deny }` rejects env.get.
  */
 function setup($, on, { cwd = "", exists = (p) => ({ value: existsSync(p) }), run = () => OK, home = HOME } = {}) {
   const toasts = [];
   const runs = [];
   on("fs.exists", (_$, e) => exists(e.path));
   on("session.cwd", () => (typeof cwd === "string" ? { value: cwd } : cwd));
-  on("env.get", (_$, e) => ({ value: e.name === "HOME" && home !== null ? home : undefined }));
+  on("env.get", (_$, e) => (typeof home === "object" && home ? home : { value: e.name === "HOME" && home !== null ? home : undefined }));
   on("process.run", (_$, e) => {
     runs.push({ argv: [...e.argv], init: { ...e.init } });
     return run(e.argv);
@@ -249,6 +249,45 @@ test("a failed probe is cached for 30 s (the new dir still gets its toast), then
   }
 });
 
+test("concurrent events share one in-flight probe", async ($, on) => {
+  const dir = withConfig(repo());
+  const { toasts, runs } = setup($, on, { cwd: dir, run: () => DENY });
+  const clock = mock.clock(on);
+  await Promise.all([$.session.start({}), $.classic.CwdChanged({ new_cwd: dir })]);
+  await clock.settle();
+  assert.equal(runs.length, 3, "one probe (3 argvs), not two");
+  assert.equal(toasts.length, 1);
+});
+
+test("a rejecting env.get is cached as a failed probe for 30 s, then re-probed; no toast", async ($, on) => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  try {
+    const T0 = Date.UTC(2026, 10, 5, 12);
+    vi.setSystemTime(T0);
+    const a = withConfig(repo());
+    const b = withConfig(repo());
+    const { fire, runs, toasts } = setup($, on, { home: { deny: "boom" }, run: () => DENY });
+    await fire("classic.CwdChanged", { new_cwd: a });
+    assert.equal(runs.length, 1, "PATH probe, then env.get rejects");
+    vi.setSystemTime(T0 + 10_000);
+    await fire("classic.CwdChanged", { new_cwd: b });
+    assert.equal(runs.length, 1, "within 30 s: no re-probe");
+    vi.setSystemTime(T0 + 31_000);
+    await fire("classic.CwdChanged", { new_cwd: b });
+    assert.equal(runs.length, 2, "after 31 s: re-probed");
+    assert.deepEqual(toasts, []);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+test("dprint --version output with leading whitespace still counts as dprint", async ($, on) => {
+  const dir = withConfig(repo());
+  const { fire, toasts } = setup($, on, { cwd: dir, run: () => ({ value: { exitCode: 0, stdout: "\n dprint 0.50.0\n", stderr: "" } }) });
+  await fire("session.start");
+  assert.deepEqual(toasts, []);
+});
+
 test("the hook returns next's result unchanged; a rejecting fs.exists -> no throw, no probe, no toast", async ($, on) => {
   const dir = repo();
   const { fire, runs, toasts } = setup($, on, { cwd: dir, exists: () => ({ deny: "boom" }), run: () => DENY });
@@ -275,6 +314,20 @@ plainTest("the module's inlined config names equal the shared CONFIG_NAMES; no i
   assert.ok(m, "inlined CONFIG_NAMES");
   assert.deepEqual(JSON.parse(m[1]), [...CONFIG_NAMES]);
   assert.doesNotMatch(src, /^import/m);
+});
+
+plainTest("the probe constants and version regex equal find-dprint's", () => {
+  const read = (f) => readFileSync(path.join(PLUGIN, "..", "src", f), "utf8");
+  const notice = read("hooks/notice.mts");
+  const find = read("skills/dprint/find-dprint.mts");
+  const num = (src, name) => new RegExp(`const ${name} = ([\\d_]+);`).exec(src)?.[1];
+  assert.ok(num(find, "NPX_PROBE_TIMEOUT_MS"));
+  assert.equal(num(notice, "PROBE_TIMEOUT_MS"), num(find, "NPX_PROBE_TIMEOUT_MS"));
+  assert.ok(num(find, "NPX_RETRY_MS"));
+  assert.equal(num(notice, "PROBE_RETRY_MS"), num(find, "NPX_RETRY_MS"));
+  assert.ok(find.includes("/^dprint \\d/") && notice.includes("/^dprint \\d/"), "version regex");
+  assert.ok(find.includes('["--yes", "dprint"]') && notice.includes('["npx", "--yes", "dprint", "--version"]'), "npx argv");
+  assert.ok(find.includes('join(homedir(), ".dprint", "bin", "dprint")') && notice.includes("${home}/.dprint/bin/dprint"), "home path");
 });
 
 plainTest("built module keeps the names Claude Code's static check needs (no mangling)", () => {

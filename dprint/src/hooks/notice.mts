@@ -97,6 +97,18 @@ type On = {
 type WorktreeResult = { worktreePath?: string; restoredCwd?: string } | null | undefined;
 
 /**
+ * Whether `since` (a `Date.now()` stamp) is less than `ms` ago; a stamp in the future (the wall clock stepped back) counts as expired.
+ *
+ * @param since - Earlier `Date.now()` value.
+ * @param ms - Window in ms.
+ * @returns Whether the window is still open.
+ */
+function withinMs(since: number, ms: number): boolean {
+  const age = Date.now() - since;
+  return age >= 0 && age < ms;
+}
+
+/**
  * Parent of `dir`, string-wise (no Node `path`).
  *
  * @param dir - Absolute directory with `/` or `\` separators.
@@ -119,7 +131,7 @@ function parentOf(dir: string): string {
 async function runsDprint($: Engine, argv: string[]): Promise<boolean> {
   try {
     const r = await $.process.run(argv, { timeoutMs: PROBE_TIMEOUT_MS });
-    return r.exitCode === 0 && /^dprint \d/.test(r.stdout);
+    return r.exitCode === 0 && /^dprint \d/.test(r.stdout.trim());
   } catch {
     return false;
   }
@@ -134,7 +146,7 @@ async function runsDprint($: Engine, argv: string[]): Promise<boolean> {
  * @returns Whether any of the three runs dprint.
  */
 function hasDprint($: Engine): Promise<boolean> {
-  if (probe && (probe.failedAt === undefined || Date.now() - probe.failedAt < PROBE_RETRY_MS)) return probe.ok;
+  if (probe && (probe.failedAt === undefined || withinMs(probe.failedAt, PROBE_RETRY_MS))) return probe.ok;
   const entry: Probe = {
     ok: (async () => {
       if (await runsDprint($, ["dprint", "--version"])) return true;
@@ -166,25 +178,23 @@ function hasDprint($: Engine): Promise<boolean> {
  */
 async function warnIfNoDprint($: Engine, dir: string): Promise<void> {
   if (!dir) return;
+  const key = dir.replace(/[\\/]+$/, "") || dir; // `/a/b` and `/a/b/` are one dir
+  const recentlyShown = () => {
+    for (const [k, t] of shown) if (!withinMs(t, TOAST_MS)) shown.delete(k); // expired entries never dedupe again
+    return shown.has(key);
+  };
+  if (recentlyShown()) return; // before the config walk: a repeat event inside the window costs no filesystem work
   const sep = dir.includes("\\") && !dir.includes("/") ? "\\" : "/";
   let found = false;
   for (let d = dir; d && !found; d = parentOf(d)) {
     const base = d.endsWith(sep) ? d : d + sep;
-    for (const n of CONFIG_NAMES) {
-      if (await $.fs.exists(base + n)) {
-        found = true;
-        break;
-      }
-    }
+    found = (await Promise.all(CONFIG_NAMES.map((n) => $.fs.exists(base + n)))).some(Boolean);
     if (!found && (await $.fs.exists(base + ".git"))) break; // repository or worktree root: never search above it
   }
   if (!found) return; // the project does not use dprint: nothing to warn about, nothing spawned
   if (await hasDprint($)) return; // before the dedupe, so a dir whose probe succeeds never takes a slot
-  const now = Date.now();
-  for (const [k, t] of shown) if (now - t >= TOAST_MS) shown.delete(k); // expired entries never dedupe again
-  const key = dir.replace(/[\\/]+$/, "") || dir; // `/a/b` and `/a/b/` are one dir
-  if (shown.has(key)) return;
-  shown.set(key, now);
+  if (recentlyShown()) return; // a concurrent event may have toasted while the probe ran
+  shown.set(key, Date.now());
   $.ui.toast(
     `dprint: ${dir} has a dprint config but dprint cannot run here (no dprint on PATH or in ~/.dprint/bin, and npx --yes dprint failed), formatting is off; run /dprint:dprint init`,
     { timeoutMs: TOAST_MS },
