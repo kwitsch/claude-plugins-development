@@ -99,9 +99,9 @@ via `node:assert/strict`; the shared config sets `testTimeout: 30_000` for the f
   and, for `Write`/`Edit` matchers, of those tools, one input shape per tool) and generates
   `src/mcp/hook-inputs.d.mts` (one interface per tool plus the `HookInputs` map) from the `input` templates.
   `server.mts` types its tool table by `HookInputs`, so a tool missing on either side is a compile error.
-  `pnpm build` regenerates the file; `pnpm lint` runs `scripts/hooks.mts --check` first and fails while it is
+  `pnpm build` regenerates the file; `pnpm --filter dprint lint` runs `scripts/hooks.mts --check` and fails while it is
   stale. Never edit the `.d.mts` by hand. A new hook event needs its input fields in `EVENT_FIELDS` there.
-- `pnpm build` strips types with oxc-transform (`.mts` → `.mjs`, `.ts` → `.js`) and then minifies every emitted file with
+- `pnpm build` strips types with oxc-transform (`.mts` → `.mjs`) and then minifies every emitted file with
   oxc-minify: no comments, mangled locals, shebang and export names kept. `plugin/hooks/*.mjs` (function-hooks modules) are neither compressed nor mangled: Claude Code's static
   module check needs named hook functions, `$`/`on` spelled as such and no shadowed names. The output is optimized for size and
   load time, not for reading; debug against `src/`.

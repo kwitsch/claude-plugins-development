@@ -1,6 +1,6 @@
 ---
 name: scaffold-plugin
-description: Scaffold a new Claude Code plugin in this repository with the repo layout (<name>/plugin.json, plugin/, src/, tests/, scripts/, package.json). Use when the user asks to create, add, scaffold or start a new plugin here.
+description: Scaffold a new Claude Code plugin in this repository with the repo layout (<name>/plugin.json, plugin/, src/, tests/, package.json). Use when the user asks to create, add, scaffold or start a new plugin here.
 argument-hint: "[plugin-name] [one-line description]"
 disable-model-invocation: false
 ---
@@ -24,12 +24,11 @@ From the repo root, copy templates from `${CLAUDE_SKILL_DIR}/templates/` and sub
 
 ```bash
 name=<name>
-mkdir -p "$name"/{plugin/.claude-plugin,src,tests,scripts}
+mkdir -p "$name"/{plugin/.claude-plugin,src,tests}
 T="${CLAUDE_SKILL_DIR}/templates"
 for f in plugin.json package.json; do
   sed -e "s/__NAME__/$name/g" -e "s/__DESCRIPTION__/<description>/g" -e "s/__AUTHOR__/$(git config user.name)/g" "$T/$f" > "$name/$f"
 done
-cp "$T/build.mts" "$name/scripts/build.mts"
 sed "s/__NAME__/$name/g" "$T/CLAUDE.md" > "$name/CLAUDE.md"
 sed "s/__NAME__/$name/g" "$T/README.md" > "$name/plugin/README.md"
 ```
@@ -42,7 +41,7 @@ Per selected component:
 - **agent** → `plugin/agents/<agent-name>.md` with frontmatter `name`, `description`, `tools`.
 - **mcp** → `src/mcp/server.mts` (zero-dep stdio JSON-RPC) and `plugin/.mcp.json` pointing at `${CLAUDE_PLUGIN_ROOT}/mcp/server.mjs`. Add a test.
 
-If no `src/` files were created, still keep `src/`, `scripts/` and the `package.json` — the build then only syncs `plugin.json`.
+If no `src/` files were created, still keep `src/` and the `package.json` — the build then only syncs `plugin.json`.
 
 ## Step 3 — Build and verify
 

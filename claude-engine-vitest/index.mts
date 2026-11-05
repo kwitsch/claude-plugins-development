@@ -275,9 +275,9 @@ class Engine {
   /**
    * Fires `event` through its chain and resolves to the chain's result (an async generator for a streaming event).
    *
-   * @param {string} event - The event name.
-   * @param {unknown} input - The event's input.
-   * @param {{ origin: Origin, caller?: object, signal?: AbortSignal, bottom?: (e: unknown) => unknown }} ctx - Who fires it.
+   * @param event - The event name.
+   * @param input - The event's input.
+   * @param ctx - Who fires it.
    */
   dispatch(event, input, ctx) {
     const hooks = this.chain(event, input, ctx.caller);
@@ -473,11 +473,8 @@ class Engine {
 /**
  * Creates the kit for one hooks module.
  *
- * @param {{ module: URL, plugin: string, options?: object, tier?: string, runner?: Function }} cfg - The built hooks
- *   module, the plugin's name, the `options` every test's `register(on, options)` gets (a test's own `options` are
- *   merged over them), the tier it loads in (`user` when not given), and (for the kit's own tests) what stands for
- *   vitest's `test`.
- * @returns {{ test: Function, mock: object }} The kit's `test` and `mock`.
+ * @param cfg - The hooks module and plugin every test loads; a test's own `options` are merged over `cfg.options`.
+ * @returns The kit's `test` and `mock`.
  */
 export function createKit(cfg: EngineConfig) {
   /** The engine of the test running now: `mock.*` registers its stubs there through the `on` it is handed. */
@@ -486,8 +483,8 @@ export function createKit(cfg: EngineConfig) {
   /**
    * One test: `test(name, [options { options, plugins, timeoutMs }], async ($, on) => ...)`.
    *
-   * @param {string} name - The test's name.
-   * @param {...unknown} rest - The body, or the options then the body.
+   * @param name - The test's name.
+   * @param rest - The body, or the options then the body.
    */
   function test(name, ...rest) {
     const [opts, body] = rest.length === 1 ? [{}, rest[0]] : rest;
@@ -516,8 +513,8 @@ export function createKit(cfg: EngineConfig) {
     /**
      * Answers `$.clock` from a clock that moves only when the test moves it.
      *
-     * @param {Function} on - The test's `on`.
-     * @param {{ now?: number }} [options] - Where the clock starts (0 when not given).
+     * @param on - The test's `on`.
+     * @param options - Where the clock starts (0 when not given).
      */
     clock(on, options: { now?: number } = {}) {
       const engine = engineOf(on);
@@ -560,8 +557,8 @@ export function createKit(cfg: EngineConfig) {
     /**
      * Answers `$.store` from a store in memory.
      *
-     * @param {Function} on - The test's `on`.
-     * @param {Record<string, unknown>} [entries] - What the store holds at the start.
+     * @param on - The test's `on`.
+     * @param entries - What the store holds at the start.
      */
     store(on, entries = {}) {
       const m = new Map(Object.entries(entries));
@@ -573,8 +570,8 @@ export function createKit(cfg: EngineConfig) {
     /**
      * Answers `$.env.get` from a set of variables; one not listed is unset.
      *
-     * @param {Function} on - The test's `on`.
-     * @param {Record<string, string>} variables - The environment.
+     * @param on - The test's `on`.
+     * @param variables - The environment.
      */
     env(on, variables) {
       on("env.get", (_$, e) => ({ value: variables[e.name] }));
@@ -582,8 +579,8 @@ export function createKit(cfg: EngineConfig) {
     /**
      * Records the rows the mods append with `$.session.append`.
      *
-     * @param {Function} on - The test's `on`.
-     * @returns {{ appended: () => unknown[] }} The rows, oldest first.
+     * @param on - The test's `on`.
+     * @returns The rows, oldest first.
      */
     session(on) {
       const rows: unknown[] = [];

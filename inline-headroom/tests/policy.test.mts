@@ -233,7 +233,6 @@ test("toCount keeps non-negative safe integers and turns everything else into 0"
 });
 
 test("foldPending adds pending into today's row, zeroes pending in place and returns copies", () => {
-  /** @type {Record<string, import("../plugin/hooks/policy.mjs").Counters>} */
   const days = {};
   const pending = zeroCounters();
   pending.steps = 2;
@@ -249,11 +248,10 @@ test("foldPending adds pending into today's row, zeroes pending in place and ret
 });
 
 test("foldPending drops days before purgeBefore and after today, keeping the window", () => {
-  /** @type {Record<string, import("../plugin/hooks/policy.mjs").Counters>} */
   const days = { "2026-09-03": zeroCounters(), "2026-09-04": zeroCounters(), "2026-10-02": zeroCounters(), "2026-10-04": zeroCounters() };
   const rows = foldPending(days, zeroCounters(), "2026-10-03", "2026-09-04");
   assert.deepEqual(Object.keys(days).sort(), ["2026-09-04", "2026-10-02", "2026-10-03"]);
-  assert.deepEqual(rows.map((r) => r.day).sort(), ["2026-09-04", "2026-10-02", "2026-10-03"]);
+  assert.deepEqual(rows.map((r) => r.day as string).sort(), ["2026-09-04", "2026-10-02", "2026-10-03"]);
 });
 
 test("computeOptimalK keeps every row up to 8, 3 for redundant rows and at most 15 otherwise", () => {
@@ -302,7 +300,7 @@ test("relevanceScores keeps its selective filter, 8-char bonus, 0.3 floor and +0
 test("bm25Scores is upstream BM25Scorer.score_batch: ln 2 idf, k1 1.5, b 0.75, over 10, +0.3 for an 8-char match", () => {
   // Tokens [alpha beta], [beta gamma gamma], [delta]: average length 2.
   const [a, b, c] = bm25Scores(["alpha beta", "beta gamma gamma", "delta"], "gamma beta");
-  const term = (/** @type {number} */ f, /** @type {number} */ len) => (Math.LN2 * f * 2.5) / (f + 1.5 * (0.25 + (0.75 * len) / 2));
+  const term = (f, len) => (Math.LN2 * f * 2.5) / (f + 1.5 * (0.25 + (0.75 * len) / 2));
   assert.ok(Math.abs(a - term(1, 2) / 10) < 1e-12, String(a));
   assert.ok(Math.abs(b - (term(1, 3) + term(2, 3)) / 10) < 1e-12, String(b));
   assert.equal(c, 0);
@@ -314,11 +312,10 @@ test("bm25Scores is upstream BM25Scorer.score_batch: ln 2 idf, k1 1.5, b 0.75, o
 });
 
 test("storeOffloaded evicts the oldest entry beyond CCR_CAPACITY", () => {
-  /** @type {Map<string, string>} */
-  const store = new Map();
+  const store = new Map<string, string>();
   storeOffloaded(
     store,
-    Array.from({ length: CCR_CAPACITY }, (_, i) => /** @type {[string, string]} */ ([`h${i}`, `[${i}]`])),
+    Array.from({ length: CCR_CAPACITY }, (_, i) => [`h${i}`, `[${i}]`]),
   );
   storeOffloaded(store, [["new", "[new]"]]);
   assert.equal(store.size, CCR_CAPACITY);
@@ -327,9 +324,8 @@ test("storeOffloaded evicts the oldest entry beyond CCR_CAPACITY", () => {
 });
 
 test("storeOffloaded never evicts the entries it was just given, even when they alone pass a cap", () => {
-  /** @type {Map<string, string>} */
-  const store = new Map([["old", "[old]"]]);
-  const batch = Array.from({ length: CCR_CAPACITY + 1 }, (_, i) => /** @type {[string, string]} */ ([`h${i}`, `[${i}]`]));
+  const store = new Map<string, string>([["old", "[old]"]]);
+  const batch = Array.from({ length: CCR_CAPACITY + 1 }, (_, i) => [`h${i}`, `[${i}]`]);
   storeOffloaded(store, batch);
   assert.equal(store.has("old"), false); // the older entry went first
   assert.deepEqual(
@@ -345,8 +341,7 @@ test("storeOffloaded never evicts the entries it was just given, even when they 
 });
 
 test("storeOffloaded evicts the oldest entries beyond CCR_MAX_CHARS", () => {
-  /** @type {Map<string, string>} */
-  const store = new Map();
+  const store = new Map<string, string>();
   const third = "x".repeat(Math.floor(CCR_MAX_CHARS / 3));
   storeOffloaded(store, [
     ["a", third],
@@ -359,11 +354,10 @@ test("storeOffloaded evicts the oldest entries beyond CCR_MAX_CHARS", () => {
 });
 
 test("storeOffloaded moves a re-put hash to the newest position, so it outlives older ones", () => {
-  /** @type {Map<string, string>} */
-  const store = new Map();
+  const store = new Map<string, string>();
   storeOffloaded(
     store,
-    Array.from({ length: CCR_CAPACITY }, (_, i) => /** @type {[string, string]} */ ([`h${i}`, "[]"])),
+    Array.from({ length: CCR_CAPACITY }, (_, i) => [`h${i}`, "[]"]),
   );
   storeOffloaded(store, [["h0", "[0]"]]);
   assert.equal([...store.keys()].at(-1), "h0");
@@ -384,7 +378,6 @@ test("retrieveKey takes a bare hash, one with its marker's hash= or <<ccr: prefi
 });
 
 test("crushQuery walks back from the last message, stops after the 5th user message with text and adds tool-call input JSON", () => {
-  /** @type {import("../plugin/hooks/policy.mjs").QueryMessage[]} */
   const messages = [
     { role: "user", text: "too old", toolUses: [] },
     { role: "user", text: "u1", toolUses: [] },
@@ -403,8 +396,7 @@ test("crushQuery walks back from the last message, stops after the 5th user mess
 });
 
 test("crushQuery keeps at most CRUSH_QUERY_INPUT_CHARS of tool-call input, newest first, and still reaches the request", () => {
-  /** @param {string} c */
-  const write = (c) => /** @type {import("../plugin/hooks/policy.mjs").QueryMessage} */ ({ role: "assistant", text: "", toolUses: [{ input: { content: c.repeat(CRUSH_QUERY_INPUT_CHARS) } }] });
+  const write = (c) => ({ role: "assistant", text: "", toolUses: [{ input: { content: c.repeat(CRUSH_QUERY_INPUT_CHARS) } }] });
   // A subagent: one user message, then more tool-call input than the cap.
   const query = crushQuery([{ role: "user", text: "find the failing tests", toolUses: [] }, write("a"), write("b"), write("c")]);
   assert.equal(query.length, CRUSH_QUERY_INPUT_CHARS + " find the failing tests".length);
@@ -419,8 +411,6 @@ const STATUS_ROWS = Array.from({ length: 200 }, (_, i) => ({ id: i, status: i ==
 
 /**
  * crushJson over `text`, its output parsed back; throws when the text passes through.
- * @param {string} text
- * @param {string} [query]
  */
 function crushText(text, query = "") {
   const r = crushJson(text, query);
@@ -430,14 +420,11 @@ function crushText(text, query = "") {
 
 /**
  * crushText over `value` as compact JSON.
- * @param {unknown} value
- * @param {string} [query]
  */
 const crush = (value, query = "") => crushText(JSON.stringify(value), query);
 
 /**
  * The kept rows' ids, without the CCR sentinel.
- * @param {{ id?: unknown, _ccr_dropped?: string }[]} rows
  */
 const keptIds = (rows) => rows.filter((r) => !("_ccr_dropped" in r)).map((r) => r.id);
 
@@ -579,10 +566,7 @@ test("crushJson keeps every object key, crushes nested and stringified dict arra
   const stringified = crush({ payload: JSON.stringify(STATUS_ROWS) });
   assert.equal(typeof stringified.out.payload, "string");
   assert.match(JSON.parse(stringified.out.payload).at(-1)._ccr_dropped, SENTINEL);
-  /**
-   * @param {number} depth
-   * @returns {unknown} STATUS_ROWS under `depth` objects
-   */
+  /** STATUS_ROWS under `depth` objects. */
   const wrap = (depth) => (depth === 0 ? STATUS_ROWS : { inner: wrap(depth - 1) });
   assert.ok(crushJson(JSON.stringify(wrap(49)), ""));
   assert.equal(crushJson(JSON.stringify(wrap(50)), ""), undefined);
@@ -618,7 +602,6 @@ const LONE_SURROGATE = /[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[
 
 /**
  * elideDense that must rewrite; throws when the text passes through.
- * @param {string} text
  */
 function elide(text) {
   const r = elideDense(text);
@@ -628,9 +611,6 @@ function elide(text) {
 
 /**
  * The omission note a dense line becomes: its head, the count of characters cut, its tail.
- * @param {string} head
- * @param {number} omitted
- * @param {string} tail
  */
 const elidedLine = (head, omitted, tail) => `${head} ...[${omitted} chars of dense machine-generated content elided]... ${tail}`;
 
@@ -644,8 +624,7 @@ test("elideDense keeps a dense line's first 160 and last 80 characters and ends 
   assert.match(hash, HASH_RE);
   assert.equal(r.lines, 1);
   assert.deepEqual(r.offloaded, [[hash, line]]);
-  /** @type {Map<string, string>} */
-  const store = new Map();
+  const store = new Map<string, string>();
   storeOffloaded(store, r.offloaded);
   assert.equal(store.get(hash), line);
 });
@@ -660,7 +639,6 @@ test("elideDense passes short text, short lines and a small dense total through"
 test("elideDense leaves lines with a tab, 6% spaces, a JSON shape or a JSON document alone", () => {
   /**
    * A 1000-character line holding exactly `k` spaces.
-   * @param {number} k
    */
   const spaced = (k) => ("x".repeat(15) + " ").repeat(k) + "x".repeat(1000 - 16 * k);
   assert.equal(elideDense(`${"x".repeat(1200)}\t${"x".repeat(1200)}`), undefined);
@@ -701,16 +679,11 @@ test("elideDense counts every dense line in the retrieval line", () => {
   assert.equal(r.text.split("\n")[1], "middle line");
 });
 
-/** @typedef {import("../plugin/hooks/policy.mjs").DedupState} DedupState */
-
 // Three numbered source lines of 40+ characters each: a run a pointer replaces.
 const RUN = ["1:function alpha() { return computeAlpha(first); }", "2:function beta() { return computeBeta(second); }", "3:function gamma() { return computeGamma(third); }"].join("\n");
 
 /**
  * dedupBlock on an unprotected text that must fold; throws otherwise.
- * @param {Map<string, DedupState>} states
- * @param {string} key
- * @param {string} text
  */
 function fold(states, key, text) {
   const f = dedupBlock(states, key, text, false);
@@ -718,7 +691,7 @@ function fold(states, key, text) {
   return f;
 }
 
-/** @returns {Map<string, DedupState>} a fresh set of conversations */
+/** A fresh set of conversations. */
 const conversations = () => new Map();
 
 test("dedupBlock folds a repeated run of 3 lines and 40+ characters into a pointer to the earlier result", () => {
@@ -756,7 +729,6 @@ test("dedupBlock never starts a run on a trivial line, but a run may hold one", 
 test("dedupBlock folds a re-read whose line numbers all shifted, and timestamps with a leading zero only on an exact match", () => {
   /**
    * Three numbered lines starting at line `from`.
-   * @param {number} from
    */
   const numbered = (from) => [`${from}:  const total = items.reduce((a, b) => a + b, 0);`, `${from + 1}:  const mean = total / items.length;`, `${from + 2}:  return { total, mean };`].join("\n");
   const states = conversations();
@@ -767,7 +739,6 @@ test("dedupBlock folds a re-read whose line numbers all shifted, and timestamps 
   assert.equal(run, numbered(12)); // the stored run is this block's own bytes
   /**
    * Three log lines at second `s` and on.
-   * @param {number} s
    */
   const log = (s) => [0, 1, 2].map((k) => `08:00:${String(s + k).padStart(2, "0")} INFO request handled by worker ${k}`).join("\n");
   const logs = conversations();
@@ -821,7 +792,6 @@ test("dedupBlock is prefix-monotonic: an earlier block's output never depends on
   const blocks = [RUN, `header\n${RUN}`, shifted, `${lines[0]}\n${lines[1]}\nbetween\n${lines[2]}`, `${RUN}\ntail`];
   /**
    * Each block's output, fed in order to one fresh set of conversations.
-   * @param {string[]} bs
    */
   const run = (bs) => {
     const states = conversations();
@@ -838,14 +808,14 @@ test("dedupBlock empties the least recently appended conversation over DEDUP_MAX
   dedupBlock(states, "a1", RUN, false); // a1's result 1
   dedupBlock(states, "a1", half, false); // a1's result 2
   dedupBlock(states, "", half, false);
-  const a1 = /** @type {DedupState} */ (states.get("a1"));
+  const a1 = states.get("a1");
   assert.deepEqual([a1.turn, a1.corpus.size, a1.index.size, a1.chars], [2, 0, 0, 0]); // emptied, not forgotten
   assert.equal(dedupBlock(states, "a1", RUN, false), undefined); // a1's result 3: results 1 and 2 left the corpus
   assert.match(fold(states, "a1", RUN).text, /^\[↑3L same as result 3: /); // never "result 1" again
   const solo = conversations();
   dedupBlock(solo, "", RUN, false); // result 1
   dedupBlock(solo, "", "y".repeat(DEDUP_MAX_CHARS + 1), false); // result 2, over the cap alone
-  const st = /** @type {DedupState} */ (solo.get(""));
+  const st = solo.get("");
   assert.deepEqual([st.turn, st.corpus.size, st.index.size, st.chars], [2, 0, 0, 0]);
   assert.equal(dedupBlock(solo, "", RUN, false), undefined); // result 3: result 1 left the corpus
   assert.match(fold(solo, "", RUN).text, /^\[↑3L same as result 3: /);
@@ -854,15 +824,12 @@ test("dedupBlock empties the least recently appended conversation over DEDUP_MAX
 test("resetCorpus empties a conversation's corpus but keeps its ordinals", () => {
   const states = conversations();
   dedupBlock(states, "", RUN, false); // result 1
-  resetCorpus(/** @type {DedupState} */ (states.get("")));
-  const st = /** @type {DedupState} */ (states.get(""));
+  resetCorpus(states.get(""));
+  const st = states.get("");
   assert.deepEqual([st.turn, st.corpus.size, st.index.size, st.chars], [1, 0, 0, 0]);
   assert.equal(dedupBlock(states, "", RUN, false), undefined); // result 2: result 1 left the corpus
   assert.match(fold(states, "", RUN).text, /^\[↑3L same as result 2: /);
 });
-
-/** @typedef {import("../plugin/hooks/policy.mjs").ContentBlock} ContentBlock */
-/** @typedef {import("../plugin/hooks/policy.mjs").Levers} Levers */
 
 const IMAGE = { type: "image", source: { type: "base64", media_type: "image/png", data: "iVBORw0KGgo=" } };
 // A pretty-printed document whose blob line is dense: elided when nothing crushes it, never once crushed.
@@ -872,27 +839,17 @@ const DENSE_TEXT = `${"x".repeat(2500)}\nexit code 0 after the bundle step\nfini
 
 /**
  * One tool_result block as session.append hands it.
- * @param {unknown} content
- * @param {boolean} [isError]
- * @returns {ContentBlock}
  */
 const toolResult = (content, isError = false) => ({ type: "tool_result", tool_use_id: "toolu_1", content, ...(isError ? { is_error: true } : {}) });
 
-/**
- * Every lever on, with a fresh main-loop dedup corpus unless one is given.
- * @param {Partial<Levers>} [over]
- * @returns {Levers}
- */
 /** rewriteToolResults' result as the source types it (the built module's inferred types are looser). */
 type Rewrite = ReturnType<typeof import("../src/hooks/policy.mjs").rewriteToolResults>;
 
+/** Every lever on, with a fresh main-loop dedup corpus unless one is given. */
 const levers = (over = {}) => ({ crush: true, elide: true, dedup: { states: new Map(), key: "" }, ...over });
 
 /**
  * rewriteToolResults that must rewrite; throws when the row passes through.
- * @param {readonly ContentBlock[]} content
- * @param {string} tool
- * @param {Levers} lv
  */
 function rewrite(content, tool, lv): NonNullable<Rewrite> {
   const r = rewriteToolResults(content, tool, lv, "") as Rewrite;
@@ -1166,7 +1123,7 @@ test("detectContentType recognizes git status only with a heading and a path ent
 
 test("detectContentType wants two grep lines, rejects timestamped log rows and takes grep context lines", () => {
   assert.equal(detectContentType("src/a.py:12:def main():\nThis is an explanation of what the function does."), "text");
-  const pad = (/** @type {number} */ n) => String(n).padStart(2, "0");
+  const pad = (n) => String(n).padStart(2, "0");
   const timestamped = Array.from({ length: 200 }, (_, i) => `2026-09-23T10:${pad(Math.floor(i / 60))}:${pad(i % 60)}Z INFO worker[${i % 8}] processed batch ${i} in ${(i * 13) % 900}ms`).join("\n");
   assert.notEqual(detectContentType(timestamped), "search");
   assert.equal(detectContentType("src/a.py-12-foo\nsrc/a.py:13:bar\nsrc/a.py-14-baz"), "search");
@@ -1174,8 +1131,8 @@ test("detectContentType wants two grep lines, rejects timestamped log rows and t
 });
 
 test("detectContentType reads CMTrace records as build output", () => {
-  const attrs = (/** @type {number} */ sec) => `time="10:00:${String(sec).padStart(2, "0")}.000-0" date="01-15-2026" component="ExampleCorp_SampleApp_1.0.0_x64_B1" context="SYSTEM" type="1" thread="4242" file="install.ps1"`;
-  const record = (/** @type {string} */ message, /** @type {number} */ sec) => `<![LOG[${message}]LOG]!><${attrs(sec)}>`;
+  const attrs = (sec) => `time="10:00:${String(sec).padStart(2, "0")}.000-0" date="01-15-2026" component="ExampleCorp_SampleApp_1.0.0_x64_B1" context="SYSTEM" type="1" thread="4242" file="install.ps1"`;
+  const record = (message, sec) => `<![LOG[${message}]LOG]!><${attrs(sec)}>`;
   const messages = [
     "Starting deployment of SampleApp 1.0.0",
     "Detection rule evaluated, not installed",
@@ -1210,7 +1167,6 @@ test("detectContentType cuts each sampled line, so a backtracking pattern cannot
 
 test("rewriteToolResults crushes only JSON and elides a dense line of every other content type", () => {
   const D = "x".repeat(2500);
-  /** @type {[string, string][]} */
   const samples = [
     ["search", `src/a.py:1:${D}\nsrc/b.py:2:foo`],
     ["build", `ERROR build failed\n${D}`],
@@ -1233,7 +1189,6 @@ test("rewriteToolResults crushes only JSON and elides a dense line of every othe
 
 /**
  * The compaction as a table; throws when it is not one.
- * @param {import("../plugin/hooks/policy.mjs").Compaction} c
  */
 function asTable(c) {
   if (c.kind !== "table") throw new Error(`expected a table, got ${c.kind}`);
@@ -1242,7 +1197,6 @@ function asTable(c) {
 
 /**
  * Upstream csv_quote, for building expected cells.
- * @param {string} s
  */
 const csvq = (s) => `"${s.replaceAll("\"", "\"\"")}"`;
 
@@ -1253,8 +1207,6 @@ const BOTH = { lossy: true, lossless: true };
 
 /**
  * crushJson with explicit stages that must rewrite; throws when the text passes through.
- * @param {string} text
- * @param {import("../plugin/hooks/policy.mjs").CrushModes} modes
  */
 function crushWith(text, modes) {
   const r = crushJson(text, "", modes);
@@ -1429,8 +1381,6 @@ test("compactRows refuses a header-breaking key and finds a discriminator among 
 
 /**
  * `n` one-key rows whose string values are `len` characters long (unique per row).
- * @param {number} n
- * @param {number} len
  */
 const oneKeyRows = (n, len) =>
   JSON.stringify(
@@ -1507,7 +1457,6 @@ const SPIKE = Array.from({ length: 30 }, (_, i) => (i < 12 || i >= 17 ? i / 1000
 
 /**
  * The sample standard deviation, as the number crusher computes it.
- * @param {readonly number[]} xs
  */
 function sampleSd(xs) {
   const m = xs.reduce((a, b) => a + b, 0) / xs.length;
@@ -1575,7 +1524,7 @@ test("crushJson groups a mixed array by type, and a dict group that compacts kee
   }
   mix.push(null, null, null);
   const r = crushWith(JSON.stringify({ mix }), BOTH);
-  const out = /** @type {unknown[]} */ (JSON.parse(r.text).mix);
+  const out = JSON.parse(r.text).mix;
   const [, n, hash] = ITEMS_SENTINEL.exec(String(out.at(-1))) ?? [];
   assert.equal(out.filter((x) => typeof x === "object" && x !== null).length, 20); // the table won, so the group stays whole
   assert.equal(out.filter((x) => x === null).length, 3); // a group under 5 is kept
@@ -1587,7 +1536,7 @@ test("crushJson groups a mixed array by type, and a dict group that compacts kee
   assert.deepEqual([r.compacted, r.offloaded], [0, [[hash, JSON.stringify(mix)]]]);
   // Without compaction the dict group is crushed like any dict array.
   const lossy = JSON.parse(crushText(JSON.stringify({ mix })).text).mix;
-  assert.ok(lossy.filter((/** @type {unknown} */ x) => typeof x === "object" && x !== null).length < 20);
+  assert.ok(lossy.filter((x) => typeof x === "object" && x !== null).length < 20);
 });
 
 test("crushJson keeps short and lossless-only scalar arrays whole and no longer descends into a 5-8 item mixed array", () => {
@@ -1690,13 +1639,11 @@ And a final line of text to round out the document nicely today.
 
 /**
  * configFlavor over a text's own lines (the test inputs hold no line over DETECT_MAX_LINE_CHARS).
- * @param {string} text
  */
 const flavorOf = (text) => configFlavor(text, text.split("\n"));
 
 /**
  * compressConfig that must rewrite; throws when the text passes through.
- * @param {string} text
  */
 function compressed(text) {
   const r = compressConfig(text);
@@ -1899,7 +1846,6 @@ const HEAD = `<!DOCTYPE html><html><head><style>${"p { margin: 0; padding: 0; } 
 
 /**
  * extractHtml that must rewrite; throws when the page passes through.
- * @param {string} html
  */
 function extracted(html) {
   const r = extractHtml(html);
@@ -1964,7 +1910,6 @@ test("rewriteToolResults extracts HTML, then elides a dense line of the extracti
 
 /**
  * The text each span covers.
- * @param {string} text
  */
 const spanTexts = (text) => (tagSpans(text) ?? []).map(([a, b]) => text.slice(a, b));
 
@@ -2091,35 +2036,24 @@ const RETRIEVE_LINE = /\n\[[^\n]*Retrieve original: hash=([0-9a-f]{12})\]$/;
 
 /**
  * A step's result that must exist (narrows away undefined for the type checker).
- * @template T
- * @param {T|undefined} x
- * @returns {T}
  */
-const must = (x) => {
+const must = <T,>(x: T | undefined): T => {
   if (x === undefined) throw new Error("expected a result");
   return x;
 };
 
 /**
  * Only the given levers on: no SmartCrusher, elider or dedup unless asked.
- * @param {Partial<Levers>} over
- * @returns {Levers}
  */
 const only = (over) => ({ crush: false, elide: false, ...over });
 
 /**
  * rewriteToolResults over one string result; undefined when the row passes through.
- * @param {string} text
- * @param {Levers} lv
- * @param {string} [tool]
- * @param {string} [query]
  */
 const route = (text, lv, tool = "Bash", query = "") => rewriteToolResults([toolResult(text)], tool, lv, query) as Rewrite;
 
 /**
  * The stored text of a rewritten one-result row.
- * @param {ReturnType<typeof rewriteToolResults>} r
- * @returns {string}
  */
 const stored = (r) => {
   if (!r) throw new Error("expected the row to be rewritten");
@@ -2127,10 +2061,10 @@ const stored = (r) => {
 };
 
 /** `n` distinct INFO lines, one per build step. */
-const infoTicks = (/** @type {number} */ n, from = 0) => Array.from({ length: n }, (_, i) => `INFO step ${from + i}: compiled module_${from + i} into build/out_${from + i}.o`);
+const infoTicks = (n, from = 0) => Array.from({ length: n }, (_, i) => `INFO step ${from + i}: compiled module_${from + i} into build/out_${from + i}.o`);
 
 /** Upstream log_compressor.rs java_chained_trace: two chained traces with `runtime` JDK frames each. */
-const javaTrace = (/** @type {number} */ runtime) =>
+const javaTrace = (runtime) =>
   [
     "Exception in thread \"main\" java.lang.IllegalStateException: boom",
     "at com.example.App.handle(App.java:10)",
@@ -2143,8 +2077,8 @@ const javaTrace = (/** @type {number} */ runtime) =>
   ].join("\n");
 
 /** Upstream log_compressor.rs pytest_issue_log: a pytest run with `n` failures, each with its own `E ` line. */
-const pytestIssueLog = (/** @type {number} */ n) => {
-  const pad = (/** @type {number} */ i) => String(i).padStart(3, "0");
+const pytestIssueLog = (n) => {
+  const pad = (i) => String(i).padStart(3, "0");
   return [
     "============================= test session starts =============================",
     "collected 400 items",
@@ -2362,16 +2296,13 @@ const FILLER_ROWS = Array.from({ length: 60 }, (_, i) => `zzz.txt:${i + 1}:fille
 
 /**
  * How compressSearch parses one grep line: its first output row (`file:line:content` as parsed), or a filler row when it does not parse.
- * @param {string} line
- * @returns {string|undefined}
  */
 const parsedRow = (line) => compressSearch([line, ...FILLER_ROWS].join("\n"), "")?.text.split("\n")[0];
 
 /** `n` grep rows each of the given files, with distinct content. */
-const grepRows = (/** @type {string[]} */ files, /** @type {number} */ n) => files.flatMap((f) => Array.from({ length: n }, (_, i) => `${f}:${(i + 1) * 3}:    value_${f.length}_${i + 1} = compute_${i + 1}(argument_${(i + 1) * 7})`));
+const grepRows = (files, n) => files.flatMap((f) => Array.from({ length: n }, (_, i) => `${f}:${(i + 1) * 3}:    value_${f.length}_${i + 1} = compute_${i + 1}(argument_${(i + 1) * 7})`));
 
 test("compressSearch parses grep, ripgrep context and Windows rows as upstream's tiered scan does (upstream parse_match_line tests)", () => {
-  /** @type {[string, string][]} */
   const cases = [
     ["src/main.py:42:def main():", "src/main.py:42:def main():"], // parses_standard_grep_line
     ["src/main.py-43-context after match", "src/main.py:43:context after match"], // parses_ripgrep_context_line
@@ -2521,7 +2452,7 @@ test("compressSearch stays bounded on 50,000 rows with a 16 KiB query and on one
   assert.ok(Date.now() - t0 < 2000, `took ${Date.now() - t0} ms`);
 });
 /** Upstream diff_compressor.rs build_synthetic_diff: `n` files with one 18-line hunk each (5 context, 3 removed, 5 added, 5 context). */
-const syntheticDiff = (/** @type {number} */ n) =>
+const syntheticDiff = (n) =>
   Array.from({ length: n }, (_, i) =>
     [
       `diff --git a/file_${i}.py b/file_${i}.py`,
@@ -2536,7 +2467,7 @@ const syntheticDiff = (/** @type {number} */ n) =>
     ].join("\n")).join("") + "# variant 1";
 
 /** Upstream diff_compressor.rs build_n_hunk_diff: one file with `n` 6-line hunks 100 lines apart (`index` adds git's bookkeeping line). */
-const nHunkDiff = (/** @type {number} */ n, index = false) =>
+const nHunkDiff = (n, index = false) =>
   [
     "diff --git a/big.py b/big.py",
     ...(index ? ["index 3b18e512dba79e4c8300dd08aeb37f8e728b8dad..af5626b4a114abcb82d63db7c8082c3c4756e51b 100644"] : []),
@@ -2569,7 +2500,7 @@ test("compressDiff trims context to 2 lines and ends with the footer and a retri
   const r = must(compressDiff(input, ""));
   const lines = r.text.split("\n");
   const [, hash] = /^\[177 lines compressed to 129\. Retrieve original: hash=([0-9a-f]{12})\]$/.exec(lines.at(-1) ?? "") ?? [];
-  assert.ok(hash, lines.at(-1));
+  assert.ok(hash, String(lines.at(-1)));
   assert.equal(lines.at(-2), "[8 files changed, +40 -24 lines]");
   assert.deepEqual(r.offloaded, [[hash, input]]);
   // Each hunk keeps the 2 context lines on either side of its 8 changes: 12 of 18 lines.
@@ -2766,7 +2697,7 @@ test("compressDiff stays bounded on a header line holding 250,000 ` b/`", () => 
   assert.ok(Date.now() - t0 < 2000, `took ${Date.now() - t0} ms`);
 });
 /** `n` distinct prose sentences on one line each. */
-const sentences = (/** @type {number} */ n, from = 0) => Array.from({ length: n }, (_, i) => `Paragraph ${from + i} explains how the scheduler balances queue ${from + i} against its neighbours.`);
+const sentences = (n, from = 0) => Array.from({ length: n }, (_, i) => `Paragraph ${from + i} explains how the scheduler balances queue ${from + i} against its neighbours.`);
 
 test("foldText collapses repeated lines it can expand back, and only when that is shorter", () => {
   assert.deepEqual(foldText("intro\nthe same long repeated line\nthe same long repeated line\nthe same long repeated line\noutro"), {
@@ -3046,7 +2977,6 @@ test("review fixes: log, search, config, diff and HTML edge cases", () => {
   assert.equal(detectContentType(md), "text");
   // multi-commit log keeps each commit header; a quoted non-ASCII path starts its own file
   const body = Array.from({ length: 30 }, (_, i) => ` ctx ${i}`).join("\n");
-  /** @type {(name: string, q?: boolean) => string} */
   const file = (name, q?) => {
     const [a, b] = q ? [`"a/${name}"`, `"b/${name}"`] : [`a/${name}`, `b/${name}`];
     return `diff --git ${a} ${b}\n--- ${a}\n+++ ${b}\n@@ -1,31 +1,31 @@\n${body}\n-old\n+new`;

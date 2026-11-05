@@ -4,9 +4,9 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "node scripts/build.mts",
+    "build": "node scripts/hooks.mts && node ../scripts/build-plugin.mts",
     "test": "vitest run --config ../vitest.config.mts",
-    "lint": "node scripts/hooks.mts --check && oxlint -c ../.oxlintrc.json"
+    "lint": "node scripts/hooks.mts --check"
   },
   "devDependencies": {
     "claude-engine-vitest": "workspace:*"

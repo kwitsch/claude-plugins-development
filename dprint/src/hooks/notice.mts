@@ -11,7 +11,7 @@
  * cause. No imports at all (hooks modules run without Node and the engine's declaration file is not
  * in the repo), so the used engine members are typed structurally below. The engine's static check wants every
  * hook a named function literal, `$` and `on` spelled as such, and no shadowed names, which is why
- * `scripts/build.mts` does not mangle or compress `hooks/*.mjs`.
+ * `scripts/build-plugin.mts` (repo root) does not mangle or compress `hooks/*.mjs`.
  *
  * @packageDocumentation
  */

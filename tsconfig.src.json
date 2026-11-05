@@ -2,8 +2,8 @@
   "extends": "./tsconfig.base.json",
   "include": [
     "*/src/**/*.mts",
-    "*/src/**/*.ts",
-    "*/scripts/**/*.mts",
+    "*/scripts/*.mts",
+    "scripts/*.mts",
     ".github/scripts/*.mts",
     "vitest.config.mts"
   ]

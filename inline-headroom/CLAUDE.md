@@ -23,7 +23,7 @@ It also ships a host-wide SQLite storage MCP server behind the fail-closed
 
 ## Layout
 
-`plugin.json`, `package.json` and `scripts/build.mts` follow the repo layout (root `CLAUDE.md`).
+`plugin.json` and `package.json` follow the repo layout (root `CLAUDE.md`).
 `pnpm build` compiles `src/**/*.mts` to `plugin/**/*.mjs` (minified; `plugin/hooks/` unmangled and uncompressed), and copies `plugin.json` to `plugin/.claude-plugin/plugin.json`.
 
 - `plugin/.mcp.json` (hand-written) — registers `src/mcp/server.mts` directly (no wrapper, no args) under
@@ -55,8 +55,8 @@ It also ships a host-wide SQLite storage MCP server behind the fail-closed
 ## Tests
 
 ```bash
-# CI (Node 24): lint src/, build, then register, policy, storage server and manifest tests (vitest, tests/*.test.mts) against plugin/
-pnpm --filter inline-headroom lint && pnpm --filter inline-headroom build && pnpm --filter inline-headroom test
+# CI (Node 24): workspace oxlint, build, then register, policy, storage server and manifest tests (vitest, tests/*.test.mts) against plugin/
+pnpm exec oxlint && pnpm --filter inline-headroom build && pnpm --filter inline-headroom test
 claude plugin validate inline-headroom/plugin
 ```
 

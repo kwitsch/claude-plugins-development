@@ -4,8 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "node scripts/build.mts",
-    "test": "vitest run --config ../vitest.config.mts",
-    "lint": "oxlint -c ../.oxlintrc.json"
+    "build": "node ../scripts/build-plugin.mts",
+    "test": "vitest run --config ../vitest.config.mts"
   }
 }

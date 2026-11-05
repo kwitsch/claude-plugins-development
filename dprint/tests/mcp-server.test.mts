@@ -9,6 +9,7 @@ import { createInterface } from "node:readline";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { afterEach, beforeEach, test } from "vitest";
 import { DprintLsp } from "../plugin/mcp/lsp.mjs";
+import type { HookResult } from "../src/mcp/format.mts";
 
 const PLUGIN = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -61,20 +62,10 @@ process.stdin.on("data", (chunk) => {
 `;
 
 let tmp, bin, home, repo;
-/** A tool result's structured content (only the fields the assertions read are typed; a missing one fails the assertion). */
+/** A tool result's structured content: the hook output, every field present (a missing one fails the assertion). */
 interface ToolOut {
   /** The hook output Claude Code reads. */
-  hookSpecificOutput: {
-    /** The hook event. */
-    hookEventName: string;
-    /** The PreToolUse decision. */
-    permissionDecision: string;
-    /** Text added to the model's context. */
-    additionalContext: string;
-    /** The rewritten tool input. */
-    updatedInput: { content: string; [k: string]: unknown };
-  };
-  [k: string]: unknown;
+  hookSpecificOutput: Required<NonNullable<HookResult["hookSpecificOutput"]>>;
 }
 
 /** A JSON-RPC reply of the server. */
@@ -317,7 +308,7 @@ test("Write with trailing spaces -> updatedInput.content stripped + notice", asy
     out.hookSpecificOutput.additionalContext,
     /^dprint: reformatted /,
   );
-  assert.equal(out.hookSpecificOutput.permissionDecision, undefined);
+  assert.equal("permissionDecision" in out.hookSpecificOutput, false);
 });
 
 test("Edit on a CRLF file: old_string/new_string come back LF-only (Claude Code's Edit matches the LF view)", async () => {

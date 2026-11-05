@@ -141,7 +141,7 @@ test("no config in the cwd or above (up to .git) -> no process.run and no toast 
   assert.deepEqual(await fire("tool.call", { tool: "EnterWorktree" }), { result: NEXT });
   assert.deepEqual(await fire("tool.call", { tool: "ExitWorktree" }), { result: NEXT });
   assert.deepEqual(runs, []);
-  assert.deepEqual(toasts, []);
+  assert.equal(toasts.length, 0);
 });
 
 for (const name of CONFIG_NAMES) {
@@ -150,7 +150,7 @@ for (const name of CONFIG_NAMES) {
     const { fire, runs, toasts } = setup($, on, { cwd: dir });
     await fire("session.start");
     assert.deepEqual(runs, [{ argv: PATH_ARGV, init: PROBE_INIT }]);
-    assert.deepEqual(toasts, []);
+    assert.equal(toasts.length, 0);
   });
 }
 
@@ -168,7 +168,7 @@ test("a config in an ancestor below the git root counts; above the git root it d
   const { fire, runs, toasts } = setup($, on, { run: () => DENY });
   await fire("classic.CwdChanged", { new_cwd: sub });
   assert.deepEqual(runs, [], "config above the git root -> not probed");
-  assert.deepEqual(toasts, [] as typeof toasts); // a bare [] would narrow toasts to never[]
+  assert.equal(toasts.length, 0);
   withConfig(root); // at the repo root: counts for pkg2
   await fire("classic.CwdChanged", { new_cwd: sub2 });
   assert.equal(runs.length, 1, "config in an ancestor -> probed (the one pick)");
@@ -185,7 +185,7 @@ test("nothing on PATH, ~/.dprint/bin/dprint exists -> it is the pick: probed as 
   const { fire, runs, toasts } = setup($, on, { cwd: dir, bins: [HOME_DPRINT] });
   await fire("session.start");
   assert.deepEqual(runs.map((r) => r.argv), [[HOME_DPRINT, "--version"]]);
-  assert.deepEqual(toasts, []);
+  assert.equal(toasts.length, 0);
 });
 
 test("HOME unset -> the ~/.dprint/bin step is skipped, npx is probed; probes run in /", async ($, on) => {
@@ -193,7 +193,7 @@ test("HOME unset -> the ~/.dprint/bin step is skipped, npx is probed; probes run
   const { fire, runs, toasts } = setup($, on, { cwd: dir, home: null, bins: [] });
   await fire("session.start");
   assert.deepEqual(runs, [{ argv: NPX_ARGV, init: { cwd: "/", timeoutMs: 10000 } }]);
-  assert.deepEqual(toasts, []);
+  assert.equal(toasts.length, 0);
 });
 
 test("HOME set to a dir that does not exist -> probes run in /, not in the missing HOME", async ($, on) => {
@@ -201,7 +201,7 @@ test("HOME set to a dir that does not exist -> probes run in /, not in the missi
   const { fire, runs, toasts } = setup($, on, { cwd: dir, home: "/nonexistent-dprint-home" });
   await fire("session.start");
   assert.deepEqual(runs, [{ argv: [PATH_DPRINT, "--version"], init: { cwd: "/", timeoutMs: 10000 } }]);
-  assert.deepEqual(toasts, []);
+  assert.equal(toasts.length, 0);
 });
 
 test("no PATH or ~/.dprint/bin dprint, a cached npx dprint runs (--no: never downloads) -> no toast; probed in HOME with a 10 s timeout", async ($, on) => {
@@ -209,7 +209,7 @@ test("no PATH or ~/.dprint/bin dprint, a cached npx dprint runs (--no: never dow
   const { fire, runs, toasts } = setup($, on, { cwd: dir, bins: [] });
   await fire("session.start");
   assert.deepEqual(runs, [{ argv: NPX_ARGV, init: PROBE_INIT }]);
-  assert.deepEqual(toasts, []);
+  assert.equal(toasts.length, 0);
 });
 
 const REASONS: [string, unknown, string][] = [
@@ -235,7 +235,7 @@ for (const out of ["dprint 0.50.0", "dprint 1.0.0", "\n dprint 0.50.0\n"]) {
     const dir = withConfig(repo());
     const { fire, toasts } = setup($, on, { cwd: dir, run: () => ver(out) });
     await fire("session.start");
-    assert.deepEqual(toasts, []);
+    assert.equal(toasts.length, 0);
   });
 }
 
@@ -311,7 +311,7 @@ test("worktree tools check the dir their result names; CwdChanged checks new_cwd
   const { fire, runs, toasts } = setup($, on, { cwd: stale, run: () => DENY });
   await fire("tool.call", { tool: "EnterWorktree", tool_response: { worktreePath: bare } });
   assert.deepEqual(runs, []);
-  assert.deepEqual(toasts, [] as typeof toasts); // a bare [] would narrow toasts to never[]
+  assert.equal(toasts.length, 0);
   await fire("tool.call", { tool: "ExitWorktree", tool_response: { restoredCwd: restored } });
   assert.deepEqual(toasts.map((t) => t.text), [toastText(restored, COULD_NOT_START)]);
   await fire("classic.CwdChanged", { new_cwd: bare });
@@ -338,7 +338,7 @@ test("a successful probe is cached: a second config dir spawns nothing", async (
   await fire("classic.CwdChanged", { new_cwd: a });
   await fire("classic.CwdChanged", { new_cwd: b });
   assert.equal(runs.length, 1);
-  assert.deepEqual(toasts, []);
+  assert.equal(toasts.length, 0);
 });
 
 test("a failed probe is cached for 30 s (the new dir still gets its toast), then re-probed", async ($, on) => {
@@ -382,7 +382,7 @@ test("a rejecting env.get is cached as a failed probe for 30 s, then re-probed; 
   await fire("classic.CwdChanged", { new_cwd: b });
   assert.equal(envGets.length, 4, "after 31 s: re-probed");
   assert.deepEqual(runs, []);
-  assert.deepEqual(toasts, []);
+  assert.equal(toasts.length, 0);
 });
 
 test("the hook returns next's result unchanged; a rejecting fs.exists -> no throw, no probe, no toast", async ($, on) => {
@@ -393,7 +393,7 @@ test("the hook returns next's result unchanged; a rejecting fs.exists -> no thro
   assert.deepEqual(await fire("tool.call", { tool: "EnterWorktree" }), { result: NEXT });
   assert.deepEqual(await fire("tool.call", { tool: "ExitWorktree" }), { result: NEXT });
   assert.deepEqual(runs, []);
-  assert.deepEqual(toasts, []);
+  assert.equal(toasts.length, 0);
 });
 
 test("a rejecting session.cwd -> next's result unchanged, no throw, no toast", async ($, on) => {
@@ -401,14 +401,13 @@ test("a rejecting session.cwd -> next's result unchanged, no throw, no toast", a
   assert.equal(await fire("session.start"), NEXT);
   assert.deepEqual(await fire("tool.call", { tool: "EnterWorktree" }), { result: NEXT });
   assert.deepEqual(await fire("tool.call", { tool: "ExitWorktree" }), { result: NEXT });
-  assert.deepEqual(toasts, []);
+  assert.equal(toasts.length, 0);
 });
 
 plainTest("the module's inlined config names equal the shared CONFIG_NAMES; no imports", () => {
   const src = readFileSync(path.join(PLUGIN, "hooks/notice.mjs"), "utf8");
   const m = /CONFIG_NAMES=(\[[^\]]*\])/.exec(src);
   assert.ok(m, "inlined CONFIG_NAMES");
-  // the minifier may print the strings with backticks
   assert.deepEqual(JSON.parse(m[1].replaceAll("`", "\"")), [...CONFIG_NAMES]);
   assert.doesNotMatch(src, /^import/m);
 });
@@ -441,6 +440,6 @@ plainTest("built module keeps the names Claude Code's static check needs (no man
   assert.match(src, /\$\.ui\.toast\(/);
   assert.match(src, /\$\.session\.cwd\(\)/);
   assert.match(src, /\$\.process\.run\(/);
-  assert.match(src, /\$\.env\.get\(["`]HOME["`]\)/);
-  assert.match(src, /\$\.env\.get\(["`]PATH["`]\)/);
+  assert.match(src, /\$\.env\.get\(`HOME`\)/);
+  assert.match(src, /\$\.env\.get\(`PATH`\)/);
 });

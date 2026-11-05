@@ -5,7 +5,7 @@
   "scripts": {
     "build": "pnpm -r build",
     "test": "pnpm -r test",
-    "lint": "pnpm -r lint"
+    "lint": "oxlint && pnpm -r lint"
   },
   "devDependencies": {
     "@types/node": "^26.6.6",

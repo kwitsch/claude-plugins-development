@@ -18,13 +18,6 @@ jobs:
             | while read -r d; do [ -f "$d/plugin.json" ] && echo "$d"; done | tr '\n' ' ')
           echo "plugins=$plugins" >> "$GITHUB_OUTPUT"
           echo "changed: ${plugins:-none}"
-          # toolchain only when a workspace package changed (the test set comes from pnpm's graph below)
-          pkgs=$(git diff --name-only "origin/${{ github.base_ref }}...HEAD" | cut -d/ -f1 | sort -u \
-            | while read -r d; do [ -f "$d/package.json" ] && echo "$d"; done | tr '\n' ' ')
-          # the workspace-wide lint/test config and root tooling apply to every package: re-check all of them
-          shared=$(git diff --name-only "origin/${{ github.base_ref }}...HEAD" -- .oxlintrc.json "tsconfig*.json" vitest.config.mts .github/scripts package.json pnpm-lock.yaml)
-          echo "toolchain=$([ -n "$pkgs$shared" ] && echo true)" >> "$GITHUB_OUTPUT"
-          echo "filter=$([ -n "$shared" ] && echo '*' || echo '...[origin/${{ github.base_ref }}]')" >> "$GITHUB_OUTPUT"
 
       - name: Versions in package.json and plugin.json must match
         if: steps.changed.outputs.plugins != ''
@@ -68,27 +61,29 @@ jobs:
           done
           exit $rc
 
-      # Toolchain only when something must be built: setup-node's post step
-      # fails when `cache: pnpm` is set but `pnpm install` never ran.
       - uses: pnpm/action-setup@v6
-        if: steps.changed.outputs.toolchain == 'true'
       - uses: actions/setup-node@v7
-        if: steps.changed.outputs.toolchain == 'true'
         with:
           node-version: 24
           cache: pnpm
 
       - name: Install
-        if: steps.changed.outputs.toolchain == 'true'
         run: pnpm install --frozen-lockfile
 
+      # one workspace-wide oxlint run (root .oxlintrc.json): lint + type check of every hand-written .mts
+      - name: Lint
+        run: pnpm exec oxlint
+
       # changed workspace packages plus everything depending on them (a claude-engine-vitest change re-tests its
-      # plugins without a version bump), or every package when the shared root config changed; plugins get the full check, other packages their tests
+      # plugins without a version bump). A change in the root package (shared config, root tooling, lockfile,
+      # .github/scripts) re-checks every package. Plugins get the full check, other packages their tests.
       - name: Build and test changed packages and their dependents
-        if: steps.changed.outputs.toolchain == 'true'
         run: |
           set -o pipefail # a failing pnpm list must fail the job, not test nothing
-          dirs=$(pnpm list -r --depth -1 --json --filter "${{ steps.changed.outputs.filter }}" | jq -r '.[].path')
+          dirs=$(pnpm list -r --depth -1 --json --filter "...[origin/${{ github.base_ref }}]" | jq -r '.[].path')
+          if printf '%s\n' $dirs | grep -qx "$PWD"; then
+            dirs=$(pnpm list -r --depth -1 --json | jq -r '.[].path')
+          fi
           for d in $dirs; do
             p=$(basename "$d")
             [ "$d" = "$PWD" ] && continue # workspace root
