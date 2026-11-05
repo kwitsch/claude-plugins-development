@@ -1,7 +1,7 @@
 // Tests for the built plugin/hooks/notice.mjs (Claude Code function-hooks module) on claude-engine-vitest, the
 // workspace's vitest stand-in for the official `claude-code/testing` kit: stubs answer fs.exists (backed by node:fs),
 // session.cwd, env.get, process.run and ui.toast, and mock.clock(on).settle() waits for the detached check. The
-// first test records the registration list by hand (the kit does not expose it); the last two read the built file.
+// first test records the registration list by hand (the kit does not expose it); the last three read the built file.
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -17,16 +17,21 @@ const { test, mock } = createKit({ module: new URL("../plugin/hooks/notice.mjs",
 const PLUGIN = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../plugin");
 const HOME = "/home/u";
 const HOME_DPRINT = `${HOME}/.dprint/bin/dprint`;
-const PATH_ARGV = ["dprint", "--version"];
+const PATH_DIRS = "/p1:/p2";
+const PATH_DPRINT = "/p1/dprint";
+const PATH_ARGV = [PATH_DPRINT, "--version"];
 const NPX_ARGV = ["npx", "--no", "--prefer-offline", "--", "dprint", "--version"];
 const PROBE_INIT = { cwd: HOME, timeoutMs: 10000 };
-const OK = { value: { exitCode: 0, stdout: "dprint 0.50.0\n", stderr: "" } };
+const ver = (stdout) => ({ value: { exitCode: 0, stdout, stderr: "" } });
+const OK = ver("dprint 0.50.0\n");
 const EXIT_1 = { value: { exitCode: 1, stdout: "", stderr: "" } };
-const NOT_DPRINT = { value: { exitCode: 0, stdout: "not dprint\n", stderr: "" } };
+const NOT_DPRINT = ver("not dprint\n");
 // a deny rejects the mod's $.process.run: stands for "the program cannot start"
 const DENY = { deny: "spawn ENOENT" };
 const NEXT = "next-result";
 const T0 = Date.UTC(2026, 10, 5, 12);
+const NOT_INSTALLED_TEXT = "no dprint is installed (none on PATH, in ~/.dprint/bin or in the npx cache)";
+const COULD_NOT_START = `${PATH_DPRINT} could not start or took over 10 s to answer --version`;
 
 // Date is faked in every test so the 15 s toast window can be stepped past with vi.setSystemTime
 beforeEach(() => {
@@ -53,24 +58,27 @@ function withConfig(dir, name = "dprint.json") {
   return dir;
 }
 
-/** The toast text the module shows for `dir`. */
-const toastText = (dir) =>
-  `dprint: ${dir} has a dprint config but no dprint is installed (none on PATH, in ~/.dprint/bin or in the npx cache); run /dprint:dprint init`;
+/** The toast text the module shows for `dir`; `problem` is the part after "but". */
+const toastText = (dir, problem = NOT_INSTALLED_TEXT) => `dprint: ${dir} has a dprint config but ${problem}; run /dprint:dprint init`;
 
 /**
  * Registers every stub (before the test's first `$` call, as the kit requires) and returns what the module did.
  * `cwd`: session.cwd's answer, a string or a `{ deny }`; `exists(path)` and `run(argv)` return a stub result;
- * `home: null` leaves HOME unset, `home: { deny }` rejects env.get.
+ * `home: null` leaves HOME unset, `home: { deny }` rejects env.get; `path` is the env PATH (`null` = unset);
+ * `bins` are the fake executables fs.exists reports (every other path is answered by node:fs).
  */
-function setup($, on, { cwd = "", exists = (p) => ({ value: existsSync(p) }), run = () => OK, home = HOME } = {}) {
+function setup($, on, { cwd = "", exists, run = () => OK, home = HOME, path: pathVar = PATH_DIRS, bins = [PATH_DPRINT] } = {}) {
+  const exist = exists ?? ((p) => ({ value: bins.includes(p) || existsSync(p) }));
   const toasts = [];
   const runs = [];
   const envGets = [];
-  on("fs.exists", (_$, e) => exists(e.path));
+  on("fs.exists", (_$, e) => exist(e.path));
   on("session.cwd", () => (typeof cwd === "string" ? { value: cwd } : cwd));
   on("env.get", (_$, e) => {
     envGets.push(e.name);
-    return typeof home === "object" && home ? home : { value: e.name === "HOME" && home !== null ? home : undefined };
+    if (typeof home === "object" && home) return home;
+    const value = e.name === "HOME" ? (home ?? undefined) : e.name === "PATH" ? (pathVar ?? undefined) : undefined;
+    return { value };
   });
   on("process.run", (_$, e) => {
     runs.push({ argv: [...e.argv], init: { ...e.init } });
@@ -121,7 +129,7 @@ test("no config in the cwd or above (up to .git) -> no process.run and no toast 
 });
 
 for (const name of CONFIG_NAMES) {
-  test(`config ${name} in the cwd -> probed with dprint --version first; dprint runs -> no toast`, async ($, on) => {
+  test(`config ${name} in the cwd -> the PATH dprint is probed with --version; it runs -> no toast`, async ($, on) => {
     const dir = withConfig(repo(), name);
     const { fire, runs, toasts } = setup($, on, { cwd: dir });
     await fire("session.start");
@@ -147,8 +155,8 @@ test("a config in an ancestor below the git root counts; above the git root it d
   assert.deepEqual(toasts, []);
   withConfig(root); // at the repo root: counts for pkg2
   await fire("classic.CwdChanged", { new_cwd: sub2 });
-  assert.equal(runs.length, 3, "config in an ancestor -> probed");
-  assert.deepEqual(toasts.map((t) => t.text), [toastText(sub2)]);
+  assert.equal(runs.length, 1, "config in an ancestor -> probed (the one pick)");
+  assert.deepEqual(toasts.map((t) => t.text), [toastText(sub2, COULD_NOT_START)]);
   // the failed probe is cached and the toast window is over, so a found config would toast again: no new toast
   // proves the walk stopped at wt
   vi.setSystemTime(T0 + 16_000);
@@ -156,42 +164,105 @@ test("a config in an ancestor below the git root counts; above the git root it d
   assert.equal(toasts.length, 1, "a worktree (.git file) is its own root");
 });
 
-test("dprint not on PATH, ~/.dprint/bin/dprint runs -> no toast; probed as $HOME/.dprint/bin/dprint --version", async ($, on) => {
+test("nothing on PATH, ~/.dprint/bin/dprint exists -> it is the pick: probed as $HOME/.dprint/bin/dprint --version, no toast", async ($, on) => {
   const dir = withConfig(repo());
-  const { fire, runs, toasts } = setup($, on, { cwd: dir, run: (argv) => (argv[0] === HOME_DPRINT ? OK : DENY) });
+  const { fire, runs, toasts } = setup($, on, { cwd: dir, bins: [HOME_DPRINT] });
   await fire("session.start");
-  assert.deepEqual(runs.map((r) => r.argv), [PATH_ARGV, [HOME_DPRINT, "--version"]]);
+  assert.deepEqual(runs.map((r) => r.argv), [[HOME_DPRINT, "--version"]]);
   assert.deepEqual(toasts, []);
 });
 
-test("HOME unset -> the ~/.dprint/bin step is skipped, npx is tried next; probes run in /", async ($, on) => {
+test("HOME unset -> the ~/.dprint/bin step is skipped, npx is probed; probes run in /", async ($, on) => {
   const dir = withConfig(repo());
-  const { fire, runs, toasts } = setup($, on, { cwd: dir, home: null, run: (argv) => (argv[0] === "npx" ? OK : DENY) });
+  const { fire, runs, toasts } = setup($, on, { cwd: dir, home: null, bins: [] });
   await fire("session.start");
-  assert.deepEqual(runs.map((r) => r.argv), [PATH_ARGV, NPX_ARGV]);
-  assert.deepEqual(runs.map((r) => r.init.cwd), ["/", "/"]);
+  assert.deepEqual(runs, [{ argv: NPX_ARGV, init: { cwd: "/", timeoutMs: 10000 } }]);
   assert.deepEqual(toasts, []);
 });
 
-test("PATH and ~/.dprint/bin fail, a cached npx dprint runs (--no: never downloads) -> no toast; every probe runs in HOME with a 10 s timeout", async ($, on) => {
+test("no PATH or ~/.dprint/bin dprint, a cached npx dprint runs (--no: never downloads) -> no toast; probed in HOME with a 10 s timeout", async ($, on) => {
   const dir = withConfig(repo());
-  const { fire, runs, toasts } = setup($, on, { cwd: dir, run: (argv) => (argv[0] === "npx" ? OK : EXIT_1) });
+  const { fire, runs, toasts } = setup($, on, { cwd: dir, bins: [] });
   await fire("session.start");
-  assert.deepEqual(runs, [
-    { argv: PATH_ARGV, init: PROBE_INIT },
-    { argv: [HOME_DPRINT, "--version"], init: PROBE_INIT },
-    { argv: NPX_ARGV, init: PROBE_INIT },
-  ]);
+  assert.deepEqual(runs, [{ argv: NPX_ARGV, init: PROBE_INIT }]);
   assert.deepEqual(toasts, []);
 });
 
-test("all three probes fail (deny, exit 1, no dprint version) -> exactly one 15 s toast naming the dir and /dprint:dprint init", async ($, on) => {
+const REASONS = [
+  ["cannot start or times out", DENY, COULD_NOT_START],
+  ["exits non-zero", EXIT_1, `${PATH_DPRINT} --version exited 1`],
+  ["prints no dprint version", NOT_DPRINT, `${PATH_DPRINT} --version printed no dprint version`],
+  ["is 0.49.0", ver("dprint 0.49.0\n"), `${PATH_DPRINT} is dprint 0.49.0, the plugin needs >= 0.50.0`],
+  ["is 0.50.0-rc.1 (prerelease of the minimum)", ver("dprint 0.50.0-rc.1\n"), `${PATH_DPRINT} is dprint 0.50.0-rc.1, the plugin needs >= 0.50.0`],
+  ["prints a bare major version", ver("dprint 1\n"), `${PATH_DPRINT} --version printed no dprint version`],
+];
+for (const [label, result, problem] of REASONS) {
+  test(`the PATH pick ${label} -> one 15 s toast with that cause`, async ($, on) => {
+    const dir = withConfig(repo());
+    const { fire, runs, toasts } = setup($, on, { cwd: dir, run: () => result });
+    await fire("session.start");
+    assert.deepEqual(runs.map((r) => r.argv), [PATH_ARGV]);
+    assert.deepEqual(toasts, [{ text: toastText(dir, problem), timeoutMs: 15000 }]);
+  });
+}
+
+for (const out of ["dprint 0.50.0", "dprint 1.0.0", "\n dprint 0.50.0\n"]) {
+  test(`the PATH pick prints ${JSON.stringify(out)} -> usable, no toast`, async ($, on) => {
+    const dir = withConfig(repo());
+    const { fire, toasts } = setup($, on, { cwd: dir, run: () => ver(out) });
+    await fire("session.start");
+    assert.deepEqual(toasts, []);
+  });
+}
+
+const NPX_CASES = [
+  ["a failing npx", EXIT_1, NOT_INSTALLED_TEXT],
+  ["a non-starting npx", DENY, NOT_INSTALLED_TEXT],
+  ["an old cached dprint", ver("dprint 0.49.0\n"), "npx is dprint 0.49.0, the plugin needs >= 0.50.0"],
+];
+for (const [label, result, problem] of NPX_CASES) {
+  test(`npx leg: ${label} -> toast "${problem}"`, async ($, on) => {
+    const dir = withConfig(repo());
+    const { fire, runs, toasts } = setup($, on, { cwd: dir, bins: [], run: () => result });
+    await fire("session.start");
+    assert.deepEqual(runs.map((r) => r.argv), [NPX_ARGV]);
+    assert.deepEqual(toasts, [{ text: toastText(dir, problem), timeoutMs: 15000 }]);
+  });
+}
+
+test("a broken PATH dprint is judged alone: no fall-through to a working ~/.dprint/bin one (what findDprint would pick)", async ($, on) => {
   const dir = withConfig(repo());
-  const results = { dprint: DENY, [HOME_DPRINT]: EXIT_1, npx: NOT_DPRINT };
-  const { fire, runs, toasts } = setup($, on, { cwd: dir, run: (argv) => results[argv[0]] });
+  const { fire, runs, toasts } = setup($, on, {
+    cwd: dir,
+    bins: [PATH_DPRINT, HOME_DPRINT],
+    run: (argv) => (argv[0] === PATH_DPRINT ? EXIT_1 : OK),
+  });
   await fire("session.start");
-  assert.equal(runs.length, 3);
-  assert.deepEqual(toasts, [{ text: toastText(dir), timeoutMs: 15000 }]);
+  assert.deepEqual(runs.map((r) => r.argv), [PATH_ARGV]);
+  assert.deepEqual(toasts, [{ text: toastText(dir, `${PATH_DPRINT} --version exited 1`), timeoutMs: 15000 }]);
+});
+
+const PICK_CASES = [
+  ["/p0:/p1", [PATH_DPRINT], "/p1/dprint", "the first existing entry"],
+  ["/p0:/p1", ["/p0/dprint", PATH_DPRINT], "/p0/dprint", "the earlier entry wins"],
+  ["relative:/p1", ["relative/dprint", PATH_DPRINT], "/p1/dprint", "a relative entry is skipped"],
+  ["::/p1", [PATH_DPRINT], "/p1/dprint", "empty entries are skipped"],
+  ["/p1/", [PATH_DPRINT], "/p1/dprint", "a trailing slash is stripped"],
+];
+for (const [pathVar, bins, pick, label] of PICK_CASES) {
+  test(`PATH pick order: ${label} (PATH=${pathVar})`, async ($, on) => {
+    const dir = withConfig(repo());
+    const { fire, runs } = setup($, on, { cwd: dir, path: pathVar, bins, run: () => EXIT_1 });
+    await fire("session.start");
+    assert.deepEqual(runs.map((r) => r.argv), [[pick, "--version"]]);
+  });
+}
+
+test("PATH unset -> no PATH candidates, the ~/.dprint/bin step decides", async ($, on) => {
+  const dir = withConfig(repo());
+  const { fire, runs } = setup($, on, { cwd: dir, path: null, bins: [HOME_DPRINT, PATH_DPRINT] });
+  await fire("session.start");
+  assert.deepEqual(runs.map((r) => r.argv), [[HOME_DPRINT, "--version"]]);
 });
 
 test("one toast per 15 s across hooks and dirs (the cause is machine-wide), the next one after 15 s", async ($, on) => {
@@ -204,7 +275,7 @@ test("one toast per 15 s across hooks and dirs (the cause is machine-wide), the 
   assert.equal(toasts.length, 1);
   vi.setSystemTime(T0 + 16_000);
   await fire("classic.CwdChanged", { new_cwd: other });
-  assert.deepEqual(toasts.map((t) => t.text), [toastText(dir), toastText(other)]);
+  assert.deepEqual(toasts.map((t) => t.text), [toastText(dir, COULD_NOT_START), toastText(other, COULD_NOT_START)]);
 });
 
 test("worktree tools check the dir their result names; CwdChanged checks new_cwd and does nothing without one", async ($, on) => {
@@ -217,13 +288,13 @@ test("worktree tools check the dir their result names; CwdChanged checks new_cwd
   assert.deepEqual(runs, []);
   assert.deepEqual(toasts, []);
   await fire("tool.call", { tool: "ExitWorktree", tool_response: { restoredCwd: restored } });
-  assert.deepEqual(toasts.map((t) => t.text), [toastText(restored)]);
+  assert.deepEqual(toasts.map((t) => t.text), [toastText(restored, COULD_NOT_START)]);
   await fire("classic.CwdChanged", { new_cwd: bare });
   await fire("classic.CwdChanged", {});
   assert.equal(toasts.length, 1);
   vi.setSystemTime(T0 + 16_000); // past the toast window
   await fire("classic.CwdChanged", { new_cwd: moved });
-  assert.deepEqual(toasts.map((t) => t.text), [toastText(restored), toastText(moved)]);
+  assert.deepEqual(toasts.map((t) => t.text), [toastText(restored, COULD_NOT_START), toastText(moved, COULD_NOT_START)]);
 });
 
 test("a successful probe is cached: a second config dir spawns nothing", async ($, on) => {
@@ -243,15 +314,15 @@ test("a failed probe is cached for 30 s (the new dir still gets its toast), then
   let result = DENY;
   const { fire, runs, toasts } = setup($, on, { run: () => result });
   await fire("classic.CwdChanged", { new_cwd: a });
-  assert.equal(runs.length, 3);
+  assert.equal(runs.length, 1);
   vi.setSystemTime(T0 + 16_000);
   await fire("classic.CwdChanged", { new_cwd: b });
-  assert.equal(runs.length, 3, "within 30 s: no re-probe");
-  assert.deepEqual(toasts.map((t) => t.text), [toastText(a), toastText(b)]);
+  assert.equal(runs.length, 1, "within 30 s: no re-probe");
+  assert.deepEqual(toasts.map((t) => t.text), [toastText(a, COULD_NOT_START), toastText(b, COULD_NOT_START)]);
   vi.setSystemTime(T0 + 31_000);
   result = OK;
   await fire("classic.CwdChanged", { new_cwd: c });
-  assert.equal(runs.length, 4, "after 31 s: re-probed, dprint on PATH runs");
+  assert.equal(runs.length, 2, "after 31 s: re-probed, the PATH dprint runs");
   assert.equal(toasts.length, 2);
 });
 
@@ -260,7 +331,7 @@ test("concurrent events share one in-flight probe", async ($, on) => {
   const { clock, toasts, runs } = setup($, on, { cwd: dir, run: () => DENY });
   await Promise.all([$.session.start({}), $.classic.CwdChanged({ new_cwd: dir })]);
   await clock.settle();
-  assert.equal(runs.length, 3, "one probe (3 argvs), not two");
+  assert.equal(runs.length, 1, "one probe (1 argv), not two");
   assert.equal(toasts.length, 1);
 });
 
@@ -269,21 +340,14 @@ test("a rejecting env.get is cached as a failed probe for 30 s, then re-probed; 
   const b = withConfig(repo());
   const { fire, runs, toasts, envGets } = setup($, on, { home: { deny: "boom" }, run: () => DENY });
   await fire("classic.CwdChanged", { new_cwd: a });
-  assert.equal(envGets.length, 1, "env.get rejects before any probe");
+  assert.equal(envGets.length, 2, "HOME and PATH are read together and both reject before any probe");
   vi.setSystemTime(T0 + 10_000);
   await fire("classic.CwdChanged", { new_cwd: b });
-  assert.equal(envGets.length, 1, "within 30 s: no re-probe");
+  assert.equal(envGets.length, 2, "within 30 s: no re-probe");
   vi.setSystemTime(T0 + 31_000);
   await fire("classic.CwdChanged", { new_cwd: b });
-  assert.equal(envGets.length, 2, "after 31 s: re-probed");
+  assert.equal(envGets.length, 4, "after 31 s: re-probed");
   assert.deepEqual(runs, []);
-  assert.deepEqual(toasts, []);
-});
-
-test("dprint --version output with leading whitespace still counts as dprint", async ($, on) => {
-  const dir = withConfig(repo());
-  const { fire, toasts } = setup($, on, { cwd: dir, run: () => ({ value: { exitCode: 0, stdout: "\n dprint 0.50.0\n", stderr: "" } }) });
-  await fire("session.start");
   assert.deepEqual(toasts, []);
 });
 
@@ -314,16 +378,21 @@ plainTest("the module's inlined config names equal the shared CONFIG_NAMES; no i
   assert.doesNotMatch(src, /^import/m);
 });
 
-plainTest("the probe constants and version regex equal find-dprint's", () => {
+plainTest("the probe constants, MIN_VERSION and version regex equal the shared sources'", () => {
   const read = (f) => readFileSync(path.join(PLUGIN, "..", "src", f), "utf8");
   const notice = read("hooks/notice.mts");
   const find = read("skills/dprint/find-dprint.mts");
+  const check = read("skills/dprint/check-dprint.mts");
   const num = (src, name) => new RegExp(`const ${name} = ([\\d_]+);`).exec(src)?.[1];
   assert.ok(num(find, "NPX_PROBE_TIMEOUT_MS"));
   assert.equal(num(notice, "PROBE_TIMEOUT_MS"), num(find, "NPX_PROBE_TIMEOUT_MS"));
   assert.ok(num(find, "NPX_RETRY_MS"));
   assert.equal(num(notice, "PROBE_RETRY_MS"), num(find, "NPX_RETRY_MS"));
-  assert.ok(find.includes("/^dprint \\d/") && notice.includes("/^dprint \\d/"), "version regex");
+  const min = (src) => /^const MIN_VERSION = "([0-9.]+)";$/m.exec(src)?.[1];
+  assert.ok(min(check));
+  assert.equal(min(notice), min(check));
+  const versionRe = "/^dprint (\\d+)\\.(\\d+)\\.(\\d+)(-\\S+)?/";
+  assert.ok(check.includes(versionRe) && notice.includes(versionRe), "version regex");
   assert.ok(find.includes('["--yes", "dprint"]') && notice.includes('["npx", "--no", "--prefer-offline", "--", "dprint", "--version"]'), "npx argv (notice never downloads)");
   assert.ok(find.includes('join(homedir(), ".dprint", "bin", "dprint")') && notice.includes("${home}/.dprint/bin/dprint"), "home path");
 });
@@ -338,4 +407,5 @@ plainTest("built module keeps the names Claude Code's static check needs (no man
   assert.match(src, /\$\.session\.cwd\(\)/);
   assert.match(src, /\$\.process\.run\(/);
   assert.match(src, /\$\.env\.get\("HOME"\)/);
+  assert.match(src, /\$\.env\.get\("PATH"\)/);
 });
