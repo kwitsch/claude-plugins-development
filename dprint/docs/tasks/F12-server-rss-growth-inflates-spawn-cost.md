@@ -42,7 +42,7 @@ Remaining optional work, lowest value first:
 
 ## Verification
 
-- Test in dprint/tests/mcp-server.test.mjs: format_pre Write with content just above the cap returns `{}` and spawns no dprint lsp; the existing "file_changed skips files above 1 MiB" test covers the FileChanged side.
+- Test in dprint/tests/mcp-server.test.mts: format_pre Write with content just above the cap returns `{}` and spawns no dprint lsp; the existing "file_changed skips files above 1 MiB" test covers the FileChanged side.
 - Measure: spawn server, 3 x 10 MB Write, sample VmRSS from /proc/<pid>/status, compare format_pre medians before/after.
 - `pnpm --filter dprint build && pnpm --filter dprint test`.
 

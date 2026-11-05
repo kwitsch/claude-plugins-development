@@ -63,12 +63,12 @@ else `$HOME/.dprint/bin/dprint` if it exists (`$.env.get("HOME")`), else `npx --
 Only the pick is run (`<pick> --version`), never a later candidate, so a broken PATH dprint toasts even when `~/.dprint/bin` works
 (as `findDprint` would fail on it too), each in `cwd` HOME (else, or when that dir does not exist, `/`, never the project, whose `node_modules/.bin` npx would prefer), 10 s timeout.
 Usable = exit 0, stdout `dprint X.Y.Z` (check-dprint's regex) and X.Y.Z >= the inlined `MIN_VERSION` copy (`0.50.0`; a prerelease of it
-sorts below; `tests/notice.test.mjs` fails when it or the regex drifts from `check-dprint.mts`). The toast text names the cause:
+sorts below; `tests/notice.test.mts` fails when it or the regex drifts from `check-dprint.mts`). The toast text names the cause:
 not installed, `<pick>` could not start or took over 10 s, exited N, printed no dprint version, or is too old (the npx leg reads a non-zero
 exit as not installed, since `npx --no` exits 1 when nothing is cached; its other causes keep their own text; `judge`
 returns `{ kind, text }`, so no logic depends on the wording). A success is cached for the module's life, a failure for
 30 s (its own cache, separate from the MCP server's `findDprint`). Only when the pick is unusable it calls
-`$.ui.toast(text, { timeoutMs: 15000 })`, at most once per 15 s overall (the cause is machine-wide). `scripts/hooks.mjs` validates only the
+`$.ui.toast(text, { timeoutMs: 15000 })`, at most once per 15 s overall (the cause is machine-wide). `scripts/hooks.mts` validates only the
 `hooks` map; `claude plugin validate plugin` checks the module, lists `process.run`, `env.get` and the env vars `HOME` and `PATH`
 among its uses, and warns "gating hook without .catch" for three of its hooks (expected: the check is detached with
 `.catch`).
@@ -81,34 +81,34 @@ among its uses, and warns "gating hook without .catch" for three of its hooks (e
 
 ## Tests
 
-`pnpm --filter dprint test` runs vitest (`vitest run`) over `tests/*.test.mjs` against the built `plugin/`; asserts
-via `node:assert/strict`; `vitest.config.mjs` sets `testTimeout: 30_000` for the files that spawn processes. `tests/notice.test.mjs` drives the built hooks module through `createKit` from the workspace package
+`pnpm --filter dprint test` runs vitest (`vitest run`, workspace config `../vitest.config.mts`) over `tests/*.test.mts` against the built `plugin/`; asserts
+via `node:assert/strict`; the shared config sets `testTimeout: 30_000` for the files that spawn processes. `tests/notice.test.mts` drives the built hooks module through `createKit` from the workspace package
 `claude-engine-vitest` (stubs for `fs.exists`, `session.cwd`, `env.get`, `process.run`, `ui.toast`;
 `mock.clock(on).settle()` waits for the detached check).
 
 ## Sources vs. build output
 
-- `src/**/*.{mts,ts}` are written for humans: every function, method, class, type, type member and
+- `src/**/*.mts` are written for humans: every function, method, class, type, type member and
   module-level constant carries a TSDoc comment (`@param name - text`, `@returns`, `@remarks`, one blank line
-  before the first tag). `pnpm lint` (ESLint + typescript-eslint, `eslint-plugin-tsdoc`, `eslint-plugin-jsdoc`;
-  config `eslint.config.mjs`, type-checked rules incl. `no-explicit-any`/`no-unsafe-*`) enforces it; CI runs
+  before the first tag). `.claude/rules/tsdoc.md` asks for it (not linted). `pnpm lint` (oxlint type-aware + type check,
+  workspace config `../.oxlintrc.json`, rules incl. `no-explicit-any`/`no-unsafe-*`) must pass; CI runs
   it. `plugin/` is ignored by the linter.
-- `plugin/hooks/hooks.json` is the hook-input contract. `scripts/hooks.mjs` validates it (`mcp_tool` hooks, plus
+- `plugin/hooks/hooks.json` is the hook-input contract. `scripts/hooks.mts` validates it (`mcp_tool` hooks, plus
   `command` hooks (non-empty `command`, timeout checked, no input, no generated types), `server` =
   `plugin:dprint:<.mcp.json key>`, every `${…}` placeholder a real input field of its event
   and, for `Write`/`Edit` matchers, of those tools, one input shape per tool) and generates
   `src/mcp/hook-inputs.d.mts` (one interface per tool plus the `HookInputs` map) from the `input` templates.
   `server.mts` types its tool table by `HookInputs`, so a tool missing on either side is a compile error.
-  `pnpm build` regenerates the file; `pnpm lint` runs `scripts/hooks.mjs --check` first and fails while it is
+  `pnpm build` regenerates the file; `pnpm --filter dprint lint` runs `scripts/hooks.mts --check` and fails while it is
   stale. Never edit the `.d.mts` by hand. A new hook event needs its input fields in `EVENT_FIELDS` there.
-- `pnpm build` compiles with `tsc` (`.mts` → `.mjs`, `.ts` → `.js`) and then minifies every emitted file with
-  terser: no comments, mangled locals, shebang and export names kept. `plugin/hooks/*.mjs` (function-hooks modules) are neither compressed nor mangled: Claude Code's static
+- `pnpm build` strips types with oxc-transform (`.mts` → `.mjs`) and then minifies every emitted file with
+  oxc-minify: no comments, mangled locals, shebang and export names kept. `plugin/hooks/*.mjs` (function-hooks modules) are neither compressed nor mangled and keep their whitespace (whitespace removal turns string literals into template literals): Claude Code's static
   module check needs named hook functions, `$`/`on` spelled as such and no shadowed names. The output is optimized for size and
   load time, not for reading; debug against `src/`.
 
 `MIN_VERSION` is defined only in the `.mts` source. Changing it: edit there, update the
 "Minimum dprint version" line in `README.md`, rebuild. Tests read the value from that source (the built
-script is minified). `src/hooks/notice.mts` holds a copy; `tests/notice.test.mjs` fails when the two differ, so change both.
+script is minified). `src/hooks/notice.mts` holds a copy; `tests/notice.test.mts` fails when the two differ, so change both.
 
 ## Refreshing `dprint-plugins.json`
 

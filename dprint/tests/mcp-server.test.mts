@@ -1,24 +1,15 @@
 // End-to-end tests: spawn the built plugin/mcp/server.mjs with an isolated PATH (bash + node + a stub
 // `dprint`) and HOME; the stub speaks Content-Length JSON-RPC like `dprint lsp`.
-import { test, beforeEach, afterEach } from "vitest";
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
-import {
-  utimesSync,
-  chmodSync,
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  statSync,
-  symlinkSync,
-  writeFileSync,
-} from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, statSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { createInterface } from "node:readline";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { afterEach, beforeEach, test } from "vitest";
 import { DprintLsp } from "../plugin/mcp/lsp.mjs";
+import type { HookResult } from "../src/mcp/format.mts";
 
 const PLUGIN = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -71,7 +62,21 @@ process.stdin.on("data", (chunk) => {
 `;
 
 let tmp, bin, home, repo;
-const servers = [];
+/** A tool result's structured content: the hook output, every field present (a missing one fails the assertion). */
+interface ToolOut {
+  /** The hook output Claude Code reads. */
+  hookSpecificOutput: Required<NonNullable<HookResult["hookSpecificOutput"]>>;
+}
+
+/** A JSON-RPC reply of the server. */
+interface RpcReply {
+  /** The request id. */
+  id: number;
+  /** The result (initialize, tools/list or tools/call fields). */
+  result: { serverInfo?: unknown; tools: { name: string }[]; structuredContent: ToolOut };
+}
+
+const servers: ReturnType<typeof spawn>[] = [];
 
 beforeEach(() => {
   tmp = mkdtempSync(path.join(tmpdir(), "dprint-mcp-test-"));
@@ -93,7 +98,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  while (servers.length) servers.pop().kill();
+  while (servers.length) servers.pop()?.kill();
 });
 
 /**
@@ -128,9 +133,9 @@ function stubNpx() {
     [
       "#!/usr/bin/env bash",
       `printf '%s\\n' "$@" >> "$HOME/npx-argv"`,
-      '[ "$1 $2" = "--yes dprint" ] || exit 9',
+      "[ \"$1 $2\" = \"--yes dprint\" ] || exit 9",
       "shift 2",
-      'if [ "$1" = "--version" ]; then echo "dprint 0.64.3"; exit 0; fi',
+      "if [ \"$1\" = \"--version\" ]; then echo \"dprint 0.64.3\"; exit 0; fi",
       `exec "${real}" "$@"`,
       "",
     ].join("\n"),
@@ -139,7 +144,7 @@ function stubNpx() {
 }
 
 /** Spawn the built server; `opts.cwd` sets its process cwd (default: the test's), `opts.env` adds env vars. */
-function startServer(opts = {}) {
+function startServer(opts: { cwd?: string; env?: Record<string, string> } = {}) {
   const child = spawn(path.join(bin, "node"), [SERVER], {
     cwd: opts.cwd,
     env: { PATH: bin, HOME: home, ...opts.env },
@@ -147,15 +152,15 @@ function startServer(opts = {}) {
   });
   servers.push(child);
   child.stderr.resume();
-  const waiting = new Map();
+  const waiting = new Map<number, (msg: RpcReply) => void>();
   createInterface({ input: child.stdout }).on("line", (line) => {
-    const msg = JSON.parse(line); // throws (fails the run) if stdout carries anything but JSON-RPC
+    const msg = JSON.parse(line) as RpcReply; // throws (fails the run) if stdout carries anything but JSON-RPC
     waiting.get(msg.id)?.(msg);
     waiting.delete(msg.id);
   });
   let nextId = 0;
   const rpc = (method, params) =>
-    new Promise((resolve) => {
+    new Promise<RpcReply>((resolve) => {
       const id = ++nextId;
       waiting.set(id, resolve);
       child.stdin.write(
@@ -211,12 +216,14 @@ test("initialize reports dprint-hooks with the manifest version; tools/list has 
 test("excluded and out-of-root paths are never formatted", async () => {
   stubDprint();
   const s = startServer();
-  for (const file of [
-    path.join(repo, "node_modules/x.ts"),
-    path.join(repo, "settings.local.json"),
-    path.join(repo, ".claude/worktrees/w/x.ts"),
-    path.join(tmp, "outside.ts"),
-  ])
+  for (
+    const file of [
+      path.join(repo, "node_modules/x.ts"),
+      path.join(repo, "settings.local.json"),
+      path.join(repo, ".claude/worktrees/w/x.ts"),
+      path.join(tmp, "outside.ts"),
+    ]
+  ) {
     assert.deepEqual(
       await s.call({
         cwd: repo,
@@ -226,6 +233,7 @@ test("excluded and out-of-root paths are never formatted", async () => {
       {},
       file,
     );
+  }
 });
 
 test("cwd_changed / worktree_entered re-root later format_pre calls for that session", async () => {
@@ -300,7 +308,7 @@ test("Write with trailing spaces -> updatedInput.content stripped + notice", asy
     out.hookSpecificOutput.additionalContext,
     /^dprint: reformatted /,
   );
-  assert.equal(out.hookSpecificOutput.permissionDecision, undefined);
+  assert.equal("permissionDecision" in out.hookSpecificOutput, false);
 });
 
 test("Edit on a CRLF file: old_string/new_string come back LF-only (Claude Code's Edit matches the LF view)", async () => {
@@ -580,7 +588,7 @@ test(".mcp.json key matches every hooks.json server id and each hook tool is lis
   const mcp = JSON.parse(readFileSync(path.join(PLUGIN, ".mcp.json"), "utf8"));
   const hooks = JSON.parse(
     readFileSync(path.join(PLUGIN, "hooks/hooks.json"), "utf8"),
-  );
+  ) as { hooks: Record<string, { hooks: { type: string; command: string; server: string; tool: string }[] }[]> };
   const keys = Object.keys(mcp.mcpServers);
   assert.deepEqual(keys, ["dprint-hooks"]);
   const s = startServer();
@@ -678,8 +686,7 @@ test("format_pre without a cwd skips instead of using the server's own cwd", asy
 test("file_changed formats an in-cwd file on disk (CRLF files keep CRLF); unlink, outside and lone-CR files are left alone", async () => {
   stubDprint();
   const s = startServer();
-  const changedEv = (file, event = "change") =>
-    s.tool("file_changed", { cwd: repo, file_path: file, event });
+  const changedEv = (file, event = "change") => s.tool("file_changed", { cwd: repo, file_path: file, event });
   // git is not on the stub PATH: the git guard fails open and the file is formatted
   const a = path.join(repo, "a.ts");
   writeFileSync(a, "x  \n");

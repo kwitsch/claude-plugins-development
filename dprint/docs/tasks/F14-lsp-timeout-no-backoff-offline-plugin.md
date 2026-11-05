@@ -35,7 +35,7 @@ Open follow-up (low): in watch-paths.mts lower the `execFileSync` timeout for `d
 
 ## Verification
 
-- tests/mcp-server.test.mjs: "lsp timeout -> later formats of that document fail fast for the cooldown, other documents do not" (uses a stub lsp and `timeoutMs`).
+- tests/mcp-server.test.mts: "lsp timeout -> later formats of that document fail fast for the cooldown, other documents do not" (uses a stub lsp and `timeoutMs`).
 - Real repro: fixture with dprint.json plugin `https://10.255.255.1/plugin.wasm`, `DPRINT_CACHE_DIR` empty; time three format_pre calls; expect ~30 s then ~4 ms.
 - `pnpm --filter dprint build && pnpm --filter dprint test`.
 

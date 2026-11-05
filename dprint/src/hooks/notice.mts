@@ -11,14 +11,14 @@
  * cause. No imports at all (hooks modules run without Node and the engine's declaration file is not
  * in the repo), so the used engine members are typed structurally below. The engine's static check wants every
  * hook a named function literal, `$` and `on` spelled as such, and no shadowed names, which is why
- * `scripts/build.mjs` does not mangle or compress `hooks/*.mjs`.
+ * `scripts/build-plugin.mts` (repo root) does not mangle or compress `hooks/*.mjs`.
  *
  * @packageDocumentation
  */
 
 /**
  * dprint's config file names. A copy of `CONFIG_NAMES` (`skills/dprint/config-names.mts`): a relative import
- * may not resolve in the engine; `tests/notice.test.mjs` fails on drift.
+ * may not resolve in the engine; `tests/notice.test.mts` fails on drift.
  */
 const CONFIG_NAMES = [
   "dprint.json",
@@ -38,7 +38,7 @@ const PROBE_TIMEOUT_MS = 10_000;
 /** How long a failed probe stays cached before the next event re-probes, in ms (same as `NPX_RETRY_MS` in `find-dprint.mts`). */
 const PROBE_RETRY_MS = 30_000;
 
-/** Minimum dprint version the format hooks need (`dprint lsp`). A copy of `MIN_VERSION` (`skills/dprint/check-dprint.mts`); `tests/notice.test.mjs` fails on drift. */
+/** Minimum dprint version the format hooks need (`dprint lsp`). A copy of `MIN_VERSION` (`skills/dprint/check-dprint.mts`); `tests/notice.test.mts` fails on drift. */
 const MIN_VERSION = "0.50.0";
 
 /** The reason when no dprint exists on PATH, in `~/.dprint/bin` or in the npx cache (the wording lives only here). */

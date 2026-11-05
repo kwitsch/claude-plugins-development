@@ -23,7 +23,7 @@ It also ships a host-wide SQLite storage MCP server behind the fail-closed
 
 ## Layout
 
-`plugin.json`, `package.json`, `tsconfig.json` and `scripts/build.mjs` follow the repo layout (root `CLAUDE.md`).
+`plugin.json` and `package.json` follow the repo layout (root `CLAUDE.md`).
 `pnpm build` compiles `src/**/*.mts` to `plugin/**/*.mjs` (minified; `plugin/hooks/` unmangled and uncompressed), and copies `plugin.json` to `plugin/.claude-plugin/plugin.json`.
 
 - `plugin/.mcp.json` (hand-written) — registers `src/mcp/server.mts` directly (no wrapper, no args) under
@@ -34,19 +34,19 @@ It also ships a host-wide SQLite storage MCP server behind the fail-closed
   (`#!/usr/bin/env node`, mode 0755 set by the build) with two modes, the per-session stdio MCP
   front-end and the detached `--service <dataDir>` singleton. Its pure exports
   (`isStorageEnabled`, `resolveStorage`, `migrate`, `execOp`, `PROTOCOL`,
-  `MIGRATIONS`) are tested by `tests/storage.test.mjs`; an
+  `MIGRATIONS`) are tested by `tests/storage.test.mts`; an
   `isMainModule()` guard keeps that import free of side effects.
 - `plugin/hooks/hooks.json` (hand-written) — exactly `{"modules": ["./register.mjs"]}`.
 - `src/hooks/register.mts` → `plugin/hooks/register.mjs` — every hook and every `$` use. No `claude-code`
   type import: the used `$` members and events are typed structurally at the top of the file. No `any`, no
   `import()` (a module holding `import()` does not load). It imports `./policy.mjs`. Tested by
-  `tests/register.test.mjs` (kit-style tests on the workspace package `claude-engine-vitest`).
+  `tests/register.test.mts` (kit-style tests on the workspace package `claude-engine-vitest`).
 - `src/hooks/policy.mts` → `plugin/hooks/policy.mjs` — pure, zero-dep logic with no clock reads
   (time comes in as arguments). It must never reference `$`: the engine rejects
   passing the mods API into functions imported from another file. It also
   rejects `$.<noun>` as a bare value (bound, passed or read), so same-file
   helpers in `register.mts` take the whole `$` typed `Engine`.
-  Tested by `tests/policy.test.mjs`. It also holds the content router and
+  Tested by `tests/policy.test.mts`. It also holds the content router and
   the SmartCrusher (with its lossless compaction stage), cross-turn dedup,
   dense line elider, config compressor, HTML extractor, log compressor, search
   compressor, diff compressor, text crusher and relevance split ports, and the
@@ -55,12 +55,12 @@ It also ships a host-wide SQLite storage MCP server behind the fail-closed
 ## Tests
 
 ```bash
-# CI (Node 24): lint src/, build, then register, policy, storage server and manifest tests (vitest, tests/*.test.mjs) against plugin/
-pnpm --filter inline-headroom lint && pnpm --filter inline-headroom build && pnpm --filter inline-headroom test
+# CI (Node 24): workspace oxlint, build, then register, policy, storage server and manifest tests (vitest, tests/*.test.mts) against plugin/
+pnpm exec oxlint && pnpm --filter inline-headroom build && pnpm --filter inline-headroom test
 claude plugin validate inline-headroom/plugin
 ```
 
-`storage.test.mjs` needs `node:sqlite` and spawns processes. Its cleanup SIGTERMs every `--service` process for
+`storage.test.mts` needs `node:sqlite` and spawns processes. Its cleanup SIGTERMs every `--service` process for
 its temp data dir, so no daemon outlives the suite.
 
 ## Storage server

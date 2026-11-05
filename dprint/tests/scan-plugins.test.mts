@@ -1,18 +1,12 @@
 // Contract tests for the built plugin/skills/dprint/scan-plugins.mjs and a shape test for the
 // shipped dprint-plugins.json. Isolated PATH (only node + git), HOME and git repo per test.
-import { test, beforeEach } from "vitest";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import {
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  symlinkSync,
-  writeFileSync,
-} from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { beforeEach, test } from "vitest";
 
 const DIR = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -75,8 +69,9 @@ test("dprint-plugins.json: every plugin has a unique id, lower-case dot-free ext
     assert.ok(!ids.has(p.id), `duplicate id ${p.id}`);
     ids.add(p.id);
     assert.ok(Array.isArray(p.extensions), p.id);
-    for (const x of p.extensions)
+    for (const x of p.extensions) {
       assert.match(x, /^[a-z0-9]+$/, `${p.id}: ${x}`);
+    }
     for (const n of p.fileNames ?? []) {
       assert.equal(typeof n, "string");
       assert.ok(n.length > 0 && !n.includes("/"), `${p.id}: ${n}`);
@@ -143,13 +138,13 @@ test("dprint.jsonc with comments and trailing commas is parsed; // inside URLs s
     [
       "{",
       "  // line comment",
-      '  "plugins": [',
+      "  \"plugins\": [",
       `    "${TS_URL}", /* block comment */`,
       `    "${JSON_URL}", // trailing comma before ]`,
       "  ],",
       "  /* multi",
       "     line */",
-      '  "lineWidth": 100,',
+      "  \"lineWidth\": 100,",
       "}",
       "",
     ].join("\n"),
@@ -218,7 +213,7 @@ test("extends -> stderr warning, exit code unchanged", () => {
 });
 
 test("invalid config -> exit 2, status=error", () => {
-  write("dprint.json", '{ "plugins": [');
+  write("dprint.json", "{ \"plugins\": [");
   const r = run();
   assert.equal(r.code, 2);
   assert.deepEqual(r.lines, ["status=error config=dprint.json missing=-"]);

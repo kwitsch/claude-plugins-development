@@ -33,7 +33,7 @@ Pinned steady state (a process holds cwd on the path: Claude Code itself and the
 
 ## Verification
 
-Add tests in dprint/tests/mcp-server.test.mjs: "config removed mid-session -> gate closes (format_pre {})" and "config created mid-session -> gate opens" (today only "cwd without any dprint config" and cwd_changed gating exist). Measure on /mnt/c (not ext4): fixture cwd at depth 0/3/8 below `.git`, cwd pinned by a child process, 20 reps, uncached vs cached `findConfig` + `scopeOf/inScope` timings.
+Add tests in dprint/tests/mcp-server.test.mts: "config removed mid-session -> gate closes (format_pre {})" and "config created mid-session -> gate opens" (today only "cwd without any dprint config" and cwd_changed gating exist). Measure on /mnt/c (not ext4): fixture cwd at depth 0/3/8 below `.git`, cwd pinned by a child process, 20 reps, uncached vs cached `findConfig` + `scopeOf/inScope` timings.
 
 ## Constraints
 

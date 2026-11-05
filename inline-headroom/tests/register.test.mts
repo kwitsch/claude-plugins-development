@@ -1,8 +1,8 @@
 // Hook-wiring tests for the built plugin/hooks/register.mjs (Claude Code function-hooks module): a near-verbatim port
 // of the former `claude plugin test` suite onto claude-engine-vitest, the workspace's vitest stand-in for the
 // official `claude-code/testing` kit (types dropped, `expect` from vitest, `test`/`mock` from createKit).
-import { expect } from "vitest";
 import { createKit } from "claude-engine-vitest";
+import { expect } from "vitest";
 import { dayKey, RETRIEVE_TOOL, windowStart } from "../plugin/hooks/policy.mjs";
 
 const { test, mock } = createKit({ module: new URL("../plugin/hooks/register.mjs", import.meta.url), plugin: "inline-headroom" });
@@ -56,8 +56,9 @@ const usageAt = (hit) => ({
 
 // Bottom turn.step hook (stands for the engine): records the effort that reached it.
 function bottomStep(on) {
-  const st = { seen: "not-called", usage: null };
+  const st: { seen: unknown; usage: unknown } = { seen: "not-called", usage: null };
   on("turn.step", async function*(_$, e) {
+    yield* []; // a streaming hook: nothing to yield, only the result
     st.seen = e.effort;
     return {
       turnId: e.turnId,
@@ -74,7 +75,7 @@ function bottomStep(on) {
 // Stands for the storage MCP server: connect answers only for the bare key `storage`, like the engine;
 // records every call; `answer`'s value is the tool's result, an Error an error result.
 function stubStorage(on, answer) {
-  const calls = [];
+  const calls: { tool: string; args: Record<string, unknown> }[] = [];
   on("mcp.connect", async (_$, e) =>
     e.server === "storage"
       ? {
@@ -107,7 +108,7 @@ function stubWindows(on, windows) {
 // One pane cell by its exact text: an unanchored string is a substring match ("1" also finds 17).
 const cell = (ui, text) => ui.find({ type: "Text", text: new RegExp(`^${text}$`) });
 
-async function step($, index, effort, agentId) {
+async function step($, index, effort, agentId?) {
   const input = {
     turnId: "t1",
     index,
@@ -122,11 +123,11 @@ async function step($, index, effort, agentId) {
 }
 
 // One Read call, from the main loop or (with agentId) from that subagent.
-async function callRead($, agentId) {
+async function callRead($, agentId?) {
   await $.tool.call({ tool: "Read", file_path: "README.md", ...(agentId === undefined ? {} : { agentId }) });
 }
 
-async function readOk($, on, agentId) {
+async function readOk($, on, agentId?) {
   on("tool.call", () => ({ result: "file contents" }));
   await callRead($, agentId);
 }
@@ -201,7 +202,7 @@ test("(h) a cache-hit drop from 90% to 10% is counted", { options: { effort_rout
 });
 
 test("(i) /headroom opens the headroom pane and prints nothing", async ($, on) => {
-  const opened = [];
+  const opened: Record<string, unknown>[] = [];
   on("ui.open", async (_$, e) => {
     opened.push(e);
     return { value: { isPlaced: true } };
@@ -242,6 +243,7 @@ test("(j) an open headroom pane redraws when a step changes the stats", async ($
 
 test("(k) a failed step still redraws the open headroom pane", async ($, on) => {
   on("turn.step", async function*() {
+    yield* []; // a streaming hook that fails before its first chunk
     throw new Error("API error");
   });
   const ui = await $.ui.mount({ ...PANE, surface: "terminal" });
@@ -622,7 +624,7 @@ const notPlaced = async () => ({ value: { isPlaced: false, reason: "no surface" 
 // `registeredAs` and records each spec. Call it after the test's other stubs: the kit refuses on() once $ was called.
 // `userText` is the one user message session.messages answers with: "" (a tool result) gives an empty query.
 async function startCrusher(on, $, registeredAs = RETRIEVE_TOOL, userText = "") {
-  const registered = [];
+  const registered: unknown[] = [];
   on("command.register", async (_$, e) => ({ value: { command: e.name } }));
   on("tool.register", async (_$, e) => {
     registered.push(e);
@@ -642,7 +644,7 @@ async function callBash($) {
 let rowSeq = 0; // a fresh tool_use id and row uuid per raised row
 // Raises one tool-result row through the test's own $.session.append, as the engine appends a tool's result (door
 // tool-result, origin the tool), and resolves to the stored tool_result's content: what the model reads.
-async function appendResult($, tool, content, opts = {}) {
+async function appendResult($, tool, content, opts: { isError?: boolean; agentId?: string } = {}) {
   const n = ++rowSeq;
   const r = await $.session.append({
     message: { type: "user", role: "user", content: [{ type: "tool_result", tool_use_id: `toolu_${n}`, content, ...(opts.isError ? { is_error: true } : {}) }] },
@@ -688,7 +690,7 @@ test("(sc2) headroom_retrieve returns the original rows, and an unknown hash is 
 
 test("(sc3) an error row is stored untouched, and tool.call error and deny results come back untouched", async ($, on) => {
   const st = bottomStep(on);
-  let answer = { isError: true, result: "boom" };
+  let answer: unknown = { isError: true, result: "boom" };
   on("tool.call", () => answer);
   await startCrusher(on, $);
   expect(await appendResult($, "Bash", BIG, { isError: true })).toBe(BIG);
@@ -760,7 +762,7 @@ test(
 test("(sc5) a row's array content gets only its JSON text block rewritten", { options: LOSSY }, async ($, on) => {
   const image = { type: "image", source: { type: "base64", media_type: "image/png", data: "iVBORw0KGgo=" } };
   await startCrusher(on, $);
-  const content = (await appendResult($, "mcp__srv__list", [{ type: "text", text: BIG }, image]));
+  const content = await appendResult($, "mcp__srv__list", [{ type: "text", text: BIG }, image]);
   expect(crushedRows(content[0].text).rows.length).toBeLessThan(200);
   expect(content[1]).toEqual(image);
 });
@@ -864,7 +866,7 @@ test(
     },
   },
   async ($, on) => {
-    const opened = [];
+    const opened: Record<string, unknown>[] = [];
     on("ui.open", async (_$, e) => {
       opened.push(e);
       return { value: { isPlaced: true } };
@@ -935,7 +937,7 @@ test("(dd4) session.end starts the dedup row and its corpus over", { options: { 
 
 // The kit raises session.compact with exactly the args it is given, so a test passes the engine's own fields (trigger, agentId, messages) too.
 const SUMMARY = { role: "user", text: "summary", toolUses: [] };
-const compact = ($, trigger, agentId) => $.session.compact({ trigger, messages: [SUMMARY], ...(agentId === undefined ? {} : { agentId }) });
+const compact = ($, trigger, agentId?) => $.session.compact({ trigger, messages: [SUMMARY], ...(agentId === undefined ? {} : { agentId }) });
 
 test(
   "(dd5) a compaction starts only the compacting loop's dedup corpus over and keeps its ordinals, a skipped or precompute one keeps it",

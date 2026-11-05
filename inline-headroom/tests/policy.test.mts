@@ -1,74 +1,6 @@
-import { test } from "vitest";
 import assert from "node:assert/strict";
-import {
-  CACHE_DROP_THRESHOLD,
-  CCR_CAPACITY,
-  CCR_MAX_CHARS,
-  CRUSH_MIN_CHARS,
-  CRUSH_QUERY_INPUT_CHARS,
-  DEDUP_MAX_CHARS,
-  EFFORT_ORDER,
-  ERROR_KEYWORDS,
-  RETAIN_DAYS,
-  RETRIEVE_TOOL,
-  ROWS,
-  adaptiveThreshold,
-  bm25Scores,
-  cacheHitRatio,
-  clampEffort,
-  collapseRuns,
-  compactConfigLossless,
-  compactRows,
-  compactionJson,
-  compressLog,
-  compressSearch,
-  compressConfig,
-  compressDiff,
-  computeOptimalK,
-  configFlavor,
-  crushJson,
-  crushNumberArray,
-  crushQuery,
-  crushStringArray,
-  crushText as crushProse,
-  dayKey,
-  detectContentType,
-  dedupBlock,
-  elideDense,
-  expandRuns,
-  extractHtml,
-  foldRepeatedBlocks,
-  foldLog,
-  foldDiff,
-  foldPending,
-  foldSearch,
-  foldText,
-  formatCsvSchema,
-  isCacheDrop,
-  isIniAssign,
-  isOwnStorageCall,
-  isProse,
-  isToolError,
-  numberChangePoints,
-  otsuThreshold,
-  relevanceScores,
-  resetCorpus,
-  retrieveKey,
-  rewriteToolResults,
-  roundHalfEven,
-  segmentRecords,
-  splitRelevance,
-  statsTables,
-  stepEffort,
-  storeOffloaded,
-  tableText,
-  tagSpans,
-  toCount,
-  unfoldRepeatedBlocks,
-  wantsQuery,
-  windowStart,
-  zeroCounters,
-} from "../plugin/hooks/policy.mjs";
+import { test } from "vitest";
+import { adaptiveThreshold, bm25Scores, CACHE_DROP_THRESHOLD, cacheHitRatio, CCR_CAPACITY, CCR_MAX_CHARS, clampEffort, collapseRuns, compactConfigLossless, compactionJson, compactRows, compressConfig, compressDiff, compressLog, compressSearch, computeOptimalK, configFlavor, CRUSH_MIN_CHARS, CRUSH_QUERY_INPUT_CHARS, crushJson, crushNumberArray, crushQuery, crushStringArray, crushText as crushProse, dayKey, DEDUP_MAX_CHARS, dedupBlock, detectContentType, EFFORT_ORDER, elideDense, ERROR_KEYWORDS, expandRuns, extractHtml, foldDiff, foldLog, foldPending, foldRepeatedBlocks, foldSearch, foldText, formatCsvSchema, isCacheDrop, isIniAssign, isOwnStorageCall, isProse, isToolError, numberChangePoints, otsuThreshold, relevanceScores, resetCorpus, RETAIN_DAYS, RETRIEVE_TOOL, retrieveKey, rewriteToolResults, roundHalfEven, ROWS, segmentRecords, splitRelevance, statsTables, stepEffort, storeOffloaded, tableText, tagSpans, toCount, unfoldRepeatedBlocks, wantsQuery, windowStart, zeroCounters } from "../plugin/hooks/policy.mjs";
 
 test("constants match the spec", () => {
   assert.deepEqual([...EFFORT_ORDER], ["low", "medium", "high", "xhigh", "max"]);
@@ -301,7 +233,6 @@ test("toCount keeps non-negative safe integers and turns everything else into 0"
 });
 
 test("foldPending adds pending into today's row, zeroes pending in place and returns copies", () => {
-  /** @type {Record<string, import("../plugin/hooks/policy.mjs").Counters>} */
   const days = {};
   const pending = zeroCounters();
   pending.steps = 2;
@@ -317,11 +248,10 @@ test("foldPending adds pending into today's row, zeroes pending in place and ret
 });
 
 test("foldPending drops days before purgeBefore and after today, keeping the window", () => {
-  /** @type {Record<string, import("../plugin/hooks/policy.mjs").Counters>} */
   const days = { "2026-09-03": zeroCounters(), "2026-09-04": zeroCounters(), "2026-10-02": zeroCounters(), "2026-10-04": zeroCounters() };
   const rows = foldPending(days, zeroCounters(), "2026-10-03", "2026-09-04");
   assert.deepEqual(Object.keys(days).sort(), ["2026-09-04", "2026-10-02", "2026-10-03"]);
-  assert.deepEqual(rows.map((r) => r.day).sort(), ["2026-09-04", "2026-10-02", "2026-10-03"]);
+  assert.deepEqual(rows.map((r) => r.day as string).sort(), ["2026-09-04", "2026-10-02", "2026-10-03"]);
 });
 
 test("computeOptimalK keeps every row up to 8, 3 for redundant rows and at most 15 otherwise", () => {
@@ -350,11 +280,11 @@ test("computeOptimalK honours a caller's minK and maxK and answers maxK once its
 
 // Captured from relevanceScores before its BM25 core moved into bm25Batch: the refactor must not move a single bit.
 const SCORED_ROWS = [
-  '{"id":1,"host":"alpha.example.com","status":"ok","note":"nightly backup finished"}',
-  '{"id":2,"host":"beta.example.com","status":"error","note":"connection refused by upstream"}',
-  '{"id":3,"host":"gamma.example.com","status":"ok","note":"nightly backup finished"}',
-  '{"id":4,"host":"delta.example.com","status":"ok","note":"retrying connection after timeout"}',
-  '{"id":5,"host":"epsilon.example.com","status":"ok","note":"configuration reloaded"}',
+  "{\"id\":1,\"host\":\"alpha.example.com\",\"status\":\"ok\",\"note\":\"nightly backup finished\"}",
+  "{\"id\":2,\"host\":\"beta.example.com\",\"status\":\"error\",\"note\":\"connection refused by upstream\"}",
+  "{\"id\":3,\"host\":\"gamma.example.com\",\"status\":\"ok\",\"note\":\"nightly backup finished\"}",
+  "{\"id\":4,\"host\":\"delta.example.com\",\"status\":\"ok\",\"note\":\"retrying connection after timeout\"}",
+  "{\"id\":5,\"host\":\"epsilon.example.com\",\"status\":\"ok\",\"note\":\"configuration reloaded\"}",
 ];
 
 test("relevanceScores keeps its selective filter, 8-char bonus, 0.3 floor and +0.2 boost bit for bit", () => {
@@ -370,7 +300,7 @@ test("relevanceScores keeps its selective filter, 8-char bonus, 0.3 floor and +0
 test("bm25Scores is upstream BM25Scorer.score_batch: ln 2 idf, k1 1.5, b 0.75, over 10, +0.3 for an 8-char match", () => {
   // Tokens [alpha beta], [beta gamma gamma], [delta]: average length 2.
   const [a, b, c] = bm25Scores(["alpha beta", "beta gamma gamma", "delta"], "gamma beta");
-  const term = (/** @type {number} */ f, /** @type {number} */ len) => (Math.LN2 * f * 2.5) / (f + 1.5 * (0.25 + (0.75 * len) / 2));
+  const term = (f, len) => (Math.LN2 * f * 2.5) / (f + 1.5 * (0.25 + (0.75 * len) / 2));
   assert.ok(Math.abs(a - term(1, 2) / 10) < 1e-12, String(a));
   assert.ok(Math.abs(b - (term(1, 3) + term(2, 3)) / 10) < 1e-12, String(b));
   assert.equal(c, 0);
@@ -382,11 +312,10 @@ test("bm25Scores is upstream BM25Scorer.score_batch: ln 2 idf, k1 1.5, b 0.75, o
 });
 
 test("storeOffloaded evicts the oldest entry beyond CCR_CAPACITY", () => {
-  /** @type {Map<string, string>} */
-  const store = new Map();
+  const store = new Map<string, string>();
   storeOffloaded(
     store,
-    Array.from({ length: CCR_CAPACITY }, (_, i) => /** @type {[string, string]} */ ([`h${i}`, `[${i}]`])),
+    Array.from({ length: CCR_CAPACITY }, (_, i) => [`h${i}`, `[${i}]`]),
   );
   storeOffloaded(store, [["new", "[new]"]]);
   assert.equal(store.size, CCR_CAPACITY);
@@ -395,9 +324,8 @@ test("storeOffloaded evicts the oldest entry beyond CCR_CAPACITY", () => {
 });
 
 test("storeOffloaded never evicts the entries it was just given, even when they alone pass a cap", () => {
-  /** @type {Map<string, string>} */
-  const store = new Map([["old", "[old]"]]);
-  const batch = Array.from({ length: CCR_CAPACITY + 1 }, (_, i) => /** @type {[string, string]} */ ([`h${i}`, `[${i}]`]));
+  const store = new Map<string, string>([["old", "[old]"]]);
+  const batch = Array.from({ length: CCR_CAPACITY + 1 }, (_, i) => [`h${i}`, `[${i}]`]);
   storeOffloaded(store, batch);
   assert.equal(store.has("old"), false); // the older entry went first
   assert.deepEqual(
@@ -413,8 +341,7 @@ test("storeOffloaded never evicts the entries it was just given, even when they 
 });
 
 test("storeOffloaded evicts the oldest entries beyond CCR_MAX_CHARS", () => {
-  /** @type {Map<string, string>} */
-  const store = new Map();
+  const store = new Map<string, string>();
   const third = "x".repeat(Math.floor(CCR_MAX_CHARS / 3));
   storeOffloaded(store, [
     ["a", third],
@@ -427,11 +354,10 @@ test("storeOffloaded evicts the oldest entries beyond CCR_MAX_CHARS", () => {
 });
 
 test("storeOffloaded moves a re-put hash to the newest position, so it outlives older ones", () => {
-  /** @type {Map<string, string>} */
-  const store = new Map();
+  const store = new Map<string, string>();
   storeOffloaded(
     store,
-    Array.from({ length: CCR_CAPACITY }, (_, i) => /** @type {[string, string]} */ ([`h${i}`, "[]"])),
+    Array.from({ length: CCR_CAPACITY }, (_, i) => [`h${i}`, "[]"]),
   );
   storeOffloaded(store, [["h0", "[0]"]]);
   assert.equal([...store.keys()].at(-1), "h0");
@@ -452,7 +378,6 @@ test("retrieveKey takes a bare hash, one with its marker's hash= or <<ccr: prefi
 });
 
 test("crushQuery walks back from the last message, stops after the 5th user message with text and adds tool-call input JSON", () => {
-  /** @type {import("../plugin/hooks/policy.mjs").QueryMessage[]} */
   const messages = [
     { role: "user", text: "too old", toolUses: [] },
     { role: "user", text: "u1", toolUses: [] },
@@ -466,18 +391,16 @@ test("crushQuery walks back from the last message, stops after the 5th user mess
     { role: "user", text: "u5", toolUses: [] },
     { role: "assistant", text: "in flight", toolUses: [{ input: { command: "cat data.json" } }] },
   ];
-  assert.equal(crushQuery(messages), '{"command":"cat data.json"} u5 {"file_path":"a.json"} u4 u3 {"command":"ls"} u2 u1');
+  assert.equal(crushQuery(messages), "{\"command\":\"cat data.json\"} u5 {\"file_path\":\"a.json\"} u4 u3 {\"command\":\"ls\"} u2 u1");
   assert.equal(crushQuery([]), "");
 });
 
 test("crushQuery keeps at most CRUSH_QUERY_INPUT_CHARS of tool-call input, newest first, and still reaches the request", () => {
-  /** @param {string} c */
-  const write = (c) =>
-    /** @type {import("../plugin/hooks/policy.mjs").QueryMessage} */ ({ role: "assistant", text: "", toolUses: [{ input: { content: c.repeat(CRUSH_QUERY_INPUT_CHARS) } }] });
+  const write = (c) => ({ role: "assistant", text: "", toolUses: [{ input: { content: c.repeat(CRUSH_QUERY_INPUT_CHARS) } }] });
   // A subagent: one user message, then more tool-call input than the cap.
   const query = crushQuery([{ role: "user", text: "find the failing tests", toolUses: [] }, write("a"), write("b"), write("c")]);
   assert.equal(query.length, CRUSH_QUERY_INPUT_CHARS + " find the failing tests".length);
-  assert.ok(query.startsWith('{"content":"ccc')); // the newest input fills the budget
+  assert.ok(query.startsWith("{\"content\":\"ccc")); // the newest input fills the budget
   assert.ok(!query.includes("bbb") && !query.includes("aaa")); // older inputs are skipped, not stringified
   assert.ok(query.endsWith(" find the failing tests")); // the request itself is still the last part
 });
@@ -488,8 +411,6 @@ const STATUS_ROWS = Array.from({ length: 200 }, (_, i) => ({ id: i, status: i ==
 
 /**
  * crushJson over `text`, its output parsed back; throws when the text passes through.
- * @param {string} text
- * @param {string} [query]
  */
 function crushText(text, query = "") {
   const r = crushJson(text, query);
@@ -499,14 +420,11 @@ function crushText(text, query = "") {
 
 /**
  * crushText over `value` as compact JSON.
- * @param {unknown} value
- * @param {string} [query]
  */
 const crush = (value, query = "") => crushText(JSON.stringify(value), query);
 
 /**
  * The kept rows' ids, without the CCR sentinel.
- * @param {{ id?: unknown, _ccr_dropped?: string }[]} rows
  */
 const keptIds = (rows) => rows.filter((r) => !("_ccr_dropped" in r)).map((r) => r.id);
 
@@ -514,20 +432,23 @@ test("crushJson passes through what it cannot or need not crush", () => {
   const rows = Array.from({ length: 40 }, (_, i) => ({ id: i, status: "ok", note: "the same note on every row" }));
   assert.ok(crushJson(JSON.stringify(rows), "")); // crushable as it is: the guards below are what stop it
   const body = JSON.stringify(rows).slice(1, -1);
-  for (const text of [
-    "{" + "x".repeat(900), // invalid JSON
-    JSON.stringify("x".repeat(900)), // a JSON scalar
-    JSON.stringify(rows.slice(0, 10)), // 800 chars or less
-    `[${body},{"id":12345678901234567890}]`, // an integer JSON.parse would round
-    `[${body},{"id":1e400}]`, // a number JSON.parse turns into Infinity
-    `[${body},{"amount":1234567.89012345678901}]`, // a decimal with more than 17 significant digits
-    `[${body},{"neg":-0}]`, // JSON.stringify prints -0 as 0
-    `[${body},{"a":1,"a":2}]`, // a duplicate key: the first value would vanish
-    String.raw`[${body},{"u":1,"u":2}]`, // a duplicate through an escape
-    JSON.stringify({ text: "x".repeat(900) }), // an unchanged compact object
-    JSON.stringify({ rows: rows.slice(0, 4).map((r) => ({ ...r, note: "y".repeat(300) })) }), // fewer than 5 rows are never crushed
-  ])
+  for (
+    const text of [
+      "{" + "x".repeat(900), // invalid JSON
+      JSON.stringify("x".repeat(900)), // a JSON scalar
+      JSON.stringify(rows.slice(0, 10)), // 800 chars or less
+      `[${body},{"id":12345678901234567890}]`, // an integer JSON.parse would round
+      `[${body},{"id":1e400}]`, // a number JSON.parse turns into Infinity
+      `[${body},{"amount":1234567.89012345678901}]`, // a decimal with more than 17 significant digits
+      `[${body},{"neg":-0}]`, // JSON.stringify prints -0 as 0
+      `[${body},{"a":1,"a":2}]`, // a duplicate key: the first value would vanish
+      String.raw`[${body},{"u":1,"u":2}]`, // a duplicate through an escape
+      JSON.stringify({ text: "x".repeat(900) }), // an unchanged compact object
+      JSON.stringify({ rows: rows.slice(0, 4).map((r) => ({ ...r, note: "y".repeat(300) })) }), // fewer than 5 rows are never crushed
+    ]
+  ) {
     assert.equal(crushJson(text, ""), undefined, text.slice(0, 60));
+  }
 });
 
 test("crushJson still crushes numbers that survive the round trip and keys that merely look alike", () => {
@@ -645,18 +566,15 @@ test("crushJson keeps every object key, crushes nested and stringified dict arra
   const stringified = crush({ payload: JSON.stringify(STATUS_ROWS) });
   assert.equal(typeof stringified.out.payload, "string");
   assert.match(JSON.parse(stringified.out.payload).at(-1)._ccr_dropped, SENTINEL);
-  /**
-   * @param {number} depth
-   * @returns {unknown} STATUS_ROWS under `depth` objects
-   */
+  /** STATUS_ROWS under `depth` objects. */
   const wrap = (depth) => (depth === 0 ? STATUS_ROWS : { inner: wrap(depth - 1) });
   assert.ok(crushJson(JSON.stringify(wrap(49)), ""));
   assert.equal(crushJson(JSON.stringify(wrap(50)), ""), undefined);
 });
 
-test('crushJson keeps a "__proto__" key as an own data property', () => {
+test("crushJson keeps a \"__proto__\" key as an own data property", () => {
   const r = crushText(`{"__proto__":{"x":1},"rows":${JSON.stringify(STATUS_ROWS)}}`);
-  assert.ok(r.text.startsWith('{"__proto__":{"x":1},"rows":['));
+  assert.ok(r.text.startsWith("{\"__proto__\":{\"x\":1},\"rows\":["));
   assert.ok(Object.hasOwn(r.out, "__proto__"));
   assert.equal(Object.getPrototypeOf(r.out), Object.prototype);
 });
@@ -684,7 +602,6 @@ const LONE_SURROGATE = /[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[
 
 /**
  * elideDense that must rewrite; throws when the text passes through.
- * @param {string} text
  */
 function elide(text) {
   const r = elideDense(text);
@@ -694,9 +611,6 @@ function elide(text) {
 
 /**
  * The omission note a dense line becomes: its head, the count of characters cut, its tail.
- * @param {string} head
- * @param {number} omitted
- * @param {string} tail
  */
 const elidedLine = (head, omitted, tail) => `${head} ...[${omitted} chars of dense machine-generated content elided]... ${tail}`;
 
@@ -710,8 +624,7 @@ test("elideDense keeps a dense line's first 160 and last 80 characters and ends 
   assert.match(hash, HASH_RE);
   assert.equal(r.lines, 1);
   assert.deepEqual(r.offloaded, [[hash, line]]);
-  /** @type {Map<string, string>} */
-  const store = new Map();
+  const store = new Map<string, string>();
   storeOffloaded(store, r.offloaded);
   assert.equal(store.get(hash), line);
 });
@@ -726,7 +639,6 @@ test("elideDense passes short text, short lines and a small dense total through"
 test("elideDense leaves lines with a tab, 6% spaces, a JSON shape or a JSON document alone", () => {
   /**
    * A 1000-character line holding exactly `k` spaces.
-   * @param {number} k
    */
   const spaced = (k) => ("x".repeat(15) + " ").repeat(k) + "x".repeat(1000 - 16 * k);
   assert.equal(elideDense(`${"x".repeat(1200)}\t${"x".repeat(1200)}`), undefined);
@@ -767,16 +679,11 @@ test("elideDense counts every dense line in the retrieval line", () => {
   assert.equal(r.text.split("\n")[1], "middle line");
 });
 
-/** @typedef {import("../plugin/hooks/policy.mjs").DedupState} DedupState */
-
 // Three numbered source lines of 40+ characters each: a run a pointer replaces.
 const RUN = ["1:function alpha() { return computeAlpha(first); }", "2:function beta() { return computeBeta(second); }", "3:function gamma() { return computeGamma(third); }"].join("\n");
 
 /**
  * dedupBlock on an unprotected text that must fold; throws otherwise.
- * @param {Map<string, DedupState>} states
- * @param {string} key
- * @param {string} text
  */
 function fold(states, key, text) {
   const f = dedupBlock(states, key, text, false);
@@ -784,7 +691,7 @@ function fold(states, key, text) {
   return f;
 }
 
-/** @returns {Map<string, DedupState>} a fresh set of conversations */
+/** A fresh set of conversations. */
 const conversations = () => new Map();
 
 test("dedupBlock folds a repeated run of 3 lines and 40+ characters into a pointer to the earlier result", () => {
@@ -822,7 +729,6 @@ test("dedupBlock never starts a run on a trivial line, but a run may hold one", 
 test("dedupBlock folds a re-read whose line numbers all shifted, and timestamps with a leading zero only on an exact match", () => {
   /**
    * Three numbered lines starting at line `from`.
-   * @param {number} from
    */
   const numbered = (from) => [`${from}:  const total = items.reduce((a, b) => a + b, 0);`, `${from + 1}:  const mean = total / items.length;`, `${from + 2}:  return { total, mean };`].join("\n");
   const states = conversations();
@@ -833,7 +739,6 @@ test("dedupBlock folds a re-read whose line numbers all shifted, and timestamps 
   assert.equal(run, numbered(12)); // the stored run is this block's own bytes
   /**
    * Three log lines at second `s` and on.
-   * @param {number} s
    */
   const log = (s) => [0, 1, 2].map((k) => `08:00:${String(s + k).padStart(2, "0")} INFO request handled by worker ${k}`).join("\n");
   const logs = conversations();
@@ -887,7 +792,6 @@ test("dedupBlock is prefix-monotonic: an earlier block's output never depends on
   const blocks = [RUN, `header\n${RUN}`, shifted, `${lines[0]}\n${lines[1]}\nbetween\n${lines[2]}`, `${RUN}\ntail`];
   /**
    * Each block's output, fed in order to one fresh set of conversations.
-   * @param {string[]} bs
    */
   const run = (bs) => {
     const states = conversations();
@@ -904,14 +808,14 @@ test("dedupBlock empties the least recently appended conversation over DEDUP_MAX
   dedupBlock(states, "a1", RUN, false); // a1's result 1
   dedupBlock(states, "a1", half, false); // a1's result 2
   dedupBlock(states, "", half, false);
-  const a1 = /** @type {DedupState} */ (states.get("a1"));
+  const a1 = states.get("a1");
   assert.deepEqual([a1.turn, a1.corpus.size, a1.index.size, a1.chars], [2, 0, 0, 0]); // emptied, not forgotten
   assert.equal(dedupBlock(states, "a1", RUN, false), undefined); // a1's result 3: results 1 and 2 left the corpus
   assert.match(fold(states, "a1", RUN).text, /^\[↑3L same as result 3: /); // never "result 1" again
   const solo = conversations();
   dedupBlock(solo, "", RUN, false); // result 1
   dedupBlock(solo, "", "y".repeat(DEDUP_MAX_CHARS + 1), false); // result 2, over the cap alone
-  const st = /** @type {DedupState} */ (solo.get(""));
+  const st = solo.get("");
   assert.deepEqual([st.turn, st.corpus.size, st.index.size, st.chars], [2, 0, 0, 0]);
   assert.equal(dedupBlock(solo, "", RUN, false), undefined); // result 3: result 1 left the corpus
   assert.match(fold(solo, "", RUN).text, /^\[↑3L same as result 3: /);
@@ -920,15 +824,12 @@ test("dedupBlock empties the least recently appended conversation over DEDUP_MAX
 test("resetCorpus empties a conversation's corpus but keeps its ordinals", () => {
   const states = conversations();
   dedupBlock(states, "", RUN, false); // result 1
-  resetCorpus(/** @type {DedupState} */ (states.get("")));
-  const st = /** @type {DedupState} */ (states.get(""));
+  resetCorpus(states.get(""));
+  const st = states.get("");
   assert.deepEqual([st.turn, st.corpus.size, st.index.size, st.chars], [1, 0, 0, 0]);
   assert.equal(dedupBlock(states, "", RUN, false), undefined); // result 2: result 1 left the corpus
   assert.match(fold(states, "", RUN).text, /^\[↑3L same as result 2: /);
 });
-
-/** @typedef {import("../plugin/hooks/policy.mjs").ContentBlock} ContentBlock */
-/** @typedef {import("../plugin/hooks/policy.mjs").Levers} Levers */
 
 const IMAGE = { type: "image", source: { type: "base64", media_type: "image/png", data: "iVBORw0KGgo=" } };
 // A pretty-printed document whose blob line is dense: elided when nothing crushes it, never once crushed.
@@ -938,27 +839,20 @@ const DENSE_TEXT = `${"x".repeat(2500)}\nexit code 0 after the bundle step\nfini
 
 /**
  * One tool_result block as session.append hands it.
- * @param {unknown} content
- * @param {boolean} [isError]
- * @returns {ContentBlock}
  */
 const toolResult = (content, isError = false) => ({ type: "tool_result", tool_use_id: "toolu_1", content, ...(isError ? { is_error: true } : {}) });
 
-/**
- * Every lever on, with a fresh main-loop dedup corpus unless one is given.
- * @param {Partial<Levers>} [over]
- * @returns {Levers}
- */
+/** rewriteToolResults' result as the source types it (the built module's inferred types are looser). */
+type Rewrite = ReturnType<typeof import("../src/hooks/policy.mjs").rewriteToolResults>;
+
+/** Every lever on, with a fresh main-loop dedup corpus unless one is given. */
 const levers = (over = {}) => ({ crush: true, elide: true, dedup: { states: new Map(), key: "" }, ...over });
 
 /**
  * rewriteToolResults that must rewrite; throws when the row passes through.
- * @param {readonly ContentBlock[]} content
- * @param {string} tool
- * @param {Levers} lv
  */
-function rewrite(content, tool, lv) {
-  const r = rewriteToolResults(content, tool, lv, "");
+function rewrite(content, tool, lv): NonNullable<Rewrite> {
+  const r = rewriteToolResults(content, tool, lv, "") as Rewrite;
   if (!r) throw new Error("expected the row to be rewritten");
   return r;
 }
@@ -1024,7 +918,7 @@ test("rewriteToolResults leaves headroom_retrieve and the mod's own storage tool
 
 test("rewriteToolResults rewrites only the text block of an array result", () => {
   const r = rewrite([toolResult([{ type: "text", text: BIG }, IMAGE])], "mcp__srv__list", levers());
-  const [text, image] = /** @type {[{ type: string, text: string }, unknown]} */ (r.content[0].content);
+  const [text, image] = r.content[0].content as [{ type: string; text: string }, unknown];
   assert.equal(text.type, "text");
   assert.match(JSON.parse(text.text).at(-1)._ccr_dropped, SENTINEL);
   assert.equal(image, IMAGE);
@@ -1116,32 +1010,32 @@ test("wantsQuery asks for the transcript only for a JSON document the crusher ma
 
 test("wantsQuery with levers also asks for any non-Read text of 300+ characters a query-reading prose lever may rewrite", () => {
   const prose = "a line of ordinary command output\n".repeat(10); // 340 characters
-  assert.equal(wantsQuery([toolResult(prose)], "Bash", { split: true }), true);
-  assert.equal(wantsQuery([toolResult(prose)], "Bash", { search: true }), true);
-  assert.equal(wantsQuery([toolResult(prose)], "Bash", { diff: true }), true);
-  assert.equal(wantsQuery([toolResult(prose)], "Bash", { textcrush: true }), true);
-  assert.equal(wantsQuery([toolResult(prose)], "Read", { split: true }), false);
-  assert.equal(wantsQuery([toolResult(prose, true)], "Bash", { split: true }), false);
-  assert.equal(wantsQuery([toolResult(prose)], RETRIEVE_TOOL, { split: true }), false);
-  assert.equal(wantsQuery([toolResult(prose.slice(0, 299))], "Bash", { split: true }), false);
-  assert.equal(wantsQuery([toolResult(prose)], "Bash", { log: true }), false); // the log compressor never reads the query
+  assert.equal(wantsQuery([toolResult(prose)], "Bash", { crush: false, split: true }), true);
+  assert.equal(wantsQuery([toolResult(prose)], "Bash", { crush: false, search: true }), true);
+  assert.equal(wantsQuery([toolResult(prose)], "Bash", { crush: false, diff: true }), true);
+  assert.equal(wantsQuery([toolResult(prose)], "Bash", { crush: false, textcrush: true }), true);
+  assert.equal(wantsQuery([toolResult(prose)], "Read", { crush: false, split: true }), false);
+  assert.equal(wantsQuery([toolResult(prose, true)], "Bash", { crush: false, split: true }), false);
+  assert.equal(wantsQuery([toolResult(prose)], RETRIEVE_TOOL, { crush: false, split: true }), false);
+  assert.equal(wantsQuery([toolResult(prose.slice(0, 299))], "Bash", { crush: false, split: true }), false);
+  assert.equal(wantsQuery([toolResult(prose)], "Bash", { crush: false, log: true }), false); // the log compressor never reads the query
   assert.equal(wantsQuery([toolResult(prose)], "Bash", { crush: true }), false); // the two-argument behaviour
   assert.equal(wantsQuery([toolResult(BIG)], "Bash", { crush: false }), false); // the SmartCrusher off: no JSON check
   assert.equal(wantsQuery([toolResult(BIG)], "Bash", { crush: true, split: true }), true);
 });
 
 // Upstream tests/parity/fixtures/content_detector/*.json at 976aa71: [input, output.content_type], file name prefix.
- 
+
 const PARITY = [
   ["diff --combined merged.py\nindex aaa..bbb..ccc 100644\n--- a/merged.py\n+++ b/merged.py\n@@@ -1,4 -1,4 +1,5 @@@\n  unchanged\n- branch_a_only\n -branch_b_only\n++merge_added\n", "diff"], // 247811aecfdec556
-  ['package com.example;\n\npublic class Foo {\n    @Override\n    public String toString() { return "foo"; }\n}\n\nprivate interface Bar {}\nprotected enum Baz { A, B }\n', "source_code"], // 37c86907c057e293
+  ["package com.example;\n\npublic class Foo {\n    @Override\n    public String toString() { return \"foo\"; }\n}\n\nprivate interface Bar {}\nprotected enum Baz { A, B }\n", "source_code"], // 37c86907c057e293
   ["Just some prose text without any structure or special markers.", "text"], // 3a0b14d2dea7c876
   ["<div>a</div>\n<span>b</span>\n<script>x()</script>\n<style>y</style>", "text"], // 3ba74a1f57c5351e
   ["", "text"], // 4efe946303371867
   ["import x from 'y';\nexport const foo = 1;\nfunction bar() { return 42; }\nconst f = async function() {};\nmodule.exports = { foo, bar };\n", "source_code"], // 53400da2b7dd2428
   ["diff --git a/foo.py b/foo.py\nindex abc..def 100644\n--- a/foo.py\n+++ b/foo.py\n@@ -1,3 +1,3 @@\n-old line\n+new line\n unchanged\n", "diff"], // 552d30c30c2a6793
   [
-    'import os\nfrom typing import Any\n\n@dataclass\nclass Foo:\n    """Docstring."""\n    def bar(self):\n        return 42\n\ndef baz():\n    pass\n\nif __name__ == \'__main__\':\n    baz()\n',
+    "import os\nfrom typing import Any\n\n@dataclass\nclass Foo:\n    \"\"\"Docstring.\"\"\"\n    def bar(self):\n        return 42\n\ndef baz():\n    pass\n\nif __name__ == '__main__':\n    baz()\n",
     "source_code",
   ], // 5e8e1bc29f6c71c5
   ["INFO starting build\nWARN deprecated API used\nERROR compilation failed\nFAILED test_x\nPASSED test_y\n============================================\n", "build"], // 628c8985c40adb7d
@@ -1154,10 +1048,10 @@ const PARITY = [
   ["src/main.py:42:def process():\nsrc/util.py:13:    return None\nlib/x.py:7:class X:\ntests/test_a.py:3:    assert True", "search"], // 79e6b68a05a1c639
   ["<p>just one tag</p>", "text"], // 7e145153192c11a1
   ["[]", "json_array"], // 7fde660489bc47aa
-  ['package main\n\nimport "fmt"\n\ntype Foo struct { ID int }\n\nfunc (f *Foo) Bar() int { return f.ID }\n\nfunc main() { fmt.Println("hi") }\n', "source_code"], // 837b272f1604eaaa
+  ["package main\n\nimport \"fmt\"\n\ntype Foo struct { ID int }\n\nfunc (f *Foo) Bar() int { return f.ID }\n\nfunc main() { fmt.Println(\"hi\") }\n", "source_code"], // 837b272f1604eaaa
   // Rust's detector records "text" (arrays only); Python, which the port follows, reads any object as JSON.
-  ['{"foo": "bar"}', "json_array"], // 9fb76321d31ed64c
-  ['[{"id":1,"name":"a"},{"id":2,"name":"b"},{"id":3,"name":"c"}]', "json_array"], // bc4488ce189d1c86
+  ["{\"foo\": \"bar\"}", "json_array"], // 9fb76321d31ed64c
+  ["[{\"id\":1,\"name\":\"a\"},{\"id\":2,\"name\":\"b\"},{\"id\":3,\"name\":\"c\"}]", "json_array"], // bc4488ce189d1c86
   [
     "use std::collections::HashMap;\n\npub struct Foo { id: u32 }\n\nimpl Foo {\n    pub fn new() -> Self { Self { id: 0 } }\n}\n\nfn main() {}\n#[derive(Debug)]\nenum Color { Red, Green }\n",
     "source_code",
@@ -1165,7 +1059,6 @@ const PARITY = [
   ["[1, 2, 3, 4, 5]", "json_array"], // cabc55445af63e2f
   ["<!DOCTYPE html>\n<html>\n<head><title>x</title></head>\n<body><div><span>hi</span></div></body>\n</html>", "html"], // d100a9ac7a3671da
 ];
- 
 
 test("detectContentType matches upstream's recorded parity fixtures, a JSON object aside", () => {
   assert.equal(PARITY.length, 21);
@@ -1173,12 +1066,12 @@ test("detectContentType matches upstream's recorded parity fixtures, a JSON obje
 });
 
 test("detectContentType reads JSON by parsing: objects, wrapped payloads and concatenated objects, never a bare scalar", () => {
-  assert.equal(detectContentType('{"name": "x", "tags": ["a"]}'), "json_array");
+  assert.equal(detectContentType("{\"name\": \"x\", \"tags\": [\"a\"]}"), "json_array");
   assert.equal(detectContentType(`Exit code: 0\n${JSON.stringify(Array.from({ length: 20 }, (_, i) => ({ id: i })))}`), "json_array"); // a small wrapper, the array the bulk
-  assert.equal(detectContentType('{"a":1} {"b":2}'), "json_array");
-  assert.notEqual(detectContentType('The service answered {"ok": true} after a retry that took several seconds to complete'), "json_array"); // under 60% of the text
+  assert.equal(detectContentType("{\"a\":1} {\"b\":2}"), "json_array");
+  assert.notEqual(detectContentType("The service answered {\"ok\": true} after a retry that took several seconds to complete"), "json_array"); // under 60% of the text
   assert.equal(detectContentType("42"), "text");
-  assert.notEqual(detectContentType('{"a":1} trailing prose that is much longer than the object itself'), "json_array");
+  assert.notEqual(detectContentType("{\"a\":1} trailing prose that is much longer than the object itself"), "json_array");
 });
 
 test("detectContentType never throws on deeply nested brackets", () => {
@@ -1201,15 +1094,15 @@ test("detectContentType recognizes git status only with a heading and a path ent
   const full = [
     "On branch feature/status",
     "Changes to be committed:",
-    '  (use "git restore --staged <file>..." to unstage)',
+    "  (use \"git restore --staged <file>...\" to unstage)",
     "\tnew file:   staged file.txt",
     "",
     "Changes not staged for commit:",
-    '  (use "git add <file>..." to update what will be committed)',
+    "  (use \"git add <file>...\" to update what will be committed)",
     "\tmodified:   path with spaces.txt",
     "",
     "Untracked files:",
-    '  (use "git add <file>..." to include in what will be committed)',
+    "  (use \"git add <file>...\" to include in what will be committed)",
     "\tuntracked path.txt",
     "",
   ].join("\n");
@@ -1218,7 +1111,7 @@ test("detectContentType recognizes git status only with a heading and a path ent
     "On branch feature/status",
     "",
     "Untracked files:",
-    '  (use "git add <file>..." to include in what will be committed)',
+    "  (use \"git add <file>...\" to include in what will be committed)",
     "\tuntracked path with spaces.txt",
     "\tuntracked α.rs",
     "",
@@ -1230,7 +1123,7 @@ test("detectContentType recognizes git status only with a heading and a path ent
 
 test("detectContentType wants two grep lines, rejects timestamped log rows and takes grep context lines", () => {
   assert.equal(detectContentType("src/a.py:12:def main():\nThis is an explanation of what the function does."), "text");
-  const pad = (/** @type {number} */ n) => String(n).padStart(2, "0");
+  const pad = (n) => String(n).padStart(2, "0");
   const timestamped = Array.from({ length: 200 }, (_, i) => `2026-09-23T10:${pad(Math.floor(i / 60))}:${pad(i % 60)}Z INFO worker[${i % 8}] processed batch ${i} in ${(i * 13) % 900}ms`).join("\n");
   assert.notEqual(detectContentType(timestamped), "search");
   assert.equal(detectContentType("src/a.py-12-foo\nsrc/a.py:13:bar\nsrc/a.py-14-baz"), "search");
@@ -1238,9 +1131,8 @@ test("detectContentType wants two grep lines, rejects timestamped log rows and t
 });
 
 test("detectContentType reads CMTrace records as build output", () => {
-  const attrs = (/** @type {number} */ sec) =>
-    `time="10:00:${String(sec).padStart(2, "0")}.000-0" date="01-15-2026" component="ExampleCorp_SampleApp_1.0.0_x64_B1" context="SYSTEM" type="1" thread="4242" file="install.ps1"`;
-  const record = (/** @type {string} */ message, /** @type {number} */ sec) => `<![LOG[${message}]LOG]!><${attrs(sec)}>`;
+  const attrs = (sec) => `time="10:00:${String(sec).padStart(2, "0")}.000-0" date="01-15-2026" component="ExampleCorp_SampleApp_1.0.0_x64_B1" context="SYSTEM" type="1" thread="4242" file="install.ps1"`;
+  const record = (message, sec) => `<![LOG[${message}]LOG]!><${attrs(sec)}>`;
   const messages = [
     "Starting deployment of SampleApp 1.0.0",
     "Detection rule evaluated, not installed",
@@ -1275,7 +1167,6 @@ test("detectContentType cuts each sampled line, so a backtracking pattern cannot
 
 test("rewriteToolResults crushes only JSON and elides a dense line of every other content type", () => {
   const D = "x".repeat(2500);
-  /** @type {[string, string][]} */
   const samples = [
     ["search", `src/a.py:1:${D}\nsrc/b.py:2:foo`],
     ["build", `ERROR build failed\n${D}`],
@@ -1298,7 +1189,6 @@ test("rewriteToolResults crushes only JSON and elides a dense line of every othe
 
 /**
  * The compaction as a table; throws when it is not one.
- * @param {import("../plugin/hooks/policy.mjs").Compaction} c
  */
 function asTable(c) {
   if (c.kind !== "table") throw new Error(`expected a table, got ${c.kind}`);
@@ -1307,9 +1197,8 @@ function asTable(c) {
 
 /**
  * Upstream csv_quote, for building expected cells.
- * @param {string} s
  */
-const csvq = (s) => `"${s.replaceAll('"', '""')}"`;
+const csvq = (s) => `"${s.replaceAll("\"", "\"\"")}"`;
 
 /** The lossless stage alone (upstream lossless_only). */
 const LOSSLESS_ONLY = { lossy: false, lossless: true };
@@ -1318,8 +1207,6 @@ const BOTH = { lossy: true, lossless: true };
 
 /**
  * crushJson with explicit stages that must rewrite; throws when the text passes through.
- * @param {string} text
- * @param {import("../plugin/hooks/policy.mjs").CrushModes} modes
  */
 function crushWith(text, modes) {
   const r = crushJson(text, "", modes);
@@ -1361,7 +1248,7 @@ test("compactRows flattens a uniform nested object into dotted columns and keeps
     t.fields.map((f) => f.name),
     ["id", "meta"],
   );
-  assert.equal(formatCsvSchema(t).split("\n")[1], `1,${csvq('{"region":"us"}')}`);
+  assert.equal(formatCsvSchema(t).split("\n")[1], `1,${csvq("{\"region\":\"us\"}")}`);
   // A header-breaking inner key keeps its column nested instead of naming a column after it.
   assert.deepEqual(
     asTable(compactRows([{ m: { "a,b": 1 } }, { m: { "a,b": 2 } }])).fields.map((f) => f.name),
@@ -1371,8 +1258,8 @@ test("compactRows flattens a uniform nested object into dotted columns and keeps
 
 test("compactRows nests a stringified array of objects and an array cell as quoted compaction JSON", () => {
   const items = [
-    { event: "batch", payload: '[{"x":1},{"x":2},{"x":3}]' },
-    { event: "batch", payload: '[{"x":4},{"x":5}]' },
+    { event: "batch", payload: "[{\"x\":1},{\"x\":2},{\"x\":3}]" },
+    { event: "batch", payload: "[{\"x\":4},{\"x\":5}]" },
   ];
   const lines = formatCsvSchema(compactRows(items)).split("\n");
   assert.equal(lines[0], "[2]{event:string,payload:string}");
@@ -1386,12 +1273,12 @@ test("compactRows nests a stringified array of objects and an array cell as quot
   assert.equal(nested[0], "[2]{id:int,items:json}");
   assert.equal(nested[1], `1,${csvq(JSON.stringify({ _compaction: "table", _schema: [{ name: "x", type: "int", nullable: true }], _kept: 2, _total: 2, _rows: [[1], [null]] }))}`);
   // A stringified object becomes its parsed value; a string carrying a CCR marker is never parsed.
-  assert.equal(formatCsvSchema(compactRows([{ v: '{"a":1}' }, { v: "<<ccr:abc [1]>>" }])), `[2]{v:string}\n${csvq('{"a":1}')}\n<<ccr:abc [1]>>\n`);
+  assert.equal(formatCsvSchema(compactRows([{ v: "{\"a\":1}" }, { v: "<<ccr:abc [1]>>" }])), `[2]{v:string}\n${csvq("{\"a\":1}")}\n<<ccr:abc [1]>>\n`);
 });
 
 test("compactRows keeps a stringified value JSON.parse would change as a string", () => {
-  const out = formatCsvSchema(compactRows([{ v: '{"n":12345678901234567890}' }, { v: '{"n":1}' }]));
-  assert.equal(out.split("\n")[1], csvq('{"n":12345678901234567890}'));
+  const out = formatCsvSchema(compactRows([{ v: "{\"n\":12345678901234567890}" }, { v: "{\"n\":1}" }]));
+  assert.equal(out.split("\n")[1], csvq("{\"n\":12345678901234567890}"));
 });
 
 test("compactRows buckets a heterogeneous array by its discriminator and skips an id-like one", () => {
@@ -1420,17 +1307,17 @@ test("compactRows orders columns by frequency then name and marks sparse or null
 });
 
 test("formatCsvSchema tells a missing key, null, an empty string and the string null apart, and quotes CSV specials", () => {
-  assert.equal(formatCsvSchema(compactRows([{ id: 1 }, { id: 2, label: null }, { id: 3, label: "" }, { id: 4, label: "null" }])), '[4]{id:int,label:string?}\n1,\n2,null\n3,""\n4,"null"\n');
+  assert.equal(formatCsvSchema(compactRows([{ id: 1 }, { id: 2, label: null }, { id: 3, label: "" }, { id: 4, label: "null" }])), "[4]{id:int,label:string?}\n1,\n2,null\n3,\"\"\n4,\"null\"\n");
   assert.equal(
     formatCsvSchema(
       compactRows([
         { id: 1, msg: "alice, the great" },
-        { id: 2, msg: 'she said "hi"' },
+        { id: 2, msg: "she said \"hi\"" },
         { id: 3, msg: "a\nb" },
         { id: 4, msg: "c\rd" },
       ]),
     ),
-    '[4]{id:int,msg:string}\n1,"alice, the great"\n2,"she said ""hi"""\n3,"a\nb"\n4,"c\rd"\n',
+    "[4]{id:int,msg:string}\n1,\"alice, the great\"\n2,\"she said \"\"hi\"\"\"\n3,\"a\nb\"\n4,\"c\rd\"\n",
   );
 });
 
@@ -1444,7 +1331,7 @@ test("formatCsvSchema quotes a json column's strings that JSON would read as a v
     { id: 6, v: 1 },
     { id: 7, v: "hello" },
   ];
-  assert.deepEqual(formatCsvSchema(compactRows(items)).split("\n"), ["[7]{id:int,v:json?}", '1,"""null"""', "2,null", '3,"""true"""', "4,true", '5,"""1"""', "6,1", "7,hello", ""]);
+  assert.deepEqual(formatCsvSchema(compactRows(items)).split("\n"), ["[7]{id:int,v:json?}", "1,\"\"\"null\"\"\"", "2,null", "3,\"\"\"true\"\"\"", "4,true", "5,\"\"\"1\"\"\"", "6,1", "7,hello", ""]);
 });
 
 test("compactionJson renders tables and buckets in upstream key order", () => {
@@ -1467,7 +1354,7 @@ test("compactionJson renders tables and buckets in upstream key order", () => {
     { k: "b", r: 3 },
     { k: "b", s: 4 },
   ]);
-  assert.ok(JSON.stringify(compactionJson(buckets)).startsWith('{"_compaction":"buckets","_discriminator":"k","_total":4,"_buckets":[{"_key":"a","_schema":'));
+  assert.ok(JSON.stringify(compactionJson(buckets)).startsWith("{\"_compaction\":\"buckets\",\"_discriminator\":\"k\",\"_total\":4,\"_buckets\":[{\"_key\":\"a\",\"_schema\":"));
   assert.deepEqual(compactionJson({ kind: "untouched", value: [1, 2] }), [1, 2]);
 });
 
@@ -1494,8 +1381,6 @@ test("compactRows refuses a header-breaking key and finds a discriminator among 
 
 /**
  * `n` one-key rows whose string values are `len` characters long (unique per row).
- * @param {number} n
- * @param {number} len
  */
 const oneKeyRows = (n, len) =>
   JSON.stringify(
@@ -1572,7 +1457,6 @@ const SPIKE = Array.from({ length: 30 }, (_, i) => (i < 12 || i >= 17 ? i / 1000
 
 /**
  * The sample standard deviation, as the number crusher computes it.
- * @param {readonly number[]} xs
  */
 function sampleSd(xs) {
   const m = xs.reduce((a, b) => a + b, 0) / xs.length;
@@ -1630,17 +1514,17 @@ test("crushJson closes a string array that lost items with a retrievable sentine
 });
 
 test("crushJson groups a mixed array by type, and a dict group that compacts keeps every row", () => {
-  /** @type {unknown[]} */
-  const mix = [];
-  for (let i = 0; i < 20; i++)
+  const mix: unknown[] = [];
+  for (let i = 0; i < 20; i++) {
     mix.push(`build step ${i} finished ok`, i === 7 ? 5000 : 10 + (i % 2), {
       id: i,
       status: "ok",
       note: "the same note on every row of it",
     });
+  }
   mix.push(null, null, null);
   const r = crushWith(JSON.stringify({ mix }), BOTH);
-  const out = /** @type {unknown[]} */ (JSON.parse(r.text).mix);
+  const out = JSON.parse(r.text).mix;
   const [, n, hash] = ITEMS_SENTINEL.exec(String(out.at(-1))) ?? [];
   assert.equal(out.filter((x) => typeof x === "object" && x !== null).length, 20); // the table won, so the group stays whole
   assert.equal(out.filter((x) => x === null).length, 3); // a group under 5 is kept
@@ -1652,7 +1536,7 @@ test("crushJson groups a mixed array by type, and a dict group that compacts kee
   assert.deepEqual([r.compacted, r.offloaded], [0, [[hash, JSON.stringify(mix)]]]);
   // Without compaction the dict group is crushed like any dict array.
   const lossy = JSON.parse(crushText(JSON.stringify({ mix })).text).mix;
-  assert.ok(lossy.filter((/** @type {unknown} */ x) => typeof x === "object" && x !== null).length < 20);
+  assert.ok(lossy.filter((x) => typeof x === "object" && x !== null).length < 20);
 });
 
 test("crushJson keeps short and lossless-only scalar arrays whole and no longer descends into a 5-8 item mixed array", () => {
@@ -1755,13 +1639,11 @@ And a final line of text to round out the document nicely today.
 
 /**
  * configFlavor over a text's own lines (the test inputs hold no line over DETECT_MAX_LINE_CHARS).
- * @param {string} text
  */
 const flavorOf = (text) => configFlavor(text, text.split("\n"));
 
 /**
  * compressConfig that must rewrite; throws when the text passes through.
- * @param {string} text
  */
 function compressed(text) {
   const r = compressConfig(text);
@@ -1770,48 +1652,55 @@ function compressed(text) {
 }
 
 test("configFlavor and detectContentType claim YAML, TOML and INI", () => {
-  for (const [text, flavor] of [
-    [K8S_MANIFEST, "yaml"],
-    [PYPROJECT_TOML, "toml"],
-    [INI_CONFIG, "ini"],
-  ]) {
+  for (
+    const [text, flavor] of [
+      [K8S_MANIFEST, "yaml"],
+      [PYPROJECT_TOML, "toml"],
+      [INI_CONFIG, "ini"],
+    ]
+  ) {
     assert.equal(flavorOf(text), flavor, flavor);
     assert.equal(detectContentType(text), "structured_config", flavor);
   }
   assert.equal(flavorOf("---\nname: a\nimage: x:1\nports:\n  - 80\n---\nname: b\nimage: y:2\nports:\n  - 443\n"), "yaml"); // a multi-document stream
-  assert.equal(flavorOf('[a]\nx = "1"\ny = "2"\n[b]\nz = "3"\n'), "toml"); // quoted values: TOML wins
+  assert.equal(flavorOf("[a]\nx = \"1\"\ny = \"2\"\n[b]\nz = \"3\"\n"), "toml"); // quoted values: TOML wins
   assert.equal(flavorOf("[a]\nx = hello\ny = world\n[b]\nz = there\n"), "ini"); // bare values are no TOML
 });
 
 test("configFlavor claims no prose, front matter, grep, CSV, JSON, code, flat YAML or a single line", () => {
-  for (const text of [
-    PROSE,
-    FRONT_MATTER_DOC,
-    "src/main.py:42:def process():\nsrc/util.py:10:import os\nsrc/x.py:5:return 1",
-    "name,age,city\nalice,30,nyc\nbob,25,sf\ncarol,35,la",
-    '[{"id": 1, "name": "a"}, {"id": 2, "name": "b"}]',
-    '{\n  "key": "value",\n  "other": "thing",\n  "third": "entry"\n}',
-    "import os\n\n\ndef main():\n    if True:\n        return os.name\n",
-    "key: value",
-    "alpha: 1\nbeta: 2\ngamma: 3\n", // one indent level, no document marker, no list: too ambiguous
-  ]) {
+  for (
+    const text of [
+      PROSE,
+      FRONT_MATTER_DOC,
+      "src/main.py:42:def process():\nsrc/util.py:10:import os\nsrc/x.py:5:return 1",
+      "name,age,city\nalice,30,nyc\nbob,25,sf\ncarol,35,la",
+      "[{\"id\": 1, \"name\": \"a\"}, {\"id\": 2, \"name\": \"b\"}]",
+      "{\n  \"key\": \"value\",\n  \"other\": \"thing\",\n  \"third\": \"entry\"\n}",
+      "import os\n\n\ndef main():\n    if True:\n        return os.name\n",
+      "key: value",
+      "alpha: 1\nbeta: 2\ngamma: 3\n", // one indent level, no document marker, no list: too ambiguous
+    ]
+  ) {
     assert.equal(flavorOf(text), undefined, text.slice(0, 40));
     assert.notEqual(detectContentType(text), "structured_config", text.slice(0, 40));
   }
 });
 
 test("isIniAssign accepts what upstream's _INI_ASSIGN_RE matches, in linear time", () => {
-  for (const [line, want] of [
-    ["key = v", true],
-    ["  a b.c-d@e : v", true],
-    [" = x", true],
-    ["\tkey\t= v", true],
-    ["\t= x", false],
-    ["a\tb = v", false],
-    ["k$y = v", false],
-    ["no delimiter", false],
-  ])
+  for (
+    const [line, want] of [
+      ["key = v", true],
+      ["  a b.c-d@e : v", true],
+      [" = x", true],
+      ["\tkey\t= v", true],
+      ["\t= x", false],
+      ["a\tb = v", false],
+      ["k$y = v", false],
+      ["no delimiter", false],
+    ]
+  ) {
     assert.equal(isIniAssign(String(line)), want, JSON.stringify(line));
+  }
   const t0 = Date.now();
   assert.equal(isIniAssign(`${" ".repeat(100_000)}x`), false); // the lazy regex backtracks quadratically here
   assert.equal(isIniAssign(`${" ".repeat(100_000)}key = v`), true);
@@ -1856,12 +1745,12 @@ test("compressConfig elides comments and blank lines behind a retrievable marker
     "# see https://example.com/advisories/CVE-2024-0001 for details",
     "# owner: platform-team, revisit after the 2.x migration lands",
   ];
-  const commented = PYPROJECT_TOML.replace('serde = "1.0"', `${notes.join("\n")}\nserde = "1.0"`);
+  const commented = PYPROJECT_TOML.replace("serde = \"1.0\"", `${notes.join("\n")}\nserde = "1.0"`);
   const r = compressed(commented);
   const [hash] = r.offloaded[0];
   assert.match(hash, HASH_RE);
   assert.deepEqual(r.offloaded, [[hash, commented]]);
-  const kept = ["[package]", 'name = "demo"', 'version = "0.1.0"', 'edition = "2021"', "[dependencies]", 'serde = "1.0"', 'tokio = "1.38"', "[profile.release]", "opt-level = 3", "lto = true"];
+  const kept = ["[package]", "name = \"demo\"", "version = \"0.1.0\"", "edition = \"2021\"", "[dependencies]", "serde = \"1.0\"", "tokio = \"1.38\"", "[profile.release]", "opt-level = 3", "lto = true"];
   assert.equal(r.text, `${kept.join("\n")}\n[6 comment/blank lines elided. Retrieve original: hash=${hash}]`);
   const folded = compressed(K8S_MANIFEST); // nothing to elide: Tier 1 alone, with its own retrieval line
   const [fh] = folded.offloaded[0];
@@ -1878,7 +1767,7 @@ test("compressConfig keeps comment lines that may be data, keeps INI blank lines
   const seqScalar = "steps:\n  - |\n    echo a\n\n    # not a comment\n    echo b\n  - name: x\n  - name: y\n";
   assert.equal(flavorOf(seqScalar), "yaml");
   assert.equal(compressConfig(seqScalar), undefined); // a sequence-item block scalar too
-  const tomlMultiline = '[a]\ntext = """\n# not a comment\n"""\nx = "1"\ny = "2"\n';
+  const tomlMultiline = "[a]\ntext = \"\"\"\n# not a comment\n\"\"\"\nx = \"1\"\ny = \"2\"\n";
   assert.equal(flavorOf(tomlMultiline), "toml");
   assert.equal(compressConfig(tomlMultiline), undefined);
   // Deviation: INI refuses Tier 2 around triple quotes too, its flavor being unconfirmed by a parser.
@@ -1941,7 +1830,7 @@ const PAGE_TEXT = [
   "## Changes",
   "",
   "- Faster startup",
-  '- Smaller "bundle" — 30% less',
+  "- Smaller \"bundle\" — 30% less",
   "",
   "| Name | Value |",
   "| retries | 3 |",
@@ -1957,7 +1846,6 @@ const HEAD = `<!DOCTYPE html><html><head><style>${"p { margin: 0; padding: 0; } 
 
 /**
  * extractHtml that must rewrite; throws when the page passes through.
- * @param {string} html
  */
 function extracted(html) {
   const r = extractHtml(html);
@@ -1990,7 +1878,7 @@ test("extractHtml keeps the text of form, dialog and map elements and drops form
 
 test("extractHtml gives up on an exhausted scan budget instead of rescanning unterminated quotes", () => {
   const t0 = Date.now();
-  assert.equal(extractHtml(`<!DOCTYPE html><html><body>${'<a x="'.repeat(40_000)}`), undefined);
+  assert.equal(extractHtml(`<!DOCTYPE html><html><body>${"<a x=\"".repeat(40_000)}`), undefined);
   assert.ok(Date.now() - t0 < 1000, `took ${Date.now() - t0} ms`);
 });
 
@@ -2022,7 +1910,6 @@ test("rewriteToolResults extracts HTML, then elides a dense line of the extracti
 
 /**
  * The text each span covers.
- * @param {string} text
  */
 const spanTexts = (text) => (tagSpans(text) ?? []).map(([a, b]) => text.slice(a, b));
 
@@ -2036,20 +1923,23 @@ test("tagSpans finds custom tag blocks and self-closing custom tags, never HTML5
   assert.deepEqual(tagSpans("<div>Some content</div>"), []);
   assert.deepEqual(tagSpans("<DIV>a</DIV><Span>b</Span>"), []); // HTML names match case-insensitively
   assert.deepEqual(spanTexts("Before <system-reminder>Important</system-reminder> After"), ["<system-reminder>Important</system-reminder>"]);
-  assert.deepEqual(spanTexts('<context key="session" type="persistent">user data</context>'), ['<context key="session" type="persistent">user data</context>']);
+  assert.deepEqual(spanTexts("<context key=\"session\" type=\"persistent\">user data</context>"), ["<context key=\"session\" type=\"persistent\">user data</context>"]);
   assert.deepEqual(spanTexts("Text <marker/> more text"), ["<marker/>"]);
   assert.deepEqual(tagSpans("Text <br/> more <hr/> text"), []);
   assert.deepEqual(spanTexts("<outer><inner>deep</inner></outer>"), ["<outer><inner>deep</inner></outer>"]);
   assert.deepEqual(spanTexts("<div>HTML</div> <system-reminder>Rule</system-reminder> <p>HTML2</p>"), ["<system-reminder>Rule</system-reminder>"]);
-  for (const tag of [
-    "<tool_call>search({query: 'test'})</tool_call>",
-    "<thinking>Let me analyze this</thinking>",
-    "<EXTREMELY_IMPORTANT>Never skip validation</EXTREMELY_IMPORTANT>",
-    "<user-prompt-submit-hook>check perms</user-prompt-submit-hook>",
-    "<system-reminder>Rules</system-reminder>",
-    "<result>Success: 42 items</result>",
-  ])
+  for (
+    const tag of [
+      "<tool_call>search({query: 'test'})</tool_call>",
+      "<thinking>Let me analyze this</thinking>",
+      "<EXTREMELY_IMPORTANT>Never skip validation</EXTREMELY_IMPORTANT>",
+      "<user-prompt-submit-hook>check perms</user-prompt-submit-hook>",
+      "<system-reminder>Rules</system-reminder>",
+      "<result>Success: 42 items</result>",
+    ]
+  ) {
     assert.deepEqual(spanTexts(`Before ${tag} After`), [tag], tag);
+  }
 });
 
 test("tagSpans keeps duplicates apart, collapses deep nesting and ignores orphans, a lone < and truncated tags", () => {
@@ -2064,17 +1954,17 @@ test("tagSpans keeps duplicates apart, collapses deep nesting and ignores orphan
   assert.deepEqual(tagSpans("<ghost>dangling content with no close"), []);
   assert.deepEqual(tagSpans("if a < b then c"), []);
   for (const text of ["</", "<", "<a/", "<a", "<a /", "</a"]) assert.deepEqual(tagSpans(text), [], text);
-  assert.deepEqual(spanTexts('<context attr="a > b">payload</context>'), ['<context attr="a > b">payload</context>']);
+  assert.deepEqual(spanTexts("<context attr=\"a > b\">payload</context>"), ["<context attr=\"a > b\">payload</context>"]);
   assert.deepEqual(spanTexts("<custom>x</div> y</custom>"), ["<custom>x</div> y</custom>"]); // an HTML close inside a block
   // Deviation: SVG and MathML children are not workflow tags.
-  assert.deepEqual(spanTexts('<svg viewBox="0 0 1 1"><g><path d="M0 0"/></g></svg> <note>x</note> <math><mi>x</mi></math>'), ["<note>x</note>"]);
-  assert.deepEqual(spanTexts('<svg viewBox="0 0 1 1">\n<note>x</note>'), ["<note>x</note>"]); // an unclosed svg or math hides nothing after it
+  assert.deepEqual(spanTexts("<svg viewBox=\"0 0 1 1\"><g><path d=\"M0 0\"/></g></svg> <note>x</note> <math><mi>x</mi></math>"), ["<note>x</note>"]);
+  assert.deepEqual(spanTexts("<svg viewBox=\"0 0 1 1\">\n<note>x</note>"), ["<note>x</note>"]); // an unclosed svg or math hides nothing after it
   assert.deepEqual(spanTexts("x <math> y <note>x</note>"), ["<note>x</note>"]);
 });
 
 test("tagSpans returns null when unterminated quotes or a deep stack of unmatched opens exhaust its budget", () => {
   const t0 = Date.now();
-  assert.equal(tagSpans('<x a="'.repeat(30_000)), null);
+  assert.equal(tagSpans("<x a=\"".repeat(30_000)), null);
   // 20,000 distinct custom opens, then 20,000 closes that match none: each close walks the whole stack.
   const opens = Array.from({ length: 20_000 }, (_, i) => `<a${i}>`).join("");
   const closes = Array.from({ length: 20_000 }, (_, i) => `</b${i}>`).join("");
@@ -2146,35 +2036,24 @@ const RETRIEVE_LINE = /\n\[[^\n]*Retrieve original: hash=([0-9a-f]{12})\]$/;
 
 /**
  * A step's result that must exist (narrows away undefined for the type checker).
- * @template T
- * @param {T|undefined} x
- * @returns {T}
  */
-const must = (x) => {
+const must = <T,>(x: T | undefined): T => {
   if (x === undefined) throw new Error("expected a result");
   return x;
 };
 
 /**
  * Only the given levers on: no SmartCrusher, elider or dedup unless asked.
- * @param {Partial<Levers>} over
- * @returns {Levers}
  */
 const only = (over) => ({ crush: false, elide: false, ...over });
 
 /**
  * rewriteToolResults over one string result; undefined when the row passes through.
- * @param {string} text
- * @param {Levers} lv
- * @param {string} [tool]
- * @param {string} [query]
  */
-const route = (text, lv, tool = "Bash", query = "") => rewriteToolResults([toolResult(text)], tool, lv, query);
+const route = (text, lv, tool = "Bash", query = "") => rewriteToolResults([toolResult(text)], tool, lv, query) as Rewrite;
 
 /**
  * The stored text of a rewritten one-result row.
- * @param {ReturnType<typeof rewriteToolResults>} r
- * @returns {string}
  */
 const stored = (r) => {
   if (!r) throw new Error("expected the row to be rewritten");
@@ -2182,12 +2061,12 @@ const stored = (r) => {
 };
 
 /** `n` distinct INFO lines, one per build step. */
-const infoTicks = (/** @type {number} */ n, from = 0) => Array.from({ length: n }, (_, i) => `INFO step ${from + i}: compiled module_${from + i} into build/out_${from + i}.o`);
+const infoTicks = (n, from = 0) => Array.from({ length: n }, (_, i) => `INFO step ${from + i}: compiled module_${from + i} into build/out_${from + i}.o`);
 
 /** Upstream log_compressor.rs java_chained_trace: two chained traces with `runtime` JDK frames each. */
-const javaTrace = (/** @type {number} */ runtime) =>
+const javaTrace = (runtime) =>
   [
-    'Exception in thread "main" java.lang.IllegalStateException: boom',
+    "Exception in thread \"main\" java.lang.IllegalStateException: boom",
     "at com.example.App.handle(App.java:10)",
     "at com.example.App.dispatch(App.java:20)",
     ...Array.from({ length: runtime }, (_, i) => `at java.base/java.util.stream.Op${i}.eval(Op${i}.java:${i + 1})`),
@@ -2198,8 +2077,8 @@ const javaTrace = (/** @type {number} */ runtime) =>
   ].join("\n");
 
 /** Upstream log_compressor.rs pytest_issue_log: a pytest run with `n` failures, each with its own `E ` line. */
-const pytestIssueLog = (/** @type {number} */ n) => {
-  const pad = (/** @type {number} */ i) => String(i).padStart(3, "0");
+const pytestIssueLog = (n) => {
+  const pad = (i) => String(i).padStart(3, "0");
   return [
     "============================= test session starts =============================",
     "collected 400 items",
@@ -2297,13 +2176,13 @@ test("compressLog dedupes warnings on their message prefix (upstream fixed_in_3e
 test("compressLog keeps a chained Python traceback across its blank lines (upstream fixed_in_3e5_chained_exception_traces_survive_blank_lines)", () => {
   const trace = [
     "Traceback (most recent call last):",
-    '  File "a.py", line 1, in <module>',
+    "  File \"a.py\", line 1, in <module>",
     "ValueError: x",
     "",
     "During handling of the above exception, another exception occurred:",
     "",
     "Traceback (most recent call last):",
-    '  File "b.py", line 2, in <module>',
+    "  File \"b.py\", line 2, in <module>",
     "RuntimeError: y",
   ];
   const out = compressLog([...infoTicks(50), ...trace, ...infoTicks(10, 50)].join("\n"))?.text ?? "";
@@ -2417,17 +2296,13 @@ const FILLER_ROWS = Array.from({ length: 60 }, (_, i) => `zzz.txt:${i + 1}:fille
 
 /**
  * How compressSearch parses one grep line: its first output row (`file:line:content` as parsed), or a filler row when it does not parse.
- * @param {string} line
- * @returns {string|undefined}
  */
 const parsedRow = (line) => compressSearch([line, ...FILLER_ROWS].join("\n"), "")?.text.split("\n")[0];
 
 /** `n` grep rows each of the given files, with distinct content. */
-const grepRows = (/** @type {string[]} */ files, /** @type {number} */ n) =>
-  files.flatMap((f) => Array.from({ length: n }, (_, i) => `${f}:${(i + 1) * 3}:    value_${f.length}_${i + 1} = compute_${i + 1}(argument_${(i + 1) * 7})`));
+const grepRows = (files, n) => files.flatMap((f) => Array.from({ length: n }, (_, i) => `${f}:${(i + 1) * 3}:    value_${f.length}_${i + 1} = compute_${i + 1}(argument_${(i + 1) * 7})`));
 
 test("compressSearch parses grep, ripgrep context and Windows rows as upstream's tiered scan does (upstream parse_match_line tests)", () => {
-  /** @type {[string, string][]} */
   const cases = [
     ["src/main.py:42:def main():", "src/main.py:42:def main():"], // parses_standard_grep_line
     ["src/main.py-43-context after match", "src/main.py:43:context after match"], // parses_ripgrep_context_line
@@ -2453,7 +2328,7 @@ test("compressSearch parses grep, ripgrep context and Windows rows as upstream's
     ["migrations/20240101-002-add_users.sql-9-  id BIGINT", "migrations/20240101-002-add_users.sql:9:  id BIGINT"], // date_stamped_path_is_not_misread_as_line_number_marker
     ["src/main.py-44-see foo.rs:12:bar", "src/main.py:44:see foo.rs:12:bar"], // body_line_reference_does_not_hijack_a_context_line
     ["logs/app.log.1-42-rotated line", "logs/app.log.1:42:rotated line"], // digit_terminated_path_still_parses_ripgrep_context_line
-    ['config.py:10:DATABASE_URL = "postgres://user:pass@host:5432/db"', 'config.py:10:DATABASE_URL = "postgres://user:pass@host:5432/db"'], // preserves_colons_in_match_content
+    ["config.py:10:DATABASE_URL = \"postgres://user:pass@host:5432/db\"", "config.py:10:DATABASE_URL = \"postgres://user:pass@host:5432/db\""], // preserves_colons_in_match_content
   ];
   for (const [line, row] of cases) assert.equal(parsedRow(line), row, line);
   // rejects_lines_without_line_number_marker, rejects_negative_line_numbers: such a line does not parse and is dropped.
@@ -2577,7 +2452,7 @@ test("compressSearch stays bounded on 50,000 rows with a 16 KiB query and on one
   assert.ok(Date.now() - t0 < 2000, `took ${Date.now() - t0} ms`);
 });
 /** Upstream diff_compressor.rs build_synthetic_diff: `n` files with one 18-line hunk each (5 context, 3 removed, 5 added, 5 context). */
-const syntheticDiff = (/** @type {number} */ n) =>
+const syntheticDiff = (n) =>
   Array.from({ length: n }, (_, i) =>
     [
       `diff --git a/file_${i}.py b/file_${i}.py`,
@@ -2589,11 +2464,10 @@ const syntheticDiff = (/** @type {number} */ n) =>
       ...Array.from({ length: 5 }, (_, k) => `+added_${k}_${i}`),
       ...Array.from({ length: 5 }, (_, k) => ` tail_${k}_${i}`),
       "",
-    ].join("\n"),
-  ).join("") + "# variant 1";
+    ].join("\n")).join("") + "# variant 1";
 
 /** Upstream diff_compressor.rs build_n_hunk_diff: one file with `n` 6-line hunks 100 lines apart (`index` adds git's bookkeeping line). */
-const nHunkDiff = (/** @type {number} */ n, index = false) =>
+const nHunkDiff = (n, index = false) =>
   [
     "diff --git a/big.py b/big.py",
     ...(index ? ["index 3b18e512dba79e4c8300dd08aeb37f8e728b8dad..af5626b4a114abcb82d63db7c8082c3c4756e51b 100644"] : []),
@@ -2626,7 +2500,7 @@ test("compressDiff trims context to 2 lines and ends with the footer and a retri
   const r = must(compressDiff(input, ""));
   const lines = r.text.split("\n");
   const [, hash] = /^\[177 lines compressed to 129\. Retrieve original: hash=([0-9a-f]{12})\]$/.exec(lines.at(-1) ?? "") ?? [];
-  assert.ok(hash, lines.at(-1));
+  assert.ok(hash, String(lines.at(-1)));
   assert.equal(lines.at(-2), "[8 files changed, +40 -24 lines]");
   assert.deepEqual(r.offloaded, [[hash, input]]);
   // Each hunk keeps the 2 context lines on either side of its 8 changes: 12 of 18 lines.
@@ -2798,8 +2672,7 @@ test("the diff route: a real git diff reaches the diff compressor over its index
       `+new ${i}`,
       " c",
       " d",
-    ].join("\n"),
-  ).join("\n");
+    ].join("\n")).join("\n");
   const tightFold = must(foldDiff(tight));
   assert.ok(must(compressDiff(tight, "")).text.length > tightFold.text.length * 0.95);
   const t = route(tight, only({ diff: true, elide: true }));
@@ -2824,7 +2697,7 @@ test("compressDiff stays bounded on a header line holding 250,000 ` b/`", () => 
   assert.ok(Date.now() - t0 < 2000, `took ${Date.now() - t0} ms`);
 });
 /** `n` distinct prose sentences on one line each. */
-const sentences = (/** @type {number} */ n, from = 0) => Array.from({ length: n }, (_, i) => `Paragraph ${from + i} explains how the scheduler balances queue ${from + i} against its neighbours.`);
+const sentences = (n, from = 0) => Array.from({ length: n }, (_, i) => `Paragraph ${from + i} explains how the scheduler balances queue ${from + i} against its neighbours.`);
 
 test("foldText collapses repeated lines it can expand back, and only when that is shorter", () => {
   assert.deepEqual(foldText("intro\nthe same long repeated line\nthe same long repeated line\nthe same long repeated line\noutro"), {
@@ -3005,8 +2878,8 @@ test("splitRelevance keeps the query's records and elides the rest behind one re
   const [, hash] = /\n\[6 low-relevance lines in 2 runs elided\. Retrieve original: hash=([0-9a-f]{12})\]$/.exec(r.text) ?? [];
   assert.equal(
     r.text,
-    `${RECORDS.oauth1}...[3 low-relevance lines elided]...\n${RECORDS.oauth2}...[3 low-relevance lines elided]...\n${RECORDS.oauth3}` +
-      `[6 low-relevance lines in 2 runs elided. Retrieve original: hash=${hash}]`,
+    `${RECORDS.oauth1}...[3 low-relevance lines elided]...\n${RECORDS.oauth2}...[3 low-relevance lines elided]...\n${RECORDS.oauth3}`
+      + `[6 low-relevance lines in 2 runs elided. Retrieve original: hash=${hash}]`,
   );
   assert.deepEqual(r.offloaded, [[hash, OAUTH_DOC]]);
   assert.equal(splitRelevance(OAUTH_DOC, "   ", true), undefined); // upstream test_empty_query_yields_no_split
@@ -3104,8 +2977,7 @@ test("review fixes: log, search, config, diff and HTML edge cases", () => {
   assert.equal(detectContentType(md), "text");
   // multi-commit log keeps each commit header; a quoted non-ASCII path starts its own file
   const body = Array.from({ length: 30 }, (_, i) => ` ctx ${i}`).join("\n");
-  /** @type {(name: string, q?: boolean) => string} */
-  const file = (name, q) => {
+  const file = (name, q?) => {
     const [a, b] = q ? [`"a/${name}"`, `"b/${name}"`] : [`a/${name}`, `b/${name}`];
     return `diff --git ${a} ${b}\n--- ${a}\n+++ ${b}\n@@ -1,31 +1,31 @@\n${body}\n-old\n+new`;
   };

@@ -1,9 +1,9 @@
 // Static checks on the hand-written skill files and the generated manifest.
-import { test } from "vitest";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { test } from "vitest";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const SKILL = readFileSync(
@@ -101,17 +101,20 @@ test("README documents /dprint:dprint and mirrors the plugin.json description", 
 
 test("README documents the cwd scope, FileChanged formatting and the watch-list hook", () => {
   const readme = readFileSync(path.join(ROOT, "plugin/README.md"), "utf8");
-  for (const s of [
-    "file_written",
-    "file_changed",
-    "mcp/watch-paths.mjs",
-    "dprint file-paths",
-    "scratchpad_dir",
-    "git status --porcelain",
-    "5000",
-    "and the file's real path is inside the working directory and not in the session scratchpad",
-  ])
+  for (
+    const s of [
+      "file_written",
+      "file_changed",
+      "mcp/watch-paths.mjs",
+      "dprint file-paths",
+      "scratchpad_dir",
+      "git status --porcelain",
+      "5000",
+      "and the file's real path is inside the working directory and not in the session scratchpad",
+    ]
+  ) {
     assert.ok(readme.includes(s), s);
+  }
   const manifest = JSON.parse(
     readFileSync(path.join(ROOT, "plugin.json"), "utf8"),
   );

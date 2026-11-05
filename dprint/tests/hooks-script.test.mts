@@ -1,44 +1,39 @@
-// Tests for scripts/hooks.mjs: hooks.json validation and the generated hook input types.
+// Tests for scripts/hooks.mts: hooks.json validation and the generated hook input types.
 // Each negative case runs the script against a scratch copy of the plugin with one defect.
-import { afterAll, test } from "vitest";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import {
-  cpSync,
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  rmSync,
-  writeFileSync,
-} from "node:fs";
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { afterAll, test } from "vitest";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const SCRIPT = path.join(ROOT, "scripts/hooks.mjs");
+const SCRIPT = path.join(ROOT, "scripts/hooks.mts");
 const HOOKS = JSON.parse(
   readFileSync(path.join(ROOT, "plugin/hooks/hooks.json"), "utf8"),
 );
 
-const run = (...args) =>
-  spawnSync(process.execPath, [SCRIPT, ...args], { encoding: "utf8" });
+const run = (...args) => spawnSync(process.execPath, [SCRIPT, ...args], { encoding: "utf8" });
 
 /** Scratch plugin root with the real files; `mutate(hooks)` edits a copy of hooks.json first. */
-const dirs = [];
+const dirs: string[] = [];
 afterAll(() => dirs.forEach((d) => rmSync(d, { recursive: true, force: true })));
 
-function scratch(mutate = () => {}) {
+function scratch(mutate: (hooks: typeof HOOKS) => unknown = () => {}) {
   const dir = mkdtempSync(path.join(tmpdir(), "dprint-hooks-"));
   dirs.push(dir);
   mkdirSync(path.join(dir, "plugin/hooks"), { recursive: true });
   mkdirSync(path.join(dir, "src/mcp"), { recursive: true });
-  for (const f of [
-    "plugin.json",
-    "plugin/.mcp.json",
-    "src/mcp/hook-inputs.d.mts",
-  ])
+  for (
+    const f of [
+      "plugin.json",
+      "plugin/.mcp.json",
+      "src/mcp/hook-inputs.d.mts",
+    ]
+  ) {
     cpSync(path.join(ROOT, f), path.join(dir, f));
+  }
   const hooks = structuredClone(HOOKS);
   mutate(hooks);
   writeFileSync(
@@ -127,7 +122,7 @@ test("one tool called with two different input shapes is rejected", () => {
       h.hooks.PreToolUse.push({
         matcher: "Write",
         hooks: [{ ...formatPre(h), input: { cwd: "${cwd}" } }],
-      }),
+      })
     ),
   );
   assert.equal(r.status, 1);
@@ -168,7 +163,7 @@ test("a command hook's timeout is still checked", () => {
         type: "command",
         command: "x",
         timeout: 0,
-      }),
+      })
     ),
   );
   assert.equal(r.status, 1);

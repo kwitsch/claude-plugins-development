@@ -18,7 +18,7 @@ import { closeSync, existsSync, mkdirSync, openSync, readFileSync, realpathSync,
 import net from "node:net";
 import path from "node:path";
 import process from "node:process";
-// Type-only, erased by tsc: the front-end never loads node:sqlite (runService imports it dynamically).
+// Type-only, erased at build time: the front-end never loads node:sqlite (runService imports it dynamically).
 import type { DatabaseSync, SQLOutputValue } from "node:sqlite";
 import { setTimeout as sleep } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
@@ -98,7 +98,7 @@ const ELECTION_PROBE_MS = 300;
 const LONE_SURROGATE = /[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/;
 /**
  * The persisted /headroom counters in stats column order. hooks/policy.mjs COUNTER_KEYS repeats them
- * (this file stays import-free); tests/storage.test.mjs pins both orders.
+ * (this file stays import-free); tests/storage.test.mts pins both orders.
  */
 const STATS_KEYS = ["steps", "clamped", "cache_drops", "input_tokens", "cache_read_input_tokens", "cache_creation_input_tokens"] as const;
 /** One validated stats_put row: a day plus every counter. */

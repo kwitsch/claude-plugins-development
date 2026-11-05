@@ -1,6 +1,6 @@
 ---
 name: scaffold-plugin
-description: Scaffold a new Claude Code plugin in this repository with the repo layout (<name>/plugin.json, plugin/, src/, tests/, scripts/, package.json). Use when the user asks to create, add, scaffold or start a new plugin here.
+description: Scaffold a new Claude Code plugin in this repository with the repo layout (<name>/plugin.json, plugin/, src/, tests/, package.json). Use when the user asks to create, add, scaffold or start a new plugin here.
 argument-hint: "[plugin-name] [one-line description]"
 disable-model-invocation: false
 ---
@@ -24,13 +24,11 @@ From the repo root, copy templates from `${CLAUDE_SKILL_DIR}/templates/` and sub
 
 ```bash
 name=<name>
-mkdir -p "$name"/{plugin/.claude-plugin,src,tests,scripts}
+mkdir -p "$name"/{plugin/.claude-plugin,src,tests}
 T="${CLAUDE_SKILL_DIR}/templates"
-for f in plugin.json package.json tsconfig.json; do
+for f in plugin.json package.json; do
   sed -e "s/__NAME__/$name/g" -e "s/__DESCRIPTION__/<description>/g" -e "s/__AUTHOR__/$(git config user.name)/g" "$T/$f" > "$name/$f"
 done
-cp "$T/build.mjs" "$name/scripts/build.mjs"
-cp "$T/eslint.config.mjs" "$name/eslint.config.mjs"
 sed "s/__NAME__/$name/g" "$T/CLAUDE.md" > "$name/CLAUDE.md"
 sed "s/__NAME__/$name/g" "$T/README.md" > "$name/plugin/README.md"
 ```
@@ -38,19 +36,19 @@ sed "s/__NAME__/$name/g" "$T/README.md" > "$name/plugin/README.md"
 Per selected component:
 
 - **skill** → `plugin/skills/<skill-name>/SKILL.md` from `templates/SKILL.md` (frontmatter `name`, `description`; body = instructions).
-- **hook** → `src/hooks/<event-kebab>.mts` from `templates/hook.mts` and `plugin/hooks/hooks.json` from `templates/hooks.json` (set the event name and the `.mjs` path). Add `tests/<event-kebab>.test.mjs` from `templates/hook.test.mjs`.
-- **mods** → `src/hooks/register.mts` exporting `register(on, options)` with structural `$`/`on` types (model: `inline-headroom/src/hooks/register.mts`), and `plugin/hooks/hooks.json` `{"modules": ["./register.mjs"]}` (merged into the same file when `hook` is also chosen). Tests in `tests/register.test.mjs` with `createKit` from `claude-engine-vitest` (`pnpm --filter <name> add -D claude-engine-vitest@workspace:*`).
+- **hook** → `src/hooks/<event-kebab>.mts` from `templates/hook.mts` and `plugin/hooks/hooks.json` from `templates/hooks.json` (set the event name and the `.mjs` path). Add `tests/<event-kebab>.test.mts` from `templates/hook.test.mts`.
+- **mods** → `src/hooks/register.mts` exporting `register(on, options)` with structural `$`/`on` types (model: `inline-headroom/src/hooks/register.mts`), and `plugin/hooks/hooks.json` `{"modules": ["./register.mjs"]}` (merged into the same file when `hook` is also chosen). Tests in `tests/register.test.mts` with `createKit` from `claude-engine-vitest` (`pnpm --filter <name> add -D claude-engine-vitest@workspace:*`).
 - **agent** → `plugin/agents/<agent-name>.md` with frontmatter `name`, `description`, `tools`.
 - **mcp** → `src/mcp/server.mts` (zero-dep stdio JSON-RPC) and `plugin/.mcp.json` pointing at `${CLAUDE_PLUGIN_ROOT}/mcp/server.mjs`. Add a test.
 
-If no `src/` files were created, still keep `src/`, `scripts/` and the `package.json` — the build then only syncs `plugin.json`.
+If no `src/` files were created, still keep `src/` and the `package.json` — the build then only syncs `plugin.json`.
 
 ## Step 3 — Build and verify
 
 ```bash
 pnpm install
 pnpm --filter <name> build
-pnpm --filter <name> lint
+pnpm exec oxlint
 pnpm --filter <name> test
 claude plugin validate <name>/plugin
 ```

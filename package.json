@@ -4,7 +4,16 @@
   "type": "module",
   "scripts": {
     "build": "pnpm -r build",
-    "test": "pnpm -r test"
+    "test": "pnpm -r test",
+    "lint": "oxlint && pnpm -r lint"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "oxc-minify": "^0.157.0",
+    "oxc-transform": "^0.157.0",
+    "oxlint": "^1.91.0",
+    "oxlint-tsgolint": "^7.0.2005",
+    "vitest": "^5.1.0"
   },
   "packageManager": "pnpm@11.20.0"
 }

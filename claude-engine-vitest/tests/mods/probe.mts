@@ -6,7 +6,7 @@ export function register(on, options) {
     try {
       return { text: String(await $.store.get("k")) };
     } catch (err) {
-      return { text: `rejected: ${err.message}` };
+      return { text: `rejected: ${(err as Error).message}` };
     }
   });
   on("command.run", { command: "unhandled" }, async ($) => ({ text: await $.store.get("k") }));

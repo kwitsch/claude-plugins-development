@@ -1,8 +1,7 @@
-import { test } from "vitest";
 import assert from "node:assert/strict";
-import { execFileSync, spawn, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { type ChildProcess, execFileSync, spawn, spawnSync } from "node:child_process";
 import { once } from "node:events";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
@@ -11,8 +10,9 @@ import readline from "node:readline";
 import { DatabaseSync } from "node:sqlite";
 import { setTimeout as sleep } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
-import { MIGRATIONS, PROTOCOL, VERSION, compareVersions, execOp, isStorageEnabled, isStorageService, migrate, resolveStorage } from "../plugin/mcp/server.mjs";
+import { test } from "vitest";
 import { zeroCounters } from "../plugin/hooks/policy.mjs";
+import { compareVersions, execOp, isStorageEnabled, isStorageService, migrate, MIGRATIONS, PROTOCOL, resolveStorage, VERSION } from "../plugin/mcp/server.mjs";
 
 const SERVER = fileURLToPath(new URL("../plugin/mcp/server.mjs", import.meta.url));
 const IT = { timeout: 30000 };
@@ -21,9 +21,6 @@ const STATS_KEYS = ["steps", "clamped", "cache_drops", "input_tokens", "cache_re
 /**
  * Six counters in stats column order, stepping by `d` from `first`: distinct per field, so a
  * column-order drift changes every sum.
- * @param {number} first
- * @param {number} d
- * @returns {Record<string, number>}
  */
 const seq = (first, d) => Object.fromEntries(STATS_KEYS.map((k, i) => [k, first + i * d]));
 
@@ -48,7 +45,7 @@ test("resolveStorage joins the three files under the data dir and refuses unusab
 test("migrate brings a fresh DB to MIGRATIONS.length, is idempotent and refuses a newer schema", () => {
   const db = new DatabaseSync(":memory:");
   assert.equal(migrate(db), MIGRATIONS.length);
-  assert.equal(db.prepare("PRAGMA user_version").get().user_version, MIGRATIONS.length);
+  assert.equal(db.prepare("PRAGMA user_version").get()?.user_version, MIGRATIONS.length);
   assert.ok(db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'kv'").get());
   assert.ok(db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'stats'").get());
   assert.equal(migrate(db), MIGRATIONS.length);
@@ -71,11 +68,9 @@ test("migrate upgrades a v1 database to v2 and keeps its kv rows", () => {
 test("stats_put replaces absolute rows per day and writer, stats_sum totals every writer from since on, the purge drops older days", () => {
   const db = new DatabaseSync(":memory:");
   migrate(db);
-  /** @param {string} writer @param {Record<string, unknown>[]} rows @param {string} [purgeBefore] */
   const put = (writer, rows, purgeBefore = "2026-01-01") => execOp(db, "stats_put", { writer, rows, purgeBefore });
-  /** @param {string} since */
-  const sum = (since) => execOp(db, "stats_sum", { since });
-  /** @param {string} day @param {number} base */
+  // stats_sum answers the counter totals
+  const sum = (since: string) => execOp(db, "stats_sum", { since }) as Record<string, number>;
   const row = (day, base) => ({ day, ...seq(base + 1, 1) });
   const a = [row("2026-10-01", 0), row("2026-10-02", 10), row("2026-10-03", 100)];
   const b = [row("2026-10-01", 1000), row("2026-10-03", 10000)];
@@ -109,7 +104,6 @@ test("stats ops validate writer, days, rows and counters before writing anything
   const row = { day: "2026-10-03", ...seq(1, 1) };
   const ok = { writer: "w1", rows: [row], purgeBefore: "2026-09-04" };
   const missing = Object.fromEntries(Object.entries(row).filter(([k]) => k !== "cache_creation_input_tokens"));
-  /** @type {[Record<string, unknown>, RegExp][]} */
   const bad = [
     [{ ...ok, writer: "" }, /writer must be/],
     [{ ...ok, writer: "a b" }, /writer must be/],
@@ -130,11 +124,11 @@ test("stats ops validate writer, days, rows and counters before writing anything
   ];
   for (const [args, re] of bad) assert.throws(() => execOp(db, "stats_put", args), re, JSON.stringify(args).slice(0, 120));
   assert.throws(() => execOp(db, "stats_sum", { since: "2026-02-30" }), /since must be/);
-  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM stats").get().n, 0); // a failed validation wrote nothing
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM stats").get()?.n, 0); // a failed validation wrote nothing
   // stats ops need no key; kv ops still do; a non-string op is an unknown op, not a TypeError
   assert.deepEqual(execOp(db, "stats_put", ok), { ok: true, purged: 0 });
   assert.throws(() => execOp(db, "kv_get", {}), /key must be/);
-  assert.throws(() => execOp(db, /** @type {any} */ (7), {}), /unknown op: 7/);
+  assert.throws(() => execOp(db, 7, {}), /unknown op: 7/);
   db.close();
 });
 
@@ -171,7 +165,6 @@ test("execOp round-trips set/get/overwrite/delete and rejects invalid keys, valu
 });
 
 test("a failed --service start logs one line, and the stack only under MCP_HOOK_DEBUG", () => {
-  /** @param {Record<string, string>} env */
   const run = (env) => spawnSync(process.execPath, [SERVER, "--service", ""], { env: { ...process.env, MCP_HOOK_DEBUG: "", ...env }, encoding: "utf8" });
   const quiet = run({});
   assert.equal(quiet.status, 1);
@@ -197,8 +190,6 @@ test("isStorageService refuses insane pids and processes that are not a server.m
 
 /**
  * Pids of every `--service` process for this data dir (pgrep exits 1 when none match).
- * @param {string} dir
- * @returns {number[]}
  */
 function servicePids(dir) {
   try {
@@ -213,8 +204,6 @@ function servicePids(dir) {
 
 /**
  * Polls until the pid no longer exists (ESRCH).
- * @param {number} pid
- * @returns {Promise<void>}
  */
 async function waitDead(pid) {
   const deadline = Date.now() + 5000;
@@ -229,21 +218,37 @@ async function waitDead(pid) {
   }
 }
 
+/** A tool result of the storage server (only the fields the assertions read are typed). */
+interface ToolResult {
+  /** Whether the call failed. */
+  isError?: boolean;
+  /** The result's text blocks. */
+  content: { type: string; text: string }[];
+  /** The result as JSON. */
+  structuredContent: { pid: number; [k: string]: unknown };
+}
+
+/** A JSON-RPC reply of a front-end, or the `{ error }` the sandbox answers once it exited. */
+interface RpcReply {
+  /** The result (initialize, tools/list or tools/call fields). */
+  result: ToolResult & { serverInfo: { name: string }; tools: { name: string }[] };
+  /** The JSON-RPC or exit error. */
+  error?: { message: string };
+}
+
 /**
  * A temp CLAUDE_PLUGIN_DATA with storage enabled. Its onTestFinished closes every front-end, kills every
  * fake, SIGTERMs every --service process for this data dir until none is left, and removes the dir.
- * @param {any} t vitest test context
+ *
+ * @param t - vitest test context
  */
 function sandbox(t) {
   const dir = mkdtempSync(path.join(os.tmpdir(), "ih-"));
-  /** @type {Record<string, string|undefined>} */
-  const env = { ...process.env, CLAUDE_PLUGIN_DATA: dir, INLINE_HEADROOM_STORAGE_ENABLED: "true" };
-  /** @type {any[]} */
-  const fronts = [];
-  /** @type {any[]} */
-  const fakes = [];
+  const env: Record<string, string | undefined> = { ...process.env, CLAUDE_PLUGIN_DATA: dir, INLINE_HEADROOM_STORAGE_ENABLED: "true" };
+  const fronts: ChildProcess[] = [];
+  const fakes: ChildProcess[] = [];
   t.onTestFinished(async () => {
-    for (const fe of fronts) fe.stdin.end();
+    for (const fe of fronts) fe.stdin?.end();
     for (const fake of fakes) fake.kill("SIGTERM");
     const deadline = Date.now() + 5000;
     for (let pids = servicePids(dir); pids.length > 0 && Date.now() < deadline; pids = servicePids(dir)) {
@@ -262,43 +267,39 @@ function sandbox(t) {
   /**
    * Spawns one MCP front-end. `request` sends a JSON-RPC request and resolves with its response
    * (or with `{error}` once the front-end has exited); `call` runs tools/call and resolves with the result.
-   * @param {Record<string, string|undefined>} [feEnv]
    */
   const frontEnd = (feEnv = env) => {
     const proc = spawn(process.execPath, [SERVER], { env: feEnv, stdio: ["pipe", "pipe", "inherit"] });
     fronts.push(proc);
-    /** @type {Map<number, (msg: any) => void>} */
-    const pending = new Map();
+    const pending = new Map<number, (msg: RpcReply) => void>();
     let nextId = 1;
     let closed = false;
-    readline.createInterface({ input: proc.stdout }).on("line", (/** @type {string} */ line) => {
-      const msg = JSON.parse(line);
+    readline.createInterface({ input: proc.stdout }).on("line", (line) => {
+      const msg = JSON.parse(line) as RpcReply & { id: number };
       pending.get(msg.id)?.(msg);
       pending.delete(msg.id);
     });
     proc.stdin.on("error", () => {}); // EPIPE once the front-end is gone; its pending requests fail below
-    proc.on("close", (/** @type {number|null} */ code) => {
+    proc.on("close", (code) => {
       closed = true;
-      for (const resolve of pending.values()) resolve({ error: { message: `front-end exited with code ${code}` } });
+      for (const resolve of pending.values()) resolve({ error: { message: `front-end exited with code ${code}` } } as RpcReply);
       pending.clear();
     });
-    /** @param {string} method @param {any} [params] @returns {Promise<any>} */
-    const request = (method, params) =>
-      new Promise((resolve) => {
-        if (closed) return resolve({ error: { message: "front-end exited" } });
+    const request = (method: string, params?: unknown) =>
+      new Promise<RpcReply>((resolve) => {
+        if (closed) return resolve({ error: { message: "front-end exited" } } as RpcReply);
         const id = nextId++;
         pending.set(id, resolve);
         proc.stdin.write(JSON.stringify({ jsonrpc: "2.0", id, method, params }) + "\n");
       });
-    /** @param {string} name @param {Record<string, unknown>} [args] @returns {Promise<any>} */
-    const call = async (name, args = {}) => (await request("tools/call", { name, arguments: args })).result;
+    const call = async (name: string, args: Record<string, unknown> = {}) => (await request("tools/call", { name, arguments: args })).result;
     return { request, call };
   };
 
   /**
    * Starts a fake service on storage.sock that answers every request with the given protocol.
-   * @param {number} protocol
-   * @returns {Promise<any>} the fake's ChildProcess, once it listens
+   *
+   * @returns the fake's ChildProcess, once it listens
    */
   const fakeService = async (protocol) => {
     // Looks like a real service to isStorageService: a server.mjs run with --service.
@@ -320,13 +321,13 @@ function sandbox(t) {
 
 // ------------------------------------------------------------------ integration
 
-test("tools/list advertises the six tools; a value set through one front-end is read through another", IT, async (/** @type {any} */ t) => {
+test("tools/list advertises the six tools; a value set through one front-end is read through another", IT, async (t) => {
   const box = sandbox(t);
   const a = box.frontEnd();
   assert.equal((await a.request("initialize", { protocolVersion: "2025-11-25" })).result.serverInfo.name, "storage");
   const list = await a.request("tools/list");
   assert.deepEqual(
-    list.result.tools.map((/** @type {any} */ tool) => tool.name),
+    list.result.tools.map((tool) => tool.name),
     ["kv_get", "kv_set", "kv_delete", "stats_put", "stats_sum", "storage_status"],
   );
   assert.deepEqual((await a.call("kv_set", { key: "stats/s1", value: { n: 1 } })).structuredContent, { ok: true });
@@ -335,7 +336,7 @@ test("tools/list advertises the six tools; a value set through one front-end is 
   assert.equal(typeof (await b.call("storage_status")).structuredContent.pid, "number");
 });
 
-test("stats_put through one front-end is summed through another, as structuredContent and as JSON text", IT, async (/** @type {any} */ t) => {
+test("stats_put through one front-end is summed through another, as structuredContent and as JSON text", IT, async (t) => {
   const box = sandbox(t);
   const a = box.frontEnd();
   const rows = [{ day: "2026-10-03", ...seq(1, 1) }];
@@ -346,7 +347,7 @@ test("stats_put through one front-end is summed through another, as structuredCo
   assert.deepEqual(JSON.parse(res.content[0].text), seq(1, 1));
 });
 
-test("five concurrent front-ends share one service that locks out every other DB reader", IT, async (/** @type {any} */ t) => {
+test("five concurrent front-ends share one service that locks out every other DB reader", IT, async (t) => {
   const box = sandbox(t);
   const results = await Promise.all(Array.from({ length: 5 }, () => box.frontEnd().call("storage_status")));
   const pids = new Set(results.map((r) => r.structuredContent.pid));
@@ -356,14 +357,14 @@ test("five concurrent front-ends share one service that locks out every other DB
   try {
     assert.throws(
       () => reader.prepare("SELECT * FROM kv").all(),
-      (/** @type {any} */ e) => e.errcode === 5,
+      (e) => (e as { errcode?: number }).errcode === 5,
     );
   } finally {
     reader.close();
   }
 });
 
-test("a SIGKILLed service is replaced and keeps every committed write", IT, async (/** @type {any} */ t) => {
+test("a SIGKILLed service is replaced and keeps every committed write", IT, async (t) => {
   const box = sandbox(t);
   const fe = box.frontEnd();
   await fe.call("kv_set", { key: "k", value: 42 });
@@ -375,7 +376,7 @@ test("a SIGKILLed service is replaced and keeps every committed write", IT, asyn
   assert.notEqual((await fe.call("storage_status")).structuredContent.pid, before);
 });
 
-test("an older-protocol service is SIGTERMed and replaced; the request runs on the new service", IT, async (/** @type {any} */ t) => {
+test("an older-protocol service is SIGTERMed and replaced; the request runs on the new service", IT, async (t) => {
   const box = sandbox(t);
   const fake = await box.fakeService(PROTOCOL - 1);
   const exited = once(fake, "exit");
@@ -385,7 +386,7 @@ test("an older-protocol service is SIGTERMed and replaced; the request runs on t
   assert.equal((await fe.call("storage_status")).structuredContent.protocol, PROTOCOL);
 });
 
-test("a foreign process holding storage.db fails the call and leaves a line in service.log", IT, async (/** @type {any} */ t) => {
+test("a foreign process holding storage.db fails the call and leaves a line in service.log", IT, async (t) => {
   const box = sandbox(t);
   const foreign = new DatabaseSync(box.db);
   foreign.exec("PRAGMA locking_mode=EXCLUSIVE; BEGIN EXCLUSIVE");
@@ -399,7 +400,7 @@ test("a foreign process holding storage.db fails the call and leaves a line in s
   }
 });
 
-test("a service shutting down drains the connection it already accepted", IT, async (/** @type {any} */ t) => {
+test("a service shutting down drains the connection it already accepted", IT, async (t) => {
   const box = sandbox(t);
   const fe = box.frontEnd();
   const pid = (await fe.call("storage_status")).structuredContent.pid;
@@ -414,17 +415,17 @@ test("a service shutting down drains the connection it already accepted", IT, as
   assert.equal((await fe.call("kv_get", { key: "k" })).isError, undefined); // the next call respawns
 });
 
-test("a newer-protocol service is refused and left running", IT, async (/** @type {any} */ t) => {
+test("a newer-protocol service is refused and left running", IT, async (t) => {
   const box = sandbox(t);
   const fake = await box.fakeService(PROTOCOL + 1);
   const res = await box.frontEnd().call("kv_get", { key: "k" });
   assert.equal(res.isError, true);
   assert.match(res.content[0].text, /newer/);
   assert.equal(fake.exitCode, null);
-  assert.doesNotThrow(() => process.kill(fake.pid, 0));
+  assert.doesNotThrow(() => process.kill(Number(fake.pid), 0));
 });
 
-test("storage disabled: no tools advertised, calls refused, no files created", IT, async (/** @type {any} */ t) => {
+test("storage disabled: no tools advertised, calls refused, no files created", IT, async (t) => {
   const box = sandbox(t);
   const fe = box.frontEnd({ ...box.env, INLINE_HEADROOM_STORAGE_ENABLED: undefined });
   assert.deepEqual((await fe.request("tools/list")).result.tools, []);
@@ -434,7 +435,7 @@ test("storage disabled: no tools advertised, calls refused, no files created", I
   assert.deepEqual(readdirSync(box.dir), []);
 });
 
-test("an unresolved CLAUDE_PLUGIN_DATA is refused", IT, async (/** @type {any} */ t) => {
+test("an unresolved CLAUDE_PLUGIN_DATA is refused", IT, async (t) => {
   const box = sandbox(t);
   const res = await box.frontEnd({ ...box.env, CLAUDE_PLUGIN_DATA: "${CLAUDE_PLUGIN_DATA}" }).call("kv_get", { key: "k" });
   assert.equal(res.isError, true);

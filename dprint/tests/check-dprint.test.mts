@@ -1,12 +1,12 @@
 // Contract tests for the built plugin/skills/dprint/check-dprint.mjs.
 // Isolated PATH (only bash + node) and HOME per test; dprint is stubbed.
-import { test, beforeEach } from "vitest";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { beforeEach, test } from "vitest";
 
 const PLUGIN = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../plugin");
 const SCRIPT = path.join(PLUGIN, "skills/dprint/check-dprint.mjs");
@@ -37,8 +37,7 @@ function stubHomeDprint(version) {
   stub(path.join(home, ".dprint/bin/dprint"), `echo "dprint ${version}"`);
 }
 /** bin/npx stub: appends its argv to $HOME/npx-argv, accepts only `--yes dprint ...`, then runs `lines` with the rest as "$@" */
-const stubNpx = (...lines) =>
-  stub(path.join(bin, "npx"), `printf '%s\\n' "$@" >> "$HOME/npx-argv"`, '[ "$1 $2" = "--yes dprint" ] || exit 9', "shift 2", ...lines);
+const stubNpx = (...lines) => stub(path.join(bin, "npx"), `printf '%s\\n' "$@" >> "$HOME/npx-argv"`, "[ \"$1 $2\" = \"--yes dprint\" ] || exit 9", "shift 2", ...lines);
 function run(...args) {
   const r = spawnSync(path.join(bin, "node"), [SCRIPT, ...args], {
     env: { PATH: bin, HOME: home },
@@ -49,7 +48,7 @@ function run(...args) {
 
 test("MIN_VERSION is defined exactly once", () => {
   assert.ok(MIN);
-  assert.equal(readFileSync(SOURCE, "utf8").match(/MIN_VERSION = /g).length, 1);
+  assert.equal(readFileSync(SOURCE, "utf8").match(/MIN_VERSION = /g)?.length, 1);
 });
 
 test("no dprint anywhere -> exit 10, status=missing", () => {
@@ -67,14 +66,14 @@ test("non-executable dprint on PATH is ignored -> exit 10", () => {
 });
 
 test("0.6.0 is outdated (numeric compare) -> exit 11", () => {
-  stubDprint('echo "dprint 0.6.0"');
+  stubDprint("echo \"dprint 0.6.0\"");
   const r = run();
   assert.equal(r.code, 11);
   assert.equal(r.out, `status=outdated version=0.6.0 min=${MIN} path=${bin}/dprint`);
 });
 
 test("0.100.0 is ok (numeric compare) -> exit 0", () => {
-  stubDprint('echo "dprint 0.100.0"');
+  stubDprint("echo \"dprint 0.100.0\"");
   const r = run();
   assert.equal(r.code, 0);
   assert.equal(r.out, `status=ok version=0.100.0 min=${MIN} path=${bin}/dprint`);
@@ -93,7 +92,7 @@ test("prerelease of MIN_VERSION is outdated -> exit 11", () => {
 });
 
 test("garbage --version output -> exit 2, status=error", () => {
-  stubDprint('echo "hello world"');
+  stubDprint("echo \"hello world\"");
   const r = run();
   assert.equal(r.code, 2);
   assert.equal(r.out, `status=error version=- min=${MIN} path=${bin}/dprint`);
@@ -105,7 +104,7 @@ test("empty --version output -> exit 2", () => {
 });
 
 test("--version exits non-zero -> exit 2", () => {
-  stubDprint('echo "dprint 0.60.0"', "exit 1");
+  stubDprint("echo \"dprint 0.60.0\"", "exit 1");
   const r = run();
   assert.equal(r.code, 2);
   assert.match(r.out, /status=error/);
@@ -119,7 +118,7 @@ test("fallback ~/.dprint/bin/dprint used when not on PATH", () => {
 });
 
 test("PATH dprint wins over ~/.dprint/bin/dprint", () => {
-  stubDprint('echo "dprint 0.10.0"');
+  stubDprint("echo \"dprint 0.10.0\"");
   stubHomeDprint("9.9.9");
   const r = run();
   assert.equal(r.code, 11);
@@ -127,21 +126,21 @@ test("PATH dprint wins over ~/.dprint/bin/dprint", () => {
 });
 
 test("any argument is a usage error -> exit 2", () => {
-  stubDprint('echo "dprint 9.9.9"');
+  stubDprint("echo \"dprint 9.9.9\"");
   const r = run("--help");
   assert.equal(r.code, 2);
   assert.match(r.out, /status=error/);
 });
 
 test("no dprint, npx runs dprint -> exit 0, path=npx", () => {
-  stubNpx('echo "dprint 0.64.3"');
+  stubNpx("echo \"dprint 0.64.3\"");
   const r = run();
   assert.equal(r.code, 0, r.err);
   assert.equal(r.out, `status=ok version=0.64.3 min=${MIN} path=npx`);
 });
 
 test("npx present but dprint not runnable -> exit 10, stderr explains", () => {
-  stubNpx('echo "npm error code ENOTCACHED" >&2', "exit 1");
+  stubNpx("echo \"npm error code ENOTCACHED\" >&2", "exit 1");
   const r = run();
   assert.equal(r.code, 10);
   assert.equal(r.out, `status=missing version=- min=${MIN} path=-`);
@@ -158,15 +157,15 @@ test("npx output not a dprint version -> exit 10", () => {
 });
 
 test("outdated via npx -> exit 11, path=npx", () => {
-  stubNpx('echo "dprint 0.49.0"');
+  stubNpx("echo \"dprint 0.49.0\"");
   const r = run();
   assert.equal(r.code, 11);
   assert.equal(r.out, `status=outdated version=0.49.0 min=${MIN} path=npx`);
 });
 
 test("PATH dprint wins over npx (npx never run)", () => {
-  stubDprint('echo "dprint 0.64.3"');
-  stubNpx('echo "dprint 0.64.3"');
+  stubDprint("echo \"dprint 0.64.3\"");
+  stubNpx("echo \"dprint 0.64.3\"");
   const r = run();
   assert.equal(r.code, 0);
   assert.equal(r.out, `status=ok version=0.64.3 min=${MIN} path=${bin}/dprint`);

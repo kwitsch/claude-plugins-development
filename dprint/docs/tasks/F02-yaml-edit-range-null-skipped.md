@@ -24,7 +24,7 @@ Real dprint 0.64.3: yaml 50-line dirty file: range -> null, whole -> 126 edits; 
 
 - `formatPre` Edit branch (`lsp.format(uri, M)` whole, `changed`)
 - `DprintLsp.formatNow` (only `textDocument/formatting`)
-- `tests/mcp-server.test.mjs`: stub mode `range-null` (rangeFormatting answers null, formatting answers edits), test "rangeFormatting answering null (yaml plugin) -> Edit still formatted", and "Edit whose trim would drop the deleted repeated line -> {}" (also uses `range-null`)
+- `tests/mcp-server.test.mts`: stub mode `range-null` (rangeFormatting answers null, formatting answers edits), test "rangeFormatting answering null (yaml plugin) -> Edit still formatted", and "Edit whose trim would drop the deleted repeated line -> {}" (also uses `range-null`)
 
 ## Approach
 

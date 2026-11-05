@@ -1,10 +1,10 @@
 // Manifest and wiring contract of the built plugin/ (ported from claude-plugins' test/inline-headroom/test.bats).
-import { test } from "vitest";
 import assert from "node:assert/strict";
 import { existsSync, readFileSync, statSync } from "node:fs";
+import { test } from "vitest";
 
-/** @param {string} rel @returns {any} */
-const json = (rel) => JSON.parse(readFileSync(new URL(`../plugin/${rel}`, import.meta.url), "utf8"));
+/** Parsed JSON of a file under plugin/. */
+const json = (rel: string) => JSON.parse(readFileSync(new URL(`../plugin/${rel}`, import.meta.url), "utf8"));
 const manifest = json(".claude-plugin/plugin.json");
 
 test("plugin.json has name, author Kwitsch and a non-empty description", () => {
@@ -33,7 +33,7 @@ test("userConfig declares exactly the seventeen boolean feature toggles, all def
     "tag_protector_enabled",
     "text_crusher_enabled",
   ]);
-  for (const [k, v] of Object.entries(manifest.userConfig)) {
+  for (const [k, v] of Object.entries(manifest.userConfig as Record<string, { type: string; default: unknown; title: string; description: string }>)) {
     assert.ok(v.type === "boolean" && v.default === true && v.title.length > 0 && v.description.length > 0, k);
   }
 });

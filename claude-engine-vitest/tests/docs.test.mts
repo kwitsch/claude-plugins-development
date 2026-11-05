@@ -1,8 +1,8 @@
 // The docs' kit examples (https://code.claude.com/docs/en/plugins/mods/test.md), ported by changing imports only.
 import { expect } from "vitest";
-import { createKit } from "../index.mjs";
+import { createKit } from "../index.mts";
 
-const mod = (name) => new URL(`./mods/${name}.mjs`, import.meta.url);
+const mod = (name) => new URL(`./mods/${name}.mts`, import.meta.url);
 
 {
   const { test } = createKit({ module: mod("tally"), plugin: "first-mod" });
@@ -36,7 +36,7 @@ const mod = (name) => new URL(`./mods/${name}.mjs`, import.meta.url);
   const { test, mock } = createKit({ module: mod("countdown"), plugin: "countdown" });
   test("the countdown ends with a toast", async ($, on) => {
     const clock = mock.clock(on);
-    const toasts = [];
+    const toasts: unknown[] = [];
     on("ui.toast", ($, e) => {
       toasts.push(e.text);
       return { value: undefined };
@@ -51,8 +51,8 @@ const mod = (name) => new URL(`./mods/${name}.mjs`, import.meta.url);
   });
   test("a timer fires exactly on its period boundary, and set moves the clock to a time", async ($, on) => {
     const clock = mock.clock(on, { now: 5000 });
-    const toasts = [];
-    on("ui.toast", ($, e) => (toasts.push(clock.now()), { value: undefined }));
+    const toasts: number[] = [];
+    on("ui.toast", () => (toasts.push(clock.now()), { value: undefined }));
     await $.command.run({ command: "countdown", args: "1" });
     await clock.advance(999);
     expect(toasts).toEqual([]);
@@ -61,8 +61,8 @@ const mod = (name) => new URL(`./mods/${name}.mjs`, import.meta.url);
   });
   test("a timer cancelled in its own callback leaves another pending timer running", async ($, on) => {
     const clock = mock.clock(on);
-    const toasts = [];
-    on("ui.toast", ($, e) => (toasts.push(clock.now()), { value: undefined }));
+    const toasts: number[] = [];
+    on("ui.toast", () => (toasts.push(clock.now()), { value: undefined }));
     await $.command.run({ command: "countdown", args: "3" }); // toasts at 3000
     await $.command.run({ command: "countdown", args: "1" }); // cancels itself at 1000
     await clock.advance(5000);

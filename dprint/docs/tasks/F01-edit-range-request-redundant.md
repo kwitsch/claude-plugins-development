@@ -25,7 +25,7 @@ Behaviour changes accepted: `@dprint/json` honours the range, so an Edit on an a
 
 - `formatPre` (Edit branch: `applyEdit`, `lineCursor`, `lsp.format(uri, M)`, `changed`, `trimToEdit`)
 - `DprintLsp.format`, `DprintLsp.formatNow` (only `textDocument/formatting` is sent)
-- tests: `tests/mcp-server.test.mjs` stub `dprint lsp` (modes `ok`, `range-null`, `hang`, `crash`)
+- tests: `tests/mcp-server.test.mts` stub `dprint lsp` (modes `ok`, `range-null`, `hang`, `crash`)
 
 ## Approach
 
@@ -34,7 +34,7 @@ Trap kept open: if a future dprint/TS plugin honours the range (`rangeHonoured` 
 
 ## Verification
 
-`pnpm --filter dprint build && pnpm --filter dprint test`. Tests: "Edit: only the edited line region comes back", "Edit: whole-file reformat by the stub -> far hunks dropped", "rangeFormatting answering null (yaml plugin) -> Edit still formatted" in `tests/mcp-server.test.mjs`. Optional: assert the stub receives exactly one `textDocument/formatting` and no `rangeFormatting` per changed Edit on a clean file.
+`pnpm --filter dprint build && pnpm --filter dprint test`. Tests: "Edit: only the edited line region comes back", "Edit: whole-file reformat by the stub -> far hunks dropped", "rangeFormatting answering null (yaml plugin) -> Edit still formatted" in `tests/mcp-server.test.mts`. Optional: assert the stub receives exactly one `textDocument/formatting` and no `rangeFormatting` per changed Edit on a clean file.
 
 ## Constraints
 
