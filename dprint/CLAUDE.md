@@ -5,7 +5,7 @@ no argument = `fmt`), one PreToolUse format hook, one FileChanged format hook (`
 `Write|Edit` recorder (`file_written`), three cwd-tracking hooks (CwdChanged, PostToolUse
 EnterWorktree/ExitWorktree), one SessionStart/CwdChanged `command` hook that sets the FileChanged watch list
 (`plugin/mcp/watch-paths.mjs`) and one Claude Code function-hooks module `plugin/hooks/notice.mjs` (15 s toast when
-the working directory has no dprint config).
+the working directory has a dprint config but dprint cannot run).
 
 Skill: three zero-dep scripts (plus the shared `find-dprint.mjs`, `find-config.mjs` and `config-names.mjs`, the six
 dprint config file names in `CONFIG_NAMES`) and one data file, all in
@@ -54,16 +54,37 @@ Toast: `plugin/hooks/hooks.json` also lists `"modules": ["./notice.mjs"]` (Claud
 API). `notice.mjs` hooks `session.start`, `classic.CwdChanged` and `tool.call` for `EnterWorktree`/`ExitWorktree`,
 lets the event run, then checks the resulting cwd (`new_cwd` for CwdChanged, the tool result's `worktreePath`/`restoredCwd` for the
 worktree tools, else `$.session.cwd()`) and its ancestors (up to the dir holding `.git`) for the `CONFIG_NAMES` (an inlined copy: the module has no
-imports; a test checks it against `config-names.mts`) with `$.fs.exists` detached (errors swallowed), at most one toast
-per directory per 15 s, and calls `$.ui.toast(text, { timeoutMs: 15000 })` when none exists. `scripts/hooks.mjs` validates only the
-`hooks` map; `claude plugin validate plugin` checks the module and warns "gating hook without .catch" for three of
-its hooks (expected: the check is detached with `.catch`).
+imports; a test checks it against `config-names.mts`) with `$.fs.exists`, detached (errors swallowed). No config: silent,
+nothing spawned. Config found: it judges the one dprint `findDprint` would pick, with `$.process.run`: the first `<abs PATH entry>/dprint`
+that exists (`$.env.get("PATH")` + `$.fs.exists`; relative entries skipped, a weaker check than `findDprint`'s executable-file test),
+else `$HOME/.dprint/bin/dprint` if it exists (`$.env.get("HOME")`), else `npx --no --prefer-offline -- dprint --version`
+(cached package only: unlike `findDprint`, which runs on a format request, this runs unprompted, so it never downloads;
+`--prefer-offline` so a name-only spec is not checked against the registry's latest, which fails offline or after a release).
+Only the pick is run (`<pick> --version`), never a later candidate, so a broken PATH dprint toasts even when `~/.dprint/bin` works
+(as `findDprint` would fail on it too), each in `cwd` HOME (else, or when that dir does not exist, `/`, never the project, whose `node_modules/.bin` npx would prefer), 10 s timeout.
+Usable = exit 0, stdout `dprint X.Y.Z` (check-dprint's regex) and X.Y.Z >= the inlined `MIN_VERSION` copy (`0.50.0`; a prerelease of it
+sorts below; `tests/notice.test.mjs` fails when it or the regex drifts from `check-dprint.mts`). The toast text names the cause:
+not installed, `<pick>` could not start or took over 10 s, exited N, printed no dprint version, or is too old (the npx leg reads a non-zero
+exit as not installed, since `npx --no` exits 1 when nothing is cached; its other causes keep their own text; `judge`
+returns `{ kind, text }`, so no logic depends on the wording). A success is cached for the module's life, a failure for
+30 s (its own cache, separate from the MCP server's `findDprint`). Only when the pick is unusable it calls
+`$.ui.toast(text, { timeoutMs: 15000 })`, at most once per 15 s overall (the cause is machine-wide). `scripts/hooks.mjs` validates only the
+`hooks` map; `claude plugin validate plugin` checks the module, lists `process.run`, `env.get` and the env vars `HOME` and `PATH`
+among its uses, and warns "gating hook without .catch" for three of its hooks (expected: the check is detached with
+`.catch`).
 
 `check-dprint.mjs`, `config-names.mjs`, `find-config.mjs`, `find-dprint.mjs`, `run-dprint.mjs`, `scan-plugins.mjs`,
 `plugin/mcp/*.mjs`, `plugin/hooks/notice.mjs` and `plugin/.claude-plugin/plugin.json` are **build output**
 (`pnpm build`) of
 `src/skills/dprint/{check-dprint,config-names,find-config,find-dprint,run-dprint,scan-plugins}.mts`,
 `src/mcp/{server,lsp,format,watch-list,watch-paths}.mts`, `src/hooks/notice.mts` and `plugin.json`. Do not edit them here.
+
+## Tests
+
+`pnpm --filter dprint test` runs vitest (`vitest run`) over `tests/*.test.mjs` against the built `plugin/`; asserts
+via `node:assert/strict`; `vitest.config.mjs` sets `testTimeout: 30_000` for the files that spawn processes. `tests/notice.test.mjs` drives the built hooks module through `createKit` from the workspace package
+`claude-engine-vitest` (stubs for `fs.exists`, `session.cwd`, `env.get`, `process.run`, `ui.toast`;
+`mock.clock(on).settle()` waits for the detached check).
 
 ## Sources vs. build output
 
@@ -87,7 +108,7 @@ its hooks (expected: the check is detached with `.catch`).
 
 `MIN_VERSION` is defined only in the `.mts` source. Changing it: edit there, update the
 "Minimum dprint version" line in `README.md`, rebuild. Tests read the value from that source (the built
-script is minified).
+script is minified). `src/hooks/notice.mts` holds a copy; `tests/notice.test.mjs` fails when the two differ, so change both.
 
 ## Refreshing `dprint-plugins.json`
 

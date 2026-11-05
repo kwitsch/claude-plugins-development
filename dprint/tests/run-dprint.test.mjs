@@ -1,7 +1,7 @@
 // Contract tests for the built plugin/skills/dprint/run-dprint.mjs.
 // Isolated PATH (only bash + node), HOME and project dir per test; dprint is stubbed and logs its argv.
 // Every run passes a cwd inside proj: otherwise findConfig walks up to the repo-root dprint.json (it stops at the nearest `.git`).
-import { test, beforeEach } from "node:test";
+import { test, beforeEach } from "vitest";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";

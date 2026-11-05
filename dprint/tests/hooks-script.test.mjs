@@ -1,6 +1,6 @@
 // Tests for scripts/hooks.mjs: hooks.json validation and the generated hook input types.
 // Each negative case runs the script against a scratch copy of the plugin with one defect.
-import { after, test } from "node:test";
+import { afterAll, test } from "vitest";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import {
@@ -26,7 +26,7 @@ const run = (...args) =>
 
 /** Scratch plugin root with the real files; `mutate(hooks)` edits a copy of hooks.json first. */
 const dirs = [];
-after(() => dirs.forEach((d) => rmSync(d, { recursive: true, force: true })));
+afterAll(() => dirs.forEach((d) => rmSync(d, { recursive: true, force: true })));
 
 function scratch(mutate = () => {}) {
   const dir = mkdtempSync(path.join(tmpdir(), "dprint-hooks-"));

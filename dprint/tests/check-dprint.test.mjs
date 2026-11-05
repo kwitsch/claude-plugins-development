@@ -1,6 +1,6 @@
 // Contract tests for the built plugin/skills/dprint/check-dprint.mjs.
 // Isolated PATH (only bash + node) and HOME per test; dprint is stubbed.
-import { test, beforeEach } from "node:test";
+import { test, beforeEach } from "vitest";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";

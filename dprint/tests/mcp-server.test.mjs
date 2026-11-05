@@ -1,6 +1,6 @@
 // End-to-end tests: spawn the built plugin/mcp/server.mjs with an isolated PATH (bash + node + a stub
 // `dprint`) and HOME; the stub speaks Content-Length JSON-RPC like `dprint lsp`.
-import { test, beforeEach, afterEach } from "node:test";
+import { test, beforeEach, afterEach } from "vitest";
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
 import {

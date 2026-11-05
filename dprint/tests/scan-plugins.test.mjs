@@ -1,6 +1,6 @@
 // Contract tests for the built plugin/skills/dprint/scan-plugins.mjs and a shape test for the
 // shipped dprint-plugins.json. Isolated PATH (only node + git), HOME and git repo per test.
-import { test, beforeEach } from "node:test";
+import { test, beforeEach } from "vitest";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import {

@@ -1,5 +1,5 @@
 // Static checks on the hand-written skill files and the generated manifest.
-import { test } from "node:test";
+import { test } from "vitest";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
@@ -73,7 +73,7 @@ test("README documents the config gate, the 15 s toast module and all six config
     readFileSync(path.join(ROOT, "plugin.json"), "utf8"),
   );
   assert.equal(readme.split("\n")[2], manifest.description);
-  assert.match(manifest.description, /shows a toast when it has none/);
+  assert.match(manifest.description, /shows a toast when it has one but no usable dprint \(missing, failing or older than 0\.50\)/);
 });
 
 test("SKILL.md frontmatter: argument-hint lists the three actions", () => {
@@ -124,7 +124,7 @@ test("README documents the cwd scope, FileChanged formatting and the watch-list 
 test("npx fallback is documented: manifest, README, SKILL.md and both script references", () => {
   const readme = readFileSync(path.join(ROOT, "plugin/README.md"), "utf8");
   const { description } = JSON.parse(readFileSync(path.join(ROOT, "plugin.json"), "utf8"));
-  assert.match(description, /needs node and dprint >= 0\.50 on PATH, or npx\)\.$/);
+  assert.match(description, /needs node and dprint >= 0\.50 on PATH or in ~\/\.dprint\/bin, or npx\)\.$/);
   assert.ok(readme.includes("npx --yes dprint"));
   assert.ok(SKILL.includes("`npx --yes dprint` when `path` is `npx`"));
   assert.doesNotMatch(SKILL, /<path> (init -y|config add)/);

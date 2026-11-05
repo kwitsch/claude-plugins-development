@@ -1,5 +1,5 @@
 // Unit tests for the pure helpers of the built plugin/mcp/format.mjs (no dprint, no spawn).
-import { test } from "node:test";
+import { test } from "vitest";
 import assert from "node:assert/strict";
 import {
   applyEdit,
