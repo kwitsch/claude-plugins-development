@@ -26,7 +26,7 @@ One config for all packages, at the repo root; no per-plugin lint or vitest conf
 - Build: `scripts/build.mjs` uses oxc-transform (type stripping) and oxc-minify.
 - Tooling (`oxlint`, `oxlint-tsgolint`, `oxc-transform`, `oxc-minify` `vitest`) is a root devDependency only.
 - `vitest.config.mjs`: every package's `test` script is `vitest run --config ../vitest.config.mjs`. `vitest` is a root devDependency only.
-- CI re-checks every package when the root `.oxlintrc.json`, `vitest.config.mjs`, `package.json` or `pnpm-lock.yaml` changes.
+- CI re-checks every package when the root `.oxlintrc.json`, `tsconfig.json`, `vitest.config.mjs`, `package.json` or `pnpm-lock.yaml` changes.
 
 ## Commands
 

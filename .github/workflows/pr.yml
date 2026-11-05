@@ -22,7 +22,7 @@ jobs:
           pkgs=$(git diff --name-only "origin/${{ github.base_ref }}...HEAD" | cut -d/ -f1 | sort -u \
             | while read -r d; do [ -f "$d/package.json" ] && echo "$d"; done | tr '\n' ' ')
           # the workspace-wide lint/test config and root tooling apply to every package: re-check all of them
-          shared=$(git diff --name-only "origin/${{ github.base_ref }}...HEAD" -- .oxlintrc.json vitest.config.mjs package.json pnpm-lock.yaml)
+          shared=$(git diff --name-only "origin/${{ github.base_ref }}...HEAD" -- .oxlintrc.json tsconfig.json vitest.config.mjs package.json pnpm-lock.yaml)
           echo "toolchain=$([ -n "$pkgs$shared" ] && echo true)" >> "$GITHUB_OUTPUT"
           echo "filter=$([ -n "$shared" ] && echo '*' || echo '...[origin/${{ github.base_ref }}]')" >> "$GITHUB_OUTPUT"
 
