@@ -92,7 +92,7 @@ jobs:
               pnpm --filter "$p" run --if-present lint
               pnpm --filter "$p" build
               pnpm --filter "$p" test
-              bash .github/scripts/check-plugin-fresh.sh "$p"
+              bash .github/scripts/check-plugin-fresh.sh "${d#"$PWD"/}" # the dir (repo-relative), not the package name
             else
               pnpm --filter "$p" run --if-present test
             fi
