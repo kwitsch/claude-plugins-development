@@ -217,7 +217,8 @@ for (const out of ["dprint 0.50.0", "dprint 1.0.0", "\n dprint 0.50.0\n"]) {
 
 const NPX_CASES = [
   ["a failing npx", EXIT_1, NOT_INSTALLED_TEXT],
-  ["a non-starting npx", DENY, NOT_INSTALLED_TEXT],
+  ["a non-starting or timed-out npx", DENY, "npx could not start or took over 10 s to answer --version"],
+  ["a cached dprint printing no version", NOT_DPRINT, "npx --version printed no dprint version"],
   ["an old cached dprint", ver("dprint 0.49.0\n"), "npx is dprint 0.49.0, the plugin needs >= 0.50.0"],
 ];
 for (const [label, result, problem] of NPX_CASES) {

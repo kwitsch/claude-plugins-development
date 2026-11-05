@@ -47,6 +47,14 @@ const NOT_INSTALLED = "no dprint is installed (none on PATH, in ~/.dprint/bin or
 /** When the last toast was shown (`Date.now()`); the cause is machine-wide, so one toast per {@link TOAST_MS} covers every directory. */
 let shownAt: number | undefined;
 
+/** Why one dprint is not usable: `kind` drives the caller's logic, `text` goes into the toast. */
+type Problem = {
+  /** Spawn rejected (cannot start or timeout), non-zero exit, no version in the output, or below {@link MIN_VERSION}. */
+  kind: "start" | "exit" | "output" | "old";
+  /** The reason as the toast shows it. */
+  text: string;
+};
+
 /** One dprint probe, in flight or settled. */
 type Probe = {
   /** Why the dprint `findDprint` would pick is not usable, `null` when it is. */
@@ -140,24 +148,25 @@ function parentOf(dir: string): string {
  * @param argv - Program and arguments, run without a shell.
  * @param cwd - Working directory of the run.
  * @param name - How the toast names this dprint (its path, or `npx`).
- * @returns Why it is not usable, `null` when it is.
+ * @returns Why it is not usable (`kind` for callers, `text` for the toast), `null` when it is.
  */
-async function judge($: Engine, argv: string[], cwd: string, name: string): Promise<string | null> {
+async function judge($: Engine, argv: string[], cwd: string, name: string): Promise<Problem | null> {
   let r: Awaited<ReturnType<Engine["process"]["run"]>>;
   try {
     r = await $.process.run(argv, { cwd, timeoutMs: PROBE_TIMEOUT_MS });
   } catch {
     // shortcut: timeout and cannot-start share one text, the engine's rejection shape is not in the repo; split when it is
-    return `${name} could not start or took over ${PROBE_TIMEOUT_MS / 1000} s to answer --version`;
+    return { kind: "start", text: `${name} could not start or took over ${PROBE_TIMEOUT_MS / 1000} s to answer --version` };
   }
-  if (r.exitCode !== 0) return `${name} --version exited ${r.exitCode}`;
+  if (r.exitCode !== 0) return { kind: "exit", text: `${name} --version exited ${r.exitCode}` };
   const m = /^dprint (\d+)\.(\d+)\.(\d+)(-\S+)?/.exec(r.stdout.trim());
-  if (!m) return `${name} --version printed no dprint version`;
+  if (!m) return { kind: "output", text: `${name} --version printed no dprint version` };
   const min = MIN_VERSION.split(".").map(Number);
   let cmp = 0;
   for (let i = 0; i < 3 && cmp === 0; i++) cmp = Number(m[i + 1]) - min[i];
   if (cmp === 0 && m[4]) cmp = -1; // a prerelease of the minimum sorts below it
-  return cmp < 0 ? `${name} is dprint ${m[1]}.${m[2]}.${m[3]}${m[4] ?? ""}, the plugin needs >= ${MIN_VERSION}` : null;
+  if (cmp >= 0) return null;
+  return { kind: "old", text: `${name} is dprint ${m[1]}.${m[2]}.${m[3]}${m[4] ?? ""}, the plugin needs >= ${MIN_VERSION}` };
 }
 
 /**
@@ -187,12 +196,12 @@ function dprintProblem($: Engine): Promise<string | null> {
       const found = await Promise.all(candidates.map((p) => $.fs.exists(p)));
       let pick = candidates.find((_, i) => found[i]);
       if (!pick && home && (await $.fs.exists(`${home}/.dprint/bin/dprint`))) pick = `${home}/.dprint/bin/dprint`;
-      if (pick) return judge($, [pick, "--version"], cwd, pick);
+      if (pick) return (await judge($, [pick, "--version"], cwd, pick))?.text ?? null;
       // `--` keeps npx from reading --version as its own flag once --no is given; --prefer-offline: npx checks a
       // name-only spec against the registry's latest, which offline or after a new release fails a cached dprint
       const npx = await judge($, ["npx", "--no", "--prefer-offline", "--", "dprint", "--version"], cwd, "npx");
-      // `npx --no` exits non-zero when nothing is cached, so only "too old" says more than "not installed"
-      return npx === null || npx.startsWith("npx is dprint ") ? npx : NOT_INSTALLED;
+      // `npx --no` exits non-zero when nothing is cached; every other cause keeps its own text
+      return npx?.kind === "exit" ? NOT_INSTALLED : (npx?.text ?? null);
     })(),
   };
   // a rejected chain (env.get, fs.exists) is retried like a failed one, never cached for good

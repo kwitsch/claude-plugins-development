@@ -64,8 +64,9 @@ Only the pick is run (`<pick> --version`), never a later candidate, so a broken 
 (as `findDprint` would fail on it too), each in `cwd` HOME (else `/`, never the project, whose `node_modules/.bin` npx would prefer), 10 s timeout.
 Usable = exit 0, stdout `dprint X.Y.Z` (check-dprint's regex) and X.Y.Z >= the inlined `MIN_VERSION` copy (`0.50.0`; a prerelease of it
 sorts below; `tests/notice.test.mjs` fails when it or the regex drifts from `check-dprint.mts`). The toast text names the cause:
-not installed, `<pick>` could not start or took over 10 s, exited N, printed no dprint version, or is too old (the npx leg shows only
-"too old", every other npx failure reads as not installed). A success is cached for the module's life, a failure for
+not installed, `<pick>` could not start or took over 10 s, exited N, printed no dprint version, or is too old (the npx leg reads a non-zero
+exit as not installed, since `npx --no` exits 1 when nothing is cached; its other causes keep their own text; `judge`
+returns `{ kind, text }`, so no logic depends on the wording). A success is cached for the module's life, a failure for
 30 s (its own cache, separate from the MCP server's `findDprint`). Only when the pick is unusable it calls
 `$.ui.toast(text, { timeoutMs: 15000 })`, at most once per 15 s overall (the cause is machine-wide). `scripts/hooks.mjs` validates only the
 `hooks` map; `claude plugin validate plugin` checks the module, lists `process.run`, `env.get` and the env vars `HOME` and `PATH`
