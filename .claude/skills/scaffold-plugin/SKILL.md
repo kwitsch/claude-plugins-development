@@ -63,4 +63,5 @@ List the created files and the three commands above. Do not commit unless asked.
 
 - `<name>/plugin.json` is the only place for `version`, `description`, `author`; `pnpm build` copies it to `plugin/.claude-plugin/plugin.json`.
 - `src/**/*.mts` → `plugin/**/*.mjs`, same relative path.
+- Scripts used by several components (skills, hooks, MCP) go in `src/bin/*.mts` → `plugin/bin/*.mjs`.
 - Runtime code: `node:` builtins only.
