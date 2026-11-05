@@ -6,12 +6,9 @@
     ".": "./index.mjs"
   },
   "scripts": {
-    "test": "vitest run"
+    "test": "vitest run --config ../vitest.config.mjs"
   },
   "peerDependencies": {
     "vitest": "*"
-  },
-  "devDependencies": {
-    "vitest": "^5.1.0"
   }
 }

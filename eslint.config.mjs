@@ -1,4 +1,6 @@
-// Lint config for the TypeScript sources in src/. plugin/ is build output (minified .mjs) and is never linted.
+// Workspace-wide lint config for every plugin's TypeScript sources (<name>/src/). Each plugin's `eslint` finds this
+// file by walking up from its own directory. <name>/plugin/ is build output (minified .mjs) and is never linted.
+// projectService picks each file's nearest tsconfig.json, so type-checked rules use that plugin's compiler options.
 import js from "@eslint/js";
 import jsdoc from "eslint-plugin-jsdoc";
 import tsdoc from "eslint-plugin-tsdoc";
@@ -6,9 +8,9 @@ import globals from "globals";
 import tseslint from "typescript-eslint";
 
 export default tseslint.config(
-  { ignores: ["plugin/**"] },
+  { ignores: ["*/plugin/**", "**/node_modules/**"] },
   {
-    files: ["src/**/*.{ts,mts}"],
+    files: ["*/src/**/*.{ts,mts}"],
     extends: [
       js.configs.recommended,
       ...tseslint.configs.recommendedTypeChecked,

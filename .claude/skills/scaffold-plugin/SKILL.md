@@ -30,7 +30,6 @@ for f in plugin.json package.json tsconfig.json; do
   sed -e "s/__NAME__/$name/g" -e "s/__DESCRIPTION__/<description>/g" -e "s/__AUTHOR__/$(git config user.name)/g" "$T/$f" > "$name/$f"
 done
 cp "$T/build.mjs" "$name/scripts/build.mjs"
-cp "$T/eslint.config.mjs" "$name/eslint.config.mjs"
 sed "s/__NAME__/$name/g" "$T/CLAUDE.md" > "$name/CLAUDE.md"
 sed "s/__NAME__/$name/g" "$T/README.md" > "$name/plugin/README.md"
 ```

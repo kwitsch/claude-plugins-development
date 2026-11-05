@@ -21,7 +21,10 @@ jobs:
           # toolchain only when a workspace package changed (the test set comes from pnpm's graph below)
           pkgs=$(git diff --name-only "origin/${{ github.base_ref }}...HEAD" | cut -d/ -f1 | sort -u \
             | while read -r d; do [ -f "$d/package.json" ] && echo "$d"; done | tr '\n' ' ')
-          echo "toolchain=$([ -n "$pkgs" ] && echo true)" >> "$GITHUB_OUTPUT"
+          # the workspace-wide lint/test config and root tooling apply to every package: re-check all of them
+          shared=$(git diff --name-only "origin/${{ github.base_ref }}...HEAD" -- eslint.config.mjs vitest.config.mjs package.json pnpm-lock.yaml)
+          echo "toolchain=$([ -n "$pkgs$shared" ] && echo true)" >> "$GITHUB_OUTPUT"
+          echo "filter=$([ -n "$shared" ] && echo '*' || echo '...[origin/${{ github.base_ref }}]')" >> "$GITHUB_OUTPUT"
 
       - name: Versions in package.json and plugin.json must match
         if: steps.changed.outputs.plugins != ''
@@ -80,12 +83,12 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       # changed workspace packages plus everything depending on them (a claude-engine-vitest change re-tests its
-      # plugins without a version bump); plugins get the full check, other packages their tests
+      # plugins without a version bump), or every package when the shared root config changed; plugins get the full check, other packages their tests
       - name: Build and test changed packages and their dependents
         if: steps.changed.outputs.toolchain == 'true'
         run: |
           set -o pipefail # a failing pnpm list must fail the job, not test nothing
-          dirs=$(pnpm list -r --depth -1 --json --filter "...[origin/${{ github.base_ref }}]" | jq -r '.[].path')
+          dirs=$(pnpm list -r --depth -1 --json --filter "${{ steps.changed.outputs.filter }}" | jq -r '.[].path')
           for d in $dirs; do
             p=$(basename "$d")
             [ "$d" = "$PWD" ] && continue # workspace root

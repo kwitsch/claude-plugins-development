@@ -4,7 +4,17 @@
   "type": "module",
   "scripts": {
     "build": "pnpm -r build",
-    "test": "pnpm -r test"
+    "test": "pnpm -r test",
+    "lint": "pnpm -r lint"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "eslint": "^10.14.0",
+    "eslint-plugin-jsdoc": "^65.4.2",
+    "eslint-plugin-tsdoc": "^0.5.4",
+    "globals": "^17.14.0",
+    "typescript-eslint": "^8.72.1",
+    "vitest": "^5.1.0"
   },
   "packageManager": "pnpm@11.20.0"
 }

@@ -81,8 +81,8 @@ among its uses, and warns "gating hook without .catch" for three of its hooks (e
 
 ## Tests
 
-`pnpm --filter dprint test` runs vitest (`vitest run`) over `tests/*.test.mjs` against the built `plugin/`; asserts
-via `node:assert/strict`; `vitest.config.mjs` sets `testTimeout: 30_000` for the files that spawn processes. `tests/notice.test.mjs` drives the built hooks module through `createKit` from the workspace package
+`pnpm --filter dprint test` runs vitest (`vitest run`, workspace config `../vitest.config.mjs`) over `tests/*.test.mjs` against the built `plugin/`; asserts
+via `node:assert/strict`; the shared config sets `testTimeout: 30_000` for the files that spawn processes. `tests/notice.test.mjs` drives the built hooks module through `createKit` from the workspace package
 `claude-engine-vitest` (stubs for `fs.exists`, `session.cwd`, `env.get`, `process.run`, `ui.toast`;
 `mock.clock(on).settle()` waits for the detached check).
 
@@ -91,7 +91,7 @@ via `node:assert/strict`; `vitest.config.mjs` sets `testTimeout: 30_000` for the
 - `src/**/*.{mts,ts}` are written for humans: every function, method, class, type, type member and
   module-level constant carries a TSDoc comment (`@param name - text`, `@returns`, `@remarks`, one blank line
   before the first tag). `pnpm lint` (ESLint + typescript-eslint, `eslint-plugin-tsdoc`, `eslint-plugin-jsdoc`;
-  config `eslint.config.mjs`, type-checked rules incl. `no-explicit-any`/`no-unsafe-*`) enforces it; CI runs
+  workspace config `../eslint.config.mjs`, type-checked rules incl. `no-explicit-any`/`no-unsafe-*`) enforces it; CI runs
   it. `plugin/` is ignored by the linter.
 - `plugin/hooks/hooks.json` is the hook-input contract. `scripts/hooks.mjs` validates it (`mcp_tool` hooks, plus
   `command` hooks (non-empty `command`, timeout checked, no input, no generated types), `server` =

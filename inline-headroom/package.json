@@ -1,25 +1,18 @@
 {
   "name": "inline-headroom",
-  "version": "0.9.0",
+  "version": "0.9.1",
   "private": true,
   "type": "module",
   "scripts": {
     "build": "node scripts/build.mjs",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "vitest run",
+    "test": "vitest run --config ../vitest.config.mjs",
     "lint": "eslint"
   },
   "devDependencies": {
-    "@eslint/js": "^10.0.1",
     "@types/node": "^26.6.6",
     "claude-engine-vitest": "workspace:*",
-    "eslint": "^10.14.0",
-    "eslint-plugin-jsdoc": "^65.4.2",
-    "eslint-plugin-tsdoc": "^0.5.4",
-    "globals": "^17.14.0",
     "terser": "^5.51.2",
-    "typescript": "^6.0.3",
-    "typescript-eslint": "^8.72.1",
-    "vitest": "^5.1.0"
+    "typescript": "^6.0.3"
   }
 }
