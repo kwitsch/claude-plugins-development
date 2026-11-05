@@ -3,6 +3,7 @@ paths:
   - "*/src/**"
   - "*/scripts/**"
   - "*/tests/**"
+  - "development/vitest/*/tests/**"
 ---
 
 # Rule: src / scripts / tests
