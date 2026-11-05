@@ -3,8 +3,6 @@
   "include": [
     "*/src/**/*.mts",
     "*/scripts/*.mts",
-    "scripts/*.mts",
-    ".github/scripts/*.mts",
     "vitest.config.mts"
   ]
 }
