@@ -57,7 +57,7 @@
     {
       "files": [
         "*/tests/**",
-        "claude-engine-vitest/**"
+        "development/vitest/claude-engine/**"
       ],
       "rules": {
         "typescript/no-unsafe-member-access": "off",
