@@ -3,11 +3,11 @@
 // session.cwd, env.get, process.run and ui.toast, and mock.clock(on).settle() waits for the detached check. The
 // first test records the registration list by hand (the kit does not expose it); the last two read the built file.
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { afterEach, beforeEach, test as plainTest, vi } from "vitest";
+import { afterAll, afterEach, beforeEach, test as plainTest, vi } from "vitest";
 import { createKit } from "claude-engine-vitest";
 import { register } from "../plugin/hooks/notice.mjs";
 import { CONFIG_NAMES } from "../plugin/skills/dprint/config-names.mjs";
@@ -18,7 +18,7 @@ const PLUGIN = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../pl
 const HOME = "/home/u";
 const HOME_DPRINT = `${HOME}/.dprint/bin/dprint`;
 const PATH_ARGV = ["dprint", "--version"];
-const NPX_ARGV = ["npx", "--no", "--", "dprint", "--version"];
+const NPX_ARGV = ["npx", "--no", "--prefer-offline", "--", "dprint", "--version"];
 const PROBE_INIT = { cwd: HOME, timeoutMs: 10000 };
 const OK = { value: { exitCode: 0, stdout: "dprint 0.50.0\n", stderr: "" } };
 const EXIT_1 = { value: { exitCode: 1, stdout: "", stderr: "" } };
@@ -35,9 +35,13 @@ beforeEach(() => {
 });
 afterEach(() => vi.useRealTimers());
 
+const dirs = [];
+afterAll(() => dirs.forEach((d) => rmSync(d, { recursive: true, force: true })));
+
 /** A fresh dir holding a `.git` dir: the config walk stops there, so no stray config above os.tmpdir() leaks in. */
 function repo() {
   const d = mkdtempSync(path.join(tmpdir(), "dprint-notice-"));
+  dirs.push(d);
   mkdirSync(path.join(d, ".git"));
   return d;
 }
@@ -320,7 +324,7 @@ plainTest("the probe constants and version regex equal find-dprint's", () => {
   assert.ok(num(find, "NPX_RETRY_MS"));
   assert.equal(num(notice, "PROBE_RETRY_MS"), num(find, "NPX_RETRY_MS"));
   assert.ok(find.includes("/^dprint \\d/") && notice.includes("/^dprint \\d/"), "version regex");
-  assert.ok(find.includes('["--yes", "dprint"]') && notice.includes('["npx", "--no", "--", "dprint", "--version"]'), "npx argv (notice never downloads)");
+  assert.ok(find.includes('["--yes", "dprint"]') && notice.includes('["npx", "--no", "--prefer-offline", "--", "dprint", "--version"]'), "npx argv (notice never downloads)");
   assert.ok(find.includes('join(homedir(), ".dprint", "bin", "dprint")') && notice.includes("${home}/.dprint/bin/dprint"), "home path");
 });
 

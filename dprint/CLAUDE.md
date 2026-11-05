@@ -56,8 +56,9 @@ lets the event run, then checks the resulting cwd (`new_cwd` for CwdChanged, the
 worktree tools, else `$.session.cwd()`) and its ancestors (up to the dir holding `.git`) for the `CONFIG_NAMES` (an inlined copy: the module has no
 imports; a test checks it against `config-names.mts`) with `$.fs.exists`, detached (errors swallowed). No config: silent,
 nothing spawned. Config found: it probes for a runnable dprint with `$.process.run`, in `find-dprint.mts`'s order:
-`dprint --version` on `PATH`, `$HOME/.dprint/bin/dprint --version` (`$.env.get("HOME")`), `npx --no -- dprint --version`
-(cached package only: unlike `findDprint`, which runs on a format request, this runs unprompted, so it never downloads),
+`dprint --version` on `PATH`, `$HOME/.dprint/bin/dprint --version` (`$.env.get("HOME")`), `npx --no --prefer-offline -- dprint --version`
+(cached package only: unlike `findDprint`, which runs on a format request, this runs unprompted, so it never downloads;
+`--prefer-offline` so a name-only spec is not checked against the registry's latest, which fails offline or after a release),
 each in `cwd` HOME (else `/`, never the project, whose `node_modules/.bin` npx would prefer), 10 s timeout each,
 success = exit 0 and stdout `dprint <digit>`; a success is cached for the module's life, a failure for
 30 s (its own cache, separate from the MCP server's `findDprint`). Only when every probe fails it calls

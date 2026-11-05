@@ -30,7 +30,7 @@ const CONFIG_NAMES = [
 /** How long the cannot-run toast stays, in ms: long enough to read, short enough not to nag; a UX default, safe to change. */
 const TOAST_MS = 15_000;
 
-/** Timeout of each dprint probe, in ms; a cold `npx --yes dprint` download measured about 2 s (same value as `find-dprint.mts`). */
+/** Timeout of each dprint probe, in ms (same value as `NPX_PROBE_TIMEOUT_MS` in `find-dprint.mts`; these probes never download). */
 const PROBE_TIMEOUT_MS = 10_000;
 
 /** How long a failed probe stays cached before the next event re-probes, in ms (same as `NPX_RETRY_MS` in `find-dprint.mts`). */
@@ -159,8 +159,9 @@ function hasDprint($: Engine): Promise<boolean> {
       const cwd = home || "/";
       if (await runsDprint($, ["dprint", "--version"], cwd)) return true;
       if (home && (await runsDprint($, [`${home}/.dprint/bin/dprint`, "--version"], cwd))) return true;
-      // `--` keeps npx from reading --version as its own flag once --no is given
-      return runsDprint($, ["npx", "--no", "--", "dprint", "--version"], cwd);
+      // `--` keeps npx from reading --version as its own flag once --no is given; --prefer-offline: npx checks a
+      // name-only spec against the registry's latest, which offline or after a new release fails a cached dprint
+      return runsDprint($, ["npx", "--no", "--prefer-offline", "--", "dprint", "--version"], cwd);
     })(),
   };
   // a rejected chain (env.get) is retried like a failed one, never cached for good
