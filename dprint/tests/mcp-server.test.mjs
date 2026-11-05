@@ -554,7 +554,7 @@ test("crashing dprint -> {}, then a working dprint is respawned -> formatted", a
   assert.equal(out.hookSpecificOutput.updatedInput.content, "x\n");
 });
 
-test("lsp timeout -> later formats of that document fail fast for the cooldown, other documents do not", async () => {
+test("lsp timeout -> later formats of that document fail fast for the cooldown, other documents do not", { timeout: 10_000 }, async () => {
   stubDprint("hang");
   const oldPath = process.env.PATH;
   process.env.PATH = bin; // findDprint resolves the stub

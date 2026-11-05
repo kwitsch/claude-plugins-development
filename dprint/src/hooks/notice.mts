@@ -50,6 +50,9 @@ type Probe = {
 /** The latest dprint probe; a success is kept for the life of the module, a failure for {@link PROBE_RETRY_MS}. */
 let probe: Probe | null = null;
 
+/** Set once a probe succeeded: from then on no event walks the filesystem, as no toast can follow. */
+let dprintRuns = false;
+
 /** The part of the engine interface `$` this module uses. */
 type Engine = {
   /** Filesystem reads. */
@@ -160,14 +163,14 @@ function hasDprint($: Engine): Promise<boolean> {
       return runsDprint($, ["npx", "--no", "--", "dprint", "--version"], cwd);
     })(),
   };
-  entry.ok.then(
-    (ok) => {
-      if (!ok) entry.failedAt = Date.now();
-    },
-    () => {
-      entry.failedAt = Date.now(); // a rejected chain (env.get) is retried like a failed one, never cached for good
-    },
-  );
+  // a rejected chain (env.get) is retried like a failed one, never cached for good
+  const fail = () => {
+    entry.failedAt = Date.now();
+  };
+  entry.ok.then((ok) => {
+    if (ok) dprintRuns = true;
+    else fail();
+  }, fail);
   probe = entry;
   return entry.ok;
 }
@@ -182,15 +185,16 @@ function hasDprint($: Engine): Promise<boolean> {
  * @returns Resolves once the check (and any toast) is done.
  */
 async function warnIfNoDprint($: Engine, dir: string): Promise<void> {
-  if (!dir) return;
   const recentlyShown = () => shownAt !== undefined && withinMs(shownAt, TOAST_MS);
-  if (recentlyShown()) return; // before the config walk: a repeat event inside the window costs no filesystem work
+  // before the config walk: these events cost no filesystem work
+  if (!dir || dprintRuns || recentlyShown()) return;
   const sep = dir.includes("\\") && !dir.includes("/") ? "\\" : "/";
   let found = false;
   for (let d = dir; d && !found; d = parentOf(d)) {
     const base = d.endsWith(sep) ? d : d + sep;
-    found = (await Promise.all(CONFIG_NAMES.map((n) => $.fs.exists(base + n)))).some(Boolean);
-    if (!found && (await $.fs.exists(base + ".git"))) break; // repository or worktree root: never search above it
+    const [git, ...configs] = await Promise.all([".git", ...CONFIG_NAMES].map((n) => $.fs.exists(base + n)));
+    found = configs.some(Boolean);
+    if (git) break; // repository or worktree root: never search above it
   }
   if (!found) return; // the project does not use dprint: nothing to warn about, nothing spawned
   if (await hasDprint($)) return; // before the dedupe, so a dir whose probe succeeds never takes a slot
@@ -230,8 +234,8 @@ async function resultingCwd($: Engine, e: unknown, r: unknown): Promise<string> 
  */
 async function onSessionCwd($: Engine, e: unknown, next: Next): Promise<unknown> {
   const r = await next(e);
-  // inside .then so even a synchronous throw from the engine lands in .catch
-  void Promise.resolve().then(() => resultingCwd($, e, r)).then((dir) => warnIfNoDprint($, dir)).catch(() => {});
+  // resultingCwd is async, so even a synchronous engine throw inside it lands in .catch
+  void resultingCwd($, e, r).then((dir) => warnIfNoDprint($, dir)).catch(() => {});
   return r;
 }
 
