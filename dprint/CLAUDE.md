@@ -56,10 +56,12 @@ lets the event run, then checks the resulting cwd (`new_cwd` for CwdChanged, the
 worktree tools, else `$.session.cwd()`) and its ancestors (up to the dir holding `.git`) for the `CONFIG_NAMES` (an inlined copy: the module has no
 imports; a test checks it against `config-names.mts`) with `$.fs.exists`, detached (errors swallowed). No config: silent,
 nothing spawned. Config found: it probes for a runnable dprint with `$.process.run`, in `find-dprint.mts`'s order:
-`dprint --version` on `PATH`, `$HOME/.dprint/bin/dprint --version` (`$.env.get("HOME")`), `npx --yes dprint --version`,
-10 s timeout each, success = exit 0 and stdout `dprint <digit>`; a success is cached for the module's life, a failure for
+`dprint --version` on `PATH`, `$HOME/.dprint/bin/dprint --version` (`$.env.get("HOME")`), `npx --no -- dprint --version`
+(cached package only: unlike `findDprint`, which runs on a format request, this runs unprompted, so it never downloads),
+each in `cwd` HOME (else `/`, never the project, whose `node_modules/.bin` npx would prefer), 10 s timeout each,
+success = exit 0 and stdout `dprint <digit>`; a success is cached for the module's life, a failure for
 30 s (its own cache, separate from the MCP server's `findDprint`). Only when every probe fails it calls
-`$.ui.toast(text, { timeoutMs: 15000 })`, at most once per directory per 15 s. `scripts/hooks.mjs` validates only the
+`$.ui.toast(text, { timeoutMs: 15000 })`, at most once per 15 s overall (the cause is machine-wide). `scripts/hooks.mjs` validates only the
 `hooks` map; `claude plugin validate plugin` checks the module, lists `process.run`, `env.get` and the env var `HOME`
 among its uses, and warns "gating hook without .catch" for three of its hooks (expected: the check is detached with
 `.catch`).
@@ -73,8 +75,7 @@ among its uses, and warns "gating hook without .catch" for three of its hooks (e
 ## Tests
 
 `pnpm --filter dprint test` runs vitest (`vitest run`) over `tests/*.test.mjs` against the built `plugin/`; asserts
-via `node:assert/strict`, no vitest config file. Files that spawn processes pass `IT = { timeout: 30_000 }` to every
-test. `tests/notice.test.mjs` drives the built hooks module through `createKit` from the workspace package
+via `node:assert/strict`; `vitest.config.mjs` sets `testTimeout: 30_000` for the files that spawn processes. `tests/notice.test.mjs` drives the built hooks module through `createKit` from the workspace package
 `claude-engine-vitest` (stubs for `fs.exists`, `session.cwd`, `env.get`, `process.run`, `ui.toast`;
 `mock.clock(on).settle()` waits for the detached check).
 

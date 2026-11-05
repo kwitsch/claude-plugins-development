@@ -36,8 +36,8 @@ const PROBE_TIMEOUT_MS = 10_000;
 /** How long a failed probe stays cached before the next event re-probes, in ms (same as `NPX_RETRY_MS` in `find-dprint.mts`). */
 const PROBE_RETRY_MS = 30_000;
 
-/** When each directory (trailing separators stripped) last got a toast, pruned after {@link TOAST_MS}; one action can fire several of the hooks below. */
-const shown = new Map<string, number>();
+/** When the last toast was shown (`Date.now()`); the cause is machine-wide, so one toast per {@link TOAST_MS} covers every directory. */
+let shownAt: number | undefined;
 
 /** One dprint probe, in flight or settled. */
 type Probe = {
@@ -75,7 +75,7 @@ type Engine = {
   /** Child processes. */
   process: {
     /** Run `argv` without a shell; resolves with the exit code, rejects when the program cannot start or times out. */
-    run(argv: string[], init?: { timeoutMs?: number }): Promise<{ exitCode: number; stdout: string; stderr: string }>;
+    run(argv: string[], init?: { cwd?: string; timeoutMs?: number }): Promise<{ exitCode: number; stdout: string; stderr: string }>;
   };
 };
 
@@ -126,11 +126,12 @@ function parentOf(dir: string): string {
  *
  * @param $ - Engine interface.
  * @param argv - Program and arguments, run without a shell.
+ * @param cwd - Working directory of the run.
  * @returns Whether that dprint runs.
  */
-async function runsDprint($: Engine, argv: string[]): Promise<boolean> {
+async function runsDprint($: Engine, argv: string[], cwd: string): Promise<boolean> {
   try {
-    const r = await $.process.run(argv, { timeoutMs: PROBE_TIMEOUT_MS });
+    const r = await $.process.run(argv, { cwd, timeoutMs: PROBE_TIMEOUT_MS });
     return r.exitCode === 0 && /^dprint \d/.test(r.stdout.trim());
   } catch {
     return false;
@@ -139,8 +140,10 @@ async function runsDprint($: Engine, argv: string[]): Promise<boolean> {
 
 /**
  * Whether a dprint can run on this machine, in the order of `find-dprint.mts`: `dprint` on PATH, then
- * `~/.dprint/bin/dprint`, then `npx --yes dprint`. Concurrent callers share one probe; a success is cached for the
- * life of the module, a failure for {@link PROBE_RETRY_MS}.
+ * `~/.dprint/bin/dprint`, then a dprint already in the npx cache. Unlike `find-dprint.mts` (which runs on a format
+ * request) this runs unprompted on every session start and cd, so npx gets `--no` (no download) and every probe runs
+ * in HOME (else `/`), never in the project, whose `node_modules/.bin` npx would prefer. Concurrent callers share one
+ * probe; a success is cached for the life of the module, a failure for {@link PROBE_RETRY_MS}.
  *
  * @param $ - Engine interface.
  * @returns Whether any of the three runs dprint.
@@ -149,10 +152,12 @@ function hasDprint($: Engine): Promise<boolean> {
   if (probe && (probe.failedAt === undefined || withinMs(probe.failedAt, PROBE_RETRY_MS))) return probe.ok;
   const entry: Probe = {
     ok: (async () => {
-      if (await runsDprint($, ["dprint", "--version"])) return true;
       const home = await $.env.get("HOME");
-      if (home && (await runsDprint($, [`${home}/.dprint/bin/dprint`, "--version"]))) return true;
-      return runsDprint($, ["npx", "--yes", "dprint", "--version"]);
+      const cwd = home || "/";
+      if (await runsDprint($, ["dprint", "--version"], cwd)) return true;
+      if (home && (await runsDprint($, [`${home}/.dprint/bin/dprint`, "--version"], cwd))) return true;
+      // `--` keeps npx from reading --version as its own flag once --no is given
+      return runsDprint($, ["npx", "--no", "--", "dprint", "--version"], cwd);
     })(),
   };
   entry.ok.then(
@@ -170,7 +175,7 @@ function hasDprint($: Engine): Promise<boolean> {
 /**
  * Show the cannot-run toast when `dir` or an ancestor up to the git repository or worktree root (as for the format
  * gate) holds one of {@link CONFIG_NAMES} but no dprint runs. No config: nothing is probed and no toast. At most one
- * toast per directory per {@link TOAST_MS}.
+ * toast per {@link TOAST_MS}.
  *
  * @param $ - Engine interface.
  * @param dir - Absolute directory to check; empty means unknown (no toast).
@@ -178,11 +183,7 @@ function hasDprint($: Engine): Promise<boolean> {
  */
 async function warnIfNoDprint($: Engine, dir: string): Promise<void> {
   if (!dir) return;
-  const key = dir.replace(/[\\/]+$/, "") || dir; // `/a/b` and `/a/b/` are one dir
-  const recentlyShown = () => {
-    for (const [k, t] of shown) if (!withinMs(t, TOAST_MS)) shown.delete(k); // expired entries never dedupe again
-    return shown.has(key);
-  };
+  const recentlyShown = () => shownAt !== undefined && withinMs(shownAt, TOAST_MS);
   if (recentlyShown()) return; // before the config walk: a repeat event inside the window costs no filesystem work
   const sep = dir.includes("\\") && !dir.includes("/") ? "\\" : "/";
   let found = false;
@@ -194,9 +195,9 @@ async function warnIfNoDprint($: Engine, dir: string): Promise<void> {
   if (!found) return; // the project does not use dprint: nothing to warn about, nothing spawned
   if (await hasDprint($)) return; // before the dedupe, so a dir whose probe succeeds never takes a slot
   if (recentlyShown()) return; // a concurrent event may have toasted while the probe ran
-  shown.set(key, Date.now());
+  shownAt = Date.now();
   $.ui.toast(
-    `dprint: ${dir} has a dprint config but dprint cannot run here (no dprint on PATH or in ~/.dprint/bin, and npx --yes dprint failed), formatting is off; run /dprint:dprint init`,
+    `dprint: ${dir} has a dprint config but no dprint is installed (none on PATH, in ~/.dprint/bin or in the npx cache); run /dprint:dprint init`,
     { timeoutMs: TOAST_MS },
   );
 }

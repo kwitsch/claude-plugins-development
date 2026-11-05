@@ -20,8 +20,6 @@ import { createInterface } from "node:readline";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { DprintLsp } from "../plugin/mcp/lsp.mjs";
 
-const IT = { timeout: 30_000 };
-
 const PLUGIN = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
   "../plugin",
@@ -174,12 +172,12 @@ function startServer(opts = {}) {
 const lines = (n) => Array.from({ length: n }, (_, i) => `l${i}`);
 const count = (hay, needle) => hay.split(needle).length - 1;
 
-test("server.mjs is an executable node script", IT, () => {
+test("server.mjs is an executable node script", () => {
   assert.ok(readFileSync(SERVER, "utf8").startsWith("#!/usr/bin/env node"));
   assert.ok(statSync(SERVER).mode & 0o100);
 });
 
-test("initialize reports dprint-hooks with the manifest version; tools/list has exactly the hook tools", IT, async () => {
+test("initialize reports dprint-hooks with the manifest version; tools/list has exactly the hook tools", async () => {
   const s = startServer();
   const init = await s.rpc("initialize", {
     protocolVersion: "2025-11-25",
@@ -210,7 +208,7 @@ test("initialize reports dprint-hooks with the manifest version; tools/list has 
   );
 });
 
-test("excluded and out-of-root paths are never formatted", IT, async () => {
+test("excluded and out-of-root paths are never formatted", async () => {
   stubDprint();
   const s = startServer();
   for (const file of [
@@ -230,7 +228,7 @@ test("excluded and out-of-root paths are never formatted", IT, async () => {
     );
 });
 
-test("cwd_changed / worktree_entered re-root later format_pre calls for that session", IT, async () => {
+test("cwd_changed / worktree_entered re-root later format_pre calls for that session", async () => {
   stubDprint();
   const s = startServer();
   const other = path.join(tmp, "other");
@@ -284,7 +282,7 @@ test("cwd_changed / worktree_entered re-root later format_pre calls for that ses
   );
 });
 
-test("Write with trailing spaces -> updatedInput.content stripped + notice", IT, async () => {
+test("Write with trailing spaces -> updatedInput.content stripped + notice", async () => {
   stubDprint();
   const s = startServer();
   const file = path.join(repo, "a.ts");
@@ -305,7 +303,7 @@ test("Write with trailing spaces -> updatedInput.content stripped + notice", IT,
   assert.equal(out.hookSpecificOutput.permissionDecision, undefined);
 });
 
-test("Edit on a CRLF file: old_string/new_string come back LF-only (Claude Code's Edit matches the LF view)", IT, async () => {
+test("Edit on a CRLF file: old_string/new_string come back LF-only (Claude Code's Edit matches the LF view)", async () => {
   stubDprint();
   const s = startServer();
   const file = path.join(repo, "crlf.ts");
@@ -323,7 +321,7 @@ test("Edit on a CRLF file: old_string/new_string come back LF-only (Claude Code'
   });
 });
 
-test("Edit: only the edited line region comes back, occurring once in the file", IT, async () => {
+test("Edit: only the edited line region comes back, occurring once in the file", async () => {
   stubDprint();
   const s = startServer();
   const file = path.join(repo, "b.ts");
@@ -348,7 +346,7 @@ test("Edit: only the edited line region comes back, occurring once in the file",
   assert.equal(count(O, "l5\n"), 1);
 });
 
-test("Edit: whole-file reformat by the stub -> far hunks dropped", IT, async () => {
+test("Edit: whole-file reformat by the stub -> far hunks dropped", async () => {
   stubDprint();
   const s = startServer();
   const file = path.join(repo, "c.ts");
@@ -371,7 +369,7 @@ test("Edit: whole-file reformat by the stub -> far hunks dropped", IT, async () 
   assert.ok(O.replace(u.old_string, () => u.new_string).includes("l1   \n"));
 });
 
-test("rangeFormatting answering null (yaml plugin) -> Edit still formatted", IT, async () => {
+test("rangeFormatting answering null (yaml plugin) -> Edit still formatted", async () => {
   stubDprint("range-null");
   const s = startServer();
   const file = path.join(repo, "d.ts");
@@ -389,7 +387,7 @@ test("rangeFormatting answering null (yaml plugin) -> Edit still formatted", IT,
   });
 });
 
-test("Edit whose trim would drop the deleted repeated line -> {} (never loses the edit)", IT, async () => {
+test("Edit whose trim would drop the deleted repeated line -> {} (never loses the edit)", async () => {
   stubDprint("range-null");
   const s = startServer();
   const file = path.join(repo, "g.ts");
@@ -407,7 +405,7 @@ test("Edit whose trim would drop the deleted repeated line -> {} (never loses th
   assert.deepEqual(out, {});
 });
 
-test("cwd without any dprint config -> Write returns {} and no dprint lsp is spawned", IT, async () => {
+test("cwd without any dprint config -> Write returns {} and no dprint lsp is spawned", async () => {
   // a dprint that would format, but logs every spawn
   const log = path.join(tmp, "spawned.log");
   const f = path.join(bin, "dprint");
@@ -436,7 +434,7 @@ test("cwd without any dprint config -> Write returns {} and no dprint lsp is spa
   assert.equal(existsSync(log), true);
 });
 
-test("only .config/dprint.jsonc in the cwd -> the Write is formatted", IT, async () => {
+test("only .config/dprint.jsonc in the cwd -> the Write is formatted", async () => {
   stubDprint();
   const dir = path.join(tmp, "dotconfig");
   mkdirSync(path.join(dir, ".config"), { recursive: true });
@@ -450,7 +448,7 @@ test("only .config/dprint.jsonc in the cwd -> the Write is formatted", IT, async
   assert.equal(out.hookSpecificOutput.updatedInput.content, "x\n");
 });
 
-test("a dprint config only in an ancestor of the cwd -> the Write is formatted", IT, async () => {
+test("a dprint config only in an ancestor of the cwd -> the Write is formatted", async () => {
   stubDprint();
   const sub = path.join(repo, "packages", "foo");
   mkdirSync(sub, { recursive: true });
@@ -463,7 +461,7 @@ test("a dprint config only in an ancestor of the cwd -> the Write is formatted",
   assert.equal(out.hookSpecificOutput.updatedInput.content, "x\n");
 });
 
-test("the config search stops at the git repo root and at a worktree root", IT, async () => {
+test("the config search stops at the git repo root and at a worktree root", async () => {
   stubDprint();
   const s = startServer();
   const write = (cwd) =>
@@ -494,7 +492,7 @@ test("the config search stops at the git repo root and at a worktree root", IT, 
   );
 });
 
-test("the config gate follows cwd_changed: config-less dir -> {}, back in the config dir -> formatted", IT, async () => {
+test("the config gate follows cwd_changed: config-less dir -> {}, back in the config dir -> formatted", async () => {
   stubDprint();
   const bare = path.join(tmp, "bare");
   mkdirSync(bare);
@@ -520,7 +518,7 @@ test("the config gate follows cwd_changed: config-less dir -> {}, back in the co
   );
 });
 
-test("no dprint on PATH or in ~/.dprint/bin -> {}", IT, async () => {
+test("no dprint on PATH or in ~/.dprint/bin -> {}", async () => {
   const s = startServer();
   const out = await s.call({
     cwd: repo,
@@ -530,7 +528,7 @@ test("no dprint on PATH or in ~/.dprint/bin -> {}", IT, async () => {
   assert.deepEqual(out, {});
 });
 
-test("no dprint binary, npx runs dprint lsp -> Write formatted", IT, async () => {
+test("no dprint binary, npx runs dprint lsp -> Write formatted", async () => {
   stubNpx();
   const s = startServer();
   const out = await s.call({
@@ -542,7 +540,7 @@ test("no dprint binary, npx runs dprint lsp -> Write formatted", IT, async () =>
   assert.ok(readFileSync(path.join(home, "npx-argv"), "utf8").includes("\nlsp\n"));
 });
 
-test("crashing dprint -> {}, then a working dprint is respawned -> formatted", IT, async () => {
+test("crashing dprint -> {}, then a working dprint is respawned -> formatted", async () => {
   stubDprint("crash");
   const s = startServer();
   const args = {
@@ -556,7 +554,7 @@ test("crashing dprint -> {}, then a working dprint is respawned -> formatted", I
   assert.equal(out.hookSpecificOutput.updatedInput.content, "x\n");
 });
 
-test("lsp timeout -> later formats of that document fail fast for the cooldown, other documents do not", IT, async () => {
+test("lsp timeout -> later formats of that document fail fast for the cooldown, other documents do not", async () => {
   stubDprint("hang");
   const oldPath = process.env.PATH;
   process.env.PATH = bin; // findDprint resolves the stub
@@ -578,7 +576,7 @@ test("lsp timeout -> later formats of that document fail fast for the cooldown, 
   }
 });
 
-test(".mcp.json key matches every hooks.json server id and each hook tool is listed", IT, async () => {
+test(".mcp.json key matches every hooks.json server id and each hook tool is listed", async () => {
   const mcp = JSON.parse(readFileSync(path.join(PLUGIN, ".mcp.json"), "utf8"));
   const hooks = JSON.parse(
     readFileSync(path.join(PLUGIN, "hooks/hooks.json"), "utf8"),
@@ -609,7 +607,7 @@ test(".mcp.json key matches every hooks.json server id and each hook tool is lis
   assert.equal(hooks.hooks.CwdChanged[0].hooks[1].type, "command");
 });
 
-test("format_pre formats only files whose real path is inside the cwd and outside the scratchpad", IT, async () => {
+test("format_pre formats only files whose real path is inside the cwd and outside the scratchpad", async () => {
   stubDprint();
   const s = startServer();
   const other = path.join(tmp, "other");
@@ -662,7 +660,7 @@ test("format_pre formats only files whose real path is inside the cwd and outsid
   );
 });
 
-test("format_pre without a cwd skips instead of using the server's own cwd", IT, async () => {
+test("format_pre without a cwd skips instead of using the server's own cwd", async () => {
   stubDprint();
   const s = startServer({ cwd: repo });
   const args = {
@@ -677,7 +675,7 @@ test("format_pre without a cwd skips instead of using the server's own cwd", IT,
   );
 });
 
-test("file_changed formats an in-cwd file on disk (CRLF files keep CRLF); unlink, outside and lone-CR files are left alone", IT, async () => {
+test("file_changed formats an in-cwd file on disk (CRLF files keep CRLF); unlink, outside and lone-CR files are left alone", async () => {
   stubDprint();
   const s = startServer();
   const changedEv = (file, event = "change") =>
@@ -709,7 +707,7 @@ test("file_changed formats an in-cwd file on disk (CRLF files keep CRLF); unlink
   assert.equal(readFileSync(cr, "utf8"), "x  \ry  \r");
 });
 
-test("file_written records the Edit/Write result: file_changed leaves it alone, also on repeated events", IT, async () => {
+test("file_written records the Edit/Write result: file_changed leaves it alone, also on repeated events", async () => {
   stubDprint();
   const s = startServer();
   const b = path.join(repo, "b.ts");
@@ -731,7 +729,7 @@ test("file_written records the Edit/Write result: file_changed leaves it alone, 
   assert.equal(readFileSync(b, "utf8"), "y\n");
 });
 
-test("60 concurrent file_changed events are all formatted", IT, async () => {
+test("60 concurrent file_changed events are all formatted", async () => {
   stubDprint();
   const s = startServer();
   const files = Array.from({ length: 60 }, (_, i) => path.join(repo, `f${i}.ts`));
@@ -743,7 +741,7 @@ test("60 concurrent file_changed events are all formatted", IT, async () => {
   for (const f of files) assert.equal(readFileSync(f, "utf8"), "x\n", f);
 });
 
-test("file_changed skips files above 1 MiB", IT, async () => {
+test("file_changed skips files above 1 MiB", async () => {
   stubDprint();
   const s = startServer();
   const big = path.join(repo, "big.ts");
@@ -756,7 +754,7 @@ test("file_changed skips files above 1 MiB", IT, async () => {
   assert.equal(readFileSync(big, "utf8"), content);
 });
 
-test("file_changed leaves a file alone that is unchanged against the git index", IT, async (t) => {
+test("file_changed leaves a file alone that is unchanged against the git index", async (t) => {
   const git = spawnSync("which", ["git"], { encoding: "utf8" }).stdout?.trim();
   if (!git) return t.skip("git not on PATH");
   symlinkSync(git, path.join(bin, "git"));
@@ -847,7 +845,7 @@ const watch = (input) =>
     encoding: "utf8",
   });
 
-test("watch-paths.mjs prints the in-cwd dprint file paths as watchPaths on SessionStart and CwdChanged", IT, () => {
+test("watch-paths.mjs prints the in-cwd dprint file paths as watchPaths on SessionStart and CwdChanged", () => {
   stubDprint();
   const start = watch({ hook_event_name: "SessionStart", cwd: repo });
   assert.equal(start.status, 0, start.stderr);
@@ -871,7 +869,7 @@ test("watch-paths.mjs prints the in-cwd dprint file paths as watchPaths on Sessi
   });
 });
 
-test("watch-paths.mjs prints nothing for a cwd without a dprint config", IT, () => {
+test("watch-paths.mjs prints nothing for a cwd without a dprint config", () => {
   stubDprint();
   const bare = path.join(tmp, "bare");
   mkdirSync(bare);
@@ -880,7 +878,7 @@ test("watch-paths.mjs prints nothing for a cwd without a dprint config", IT, () 
   assert.equal(r.stdout, "");
 });
 
-test("watch-paths.mjs lists the files through npx when no dprint binary is installed", IT, () => {
+test("watch-paths.mjs lists the files through npx when no dprint binary is installed", () => {
   stubNpx();
   const r = watch({ hook_event_name: "SessionStart", cwd: repo });
   assert.equal(r.status, 0, r.stderr);
@@ -892,7 +890,7 @@ test("watch-paths.mjs lists the files through npx when no dprint binary is insta
   });
 });
 
-test("watch-paths.mjs falls back to output-file-paths on dprint 0.50-0.54", IT, () => {
+test("watch-paths.mjs falls back to output-file-paths on dprint 0.50-0.54", () => {
   stubDprint("ok", "output-file-paths");
   const r = watch({ hook_event_name: "SessionStart", cwd: repo });
   assert.equal(r.status, 0, r.stderr);
@@ -906,7 +904,7 @@ test("watch-paths.mjs falls back to output-file-paths on dprint 0.50-0.54", IT, 
 
 const SESSION = { session_id: "s1", agent_id: "" };
 
-test("bash_finished formats a file the Bash call changed and names it; a later file_changed stays silent", IT, async () => {
+test("bash_finished formats a file the Bash call changed and names it; a later file_changed stays silent", async () => {
   stubDprint();
   const s = startServer();
   const a = path.join(repo, "a.ts"); // the stub's watch list is $PWD/a.ts
@@ -922,7 +920,7 @@ test("bash_finished formats a file the Bash call changed and names it; a later f
   assert.deepEqual(await s.tool("drain_notices", { hook_event_name: "UserPromptSubmit", cwd: repo, ...SESSION }), {});
 });
 
-test("bash_finished: already formatted, stale mtime and missing bash_started give {}", IT, async () => {
+test("bash_finished: already formatted, stale mtime and missing bash_started give {}", async () => {
   stubDprint();
   const s = startServer();
   const a = path.join(repo, "a.ts");
@@ -940,7 +938,7 @@ test("bash_finished: already formatted, stale mtime and missing bash_started giv
   assert.deepEqual(await s.tool("bash_finished", ctx), {});
 });
 
-test("drain_notices reports a file_changed reformat once, to its own session/agent only", IT, async () => {
+test("drain_notices reports a file_changed reformat once, to its own session/agent only", async () => {
   stubDprint();
   const s = startServer();
   const a = path.join(repo, "a.ts");
@@ -955,7 +953,7 @@ test("drain_notices reports a file_changed reformat once, to its own session/age
   assert.deepEqual(await drain(SESSION), {});
 });
 
-test("bash_finished also reports a reformat file_changed already made mid-Bash", IT, async () => {
+test("bash_finished also reports a reformat file_changed already made mid-Bash", async () => {
   stubDprint();
   const s = startServer();
   const a = path.join(repo, "a.ts");

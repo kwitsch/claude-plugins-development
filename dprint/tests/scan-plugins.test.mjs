@@ -14,8 +14,6 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-const IT = { timeout: 30_000 };
-
 const DIR = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
   "../plugin/skills/dprint",
@@ -68,7 +66,7 @@ function run(...args) {
   return { code: r.status, lines: r.stdout.trim().split("\n"), err: r.stderr };
 }
 
-test("dprint-plugins.json: every plugin has a unique id, lower-case dot-free extensions, and at least one file type", IT, () => {
+test("dprint-plugins.json: every plugin has a unique id, lower-case dot-free extensions, and at least one file type", () => {
   assert.ok(Array.isArray(REF.plugins));
   const ids = new Set();
   for (const p of REF.plugins) {
@@ -87,14 +85,14 @@ test("dprint-plugins.json: every plugin has a unique id, lower-case dot-free ext
   }
 });
 
-test("no config file -> exit 11, status=noconfig", IT, () => {
+test("no config file -> exit 11, status=noconfig", () => {
   write("a.ts");
   const r = run();
   assert.equal(r.code, 11);
   assert.deepEqual(r.lines, ["status=noconfig config=- missing=-"]);
 });
 
-test("config only in an ancestor of the cwd -> found, header carries only its name, stderr its path", IT, () => {
+test("config only in an ancestor of the cwd -> found, header carries only its name, stderr its path", () => {
   write("dprint.json", config(JSON_URL));
   const sub = path.join(repo, "sub");
   mkdirSync(sub);
@@ -107,7 +105,7 @@ test("config only in an ancestor of the cwd -> found, header carries only its na
   assert.match(r.stderr, /config found above the cwd: .*dprint\.json/);
 });
 
-test("all detected types covered (URL with checksum suffix) -> exit 0", IT, () => {
+test("all detected types covered (URL with checksum suffix) -> exit 0", () => {
   write("a.ts");
   write("dprint.json", config(`${TS_URL}@abc`, JSON_URL));
   const r = run();
@@ -115,7 +113,7 @@ test("all detected types covered (URL with checksum suffix) -> exit 0", IT, () =
   assert.deepEqual(r.lines, ["status=ok config=dprint.json missing=0"]);
 });
 
-test("only .config/dprint.json -> it is the config, exit 0", IT, () => {
+test("only .config/dprint.json -> it is the config, exit 0", () => {
   write("a.ts");
   write(".config/dprint.json", config(TS_URL, JSON_URL));
   const r = run();
@@ -123,7 +121,7 @@ test("only .config/dprint.json -> it is the config, exit 0", IT, () => {
   assert.deepEqual(r.lines, ["status=ok config=.config/dprint.json missing=0"]);
 });
 
-test("uncovered types -> exit 10, sorted by file count, candidates from the reference", IT, () => {
+test("uncovered types -> exit 10, sorted by file count, candidates from the reference", () => {
   write("a.ts");
   write("b.ts");
   write("src/c.toml");
@@ -138,7 +136,7 @@ test("uncovered types -> exit 10, sorted by file count, candidates from the refe
   ]);
 });
 
-test("dprint.jsonc with comments and trailing commas is parsed; // inside URLs survives", IT, () => {
+test("dprint.jsonc with comments and trailing commas is parsed; // inside URLs survives", () => {
   write("a.ts");
   write(
     ".dprint.jsonc",
@@ -161,7 +159,7 @@ test("dprint.jsonc with comments and trailing commas is parsed; // inside URLs s
   assert.deepEqual(r.lines, ["status=ok config=.dprint.jsonc missing=0"]);
 });
 
-test("npm specifier and node_modules path count as present", IT, () => {
+test("npm specifier and node_modules path count as present", () => {
   write("a.ts");
   write(
     "dprint.json",
@@ -175,7 +173,7 @@ test("npm specifier and node_modules path count as present", IT, () => {
   assert.deepEqual(r.lines, ["status=ok config=dprint.json missing=0"]);
 });
 
-test(".gitignore'd files are not scanned", IT, () => {
+test(".gitignore'd files are not scanned", () => {
   write(".gitignore", "dist/\n");
   write("dist/x.css");
   write("dprint.json", config(JSON_URL));
@@ -184,7 +182,7 @@ test(".gitignore'd files are not scanned", IT, () => {
   assert.deepEqual(r.lines, ["status=ok config=dprint.json missing=0"]);
 });
 
-test("exact file names and upper-case extensions are recognized", IT, () => {
+test("exact file names and upper-case extensions are recognized", () => {
   write("Dockerfile");
   write("README.MD");
   write("dprint.json", config(JSON_URL));
@@ -205,7 +203,7 @@ test("exact file names and upper-case extensions are recognized", IT, () => {
   );
 });
 
-test("extends -> stderr warning, exit code unchanged", IT, () => {
+test("extends -> stderr warning, exit code unchanged", () => {
   write(
     "dprint.json",
     JSON.stringify({
@@ -219,14 +217,14 @@ test("extends -> stderr warning, exit code unchanged", IT, () => {
   assert.match(r.err, /extends/);
 });
 
-test("invalid config -> exit 2, status=error", IT, () => {
+test("invalid config -> exit 2, status=error", () => {
   write("dprint.json", '{ "plugins": [');
   const r = run();
   assert.equal(r.code, 2);
   assert.deepEqual(r.lines, ["status=error config=dprint.json missing=-"]);
 });
 
-test("not a git work tree -> exit 2", IT, () => {
+test("not a git work tree -> exit 2", () => {
   const plain = path.join(tmp, "plain");
   mkdirSync(plain);
   writeFileSync(path.join(plain, "dprint.json"), config(JSON_URL));
@@ -240,7 +238,7 @@ test("not a git work tree -> exit 2", IT, () => {
   assert.match(r.stderr, /git ls-files/);
 });
 
-test("any argument is a usage error -> exit 2", IT, () => {
+test("any argument is a usage error -> exit 2", () => {
   write("dprint.json", config(JSON_URL));
   const r = run("--help");
   assert.equal(r.code, 2);

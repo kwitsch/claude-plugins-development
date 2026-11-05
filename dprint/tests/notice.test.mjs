@@ -7,7 +7,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { test as plainTest, vi } from "vitest";
+import { afterEach, beforeEach, test as plainTest, vi } from "vitest";
 import { createKit } from "claude-engine-vitest";
 import { register } from "../plugin/hooks/notice.mjs";
 import { CONFIG_NAMES } from "../plugin/skills/dprint/config-names.mjs";
@@ -18,14 +18,22 @@ const PLUGIN = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../pl
 const HOME = "/home/u";
 const HOME_DPRINT = `${HOME}/.dprint/bin/dprint`;
 const PATH_ARGV = ["dprint", "--version"];
-const NPX_ARGV = ["npx", "--yes", "dprint", "--version"];
-const PROBE_INIT = { timeoutMs: 10000 };
+const NPX_ARGV = ["npx", "--no", "--", "dprint", "--version"];
+const PROBE_INIT = { cwd: HOME, timeoutMs: 10000 };
 const OK = { value: { exitCode: 0, stdout: "dprint 0.50.0\n", stderr: "" } };
 const EXIT_1 = { value: { exitCode: 1, stdout: "", stderr: "" } };
 const NOT_DPRINT = { value: { exitCode: 0, stdout: "not dprint\n", stderr: "" } };
 // a deny rejects the mod's $.process.run: stands for "the program cannot start"
 const DENY = { deny: "spawn ENOENT" };
 const NEXT = "next-result";
+const T0 = Date.UTC(2026, 10, 5, 12);
+
+// Date is faked in every test so the 15 s toast window can be stepped past with vi.setSystemTime
+beforeEach(() => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(T0);
+});
+afterEach(() => vi.useRealTimers());
 
 /** A fresh dir holding a `.git` dir: the config walk stops there, so no stray config above os.tmpdir() leaks in. */
 function repo() {
@@ -43,7 +51,7 @@ function withConfig(dir, name = "dprint.json") {
 
 /** The toast text the module shows for `dir`. */
 const toastText = (dir) =>
-  `dprint: ${dir} has a dprint config but dprint cannot run here (no dprint on PATH or in ~/.dprint/bin, and npx --yes dprint failed), formatting is off; run /dprint:dprint init`;
+  `dprint: ${dir} has a dprint config but no dprint is installed (none on PATH, in ~/.dprint/bin or in the npx cache); run /dprint:dprint init`;
 
 /**
  * Registers every stub (before the test's first `$` call, as the kit requires) and returns what the module did.
@@ -53,9 +61,13 @@ const toastText = (dir) =>
 function setup($, on, { cwd = "", exists = (p) => ({ value: existsSync(p) }), run = () => OK, home = HOME } = {}) {
   const toasts = [];
   const runs = [];
+  const envGets = [];
   on("fs.exists", (_$, e) => exists(e.path));
   on("session.cwd", () => (typeof cwd === "string" ? { value: cwd } : cwd));
-  on("env.get", (_$, e) => (typeof home === "object" && home ? home : { value: e.name === "HOME" && home !== null ? home : undefined }));
+  on("env.get", (_$, e) => {
+    envGets.push(e.name);
+    return typeof home === "object" && home ? home : { value: e.name === "HOME" && home !== null ? home : undefined };
+  });
   on("process.run", (_$, e) => {
     runs.push({ argv: [...e.argv], init: { ...e.init } });
     return run(e.argv);
@@ -75,7 +87,7 @@ function setup($, on, { cwd = "", exists = (p) => ({ value: existsSync(p) }), ru
     await clock.settle();
     return r;
   };
-  return { fire, toasts, runs };
+  return { fire, toasts, runs, envGets };
 }
 
 plainTest("registers exactly session.start, classic.CwdChanged and tool.call for EnterWorktree/ExitWorktree", () => {
@@ -133,7 +145,9 @@ test("a config in an ancestor below the git root counts; above the git root it d
   await fire("classic.CwdChanged", { new_cwd: sub2 });
   assert.equal(runs.length, 3, "config in an ancestor -> probed");
   assert.deepEqual(toasts.map((t) => t.text), [toastText(sub2)]);
-  // the failed probe is cached, so a found config would toast again: no new toast proves the walk stopped at wt
+  // the failed probe is cached and the toast window is over, so a found config would toast again: no new toast
+  // proves the walk stopped at wt
+  vi.setSystemTime(T0 + 16_000);
   await fire("classic.CwdChanged", { new_cwd: path.join(wt, "src") });
   assert.equal(toasts.length, 1, "a worktree (.git file) is its own root");
 });
@@ -146,15 +160,16 @@ test("dprint not on PATH, ~/.dprint/bin/dprint runs -> no toast; probed as $HOME
   assert.deepEqual(toasts, []);
 });
 
-test("HOME unset -> the ~/.dprint/bin step is skipped and npx is tried next", async ($, on) => {
+test("HOME unset -> the ~/.dprint/bin step is skipped, npx is tried next; probes run in /", async ($, on) => {
   const dir = withConfig(repo());
   const { fire, runs, toasts } = setup($, on, { cwd: dir, home: null, run: (argv) => (argv[0] === "npx" ? OK : DENY) });
   await fire("session.start");
   assert.deepEqual(runs.map((r) => r.argv), [PATH_ARGV, NPX_ARGV]);
+  assert.deepEqual(runs.map((r) => r.init.cwd), ["/", "/"]);
   assert.deepEqual(toasts, []);
 });
 
-test("PATH and ~/.dprint/bin fail, npx --yes dprint runs -> no toast; every probe has a 10 s timeout", async ($, on) => {
+test("PATH and ~/.dprint/bin fail, a cached npx dprint runs (--no: never downloads) -> no toast; every probe runs in HOME with a 10 s timeout", async ($, on) => {
   const dir = withConfig(repo());
   const { fire, runs, toasts } = setup($, on, { cwd: dir, run: (argv) => (argv[0] === "npx" ? OK : EXIT_1) });
   await fire("session.start");
@@ -185,13 +200,17 @@ test("every process.run rejecting counts as 'cannot run' -> toast", async ($, on
   assert.deepEqual(toasts, [{ text: toastText(dir), timeoutMs: 15000 }]);
 });
 
-test("the same dir within 15 s is toasted once across hooks; a trailing separator does not bypass the dedupe", async ($, on) => {
+test("one toast per 15 s across hooks and dirs (the cause is machine-wide), the next one after 15 s", async ($, on) => {
   const dir = withConfig(repo());
+  const other = withConfig(repo());
   const { fire, toasts } = setup($, on, { cwd: dir, run: () => DENY });
   await fire("tool.call", { tool: "EnterWorktree" });
   await fire("classic.CwdChanged", { new_cwd: dir });
-  await fire("classic.CwdChanged", { new_cwd: dir + "/" });
+  await fire("classic.CwdChanged", { new_cwd: other });
   assert.equal(toasts.length, 1);
+  vi.setSystemTime(T0 + 16_000);
+  await fire("classic.CwdChanged", { new_cwd: other });
+  assert.deepEqual(toasts.map((t) => t.text), [toastText(dir), toastText(other)]);
 });
 
 test("worktree tools check the dir their result names; CwdChanged checks new_cwd and does nothing without one", async ($, on) => {
@@ -208,6 +227,7 @@ test("worktree tools check the dir their result names; CwdChanged checks new_cwd
   await fire("classic.CwdChanged", { new_cwd: bare });
   await fire("classic.CwdChanged", {});
   assert.equal(toasts.length, 1);
+  vi.setSystemTime(T0 + 16_000); // past the toast window
   await fire("classic.CwdChanged", { new_cwd: moved });
   assert.deepEqual(toasts.map((t) => t.text), [toastText(restored), toastText(moved)]);
 });
@@ -235,7 +255,7 @@ test("a failed probe is cached for 30 s (the new dir still gets its toast), then
     const { fire, runs, toasts } = setup($, on, { run: () => result });
     await fire("classic.CwdChanged", { new_cwd: a });
     assert.equal(runs.length, 3);
-    vi.setSystemTime(T0 + 10_000);
+    vi.setSystemTime(T0 + 16_000);
     await fire("classic.CwdChanged", { new_cwd: b });
     assert.equal(runs.length, 3, "within 30 s: no re-probe");
     assert.deepEqual(toasts.map((t) => t.text), [toastText(a), toastText(b)]);
@@ -266,15 +286,16 @@ test("a rejecting env.get is cached as a failed probe for 30 s, then re-probed; 
     vi.setSystemTime(T0);
     const a = withConfig(repo());
     const b = withConfig(repo());
-    const { fire, runs, toasts } = setup($, on, { home: { deny: "boom" }, run: () => DENY });
+    const { fire, runs, toasts, envGets } = setup($, on, { home: { deny: "boom" }, run: () => DENY });
     await fire("classic.CwdChanged", { new_cwd: a });
-    assert.equal(runs.length, 1, "PATH probe, then env.get rejects");
+    assert.equal(envGets.length, 1, "env.get rejects before any probe");
     vi.setSystemTime(T0 + 10_000);
     await fire("classic.CwdChanged", { new_cwd: b });
-    assert.equal(runs.length, 1, "within 30 s: no re-probe");
+    assert.equal(envGets.length, 1, "within 30 s: no re-probe");
     vi.setSystemTime(T0 + 31_000);
     await fire("classic.CwdChanged", { new_cwd: b });
-    assert.equal(runs.length, 2, "after 31 s: re-probed");
+    assert.equal(envGets.length, 2, "after 31 s: re-probed");
+    assert.deepEqual(runs, []);
     assert.deepEqual(toasts, []);
   } finally {
     vi.useRealTimers();
@@ -326,7 +347,7 @@ plainTest("the probe constants and version regex equal find-dprint's", () => {
   assert.ok(num(find, "NPX_RETRY_MS"));
   assert.equal(num(notice, "PROBE_RETRY_MS"), num(find, "NPX_RETRY_MS"));
   assert.ok(find.includes("/^dprint \\d/") && notice.includes("/^dprint \\d/"), "version regex");
-  assert.ok(find.includes('["--yes", "dprint"]') && notice.includes('["npx", "--yes", "dprint", "--version"]'), "npx argv");
+  assert.ok(find.includes('["--yes", "dprint"]') && notice.includes('["npx", "--no", "--", "dprint", "--version"]'), "npx argv (notice never downloads)");
   assert.ok(find.includes('join(homedir(), ".dprint", "bin", "dprint")') && notice.includes("${home}/.dprint/bin/dprint"), "home path");
 });
 
