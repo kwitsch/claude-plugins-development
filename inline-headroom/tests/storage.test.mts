@@ -1,8 +1,7 @@
-import { test } from "vitest";
 import assert from "node:assert/strict";
-import { execFileSync, spawn, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { type ChildProcess, execFileSync, spawn, spawnSync } from "node:child_process";
 import { once } from "node:events";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
@@ -11,8 +10,9 @@ import readline from "node:readline";
 import { DatabaseSync } from "node:sqlite";
 import { setTimeout as sleep } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
-import { MIGRATIONS, PROTOCOL, VERSION, compareVersions, execOp, isStorageEnabled, isStorageService, migrate, resolveStorage } from "../plugin/mcp/server.mjs";
+import { test } from "vitest";
 import { zeroCounters } from "../plugin/hooks/policy.mjs";
+import { compareVersions, execOp, isStorageEnabled, isStorageService, migrate, MIGRATIONS, PROTOCOL, resolveStorage, VERSION } from "../plugin/mcp/server.mjs";
 
 const SERVER = fileURLToPath(new URL("../plugin/mcp/server.mjs", import.meta.url));
 const IT = { timeout: 30000 };
@@ -48,7 +48,7 @@ test("resolveStorage joins the three files under the data dir and refuses unusab
 test("migrate brings a fresh DB to MIGRATIONS.length, is idempotent and refuses a newer schema", () => {
   const db = new DatabaseSync(":memory:");
   assert.equal(migrate(db), MIGRATIONS.length);
-  assert.equal(db.prepare("PRAGMA user_version").get().user_version, MIGRATIONS.length);
+  assert.equal(db.prepare("PRAGMA user_version").get()?.user_version, MIGRATIONS.length);
   assert.ok(db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'kv'").get());
   assert.ok(db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'stats'").get());
   assert.equal(migrate(db), MIGRATIONS.length);
@@ -73,8 +73,8 @@ test("stats_put replaces absolute rows per day and writer, stats_sum totals ever
   migrate(db);
   /** @param {string} writer @param {Record<string, unknown>[]} rows @param {string} [purgeBefore] */
   const put = (writer, rows, purgeBefore = "2026-01-01") => execOp(db, "stats_put", { writer, rows, purgeBefore });
-  /** @param {string} since */
-  const sum = (since) => execOp(db, "stats_sum", { since });
+  // stats_sum answers the counter totals
+  const sum = (since: string) => execOp(db, "stats_sum", { since }) as Record<string, number>;
   /** @param {string} day @param {number} base */
   const row = (day, base) => ({ day, ...seq(base + 1, 1) });
   const a = [row("2026-10-01", 0), row("2026-10-02", 10), row("2026-10-03", 100)];
@@ -130,7 +130,7 @@ test("stats ops validate writer, days, rows and counters before writing anything
   ];
   for (const [args, re] of bad) assert.throws(() => execOp(db, "stats_put", args), re, JSON.stringify(args).slice(0, 120));
   assert.throws(() => execOp(db, "stats_sum", { since: "2026-02-30" }), /since must be/);
-  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM stats").get().n, 0); // a failed validation wrote nothing
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM stats").get()?.n, 0); // a failed validation wrote nothing
   // stats ops need no key; kv ops still do; a non-string op is an unknown op, not a TypeError
   assert.deepEqual(execOp(db, "stats_put", ok), { ok: true, purged: 0 });
   assert.throws(() => execOp(db, "kv_get", {}), /key must be/);
@@ -234,16 +234,31 @@ async function waitDead(pid) {
  * fake, SIGTERMs every --service process for this data dir until none is left, and removes the dir.
  * @param {any} t vitest test context
  */
+/** A tool result of the storage server (only the fields the assertions read are typed). */
+interface ToolResult {
+  /** Whether the call failed. */
+  isError?: boolean;
+  /** The result's text blocks. */
+  content: { type: string; text: string }[];
+  /** The result as JSON. */
+  structuredContent: { pid: number; [k: string]: unknown };
+}
+
+/** A JSON-RPC reply of a front-end, or the `{ error }` the sandbox answers once it exited. */
+interface RpcReply {
+  /** The result (initialize, tools/list or tools/call fields). */
+  result: ToolResult & { serverInfo: { name: string }; tools: { name: string }[] };
+  /** The JSON-RPC or exit error. */
+  error?: { message: string };
+}
+
 function sandbox(t) {
   const dir = mkdtempSync(path.join(os.tmpdir(), "ih-"));
-  /** @type {Record<string, string|undefined>} */
-  const env = { ...process.env, CLAUDE_PLUGIN_DATA: dir, INLINE_HEADROOM_STORAGE_ENABLED: "true" };
-  /** @type {any[]} */
-  const fronts = [];
-  /** @type {any[]} */
-  const fakes = [];
+  const env: Record<string, string | undefined> = { ...process.env, CLAUDE_PLUGIN_DATA: dir, INLINE_HEADROOM_STORAGE_ENABLED: "true" };
+  const fronts: ChildProcess[] = [];
+  const fakes: ChildProcess[] = [];
   t.onTestFinished(async () => {
-    for (const fe of fronts) fe.stdin.end();
+    for (const fe of fronts) fe.stdin?.end();
     for (const fake of fakes) fake.kill("SIGTERM");
     const deadline = Date.now() + 5000;
     for (let pids = servicePids(dir); pids.length > 0 && Date.now() < deadline; pids = servicePids(dir)) {
@@ -267,31 +282,30 @@ function sandbox(t) {
   const frontEnd = (feEnv = env) => {
     const proc = spawn(process.execPath, [SERVER], { env: feEnv, stdio: ["pipe", "pipe", "inherit"] });
     fronts.push(proc);
-    /** @type {Map<number, (msg: any) => void>} */
-    const pending = new Map();
+    const pending = new Map<number, (msg: RpcReply) => void>();
     let nextId = 1;
     let closed = false;
     readline.createInterface({ input: proc.stdout }).on("line", (/** @type {string} */ line) => {
-      const msg = JSON.parse(line);
+      const msg = JSON.parse(line) as RpcReply & { id: number };
       pending.get(msg.id)?.(msg);
       pending.delete(msg.id);
     });
     proc.stdin.on("error", () => {}); // EPIPE once the front-end is gone; its pending requests fail below
     proc.on("close", (/** @type {number|null} */ code) => {
       closed = true;
-      for (const resolve of pending.values()) resolve({ error: { message: `front-end exited with code ${code}` } });
+      for (const resolve of pending.values()) resolve({ error: { message: `front-end exited with code ${code}` } } as RpcReply);
       pending.clear();
     });
     /** @param {string} method @param {any} [params] @returns {Promise<any>} */
-    const request = (method, params) =>
-      new Promise((resolve) => {
-        if (closed) return resolve({ error: { message: "front-end exited" } });
+    const request = (method: string, params?: unknown) =>
+      new Promise<RpcReply>((resolve) => {
+        if (closed) return resolve({ error: { message: "front-end exited" } } as RpcReply);
         const id = nextId++;
         pending.set(id, resolve);
         proc.stdin.write(JSON.stringify({ jsonrpc: "2.0", id, method, params }) + "\n");
       });
     /** @param {string} name @param {Record<string, unknown>} [args] @returns {Promise<any>} */
-    const call = async (name, args = {}) => (await request("tools/call", { name, arguments: args })).result;
+    const call = async (name: string, args: Record<string, unknown> = {}) => (await request("tools/call", { name, arguments: args })).result;
     return { request, call };
   };
 
@@ -356,7 +370,7 @@ test("five concurrent front-ends share one service that locks out every other DB
   try {
     assert.throws(
       () => reader.prepare("SELECT * FROM kv").all(),
-      (/** @type {any} */ e) => e.errcode === 5,
+      (e) => (e as { errcode?: number }).errcode === 5,
     );
   } finally {
     reader.close();
@@ -421,7 +435,7 @@ test("a newer-protocol service is refused and left running", IT, async (/** @typ
   assert.equal(res.isError, true);
   assert.match(res.content[0].text, /newer/);
   assert.equal(fake.exitCode, null);
-  assert.doesNotThrow(() => process.kill(fake.pid, 0));
+  assert.doesNotThrow(() => process.kill(Number(fake.pid), 0));
 });
 
 test("storage disabled: no tools advertised, calls refused, no files created", IT, async (/** @type {any} */ t) => {

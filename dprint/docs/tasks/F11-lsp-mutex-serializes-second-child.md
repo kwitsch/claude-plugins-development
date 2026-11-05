@@ -36,7 +36,7 @@ Optional hardening, not validated: (1) reword the `client` TSDoc to say dprint l
 
 ## Verification
 
-Only if the optional test is added: in dprint/tests/mcp-server.test.mjs spawn the server with a stub `dprint lsp` that records its pid per request, run a format_pre and a file_changed in the same cwd, assert two distinct pids. Run `pnpm --filter dprint build && pnpm --filter dprint test`.
+Only if the optional test is added: in dprint/tests/mcp-server.test.mts spawn the server with a stub `dprint lsp` that records its pid per request, run a format_pre and a file_changed in the same cwd, assert two distinct pids. Run `pnpm --filter dprint build && pnpm --filter dprint test`.
 
 ## Constraints
 

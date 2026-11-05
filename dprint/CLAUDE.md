@@ -63,7 +63,7 @@ else `$HOME/.dprint/bin/dprint` if it exists (`$.env.get("HOME")`), else `npx --
 Only the pick is run (`<pick> --version`), never a later candidate, so a broken PATH dprint toasts even when `~/.dprint/bin` works
 (as `findDprint` would fail on it too), each in `cwd` HOME (else, or when that dir does not exist, `/`, never the project, whose `node_modules/.bin` npx would prefer), 10 s timeout.
 Usable = exit 0, stdout `dprint X.Y.Z` (check-dprint's regex) and X.Y.Z >= the inlined `MIN_VERSION` copy (`0.50.0`; a prerelease of it
-sorts below; `tests/notice.test.mjs` fails when it or the regex drifts from `check-dprint.mts`). The toast text names the cause:
+sorts below; `tests/notice.test.mts` fails when it or the regex drifts from `check-dprint.mts`). The toast text names the cause:
 not installed, `<pick>` could not start or took over 10 s, exited N, printed no dprint version, or is too old (the npx leg reads a non-zero
 exit as not installed, since `npx --no` exits 1 when nothing is cached; its other causes keep their own text; `judge`
 returns `{ kind, text }`, so no logic depends on the wording). A success is cached for the module's life, a failure for
@@ -81,8 +81,8 @@ among its uses, and warns "gating hook without .catch" for three of its hooks (e
 
 ## Tests
 
-`pnpm --filter dprint test` runs vitest (`vitest run`, workspace config `../vitest.config.mjs`) over `tests/*.test.mjs` against the built `plugin/`; asserts
-via `node:assert/strict`; the shared config sets `testTimeout: 30_000` for the files that spawn processes. `tests/notice.test.mjs` drives the built hooks module through `createKit` from the workspace package
+`pnpm --filter dprint test` runs vitest (`vitest run`, workspace config `../vitest.config.mts`) over `tests/*.test.mts` against the built `plugin/`; asserts
+via `node:assert/strict`; the shared config sets `testTimeout: 30_000` for the files that spawn processes. `tests/notice.test.mts` drives the built hooks module through `createKit` from the workspace package
 `claude-engine-vitest` (stubs for `fs.exists`, `session.cwd`, `env.get`, `process.run`, `ui.toast`;
 `mock.clock(on).settle()` waits for the detached check).
 
@@ -108,7 +108,7 @@ via `node:assert/strict`; the shared config sets `testTimeout: 30_000` for the f
 
 `MIN_VERSION` is defined only in the `.mts` source. Changing it: edit there, update the
 "Minimum dprint version" line in `README.md`, rebuild. Tests read the value from that source (the built
-script is minified). `src/hooks/notice.mts` holds a copy; `tests/notice.test.mjs` fails when the two differ, so change both.
+script is minified). `src/hooks/notice.mts` holds a copy; `tests/notice.test.mts` fails when the two differ, so change both.
 
 ## Refreshing `dprint-plugins.json`
 

@@ -98,7 +98,7 @@ const ELECTION_PROBE_MS = 300;
 const LONE_SURROGATE = /[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/;
 /**
  * The persisted /headroom counters in stats column order. hooks/policy.mjs COUNTER_KEYS repeats them
- * (this file stays import-free); tests/storage.test.mjs pins both orders.
+ * (this file stays import-free); tests/storage.test.mts pins both orders.
  */
 const STATS_KEYS = ["steps", "clamped", "cache_drops", "input_tokens", "cache_read_input_tokens", "cache_creation_input_tokens"] as const;
 /** One validated stats_put row: a day plus every counter. */

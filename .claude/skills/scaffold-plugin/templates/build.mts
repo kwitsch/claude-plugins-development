@@ -36,7 +36,7 @@ function walk(dir: string): string[] {
 }
 
 // 0. plugin/ ships only build output and hand-written plugin files (.claude/rules/plugin-build-output.md)
-const layout = spawnSync(process.execPath, [path.join(ROOT, "../.github/scripts/check-plugin-layout.mjs"), ROOT], { stdio: "inherit" });
+const layout = spawnSync(process.execPath, [path.join(ROOT, "../.github/scripts/check-plugin-layout.mts"), ROOT], { stdio: "inherit" });
 if (layout.status !== 0) process.exit(layout.status ?? 1);
 
 // 1. remove stale build output (plugin/ holds no hand-written .mjs)

@@ -2,13 +2,13 @@
 // workspace's vitest stand-in for the official `claude-code/testing` kit: stubs answer fs.exists (backed by node:fs),
 // session.cwd, env.get, process.run and ui.toast, and mock.clock(on).settle() waits for the detached check. The
 // first test records the registration list by hand (the kit does not expose it); the last three read the built file.
+import { createKit } from "claude-engine-vitest";
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, afterEach, beforeEach, test as plainTest, vi } from "vitest";
-import { createKit } from "claude-engine-vitest";
 import { register } from "../plugin/hooks/notice.mjs";
 import { CONFIG_NAMES } from "../plugin/skills/dprint/config-names.mjs";
 
@@ -40,7 +40,7 @@ beforeEach(() => {
 });
 afterEach(() => vi.useRealTimers());
 
-const dirs = [];
+const dirs: string[] = [];
 afterAll(() => dirs.forEach((d) => rmSync(d, { recursive: true, force: true })));
 
 /** A fresh dir holding a `.git` dir: the config walk stops there, so no stray config above os.tmpdir() leaks in. */
@@ -52,7 +52,7 @@ function repo() {
 }
 
 /** Writes the dprint config `name` into `dir` and returns `dir`. */
-function withConfig(dir, name = "dprint.json") {
+function withConfig(dir: string, name = "dprint.json") {
   mkdirSync(path.dirname(path.join(dir, name)), { recursive: true });
   writeFileSync(path.join(dir, name), "{}");
   return dir;
@@ -67,11 +67,27 @@ const toastText = (dir, problem = NOT_INSTALLED_TEXT) => `dprint: ${dir} (or a p
  * `home: null` leaves HOME unset, `home: { deny }` rejects env.get; `path` is the env PATH (`null` = unset);
  * `bins` are the fake executables fs.exists reports (every other path is answered by node:fs).
  */
-function setup($, on, { cwd = "", exists, run = () => OK, home = HOME, path: pathVar = PATH_DIRS, bins = [PATH_DPRINT] } = {}) {
+/** What `setup` stubs; see its comment. */
+interface SetupOptions {
+  /** session.cwd's answer: a string or a `{ deny }`. */
+  cwd?: unknown;
+  /** fs.exists' stub result for a path. */
+  exists?: (p: string) => unknown;
+  /** process.run's stub result for an argv. */
+  run?: (argv: string[]) => unknown;
+  /** HOME: `null` = unset, `{ deny }` rejects env.get. */
+  home?: unknown;
+  /** The env PATH (`null` = unset). */
+  path?: string | null;
+  /** The fake executables fs.exists reports. */
+  bins?: string[];
+}
+
+function setup($, on, { cwd = "", exists, run = () => OK, home = HOME, path: pathVar = PATH_DIRS, bins = [PATH_DPRINT] }: SetupOptions = {}) {
   const exist = exists ?? ((p) => ({ value: p === HOME || bins.includes(p) || existsSync(p) }));
-  const toasts = [];
-  const runs = [];
-  const envGets = [];
+  const toasts: { text: string; timeoutMs?: number }[] = [];
+  const runs: { argv: string[]; init: Record<string, unknown> }[] = [];
+  const envGets: string[] = [];
   on("fs.exists", (_$, e) => exist(e.path));
   on("session.cwd", () => (typeof cwd === "string" ? { value: cwd } : cwd));
   on("env.get", (_$, e) => {
@@ -103,7 +119,7 @@ function setup($, on, { cwd = "", exists, run = () => OK, home = HOME, path: pat
 }
 
 plainTest("registers exactly session.start, classic.CwdChanged and tool.call for EnterWorktree/ExitWorktree", () => {
-  const out = [];
+  const out: { event: string; matcher: unknown; hook: unknown }[] = [];
   register((event, a, b) => out.push(b === undefined ? { event, matcher: undefined, hook: a } : { event, matcher: a, hook: b }));
   assert.deepEqual(
     out.map(({ event, matcher }) => ({ event, matcher })),
@@ -152,7 +168,7 @@ test("a config in an ancestor below the git root counts; above the git root it d
   const { fire, runs, toasts } = setup($, on, { run: () => DENY });
   await fire("classic.CwdChanged", { new_cwd: sub });
   assert.deepEqual(runs, [], "config above the git root -> not probed");
-  assert.deepEqual(toasts, []);
+  assert.deepEqual(toasts, [] as typeof toasts); // a bare [] would narrow toasts to never[]
   withConfig(root); // at the repo root: counts for pkg2
   await fire("classic.CwdChanged", { new_cwd: sub2 });
   assert.equal(runs.length, 1, "config in an ancestor -> probed (the one pick)");
@@ -196,7 +212,7 @@ test("no PATH or ~/.dprint/bin dprint, a cached npx dprint runs (--no: never dow
   assert.deepEqual(toasts, []);
 });
 
-const REASONS = [
+const REASONS: [string, unknown, string][] = [
   ["cannot start or times out", DENY, COULD_NOT_START],
   ["exits non-zero", EXIT_1, `${PATH_DPRINT} --version exited 1`],
   ["prints no dprint version", NOT_DPRINT, `${PATH_DPRINT} --version printed no dprint version`],
@@ -223,7 +239,7 @@ for (const out of ["dprint 0.50.0", "dprint 1.0.0", "\n dprint 0.50.0\n"]) {
   });
 }
 
-const NPX_CASES = [
+const NPX_CASES: [string, unknown, string][] = [
   ["a failing npx", EXIT_1, NOT_INSTALLED_TEXT],
   ["a non-starting or timed-out npx", DENY, "npx could not start or took over 10 s to answer --version"],
   ["a cached dprint printing no version", NOT_DPRINT, "npx --version printed no dprint version"],
@@ -251,7 +267,7 @@ test("a broken PATH dprint is judged alone: no fall-through to a working ~/.dpri
   assert.deepEqual(toasts, [{ text: toastText(dir, `${PATH_DPRINT} --version exited 1`), timeoutMs: 15000 }]);
 });
 
-const PICK_CASES = [
+const PICK_CASES: [string, string[], string, string][] = [
   ["/p0:/p1", [PATH_DPRINT], "/p1/dprint", "the first existing entry"],
   ["/p0:/p1", ["/p0/dprint", PATH_DPRINT], "/p0/dprint", "the earlier entry wins"],
   ["relative:/p1", ["relative/dprint", PATH_DPRINT], "/p1/dprint", "a relative entry is skipped"],
@@ -295,7 +311,7 @@ test("worktree tools check the dir their result names; CwdChanged checks new_cwd
   const { fire, runs, toasts } = setup($, on, { cwd: stale, run: () => DENY });
   await fire("tool.call", { tool: "EnterWorktree", tool_response: { worktreePath: bare } });
   assert.deepEqual(runs, []);
-  assert.deepEqual(toasts, []);
+  assert.deepEqual(toasts, [] as typeof toasts); // a bare [] would narrow toasts to never[]
   await fire("tool.call", { tool: "ExitWorktree", tool_response: { restoredCwd: restored } });
   assert.deepEqual(toasts.map((t) => t.text), [toastText(restored, COULD_NOT_START)]);
   await fire("classic.CwdChanged", { new_cwd: bare });
@@ -329,7 +345,7 @@ test("a failed probe is cached for 30 s (the new dir still gets its toast), then
   const a = withConfig(repo());
   const b = withConfig(repo());
   const c = withConfig(repo());
-  let result = DENY;
+  let result: unknown = DENY;
   const { fire, runs, toasts } = setup($, on, { run: () => result });
   await fire("classic.CwdChanged", { new_cwd: a });
   assert.equal(runs.length, 1);
@@ -393,7 +409,7 @@ plainTest("the module's inlined config names equal the shared CONFIG_NAMES; no i
   const m = /CONFIG_NAMES=(\[[^\]]*\])/.exec(src);
   assert.ok(m, "inlined CONFIG_NAMES");
   // the minifier may print the strings with backticks
-  assert.deepEqual(JSON.parse(m[1].replaceAll("`", '"')), [...CONFIG_NAMES]);
+  assert.deepEqual(JSON.parse(m[1].replaceAll("`", "\"")), [...CONFIG_NAMES]);
   assert.doesNotMatch(src, /^import/m);
 });
 
@@ -412,8 +428,8 @@ plainTest("the probe constants, MIN_VERSION and version regex equal the shared s
   assert.equal(min(notice), min(check));
   const versionRe = "/^dprint (\\d+)\\.(\\d+)\\.(\\d+)(-\\S+)?/";
   assert.ok(check.includes(versionRe) && notice.includes(versionRe), "version regex");
-  assert.ok(find.includes('["--yes", "dprint"]') && notice.includes('["npx", "--no", "--prefer-offline", "--", "dprint", "--version"]'), "npx argv (notice never downloads)");
-  assert.ok(find.includes('join(homedir(), ".dprint", "bin", "dprint")') && notice.includes("${home}/.dprint/bin/dprint"), "home path");
+  assert.ok(find.includes("[\"--yes\", \"dprint\"]") && notice.includes("[\"npx\", \"--no\", \"--prefer-offline\", \"--\", \"dprint\", \"--version\"]"), "npx argv (notice never downloads)");
+  assert.ok(find.includes("join(homedir(), \".dprint\", \"bin\", \"dprint\")") && notice.includes("${home}/.dprint/bin/dprint"), "home path");
 });
 
 plainTest("built module keeps the names Claude Code's static check needs (no mangling)", () => {

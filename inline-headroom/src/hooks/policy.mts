@@ -163,7 +163,7 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 /**
  * The persisted counters in mcp/server.mjs STATS_KEYS order.
  *
- * That file stays import-free, so the list is repeated on purpose; tests/storage.test.mjs pins both orders.
+ * That file stays import-free, so the list is repeated on purpose; tests/storage.test.mts pins both orders.
  */
 const COUNTER_KEYS = ["steps", "clamped", "cache_drops", "input_tokens", "cache_read_input_tokens", "cache_creation_input_tokens"] as const;
 /** One day in milliseconds. */

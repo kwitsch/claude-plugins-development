@@ -3,10 +3,10 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": "./index.mjs"
+    ".": "./index.mts"
   },
   "scripts": {
-    "test": "vitest run --config ../vitest.config.mjs"
+    "test": "vitest run --config ../vitest.config.mts"
   },
   "peerDependencies": {
     "vitest": "*"

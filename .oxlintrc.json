@@ -19,8 +19,6 @@
     ".claude/**",
     "**/plugin/**",
     "**/node_modules/**",
-    "**/tests/**",
-    "claude-engine-vitest/**",
     "**/*.mjs",
     "**/*.js"
   ],
@@ -115,5 +113,21 @@
     "typescript/restrict-template-expressions": "error",
     "typescript/triple-slash-reference": "error",
     "typescript/unbound-method": "error"
-  }
+  },
+  "overrides": [
+    {
+      "files": [
+        "*/tests/**",
+        "claude-engine-vitest/**"
+      ],
+      "rules": {
+        "typescript/no-unsafe-member-access": "off",
+        "typescript/no-unsafe-call": "off",
+        "typescript/no-unsafe-assignment": "off",
+        "typescript/no-unsafe-argument": "off",
+        "typescript/no-unsafe-return": "off",
+        "typescript/require-await": "off"
+      }
+    }
+  ]
 }

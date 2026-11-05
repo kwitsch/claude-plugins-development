@@ -35,7 +35,7 @@ Node delivers child stdout in <= 64 KB chunks; each chunk copies the whole accum
 
 ## Verification
 
-- Add a unit-style test in dprint/tests/mcp-server.test.mjs with a stub `dprint lsp` that writes one frame in 1-byte/64 KB splits and a response of several MB; assert the format result is correct.
+- Add a unit-style test in dprint/tests/mcp-server.test.mts with a stub `dprint lsp` that writes one frame in 1-byte/64 KB splits and a response of several MB; assert the format result is correct.
 - Measure: 10 MB stub response via format_pre Write, before/after (expect ~-500 ms).
 - `pnpm --filter dprint build && pnpm --filter dprint test`.
 

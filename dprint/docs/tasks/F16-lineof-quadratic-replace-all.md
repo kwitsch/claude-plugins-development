@@ -33,7 +33,7 @@ Implemented as in the analysis patch. Invariant to preserve: offsets passed to o
 
 ## Verification
 
-- tests/mcp-format.test.mjs and tests/mcp-server.test.mjs (replace_all cases) stay green.
+- tests/mcp-format.test.mts and tests/mcp-server.test.mts (replace_all cases) stay green.
 - Optional perf test: replace_all with 5000 occurrences in a 20k-line file, assert the lineCursor stage is < 50 ms (not needed for correctness).
 - `pnpm --filter dprint build && pnpm --filter dprint test`.
 

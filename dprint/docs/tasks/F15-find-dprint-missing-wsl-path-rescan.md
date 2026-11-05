@@ -25,7 +25,7 @@ Done. After `findDprint()` returned null, `DprintLsp.start()` rejects "dprint no
 ## Code locations
 
 - `DprintLsp.noDprintUntil` (field), `NOT_FOUND_RETRY_MS`, and `start()` in dprint/src/mcp/lsp.mts: first `if (this.ready)`, then `Date.now() < this.noDprintUntil` rejects, then `findDprint()`; a miss sets `noDprintUntil`.
-- tests: dprint/tests/mcp-server.test.mjs "no dprint on PATH or in ~/.dprint/bin -> {}".
+- tests: dprint/tests/mcp-server.test.mts "no dprint on PATH or in ~/.dprint/bin -> {}".
 
 ## Approach
 

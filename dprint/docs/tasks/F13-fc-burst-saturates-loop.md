@@ -33,7 +33,7 @@ Implemented as validated: (1) slot semaphore (8 slots, FIFO, bounded queue) acqu
 
 ## Verification
 
-- tests/mcp-server.test.mjs: "60 concurrent file_changed events are all formatted".
+- tests/mcp-server.test.mts: "60 concurrent file_changed events are all formatted".
 - Re-measure: send 50-122 file_changed events at once plus a format_pre 50 ms into the burst; target format_pre < 30 ms.
 - `pnpm --filter dprint build && pnpm --filter dprint test`.
 

@@ -31,7 +31,7 @@ One-line guard as implemented. The `timeoutMs` constructor option (F14/F28) make
 
 ## Verification
 
-- Missing regression test worth adding (dprint/tests/mcp-server.test.mjs or a DprintLsp-level test against the built plugin/mcp/lsp.mjs): PATH-first stub `dprint` whose `lsp` answers initialize, then on formatting stays silent until SIGTERM, then writes a valid Content-Length header + partial body and exits; construct `new DprintLsp({cwd, timeoutMs: 200})`, call `format(big)` and queue `format(small)`, expect the first to reject with timeout and the second NOT to reject with "initialize timed out". Cooldown applies per URI, so use a different URI for the second call.
+- Missing regression test worth adding (dprint/tests/mcp-server.test.mts or a DprintLsp-level test against the built plugin/mcp/lsp.mjs): PATH-first stub `dprint` whose `lsp` answers initialize, then on formatting stays silent until SIGTERM, then writes a valid Content-Length header + partial body and exits; construct `new DprintLsp({cwd, timeoutMs: 200})`, call `format(big)` and queue `format(small)`, expect the first to reject with timeout and the second NOT to reject with "initialize timed out". Cooldown applies per URI, so use a different URI for the second call.
 - `pnpm --filter dprint build && pnpm --filter dprint test`.
 
 ## Constraints

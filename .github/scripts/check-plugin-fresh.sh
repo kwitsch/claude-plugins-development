@@ -8,4 +8,4 @@ test -z "$(git status --porcelain -- "$p/plugin")" || {
   exit 1
 }
 # plugin/ ships only build output and hand-written plugin files (.claude/rules/plugin-build-output.md)
-node "$(dirname "$0")/check-plugin-layout.mjs" "$p"
+node "$(dirname "$0")/check-plugin-layout.mts" "$p"

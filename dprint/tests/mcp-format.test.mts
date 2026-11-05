@@ -1,16 +1,11 @@
 // Unit tests for the pure helpers of the built plugin/mcp/format.mjs (no dprint, no spawn).
-import { test } from "vitest";
 import assert from "node:assert/strict";
-import {
-  applyEdit,
-  formatPre,
-  lineDiff,
-  trimToEdit,
-} from "../plugin/mcp/format.mjs";
-import { applyTextEdits } from "../plugin/mcp/lsp.mjs";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { test } from "vitest";
+import { applyEdit, formatPre, lineDiff, trimToEdit } from "../plugin/mcp/format.mjs";
+import { applyTextEdits } from "../plugin/mcp/lsp.mjs";
 
 const h = (aStart, aEnd, bStart, bEnd) => ({ aStart, aEnd, bStart, bEnd });
 
@@ -22,11 +17,12 @@ function trim(O, F, editLines, allKept) {
     assert.notEqual(O.indexOf(r.oldString), -1);
     assert.equal(O.indexOf(r.oldString), O.lastIndexOf(r.oldString));
     // function replacer: a "$" in newString must not be read as a replacement pattern
-    if (allKept)
+    if (allKept) {
       assert.equal(
         O.replace(r.oldString, () => r.newString),
         F,
       );
+    }
   }
   return r;
 }

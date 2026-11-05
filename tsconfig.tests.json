@@ -1,0 +1,15 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "noImplicitAny": false,
+    "allowJs": true,
+    "checkJs": false
+  },
+  "include": [
+    "*/tests/**/*.mts",
+    "claude-engine-vitest/**/*.mts"
+  ],
+  "exclude": [
+    "**/node_modules/**"
+  ]
+}

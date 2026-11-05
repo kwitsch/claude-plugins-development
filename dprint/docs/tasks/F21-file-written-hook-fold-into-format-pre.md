@@ -40,7 +40,7 @@ Prototype FIRST in a scratch copy; decision it gates: whether to delete the hook
 
 ## Verification
 
-Existing test "file_written records the Edit/Write result: file_changed leaves it alone, also on repeated events" in dprint/tests/mcp-server.test.mjs must keep passing (or be rewritten against format_pre). Add: CRLF Edit then file_changed -> file untouched; rejected Edit -> later real change is still formatted. Real-session check: Write/Edit with edits-style prompts, confirm no whole-file reformat after the FileChanged echo and measure Edit wall vs baseline (~147-153 ms).
+Existing test "file_written records the Edit/Write result: file_changed leaves it alone, also on repeated events" in dprint/tests/mcp-server.test.mts must keep passing (or be rewritten against format_pre). Add: CRLF Edit then file_changed -> file untouched; rejected Edit -> later real change is still formatted. Real-session check: Write/Edit with edits-style prompts, confirm no whole-file reformat after the FileChanged echo and measure Edit wall vs baseline (~147-153 ms).
 
 ## Constraints
 

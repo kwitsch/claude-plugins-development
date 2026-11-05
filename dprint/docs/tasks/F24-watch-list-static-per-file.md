@@ -41,7 +41,7 @@ Prototype FIRST (nothing is validated); decision it gates: which of the two desi
 
 ## Verification
 
-Offline: unit/integration test in dprint/tests/mcp-server.test.mjs or a new test running `plugin/mcp/watch-paths.mjs` (existing tests at "watch-paths.mjs prints the in-cwd dprint file paths as watchPaths ..." show the harness). Real-session proof needs a headless `claude -p` run with `--plugin-dir dprint/plugin --debug` and an inotify watch-count sampler (`grep -c inotify /proc/<pid>/fdinfo/*`): create a new file, run `git checkout` rewriting watched files twice, assert events keep arriving and watch count stays stable.
+Offline: unit/integration test in dprint/tests/mcp-server.test.mts or a new test running `plugin/mcp/watch-paths.mjs` (existing tests at "watch-paths.mjs prints the in-cwd dprint file paths as watchPaths ..." show the harness). Real-session proof needs a headless `claude -p` run with `--plugin-dir dprint/plugin --debug` and an inotify watch-count sampler (`grep -c inotify /proc/<pid>/fdinfo/*`): create a new file, run `git checkout` rewriting watched files twice, assert events keep arriving and watch count stays stable.
 
 ## Constraints
 

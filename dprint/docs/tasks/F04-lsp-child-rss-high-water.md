@@ -25,7 +25,7 @@ Real session (bigjson-append): one in-place append to a watched 6.5 MB JSON -> 6
 - `fileChanged` (`statSync(s.fp).size > MAX_CHANGED_BYTES`, then `acquireChangeSlot`, then `readFileSync`)
 - `MAX_CHANGED_BYTES`, `MAX_CLIENTS`, `client` (LRU map), `disposeLsp`
 - `DprintLsp.dispose`, `DprintLsp.formatNow` (finally block with `didClose`), `DprintLsp.format`
-- test: "file_changed skips files above 1 MiB" in `tests/mcp-server.test.mjs`
+- test: "file_changed skips files above 1 MiB" in `tests/mcp-server.test.mts`
 
 ## Approach
 

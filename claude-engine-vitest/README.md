@@ -36,4 +36,4 @@ test("name", { options: { flag: false }, plugins: [{ name: "helper", register(on
 ## Porting a kit test
 
 1. Replace `import { expect, mock, test } from "claude-code/testing"` with `import { expect } from "vitest"`, `import { createKit } from "claude-engine-vitest"` and `const { test, mock } = createKit({ module, plugin })`.
-2. Point relative imports of the mod's own files at the built `plugin/` output, and drop the TypeScript types (`*.test.mjs`).
+2. Point relative imports of the mod's own files at the built `plugin/` output, and drop the TypeScript types (`*.test.mts`).

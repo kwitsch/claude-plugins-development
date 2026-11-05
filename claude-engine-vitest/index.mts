@@ -3,11 +3,89 @@
 // Semantics follow https://code.claude.com/docs/en/plugins/mods/test.md and the kit's typings; see README.md.
 import { test as vitestTest } from "vitest";
 
-/** @typedef {{ plugin: string, tier: string }} Origin */
-/** @typedef {{ name: string, tier?: string, register: (on: Function, options: object) => void }} Plugin */
-/** @typedef {{ type: string, props: Record<string, unknown>, children: unknown[] }} Element */
+/** Who fires an event: a plugin (or `engine`/`test`) and its tier. */
+interface Origin {
+  /** The plugin's name. */
+  plugin: string;
+  /** Its tier. */
+  tier: string;
+}
 
-const ENGINE = Object.freeze({ plugin: "engine", tier: "core" });
+/** A hook function as a mod registers it; its arguments and result depend on the event. */
+type HookFn = (...args: unknown[]) => unknown;
+
+/** The `on` a mod's `register` gets: `on(event, fn)` or `on(event, matcher, fn)`. */
+type On = (event: string, a: unknown, b?: unknown) => { catch: (handler: HookFn) => void };
+
+/** An inline plugin of a test (`plugins` option). */
+interface Plugin {
+  /** The plugin's name. */
+  name: string;
+  /** Its tier (`user` when not given). */
+  tier?: string;
+  /** Registers its hooks. */
+  register: (on: On, options: unknown) => void;
+}
+
+/** A drawn element: plain `{ type, props, children }` data. */
+interface UiElement {
+  /** The element name. */
+  type: string;
+  /** Its props. */
+  props: Record<string, unknown>;
+  /** Its children. */
+  children: unknown[];
+}
+
+/** One registered hook (a plugin's or a test stub). */
+interface Hook {
+  /** The registering plugin (`test` for a stub). */
+  plugin: string;
+  /** Its tier. */
+  tier: string;
+  /** Load order of the plugin (Infinity for stubs). */
+  idx: number;
+  /** The `on` pattern. */
+  event: string;
+  /** Fields the event input must hold. */
+  matcher?: unknown;
+  /** The hook. */
+  fn: HookFn;
+  /** The handler set by `.catch(handler)`. */
+  catcher?: HookFn;
+}
+
+/** A mounted render site. */
+interface Site {
+  /** The ui.render event it was mounted with. */
+  e: Record<string, unknown>;
+  /** The last drawn tree. */
+  tree: unknown;
+  /** The draw under way (resolves when it is done). */
+  drawing: Promise<unknown>;
+  /** false once unmounted. */
+  mounted: boolean;
+  /** Queues a redraw. */
+  redraw: () => unknown;
+}
+
+/** What `createKit` and a test hand an engine. */
+interface EngineConfig {
+  /** The built hooks module. */
+  module: URL;
+  /** The plugin's name. */
+  plugin: string;
+  /** The tier it loads in (`user` when not given). */
+  tier?: string;
+  /** The `options` its `register(on, options)` gets. */
+  options?: Record<string, unknown>;
+  /** Inline plugins loaded with it. */
+  plugins?: Plugin[];
+  /** What stands for vitest's `test` (the kit's own tests). */
+  runner?: (name: string, opts: { timeout: number }, fn: () => Promise<void>) => void;
+}
+
+const ENGINE: Origin = Object.freeze({ plugin: "engine", tier: "core" });
 const TIERS = ["prepend", "user", "append", "builtin"];
 const STREAMING = new Set(["turn.step", "process.spawn"]);
 // Positional arguments of each mods API call, as its event's input fields ("..." spreads an options object).
@@ -57,8 +135,7 @@ const frozen = (v) => {
 };
 
 /** Whether `e` holds every field of `matcher` (nested objects compared field by field). */
-const fits = (matcher, e) =>
-  matcher === undefined || Object.entries(matcher).every(([k, m]) => (m && typeof m === "object" ? e?.[k] && typeof e[k] === "object" && fits(m, e[k]) : e?.[k] === m));
+const fits = (matcher, e) => matcher === undefined || Object.entries(matcher).every(([k, m]) => (m && typeof m === "object" ? e?.[k] && typeof e[k] === "object" && fits(m, e[k]) : e?.[k] === m));
 
 /** Whether an `on` pattern (a name, `ns.*` or `*`) selects `event`. */
 const selects = (pattern, event) => pattern === event || pattern === "*" || (pattern.endsWith(".*") && event.startsWith(pattern.slice(0, -1)));
@@ -70,8 +147,8 @@ const message = (err) => (err instanceof Error ? err.message : String(err));
 const textOf = (n) => (n?.children ?? []).map((c) => (typeof c === "string" || typeof c === "number" ? String(c) : c && typeof c === "object" ? textOf(c) : "")).join("");
 
 /** Every element of a tree, depth first. */
-const nodes = (n, out = []) => {
-  if (Array.isArray(n)) for (const c of n) nodes(c, out);
+const nodes = (n, out: UiElement[] = []): UiElement[] => {
+  if (Array.isArray(n)) { for (const c of n) nodes(c, out); }
   else if (n && typeof n === "object" && typeof n.type === "string") {
     out.push(n);
     nodes(n.children ?? [], out);
@@ -88,7 +165,7 @@ const matches = (n, q) =>
 const elements = new Proxy({}, {
   get: (_, type) =>
     typeof type === "string"
-      ? (props = {}) => {
+      ? (props: Record<string, unknown> = {}) => {
         const { children, ...rest } = props;
         return { type, props: rest, children: children === undefined ? [] : [children].flat() };
       }
@@ -99,28 +176,41 @@ let loads = 0;
 
 /** One test's engine: the loaded plugins, the test's stubs, mounted sites, held clock waits and what it reported. */
 class Engine {
+  /** module (URL), plugin (name), tier, options, plugins (inline). */
+  cfg: EngineConfig;
+  /** The plugins' hooks, in load order. */
+  hooks: Hook[] = [];
+  /** The test's stubs. */
+  stubs: Hook[] = [];
+  /** Whether the test called $ (no more stubs then). */
+  started = false;
+  /** Loads the plugins, once. */
+  loading: Promise<void> | undefined = undefined;
+  /** The engine report: each skipped hook and why. */
+  reported: string[] = [];
+  /** Failures that fail the test even when the body passes. */
+  fatal: unknown[] = [];
+  /** The mounted render sites. */
+  mounts = new Set<Site>();
+  /** Bumped on every dispatch step: settle waits until it stops moving. */
+  activity = 0;
+  /** Orders clock waits due at the same time. */
+  seq = 0;
+
   /**
-   * @param {object} cfg - module (URL), plugin (name), tier, options, plugins (inline).
+   * An engine for one test.
+   *
+   * @param cfg - module (URL), plugin (name), tier, options, plugins (inline).
    */
-  constructor(cfg) {
+  constructor(cfg: EngineConfig) {
     this.cfg = cfg;
-    /** @type {{ plugin: string, tier: string, idx: number, event: string, matcher?: object, fn: Function, catcher?: Function }[]} */
-    this.hooks = [];
-    this.stubs = [];
-    this.started = false;
-    this.loading = undefined;
-    this.reported = []; // the engine report: each skipped hook and why
-    this.fatal = []; // failures that fail the test even when the body passes
-    this.mounts = new Set();
-    this.activity = 0; // bumped on every dispatch step: settle waits until it stops moving
-    this.seq = 0; // orders clock waits due at the same time
   }
 
   /** The test's `on`: registers a stub beneath every plugin, before the first call on `$`. */
   stubOn = (event, a, b) => {
     if (this.started) throw new Error(`on("${event}") after the test first called $`);
     const [matcher, fn] = b === undefined ? [undefined, a] : [a, b];
-    this.stubs.push({ plugin: "test", tier: "core", idx: Infinity, event, matcher, fn });
+    this.stubs.push({ plugin: "test", tier: "core", idx: Infinity, event, matcher, fn: fn as HookFn });
     return { catch: () => undefined };
   };
 
@@ -129,20 +219,20 @@ class Engine {
     this.started = true;
     this.loading ??= (async () => {
       const { register } = await import(`${this.cfg.module.href}${this.cfg.module.search ? "&" : "?"}claude-engine-vitest=${loads++}`);
-      const list = [
+      const list: { name: string; tier: string; register: Plugin["register"]; options: unknown }[] = [
         { name: this.cfg.plugin, tier: this.cfg.tier ?? "user", register, options: this.cfg.options },
         ...(this.cfg.plugins ?? []).map((p) => ({ ...p, tier: p.tier ?? "user", options: {} })),
       ];
       list.sort((x, y) => TIERS.indexOf(x.tier) - TIERS.indexOf(y.tier));
       list.forEach((p, idx) => {
-        const bare = new Set();
+        const bare = new Set<string>();
         p.register((event, a, b) => {
           const [matcher, fn] = b === undefined ? [undefined, a] : [a, b];
           if (matcher === undefined) {
             if (bare.has(event)) throw new Error(`${p.name}: ${event} registered twice without a matcher`);
             bare.add(event);
           }
-          const hook = { plugin: p.name, tier: p.tier, idx, event, matcher, fn };
+          const hook: Hook = { plugin: p.name, tier: p.tier, idx, event, matcher, fn: fn as HookFn };
           this.hooks.push(hook);
           return { catch: (handler) => void (hook.catcher = handler) };
         }, p.options ?? {});
@@ -195,14 +285,14 @@ class Engine {
     const bottom = ctx.bottom ?? ((e) => this.bottom(event, e));
     const nextFor = (i, called) => Object.assign((e2) => (called.value = true, step(i + 1, e2)), { origin: ctx.origin, event, signal });
     const step = STREAMING.has(event)
-      ? async function*(i, e) {
+      ? async function*(this: Engine, i: number, e: unknown): AsyncGenerator<unknown, unknown> {
         this.activity++;
         if (i === hooks.length) return await bottom(e);
         const h = hooks[i];
         const called = { value: false };
         const { $, end } = this.api(h);
         try {
-          return yield* h.fn($, frozen(e), nextFor(i, called));
+          return yield* h.fn($, frozen(e), nextFor(i, called)) as AsyncGenerator<unknown, unknown>;
         } catch (err) {
           this.report(h, err);
           if (called.value) throw err;
@@ -246,11 +336,10 @@ class Engine {
     const fire = (event, input) => {
       if (OPS.has(event)) throw new Error(`$.${event} is a mods API call: a test cannot fire it, trigger it through a mod`);
       if (STREAMING.has(event)) {
-        const self = this;
-        return (async function*() {
-          await self.load();
-          return yield* self.dispatch(event, input, { origin: ENGINE });
-        })();
+        return async function*(this: Engine) {
+          await this.load();
+          return yield* this.dispatch(event, input, { origin: ENGINE }) as AsyncGenerator<unknown, unknown>;
+        }.call(this);
       }
       return this.load().then(() => this.dispatch(event, input, { origin: ENGINE }));
     };
@@ -275,7 +364,7 @@ class Engine {
     let running = true;
     const caller = { plugin: hook.plugin, idx: hook.idx, hook, active: () => running };
     const origin = Object.freeze({ plugin: hook.plugin, tier: hook.tier });
-    const call = async (event, input, signal) => {
+    const call = async (event, input, signal?: AbortSignal) => {
       await this.load();
       const r = await this.dispatch(event, input, { origin, caller, signal });
       if (r && typeof r === "object" && "deny" in r && r.deny !== undefined) throw new Error(String(r.deny));
@@ -287,7 +376,7 @@ class Engine {
     const input = (event, args) => {
       const names = POSITIONAL[event];
       if (!names) return args[0] ?? {};
-      const out = {};
+      const out: Record<string, unknown> = {};
       names.forEach((n, i) => (n === "..." ? Object.assign(out, args[i]) : args[i] !== undefined && (out[n] = args[i])));
       return out;
     };
@@ -328,7 +417,7 @@ class Engine {
 
   /** Draws a render site through the ui.render chain and returns the kit's handle on it. */
   async mount(e) {
-    const site = { e, tree: undefined, drawing: Promise.resolve(), mounted: true };
+    const site: Site = { e, tree: undefined, drawing: Promise.resolve(), mounted: true, redraw: () => undefined };
     const render = async () => {
       if (!site.mounted) return;
       this.activity++;
@@ -358,7 +447,7 @@ class Engine {
   }
 
   /** Uses a drawn control: its event's chain over every plugin, the control's own handler at the bottom. */
-  async control(event, target, type, act, site) {
+  async control(event, target, type, act, site?: Site) {
     const sites = site ? [site] : [...this.mounts].filter((s) => s.e.plugin === target.plugin && (target.requestId === undefined || s.e.requestId === target.requestId));
     await Promise.all(sites.map((s) => s.drawing));
     const found = sites.flatMap((s) => nodes(s.tree)).filter((n) => n.type === type && n.props?.key === target.key);
@@ -390,7 +479,7 @@ class Engine {
  *   vitest's `test`.
  * @returns {{ test: Function, mock: object }} The kit's `test` and `mock`.
  */
-export function createKit(cfg) {
+export function createKit(cfg: EngineConfig) {
   /** The engine of the test running now: `mock.*` registers its stubs there through the `on` it is handed. */
   const engines = new WeakMap();
 
@@ -410,7 +499,7 @@ export function createKit(cfg) {
         if (engine.fatal.length) throw engine.fatal[0];
       } catch (err) {
         if (engine.reported.length && err && typeof err === "object") {
-          err.message = `${err.message}\n\nthe engine reported:\n${engine.reported.map((l) => `  ${l}`).join("\n")}`;
+          (err as Error).message = `${(err as Error).message}\n\nthe engine reported:\n${engine.reported.map((l) => `  ${l}`).join("\n")}`;
         }
         throw err;
       }
@@ -430,11 +519,11 @@ export function createKit(cfg) {
      * @param {Function} on - The test's `on`.
      * @param {{ now?: number }} [options] - Where the clock starts (0 when not given).
      */
-    clock(on, options = {}) {
+    clock(on, options: { now?: number } = {}) {
       const engine = engineOf(on);
       let now = options.now ?? 0;
-      const waits = [];
-      const wait = (ms, signal) =>
+      const waits: { due: number; seq: number; resolve: (v?: unknown) => void }[] = [];
+      const wait = (ms: number, signal?: AbortSignal) =>
         new Promise((resolve) => {
           const w = { due: now + ms, seq: engine.seq++, resolve };
           waits.push(w);
@@ -497,7 +586,7 @@ export function createKit(cfg) {
      * @returns {{ appended: () => unknown[] }} The rows, oldest first.
      */
     session(on) {
-      const rows = [];
+      const rows: unknown[] = [];
       on("session.append", (_$, e, next) => {
         if (next.origin.plugin !== "engine") rows.push(e);
         return next(e);

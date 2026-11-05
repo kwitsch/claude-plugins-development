@@ -1,13 +1,13 @@
 // Contract tests for the built plugin/skills/dprint/run-dprint.mjs.
 // Isolated PATH (only bash + node), HOME and project dir per test; dprint is stubbed and logs its argv.
 // Every run passes a cwd inside proj: otherwise findConfig walks up to the repo-root dprint.json (it stops at the nearest `.git`).
-import { test, beforeEach } from "vitest";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { beforeEach, test } from "vitest";
 
 const SCRIPT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../plugin/skills/dprint/run-dprint.mjs");
 
@@ -36,8 +36,7 @@ const argv = () => readFileSync(path.join(home, "argv"), "utf8").split("\n").sli
 /** whether the stub was called at all */
 const ran = () => existsSync(path.join(home, "argv"));
 /** bin/npx stub: appends its argv to $HOME/npx-argv, accepts only `--yes dprint ...`, then runs `lines` with the rest as "$@" */
-const stubNpx = (...lines) =>
-  stub(path.join(bin, "npx"), `printf '%s\\n' "$@" >> "$HOME/npx-argv"`, '[ "$1 $2" = "--yes dprint" ] || exit 9', "shift 2", ...lines);
+const stubNpx = (...lines) => stub(path.join(bin, "npx"), `printf '%s\\n' "$@" >> "$HOME/npx-argv"`, "[ \"$1 $2\" = \"--yes dprint\" ] || exit 9", "shift 2", ...lines);
 /** every argv the npx stub was called with, concatenated, one argument per line */
 const npxArgv = () => readFileSync(path.join(home, "npx-argv"), "utf8").split("\n").slice(0, -1);
 /** create proj/<rel> as an empty dprint config */
@@ -144,7 +143,7 @@ test("dprint only in ~/.dprint/bin -> that one is used", () => {
 });
 
 test("dprint's exit code and output are passed through", () => {
-  stubDprint(undefined, 'echo "unformatted: a.ts"', "exit 20");
+  stubDprint(undefined, "echo \"unformatted: a.ts\"", "exit 20");
   conf();
   const r = run(["check"]);
   assert.equal(r.code, 20);
@@ -152,7 +151,7 @@ test("dprint's exit code and output are passed through", () => {
 });
 
 test("dprint only via npx -> runs npx --yes dprint fmt -- scope, exit code passed through", () => {
-  stubNpx('if [ "$1" = "--version" ]; then echo "dprint 0.64.3"; exit 0; fi', "exit 7");
+  stubNpx("if [ \"$1\" = \"--version\" ]; then echo \"dprint 0.64.3\"; exit 0; fi", "exit 7");
   conf();
   const r = run(["fmt", "src/a.ts"]);
   assert.equal(r.code, 7, r.err);
@@ -160,7 +159,7 @@ test("dprint only via npx -> runs npx --yes dprint fmt -- scope, exit code passe
 });
 
 test("npx failing -> exit 3, reason=missing", () => {
-  stubNpx('echo "npm error code ENOTCACHED" >&2', "exit 1");
+  stubNpx("echo \"npm error code ENOTCACHED\" >&2", "exit 1");
   conf();
   const r = run(["check"]);
   assert.equal(r.code, 3);

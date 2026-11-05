@@ -24,7 +24,7 @@ Decision parity 21/21 fixture cases (ignored dir -> `!! dir/`, pattern, info/exc
 
 - `fileChanged` (the `execFileAsync("git", [...status...])` block and the `stdout === "" || stdout.startsWith("!!")` check)
 - `isGitIgnored` (formatPre only), `execFileAsync`
-- test: "file_changed leaves a file alone that is unchanged against the git index" in `tests/mcp-server.test.mjs` (tracked-unchanged skip, modified format, gitignored skip)
+- test: "file_changed leaves a file alone that is unchanged against the git index" in `tests/mcp-server.test.mts` (tracked-unchanged skip, modified format, gitignored skip)
 
 ## Approach
 
