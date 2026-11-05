@@ -2,6 +2,8 @@
 
 Development repository for Claude Code plugins. One top-level directory per plugin, named after the plugin.
 
+`claude-engine-vitest/` is no plugin (no `plugin.json`): the shared vitest stand-in for Claude Code's mod test kit (`claude-code/testing`), a `workspace:*` devDependency of plugins with function-hooks modules. Not versioned or released.
+
 ## Layout per plugin (`<name>/`)
 
 | Path           | Purpose                                                                                                                                      |
@@ -9,9 +11,9 @@ Development repository for Claude Code plugins. One top-level directory per plug
 | `plugin.json`  | Source of truth for the plugin manifest (`name`, `version`, `description`, `author`, …). Edit here only.                                     |
 | `plugin/`      | The finished, installable plugin. `plugin/.claude-plugin/plugin.json` and every `plugin/**/*.mjs` are **build output** — never edit by hand. |
 | `src/`         | TypeScript sources (`*.mts`). `pnpm build` compiles them to `plugin/**/*.mjs` (same relative path).                                          |
-| `tests/`       | Integration tests (`*.test.mjs`, `node:test`), run against `plugin/`.                                                                        |
+| `tests/`       | Integration tests (`*.test.mjs`, vitest; dprint still `node:test`), run against `plugin/`.                                                   |
 | `scripts/`     | Build scripts (`build.mjs`).                                                                                                                 |
-| `package.json` | Per-plugin pnpm scripts: `build`, `test`, `typecheck`.                                                                                       |
+| `package.json` | Per-plugin pnpm scripts: `build`, `test`, `typecheck`, `lint` (+ `eslint.config.mjs`).                                                       |
 | `CLAUDE.md`    | Developer notes for the plugin. Not inside `plugin/` (a plugin-root CLAUDE.md is not loaded and triggers a validate warning).                |
 
 Hand-written plugin content that is not generated (`SKILL.md`, `hooks/hooks.json`, `agents/*.md`, `README.md`) lives directly in `plugin/` and is edited there.
@@ -36,7 +38,7 @@ claude plugin validate < name > /plugin
 
 ## CI
 
-PR (`.github/workflows/pr.yml`): On every PR, for each plugin dir with changes: `plugin.json` and `package.json` versions must match; for PRs into `main` the version must be higher than on `main` and tag `<name>-<version>` must not exist here or in kwitsch/claude-plugins; then `pnpm --filter <name> lint` (only if the plugin defines a `lint` script), `build` and `test` must pass and the committed `<name>/plugin/` must equal the fresh build. Job `changed-plugins` is the required status check on `main` (branch protection in GitHub settings) — do not rename it.
+PR (`.github/workflows/pr.yml`): On every PR, for each plugin dir with changes: `plugin.json` and `package.json` versions must match; for PRs into `main` the version must be higher than on `main` and tag `<name>-<version>` must not exist here or in kwitsch/claude-plugins; then `pnpm --filter <name> lint` (only if the plugin defines a `lint` script), `build` and `test` must pass and the committed `<name>/plugin/` must equal the fresh build. The tested set is pnpm's graph `...[origin/<base>]`: changed workspace packages plus their dependents, so a `claude-engine-vitest/` change runs its tests and re-tests every plugin using it (no version bump for those). `check-plugin-fresh.sh` also runs `.github/scripts/check-plugin-layout.mjs` (allowlist of what `plugin/` may ship; plugin builds from the scaffold template run it as step 0; dprint's build does not yet). Job `changed-plugins` is the required status check on `main` (branch protection in GitHub settings) — do not rename it.
 
 Dependabot (`.github/dependabot.yml`, `.github/workflows/dependabot-automerge.yml`): weekly npm (pnpm workspace) and github-actions updates. Patch and pin/digest updates get auto-merge (squash) once `changed-plugins` is green; minor/major need a manual merge. Dependabot PRs skip the version-bump check for a plugin as long as its `plugin/` is unchanged (the freshness check still catches a changed build).
 

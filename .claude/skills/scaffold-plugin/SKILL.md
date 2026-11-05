@@ -15,7 +15,7 @@ Use `AskUserQuestion` for anything missing. Parse `$ARGUMENTS` first (`<name> [d
 
 - **name** — kebab-case, `^[a-z][a-z0-9-]*$`. Abort if `<name>/` already exists.
 - **description** — one sentence.
-- **components** (multi-select): `skill`, `hook`, `agent`, `mcp`. Only `hook` and `mcp` need `src/` TypeScript; the others are plain markdown in `plugin/`.
+- **components** (multi-select): `skill`, `hook` (command hook), `mods` (function-hooks module), `agent`, `mcp`. Only `hook`, `mods` and `mcp` need `src/` TypeScript; the others are plain markdown in `plugin/`.
 - **hook event** (if `hook` chosen): e.g. `SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `Stop`.
 
 ## Step 2 — Create the directory tree
@@ -30,6 +30,7 @@ for f in plugin.json package.json tsconfig.json; do
   sed -e "s/__NAME__/$name/g" -e "s/__DESCRIPTION__/<description>/g" -e "s/__AUTHOR__/$(git config user.name)/g" "$T/$f" > "$name/$f"
 done
 cp "$T/build.mjs" "$name/scripts/build.mjs"
+cp "$T/eslint.config.mjs" "$name/eslint.config.mjs"
 sed "s/__NAME__/$name/g" "$T/CLAUDE.md" > "$name/CLAUDE.md"
 sed "s/__NAME__/$name/g" "$T/README.md" > "$name/plugin/README.md"
 ```
@@ -38,6 +39,7 @@ Per selected component:
 
 - **skill** → `plugin/skills/<skill-name>/SKILL.md` from `templates/SKILL.md` (frontmatter `name`, `description`; body = instructions).
 - **hook** → `src/hooks/<event-kebab>.mts` from `templates/hook.mts` and `plugin/hooks/hooks.json` from `templates/hooks.json` (set the event name and the `.mjs` path). Add `tests/<event-kebab>.test.mjs` from `templates/hook.test.mjs`.
+- **mods** → `src/hooks/register.mts` exporting `register(on, options)` with structural `$`/`on` types (model: `inline-headroom/src/hooks/register.mts`), and `plugin/hooks/hooks.json` `{"modules": ["./register.mjs"]}` (merged into the same file when `hook` is also chosen). Tests in `tests/register.test.mjs` with `createKit` from `claude-engine-vitest` (`pnpm --filter <name> add -D claude-engine-vitest@workspace:*`).
 - **agent** → `plugin/agents/<agent-name>.md` with frontmatter `name`, `description`, `tools`.
 - **mcp** → `src/mcp/server.mts` (zero-dep stdio JSON-RPC) and `plugin/.mcp.json` pointing at `${CLAUDE_PLUGIN_ROOT}/mcp/server.mjs`. Add a test.
 
@@ -48,11 +50,12 @@ If no `src/` files were created, still keep `src/`, `scripts/` and the `package.
 ```bash
 pnpm install
 pnpm --filter <name> build
+pnpm --filter <name> lint
 pnpm --filter <name> test
 claude plugin validate <name>/plugin
 ```
 
-All three must pass. Fix template substitutions, never hand-edit `plugin/**/*.mjs` or `plugin/.claude-plugin/plugin.json`.
+All four must pass. Fix template substitutions, never hand-edit `plugin/**/*.mjs` or `plugin/.claude-plugin/plugin.json`.
 
 ## Step 4 — Report
 

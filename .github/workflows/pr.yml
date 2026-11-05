@@ -18,6 +18,10 @@ jobs:
             | while read -r d; do [ -f "$d/plugin.json" ] && echo "$d"; done | tr '\n' ' ')
           echo "plugins=$plugins" >> "$GITHUB_OUTPUT"
           echo "changed: ${plugins:-none}"
+          # toolchain only when a workspace package changed (the test set comes from pnpm's graph below)
+          pkgs=$(git diff --name-only "origin/${{ github.base_ref }}...HEAD" | cut -d/ -f1 | sort -u \
+            | while read -r d; do [ -f "$d/package.json" ] && echo "$d"; done | tr '\n' ' ')
+          echo "toolchain=$([ -n "$pkgs" ] && echo true)" >> "$GITHUB_OUTPUT"
 
       - name: Versions in package.json and plugin.json must match
         if: steps.changed.outputs.plugins != ''
@@ -64,23 +68,33 @@ jobs:
       # Toolchain only when something must be built: setup-node's post step
       # fails when `cache: pnpm` is set but `pnpm install` never ran.
       - uses: pnpm/action-setup@v6
-        if: steps.changed.outputs.plugins != ''
+        if: steps.changed.outputs.toolchain == 'true'
       - uses: actions/setup-node@v7
-        if: steps.changed.outputs.plugins != ''
+        if: steps.changed.outputs.toolchain == 'true'
         with:
           node-version: 24
           cache: pnpm
 
       - name: Install
-        if: steps.changed.outputs.plugins != ''
+        if: steps.changed.outputs.toolchain == 'true'
         run: pnpm install --frozen-lockfile
 
-      - name: Build and test changed plugins
-        if: steps.changed.outputs.plugins != ''
+      # changed workspace packages plus everything depending on them (a claude-engine-vitest change re-tests its
+      # plugins without a version bump); plugins get the full check, other packages their tests
+      - name: Build and test changed packages and their dependents
+        if: steps.changed.outputs.toolchain == 'true'
         run: |
-          for p in ${{ steps.changed.outputs.plugins }}; do
-            pnpm --filter "$p" run --if-present lint
-            pnpm --filter "$p" build
-            pnpm --filter "$p" test
-            bash .github/scripts/check-plugin-fresh.sh "$p"
+          set -o pipefail # a failing pnpm list must fail the job, not test nothing
+          dirs=$(pnpm list -r --depth -1 --json --filter "...[origin/${{ github.base_ref }}]" | jq -r '.[].path')
+          for d in $dirs; do
+            p=$(basename "$d")
+            [ "$d" = "$PWD" ] && continue # workspace root
+            if [ -f "$p/plugin.json" ]; then
+              pnpm --filter "$p" run --if-present lint
+              pnpm --filter "$p" build
+              pnpm --filter "$p" test
+              bash .github/scripts/check-plugin-fresh.sh "$p"
+            else
+              pnpm --filter "$p" run --if-present test
+            fi
           done

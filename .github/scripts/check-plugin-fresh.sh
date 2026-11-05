@@ -7,3 +7,5 @@ test -z "$(git status --porcelain -- "$p/plugin")" || {
   echo "::error::$p/plugin is stale or has untracked build output; run pnpm --filter $p build and commit"
   exit 1
 }
+# plugin/ ships only build output and hand-written plugin files (.claude/rules/plugin-build-output.md)
+node "$(dirname "$0")/check-plugin-layout.mjs" "$p"
