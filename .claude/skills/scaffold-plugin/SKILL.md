@@ -26,7 +26,7 @@ From the repo root, copy templates from `${CLAUDE_SKILL_DIR}/templates/` and sub
 name=<name>
 mkdir -p "$name"/{plugin/.claude-plugin,src,tests,scripts}
 T="${CLAUDE_SKILL_DIR}/templates"
-for f in plugin.json package.json tsconfig.json; do
+for f in plugin.json package.json; do
   sed -e "s/__NAME__/$name/g" -e "s/__DESCRIPTION__/<description>/g" -e "s/__AUTHOR__/$(git config user.name)/g" "$T/$f" > "$name/$f"
 done
 cp "$T/build.mjs" "$name/scripts/build.mjs"

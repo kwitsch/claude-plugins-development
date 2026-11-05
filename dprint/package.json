@@ -9,7 +9,6 @@
     "lint": "node scripts/hooks.mjs --check && oxlint -c ../.oxlintrc.json"
   },
   "devDependencies": {
-    "@types/node": "^26.6.6",
     "claude-engine-vitest": "workspace:*"
   }
 }

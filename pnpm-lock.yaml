@@ -8,6 +8,9 @@ importers:
 
   .:
     devDependencies:
+      '@types/node':
+        specifier: ^26.6.6
+        version: 26.6.6
       oxc-minify:
         specifier: ^0.157.0
         version: 0.157.0
@@ -32,18 +35,12 @@ importers:
 
   dprint:
     devDependencies:
-      '@types/node':
-        specifier: ^26.6.6
-        version: 26.6.6
       claude-engine-vitest:
         specifier: workspace:*
         version: link:../claude-engine-vitest
 
   inline-headroom:
     devDependencies:
-      '@types/node':
-        specifier: ^26.6.6
-        version: 26.6.6
       claude-engine-vitest:
         specifier: workspace:*
         version: link:../claude-engine-vitest

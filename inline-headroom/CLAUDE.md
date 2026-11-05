@@ -23,7 +23,7 @@ It also ships a host-wide SQLite storage MCP server behind the fail-closed
 
 ## Layout
 
-`plugin.json`, `package.json`, `tsconfig.json` and `scripts/build.mjs` follow the repo layout (root `CLAUDE.md`).
+`plugin.json`, `package.json` and `scripts/build.mjs` follow the repo layout (root `CLAUDE.md`).
 `pnpm build` compiles `src/**/*.mts` to `plugin/**/*.mjs` (minified; `plugin/hooks/` unmangled and uncompressed), and copies `plugin.json` to `plugin/.claude-plugin/plugin.json`.
 
 - `plugin/.mcp.json` (hand-written) — registers `src/mcp/server.mts` directly (no wrapper, no args) under
