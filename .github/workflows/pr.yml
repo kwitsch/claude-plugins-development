@@ -74,9 +74,10 @@ jobs:
       - name: Lint
         run: pnpm exec oxlint
 
-      # changed workspace packages plus everything depending on them (a claude-engine-vitest change re-tests its
-      # plugins without a version bump). A change in the root package (shared config, root tooling, lockfile,
-      # .github/scripts) re-checks every package. Plugins get the full check, other packages their tests.
+      # changed workspace packages plus everything depending on them (a development/vitest/claude-engine
+      # (claude-engine-vitest) change re-tests its plugins without a version bump). A change in the root package
+      # (shared config, root tooling, lockfile, development/scripts, .github/) re-checks every package. Plugins get
+      # the full check, other packages their tests.
       - name: Build and test changed packages and their dependents
         run: |
           set -o pipefail # a failing pnpm list must fail the job, not test nothing
@@ -85,9 +86,9 @@ jobs:
             dirs=$(pnpm list -r --depth -1 --json | jq -r '.[].path')
           fi
           for d in $dirs; do
-            p=$(basename "$d")
             [ "$d" = "$PWD" ] && continue # workspace root
-            if [ -f "$p/plugin.json" ]; then
+            p=$(jq -r .name "$d/package.json") # package name; a nested package's dir basename differs from it
+            if [ -f "$d/plugin.json" ]; then
               pnpm --filter "$p" run --if-present lint
               pnpm --filter "$p" build
               pnpm --filter "$p" test
