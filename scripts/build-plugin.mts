@@ -43,7 +43,13 @@ for (const f of walk(PLUGIN)) if (f.endsWith(".mjs")) rmSync(f);
 
 // 2. compile: strip types file by file (.mts -> .mjs), then minify.
 // Type checking is not part of the build: `pnpm lint` (oxlint --type-check) does it.
-const sources = walk(SRC).filter((f) => f.endsWith(".mts") && !f.endsWith(".d.mts"));
+const stray = walk(SRC).filter((f) => !f.endsWith(".mts"));
+if (stray.length) {
+  // src/ holds only .mts: anything else (a .ts, a .js) would silently not ship
+  for (const f of stray) console.error(`${path.relative(ROOT, f)}: src/ holds only .mts sources`);
+  process.exit(1);
+}
+const sources = walk(SRC).filter((f) => !f.endsWith(".d.mts"));
 for (const src of sources) {
   const out = path.join(PLUGIN, path.relative(SRC, src)).replace(/\.mts$/, ".mjs");
   const t = transformSync(src, readFileSync(src, "utf8"), { sourceType: "module", target: "es2022" });
@@ -54,12 +60,14 @@ for (const src of sources) {
   // shipped output is for node, not humans: minify (drops comments, keeps the shebang and export names).
   // Function-hooks modules (plugin/hooks/*.mjs) keep their names and shape: Claude Code's static check wants
   // named hook functions, `$`/`on` spelled as such and no shadowed names, which compress/mangle would break.
+  // They also keep their whitespace: whitespace removal turns every string literal into a template literal, and
+  // the static check reads only string literals (e.g. a `$.command.register({ name })` its own command hook answers).
   const hooksModule = path.relative(PLUGIN, out).startsWith("hooks" + path.sep);
   const m = minifySync(out, t.code, {
     module: true,
     compress: hooksModule ? false : { target: "es2022" },
     mangle: !hooksModule,
-    codegen: { legalComments: "none" },
+    codegen: { removeWhitespace: !hooksModule, legalComments: "none" },
   });
   if (m.errors.length) {
     for (const e of m.errors) console.error(`${path.relative(ROOT, out)}: ${e.message}`);

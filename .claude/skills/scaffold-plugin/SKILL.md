@@ -48,7 +48,7 @@ If no `src/` files were created, still keep `src/` and the `package.json` — th
 ```bash
 pnpm install
 pnpm --filter <name> build
-pnpm --filter <name> lint
+pnpm exec oxlint
 pnpm --filter <name> test
 claude plugin validate <name>/plugin
 ```

@@ -406,9 +406,9 @@ test("a rejecting session.cwd -> next's result unchanged, no throw, no toast", a
 
 plainTest("the module's inlined config names equal the shared CONFIG_NAMES; no imports", () => {
   const src = readFileSync(path.join(PLUGIN, "hooks/notice.mjs"), "utf8");
-  const m = /CONFIG_NAMES=(\[[^\]]*\])/.exec(src);
+  const m = /CONFIG_NAMES = (\[[^\]]*\])/.exec(src);
   assert.ok(m, "inlined CONFIG_NAMES");
-  assert.deepEqual(JSON.parse(m[1].replaceAll("`", "\"")), [...CONFIG_NAMES]);
+  assert.deepEqual(JSON.parse(m[1].replace(/,\s*\]$/, "]")), [...CONFIG_NAMES]);
   assert.doesNotMatch(src, /^import/m);
 });
 
@@ -433,13 +433,13 @@ plainTest("the probe constants, MIN_VERSION and version regex equal the shared s
 
 plainTest("built module keeps the names Claude Code's static check needs (no mangling)", () => {
   const src = readFileSync(path.join(PLUGIN, "hooks/notice.mjs"), "utf8");
-  assert.match(src, /export const register=on=>/);
-  assert.match(src, /async function onSessionCwd\(\$,e,next\)/);
-  assert.match(src, /async function onCwdChanged\(\$,e,next\)/);
+  assert.match(src, /export const register = \(on\) =>/);
+  assert.match(src, /async function onSessionCwd\(\$, e, next\)/);
+  assert.match(src, /async function onCwdChanged\(\$, e, next\)/);
   assert.match(src, /\$\.fs\.exists\(/);
   assert.match(src, /\$\.ui\.toast\(/);
   assert.match(src, /\$\.session\.cwd\(\)/);
   assert.match(src, /\$\.process\.run\(/);
-  assert.match(src, /\$\.env\.get\(`HOME`\)/);
-  assert.match(src, /\$\.env\.get\(`PATH`\)/);
+  assert.match(src, /\$\.env\.get\("HOME"\)/);
+  assert.match(src, /\$\.env\.get\("PATH"\)/);
 });

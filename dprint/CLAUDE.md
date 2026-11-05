@@ -88,7 +88,7 @@ via `node:assert/strict`; the shared config sets `testTimeout: 30_000` for the f
 
 ## Sources vs. build output
 
-- `src/**/*.{mts,ts}` are written for humans: every function, method, class, type, type member and
+- `src/**/*.mts` are written for humans: every function, method, class, type, type member and
   module-level constant carries a TSDoc comment (`@param name - text`, `@returns`, `@remarks`, one blank line
   before the first tag). `.claude/rules/tsdoc.md` asks for it (not linted). `pnpm lint` (oxlint type-aware + type check,
   workspace config `../.oxlintrc.json`, rules incl. `no-explicit-any`/`no-unsafe-*`) must pass; CI runs
@@ -102,7 +102,7 @@ via `node:assert/strict`; the shared config sets `testTimeout: 30_000` for the f
   `pnpm build` regenerates the file; `pnpm --filter dprint lint` runs `scripts/hooks.mts --check` and fails while it is
   stale. Never edit the `.d.mts` by hand. A new hook event needs its input fields in `EVENT_FIELDS` there.
 - `pnpm build` strips types with oxc-transform (`.mts` → `.mjs`) and then minifies every emitted file with
-  oxc-minify: no comments, mangled locals, shebang and export names kept. `plugin/hooks/*.mjs` (function-hooks modules) are neither compressed nor mangled: Claude Code's static
+  oxc-minify: no comments, mangled locals, shebang and export names kept. `plugin/hooks/*.mjs` (function-hooks modules) are neither compressed nor mangled and keep their whitespace (whitespace removal turns string literals into template literals): Claude Code's static
   module check needs named hook functions, `$`/`on` spelled as such and no shadowed names. The output is optimized for size and
   load time, not for reading; debug against `src/`.
 

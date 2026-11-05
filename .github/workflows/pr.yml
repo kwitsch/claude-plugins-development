@@ -81,7 +81,7 @@ jobs:
         run: |
           set -o pipefail # a failing pnpm list must fail the job, not test nothing
           dirs=$(pnpm list -r --depth -1 --json --filter "...[origin/${{ github.base_ref }}]" | jq -r '.[].path')
-          if printf '%s\n' $dirs | grep -qx "$PWD"; then
+          if printf '%s\n' $dirs | grep -qxF "$PWD"; then
             dirs=$(pnpm list -r --depth -1 --json | jq -r '.[].path')
           fi
           for d in $dirs; do
