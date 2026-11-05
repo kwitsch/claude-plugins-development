@@ -73,7 +73,7 @@ test("README documents the config gate, the 15 s toast module and all six config
     readFileSync(path.join(ROOT, "plugin.json"), "utf8"),
   );
   assert.equal(readme.split("\n")[2], manifest.description);
-  assert.match(manifest.description, /shows a toast when it has none/);
+  assert.match(manifest.description, /shows a toast when it has one but dprint cannot run/);
 });
 
 test("SKILL.md frontmatter: argument-hint lists the three actions", () => {

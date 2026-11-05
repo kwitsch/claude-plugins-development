@@ -11,7 +11,7 @@ Development repository for Claude Code plugins. One top-level directory per plug
 | `plugin.json`  | Source of truth for the plugin manifest (`name`, `version`, `description`, `author`, …). Edit here only.                                     |
 | `plugin/`      | The finished, installable plugin. `plugin/.claude-plugin/plugin.json` and every `plugin/**/*.mjs` are **build output** — never edit by hand. |
 | `src/`         | TypeScript sources (`*.mts`). `pnpm build` compiles them to `plugin/**/*.mjs` (same relative path).                                          |
-| `tests/`       | Integration tests (`*.test.mjs`, vitest; dprint still `node:test`), run against `plugin/`.                                                   |
+| `tests/`       | Integration tests (`*.test.mjs`, vitest), run against `plugin/`.                                                                             |
 | `scripts/`     | Build scripts (`build.mjs`).                                                                                                                 |
 | `package.json` | Per-plugin pnpm scripts: `build`, `test`, `typecheck`, `lint` (+ `eslint.config.mjs`).                                                       |
 | `CLAUDE.md`    | Developer notes for the plugin. Not inside `plugin/` (a plugin-root CLAUDE.md is not loaded and triggers a validate warning).                |
