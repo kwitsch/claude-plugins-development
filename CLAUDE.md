@@ -41,6 +41,7 @@ claude plugin validate < name > /plugin
 
 ## Rules
 
+- `.gitattributes` marks build output and the lockfile `linguist-generated` (collapsed in PRs); `*/plugin/**/*.mjs` is also `-diff -merge`: resolve conflicts there by rebuilding.
 - Never edit `*/plugin/**/*.mjs` or `*/plugin/.claude-plugin/plugin.json` — change `src/` or `<name>/plugin.json` and run `pnpm build`. `.claude/settings.json` denies these writes.
 - Version bump = edit `version` in both `<name>/plugin.json` and `<name>/package.json` (must match; `pnpm build` and CI fail otherwise), then `pnpm build`. Any change under `<name>/` merged to `main` needs a bump to a version higher than on `main` that is not yet tagged `<name>-<version>` here or in kwitsch/claude-plugins.
 - New plugin: use the `scaffold-plugin` skill (`.claude/skills/scaffold-plugin/`). Never hand-copy the layout.

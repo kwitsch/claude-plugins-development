@@ -1,0 +1,11 @@
+# Build output and lockfile: only checked for freshness (CI rebuilds and compares), never reviewed.
+# linguist-generated: GitHub collapses these in PR diffs and leaves them out of language stats.
+# -diff: minified one-liners; `git diff`/`git log -p` print "Binary files differ" instead of one huge line.
+# -merge: a conflict keeps our version and marks the file conflicted; resolve by rebuilding (`pnpm build`).
+*/plugin/**/*.mjs                 linguist-generated -diff -merge
+*/plugin/.claude-plugin/plugin.json linguist-generated
+dprint/src/mcp/hook-inputs.d.mts  linguist-generated
+pnpm-lock.yaml                    linguist-generated
+
+# LF everywhere so a Windows/WSL checkout does not make the freshness check (git status on plugin/) fail
+* text=auto eol=lf
