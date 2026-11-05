@@ -1,5 +1,5 @@
 // Static checks on the hand-written skill files and the generated manifest.
-import { test } from "node:test";
+import { test } from "vitest";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
