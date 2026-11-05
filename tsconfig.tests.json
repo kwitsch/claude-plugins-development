@@ -6,6 +6,6 @@
   },
   "include": [
     "*/tests/**/*.mts",
-    "claude-engine-vitest/**/*.mts"
+    "development/vitest/claude-engine/**/*.mts"
   ]
 }

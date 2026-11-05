@@ -6,7 +6,7 @@
     ".": "./index.mts"
   },
   "scripts": {
-    "test": "vitest run --config ../vitest.config.mts"
+    "test": "vitest run --config ../../../vitest.config.mts"
   },
   "peerDependencies": {
     "vitest": "*"
