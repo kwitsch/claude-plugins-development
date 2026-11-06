@@ -498,6 +498,13 @@ class Engine {
       try {
         return yield* h.fn($, frozen(e), nextFor(i, called)) as AsyncGenerator<unknown, unknown>;
       } catch (err) {
+        if (h.catcher) {
+          try {
+            return yield* h.catcher($, frozen(e), Object.assign(nextFor(i, called), { error: { kind: "throw", message: message(err) }, called: called.value })) as AsyncGenerator<unknown, unknown>;
+          } catch {
+            // the handler failed too: skip the hook as without one
+          }
+        }
         this.report(h, err);
         if (called.value) throw err;
         return yield* stream.call(this, i + 1, e);
