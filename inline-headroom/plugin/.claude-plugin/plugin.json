@@ -5,6 +5,13 @@
   "author": {
     "name": "Kwitsch"
   },
+  "keywords": [
+    "mods",
+    "hooks",
+    "token-efficiency",
+    "prompt-cache",
+    "effort"
+  ],
   "userConfig": {
     "cache_aligner_enabled": {
       "type": "boolean",
