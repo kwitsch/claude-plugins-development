@@ -19,7 +19,7 @@
  *
  * @packageDocumentation
  */
-import { spawnSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import type { SpawnSyncOptionsWithStringEncoding, SpawnSyncReturns } from "node:child_process";
 import { createHash } from "node:crypto";
 import { accessSync, constants as fsConstants, existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, renameSync, writeFileSync } from "node:fs";
@@ -60,6 +60,12 @@ const TSC_SPAWN_TIMEOUT_MS = 45000;
  * as TSC_SPAWN_TIMEOUT_MS; stays under the hook-level timeout backstop.
  */
 const CARGO_SPAWN_TIMEOUT_MS = 45000;
+
+/** Above this many lintable files the watch list is empty (nothing watched), as dprint's watch-list.mts. */
+export const WATCH_LIMIT = 5000;
+
+/** Budget of each git call (ls-files for the watch list, status for the FileChanged gate). */
+const GIT_TIMEOUT_MS = 10000;
 
 /** tsc only understands real TypeScript syntax; .js/.jsx/.mjs/.cjs stay chain-linted only (eslint or oxlint, see resolveOxlintConfig). */
 const TYPE_CHECK_EXTS = new Set([".ts", ".tsx", ".mts", ".cts"]);
@@ -1555,6 +1561,59 @@ export function lintFileHandler(args: PostToolUseHookInput): HookResult {
 }
 
 /**
+ * Lintable, in-scope files of `cwd` per `git ls-files -co --exclude-standard` (tracked + untracked-not-ignored; in a
+ * subdirectory git lists only paths below it, relative to it), each filtered through `scopedTarget` (drops excluded
+ * paths, scratchpad files, dangling links and index entries deleted from disk).
+ *
+ * @param cwd - Payload cwd (`new_cwd` for CwdChanged).
+ * @param scratchpad - The session's `scratchpad_dir`, when the payload has one.
+ * @returns Lexical absolute paths; [] on git failure or when more than WATCH_LIMIT remain (stderr note).
+ */
+export function watchList(cwd: string, scratchpad?: string): string[] {
+  let out: string;
+  try {
+    out = execFileSync("git", ["ls-files", "-co", "--exclude-standard", "-z"], {
+      cwd,
+      encoding: "utf8",
+      timeout: GIT_TIMEOUT_MS,
+      maxBuffer: MAX_BUFFER_BYTES,
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+  } catch {
+    return [];
+  }
+  const list = out.split("\0").filter(Boolean).flatMap((rel) => {
+    const fp = scopedTarget(cwd, rel, scratchpad)?.fp;
+    return fp ? [fp] : [];
+  });
+  if (list.length > WATCH_LIMIT) {
+    process.stderr.write(`universal-lint: watch list: ${list.length} files above ${WATCH_LIMIT}, FileChanged linting off for this cwd\n`);
+    return [];
+  }
+  return list;
+}
+
+/**
+ * SessionStart/CwdChanged: the watch list as `hookSpecificOutput.watchPaths` (Claude Code then fires FileChanged for
+ * those files). Fails open to {}.
+ *
+ * @param args - The SessionStart/CwdChanged hook payload.
+ * @returns The watch-paths output, or {} when the list is empty or for any other event.
+ */
+export function watchPathsHandler(args: PostToolUseHookInput): { hookSpecificOutput?: { hookEventName: string; watchPaths: string[] } } {
+  try {
+    const ev = typeof args?.hook_event_name === "string" ? args.hook_event_name : "";
+    if (ev !== "SessionStart" && ev !== "CwdChanged") return {};
+    const cwd = typeof args.new_cwd === "string" && args.new_cwd ? args.new_cwd : args.cwd;
+    if (typeof cwd !== "string" || !cwd) return {};
+    const list = watchList(cwd, typeof args.scratchpad_dir === "string" ? args.scratchpad_dir : undefined);
+    return list.length > 0 ? { hookSpecificOutput: { hookEventName: ev, watchPaths: list } } : {};
+  } catch {
+    return {};
+  }
+}
+
+/**
  * True only when this file is the process entry point (MCP spawn / `node server.mjs`),
  * false when imported by a unit test -- so importing never starts the stdin loop.
  */
@@ -1567,13 +1626,20 @@ function isMainModule(): boolean {
 }
 
 /**
- * Read the hook's stdin JSON and run lintFileHandler. Findings: their text on
- * stderr and exit 2 (asyncRewake wakes Claude with it). Fails open on any
+ * Read the hook's stdin JSON and dispatch on `hook_event_name`: SessionStart/CwdChanged print the watch-paths JSON on
+ * stdout (exit 0); anything else (PostToolUse, or a payload without the field) records the Write/Edit digest and runs
+ * lintFileHandler. Findings: their text on stderr and exit 2 (asyncRewake wakes Claude with it). Fails open on any
  * error — no output, exit 0.
  */
 function main(): void {
   try {
     const input = JSON.parse(readFileSync(0, "utf8")) as PostToolUseHookInput;
+    const ev = input?.hook_event_name;
+    if (ev === "SessionStart" || ev === "CwdChanged") {
+      const r = watchPathsHandler(input);
+      if (r.hookSpecificOutput) process.stdout.write(JSON.stringify(r));
+      return;
+    }
     recordWrittenFor(input);
     const ctx = lintFileHandler(input).hookSpecificOutput?.additionalContext;
     if (ctx) {
