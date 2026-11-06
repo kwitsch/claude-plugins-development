@@ -22,7 +22,7 @@
 import { spawnSync } from "node:child_process";
 import type { SpawnSyncOptionsWithStringEncoding, SpawnSyncReturns } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
-import { accessSync, constants as fsConstants, existsSync, mkdirSync, readFileSync, realpathSync, renameSync, writeFileSync } from "node:fs";
+import { accessSync, appendFileSync, constants as fsConstants, existsSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import path from "node:path";
 import process from "node:process";
@@ -71,6 +71,12 @@ const DEBOUNCE_MS = (() => {
   const n = raw ? Number(raw) : NaN;
   return Number.isFinite(n) && n >= 0 ? n : 5000;
 })();
+
+/**
+ * Max age of a `<hash>.edits` entry: older entries come from a hook killed during its sleep, not from a live debounce
+ * chain, and would otherwise widen a later run's edit range indefinitely.
+ */
+const EDITS_MAX_AGE_MS = 600_000;
 
 /** tsc only understands real TypeScript syntax; .js/.jsx/.mjs/.cjs stay chain-linted only (eslint or oxlint, see resolveOxlintConfig). */
 const TYPE_CHECK_EXTS = new Set([".ts", ".tsx", ".mts", ".cts"]);
@@ -1454,34 +1460,55 @@ function isMainModule(): boolean {
 
 /**
  * Debounced gate. Writes a unique token for `resolved` to a per-file marker under
- * tmpdir()/universal-lint-debounce (keyed by sha256 of the resolved absolute path),
- * waits DEBOUNCE_MS, then returns true only if this invocation's token is still the
- * newest — i.e. no later edit's process overwrote it. On any filesystem error,
- * returns true (fail open: run the lint rather than silently skip). The marker
- * write is atomic (temp file + renameSync) so a concurrent process never reads a
- * torn token. No cleanup: markers are tiny and the OS reclaims tmpdir().
+ * tmpdir()/universal-lint-debounce (keyed by sha256 of the resolved absolute path), appends this invocation's
+ * timestamped edit entry to `<hash>.edits`, waits DEBOUNCE_MS, then lints only if this invocation's token is still the
+ * newest — i.e. no later edit's process overwrote it. The winner renames `<hash>.edits` away (later appends start a
+ * fresh file for the next winner), reads and removes it, and returns every entry younger than EDITS_MAX_AGE_MS plus its
+ * own. On any filesystem error it returns its own entry only (fail open: run the lint rather than silently skip). The
+ * marker write is atomic (temp file + renameSync) so a concurrent process never reads a torn token. Residual: an append
+ * opened just before the winner's rename but written after its read is lost (microsecond window).
  *
  * @param resolved - Absolute file path.
- * @returns True when this invocation is still the newest edit of the file.
+ * @param entry - This invocation's edit entry (see `editEntry`).
+ * @returns The edit entries of every hook process coalesced into this run (own entry included), or null when
+ *   superseded by a newer edit.
  */
-async function debounceGate(resolved: string): Promise<boolean> {
+async function debounceGate(resolved: string, entry: string | null): Promise<Array<string | null> | null> {
   const token = `${Date.now()}-${process.pid}-${randomBytes(6).toString("hex")}`;
   const dir = path.join(tmpdir(), "universal-lint-debounce");
   const marker = path.join(dir, hashPath(resolved) + ".mark");
+  const edits = path.join(dir, hashPath(resolved) + ".edits");
   try {
     mkdirSync(dir, { recursive: true });
     const tmp = `${marker}.${token}.tmp`;
     writeFileSync(tmp, token);
     renameSync(tmp, marker);
+    appendFileSync(edits, JSON.stringify([Date.now(), entry]) + "\n");
   } catch {
-    return true; // couldn't arm the marker — fail open, just run
+    return [entry]; // couldn't arm the marker or record the edit — fail open, just run
   }
   await sleep(DEBOUNCE_MS);
   try {
-    return readFileSync(marker, "utf8").trim() === token;
+    if (readFileSync(marker, "utf8").trim() !== token) return null; // superseded
   } catch {
-    return true; // marker unreadable/deleted — fail open, run
+    return [entry]; // marker unreadable/deleted — fail open, run
   }
+  const entries: Array<string | null> = [];
+  try {
+    const taken = `${edits}.${token}`;
+    renameSync(edits, taken); // later appends start a fresh file for the next winner
+    const raw = readFileSync(taken, "utf8");
+    rmSync(taken, { force: true });
+    const now = Date.now();
+    for (const l of raw.split("\n")) {
+      if (!l) continue;
+      const [t, e] = JSON.parse(l) as [number, string | null];
+      if (now - t <= EDITS_MAX_AGE_MS) entries.push(e);
+    }
+  } catch {
+    // fail open: own entry only
+  }
+  return entries.includes(entry) ? entries : [...entries, entry];
 }
 
 /**
@@ -1496,8 +1523,9 @@ async function main(): Promise<void> {
     const input = JSON.parse(readFileSync(0, "utf8")) as PostToolUseHookInput;
     const resolved = resolveLintTarget(input);
     if (!resolved) return; // guards rejected — nothing to lint, no wait
-    if (!(await debounceGate(resolved))) return; // superseded by a newer edit
-    const ctx = lintFileHandler(input).hookSpecificOutput?.additionalContext;
+    const edits = await debounceGate(resolved, editEntry(input));
+    if (!edits) return; // superseded by a newer edit
+    const ctx = lintFileHandler(input, edits).hookSpecificOutput?.additionalContext;
     if (ctx) {
       process.stderr.write(ctx + "\n");
       process.exitCode = 2;
