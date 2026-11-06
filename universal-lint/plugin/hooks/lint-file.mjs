@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { spawnSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { accessSync, constants as fsConstants, existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, renameSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
@@ -13,6 +13,8 @@ const MAX_CONTEXT_CHARS = 4e3;
 const MAX_BUFFER_BYTES = 10 * 1024 * 1024;
 const TSC_SPAWN_TIMEOUT_MS = 45e3;
 const CARGO_SPAWN_TIMEOUT_MS = 45e3;
+export const WATCH_LIMIT = 5e3;
+const GIT_TIMEOUT_MS = 1e4;
 const TYPE_CHECK_EXTS = new Set([
 	".ts",
 	".tsx",
@@ -830,6 +832,53 @@ export function lintFileHandler(args) {
 		return {};
 	}
 }
+export function watchList(cwd, scratchpad) {
+	let out;
+	try {
+		out = execFileSync("git", [
+			"ls-files",
+			"-co",
+			"--exclude-standard",
+			"-z"
+		], {
+			cwd,
+			encoding: "utf8",
+			timeout: GIT_TIMEOUT_MS,
+			maxBuffer: MAX_BUFFER_BYTES,
+			stdio: [
+				"ignore",
+				"pipe",
+				"ignore"
+			]
+		});
+	} catch {
+		return [];
+	}
+	const list = out.split("\0").filter(Boolean).flatMap((rel) => {
+		const fp = scopedTarget(cwd, rel, scratchpad)?.fp;
+		return fp ? [fp] : [];
+	});
+	if (list.length > WATCH_LIMIT) {
+		process.stderr.write(`universal-lint: watch list: ${list.length} files above ${WATCH_LIMIT}, FileChanged linting off for this cwd\n`);
+		return [];
+	}
+	return list;
+}
+export function watchPathsHandler(args) {
+	try {
+		const ev = typeof args?.hook_event_name === "string" ? args.hook_event_name : "";
+		if (ev !== "SessionStart" && ev !== "CwdChanged") return {};
+		const cwd = typeof args.new_cwd === "string" && args.new_cwd ? args.new_cwd : args.cwd;
+		if (typeof cwd !== "string" || !cwd) return {};
+		const list = watchList(cwd, typeof args.scratchpad_dir === "string" ? args.scratchpad_dir : undefined);
+		return list.length > 0 ? { hookSpecificOutput: {
+			hookEventName: ev,
+			watchPaths: list
+		} } : {};
+	} catch {
+		return {};
+	}
+}
 function isMainModule() {
 	try {
 		return realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url));
@@ -840,6 +889,12 @@ function isMainModule() {
 function main() {
 	try {
 		const input = JSON.parse(readFileSync(0, "utf8"));
+		const ev = input?.hook_event_name;
+		if (ev === "SessionStart" || ev === "CwdChanged") {
+			const r = watchPathsHandler(input);
+			if (r.hookSpecificOutput) process.stdout.write(JSON.stringify(r));
+			return;
+		}
 		recordWrittenFor(input);
 		const ctx = lintFileHandler(input).hookSpecificOutput?.additionalContext;
 		if (ctx) {
