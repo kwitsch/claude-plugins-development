@@ -207,7 +207,7 @@ test("(i) /headroom opens the headroom pane and prints nothing", async ($, on) =
     opened.push(e);
     return { value: { isPlaced: true } };
   });
-  const out = await $.command.run({ command: "headroom" });
+  const out = (await $.command.run({ command: "headroom" })) as { text?: string };
   expect(out.text).toBeUndefined();
   expect(opened.length).toBe(1);
   // 6 + 5 + 2 × 11 table rows, the storage note and thirteen gaps.
@@ -221,7 +221,7 @@ test("(i2) /headroom falls back to the stats tables as text when the pane is not
   on("ui.open", async () => ({ value: { isPlaced: false, reason: "no surface" } }));
   const run = $.command.run({ command: "headroom" });
   await clock.settle(); // lets the one storage read finish
-  const out = await run;
+  const out = (await run) as { text?: string };
   expect(out.text).toMatch(/^effort routing\s+steps\s+clamped$/m);
   expect(out.text).toMatch(/^7 days\s+17\s+9$/m);
   expect(out.text).toMatch(/^cache aligner\s+hit\s+drops$/m);
@@ -317,7 +317,7 @@ test("(o) a storage error result shows as storage unavailable", async ($, on) =>
 test("(s) a clock failure shows as storage unavailable instead of loading forever", async ($, on) => {
   stubStorage(on, () => SUMS);
   on("ui.open", async () => ({ value: { isPlaced: false, reason: "no surface" } }));
-  const out = await $.command.run({ command: "headroom" }); // no mock.clock: the kit refuses $.clock.now()
+  const out = (await $.command.run({ command: "headroom" })) as { text?: string }; // no mock.clock: the kit refuses $.clock.now()
   expect(out.text).toMatch(/storage unavailable: /);
 });
 
@@ -529,7 +529,7 @@ test(
     expect(st.seen).toBe("high");
     await step($, 1, "high");
     expect(st.seen).toBe("low"); // the main loop is still clamped
-    const out = await $.command.run({ command: "headroom" });
+    const out = (await $.command.run({ command: "headroom" })) as { text?: string };
     expect(out.text).toMatch(/^effort routing\s+steps\s+clamped$/m);
     expect(out.text).not.toMatch(/^subagents/m);
   },
@@ -593,11 +593,11 @@ test("(ah) the subagents row counts this session's subagent steps and clamps, an
   on("session.end", async (_$, e) => ({ sessionId: e.sessionId }));
   await step($, 0, "high", "a1");
   await step($, 1, "high", "a1");
-  const before = await $.command.run({ command: "headroom" });
+  const before = (await $.command.run({ command: "headroom" })) as { text?: string };
   expect(before.text).toMatch(/^subagents\s+2\s+1$/m);
   expect(before.text).toMatch(/^session\s+0\s+0$/m); // subagent steps never count in the main-loop session row
   await $.session.end({ reason: "clear", sessionId: "s1", resume: { id: "s1" } });
-  const after = await $.command.run({ command: "headroom" });
+  const after = (await $.command.run({ command: "headroom" })) as { text?: string };
   expect(after.text).toMatch(/^subagents\s+0\s+0$/m);
 });
 
@@ -671,7 +671,7 @@ test("(sc1) a main-loop Bash JSON row is stored crushed, and /headroom counts th
   expect(kept.length).toBeLessThan(200);
   expect(kept.some((row) => row.status === "error")).toBe(true);
   expect(dropped).toBe(200 - (kept.length - 1));
-  const [, n, saved] = CRUSHER_ROW.exec((await $.command.run({ command: "headroom" })).text ?? "") ?? [];
+  const [, n, saved] = CRUSHER_ROW.exec(((await $.command.run({ command: "headroom" })) as { text?: string }).text ?? "") ?? [];
   expect(Number(n)).toBe(dropped);
   expect(Number(saved)).toBeGreaterThan(0);
 });
@@ -680,9 +680,9 @@ test("(sc2) headroom_retrieve returns the original rows, and an unknown hash is 
   const st = bottomStep(on);
   await startCrusher(on, $);
   const { hash } = crushedRows(await appendResult($, "Bash", BIG));
-  expect((await $.tool.call({ tool: RETRIEVE_TOOL, hash })).result).toBe(BIG);
-  expect((await $.tool.call({ tool: RETRIEVE_TOOL, hash: `hash=${hash}` })).result).toBe(BIG); // a marker's own `hash=H` text works too
-  const miss = await $.tool.call({ tool: RETRIEVE_TOOL, hash: "000000000000" });
+  expect(((await $.tool.call({ tool: RETRIEVE_TOOL, hash })) as { result?: unknown }).result).toBe(BIG);
+  expect(((await $.tool.call({ tool: RETRIEVE_TOOL, hash: `hash=${hash}` })) as { result?: unknown }).result).toBe(BIG); // a marker's own `hash=H` text works too
+  const miss = (await $.tool.call({ tool: RETRIEVE_TOOL, hash: "000000000000" })) as { deny?: unknown };
   expect(typeof miss.deny).toBe("string");
   await step($, 1, "high");
   expect(st.seen).toBe("high"); // the effort observer counted the deny as a failed call
@@ -726,7 +726,7 @@ test(
     await callRead($);
     await step($, 1, "high");
     expect(st.seen).toBe("low"); // effort routing still clamps after the successful call
-    const text = (await $.command.run({ command: "headroom" })).text ?? "";
+    const text = ((await $.command.run({ command: "headroom" })) as { text?: string }).text ?? "";
     expect(text).not.toMatch(/^smart crusher/m);
     expect(text).not.toMatch(/^dedup/m);
     expect(text).not.toMatch(/^line elider/m);
@@ -751,7 +751,7 @@ test(
     expect(table.startsWith("[200]{id:int,note:string,status:string}\n")).toBe(true);
     expect(table).not.toMatch(/_ccr_dropped/);
     expect(registered).toHaveLength(1);
-    const text = (await $.command.run({ command: "headroom" })).text ?? "";
+    const text = ((await $.command.run({ command: "headroom" })) as { text?: string }).text ?? "";
     expect(text).not.toMatch(/^smart crusher/m);
     expect(text).toMatch(DEDUP_ROW);
     expect(text).toMatch(ELIDER_ROW);
@@ -886,10 +886,10 @@ test("(sc10) session.end starts the smart crusher row over", { options: { ...LOS
   on("session.end", async (_$, e) => ({ sessionId: e.sessionId }));
   await startCrusher(on, $);
   await appendResult($, "Bash", BIG);
-  const [, before] = CRUSHER_ROW.exec((await $.command.run({ command: "headroom" })).text ?? "") ?? [];
+  const [, before] = CRUSHER_ROW.exec(((await $.command.run({ command: "headroom" })) as { text?: string }).text ?? "") ?? [];
   expect(Number(before)).toBeGreaterThan(0);
   await $.session.end({ reason: "clear", sessionId: "s1", resume: { id: "s1" } });
-  expect((await $.command.run({ command: "headroom" })).text).toMatch(/^smart crusher\s+dropped\s+saved\nsession\s+0\s+0$/m);
+  expect(((await $.command.run({ command: "headroom" })) as { text?: string }).text).toMatch(/^smart crusher\s+dropped\s+saved\nsession\s+0\s+0$/m);
 });
 
 test("(dd1) a row repeating 10 lines of an earlier row is stored with one pointer, and the run is retrievable", { options: { ...NEW_LEVERS_OFF, storage_enabled: false } }, async ($, on) => {
@@ -902,8 +902,8 @@ test("(dd1) a row repeating 10 lines of an earlier row is stored with one pointe
   const [, n, ref, hash] = POINTER.exec(ptr ?? "") ?? [];
   expect(Number(n)).toBe(10);
   expect(Number(ref)).toBe(1);
-  expect((await $.tool.call({ tool: RETRIEVE_TOOL, hash })).result).toBe(TEN);
-  const [, spans, saved] = DEDUP_ROW.exec((await $.command.run({ command: "headroom" })).text ?? "") ?? [];
+  expect(((await $.tool.call({ tool: RETRIEVE_TOOL, hash })) as { result?: unknown }).result).toBe(TEN);
+  const [, spans, saved] = DEDUP_ROW.exec(((await $.command.run({ command: "headroom" })) as { text?: string }).text ?? "") ?? [];
   expect(Number(spans)).toBe(1);
   expect(Number(saved)).toBeGreaterThan(0);
 });
@@ -920,7 +920,7 @@ test("(dd3) cross_turn_dedup_enabled false folds nothing and hides the dedup tab
   await startCrusher(on, $);
   await appendResult($, "Bash", TEN);
   expect(await appendResult($, "Bash", TEN)).toBe(TEN);
-  expect((await $.command.run({ command: "headroom" })).text).not.toMatch(/^dedup/m);
+  expect(((await $.command.run({ command: "headroom" })) as { text?: string }).text).not.toMatch(/^dedup/m);
 });
 
 test("(dd4) session.end starts the dedup row and its corpus over", { options: { ...NEW_LEVERS_OFF, storage_enabled: false } }, async ($, on) => {
@@ -929,9 +929,9 @@ test("(dd4) session.end starts the dedup row and its corpus over", { options: { 
   await startCrusher(on, $);
   await appendResult($, "Bash", TEN);
   await appendResult($, "Bash", TEN);
-  expect((await $.command.run({ command: "headroom" })).text).toMatch(/^dedup\s+spans\s+saved\nsession\s+1\s+\d+$/m);
+  expect(((await $.command.run({ command: "headroom" })) as { text?: string }).text).toMatch(/^dedup\s+spans\s+saved\nsession\s+1\s+\d+$/m);
   await $.session.end({ reason: "clear", sessionId: "s1", resume: { id: "s1" } });
-  expect((await $.command.run({ command: "headroom" })).text).toMatch(/^dedup\s+spans\s+saved\nsession\s+0\s+0$/m);
+  expect(((await $.command.run({ command: "headroom" })) as { text?: string }).text).toMatch(/^dedup\s+spans\s+saved\nsession\s+0\s+0$/m);
   expect(await appendResult($, "Bash", TEN)).toBe(TEN); // the corpus was cleared: nothing earlier to fold against
 });
 
@@ -979,9 +979,9 @@ test("(dd7) dedup runs have a store of their own, so a flood of them never evict
   await appendResult($, "Bash", runsRow(600, 600, "a"));
   const last = hashesOf(await appendResult($, "Bash", runsRow(600, 600, "b")));
   expect([first.length, last.length]).toEqual([600, 600]);
-  expect((await $.tool.call({ tool: RETRIEVE_TOOL, hash })).result).toBe(BIG); // 1200 runs went through the store of 1000
-  expect((await $.tool.call({ tool: RETRIEVE_TOOL, hash: last[599] })).result).toBe(runsRow(1, 1199, "b").split("\n").slice(0, 3).join("\n"));
-  expect(typeof (await $.tool.call({ tool: RETRIEVE_TOOL, hash: first[0] })).deny).toBe("string"); // the oldest runs went
+  expect(((await $.tool.call({ tool: RETRIEVE_TOOL, hash })) as { result?: unknown }).result).toBe(BIG); // 1200 runs went through the store of 1000
+  expect(((await $.tool.call({ tool: RETRIEVE_TOOL, hash: last[599] })) as { result?: unknown }).result).toBe(runsRow(1, 1199, "b").split("\n").slice(0, 3).join("\n"));
+  expect(typeof ((await $.tool.call({ tool: RETRIEVE_TOOL, hash: first[0] })) as { deny?: unknown }).deny).toBe("string"); // the oldest runs went
 });
 
 test("(dd9) a row folding more runs than the store holds keeps every one of its own pointers retrievable", { options: { ...NEW_LEVERS_OFF, storage_enabled: false } }, async ($, on) => {
@@ -989,8 +989,8 @@ test("(dd9) a row folding more runs than the store holds keeps every one of its 
   await appendResult($, "Bash", runsRow(1001, 0, "a"));
   const hashes = hashesOf(await appendResult($, "Bash", runsRow(1001, 0, "b")));
   expect(hashes).toHaveLength(1001);
-  expect((await $.tool.call({ tool: RETRIEVE_TOOL, hash: hashes[0] })).result).toBe(runsRow(1, 0, "b").split("\n").slice(0, 3).join("\n"));
-  expect((await $.tool.call({ tool: RETRIEVE_TOOL, hash: hashes[1000] })).result).toBe(runsRow(1, 1000, "b").split("\n").slice(0, 3).join("\n"));
+  expect(((await $.tool.call({ tool: RETRIEVE_TOOL, hash: hashes[0] })) as { result?: unknown }).result).toBe(runsRow(1, 0, "b").split("\n").slice(0, 3).join("\n"));
+  expect(((await $.tool.call({ tool: RETRIEVE_TOOL, hash: hashes[1000] })) as { result?: unknown }).result).toBe(runsRow(1, 1000, "b").split("\n").slice(0, 3).join("\n"));
 });
 
 test(
@@ -1016,8 +1016,8 @@ test("(de1) a dense line is stored elided with a retrieval line, and the origina
   expect(lines[0]).toBe(`${"x".repeat(160)} ...[2260 chars of dense machine-generated content elided]... ${"x".repeat(80)}`);
   expect(lines[1]).toBe("exit 0");
   const [, hash] = /^\[1 dense machine-generated line elided\. Retrieve original: hash=([0-9a-f]{12})\]$/.exec(lines[2] ?? "") ?? [];
-  expect((await $.tool.call({ tool: RETRIEVE_TOOL, hash })).result).toBe(DENSE);
-  const [, n, saved] = ELIDER_ROW.exec((await $.command.run({ command: "headroom" })).text ?? "") ?? [];
+  expect(((await $.tool.call({ tool: RETRIEVE_TOOL, hash })) as { result?: unknown }).result).toBe(DENSE);
+  const [, n, saved] = ELIDER_ROW.exec(((await $.command.run({ command: "headroom" })) as { text?: string }).text ?? "") ?? [];
   expect(Number(n)).toBe(1);
   expect(Number(saved)).toBeGreaterThan(0);
 });
@@ -1026,7 +1026,7 @@ test("(de2) dense_line_elider_enabled false keeps dense lines and hides the line
   on("ui.open", notPlaced);
   await startCrusher(on, $);
   expect(await appendResult($, "Bash", DENSE)).toBe(DENSE);
-  expect((await $.command.run({ command: "headroom" })).text).not.toMatch(/^line elider/m);
+  expect(((await $.command.run({ command: "headroom" })) as { text?: string }).text).not.toMatch(/^line elider/m);
 });
 
 test("(lc1) by default a uniform JSON array is stored as a lossless table, counted under compaction and not under the crusher", { options: { storage_enabled: false } }, async ($, on) => {
@@ -1038,7 +1038,7 @@ test("(lc1) by default a uniform JSON array is stored as a lossless table, count
   expect(String(table).startsWith("[200]{id:int,note:string,status:string}\n")).toBe(true);
   expect(String(table).split("\n").includes("150,same text,error")).toBe(true);
   expect(stored).not.toMatch(/_ccr_dropped/);
-  const text = (await $.command.run({ command: "headroom" })).text ?? "";
+  const text = ((await $.command.run({ command: "headroom" })) as { text?: string }).text ?? "";
   const [, arrays, saved] = COMPACTION_ROW.exec(text) ?? [];
   expect(Number(arrays)).toBe(1);
   expect(Number(saved)).toBe(BIG.length - stored.length);
@@ -1051,7 +1051,7 @@ test("(lc2) lossless_compaction_enabled false sends a uniform JSON array to the 
   const { rows, dropped } = crushedRows(await appendResult($, "Bash", BIG));
   expect(rows.length).toBeLessThan(200);
   expect(dropped).toBeGreaterThan(0);
-  expect((await $.command.run({ command: "headroom" })).text).not.toMatch(/^compaction/m);
+  expect(((await $.command.run({ command: "headroom" })) as { text?: string }).text).not.toMatch(/^compaction/m);
 });
 
 // A commented k8s manifest whose container stanzas repeat: the config compressor elides the comments and folds the stanzas.
@@ -1077,8 +1077,8 @@ test("(cc1) a YAML row is stored config-compressed, its original is retrievable,
   const stored = String(await appendResult($, "Bash", CONFIG));
   expect(stored).toMatch(/lines back\)$/m);
   const [, hash] = /\[1 comment\/blank lines elided\. Retrieve original: hash=([0-9a-f]{12})\]$/m.exec(stored) ?? [];
-  expect((await $.tool.call({ tool: RETRIEVE_TOOL, hash })).result).toBe(CONFIG);
-  const [, texts, saved] = CONFIG_ROW.exec((await $.command.run({ command: "headroom" })).text ?? "") ?? [];
+  expect(((await $.tool.call({ tool: RETRIEVE_TOOL, hash })) as { result?: unknown }).result).toBe(CONFIG);
+  const [, texts, saved] = CONFIG_ROW.exec(((await $.command.run({ command: "headroom" })) as { text?: string }).text ?? "") ?? [];
   expect(Number(texts)).toBe(1);
   expect(Number(saved)).toBe(CONFIG.length - stored.length);
 });
@@ -1087,7 +1087,7 @@ test("(cc2) config_compressor_enabled false keeps a YAML row whole and hides the
   on("ui.open", notPlaced);
   await startCrusher(on, $);
   expect(await appendResult($, "Bash", CONFIG)).toBe(CONFIG);
-  expect((await $.command.run({ command: "headroom" })).text).not.toMatch(/^config/m);
+  expect(((await $.command.run({ command: "headroom" })) as { text?: string }).text).not.toMatch(/^config/m);
 });
 
 // A small web page: its head, script, navigation and footer are boilerplate the HTML extractor drops.
@@ -1107,8 +1107,8 @@ test("(hx1) an HTML row is stored as extracted text, its page is retrievable, an
   const stored = String(await appendResult($, "Bash", HTML_PAGE));
   const [, hash] = /\n\[HTML extracted to text: \d+ characters of markup removed\. Retrieve original: hash=([0-9a-f]{12})\]$/.exec(stored) ?? [];
   expect(stored.startsWith("# Install\n\nRun the installer, then restart the service.\n\n- Linux\n- macOS\n")).toBe(true);
-  expect((await $.tool.call({ tool: RETRIEVE_TOOL, hash })).result).toBe(HTML_PAGE);
-  const [, pages, saved] = EXTRACTOR_ROW.exec((await $.command.run({ command: "headroom" })).text ?? "") ?? [];
+  expect(((await $.tool.call({ tool: RETRIEVE_TOOL, hash })) as { result?: unknown }).result).toBe(HTML_PAGE);
+  const [, pages, saved] = EXTRACTOR_ROW.exec(((await $.command.run({ command: "headroom" })) as { text?: string }).text ?? "") ?? [];
   expect(Number(pages)).toBe(1);
   expect(Number(saved)).toBe(HTML_PAGE.length - stored.length);
 });
@@ -1117,7 +1117,7 @@ test("(hx2) html_extractor_enabled false keeps an HTML row whole and hides the h
   on("ui.open", notPlaced);
   await startCrusher(on, $);
   expect(await appendResult($, "Bash", HTML_PAGE)).toBe(HTML_PAGE);
-  expect((await $.command.run({ command: "headroom" })).text).not.toMatch(/^html extractor/m);
+  expect(((await $.command.run({ command: "headroom" })) as { text?: string }).text).not.toMatch(/^html extractor/m);
 });
 
 // One dense line with a workflow tag in its middle, then a short line.
@@ -1144,8 +1144,8 @@ test("(lg1) a build log is stored compressed, its original is retrievable, and /
   const stored = String(await appendResult($, "Bash", BUILD_LOG));
   expect(stored).toMatch(/^ERROR linker exited with code 1$/m);
   const [, hash] = /\n\[61 lines compressed to \d+\. Retrieve original: hash=([0-9a-f]{12})\]$/.exec(stored) ?? [];
-  expect((await $.tool.call({ tool: RETRIEVE_TOOL, hash })).result).toBe(BUILD_LOG);
-  const [, texts, saved] = LOGS_ROW.exec((await $.command.run({ command: "headroom" })).text ?? "") ?? [];
+  expect(((await $.tool.call({ tool: RETRIEVE_TOOL, hash })) as { result?: unknown }).result).toBe(BUILD_LOG);
+  const [, texts, saved] = LOGS_ROW.exec(((await $.command.run({ command: "headroom" })) as { text?: string }).text ?? "") ?? [];
   expect(Number(texts)).toBe(1);
   expect(Number(saved)).toBe(BUILD_LOG.length - stored.length);
 });
@@ -1154,7 +1154,7 @@ test("(lg2) log_compressor_enabled false keeps a build log whole and hides the l
   on("ui.open", notPlaced);
   await startCrusher(on, $);
   expect(await appendResult($, "Bash", BUILD_LOG)).toBe(BUILD_LOG);
-  expect((await $.command.run({ command: "headroom" })).text).not.toMatch(/^logs/m);
+  expect(((await $.command.run({ command: "headroom" })) as { text?: string }).text).not.toMatch(/^logs/m);
 });
 // A grep dump: 40 matches in each of three files, more than the search compressor keeps.
 const GREP = ["src/alpha.py", "src/beta.py", "src/gamma.py"]
@@ -1168,8 +1168,8 @@ test("(sr1) a grep dump is stored compressed, its original is retrievable, and /
   const stored = String(await appendResult($, "Bash", GREP));
   expect(stored).toMatch(/^\[\.\.\. and 35 more matches in src\/alpha\.py\]$/m);
   const [, hash] = /\n\[120 matches compressed to 15\. Retrieve original: hash=([0-9a-f]{12})\]$/.exec(stored) ?? [];
-  expect((await $.tool.call({ tool: RETRIEVE_TOOL, hash })).result).toBe(GREP);
-  const [, texts, saved] = SEARCH_ROW.exec((await $.command.run({ command: "headroom" })).text ?? "") ?? [];
+  expect(((await $.tool.call({ tool: RETRIEVE_TOOL, hash })) as { result?: unknown }).result).toBe(GREP);
+  const [, texts, saved] = SEARCH_ROW.exec(((await $.command.run({ command: "headroom" })) as { text?: string }).text ?? "") ?? [];
   expect(Number(texts)).toBe(1);
   expect(Number(saved)).toBe(GREP.length - stored.length);
 });
@@ -1178,7 +1178,7 @@ test("(sr2) search_compressor_enabled false keeps a grep dump whole and hides th
   on("ui.open", notPlaced);
   await startCrusher(on, $);
   expect(await appendResult($, "Bash", GREP)).toBe(GREP);
-  expect((await $.command.run({ command: "headroom" })).text).not.toMatch(/^search/m);
+  expect(((await $.command.run({ command: "headroom" })) as { text?: string }).text).not.toMatch(/^search/m);
 });
 // A real git diff shape: git's index line and one file with 15 hunks, more than the diff compressor keeps per file.
 const GIT_DIFF = [
@@ -1198,8 +1198,8 @@ test("(df1) a git diff is stored compressed over its index-strip fold, its origi
   expect(stored).not.toMatch(/^index /m);
   expect(stored).toMatch(/^\[1 files changed, \+15 -15 lines, 5 hunks omitted\]$/m);
   const [, hash] = /\n\[110 lines compressed to \d+\. Retrieve original: hash=([0-9a-f]{12})\]$/.exec(stored) ?? [];
-  expect((await $.tool.call({ tool: RETRIEVE_TOOL, hash })).result).toBe(GIT_DIFF);
-  const [, texts, saved] = DIFF_ROW.exec((await $.command.run({ command: "headroom" })).text ?? "") ?? [];
+  expect(((await $.tool.call({ tool: RETRIEVE_TOOL, hash })) as { result?: unknown }).result).toBe(GIT_DIFF);
+  const [, texts, saved] = DIFF_ROW.exec(((await $.command.run({ command: "headroom" })) as { text?: string }).text ?? "") ?? [];
   expect(Number(texts)).toBe(1);
   expect(Number(saved)).toBe(GIT_DIFF.length - stored.length);
 });
@@ -1208,7 +1208,7 @@ test("(df2) diff_compressor_enabled false keeps a git diff whole and hides the d
   on("ui.open", notPlaced);
   await startCrusher(on, $);
   expect(await appendResult($, "Bash", GIT_DIFF)).toBe(GIT_DIFF);
-  expect((await $.command.run({ command: "headroom" })).text).not.toMatch(/^diff/m);
+  expect(((await $.command.run({ command: "headroom" })) as { text?: string }).text).not.toMatch(/^diff/m);
 });
 // A subagent-style prose report: twelve distinct sentences, no repeated line for the lossless fold to collapse.
 const REPORT = Array.from({ length: 12 }, (_, i) => `Finding ${i + 1} describes how the ${["cache", "queue", "router", "parser"][i % 4]} module behaves under ${i * 10} percent load.`).join("\n");
@@ -1222,8 +1222,8 @@ test("(tc1) a prose report is stored crushed, its original is retrievable, and /
   const [, total, hash] = CRUSHED.exec(stored) ?? [];
   expect(Number(total)).toBe(12);
   expect(String(await appendResult($, "Agent", REPORT))).not.toMatch(CRUSHED); // an Agent report is never crushed (dedup may still fold it)
-  expect((await $.tool.call({ tool: RETRIEVE_TOOL, hash })).result).toBe(REPORT);
-  const [, texts, saved] = TEXT_ROW.exec((await $.command.run({ command: "headroom" })).text ?? "") ?? [];
+  expect(((await $.tool.call({ tool: RETRIEVE_TOOL, hash })) as { result?: unknown }).result).toBe(REPORT);
+  const [, texts, saved] = TEXT_ROW.exec(((await $.command.run({ command: "headroom" })) as { text?: string }).text ?? "") ?? [];
   expect(Number(texts)).toBe(1);
   expect(Number(saved)).toBe(REPORT.length - stored.length);
 });
@@ -1232,7 +1232,7 @@ test("(tc2) text_crusher_enabled false keeps a prose report whole and hides the 
   on("ui.open", notPlaced);
   await startCrusher(on, $);
   expect(await appendResult($, "Agent", REPORT)).toBe(REPORT);
-  expect((await $.command.run({ command: "headroom" })).text).not.toMatch(/^text crusher/m);
+  expect(((await $.command.run({ command: "headroom" })) as { text?: string }).text).not.toMatch(/^text crusher/m);
 });
 
 test("(tc3) by default dedup indexes the crushed form: a repeated prose row is crushed the same way, then folded into one pointer", { options: { storage_enabled: false } }, async ($, on) => {
@@ -1259,8 +1259,8 @@ test("(rs1) prose is split by the user's request, the original is retrievable, a
   expect(stored).toMatch(/^\.\.\.\[3 low-relevance lines elided\]\.\.\.$/m);
   expect(stored).toMatch(/^A refreshed oauth token is cached for the lifetime of the session\.$/m);
   const [, hash] = /\n\[6 low-relevance lines in 2 runs elided\. Retrieve original: hash=([0-9a-f]{12})\]$/.exec(stored) ?? [];
-  expect((await $.tool.call({ tool: RETRIEVE_TOOL, hash })).result).toBe(OAUTH_NOTES);
-  const [, texts, saved] = SPLIT_ROW.exec((await $.command.run({ command: "headroom" })).text ?? "") ?? [];
+  expect(((await $.tool.call({ tool: RETRIEVE_TOOL, hash })) as { result?: unknown }).result).toBe(OAUTH_NOTES);
+  const [, texts, saved] = SPLIT_ROW.exec(((await $.command.run({ command: "headroom" })) as { text?: string }).text ?? "") ?? [];
   expect(Number(texts)).toBe(1);
   expect(Number(saved)).toBe(OAUTH_NOTES.length - stored.length);
 });
@@ -1272,7 +1272,7 @@ test(
     on("ui.open", notPlaced);
     await startCrusher(on, $, RETRIEVE_TOOL, OAUTH_ASK);
     expect(await appendResult($, "Bash", OAUTH_NOTES)).toBe(OAUTH_NOTES);
-    expect((await $.command.run({ command: "headroom" })).text).not.toMatch(/^relevance split/m);
+    expect(((await $.command.run({ command: "headroom" })) as { text?: string }).text).not.toMatch(/^relevance split/m);
   },
 );
 
@@ -1282,9 +1282,9 @@ test("(rs3) session.end starts the logs, search, diff, text crusher and relevanc
   await startCrusher(on, $, RETRIEVE_TOOL, OAUTH_ASK);
   for (const text of [BUILD_LOG, GREP, GIT_DIFF, REPORT, OAUTH_NOTES]) await appendResult($, "Bash", text);
   const rows = [LOGS_ROW, SEARCH_ROW, DIFF_ROW, TEXT_ROW, SPLIT_ROW];
-  const before = (await $.command.run({ command: "headroom" })).text ?? "";
+  const before = ((await $.command.run({ command: "headroom" })) as { text?: string }).text ?? "";
   for (const row of rows) expect(Number(row.exec(before)?.[1])).toBe(1);
   await $.session.end({ reason: "clear", sessionId: "s1", resume: { id: "s1" } });
-  const after = (await $.command.run({ command: "headroom" })).text ?? "";
+  const after = ((await $.command.run({ command: "headroom" })) as { text?: string }).text ?? "";
   for (const row of rows) expect(row.exec(after)?.slice(1)).toEqual(["0", "0"]);
 });
