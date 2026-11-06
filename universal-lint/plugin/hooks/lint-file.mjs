@@ -628,12 +628,13 @@ export function lintFileHandler(args) {
 		const ext = path.extname(resolved).toLowerCase();
 		const lang = EXT_MAP[ext];
 		const typeCheckEligible = TYPE_CHECK_EXTS.has(ext);
+		const oxlintConfig = lang === "jsts" ? resolveOxlintConfig(path.dirname(resolved), cwd) : null;
 		const findings = [];
 		if (lang) {
-			const chainResult = runChainLint(REGISTRY[lang], resolved, cwd, rel);
+			const chainResult = runChainLint(REGISTRY[oxlintConfig ? "oxlint" : lang], resolved, cwd, rel);
 			if (chainResult) findings.push(chainResult);
 		}
-		if (typeCheckEligible) {
+		if (typeCheckEligible && !(oxlintConfig && oxlintConfigTypeChecks(oxlintConfig))) {
 			const tsResult = runTypeCheck(resolved, cwd);
 			if (tsResult) findings.push(tsResult);
 		}
