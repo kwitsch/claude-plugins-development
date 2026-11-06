@@ -573,12 +573,14 @@ function runChainLint(lang, resolved, cwd, rel) {
 		text = `${result.stdout ?? ""}\n${result.stderr ?? ""}`;
 	}
 	if (verdict === "skip") return none;
+	const base = manifest ? path.dirname(manifest) : tool.targetsDir ? path.dirname(resolved) : cwd;
 	return {
 		ran: true,
 		finding: verdict === "issues" ? {
 			tool: tool.name,
 			target,
-			text
+			text,
+			base
 		} : null
 	};
 }
@@ -623,7 +625,8 @@ function runTypeCheck(resolved, cwd) {
 	return {
 		tool: "tsc",
 		target: path.relative(cwd, path.dirname(tsconfigPath)) || ".",
-		text
+		text,
+		base: cwd
 	};
 }
 export function isExcludedPath(rel) {
@@ -662,6 +665,58 @@ export function editRanges(text, needle) {
 		ranges.push([lineOf(i), lineOf(i + needle.length - 1)]);
 	}
 	return ranges.length > 0 ? ranges : null;
+}
+const LOC_PATH_RE = /(?<path>[^\s:()[\]'"]+\.[A-Za-z0-9]+)[:(](?<line>\d+)(?:[:,]\d+)?/;
+const LOC_ROW_RE = /^\s*(?<line>\d+):\d+\s/;
+const LOC_SHELLCHECK_RE = /^In .+ line (?<line>\d+):/;
+export function gateFinding(finding, ranges, resolved) {
+	const hit = (line) => ranges === null || ranges.some(([s, e]) => s <= line - 1 && line - 1 <= e) ? "hit" : "miss";
+	const classify = (raw) => {
+		const plain = raw.replace(ANSI_SGR_RE, "");
+		for (const own of [resolved, path.relative(finding.base, resolved)]) {
+			const at = /\s/.test(own) ? plain.indexOf(own) : -1;
+			const m = at === -1 ? null : /^[:(](\d+)/.exec(plain.slice(at + own.length));
+			if (m) return hit(Number(m[1]));
+		}
+		const a = LOC_PATH_RE.exec(plain);
+		if (a?.groups) {
+			const p = path.normalize(a.groups.path);
+			const abs = path.resolve(finding.base, p);
+			const own = abs === resolved || !path.isAbsolute(p) && !existsSync(abs) && resolved.endsWith(path.sep + p);
+			return own ? hit(Number(a.groups.line)) : "foreign";
+		}
+		const b = LOC_ROW_RE.exec(plain) ?? LOC_SHELLCHECK_RE.exec(plain);
+		return b?.groups ? hit(Number(b.groups.line)) : null;
+	};
+	let located = false;
+	let reportable = false;
+	const kept = [];
+	for (const para of finding.text.split(/\n\s*\n/)) {
+		const lines = para.split("\n");
+		const kinds = lines.map(classify);
+		const starts = kinds.flatMap((k, i) => k === null ? [] : [i]);
+		if (starts.length === 0) {
+			kept.push(para);
+			continue;
+		}
+		located = true;
+		const out = lines.slice(0, starts[0]);
+		let any = false;
+		starts.forEach((start, n) => {
+			if (kinds[start] === "miss") return;
+			out.push(...lines.slice(start, starts[n + 1] ?? lines.length));
+			any = true;
+		});
+		if (any) {
+			kept.push(out.join("\n"));
+			reportable = true;
+		}
+	}
+	if (!located) return finding;
+	return reportable ? {
+		...finding,
+		text: kept.join("\n\n")
+	} : null;
 }
 export function lintFileHandler(args) {
 	try {

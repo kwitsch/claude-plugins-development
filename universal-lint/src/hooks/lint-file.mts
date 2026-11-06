@@ -113,6 +113,8 @@ interface Finding {
   target: string;
   /** The tool's raw findings text. */
   text: string;
+  /** Absolute directory the tool's relative paths are resolved against. */
+  base: string;
 }
 
 /** The subset of Claude Code's PostToolUse hook payload this hook reads. */
@@ -1112,7 +1114,9 @@ function runChainLint(lang: LangEntry, resolved: string, cwd: string, rel: strin
     text = `${result.stdout ?? ""}\n${result.stderr ?? ""}`;
   }
   if (verdict === "skip") return none;
-  return { ran: true, finding: verdict === "issues" ? { tool: tool.name, target, text } : null };
+  // cargo prints paths relative to the crate (or workspace) root, go tools get the package dir, the rest run in cwd.
+  const base = manifest ? path.dirname(manifest) : tool.targetsDir ? path.dirname(resolved) : cwd;
+  return { ran: true, finding: verdict === "issues" ? { tool: tool.name, target, text, base } : null };
 }
 
 /**
@@ -1201,6 +1205,7 @@ function runTypeCheck(resolved: string, cwd: string): Finding | null {
     tool: "tsc",
     target: path.relative(cwd, path.dirname(tsconfigPath)) || ".",
     text,
+    base: cwd,
   };
 }
 
@@ -1285,6 +1290,79 @@ export function editRanges(text: string, needle: string): Array<[number, number]
     ranges.push([lineOf(i), lineOf(i + needle.length - 1)]);
   }
   return ranges.length > 0 ? ranges : null;
+}
+
+/**
+ * Location regex A: `<path>.<ext>:<line>` or `<path>.<ext>(<line>` (ruff, ktlint, golangci-lint, go vet, checkstyle,
+ * markdownlint, psalm, oxlint `,-[src/a.ts:3:7]`, cargo `--> src/a.rs:12:5`, tsc `a.ts(12,5)` / `a.ts:12:5`).
+ */
+const LOC_PATH_RE = /(?<path>[^\s:()[\]'"]+\.[A-Za-z0-9]+)[:(](?<line>\d+)(?:[:,]\d+)?/;
+/** Location regex B: path-less `  <line>:<col>  ` rows (eslint/stylelint stylish, yamllint standard). */
+const LOC_ROW_RE = /^\s*(?<line>\d+):\d+\s/;
+/** Location regex C: shellcheck's default tty header `In <file> line <line>:` (path-less: the edited file is its only target). */
+const LOC_SHELLCHECK_RE = /^In .+ line (?<line>\d+):/;
+
+/**
+ * Drop the diagnostics of `finding` located in `resolved` outside `ranges`. Text is split into blank-line paragraphs;
+ * a paragraph's located lines start segments that carry the unlocated lines after them (lines before the first one
+ * are the preamble). Own-file misses are dropped; hits and foreign locations (a path not tied to `resolved`) are kept
+ * and reportable. A paragraph whose segments are all dropped loses its preamble too; unlocated paragraphs are kept but
+ * not reportable.
+ *
+ * @param finding - One tool's finding.
+ * @param ranges - Inclusive 0-based edited line ranges, or null when every line counts as edited.
+ * @param resolved - Absolute path of the edited file.
+ * @returns The finding with only the kept text, `finding` itself when no line is located (unknown format, fail open),
+ *   or null when nothing reportable remains.
+ */
+export function gateFinding(finding: Finding, ranges: Array<[number, number]> | null, resolved: string): Finding | null {
+  const hit = (line: number): "hit" | "miss" => (ranges === null || ranges.some(([s, e]) => s <= line - 1 && line - 1 <= e) ? "hit" : "miss");
+  const classify = (raw: string): "hit" | "miss" | "foreign" | null => {
+    const plain = raw.replace(ANSI_SGR_RE, "");
+    // LOC_PATH_RE stops at whitespace, so a path with a space is looked up literally (absolute and base-relative).
+    for (const own of [resolved, path.relative(finding.base, resolved)]) {
+      const at = /\s/.test(own) ? plain.indexOf(own) : -1;
+      const m = at === -1 ? null : /^[:(](\d+)/.exec(plain.slice(at + own.length));
+      if (m) return hit(Number(m[1]));
+    }
+    const a = LOC_PATH_RE.exec(plain);
+    if (a?.groups) {
+      const p = path.normalize(a.groups.path);
+      const abs = path.resolve(finding.base, p);
+      // Suffix fallback only when the base-resolved path is not a real file, so a same-named other file stays foreign.
+      const own = abs === resolved || (!path.isAbsolute(p) && !existsSync(abs) && resolved.endsWith(path.sep + p));
+      return own ? hit(Number(a.groups.line)) : "foreign";
+    }
+    const b = LOC_ROW_RE.exec(plain) ?? LOC_SHELLCHECK_RE.exec(plain);
+    return b?.groups ? hit(Number(b.groups.line)) : null;
+  };
+
+  let located = false;
+  let reportable = false;
+  const kept: string[] = [];
+  for (const para of finding.text.split(/\n\s*\n/)) {
+    const lines = para.split("\n");
+    const kinds = lines.map(classify);
+    const starts = kinds.flatMap((k, i) => (k === null ? [] : [i]));
+    if (starts.length === 0) {
+      kept.push(para);
+      continue;
+    }
+    located = true;
+    const out = lines.slice(0, starts[0]);
+    let any = false;
+    starts.forEach((start, n) => {
+      if (kinds[start] === "miss") return;
+      out.push(...lines.slice(start, starts[n + 1] ?? lines.length));
+      any = true;
+    });
+    if (any) {
+      kept.push(out.join("\n"));
+      reportable = true;
+    }
+  }
+  if (!located) return finding;
+  return reportable ? { ...finding, text: kept.join("\n\n") } : null;
 }
 
 /**
