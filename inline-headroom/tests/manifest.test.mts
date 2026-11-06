@@ -7,10 +7,12 @@ import { test } from "vitest";
 const json = (rel: string) => JSON.parse(readFileSync(new URL(`../plugin/${rel}`, import.meta.url), "utf8"));
 const manifest = json(".claude-plugin/plugin.json");
 
-test("plugin.json has name, author Kwitsch and a non-empty description", () => {
+test("plugin.json has name, author Kwitsch, a non-empty description and string keywords", () => {
   assert.equal(manifest.name, "inline-headroom");
   assert.equal(manifest.author.name, "Kwitsch");
   assert.ok(manifest.description.length > 0);
+  assert.ok(Array.isArray(manifest.keywords) && manifest.keywords.length > 0);
+  for (const k of manifest.keywords) assert.equal(typeof k, "string");
 });
 
 test("userConfig declares exactly the seventeen boolean feature toggles, all default true", () => {

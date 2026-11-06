@@ -1,16 +1,17 @@
 #!/usr/bin/env node
 // Usage: build-plugin.mts [plugin dir]  (default: the cwd; every plugin's `build` script runs it from its own dir)
 // Builds one plugin: src/**/*.mts -> plugin/**/*.mjs via oxc-transform (type stripping; type checks run in
-// `pnpm lint`), minified with oxc-minify, then syncs plugin.json into plugin/.claude-plugin/.
+// `pnpm lint`), minified with oxc-minify, then generates plugin/.claude-plugin/plugin.json from package.json.
 // Generated .mjs files and plugin/.claude-plugin/plugin.json must never be edited by hand.
 import { spawnSync } from "node:child_process";
-import { chmodSync, copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { minifySync } from "oxc-minify";
 import { transformSync } from "oxc-transform";
+import { pluginManifest } from "./plugin-manifest.mts";
 
-/** The plugin directory (holds plugin.json, package.json, src/ and plugin/). */
+/** The plugin directory (holds package.json, src/ and plugin/). */
 const ROOT = path.resolve(process.argv[2] ?? ".");
 /** The shipped plugin. */
 const PLUGIN = path.join(ROOT, "plugin");
@@ -78,21 +79,16 @@ for (const src of sources) {
   if (m.code.startsWith("#!")) chmodSync(out, 0o755);
 }
 
-// 3. manifest: <name>/plugin.json is the source of truth
-const manifest = JSON.parse(readFileSync(path.join(ROOT, "plugin.json"), "utf8")) as Partial<
-  Record<"name" | "version" | "description", string>
->;
-for (const k of ["name", "version", "description"] as const) {
-  if (!manifest[k]) {
-    console.error(`plugin.json: missing "${k}"`);
-    process.exit(1);
-  }
-}
-const pkg = JSON.parse(readFileSync(path.join(ROOT, "package.json"), "utf8")) as { version?: string };
-if (pkg.version !== manifest.version) {
-  console.error(`version mismatch: package.json ${pkg.version} != plugin.json ${manifest.version}`);
+// 3. manifest: generated from <name>/package.json (the only manifest source) by plugin-manifest.mts
+const pkg = JSON.parse(readFileSync(path.join(ROOT, "package.json"), "utf8")) as Record<string, unknown>;
+let manifest: Record<string, unknown>;
+try {
+  manifest = pluginManifest(pkg);
+} catch (e) {
+  // nothing is written: the previous manifest stays in place
+  console.error((e as Error).message);
   process.exit(1);
 }
 mkdirSync(path.join(PLUGIN, ".claude-plugin"), { recursive: true });
-copyFileSync(path.join(ROOT, "plugin.json"), path.join(PLUGIN, ".claude-plugin", "plugin.json"));
-console.log(`built ${manifest.name}@${manifest.version} (${sources.length} source file(s))`);
+writeFileSync(path.join(PLUGIN, ".claude-plugin", "plugin.json"), JSON.stringify(manifest, null, 2) + "\n");
+console.log(`built ${String(manifest.name)}@${String(manifest.version)} (${sources.length} source file(s))`);
