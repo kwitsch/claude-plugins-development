@@ -1369,12 +1369,29 @@ export function gateFinding(finding: Finding, ranges: Array<[number, number]> | 
  * The lint_file tool handler. Returns {} on every guard failure / clean / skip (fail open).
  *
  * @param args - The PostToolUse hook payload.
+ * @param edits - Edit entries of every hook process coalesced into this run (see `editEntry`); defaults to this payload's own.
  * @returns The hook result: findings as additionalContext, or an empty object.
  */
-export function lintFileHandler(args: PostToolUseHookInput): HookResult {
+export function lintFileHandler(args: PostToolUseHookInput, edits: Array<string | null> = [editEntry(args)]): HookResult {
   try {
     const resolved = resolveLintTarget(args);
     if (!resolved) return {};
+    const content = readFileSync(resolved, "utf8");
+    let ranges: Array<[number, number]> | null = [];
+    for (const e of edits) {
+      if (e === null) {
+        ranges = null; // Write / other tool: whole file
+        break;
+      }
+      if (e === "") continue; // pure deletion: no edited lines
+      const r = editRanges(content, e);
+      if (r === null) {
+        ranges = null; // not on disk any more: whole file (report rather than lose)
+        break;
+      }
+      ranges.push(...r);
+    }
+    if (ranges !== null && ranges.length === 0) return {}; // only deletions: no lint
     const cwd = args.cwd;
     const rel = path.relative(cwd, resolved);
     const ext = path.extname(resolved).toLowerCase();
@@ -1397,7 +1414,12 @@ export function lintFileHandler(args: PostToolUseHookInput): HookResult {
       const tsResult = runTypeCheck(resolved, cwd);
       if (tsResult) findings.push(tsResult);
     }
-    if (findings.length === 0) return {};
+    // Gate before truncate() so the context budget is spent on in-range text.
+    const kept = findings.flatMap((f) => {
+      const g = gateFinding(f, ranges, resolved);
+      return g ? [g] : [];
+    });
+    if (kept.length === 0) return {};
 
     // truncate() is applied per-finding first (so a single finding's own text
     // is capped exactly as before this change), then AGAIN over the joined
@@ -1406,7 +1428,7 @@ export function lintFileHandler(args: PostToolUseHookInput): HookResult {
     // hard whole-message ceiling. Idempotent/no-op for the single-finding
     // case (already <= MAX_CONTEXT_CHARS from its own inner truncate()), so
     // single-finding output is unchanged from before this change.
-    const blocks = findings.map((f) => `${f.tool} found issues in ${f.target}:\n${truncate(f.text)}`);
+    const blocks = kept.map((f) => `${f.tool} found issues in ${f.target}:\n${truncate(f.text)}`);
     return {
       hookSpecificOutput: {
         hookEventName: "PostToolUse",

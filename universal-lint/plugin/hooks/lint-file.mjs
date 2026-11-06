@@ -718,10 +718,26 @@ export function gateFinding(finding, ranges, resolved) {
 		text: kept.join("\n\n")
 	} : null;
 }
-export function lintFileHandler(args) {
+export function lintFileHandler(args, edits = [editEntry(args)]) {
 	try {
 		const resolved = resolveLintTarget(args);
 		if (!resolved) return {};
+		const content = readFileSync(resolved, "utf8");
+		let ranges = [];
+		for (const e of edits) {
+			if (e === null) {
+				ranges = null;
+				break;
+			}
+			if (e === "") continue;
+			const r = editRanges(content, e);
+			if (r === null) {
+				ranges = null;
+				break;
+			}
+			ranges.push(...r);
+		}
+		if (ranges !== null && ranges.length === 0) return {};
 		const cwd = args.cwd;
 		const rel = path.relative(cwd, resolved);
 		const ext = path.extname(resolved).toLowerCase();
@@ -747,8 +763,12 @@ export function lintFileHandler(args) {
 			const tsResult = runTypeCheck(resolved, cwd);
 			if (tsResult) findings.push(tsResult);
 		}
-		if (findings.length === 0) return {};
-		const blocks = findings.map((f) => `${f.tool} found issues in ${f.target}:\n${truncate(f.text)}`);
+		const kept = findings.flatMap((f) => {
+			const g = gateFinding(f, ranges, resolved);
+			return g ? [g] : [];
+		});
+		if (kept.length === 0) return {};
+		const blocks = kept.map((f) => `${f.tool} found issues in ${f.target}:\n${truncate(f.text)}`);
 		return { hookSpecificOutput: {
 			hookEventName: "PostToolUse",
 			additionalContext: `universal-lint: ${truncate(blocks.join("\n\n"))}`
