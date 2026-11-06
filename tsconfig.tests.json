@@ -5,7 +5,6 @@
     "allowJs": true
   },
   "include": [
-    "*/tests/**/*.mts",
-    "development/vitest/claude-engine/**/*.mts"
+    "*/tests/**/*.mts"
   ]
 }
