@@ -186,6 +186,10 @@ export const REGISTRY: Record<string, LangEntry> = {
   },
   kotlin: { chain: [{ name: "ktlint", args: [] }] },
   jsts: { chain: [{ name: "eslint", args: [], npmSpec: "eslint" }] },
+  // Alternate jsts chain, picked by resolveOxlintConfig (not in EXT_MAP).
+  // --no-error-on-unmatched-pattern: a file excluded by the project's oxlint
+  // ignorePatterns otherwise exits 1 ("No files found to lint") -> false finding.
+  oxlint: { chain: [{ name: "oxlint", args: ["--no-error-on-unmatched-pattern"], npmSpec: "oxlint" }] },
   python: { chain: [{ name: "ruff", args: ["check"] }] },
   go: {
     chain: [
@@ -503,6 +507,65 @@ export function resolveTsconfig(fileDir: string, cwd: string): string | null {
   });
 }
 
+/** Eslint config file names, checked before the oxlint names within one directory. */
+const ESLINT_CONFIG_FILENAMES = [
+  "eslint.config.js",
+  "eslint.config.mjs",
+  "eslint.config.cjs",
+  "eslint.config.ts",
+  "eslint.config.mts",
+  "eslint.config.cts",
+  ".eslintrc",
+  ".eslintrc.js",
+  ".eslintrc.cjs",
+  ".eslintrc.json",
+  ".eslintrc.yaml",
+  ".eslintrc.yml",
+];
+
+/** Oxlint config file names. */
+const OXLINT_CONFIG_FILENAMES = [".oxlintrc.json", ".oxlintrc.jsonc", "oxlint.config.ts"];
+
+/**
+ * Nearest lint config (file dir up to cwd, inclusive) picks the jsts chain.
+ * Selection by file name only; in one dir eslint names are checked first, so
+ * eslint wins a same-dir tie, and no config at all means eslint.
+ *
+ * @param fileDir - Directory of the edited file.
+ * @param cwd - Project root.
+ * @returns Path of the nearest config if it is an oxlint config, else null (eslint).
+ */
+export function resolveOxlintConfig(fileDir: string, cwd: string): string | null {
+  const hit = walkUpToCwd(fileDir, cwd, (dir) => {
+    for (const n of [...ESLINT_CONFIG_FILENAMES, ...OXLINT_CONFIG_FILENAMES]) {
+      const p = path.join(dir, n);
+      if (existsSync(p)) return p;
+    }
+    return null;
+  });
+  return hit && OXLINT_CONFIG_FILENAMES.includes(path.basename(hit)) ? hit : null;
+}
+
+/**
+ * True when an oxlint JSON(C) config sets options.typeCheck: oxlint
+ * type-checks itself, so the separate tsc run is skipped. oxlint.config.ts
+ * can't be read without executing it -> false.
+ *
+ * @param configPath - The oxlint config that selected oxlint.
+ * @returns Whether its parsed `options.typeCheck` is literally `true`.
+ */
+export function oxlintConfigTypeChecks(configPath: string): boolean {
+  if (!configPath.endsWith(".json") && !configPath.endsWith(".jsonc")) return false;
+  try {
+    // shortcut: trailing-comma regex also touches ",}" / ",]" inside string values; only typeCheck is read, upgrade to a real JSONC parser if that ever matters.
+    const text = stripJsonComments(readFileSync(configPath, "utf8")).replace(/,(\s*[}\]])/g, "$1");
+    const cfg = JSON.parse(text) as { options?: { typeCheck?: unknown } } | null;
+    return cfg?.options?.typeCheck === true;
+  } catch {
+    return false; // unreadable or malformed -> keep tsc
+  }
+}
+
 /**
  * Strip // line comments and /* ... *\/ block comments from JSONC text, respecting
  * string literals (so a string containing "//" or "/\*" isn't misread as a
@@ -813,6 +876,7 @@ export function classifyExit(toolName: string, status: number | null): "clean" |
     case "shellcheck": // 0 clean, 1 issues, 2/3/4 file-not-found/bad-invocation/bad-options
     case "ktlint": // 0 clean, 1 issues (lint-only mode; --format's quirk doesn't apply here)
     case "eslint": // 0 clean, 1 issues, 2 config/internal error
+    case "oxlint": // 0 clean (warnings don't fail), 1 lint errors / config load failure / type errors
     case "ruff": // 0 clean, 1 issues, 2 abnormal termination
     case "golangci-lint": // 0 clean, 1 issues, 2-7 warning-in-test/failure/timeout/no-go-files/no-config/error-logged
     case "yamllint": // 0 clean, 1 issues (run without --strict, matching eslint's warnings-don't-count precedent), 255 config/IO crash (POSIX-truncated from sys.exit(-1))

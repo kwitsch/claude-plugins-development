@@ -70,6 +70,11 @@ export const REGISTRY = {
 		args: [],
 		npmSpec: "eslint"
 	}] },
+	oxlint: { chain: [{
+		name: "oxlint",
+		args: ["--no-error-on-unmatched-pattern"],
+		npmSpec: "oxlint"
+	}] },
 	python: { chain: [{
 		name: "ruff",
 		args: ["check"]
@@ -256,6 +261,45 @@ export function resolveTsconfig(fileDir, cwd) {
 		return !looksLikeSolutionStyleTsconfig(text) ? p : null;
 	});
 }
+const ESLINT_CONFIG_FILENAMES = [
+	"eslint.config.js",
+	"eslint.config.mjs",
+	"eslint.config.cjs",
+	"eslint.config.ts",
+	"eslint.config.mts",
+	"eslint.config.cts",
+	".eslintrc",
+	".eslintrc.js",
+	".eslintrc.cjs",
+	".eslintrc.json",
+	".eslintrc.yaml",
+	".eslintrc.yml"
+];
+const OXLINT_CONFIG_FILENAMES = [
+	".oxlintrc.json",
+	".oxlintrc.jsonc",
+	"oxlint.config.ts"
+];
+export function resolveOxlintConfig(fileDir, cwd) {
+	const hit = walkUpToCwd(fileDir, cwd, (dir) => {
+		for (const n of [...ESLINT_CONFIG_FILENAMES, ...OXLINT_CONFIG_FILENAMES]) {
+			const p = path.join(dir, n);
+			if (existsSync(p)) return p;
+		}
+		return null;
+	});
+	return hit && OXLINT_CONFIG_FILENAMES.includes(path.basename(hit)) ? hit : null;
+}
+export function oxlintConfigTypeChecks(configPath) {
+	if (!configPath.endsWith(".json") && !configPath.endsWith(".jsonc")) return false;
+	try {
+		const text = stripJsonComments(readFileSync(configPath, "utf8")).replace(/,(\s*[}\]])/g, "$1");
+		const cfg = JSON.parse(text);
+		return cfg?.options?.typeCheck === true;
+	} catch {
+		return false;
+	}
+}
 function stripJsonComments(text) {
 	let out = "";
 	let i = 0;
@@ -401,6 +445,7 @@ export function classifyExit(toolName, status) {
 		case "shellcheck":
 		case "ktlint":
 		case "eslint":
+		case "oxlint":
 		case "ruff":
 		case "golangci-lint":
 		case "yamllint":
