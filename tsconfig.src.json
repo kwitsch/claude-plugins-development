@@ -3,6 +3,7 @@
   "include": [
     "*/src/**/*.mts",
     "*/scripts/*.mts",
+    "development/scripts/*.mts",
     "development/vitest/claude-engine/**/*.mts",
     "vitest.config.mts"
   ]
