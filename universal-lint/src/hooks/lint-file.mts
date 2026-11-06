@@ -26,7 +26,7 @@
 import { execFileSync, spawnSync } from "node:child_process";
 import type { SpawnSyncOptionsWithStringEncoding, SpawnSyncReturns } from "node:child_process";
 import { createHash } from "node:crypto";
-import { accessSync, constants as fsConstants, existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, renameSync, writeFileSync } from "node:fs";
+import { accessSync, constants as fsConstants, existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import path from "node:path";
 import process from "node:process";
@@ -1261,6 +1261,11 @@ function realish(p: string): string {
   }
 }
 
+/** The payload's `scratchpad_dir` when it is a string, else undefined. */
+function scratchpadOf(args: PostToolUseHookInput): string | undefined {
+  return typeof args.scratchpad_dir === "string" ? args.scratchpad_dir : undefined;
+}
+
 /**
  * The real-path scope rule shared by every event (dprint's `inScope`): `file` resolved against `cwd` must exist, have a
  * lintable extension, its real path must lie strictly inside realpath(cwd), not be excluded (`isExcludedPath` on the
@@ -1269,23 +1274,42 @@ function realish(p: string): string {
  * @param cwd - Payload cwd (the scope root; never `process.cwd()`).
  * @param file - Absolute or cwd-relative path.
  * @param scratchpad - The session's `scratchpad_dir`, when the payload has one.
+ * @param roots - Pre-resolved `realish(cwd)` / `realish(scratchpad)`, so a caller scoping many files resolves them once.
  * @returns `{ fp, real }` (lexical absolute path, real path) or null when out of scope.
  */
-export function scopedTarget(cwd: string, file: string, scratchpad?: string): { fp: string; real: string } | null {
+export function scopedTarget(cwd: string, file: string, scratchpad?: string, roots?: { cwd: string; scratchpad?: string }): { fp: string; real: string } | null {
   try {
     const fp = path.resolve(cwd, file);
     const real = realish(fp);
     const outside = (rel: string): boolean => rel === ".." || rel.startsWith(".." + path.sep) || path.isAbsolute(rel);
-    const rel = path.relative(realish(cwd), real);
+    const rel = path.relative(roots?.cwd ?? realish(cwd), real);
     if (rel === "" || outside(rel) || isExcludedPath(rel)) return null;
     if (scratchpad) {
-      const rs = realish(scratchpad);
+      const rs = roots ? roots.scratchpad ?? realish(scratchpad) : realish(scratchpad);
       if (real === rs || real.startsWith(rs + path.sep)) return null;
     }
     const ext = path.extname(fp).toLowerCase();
     if (!EXT_MAP[ext] && !TYPE_CHECK_EXTS.has(ext)) return null;
     if (!existsSync(fp)) return null;
     return { fp, real };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * PostToolUse entry guards (success !== false, non-empty cwd and tool_input.file_path) then `scopedTarget`.
+ *
+ * @param args - The PostToolUse hook payload.
+ * @returns `{ fp, real }` or null when a guard rejects or on any error.
+ */
+function postToolScope(args: PostToolUseHookInput): { fp: string; real: string } | null {
+  try {
+    if (args?.tool_response?.success === false) return null;
+    const cwd = typeof args?.cwd === "string" ? args.cwd : "";
+    const fp = args?.tool_input?.file_path;
+    if (!cwd || typeof fp !== "string" || !fp) return null;
+    return scopedTarget(cwd, fp, scratchpadOf(args));
   } catch {
     return null;
   }
@@ -1301,15 +1325,7 @@ export function scopedTarget(cwd: string, file: string, scratchpad?: string): { 
  * @returns The lexical absolute path to lint, or null when a guard rejects.
  */
 export function resolveLintTarget(args: PostToolUseHookInput): string | null {
-  try {
-    if (args?.tool_response?.success === false) return null;
-    const cwd = typeof args?.cwd === "string" ? args.cwd : "";
-    const fp = args?.tool_input?.file_path;
-    if (!cwd || typeof fp !== "string" || !fp) return null;
-    return scopedTarget(cwd, fp, typeof args.scratchpad_dir === "string" ? args.scratchpad_dir : undefined)?.fp ?? null;
-  } catch {
-    return null;
-  }
+  return postToolScope(args)?.fp ?? null;
 }
 
 /**
@@ -1472,23 +1488,13 @@ export function recordWritten(fp: string, real: string): void {
 }
 
 /**
- * PostToolUse digest step: the `resolveLintTarget` guards (success !== false, non-empty cwd and tool_input.file_path),
- * then `scopedTarget` for the real path, then `recordWritten`. Runs before the lint so the digest lands within
- * milliseconds. Never throws.
+ * PostToolUse digest step: `recordWritten` for the already-scoped target. Runs before the lint so the digest lands
+ * within milliseconds. Never throws.
  *
- * @param args - The PostToolUse hook payload.
+ * @param s - The `postToolScope` result, or null.
  */
-function recordWrittenFor(args: PostToolUseHookInput): void {
-  try {
-    if (args?.tool_response?.success === false) return;
-    const cwd = args?.cwd;
-    const file = args?.tool_input?.file_path;
-    if (typeof cwd !== "string" || !cwd || typeof file !== "string" || !file) return;
-    const s = scopedTarget(cwd, file, typeof args.scratchpad_dir === "string" ? args.scratchpad_dir : undefined);
-    if (s) recordWritten(s.fp, s.real);
-  } catch {
-    // fail open
-  }
+function recordWrittenFor(s: { fp: string; real: string } | null): void {
+  if (s) recordWritten(s.fp, s.real);
 }
 
 /**
@@ -1552,9 +1558,9 @@ function lintResolved(resolved: string, cwd: string, ranges: Array<[number, numb
  * @param args - The PostToolUse hook payload.
  * @returns The hook result: findings as additionalContext, or an empty object.
  */
-export function lintFileHandler(args: PostToolUseHookInput): HookResult {
+export function lintFileHandler(args: PostToolUseHookInput, scoped: { fp: string; real: string } | null = postToolScope(args)): HookResult {
   try {
-    const resolved = resolveLintTarget(args);
+    const resolved = scoped?.fp;
     if (!resolved) return {};
     const ranges = editRanges(args);
     if (ranges?.length === 0) return {}; // the Edit changed nothing
@@ -1580,7 +1586,7 @@ export function fileChangedHandler(args: PostToolUseHookInput): HookResult {
     const cwd = args?.cwd;
     const file = args?.file_path;
     if (typeof cwd !== "string" || !cwd || typeof file !== "string" || !file) return {};
-    const s = scopedTarget(cwd, file, typeof args.scratchpad_dir === "string" ? args.scratchpad_dir : undefined);
+    const s = scopedTarget(cwd, file, scratchpadOf(args));
     if (!s) return {};
     let recorded: string | null = null;
     try {
@@ -1588,7 +1594,10 @@ export function fileChangedHandler(args: PostToolUseHookInput): HookResult {
     } catch {
       // no digest: the file was not just written by Write/Edit
     }
-    if (recorded !== null && recorded === fileDigest(s.fp)) return {};
+    if (recorded !== null) {
+      if (recorded === fileDigest(s.fp)) return {};
+      rmSync(writtenDigestPath(s.real), { force: true }); // stale: a later restore of the old bytes must lint
+    }
     try {
       const status = execFileSync("git", ["--no-optional-locks", "status", "--porcelain", "--untracked-files=normal", "--ignored=matching", "--", s.fp], {
         cwd: path.dirname(s.fp),
@@ -1628,10 +1637,17 @@ export function watchList(cwd: string, scratchpad?: string): string[] {
   } catch {
     return [];
   }
-  const list = out.split("\0").filter(Boolean).flatMap((rel) => {
-    const fp = scopedTarget(cwd, rel, scratchpad)?.fp;
+  let roots: { cwd: string; scratchpad?: string };
+  try {
+    roots = { cwd: realish(cwd), scratchpad: scratchpad ? realish(scratchpad) : undefined };
+  } catch {
+    return [];
+  }
+  // Set: unmerged index entries are listed once per stage
+  const list = [...new Set(out.split("\0").filter(Boolean).flatMap((rel) => {
+    const fp = scopedTarget(cwd, rel, scratchpad, roots)?.fp;
     return fp ? [fp] : [];
-  });
+  }))];
   if (list.length > WATCH_LIMIT) {
     process.stderr.write(`universal-lint: watch list: ${list.length} files above ${WATCH_LIMIT}, FileChanged linting off for this cwd\n`);
     return [];
@@ -1652,7 +1668,7 @@ export function watchPathsHandler(args: PostToolUseHookInput): { hookSpecificOut
     if (ev !== "SessionStart" && ev !== "CwdChanged") return {};
     const cwd = typeof args.new_cwd === "string" && args.new_cwd ? args.new_cwd : args.cwd;
     if (typeof cwd !== "string" || !cwd) return {};
-    const list = watchList(cwd, typeof args.scratchpad_dir === "string" ? args.scratchpad_dir : undefined);
+    const list = watchList(cwd, scratchpadOf(args));
     return list.length > 0 ? { hookSpecificOutput: { hookEventName: ev, watchPaths: list } } : {};
   } catch {
     return {};
@@ -1689,8 +1705,9 @@ function main(): void {
     let ctx: string | undefined;
     if (ev === "FileChanged") ctx = fileChangedHandler(input).hookSpecificOutput?.additionalContext;
     else {
-      recordWrittenFor(input);
-      ctx = lintFileHandler(input).hookSpecificOutput?.additionalContext;
+      const scoped = postToolScope(input);
+      recordWrittenFor(scoped);
+      ctx = lintFileHandler(input, scoped).hookSpecificOutput?.additionalContext;
     }
     if (ctx) {
       process.stderr.write(ctx + "\n");

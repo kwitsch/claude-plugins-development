@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { execFileSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { accessSync, constants as fsConstants, existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, renameSync, writeFileSync } from "node:fs";
+import { accessSync, constants as fsConstants, existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import path from "node:path";
 import process from "node:process";
@@ -645,15 +645,18 @@ function realish(p) {
 		throw e;
 	}
 }
-export function scopedTarget(cwd, file, scratchpad) {
+function scratchpadOf(args) {
+	return typeof args.scratchpad_dir === "string" ? args.scratchpad_dir : undefined;
+}
+export function scopedTarget(cwd, file, scratchpad, roots) {
 	try {
 		const fp = path.resolve(cwd, file);
 		const real = realish(fp);
 		const outside = (rel) => rel === ".." || rel.startsWith(".." + path.sep) || path.isAbsolute(rel);
-		const rel = path.relative(realish(cwd), real);
+		const rel = path.relative(roots?.cwd ?? realish(cwd), real);
 		if (rel === "" || outside(rel) || isExcludedPath(rel)) return null;
 		if (scratchpad) {
-			const rs = realish(scratchpad);
+			const rs = roots ? roots.scratchpad ?? realish(scratchpad) : realish(scratchpad);
 			if (real === rs || real.startsWith(rs + path.sep)) return null;
 		}
 		const ext = path.extname(fp).toLowerCase();
@@ -667,16 +670,19 @@ export function scopedTarget(cwd, file, scratchpad) {
 		return null;
 	}
 }
-export function resolveLintTarget(args) {
+function postToolScope(args) {
 	try {
 		if (args?.tool_response?.success === false) return null;
 		const cwd = typeof args?.cwd === "string" ? args.cwd : "";
 		const fp = args?.tool_input?.file_path;
 		if (!cwd || typeof fp !== "string" || !fp) return null;
-		return scopedTarget(cwd, fp, typeof args.scratchpad_dir === "string" ? args.scratchpad_dir : undefined)?.fp ?? null;
+		return scopedTarget(cwd, fp, scratchpadOf(args));
 	} catch {
 		return null;
 	}
+}
+export function resolveLintTarget(args) {
+	return postToolScope(args)?.fp ?? null;
 }
 export function editRanges(args) {
 	const patch = args?.tool_response?.structuredPatch;
@@ -775,15 +781,8 @@ export function recordWritten(fp, real) {
 		renameSync(tmp, file);
 	} catch {}
 }
-function recordWrittenFor(args) {
-	try {
-		if (args?.tool_response?.success === false) return;
-		const cwd = args?.cwd;
-		const file = args?.tool_input?.file_path;
-		if (typeof cwd !== "string" || !cwd || typeof file !== "string" || !file) return;
-		const s = scopedTarget(cwd, file, typeof args.scratchpad_dir === "string" ? args.scratchpad_dir : undefined);
-		if (s) recordWritten(s.fp, s.real);
-	} catch {}
+function recordWrittenFor(s) {
+	if (s) recordWritten(s.fp, s.real);
 }
 function lintResolved(resolved, cwd, ranges, hookEventName, label) {
 	const rel = path.relative(cwd, resolved);
@@ -821,9 +820,9 @@ function lintResolved(resolved, cwd, ranges, hookEventName, label) {
 		additionalContext: `${label}: ${truncate(blocks.join("\n\n"))}`
 	} };
 }
-export function lintFileHandler(args) {
+export function lintFileHandler(args, scoped = postToolScope(args)) {
 	try {
-		const resolved = resolveLintTarget(args);
+		const resolved = scoped?.fp;
 		if (!resolved) return {};
 		const ranges = editRanges(args);
 		if (ranges?.length === 0) return {};
@@ -838,13 +837,16 @@ export function fileChangedHandler(args) {
 		const cwd = args?.cwd;
 		const file = args?.file_path;
 		if (typeof cwd !== "string" || !cwd || typeof file !== "string" || !file) return {};
-		const s = scopedTarget(cwd, file, typeof args.scratchpad_dir === "string" ? args.scratchpad_dir : undefined);
+		const s = scopedTarget(cwd, file, scratchpadOf(args));
 		if (!s) return {};
 		let recorded = null;
 		try {
 			recorded = readFileSync(writtenDigestPath(s.real), "utf8");
 		} catch {}
-		if (recorded !== null && recorded === fileDigest(s.fp)) return {};
+		if (recorded !== null) {
+			if (recorded === fileDigest(s.fp)) return {};
+			rmSync(writtenDigestPath(s.real), { force: true });
+		}
 		try {
 			const status = execFileSync("git", [
 				"--no-optional-locks",
@@ -893,10 +895,19 @@ export function watchList(cwd, scratchpad) {
 	} catch {
 		return [];
 	}
-	const list = out.split("\0").filter(Boolean).flatMap((rel) => {
-		const fp = scopedTarget(cwd, rel, scratchpad)?.fp;
+	let roots;
+	try {
+		roots = {
+			cwd: realish(cwd),
+			scratchpad: scratchpad ? realish(scratchpad) : undefined
+		};
+	} catch {
+		return [];
+	}
+	const list = [...new Set(out.split("\0").filter(Boolean).flatMap((rel) => {
+		const fp = scopedTarget(cwd, rel, scratchpad, roots)?.fp;
 		return fp ? [fp] : [];
-	});
+	}))];
 	if (list.length > WATCH_LIMIT) {
 		process.stderr.write(`universal-lint: watch list: ${list.length} files above ${WATCH_LIMIT}, FileChanged linting off for this cwd\n`);
 		return [];
@@ -909,7 +920,7 @@ export function watchPathsHandler(args) {
 		if (ev !== "SessionStart" && ev !== "CwdChanged") return {};
 		const cwd = typeof args.new_cwd === "string" && args.new_cwd ? args.new_cwd : args.cwd;
 		if (typeof cwd !== "string" || !cwd) return {};
-		const list = watchList(cwd, typeof args.scratchpad_dir === "string" ? args.scratchpad_dir : undefined);
+		const list = watchList(cwd, scratchpadOf(args));
 		return list.length > 0 ? { hookSpecificOutput: {
 			hookEventName: ev,
 			watchPaths: list
@@ -937,8 +948,9 @@ function main() {
 		let ctx;
 		if (ev === "FileChanged") ctx = fileChangedHandler(input).hookSpecificOutput?.additionalContext;
 		else {
-			recordWrittenFor(input);
-			ctx = lintFileHandler(input).hookSpecificOutput?.additionalContext;
+			const scoped = postToolScope(input);
+			recordWrittenFor(scoped);
+			ctx = lintFileHandler(input, scoped).hookSpecificOutput?.additionalContext;
 		}
 		if (ctx) {
 			process.stderr.write(ctx + "\n");
