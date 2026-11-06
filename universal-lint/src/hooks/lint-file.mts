@@ -72,7 +72,7 @@ const DEBOUNCE_MS = (() => {
   return Number.isFinite(n) && n >= 0 ? n : 5000;
 })();
 
-/** tsc only understands real TypeScript syntax; .js/.jsx/.mjs/.cjs stay eslint-only via the existing jsts chain. */
+/** tsc only understands real TypeScript syntax; .js/.jsx/.mjs/.cjs stay chain-linted only (eslint or oxlint, see resolveOxlintConfig). */
 const TYPE_CHECK_EXTS = new Set([".ts", ".tsx", ".mts", ".cts"]);
 
 /** One linter in a language's chain. */
@@ -1238,13 +1238,14 @@ export function lintFileHandler(args: PostToolUseHookInput): HookResult {
     const ext = path.extname(resolved).toLowerCase();
     const lang = EXT_MAP[ext];
     const typeCheckEligible = TYPE_CHECK_EXTS.has(ext);
+    const oxlintConfig = lang === "jsts" ? resolveOxlintConfig(path.dirname(resolved), cwd) : null;
 
     const findings: Finding[] = [];
     if (lang) {
-      const chainResult = runChainLint(REGISTRY[lang], resolved, cwd, rel);
+      const chainResult = runChainLint(REGISTRY[oxlintConfig ? "oxlint" : lang], resolved, cwd, rel);
       if (chainResult) findings.push(chainResult);
     }
-    if (typeCheckEligible) {
+    if (typeCheckEligible && !(oxlintConfig && oxlintConfigTypeChecks(oxlintConfig))) {
       const tsResult = runTypeCheck(resolved, cwd);
       if (tsResult) findings.push(tsResult);
     }
