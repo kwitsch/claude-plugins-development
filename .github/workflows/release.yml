@@ -29,8 +29,8 @@ jobs:
             || BEFORE=$(git rev-parse -q --verify "$GITHUB_SHA^" || git hash-object -t tree /dev/null)
           tags=""
           for p in $(git diff --name-only "$BEFORE" "$GITHUB_SHA" | cut -d/ -f1 | sort -u); do
-            [ -f "$p/plugin.json" ] || continue
-            t="$p-$(jq -r .version "$p/plugin.json")"
+            [ -f "$p/plugin/.claude-plugin/plugin.json" ] || continue
+            t="$p-$(jq -r .version "$p/package.json")"
             if git ls-remote --exit-code --tags origin "refs/tags/$t" > /dev/null; then
               echo "::notice::$t already exists, not re-tagging"
             else
