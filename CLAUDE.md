@@ -35,8 +35,8 @@ pnpm install                 # once, at repo root (workspace)
 pnpm -r build                # build every plugin
 pnpm -r test                 # run every plugin's tests
 pnpm lint                    # oxlint (lint + type check) over the workspace, then plugin-specific lint scripts
-pnpm --filter < name > build # one plugin
-claude plugin validate < name > /plugin
+pnpm --filter <name> build   # one plugin
+claude plugin validate <name>/plugin
 ```
 
 ## Rules
