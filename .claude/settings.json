@@ -20,6 +20,21 @@
       "Edit(./*/plugin/**/CLAUDE.md)"
     ]
   },
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/oxlint-edited.sh",
+            "asyncRewake": true,
+            "timeout": 120
+          }
+        ]
+      }
+    ]
+  },
   "attribution": {
     "commit": "",
     "pr": "",
@@ -27,6 +42,7 @@
   },
   "enabledPlugins": {
     "universal-format@kwitsch-plugins": false,
+    "universal-lint@kwitsch-plugins": false,
     "dprint@kwitsch-plugins": true
   },
   "extraKnownMarketplaces": {

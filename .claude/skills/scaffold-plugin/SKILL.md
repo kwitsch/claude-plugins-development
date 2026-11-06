@@ -1,6 +1,6 @@
 ---
 name: scaffold-plugin
-description: Scaffold a new Claude Code plugin in this repository with the repo layout (<name>/plugin.json, plugin/, src/, tests/, package.json). Use when the user asks to create, add, scaffold or start a new plugin here.
+description: Scaffold a new Claude Code plugin in this repository with the repo layout (<name>/package.json, plugin/, src/, tests/). Use when the user asks to create, add, scaffold or start a new plugin here.
 argument-hint: "[plugin-name] [one-line description]"
 disable-model-invocation: false
 ---
@@ -26,9 +26,7 @@ From the repo root, copy templates from `${CLAUDE_SKILL_DIR}/templates/` and sub
 name=<name>
 mkdir -p "$name"/{plugin/.claude-plugin,src,tests}
 T="${CLAUDE_SKILL_DIR}/templates"
-for f in plugin.json package.json; do
-  sed -e "s/__NAME__/$name/g" -e "s/__DESCRIPTION__/<description>/g" -e "s/__AUTHOR__/$(git config user.name)/g" "$T/$f" > "$name/$f"
-done
+sed -e "s/__NAME__/$name/g" -e "s/__DESCRIPTION__/<description>/g" -e "s/__AUTHOR__/$(git config user.name)/g" "$T/package.json" > "$name/package.json"
 sed "s/__NAME__/$name/g" "$T/CLAUDE.md" > "$name/CLAUDE.md"
 sed "s/__NAME__/$name/g" "$T/README.md" > "$name/plugin/README.md"
 ```
@@ -41,7 +39,7 @@ Per selected component:
 - **agent** → `plugin/agents/<agent-name>.md` with frontmatter `name`, `description`, `tools`.
 - **mcp** → `src/mcp/server.mts` (zero-dep stdio JSON-RPC) and `plugin/.mcp.json` pointing at `${CLAUDE_PLUGIN_ROOT}/mcp/server.mjs`. Add a test.
 
-If no `src/` files were created, still keep `src/` and the `package.json` — the build then only syncs `plugin.json`.
+If no `src/` files were created, still keep `src/` and the `package.json` — the build then only generates `plugin/.claude-plugin/plugin.json` from `package.json`.
 
 ## Step 3 — Build and verify
 
@@ -61,6 +59,7 @@ List the created files and the three commands above. Do not commit unless asked.
 
 ## Rules recap
 
-- `<name>/plugin.json` is the only place for `version`, `description`, `author`; `pnpm build` copies it to `plugin/.claude-plugin/plugin.json`.
+- `<name>/package.json` is the only place for `version`, `description`, `author`, `keywords` and `claudePlugin` (required, `{}` at least: marks the package as a plugin for CI; holds plugin-only manifest fields such as `userConfig`); `pnpm build` generates the manifest `plugin/.claude-plugin/plugin.json`.
 - `src/**/*.mts` → `plugin/**/*.mjs`, same relative path.
+- Scripts used by several components (skills, hooks, MCP) go in `src/bin/*.mts` → `plugin/bin/*.mjs`.
 - Runtime code: `node:` builtins only.

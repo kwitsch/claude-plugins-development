@@ -34,7 +34,7 @@ jobs:
           p=""
           for d in */; do
             d=${d%/}
-            [ -f "$d/plugin.json" ] || continue
+            bash .github/scripts/is-plugin.sh "$d" || continue
             case "$TAG" in "$d"-*) [ ${#d} -gt ${#p} ] && p=$d ;; esac
           done
           if [ -z "$p" ]; then
@@ -42,7 +42,7 @@ jobs:
             echo "plugin=" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          v=$(jq -r .version "$p/plugin.json")
+          v=$(jq -r .version "$p/package.json")
           if [ "$TAG" != "$p-$v" ]; then
             echo "::error::tag $TAG does not match $p version $v (expected $p-$v)"
             exit 1

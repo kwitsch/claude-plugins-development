@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { test } from "vitest";
+import { pluginManifest } from "../../development/scripts/plugin-manifest.mts";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const SKILL = readFileSync(
@@ -11,7 +12,7 @@ const SKILL = readFileSync(
   "utf8",
 );
 
-test("generated manifest equals plugin.json", () => {
+test("generated manifest equals pluginManifest(package.json)", () => {
   assert.deepEqual(
     JSON.parse(
       readFileSync(
@@ -19,8 +20,13 @@ test("generated manifest equals plugin.json", () => {
         "utf8",
       ),
     ),
-    JSON.parse(readFileSync(path.join(ROOT, "plugin.json"), "utf8")),
+    pluginManifest(JSON.parse(readFileSync(path.join(ROOT, "package.json"), "utf8"))),
   );
+});
+
+test("pluginManifest requires the claudePlugin marker CI detects plugins by", () => {
+  assert.throws(() => pluginManifest({ name: "x", version: "1.0.0", description: "d" }), /"claudePlugin" must be an object/);
+  assert.equal(pluginManifest({ name: "x", version: "1.0.0", description: "d", claudePlugin: {} }).name, "x");
 });
 
 test("SKILL.md frontmatter: name, model-invocable, allowed-tools without bare Bash", () => {
@@ -60,7 +66,7 @@ test("README documents the format_pre hook and its dprint lsp requirement", () =
   assert.ok(readme.includes(`dprint >= ${min}`));
 });
 
-test("README documents the config gate, the 15 s toast module and all six config names; line 3 mirrors plugin.json", async () => {
+test("README documents the config gate, the 15 s toast module and all six config names; line 3 mirrors package.json", async () => {
   const readme = readFileSync(path.join(ROOT, "plugin/README.md"), "utf8");
   const { CONFIG_NAMES } = await import(
     "../plugin/skills/dprint/config-names.mjs"
@@ -70,7 +76,7 @@ test("README documents the config gate, the 15 s toast module and all six config
   assert.match(readme, /only when the working directory or an ancestor has a dprint config/);
   for (const n of CONFIG_NAMES) assert.ok(readme.includes(`\`${n}\``), n);
   const manifest = JSON.parse(
-    readFileSync(path.join(ROOT, "plugin.json"), "utf8"),
+    readFileSync(path.join(ROOT, "package.json"), "utf8"),
   );
   assert.equal(readme.split("\n")[2], manifest.description);
   assert.match(manifest.description, /shows a toast when it has one but no usable dprint \(missing, failing or older than 0\.50\)/);
@@ -92,10 +98,10 @@ test("SKILL.md uses the arguments placeholder exactly once and no indexed placeh
   assert.doesNotMatch(SKILL, /\$[01]\b/);
 });
 
-test("README documents /dprint:dprint and mirrors the plugin.json description", () => {
+test("README documents /dprint:dprint and mirrors the package.json description", () => {
   const readme = readFileSync(path.join(ROOT, "plugin/README.md"), "utf8");
   assert.match(readme, /\/dprint:dprint/);
-  const { description } = JSON.parse(readFileSync(path.join(ROOT, "plugin.json"), "utf8"));
+  const { description } = JSON.parse(readFileSync(path.join(ROOT, "package.json"), "utf8"));
   assert.ok(readme.includes(description));
 });
 
@@ -116,7 +122,7 @@ test("README documents the cwd scope, FileChanged formatting and the watch-list 
     assert.ok(readme.includes(s), s);
   }
   const manifest = JSON.parse(
-    readFileSync(path.join(ROOT, "plugin.json"), "utf8"),
+    readFileSync(path.join(ROOT, "package.json"), "utf8"),
   );
   assert.match(
     manifest.description,
@@ -126,7 +132,7 @@ test("README documents the cwd scope, FileChanged formatting and the watch-list 
 
 test("npx fallback is documented: manifest, README, SKILL.md and both script references", () => {
   const readme = readFileSync(path.join(ROOT, "plugin/README.md"), "utf8");
-  const { description } = JSON.parse(readFileSync(path.join(ROOT, "plugin.json"), "utf8"));
+  const { description } = JSON.parse(readFileSync(path.join(ROOT, "package.json"), "utf8"));
   assert.match(description, /needs node and dprint >= 0\.50 on PATH or in ~\/\.dprint\/bin, or npx\)\.$/);
   assert.ok(readme.includes("npx --yes dprint"));
   assert.ok(SKILL.includes("`npx --yes dprint` when `path` is `npx`"));

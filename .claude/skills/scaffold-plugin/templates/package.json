@@ -1,10 +1,15 @@
 {
   "name": "__NAME__",
   "version": "0.1.0",
+  "description": "__DESCRIPTION__",
+  "author": {
+    "name": "__AUTHOR__"
+  },
+  "claudePlugin": {},
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "node ../scripts/build-plugin.mts",
-    "test": "vitest run --config ../vitest.config.mts"
+    "build": "node ../development/scripts/build-plugin.mts",
+    "test": "vitest run --config \"$(git rev-parse --show-toplevel)/vitest.config.mts\""
   }
 }

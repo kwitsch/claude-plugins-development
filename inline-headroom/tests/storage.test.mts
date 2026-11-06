@@ -172,7 +172,7 @@ test("a failed --service start logs one line, and the stack only under MCP_HOOK_
   assert.match(run({ MCP_HOOK_DEBUG: "1" }).stderr, /\n\s+at resolveStorage/);
 });
 
-test("VERSION comes from plugin.json and compareVersions orders dotted versions numerically", () => {
+test("VERSION comes from the built manifest and compareVersions orders dotted versions numerically", () => {
   const manifest = JSON.parse(readFileSync(new URL("../plugin/.claude-plugin/plugin.json", import.meta.url), "utf8"));
   assert.equal(VERSION, manifest.version);
   assert.ok(compareVersions("0.2.0", "0.10.0") < 0);

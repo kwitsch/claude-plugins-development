@@ -1,10 +1,12 @@
 // The hello-tabs pane of the docs: two tabs, the second counts presses and saves the count.
-export function register(on) {
+import type { On } from "../../index.mts";
+
+export function register(on: On) {
   let tab = "one";
   on("ui.render", { component: "Pane", requestId: "hello-tabs" }, async ($, e) => {
     const { Box, Text, Button } = $.ui.resolve(e);
-    const count = (await $.store.get("count")) ?? 0;
-    const press = (fn) => async () => {
+    const count = Number((await $.store.get("count")) ?? 0);
+    const press = (fn: () => unknown) => async () => {
       await fn();
       $.ui.invalidate("ui.render");
     };

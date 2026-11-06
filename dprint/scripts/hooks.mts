@@ -181,7 +181,7 @@ const pascal = (s: string): string => s.replace(/(^|_)([a-z])/g, (_: string, __:
 let hooks: Json, manifest: Json, mcp: Json;
 try {
   hooks = readJson(HOOKS);
-  manifest = readJson(path.join(ROOT, "plugin.json"));
+  manifest = readJson(path.join(ROOT, "package.json"));
   mcp = readJson(path.join(ROOT, "plugin/.mcp.json"));
 } catch (e) {
   console.error(`hooks: ${(e as Error).message}`);

@@ -1,125 +1,21 @@
 # dprint
 
-Plugin with one model-invocable skill `dprint` (`plugin/skills/dprint/SKILL.md`; actions `init`, `check`, `fmt`,
-no argument = `fmt`), one PreToolUse format hook, one FileChanged format hook (`file_changed`) with its PostToolUse
-`Write|Edit` recorder (`file_written`), three cwd-tracking hooks (CwdChanged, PostToolUse
-EnterWorktree/ExitWorktree), one SessionStart/CwdChanged `command` hook that sets the FileChanged watch list
-(`plugin/mcp/watch-paths.mjs`) and one Claude Code function-hooks module `plugin/hooks/notice.mjs` (15 s toast when
-the working directory has a dprint config but dprint cannot run).
+Plugin parts, each with its own path-scoped rule in `.claude/rules/` (loaded when you work on matching files):
 
-Skill: three zero-dep scripts (plus the shared `find-dprint.mjs`, `find-config.mjs` and `config-names.mjs`, the six
-dprint config file names in `CONFIG_NAMES`) and one data file, all in
-`plugin/skills/dprint/`:
+- Skill `dprint` (`plugin/skills/dprint/SKILL.md`; actions `init`, `check`, `fmt`, no argument = `fmt`), scripts in
+  `src/skills/dprint/`: `skill-scripts.md` (also `findDprint`/`findConfig` resolution, changing `MIN_VERSION`,
+  refreshing `dprint-plugins.json`).
+- MCP server `dprint-hooks` (format, cwd-tracking and FileChanged hooks, watch-list `command` hook) in `src/mcp/`:
+  `mcp-server.md`; the `hooks.json` → `hook-inputs.d.mts` contract of `scripts/hooks.mts`: `hook-inputs.md`.
+- Function-hooks module `notice` (toast when a dprint config exists but dprint cannot run) in `src/hooks/`:
+  `notice-hook.md`.
 
-- `check-dprint.mjs`: dprint detection and minimum-version check (contract: `check-dprint.reference.md`).
-- `scan-plugins.mjs`: read-only scan of the project's file types against its dprint config (contract:
-  `scan-plugins.reference.md`).
-- `run-dprint.mjs`: check/fmt dispatcher with the not-set-up gate (contract: `run-dprint.reference.md`).
-- `dprint-plugins.json`: hand-written plugin reference data read by `scan-plugins.mjs`. It is **not** build
-  output; edit it in place.
+## Pitfalls
 
-`find-dprint.mjs` exports `findDprint` (`PATH`, then `~/.dprint/bin`, then `npx --yes dprint` (async probe, a failure re-probed after 30 s); `findDprint` is async, `dprintArgv` builds the spawn arguments from the returned argv prefix); `find-config.mjs` exports `findConfig`
-(first of `CONFIG_NAMES` in a directory or its ancestors, never above the git/worktree root), shared by
-`run-dprint.mjs`, `scan-plugins.mjs` and `mcp/format.mjs`.
-
-Hook: `plugin/hooks/hooks.json` (hand-written) wires PreToolUse `Write|Edit` as an `mcp_tool` hook to tool
-`format_pre` of the MCP server `dprint-hooks` (`plugin/.mcp.json`, hand-written, `command: node`). The server is
-`plugin/mcp/` (zero-dep):
-
-- `server.mjs`: MCP stdio loop (newline-delimited JSON-RPC), tools `format_pre`, `cwd_changed` (CwdChanged hook),
-  `worktree_entered` and `worktree_exited` (PostToolUse EnterWorktree/ExitWorktree hooks), `file_written`
-  (PostToolUse Write|Edit), `file_changed` (FileChanged), `bash_started`/`bash_finished` (PreToolUse/PostToolUse `Bash`) and `drain_notices` (PreToolUse `Edit|Write|Read|Bash|MultiEdit`, UserPromptSubmit).
-- `lsp.mjs`: `dprint lsp` client (one lazily spawned child per cwd, Content-Length JSON-RPC, 30 s request timeout
-  (constructor option `timeoutMs`, tests only), a 60 s cooldown after a request timeout during which formats of
-  that document fail at once, a 30 s per-client pause before `findDprint` is retried after dprint was not found, stdout of a
-  replaced child ignored, respawn after a crash, `applyTextEdits`). Needs dprint >= 0.50 (`findDprint` from
-  `skills/dprint/find-dprint.mjs`: `PATH`, then `~/.dprint/bin`, then `npx --yes dprint` (async probe, a failure re-probed after 30 s); `findDprint` is async, `dprintArgv` builds the spawn arguments from the returned argv prefix).
-- `format.mjs`: scope via `scopeOf` (effective cwd: override, else payload `cwd`, never `process.cwd()`) and
-  `inScope` (real path strictly inside the real cwd, not excluded, not inside `scratchpad_dir`; dangling links
-  rejected); `fileWritten` records Edit/Write content per real path; `fileChanged` formats a watched file whole on
-  disk unless it is out of scope, has a lone CR (CRLF files are formatted on their LF view), equals the recorded content (a SHA-256 digest; `fileWritten` records only where a config exists), is gitignored, or is tracked and unchanged against the git index
-  (a single `git --no-optional-locks status --porcelain --untracked-files=normal --ignored=matching`: `!!` or empty output skips; git failure means format); it uses its own `dprint lsp`, runs at most 8 events at once (git + dprint), queues up to 1000 more and drops beyond that with a stderr line; skips files above 1 MiB; at most 8 `dprint lsp` children live, the least recently used is disposed; `formatPre` (config gate first, then the gitignore check (`git check-ignore`; Write/Edit skip ignored files): `{}` and no `dprint lsp` spawn unless `findConfig` finds a config in the
-  effective cwd or an ancestor (never above the nearest dir holding `.git`: repo root or worktree root); Write: `formatting`; Edit: whole-file
-  `formatting` of the edited text), `lineDiff` and `trimToEdit` (keep only hunks touching the edit, widen
-  `old_string` until it is unique, at most 1000 single-line widening steps, then one jump to the widest span; accepted only if the trimmed file formats like the intended edit, skipped when the trim reproduces dprint's output, else one extra
-  whole-document `formatting`; CRLF files are trimmed on their LF view), one `DprintLsp` per cwd, per session/agent cwd overrides, and universal-format's
-  path exclusions. `formatOnDisk` is the shared core of `fileChanged` (queues the file for `drainNotices`) and `bashFinished` (reports directly; it formats every cached watch-list file with mtime > `bash_started` − 1 s, so the Bash result is not stale; the digest in `written` makes the later FileChanged a no-op); all three keyed by `overrideKey`. Every failure returns `{}` (fail open), including a diff above the size guard.
-- `watch-list.mjs`: `dprintFilePaths` (`dprint file-paths` + `WATCH_LIMIT`), shared by `watch-paths.mjs` and `bashFinished`; imports neither `server.mjs` nor `format.mjs`.
-- `watch-paths.mjs`: `command` hook for SessionStart and CwdChanged (SessionStart `mcp_tool` hooks are skipped while
-  the server connects). Runs `dprint file-paths` (fallback `output-file-paths` for dprint 0.50-0.54) in the cwd,
-  filters through `inScope`, caps at `WATCH_LIMIT` (5000; above it nothing is watched) and prints
-  `hookSpecificOutput.watchPaths`. Must not import `server.mjs`.
-
-Toast: `plugin/hooks/hooks.json` also lists `"modules": ["./notice.mjs"]` (Claude Code function hooks, early-access
-API). `notice.mjs` hooks `session.start`, `classic.CwdChanged` and `tool.call` for `EnterWorktree`/`ExitWorktree`,
-lets the event run, then checks the resulting cwd (`new_cwd` for CwdChanged, the tool result's `worktreePath`/`restoredCwd` for the
-worktree tools, else `$.session.cwd()`) and its ancestors (up to the dir holding `.git`) for the `CONFIG_NAMES` (an inlined copy: the module has no
-imports; a test checks it against `config-names.mts`) with `$.fs.exists`, detached (errors swallowed). No config: silent,
-nothing spawned. Config found: it judges the one dprint `findDprint` would pick, with `$.process.run`: the first `<abs PATH entry>/dprint`
-that exists (`$.env.get("PATH")` + `$.fs.exists`; relative entries skipped, a weaker check than `findDprint`'s executable-file test),
-else `$HOME/.dprint/bin/dprint` if it exists (`$.env.get("HOME")`), else `npx --no --prefer-offline -- dprint --version`
-(cached package only: unlike `findDprint`, which runs on a format request, this runs unprompted, so it never downloads;
-`--prefer-offline` so a name-only spec is not checked against the registry's latest, which fails offline or after a release).
-Only the pick is run (`<pick> --version`), never a later candidate, so a broken PATH dprint toasts even when `~/.dprint/bin` works
-(as `findDprint` would fail on it too), each in `cwd` HOME (else, or when that dir does not exist, `/`, never the project, whose `node_modules/.bin` npx would prefer), 10 s timeout.
-Usable = exit 0, stdout `dprint X.Y.Z` (check-dprint's regex) and X.Y.Z >= the inlined `MIN_VERSION` copy (`0.50.0`; a prerelease of it
-sorts below; `tests/notice.test.mts` fails when it or the regex drifts from `check-dprint.mts`). The toast text names the cause:
-not installed, `<pick>` could not start or took over 10 s, exited N, printed no dprint version, or is too old (the npx leg reads a non-zero
-exit as not installed, since `npx --no` exits 1 when nothing is cached; its other causes keep their own text; `judge`
-returns `{ kind, text }`, so no logic depends on the wording). A success is cached for the module's life, a failure for
-30 s (its own cache, separate from the MCP server's `findDprint`). Only when the pick is unusable it calls
-`$.ui.toast(text, { timeoutMs: 15000 })`, at most once per 15 s overall (the cause is machine-wide). `scripts/hooks.mts` validates only the
-`hooks` map; `claude plugin validate plugin` checks the module, lists `process.run`, `env.get` and the env vars `HOME` and `PATH`
-among its uses, and warns "gating hook without .catch" for three of its hooks (expected: the check is detached with
-`.catch`).
-
-`check-dprint.mjs`, `config-names.mjs`, `find-config.mjs`, `find-dprint.mjs`, `run-dprint.mjs`, `scan-plugins.mjs`,
-`plugin/mcp/*.mjs`, `plugin/hooks/notice.mjs` and `plugin/.claude-plugin/plugin.json` are **build output**
-(`pnpm build`) of
-`src/skills/dprint/{check-dprint,config-names,find-config,find-dprint,run-dprint,scan-plugins}.mts`,
-`src/mcp/{server,lsp,format,watch-list,watch-paths}.mts`, `src/hooks/notice.mts` and `plugin.json`. Do not edit them here.
+- `plugin/skills/dprint/dprint-plugins.json` is hand-written reference data, **not** build output: edit it in place.
+- Every `plugin/**/*.mjs` is minified build output: debug against `src/`.
 
 ## Tests
 
-`pnpm --filter dprint test` runs vitest (`vitest run`, workspace config `../vitest.config.mts`) over `tests/*.test.mts` against the built `plugin/`; asserts
-via `node:assert/strict`; the shared config sets `testTimeout: 30_000` for the files that spawn processes. `tests/notice.test.mts` drives the built hooks module through `createKit` from the workspace package
-`claude-engine-vitest` (stubs for `fs.exists`, `session.cwd`, `env.get`, `process.run`, `ui.toast`;
-`mock.clock(on).settle()` waits for the detached check).
-
-## Sources vs. build output
-
-- `src/**/*.mts` are written for humans: every function, method, class, type, type member and
-  module-level constant carries a TSDoc comment (`@param name - text`, `@returns`, `@remarks`, one blank line
-  before the first tag). `.claude/rules/tsdoc.md` asks for it (not linted). `pnpm lint` (oxlint type-aware + type check,
-  workspace config `../.oxlintrc.json`, rules incl. `no-explicit-any`/`no-unsafe-*`) must pass; CI runs
-  it. `plugin/` is ignored by the linter.
-- `plugin/hooks/hooks.json` is the hook-input contract. `scripts/hooks.mts` validates it (`mcp_tool` hooks, plus
-  `command` hooks (non-empty `command`, timeout checked, no input, no generated types), `server` =
-  `plugin:dprint:<.mcp.json key>`, every `${…}` placeholder a real input field of its event
-  and, for `Write`/`Edit` matchers, of those tools, one input shape per tool) and generates
-  `src/mcp/hook-inputs.d.mts` (one interface per tool plus the `HookInputs` map) from the `input` templates.
-  `server.mts` types its tool table by `HookInputs`, so a tool missing on either side is a compile error.
-  `pnpm build` regenerates the file; `pnpm --filter dprint lint` runs `scripts/hooks.mts --check` and fails while it is
-  stale. Never edit the `.d.mts` by hand. A new hook event needs its input fields in `EVENT_FIELDS` there.
-- `pnpm build` strips types with oxc-transform (`.mts` → `.mjs`) and then minifies every emitted file with
-  oxc-minify: no comments, mangled locals, shebang and export names kept. `plugin/hooks/*.mjs` (function-hooks modules) are neither compressed nor mangled and keep their whitespace (whitespace removal turns string literals into template literals): Claude Code's static
-  module check needs named hook functions, `$`/`on` spelled as such and no shadowed names. The output is optimized for size and
-  load time, not for reading; debug against `src/`.
-
-`MIN_VERSION` is defined only in the `.mts` source. Changing it: edit there, update the
-"Minimum dprint version" line in `README.md`, rebuild. Tests read the value from that source (the built
-script is minified). `src/hooks/notice.mts` holds a copy; `tests/notice.test.mts` fails when the two differ, so change both.
-
-## Refreshing `dprint-plugins.json`
-
-1. Regenerate `plugins` from the `latest` array of `https://plugins.dprint.dev/info.json`, keeping registry order
-   (it is the candidate preference order):
-   - `id`: the URL path between `https://plugins.dprint.dev/` and `-<version>` (the name `dprint config add` accepts)
-   - `npm`: the registry's `npm.name`; omit the key when there is none
-   - `extensions`: the registry's `fileExtensions`, lower-cased, deduplicated, without a leading dot; drop dotted
-     entries (for example `component.html`)
-   - `fileNames`: the registry's `fileNames` verbatim; omit the key when there are none
-   - skip entries with neither extensions nor file names (`exec`-only)
-   - store no versions or URLs
-2. Update `snapshot` to the refresh date (`YYYY-MM-DD`).
-3. Run `pnpm --filter dprint test`.
+`pnpm --filter dprint test` runs vitest over `tests/*.test.mts` against the built `plugin/`; the shared config sets
+`testTimeout: 30_000` for the files that spawn processes.

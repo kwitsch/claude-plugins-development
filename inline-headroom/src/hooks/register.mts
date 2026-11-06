@@ -4,7 +4,7 @@
  *
  * @remarks
  * EARLY ACCESS API. No engine type import (`claude-code` typings are not in the repo): the used `$` members and
- * events are typed structurally below. `scripts/build-plugin.mts` (repo root) keeps `hooks/*.mjs` unmangled and uncompressed, since
+ * events are typed structurally below. `development/scripts/build-plugin.mts` keeps `hooks/*.mjs` unmangled and uncompressed, since
  * the engine's static check wants `$`/`on` spelled as such and no `$.<noun>` passed as a bare value.
  *
  * @packageDocumentation
@@ -435,7 +435,7 @@ export const register = (on: On, options: Record<string, unknown>): void => {
     return r;
   });
 
-  // One tool.call hook without a matcher for every job: the engine refuses a second one in one module (see CLAUDE.md).
+  // One tool.call hook without a matcher for every job: the engine refuses a second one in one module (see .claude/rules/register-hooks.md).
   // It observes failures for effort routing and answers headroom_retrieve.
   if (effortOn || compressOn) {
     // Observe AFTER the tool ran. A failure keeps full effort on the next step of the loop that made the call:
@@ -615,7 +615,7 @@ export const register = (on: On, options: Record<string, unknown>): void => {
 
   if (storageOn) {
     // The mod's own storage calls need no permission rule: core checks $.mcp.call like a tool call (see isOwnStorageCall).
-    // 2.1.310 reports this hook as skipped once per session (the allow still stands); unavoidable, see CLAUDE.md.
+    // 2.1.310 reports this hook as skipped once per session (the allow still stands); unavoidable, see .claude/rules/register-hooks.md.
     on("tool.check", async (_$, e, next) => (isOwnStorageCall(next.origin.plugin, e.tool) ? { decision: "allow" as const, reason: "inline-headroom's own /headroom storage call" } : next(e)));
   }
 
