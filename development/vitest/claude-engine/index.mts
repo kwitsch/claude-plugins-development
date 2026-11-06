@@ -385,8 +385,9 @@ class Engine {
     const fn = b ?? a;
     if (typeof fn !== "function") throw new TypeError(`on("${event}"): no hook function`);
     const matcher = b === undefined || typeof a === "function" ? undefined : a;
-    this.stubs.push({ plugin: "test", tier: "core", idx: Infinity, event, matcher, fn });
-    return { catch: () => undefined };
+    const hook: Hook = { plugin: "test", tier: "core", idx: Infinity, event, matcher, fn };
+    this.stubs.push(hook);
+    return { catch: (handler) => void (hook.catcher = handler) };
   };
 
   /** Loads every plugin once, at the test's first call on `$`: a fresh instance of the module under test, then inline ones. */

@@ -29,6 +29,13 @@ test("a { deny } makes the call reject with its reason, a { value } resolve to i
   expect(await text($.command.run({ command: "store" }))).toBe("7");
 });
 
+test("a throwing stub's .catch handler answers in its place", async ($, on) => {
+  on("store.get", () => {
+    throw new Error("stub broke");
+  }).catch(() => ({ value: 9 }));
+  expect(await text($.command.run({ command: "store" }))).toBe("9");
+});
+
 test("a hook whose call rejects unhandled is skipped, so the event reaches the bottom", async ($) => {
   await expect($.command.run({ command: "unhandled" })).rejects.toThrow("no implementation for command.run");
 });
