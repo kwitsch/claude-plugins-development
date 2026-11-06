@@ -296,6 +296,20 @@ const fits = (matcher: Data | undefined, e: unknown): boolean =>
 /** Whether an `on` pattern (a name, `ns.*` or `*`) selects `event`. */
 const selects = (pattern: string, event: string): boolean => pattern === event || pattern === "*" || (pattern.endsWith(".*") && event.startsWith(pattern.slice(0, -1)));
 
+/**
+ * Splits `on(event, fn)` / `on(event, matcher, fn)` arguments.
+ *
+ * @param event - The `on` pattern, for the error message.
+ * @param a - The hook, or the matcher when `b` is given.
+ * @param b - The hook after a matcher.
+ * @returns The hook and its matcher (undefined without one).
+ */
+const parseOn = (event: string, a: HookFn | Data, b?: HookFn): { fn: HookFn; matcher: Data | undefined } => {
+  const fn = b ?? a;
+  if (typeof fn !== "function") throw new TypeError(`on("${event}"): no hook function`);
+  return { fn, matcher: b === undefined || typeof a === "function" ? undefined : a };
+};
+
 /** Whether `err` is a failed assertion (node:assert or vitest's expect). */
 const isAssertion = (err: unknown): boolean => isData(err) && (err.name === "AssertionError" || err.matcherResult !== undefined);
 
@@ -382,9 +396,7 @@ class Engine {
   /** The test's `on`: registers a stub beneath every plugin, before the first call on `$`. */
   stubOn = (event: string, a: HookFn | Data, b?: HookFn): Registration => {
     if (this.started) throw new Error(`on("${event}") after the test first called $`);
-    const fn = b ?? a;
-    if (typeof fn !== "function") throw new TypeError(`on("${event}"): no hook function`);
-    const matcher = b === undefined || typeof a === "function" ? undefined : a;
+    const { fn, matcher } = parseOn(event, a, b);
     const hook: Hook = { plugin: "test", tier: "core", idx: Infinity, event, matcher, fn };
     this.stubs.push(hook);
     return { catch: (handler) => void (hook.catcher = handler) };
@@ -406,9 +418,7 @@ class Engine {
       list.forEach((p, idx) => {
         const bare = new Set<string>();
         p.register((event: string, a: HookFn | Data, b?: HookFn): Registration => {
-          const fn = b ?? a;
-          if (typeof fn !== "function") throw new TypeError(`on("${event}"): no hook function`);
-          const matcher = b === undefined || typeof a === "function" ? undefined : a;
+          const { fn, matcher } = parseOn(event, a, b);
           if (matcher === undefined) {
             if (bare.has(event)) throw new Error(`${p.name}: ${event} registered twice without a matcher`);
             bare.add(event);
