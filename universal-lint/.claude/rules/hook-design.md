@@ -2,7 +2,7 @@
 paths:
   - "src/hooks/**"
   - "plugin/hooks/**"
-  - "tests/{core,debounce,npx-fallback,rtk,truncation,manifest}.test.mts"
+  - "tests/{core,debounce,npx-fallback,rtk,truncation,manifest,registry,tsc}.test.mts"
 ---
 
 # Hook design (do not "fix" without reading this)
@@ -22,6 +22,10 @@ paths:
 
 - Each hook process writes a unique token to a per-file marker under `tmpdir()/universal-lint-debounce/<sha256(resolved path)>.mark` (atomic: temp file + `renameSync`), sleeps `DEBOUNCE_MS`, re-reads the marker, and lints only if its token is still the newest.
   - A later edit overwrites the token, so older sleepers bail: N edits in the window → N sleeping processes, one linter run.
+- **Coalesced edits (`<hash>.edits`):** after the marker rename each process appends one line `JSON.stringify([Date.now(), editEntry(input)])` to `tmpdir()/universal-lint-debounce/<hash>.edits` (same `hashPath(resolved)` key as the marker). The winner renames the file to `<hash>.edits.<token>`, reads it, removes it, and gates against the union of all entries (`lintFileHandler(input, edits)`); its own entry is always included. Appends after the rename start a fresh file for the next winner.
+  - Entries older than `EDITS_MAX_AGE_MS` (10 min) are ignored: they come from a hook killed during its sleep and would otherwise widen a later run's range indefinitely.
+  - **Accepted residual:** an append opened just before the winner's rename whose write lands after the winner's read is lost with the renamed file (microsecond window). Every other ordering is safe.
+  - Every edits-file op (append, rename, read, parse, remove) fails open to the process's own entry; it never skips a lint. The extra I/O is microseconds and is not a term of the timeout budget.
 - `UNIVERSAL_LINT_DEBOUNCE_MS` overrides the window — a test-only fast path (the vitest harness `tests/support/lint-hook.mts` runs at `0`); NOT a `userConfig`, not part of the hook input contract. An explicitly empty value falls back to the real 5000 ms default (tested).
 - Markers live in `tmpdir()`, not `${CLAUDE_PLUGIN_DATA}` (unlike `tsBuildInfoPathFor`): ephemeral signalling files with no cross-update persistence need. No cleanup routine — tiny, the OS reclaims `tmpdir()`.
 - Every debounce filesystem op fails open: the lint runs on error, never silently skipped.
@@ -63,6 +67,21 @@ paths:
   - `--yes`/`-y` defeats `rtk`'s npx package-name detection, so the wrapped call yields byte-identical unfiltered output; `rtk lint` compacts and resolves `eslint` itself even when it's absent from `PATH`.
   - `rtk markdownlint` is an unfiltered passthrough needing the literal binary: with it missing the attempt fails (empty stdout, non-zero), `tryRtk` reports failure, and the code falls through to bare `npx --yes`. `markdownlint-cli2` has no `rtk` verb and always falls through.
 - `manifestPath` (cargo) tools never go through `rtk` (see `languages.md`, "Rust").
+
+## Edit-range gate
+
+- After an `Edit` the hook exits 2 only when a diagnostic is not proven to sit in the edited file outside the edited lines. No registered tool (shellcheck, checkstyle, ktlint, eslint, oxlint, ruff check, golangci-lint, go vet, yamllint, markdownlint(-cli2), stylelint, phpstan, psalm, cargo clippy/check) nor `tsc` has a line-range check mode (`golangci-lint --new-from-rev`/`psalm --diff` are git-based; `ruff format --line-range` is not a check), so the scan stays file/project-scoped and `gateFinding` filters the raw text afterwards. `buildArgv`/`classifyExit`/rtk are unchanged.
+- **Range source:** every non-overlapping occurrence of `tool_input.new_string` in the post-edit file (`editRanges`, inclusive 0-based lines; a trailing `\n` does not spill into the next line), for every entry of the debounce window (see "Debounce"). All occurrences count (over-inclusion only keeps more).
+- **Whole file:** `Write`, any non-`Edit` tool, a missing `new_string`, or a non-empty `new_string` no longer found on disk. **Pure deletion** (empty `new_string`): no edited lines; a window of only deletions returns `{}` without linting.
+- **Location extraction**, per line after stripping `ANSI_SGR_RE`; first match wins:
+  - A `LOC_PATH_RE` `<path>.<ext>[:(]<line>`: ruff, ktlint, golangci-lint, go vet, checkstyle `[WARN] /abs/A.java:3:`, markdownlint `a.md:12`, psalm, oxlint `,-[src/a.ts:3:7]`, cargo `--> src/a.rs:12:5`, tsc `a.ts(12,5)`/`a.ts:12:5`.
+  - B `LOC_ROW_RE` `  <line>:<col>  ` rows (path-less, own file): eslint stylish, stylelint stylish, yamllint standard.
+  - C `LOC_SHELLCHECK_RE` `In <file> line <n>:` (path-less, own file): shellcheck's default tty format.
+- **Base directory** (`Finding.base`, set in `runChainLint`/`runTypeCheck`): cargo → directory of the `--manifest-path` Cargo.toml; golangci-lint/go vet (`targetsDir`) → the edited file's directory; tsc and every other tool → the payload `cwd` (their spawn cwd).
+- **Path matching (user decision):** (1) `path.resolve(base, p) === resolved` → own file; (2) else, only for a relative `p` whose base-resolved path does not exist, a path-segment suffix match (`resolved.endsWith(sep + p)`) → own file (covers cargo workspace-root paths, cwd-relative go paths, a path split by a space); (3) else **foreign**: kept and reportable. Diagnostics in other files (e.g. tsc errors elsewhere) therefore still exit 2.
+- **Filtering** by blank-line paragraphs: a paragraph without a located line is kept but not reportable (headers, summaries, rtk notes); otherwise it is split into segments at located lines (each carries the unlocated lines after it, so tsc continuation lines stay with their diagnostic; earlier lines are the preamble). Own-file misses are dropped, hits and foreign segments kept; a paragraph whose segments are all dropped loses its preamble. Exact lines, no context slack.
+- **Result:** no located line at all → finding unchanged (fail open = report: rtk-compacted text, phpstan's table format); nothing reportable left → finding dropped; exit 2 only when at least one finding survives. The gate runs before `truncate()`.
+- **Residuals:** a pure deletion is never reported; a later edit rewriting an earlier `new_string` widens that run to the whole file; a same-named file reached only by the suffix fallback can be mistaken for the edited file; a format the regexes miss is reported unchanged.
 
 ## Path exclusions (`isExcludedPath`)
 
