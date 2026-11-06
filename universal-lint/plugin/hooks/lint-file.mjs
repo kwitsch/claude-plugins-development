@@ -583,8 +583,9 @@ function runChainLint(lang, resolved, cwd, rel) {
 	};
 }
 const TSC_SOURCE_DIAGNOSTIC_RE = /\.(?:ts|tsx|mts|cts)[:(]\d+/;
+const ANSI_SGR_RE = /\x1b\[[0-9;]*m/g;
 export function tscOutputHasSourceDiagnostic(text) {
-	const plain = text.replace(/\x1b\[[0-9;]*m/g, "");
+	const plain = text.replace(ANSI_SGR_RE, "");
 	return TSC_SOURCE_DIAGNOSTIC_RE.test(plain);
 }
 function runTypeCheck(resolved, cwd) {
@@ -648,6 +649,19 @@ export function resolveLintTarget(args) {
 	} catch {
 		return null;
 	}
+}
+export function editEntry(args) {
+	const newString = args?.tool_input?.new_string;
+	return args?.tool_name === "Edit" && typeof newString === "string" ? newString : null;
+}
+export function editRanges(text, needle) {
+	if (needle === "") return null;
+	const lineOf = (k) => text.slice(0, k).split("\n").length - 1;
+	const ranges = [];
+	for (let i = text.indexOf(needle); i !== -1; i = text.indexOf(needle, i + needle.length)) {
+		ranges.push([lineOf(i), lineOf(i + needle.length - 1)]);
+	}
+	return ranges.length > 0 ? ranges : null;
 }
 export function lintFileHandler(args) {
 	try {

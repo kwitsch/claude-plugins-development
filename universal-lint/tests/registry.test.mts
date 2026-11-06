@@ -4,7 +4,7 @@ import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "vitest";
-import { buildArgv, classifyCheckstyleOutput, classifyExit, hasProjectMarkdownlintConfig, hasProjectYamllintConfig, isExcludedPath, isToolAvailable, lintFileHandler, looksLikeSolutionStyleTsconfig, oxlintConfigTypeChecks, parseRtkPrefix, REGISTRY, resolveCargoManifest, resolveCheckstyleConfig, resolveLintTarget, resolveOxlintConfig, resolveTsconfig, stripTrailingCommas, truncate, tsBuildInfoPathFor, tscOutputHasSourceDiagnostic } from "../plugin/hooks/lint-file.mjs";
+import { buildArgv, classifyCheckstyleOutput, classifyExit, editEntry, editRanges, hasProjectMarkdownlintConfig, hasProjectYamllintConfig, isExcludedPath, isToolAvailable, lintFileHandler, looksLikeSolutionStyleTsconfig, oxlintConfigTypeChecks, parseRtkPrefix, REGISTRY, resolveCargoManifest, resolveCheckstyleConfig, resolveLintTarget, resolveOxlintConfig, resolveTsconfig, stripTrailingCommas, truncate, tsBuildInfoPathFor, tscOutputHasSourceDiagnostic } from "../plugin/hooks/lint-file.mjs";
 
 const shellcheck = REGISTRY.shell.chain[0];
 const checkstyle = REGISTRY.java.chain[0];
@@ -727,4 +727,28 @@ test("oxlintConfigTypeChecks: a directory named .oxlintrc.json (EISDIR) -> false
   const p = path.join(mkdtempSync(path.join(tmpdir(), "ul-oxl-")), ".oxlintrc.json");
   mkdirSync(p);
   assert.equal(oxlintConfigTypeChecks(p), false);
+});
+
+test("editRanges: a multi-line single occurrence spans all its lines", () => {
+  assert.deepEqual(editRanges("a\nb\nc\nd\n", "b\nc"), [[1, 2]]);
+});
+
+test("editRanges: a trailing newline in the needle does not extend the range into the next line", () => {
+  assert.deepEqual(editRanges("a\nb\nc\n", "b\n"), [[1, 1]]);
+});
+
+test("editRanges: two non-overlapping occurrences give two ranges", () => {
+  assert.deepEqual(editRanges("x\ny\nx\n", "x"), [[0, 0], [2, 2]]);
+});
+
+test("editRanges: an empty or absent needle gives null", () => {
+  assert.equal(editRanges("a\n", ""), null);
+  assert.equal(editRanges("a\n", "zzz"), null);
+});
+
+test("editEntry: Edit with a string new_string gives it; Write or a missing new_string gives null", () => {
+  assert.equal(editEntry({ cwd: "/p", tool_name: "Edit", tool_input: { file_path: "a.sh", new_string: "x" } }), "x");
+  assert.equal(editEntry({ cwd: "/p", tool_name: "Edit", tool_input: { file_path: "a.sh", new_string: "" } }), "");
+  assert.equal(editEntry({ cwd: "/p", tool_name: "Write", tool_input: { file_path: "a.sh", new_string: "x" } }), null);
+  assert.equal(editEntry({ cwd: "/p", tool_name: "Edit", tool_input: { file_path: "a.sh" } }), null);
 });

@@ -119,8 +119,10 @@ interface Finding {
 interface PostToolUseHookInput {
   /** Project root the session runs in. */
   cwd: string;
-  /** The tool's input; `file_path` names the written file. */
-  tool_input: { file_path?: unknown };
+  /** Name of the tool that fired the hook (`Write` or `Edit`). */
+  tool_name?: unknown;
+  /** The tool's input; `file_path` names the written file, `new_string` is the Edit tool's replacement text. */
+  tool_input: { file_path?: unknown; new_string?: unknown };
   /** The tool's result; `success: false` marks a failed Write/Edit. */
   tool_response?: { success?: boolean };
   [key: string]: unknown;
@@ -1127,6 +1129,9 @@ function runChainLint(lang: LangEntry, resolved: string, cwd: string, rel: strin
  * reports both and this only needs one true location to fire.
  */
 const TSC_SOURCE_DIAGNOSTIC_RE = /\.(?:ts|tsx|mts|cts)[:(]\d+/;
+/** ANSI SGR escape sequences (colour codes), stripped before matching tool output. */
+// eslint-disable-next-line no-control-regex -- stripping ANSI SGR sequences from colorized tool output
+const ANSI_SGR_RE = /\x1b\[[0-9;]*m/g;
 /**
  * Whether tsc's output holds a diagnostic anchored to a real source file (see TSC_SOURCE_DIAGNOSTIC_RE).
  *
@@ -1134,8 +1139,7 @@ const TSC_SOURCE_DIAGNOSTIC_RE = /\.(?:ts|tsx|mts|cts)[:(]\d+/;
  * @returns True when a diagnostic is anchored to a real source file.
  */
 export function tscOutputHasSourceDiagnostic(text: string): boolean {
-  // eslint-disable-next-line no-control-regex -- stripping ANSI SGR sequences from tsc's colorized output
-  const plain = text.replace(/\x1b\[[0-9;]*m/g, "");
+  const plain = text.replace(ANSI_SGR_RE, "");
   return TSC_SOURCE_DIAGNOSTIC_RE.test(plain);
 }
 
@@ -1252,6 +1256,35 @@ export function resolveLintTarget(args: PostToolUseHookInput): string | null {
   } catch {
     return null;
   }
+}
+
+/**
+ * What this hook invocation edited.
+ *
+ * @param args - The PostToolUse hook payload.
+ * @returns The Edit tool's `new_string`, or null when the whole file counts as edited (Write, other tool, no string).
+ */
+export function editEntry(args: PostToolUseHookInput): string | null {
+  const newString = args?.tool_input?.new_string;
+  return args?.tool_name === "Edit" && typeof newString === "string" ? newString : null;
+}
+
+/**
+ * Inclusive 0-based line ranges of every non-overlapping occurrence of `needle` in `text`. Every occurrence counts:
+ * which one the edit produced is unknowable, and over-inclusion only keeps more findings.
+ *
+ * @param text - Post-edit file content.
+ * @param needle - The Edit tool's `new_string`.
+ * @returns The ranges, or null when `needle` is empty or absent from `text`.
+ */
+export function editRanges(text: string, needle: string): Array<[number, number]> | null {
+  if (needle === "") return null;
+  const lineOf = (k: number): number => text.slice(0, k).split("\n").length - 1;
+  const ranges: Array<[number, number]> = [];
+  for (let i = text.indexOf(needle); i !== -1; i = text.indexOf(needle, i + needle.length)) {
+    ranges.push([lineOf(i), lineOf(i + needle.length - 1)]);
+  }
+  return ranges.length > 0 ? ranges : null;
 }
 
 /**
