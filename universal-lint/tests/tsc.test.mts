@@ -4,6 +4,34 @@ import { chmodSync } from "node:fs";
 import { test } from "vitest";
 import { makeEnv } from "./support/lint-hook.mts";
 
+/** Project with src/** tsconfig and a 2-line src/a.ts, for the Edit-range tests. */
+function srcProj() {
+  const e = makeEnv();
+  e.file("tsconfig.json", "{\"compilerOptions\":{\"noEmit\":true},\"include\":[\"src/**/*.ts\"]}");
+  return { e, a: e.file("src/a.ts", "const x: number = 1;\nconst y: string = 2;\n") };
+}
+
+test("tsc Edit: only the diagnostic on the edited line is reported", () => {
+  const { e, a } = srcProj();
+  e.recStub("tsc", 2);
+  const r = e.run(a, {
+    toolName: "Edit",
+    toolInput: { new_string: "const x: number = 1;" },
+    out: "src/a.ts(1,1): error TS2322: line1-marker\nsrc/a.ts(2,1): error TS2322: line2-marker",
+  });
+  assert.equal(r.status, 2);
+  assert.match(r.ctx, /line1-marker/);
+  assert.doesNotMatch(r.ctx, /line2-marker/);
+});
+
+test("tsc Edit: a diagnostic only outside the edited line -> exit 0", () => {
+  const { e, a } = srcProj();
+  e.recStub("tsc", 2);
+  const r = e.run(a, { toolName: "Edit", toolInput: { new_string: "const x: number = 1;" }, out: "src/a.ts(2,1): error TS2322: line2-marker" });
+  assert.equal(r.status, 0);
+  assert.equal(r.ctx, "");
+});
+
 /** A tsconfig.json that governs `*.ts` in the project root. */
 const TSCONFIG = "{\"compilerOptions\":{\"noEmit\":true},\"include\":[\"*.ts\"]}";
 const TS = "const x: number = 1;\n";

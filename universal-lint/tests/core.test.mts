@@ -4,6 +4,38 @@ import { readFileSync } from "node:fs";
 import { test } from "vitest";
 import { makeEnv } from "./support/lint-hook.mts";
 
+/** A 4-line shell script; the Edit tests below edit line 2. */
+const SH4 = "echo a\necho $1\necho b\necho $2\n";
+
+test("Edit: only findings on the edited line are reported (exit 2, line-2 text only)", () => {
+  const e = makeEnv();
+  e.recStub("shellcheck", 1);
+  const r = e.run(e.file("a.sh", SH4), {
+    toolName: "Edit",
+    toolInput: { new_string: "echo $1" },
+    out: "a.sh:2:6: note: line2-marker [SC2086]\na.sh:4:6: note: line4-marker [SC2086]",
+  });
+  assert.equal(r.status, 2);
+  assert.match(r.ctx, /line2-marker/);
+  assert.doesNotMatch(r.ctx, /line4-marker/);
+});
+
+test("Edit: findings only outside the edited lines -> exit 0, no output", () => {
+  const e = makeEnv();
+  e.recStub("shellcheck", 1);
+  const r = e.run(e.file("a.sh", SH4), { toolName: "Edit", toolInput: { new_string: "echo $1" }, out: "a.sh:4:6: note: line4-marker [SC2086]" });
+  assert.equal(r.status, 0);
+  assert.equal(r.ctx, "");
+});
+
+test("Edit: a pure deletion (empty new_string) -> exit 0, linter never invoked", () => {
+  const e = makeEnv();
+  e.recStub("shellcheck", 1);
+  const r = e.run(e.file("a.sh", SH4), { toolName: "Edit", toolInput: { new_string: "" }, out: "a.sh:2:6: note: x [SC2086]" });
+  assert.equal(r.status, 0);
+  assert.deepEqual(e.lines(), []);
+});
+
 test("shellcheck finds an issue: exit 2 (asyncRewake) with the stub's text on stderr", () => {
   const e = makeEnv();
   const f = e.file("a.sh", "echo $1\n");

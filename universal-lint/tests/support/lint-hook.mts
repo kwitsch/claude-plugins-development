@@ -40,6 +40,10 @@ export interface RunOptions {
   debounceMs?: string;
   /** Extra environment variables. */
   env?: Record<string, string>;
+  /** Payload `tool_name`; default "Write" (whole file counts as edited). */
+  toolName?: string;
+  /** Extra payload `tool_input` fields (e.g. `new_string`), merged over `{ file_path }`. */
+  toolInput?: Record<string, unknown>;
 }
 
 /** A fresh isolated environment. */
@@ -77,9 +81,10 @@ export interface LintEnv {
  *
  * @param filePath - Written file.
  * @param cwd - Payload cwd.
+ * @param opts - Run options; `toolName` and `toolInput` shape the payload.
  * @returns The JSON text.
  */
-export const payload = (filePath: string, cwd: string): string => JSON.stringify({ hook_event_name: "PostToolUse", tool_name: "Write", tool_input: { file_path: filePath }, tool_response: { success: true }, cwd });
+export const payload = (filePath: string, cwd: string, opts: RunOptions = {}): string => JSON.stringify({ hook_event_name: "PostToolUse", tool_name: opts.toolName ?? "Write", tool_input: { file_path: filePath, ...opts.toolInput }, tool_response: { success: true }, cwd });
 
 /**
  * Build a HookRun from the exit status and raw stderr.
@@ -147,14 +152,14 @@ export function makeEnv(): LintEnv {
       return e;
     },
     run(filePath, opts) {
-      const r = spawnSync(process.execPath, [HOOK], { input: payload(filePath, cwd), env: env.childEnv(opts), encoding: "utf8" });
+      const r = spawnSync(process.execPath, [HOOK], { input: payload(filePath, cwd, opts), env: env.childEnv(opts), encoding: "utf8" });
       return toRun(r.status, r.stderr);
     },
     start(filePath, opts) {
       const child = spawn(process.execPath, [HOOK], { env: env.childEnv(opts), stdio: ["pipe", "ignore", "pipe"] });
       let stderr = "";
       child.stderr.on("data", (d: Buffer) => (stderr += d.toString()));
-      child.stdin.end(payload(filePath, cwd));
+      child.stdin.end(payload(filePath, cwd, opts));
       const done = new Promise<HookRun>((resolve) => child.on("close", (code) => resolve(toRun(code, stderr))));
       return { child, done };
     },
