@@ -77,7 +77,7 @@ among its uses, and warns "gating hook without .catch" for three of its hooks (e
 `plugin/mcp/*.mjs`, `plugin/hooks/notice.mjs` and `plugin/.claude-plugin/plugin.json` are **build output**
 (`pnpm build`) of
 `src/skills/dprint/{check-dprint,config-names,find-config,find-dprint,run-dprint,scan-plugins}.mts`,
-`src/mcp/{server,lsp,format,watch-list,watch-paths}.mts`, `src/hooks/notice.mts` and `plugin.json`. Do not edit them here.
+`src/mcp/{server,lsp,format,watch-list,watch-paths}.mts`, `src/hooks/notice.mts` and `package.json` (the manifest, via `development/scripts/plugin-manifest.mts`). Do not edit them here.
 
 ## Tests
 

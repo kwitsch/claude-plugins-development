@@ -1,6 +1,6 @@
 # claude-engine-vitest
 
-A vitest stand-in for Claude Code's mod test kit `claude-code/testing`. The official kit exists only inside the `claude` binary and runs under `claude plugin test`. This package runs the same kind of test under plain vitest, against a plugin's built hooks module. It mirrors the kit's API and semantics ([Test a mod](https://code.claude.com/docs/en/plugins/mods/test.md), [Mods reference](https://code.claude.com/docs/en/plugins/mods/reference.md)), so you port a kit test by changing its imports. It is a workspace package, not a plugin (it has no `plugin.json`). Its only dependency is vitest, as a peer.
+A vitest stand-in for Claude Code's mod test kit `claude-code/testing`. The official kit exists only inside the `claude` binary and runs under `claude plugin test`. This package runs the same kind of test under plain vitest, against a plugin's built hooks module. It mirrors the kit's API and semantics ([Test a mod](https://code.claude.com/docs/en/plugins/mods/test.md), [Mods reference](https://code.claude.com/docs/en/plugins/mods/reference.md)), so you port a kit test by changing its imports. It is a workspace package, not a plugin (it has no `plugin/`). Its only dependency is vitest, as a peer.
 
 ## API
 

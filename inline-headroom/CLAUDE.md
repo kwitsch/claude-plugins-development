@@ -23,8 +23,8 @@ It also ships a host-wide SQLite storage MCP server behind the fail-closed
 
 ## Layout
 
-`plugin.json` and `package.json` follow the repo layout (root `CLAUDE.md`).
-`pnpm build` compiles `src/**/*.mts` to `plugin/**/*.mjs` (minified; `plugin/hooks/` unmangled and uncompressed), and copies `plugin.json` to `plugin/.claude-plugin/plugin.json`.
+`package.json` follows the repo layout (root `CLAUDE.md`): it is the only manifest source, with `userConfig` under its `claudePlugin` key.
+`pnpm build` compiles `src/**/*.mts` to `plugin/**/*.mjs` (minified; `plugin/hooks/` unmangled and uncompressed), and generates `plugin/.claude-plugin/plugin.json` from `package.json`.
 
 - `plugin/.mcp.json` (hand-written) — registers `src/mcp/server.mts` directly (no wrapper, no args) under
   the key `storage`, with env `INLINE_HEADROOM_STORAGE_ENABLED` =
@@ -99,7 +99,7 @@ Invariants for `src/mcp/server.mts`:
   election logs one line to `service.log` only when no live service answers.
 - `PROTOCOL` (an integer, now `2`) must be bumped on any op or schema change. A
   newer front-end SIGTERMs an older service; an older front-end refuses a newer
-  one. A service whose plugin version (read from `plugin.json`, never a literal)
+  one. A service whose plugin version (read from the generated `plugin.json`, never a literal)
   is older than the front-end's is also retired after answering, so a service-side
   fix without a `PROTOCOL` bump still takes effect. A pid is only signalled when
   `/proc/<pid>/cmdline` (where `/proc` exists) shows a `server.mjs --service`
