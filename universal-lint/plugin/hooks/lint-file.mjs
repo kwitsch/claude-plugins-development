@@ -720,9 +720,10 @@ async function main() {
 		const resolved = resolveLintTarget(input);
 		if (!resolved) return;
 		if (!await debounceGate(resolved)) return;
-		const result = lintFileHandler(input);
-		if (result && Object.keys(result).length > 0) {
-			process.stdout.write(JSON.stringify(result) + "\n");
+		const ctx = lintFileHandler(input).hookSpecificOutput?.additionalContext;
+		if (ctx) {
+			process.stderr.write(ctx + "\n");
+			process.exitCode = 2;
 		}
 	} catch {}
 }

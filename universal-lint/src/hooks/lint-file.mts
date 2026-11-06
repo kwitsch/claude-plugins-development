@@ -3,9 +3,9 @@
  * universal-lint plugin: PostToolUse Write|Edit lint-only checker.
  *
  * @remarks
- * Command hook, invoked directly per event (no MCP server). stdin = hook JSON (PostToolUseHookInput), stdout = hook
- * result JSON (`hookSpecificOutput.additionalContext`) or nothing when there is no finding. `async: true` in
- * hooks.json: safe because linting never mutates the file; findings surface as context on the next turn.
+ * Command hook, invoked directly per event (no MCP server). stdin = hook JSON (PostToolUseHookInput). `asyncRewake:
+ * true` in hooks.json: runs in the background (safe because linting never mutates the file); findings go to stderr
+ * with exit 2, which wakes Claude with them; no finding = no output, exit 0.
  *
  * lint_file flow (every failure path returns `{}` silently, fail open): guard `tool_response.success !== false`,
  * extension in the registry or type-check-eligible, path inside cwd and not excluded (node_modules/vendor/.git,
@@ -15,7 +15,7 @@
  * classified by exit code for most tools (checkstyle by stripped output, since its exit code counts only
  * ERROR-severity violations and the bundled default ruleset runs at `warning`); (2) for .ts/.tsx/.mts/.cts only, a
  * whole-project `tsc --noEmit` via the nearest tsconfig.json (see `runTypeCheck`). Any issues found: truncated,
- * joined additionalContext; no finding from either check: nothing printed.
+ * joined text (stderr, exit 2); no finding from either check: nothing printed.
  *
  * @packageDocumentation
  */
@@ -1353,8 +1353,8 @@ async function debounceGate(resolved: string): Promise<boolean> {
 
 /**
  * Read the hook's stdin JSON, run the cheap guards, debounce, then run
- * lintFileHandler and print the result JSON (or nothing). Fails open on any
- * error — no output, exit 0.
+ * lintFileHandler. Findings: their text on stderr and exit 2 (asyncRewake wakes
+ * Claude with it). Fails open on any error — no output, exit 0.
  *
  * @returns Resolves when the hook run is over.
  */
@@ -1364,9 +1364,10 @@ async function main(): Promise<void> {
     const resolved = resolveLintTarget(input);
     if (!resolved) return; // guards rejected — nothing to lint, no wait
     if (!(await debounceGate(resolved))) return; // superseded by a newer edit
-    const result = lintFileHandler(input);
-    if (result && Object.keys(result).length > 0) {
-      process.stdout.write(JSON.stringify(result) + "\n");
+    const ctx = lintFileHandler(input).hookSpecificOutput?.additionalContext;
+    if (ctx) {
+      process.stderr.write(ctx + "\n");
+      process.exitCode = 2;
     }
   } catch {
     // fail open — no output, exit 0

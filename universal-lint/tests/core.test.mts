@@ -4,13 +4,13 @@ import { readFileSync } from "node:fs";
 import { test } from "vitest";
 import { makeEnv } from "./support/lint-hook.mts";
 
-test("shellcheck finds an issue: additionalContext returned with the stub's text", () => {
+test("shellcheck finds an issue: exit 2 (asyncRewake) with the stub's text on stderr", () => {
   const e = makeEnv();
   const f = e.file("a.sh", "echo $1\n");
   e.recStub("shellcheck", 1);
   const r = e.run(f, { out: "a.sh:1:6: note: Double quote to prevent globbing. [SC2086]" });
-  assert.equal(r.status, 0);
-  assert.equal(r.result.hookSpecificOutput?.hookEventName, "PostToolUse");
+  assert.equal(r.status, 2);
+  assert.match(r.ctx, /^universal-lint: shellcheck found issues/);
   assert.match(r.ctx, /SC2086/);
   assert.ok(e.lines().some((l) => l.startsWith("shellcheck ")));
   assert.equal(readFileSync(f, "utf8"), "echo $1\n"); // linter never modifies the file

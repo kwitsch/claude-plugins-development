@@ -24,11 +24,11 @@ let counter = 0;
 export interface HookRun {
   /** Exit status (null when killed by a signal). */
   status: number | null;
-  /** Raw stdout. */
-  stdout: string;
-  /** Parsed stdout, or `{}` when the hook printed nothing (the handler's own "no finding" contract). */
-  result: { hookSpecificOutput?: { hookEventName: string; additionalContext: string } };
-  /** The additionalContext, or "" when there is none. */
+  /** Raw stderr. */
+  stderr: string;
+  /** `{ rewake: <findings> }` on exit 2 (asyncRewake wakes Claude), `{}` otherwise (no finding). */
+  result: { rewake?: string };
+  /** The findings text (stderr on exit 2), or "" when there is none. */
   ctx: string;
 }
 
@@ -82,15 +82,15 @@ export interface LintEnv {
 export const payload = (filePath: string, cwd: string): string => JSON.stringify({ hook_event_name: "PostToolUse", tool_name: "Write", tool_input: { file_path: filePath }, tool_response: { success: true }, cwd });
 
 /**
- * Build a HookRun from raw stdout.
+ * Build a HookRun from the exit status and raw stderr.
  *
  * @param status - Exit status.
- * @param stdout - Raw stdout.
+ * @param stderr - Raw stderr.
  * @returns The run.
  */
-function toRun(status: number | null, stdout: string): HookRun {
-  const result = stdout.trim() ? JSON.parse(stdout) : {};
-  return { status, stdout, result, ctx: result.hookSpecificOutput?.additionalContext ?? "" };
+function toRun(status: number | null, stderr: string): HookRun {
+  const ctx = status === 2 ? stderr.trim() : "";
+  return { status, stderr, result: ctx ? { rewake: ctx } : {}, ctx };
 }
 
 /**
@@ -148,14 +148,14 @@ export function makeEnv(): LintEnv {
     },
     run(filePath, opts) {
       const r = spawnSync(process.execPath, [HOOK], { input: payload(filePath, cwd), env: env.childEnv(opts), encoding: "utf8" });
-      return toRun(r.status, r.stdout);
+      return toRun(r.status, r.stderr);
     },
     start(filePath, opts) {
-      const child = spawn(process.execPath, [HOOK], { env: env.childEnv(opts), stdio: ["pipe", "pipe", "ignore"] });
-      let stdout = "";
-      child.stdout.on("data", (d: Buffer) => (stdout += d.toString()));
+      const child = spawn(process.execPath, [HOOK], { env: env.childEnv(opts), stdio: ["pipe", "ignore", "pipe"] });
+      let stderr = "";
+      child.stderr.on("data", (d: Buffer) => (stderr += d.toString()));
       child.stdin.end(payload(filePath, cwd));
-      const done = new Promise<HookRun>((resolve) => child.on("close", (code) => resolve(toRun(code, stdout))));
+      const done = new Promise<HookRun>((resolve) => child.on("close", (code) => resolve(toRun(code, stderr))));
       return { child, done };
     },
   };
