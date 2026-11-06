@@ -22,7 +22,7 @@
 import { spawnSync } from "node:child_process";
 import type { SpawnSyncOptionsWithStringEncoding, SpawnSyncReturns } from "node:child_process";
 import { createHash } from "node:crypto";
-import { accessSync, constants as fsConstants, existsSync, mkdirSync, readFileSync, realpathSync, renameSync, writeFileSync } from "node:fs";
+import { accessSync, constants as fsConstants, existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, renameSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import path from "node:path";
 import process from "node:process";
@@ -106,14 +106,24 @@ interface Finding {
   base: string;
 }
 
-/** The subset of Claude Code's PostToolUse hook payload this hook reads. */
+/** The subset of Claude Code's hook payloads this module reads (PostToolUse, FileChanged, SessionStart, CwdChanged). */
 interface PostToolUseHookInput {
   /** Project root the session runs in. */
   cwd: string;
+  /** Hook event (`PostToolUse`, `FileChanged`, `SessionStart`, `CwdChanged`); missing in older payloads (treated as PostToolUse). */
+  hook_event_name?: unknown;
+  /** The session scratchpad directory; files inside it are out of scope. */
+  scratchpad_dir?: unknown;
+  /** FileChanged: the changed file. */
+  file_path?: unknown;
+  /** FileChanged: `"change"`, `"add"` or `"unlink"`. */
+  event?: unknown;
+  /** CwdChanged: the new working directory. */
+  new_cwd?: unknown;
   /** Name of the tool that fired the hook (`Write` or `Edit`). */
   tool_name?: unknown;
-  /** The tool's input; `file_path` names the written file. */
-  tool_input: { file_path?: unknown };
+  /** The tool's input; `file_path` names the written file. Absent for non-tool events. */
+  tool_input?: { file_path?: unknown };
   /** The tool's result; `success: false` marks a failed Write/Edit, `structuredPatch` holds the Edit tool's diff hunks. */
   tool_response?: { success?: boolean; structuredPatch?: unknown };
   [key: string]: unknown;
@@ -1219,15 +1229,66 @@ export function isExcludedPath(rel: string): boolean {
 }
 
 /**
- * Run every cheap entry guard and return the resolved absolute lint target, or
- * null when any guard rejects (success===false, missing cwd/file_path, path
- * outside cwd, excluded path, unsupported extension, or file absent). Shared by
- * main() (to decide whether to lint at all) and lintFileHandler (to re-run the
- * guards before linting) so the two never diverge. Fails closed to null on any
- * unexpected error, matching lintFileHandler's fail-open-to-{} philosophy.
+ * realpath of `p`; for a missing path, the nearest existing ancestor's realpath joined with the missing rest (port of
+ * dprint's `realish`).
+ *
+ * @param p - Absolute path.
+ * @returns The real path.
+ * @throws When `p` itself exists but cannot be resolved (a dangling symlink), or on any non-ENOENT error.
+ */
+function realish(p: string): string {
+  try {
+    return realpathSync(p);
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw e;
+    try {
+      lstatSync(p);
+    } catch {
+      const dir = path.dirname(p);
+      return dir === p ? p : path.join(realish(dir), path.basename(p));
+    }
+    throw e; // p itself exists: a dangling symlink
+  }
+}
+
+/**
+ * The real-path scope rule shared by every event (dprint's `inScope`): `file` resolved against `cwd` must exist, have a
+ * lintable extension, its real path must lie strictly inside realpath(cwd), not be excluded (`isExcludedPath` on the
+ * path relative to the real cwd), not lie inside realpath(scratchpad) when given, and not be a dangling link.
+ *
+ * @param cwd - Payload cwd (the scope root; never `process.cwd()`).
+ * @param file - Absolute or cwd-relative path.
+ * @param scratchpad - The session's `scratchpad_dir`, when the payload has one.
+ * @returns `{ fp, real }` (lexical absolute path, real path) or null when out of scope.
+ */
+export function scopedTarget(cwd: string, file: string, scratchpad?: string): { fp: string; real: string } | null {
+  try {
+    const fp = path.resolve(cwd, file);
+    const real = realish(fp);
+    const outside = (rel: string): boolean => rel === ".." || rel.startsWith(".." + path.sep) || path.isAbsolute(rel);
+    const rel = path.relative(realish(cwd), real);
+    if (rel === "" || outside(rel) || isExcludedPath(rel)) return null;
+    if (scratchpad) {
+      const rs = realish(scratchpad);
+      if (real === rs || real.startsWith(rs + path.sep)) return null;
+    }
+    const ext = path.extname(fp).toLowerCase();
+    if (!EXT_MAP[ext] && !TYPE_CHECK_EXTS.has(ext)) return null;
+    if (!existsSync(fp)) return null;
+    return { fp, real };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Run every cheap entry guard and return the resolved absolute lint target, or null when any guard rejects
+ * (success===false, missing cwd/file_path, or `scopedTarget` rejects: outside the real cwd, excluded, inside
+ * `scratchpad_dir`, dangling link, unsupported extension, file absent). Used by lintFileHandler (and through it by the
+ * skill driver). Fails closed to null on any unexpected error, matching lintFileHandler's fail-open-to-{} philosophy.
  *
  * @param args - The PostToolUse hook payload.
- * @returns The absolute path to lint, or null when a guard rejects.
+ * @returns The lexical absolute path to lint, or null when a guard rejects.
  */
 export function resolveLintTarget(args: PostToolUseHookInput): string | null {
   try {
@@ -1235,16 +1296,7 @@ export function resolveLintTarget(args: PostToolUseHookInput): string | null {
     const cwd = typeof args?.cwd === "string" ? args.cwd : "";
     const fp = args?.tool_input?.file_path;
     if (!cwd || typeof fp !== "string" || !fp) return null;
-
-    const resolved = path.resolve(cwd, fp);
-    if (resolved !== cwd && !resolved.startsWith(cwd + path.sep)) return null;
-    const rel = path.relative(cwd, resolved);
-    if (isExcludedPath(rel)) return null;
-
-    const ext = path.extname(resolved).toLowerCase();
-    if (!EXT_MAP[ext] && !TYPE_CHECK_EXTS.has(ext)) return null;
-    if (!existsSync(resolved)) return null;
-    return resolved;
+    return scopedTarget(cwd, fp, typeof args.scratchpad_dir === "string" ? args.scratchpad_dir : undefined)?.fp ?? null;
   } catch {
     return null;
   }

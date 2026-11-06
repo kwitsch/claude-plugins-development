@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { accessSync, constants as fsConstants, existsSync, mkdirSync, readFileSync, realpathSync, renameSync, writeFileSync } from "node:fs";
+import { accessSync, constants as fsConstants, existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, renameSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import path from "node:path";
 import process from "node:process";
@@ -629,20 +629,49 @@ export function isExcludedPath(rel) {
 	if (segments.some((s, i) => s === ".claude" && (segments[i + 1] === "worktrees" || segments[i + 1] === "agent-memory"))) return true;
 	return segments[segments.length - 1].includes(".local.");
 }
+function realish(p) {
+	try {
+		return realpathSync(p);
+	} catch (e) {
+		if (e.code !== "ENOENT") throw e;
+		try {
+			lstatSync(p);
+		} catch {
+			const dir = path.dirname(p);
+			return dir === p ? p : path.join(realish(dir), path.basename(p));
+		}
+		throw e;
+	}
+}
+export function scopedTarget(cwd, file, scratchpad) {
+	try {
+		const fp = path.resolve(cwd, file);
+		const real = realish(fp);
+		const outside = (rel) => rel === ".." || rel.startsWith(".." + path.sep) || path.isAbsolute(rel);
+		const rel = path.relative(realish(cwd), real);
+		if (rel === "" || outside(rel) || isExcludedPath(rel)) return null;
+		if (scratchpad) {
+			const rs = realish(scratchpad);
+			if (real === rs || real.startsWith(rs + path.sep)) return null;
+		}
+		const ext = path.extname(fp).toLowerCase();
+		if (!EXT_MAP[ext] && !TYPE_CHECK_EXTS.has(ext)) return null;
+		if (!existsSync(fp)) return null;
+		return {
+			fp,
+			real
+		};
+	} catch {
+		return null;
+	}
+}
 export function resolveLintTarget(args) {
 	try {
 		if (args?.tool_response?.success === false) return null;
 		const cwd = typeof args?.cwd === "string" ? args.cwd : "";
 		const fp = args?.tool_input?.file_path;
 		if (!cwd || typeof fp !== "string" || !fp) return null;
-		const resolved = path.resolve(cwd, fp);
-		if (resolved !== cwd && !resolved.startsWith(cwd + path.sep)) return null;
-		const rel = path.relative(cwd, resolved);
-		if (isExcludedPath(rel)) return null;
-		const ext = path.extname(resolved).toLowerCase();
-		if (!EXT_MAP[ext] && !TYPE_CHECK_EXTS.has(ext)) return null;
-		if (!existsSync(resolved)) return null;
-		return resolved;
+		return scopedTarget(cwd, fp, typeof args.scratchpad_dir === "string" ? args.scratchpad_dir : undefined)?.fp ?? null;
 	} catch {
 		return null;
 	}
