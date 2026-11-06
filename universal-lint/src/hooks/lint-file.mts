@@ -507,7 +507,7 @@ export function resolveTsconfig(fileDir: string, cwd: string): string | null {
   });
 }
 
-/** Eslint config file names, checked before the oxlint names within one directory. */
+/** Eslint config file names, checked after the oxlint names within one directory. */
 const ESLINT_CONFIG_FILENAMES = [
   "eslint.config.js",
   "eslint.config.mjs",
@@ -523,13 +523,13 @@ const ESLINT_CONFIG_FILENAMES = [
   ".eslintrc.yml",
 ];
 
-/** Oxlint config file names. */
+/** Oxlint config file names, checked first within one directory (oxlint wins a same-dir tie). */
 const OXLINT_CONFIG_FILENAMES = [".oxlintrc.json", ".oxlintrc.jsonc", "oxlint.config.ts"];
 
 /**
  * Nearest lint config (file dir up to cwd, inclusive) picks the jsts chain.
- * Selection by file name only; in one dir eslint names are checked first, so
- * eslint wins a same-dir tie, and no config at all means eslint.
+ * Selection by file name only; in one dir oxlint names are checked first, so
+ * oxlint wins a same-dir tie, and no config at all means eslint.
  *
  * @param fileDir - Directory of the edited file.
  * @param cwd - Project root.
@@ -537,7 +537,7 @@ const OXLINT_CONFIG_FILENAMES = [".oxlintrc.json", ".oxlintrc.jsonc", "oxlint.co
  */
 export function resolveOxlintConfig(fileDir: string, cwd: string): string | null {
   const hit = walkUpToCwd(fileDir, cwd, (dir) => {
-    for (const n of [...ESLINT_CONFIG_FILENAMES, ...OXLINT_CONFIG_FILENAMES]) {
+    for (const n of [...OXLINT_CONFIG_FILENAMES, ...ESLINT_CONFIG_FILENAMES]) {
       const p = path.join(dir, n);
       if (existsSync(p)) return p;
     }

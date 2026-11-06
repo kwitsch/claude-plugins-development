@@ -658,9 +658,9 @@ test("resolveOxlintConfig: eslint config at root -> null", () => {
   }
 });
 
-test("resolveOxlintConfig: eslint and oxlint config in the same dir -> null (eslint wins the tie)", () => {
+test("resolveOxlintConfig: eslint and oxlint config in the same dir -> oxlint path (oxlint wins the tie)", () => {
   const { root, sub } = oxlRoot({ "eslint.config.mjs": "export default [];", ".oxlintrc.json": "{}" });
-  assert.equal(resolveOxlintConfig(sub, root), null);
+  assert.equal(resolveOxlintConfig(sub, root), path.join(root, ".oxlintrc.json"));
 });
 
 test("resolveOxlintConfig: nearest config wins (oxlint in sub/, eslint at root -> sub path)", () => {

@@ -35,7 +35,7 @@ paths:
 
 - `.js .jsx .mjs .cjs .ts .tsx .mts .cts` run `REGISTRY.jsts` (eslint) or the alternate chain `REGISTRY.oxlint` (not in `EXT_MAP`); `lintFileHandler` picks the key via `resolveOxlintConfig`.
 - Config names: eslint = `eslint.config.{js,mjs,cjs,ts,mts,cts}`, `.eslintrc`, `.eslintrc.{js,cjs,json,yaml,yml}`; oxlint = `.oxlintrc.json`, `.oxlintrc.jsonc`, `oxlint.config.ts` (probed on oxlint 1.91.0; `oxlint.config.js`/`.mjs` were not picked up).
-- The nearest directory with any config wins; within one directory eslint names are checked first, so eslint wins a same-dir tie (no `eslint-plugin-oxlint` co-existence: only eslint runs). No config at all = eslint (pre-oxlint behavior).
+- The nearest directory with any config wins; within one directory oxlint names are checked first, so oxlint wins a same-dir tie (user decision: a project adding oxlint next to an existing eslint config is migrating; only oxlint runs, no co-existence). No config at all = eslint (pre-oxlint behavior).
 - The walk goes from the file's dir up to `cwd` inclusive (`walkUpToCwd`, like the checkstyle/cargo/tsconfig resolvers); configs above `cwd` are ignored.
 - Selection is by file name only (`existsSync`), never by content or `package.json#eslintConfig`: this repo's own `.oxlintrc.json` lists `"plugins": ["eslint", ...]`, so content-based selection would misfire.
 - `--no-error-on-unmatched-pattern` is passed because a file excluded by the project's oxlint `ignorePatterns` otherwise exits 1 ("No files found to lint"), which would be a false finding.

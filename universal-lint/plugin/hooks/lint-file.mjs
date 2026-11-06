@@ -282,7 +282,7 @@ const OXLINT_CONFIG_FILENAMES = [
 ];
 export function resolveOxlintConfig(fileDir, cwd) {
 	const hit = walkUpToCwd(fileDir, cwd, (dir) => {
-		for (const n of [...ESLINT_CONFIG_FILENAMES, ...OXLINT_CONFIG_FILENAMES]) {
+		for (const n of [...OXLINT_CONFIG_FILENAMES, ...ESLINT_CONFIG_FILENAMES]) {
 			const p = path.join(dir, n);
 			if (existsSync(p)) return p;
 		}

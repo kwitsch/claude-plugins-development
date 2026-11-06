@@ -40,15 +40,15 @@ test("oxlint: no lint config anywhere -> eslint runs, oxlint never spawned", () 
   assert.ok(e.lines().every((l) => l.startsWith("eslint ")));
 });
 
-test("oxlint: eslint.config.mjs and .oxlintrc.json in the same dir -> eslint wins", () => {
+test("oxlint: eslint.config.mjs and .oxlintrc.json in the same dir -> oxlint wins", () => {
   const e = makeEnv();
   e.file("eslint.config.mjs", "export default [];\n");
   e.file(".oxlintrc.json", "{}");
-  e.recStub("oxlint", 1);
-  e.recStub("eslint", 0);
+  e.recStub("oxlint", 0);
+  e.recStub("eslint", 1);
   e.run(e.file("a.js", JS));
-  assert.ok(e.lines().some((l) => l.startsWith("eslint ")));
-  assert.ok(!e.lines().some((l) => l.startsWith("oxlint ")));
+  assert.ok(e.lines().some((l) => l.startsWith("oxlint ")));
+  assert.ok(!e.lines().some((l) => l.startsWith("eslint ")));
 });
 
 test("oxlint: absent from PATH but npx present -> npx --yes oxlint fallback runs", () => {
