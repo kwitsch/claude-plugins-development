@@ -45,6 +45,8 @@ importers:
         specifier: workspace:*
         version: link:../development/vitest/claude-engine
 
+  universal-lint: {}
+
 packages:
 
   '@jridgewell/gen-mapping@0.3.13':
