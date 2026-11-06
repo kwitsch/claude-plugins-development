@@ -1,6 +1,24 @@
-# src/mcp/ — storage server notes
+---
+paths:
+  - "src/mcp/**"
+  - "plugin/mcp/**"
+  - "plugin/.mcp.json"
+  - "tests/storage.test.mts"
+---
 
-## Storage server
+# Storage server (`src/mcp/server.mts`)
+
+- `plugin/.mcp.json` (hand-written) registers `src/mcp/server.mts` directly (no wrapper, no args) under the key
+  `storage`, with env `INLINE_HEADROOM_STORAGE_ENABLED` = `${user_config.storage_enabled}`. `CLAUDE_PLUGIN_DATA` gets
+  no `env` entry: Claude Code exports it to stdio MCP servers.
+- `server.mts` → `plugin/mcp/server.mjs`: one zero-dep executable module (`#!/usr/bin/env node`, mode 0755 set by the
+  build) with two modes, the per-session stdio MCP front-end and the detached `--service <dataDir>` singleton. Its
+  pure exports (`isStorageEnabled`, `resolveStorage`, `migrate`, `execOp`, `PROTOCOL`, `MIGRATIONS`) are tested by
+  `tests/storage.test.mts`; an `isMainModule()` guard keeps that import free of side effects.
+- `tests/storage.test.mts` needs `node:sqlite` and spawns processes. Its cleanup SIGTERMs every `--service` process
+  for its temp data dir, so no daemon outlives the suite.
+
+## Invariants
 
 Invariants for `src/mcp/server.mts`:
 
@@ -24,7 +42,7 @@ Invariants for `src/mcp/server.mts`:
   `service.log`). There is no fallback directory: an unset, blank or
   uninterpolated value refuses storage.
 - `storage_enabled` is fail-closed (only the trimmed literal `"true"` enables)
-  under the state-creating exception of `.claude/rules/plugin-userconfig.md`.
+  (the state-creating exception of the toggle convention in the plugin `CLAUDE.md`).
   Disabled means `tools/list` is `[]` and no file or process is created.
 - The front-end retries `ENOENT`/`ECONNREFUSED`/`ECONNRESET` and a reply-less
   close (a service shutting down). Every op is idempotent, so a retry is safe
@@ -34,7 +52,7 @@ Invariants for `src/mcp/server.mts`:
 - The service shuts down (idle or SIGTERM) by closing its listener and draining
   accepted connections for at most 1 s before releasing the DB lock. A lost
   election logs one line to `service.log` only when no live service answers.
-- `PROTOCOL` (an integer, now `2`) must be bumped on any op or schema change. A
+- `PROTOCOL` (an integer constant in `server.mts`) must be bumped on any op or schema change. A
   newer front-end SIGTERMs an older service; an older front-end refuses a newer
   one. A service whose plugin version (read from the generated `plugin.json`, never a literal)
   is older than the front-end's is also retired after answering, so a service-side
@@ -59,6 +77,8 @@ Invariants for `src/mcp/server.mts`:
   and storage stays unavailable until the plugin is updated again. Intended
   append-only behaviour.
 
+How the mod calls storage (in-frame only): `register-hooks.md`.
+
 Key naming convention for consumers (documented, not enforced): a `<feature>/`
 prefix, e.g. `notes/<sessionId>`. A feature that needs a table, `kv_list` or a
 query adds a new `MIGRATIONS` entry and op plus a `PROTOCOL` bump.
@@ -75,18 +95,7 @@ row and a hot reload (a new `WRITER`) never shrinks a stored total. The today /
 7 days / 30 days rows are `stats_sum` from `windowStart(today, n)` on; every
 `stats_put` deletes the rows before `windowStart(today, 30)`.
 
-Deviation from `.claude/rules/hooks-mcp-server.md`: the `.mcp.json` key is
-`storage`, not `<name>-hooks`, because this server backs no `mcp_tool` hook and
+The `.mcp.json` key is `storage`, not the `<name>-hooks` name a server behind
+`mcp_tool` hooks would get, because this server backs no `mcp_tool` hook and
 `hooks.json` never references it. `/headroom` persistence is the first mod-side
 consumer.
-
-Every mod-side storage call must be awaited by a running hook of this module
-(live on 2.1.296): core routes `$.mcp.call` through `$.tool.call` and its
-permission check, although the typings promise no prompt. A plugin's own hooks
-see a call it raises only while one of its hooks runs; a call raised after the
-hook returned (an unawaited chain, a `$.clock.every` callback) skips them, so
-in `default` mode the user gets a permission dialog per call and a headless
-session denies it. In-frame, the module's `tool.check` hook allows it
-(`isOwnStorageCall`). Hence: `turn.complete` awaits its `stats_put`,
-`command.run` awaits the first `stats_sum`, and a refresh tick only sets
-`stale` and redraws, so the `ui.render` hook fetches.

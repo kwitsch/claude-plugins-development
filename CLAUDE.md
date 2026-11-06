@@ -11,7 +11,7 @@ Development repository for Claude Code plugins. One top-level directory per plug
 - `package.json`: the only manifest source (`name`, `version`, `description`, `author`, `keywords`; plugin-only fields such as `userConfig` under `claudePlugin`, which is required, `{}` at least, and marks the package as a plugin) and the pnpm scripts `build` (`node ../development/scripts/build-plugin.mts`), `test`, optional `lint`. Edit here only.
 - `src/bin/`: scripts used from several places (skills, hooks, MCP), built to `plugin/bin/*.mjs`, which Claude Code puts on the Bash PATH while the plugin is enabled.
 - `scripts/`: optional plugin-specific build steps (`.mts`, run by Node 24's type stripping), e.g. dprint's `hooks.mts`.
-- `CLAUDE.md`: developer notes, never inside `plugin/` (a plugin-root CLAUDE.md is not loaded and triggers a validate warning). Notes for one subtree go in `src/**/CLAUDE.md` (Claude Code loads them on demand; the build skips them, they never ship).
+- `CLAUDE.md`: developer notes, never inside `plugin/` (a plugin-root CLAUDE.md is not loaded and triggers a validate warning). Notes for single parts go in `<name>/.claude/rules/*.md` with `paths:` relative to `<name>/` (loaded when Claude works on matching files; keep each under 40,000 characters, the on-demand load limit); `src/` holds only `.mts`.
 - Hand-written plugin content (`SKILL.md`, `hooks/hooks.json`, `agents/*.md`, `README.md`) lives directly in `plugin/` and is edited there.
 
 ## Workspace-wide lint and test config
@@ -20,9 +20,7 @@ One config for all packages, at the repo root; no per-plugin lint or vitest conf
 
 - Lint + type check: root `.oxlintrc.json` (oxlint, type-aware) with the solution `tsconfig.json` (`tsconfig.src.json` strict, `tsconfig.tests.json` relaxed for plugin `*/tests/`); `pnpm lint` is the type check. Details: `.claude/rules/lint-config.md`.
 - Build: the shared `development/scripts/build-plugin.mts` builds the plugin in the cwd (layout check, oxc-transform type stripping, oxc-minify, `plugin.json` generated from `package.json` by `plugin-manifest.mts`); a plugin's `build` script may run its own steps first.
-- `vitest.config.mts` at the root is the one vitest config; details in `.claude/rules/lint-config.md`.
-- Claude Code hook `.claude/hooks/oxlint-edited.sh` (project `.claude/settings.json`, PostToolUse `Write|Edit`, `asyncRewake`): runs `pnpm exec oxlint --deny-warnings` with the root config on each edited `.ts`/`.mts` in the background and wakes Claude with any findings.
-- Tooling (`oxlint`, `oxlint-tsgolint`, `oxc-transform`, `oxc-minify`, `vitest`, `@types/node`) is a root devDependency only.
+- `vitest.config.mts` at the root is the one vitest config. Tooling is root devDependencies only; an async oxlint hook checks every edited `.ts`/`.mts`. Details: `.claude/rules/lint-config.md`.
 
 ## Commands
 
@@ -37,7 +35,6 @@ claude plugin validate <name>/plugin
 
 ## Rules
 
-- `.gitattributes` marks build output and the lockfile `linguist-generated` (collapsed in PRs); `*/plugin/**/*.mjs` is also `-diff -merge`: resolve conflicts there by rebuilding.
 - `.mjs` (and `.js`) is build output only; every hand-written module is `.mts` (Node 24 and vitest strip the types; `src/` is compiled by `pnpm build`).
 - Never edit `*/plugin/**/*.mjs` or `*/plugin/.claude-plugin/plugin.json` — change `src/` or `<name>/package.json` and run `pnpm build`. `.claude/settings.json` denies these writes.
 - Version bump = edit `version` in `<name>/package.json`, then `pnpm build`. Any change under `<name>/` merged to `main` needs a bump to a version higher than on `main` that is not yet tagged `<name>-<version>` here or in kwitsch/claude-plugins.

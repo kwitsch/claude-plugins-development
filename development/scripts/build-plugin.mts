@@ -45,14 +45,13 @@ for (const f of walk(PLUGIN)) if (f.endsWith(".mjs")) rmSync(f);
 // 2. compile: strip types file by file (.mts -> .mjs), then minify.
 // Type checking is not part of the build: `pnpm lint` (oxlint --type-check) does it.
 const files = walk(SRC);
-// subdir CLAUDE.md files are developer notes Claude Code loads on demand; they never ship
-const stray = files.filter((f) => !f.endsWith(".mts") && path.basename(f) !== "CLAUDE.md");
+const stray = files.filter((f) => !f.endsWith(".mts"));
 if (stray.length) {
-  // src/ holds only .mts (and CLAUDE.md notes): anything else (a .ts, a .js) would silently not ship
+  // src/ holds only .mts: anything else (a .ts, a .js) would silently not ship
   for (const f of stray) console.error(`${path.relative(ROOT, f)}: src/ holds only .mts sources`);
   process.exit(1);
 }
-const sources = files.filter((f) => f.endsWith(".mts") && !f.endsWith(".d.mts"));
+const sources = files.filter((f) => !f.endsWith(".d.mts"));
 for (const src of sources) {
   const out = path.join(PLUGIN, path.relative(SRC, src)).replace(/\.mts$/, ".mjs");
   const t = transformSync(src, readFileSync(src, "utf8"), { sourceType: "module", target: "es2022" });
