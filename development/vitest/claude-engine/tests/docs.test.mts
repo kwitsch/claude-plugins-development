@@ -2,7 +2,7 @@
 import { expect } from "vitest";
 import { createKit } from "../index.mts";
 
-const mod = (name) => new URL(`./mods/${name}.mts`, import.meta.url);
+const mod = (name: string) => new URL(`./mods/${name}.mts`, import.meta.url);
 
 {
   const { test } = createKit({ module: mod("tally"), plugin: "first-mod" });
@@ -11,10 +11,10 @@ const mod = (name) => new URL(`./mods/${name}.mts`, import.meta.url);
     await $.tool.call({ tool: "Bash", command: "ls" });
     await $.tool.call({ tool: "Read", file_path: "README.md" });
     const answer = await $.command.run({ command: "tally", args: "" });
-    expect(answer.text).toBe("Claude has made 2 tool calls since this mod loaded");
+    expect((answer as { text: string }).text).toBe("Claude has made 2 tool calls since this mod loaded");
   });
   test("each test loads a fresh module", async ($) => {
-    expect((await $.command.run({ command: "tally", args: "" })).text).toBe("Claude has made 0 tool calls since this mod loaded");
+    expect(((await $.command.run({ command: "tally", args: "" })) as { text: string }).text).toBe("Claude has made 0 tool calls since this mod loaded");
   });
 }
 
@@ -24,11 +24,11 @@ const mod = (name) => new URL(`./mods/${name}.mts`, import.meta.url);
   test("a passing grade is reported", async ($, on) => {
     on("model.complete", () => ({ value: { isAnswered: true, text: "PASS\nNice sentence.", usage } }));
     const answer = await $.command.run({ command: "grade", args: "The cat sat on the mat." });
-    expect(answer.text).toBe("Passed");
+    expect((answer as { text: string }).text).toBe("Passed");
   });
   test("a failing grade is reported", async ($, on) => {
     on("model.complete", () => ({ value: { isAnswered: true, text: "FAIL", usage } }));
-    expect((await $.command.run({ command: "grade", args: "cat mat" })).text).toBe("Try again");
+    expect(((await $.command.run({ command: "grade", args: "cat mat" })) as { text: string }).text).toBe("Try again");
   });
 }
 
@@ -80,7 +80,7 @@ const mod = (name) => new URL(`./mods/${name}.mts`, import.meta.url);
     props: { title: "Hello tabs", isFocused: true, bodyColumns: 60, placement: "inline", scroll: { offset: 0, bodyRows: 10 }, view: {} },
   };
   test("the second tab counts presses and saves the count", async ($, on) => {
-    const saved = new Map();
+    const saved = new Map<unknown, unknown>();
     on("store.get", ($, e) => ({ value: saved.get(e.key) }));
     on("store.set", ($, e) => {
       saved.set(e.key, e.value);

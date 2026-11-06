@@ -56,8 +56,7 @@
   "overrides": [
     {
       "files": [
-        "*/tests/**",
-        "development/vitest/claude-engine/**"
+        "*/tests/**"
       ],
       "rules": {
         "typescript/no-unsafe-member-access": "off",

@@ -1,12 +1,14 @@
 // The countdown example of the docs: a one-second timer that toasts at zero.
-export function register(on) {
-  on("command.run", { command: "countdown" }, async ($, e) => {
+import type { On } from "../../index.mts";
+
+export function register(on: On) {
+  on("command.run", { command: "countdown" }, ($, e) => {
     let left = Number(e.args);
-    const timer = $.clock.every(1000, () => {
+    const timer: { cancel: () => void } = $.clock.every(1000, () => {
       left -= 1;
       if (left === 0) {
         timer.cancel();
-        $.ui.toast("Time is up");
+        void $.ui.toast("Time is up");
       }
     });
     return {};
