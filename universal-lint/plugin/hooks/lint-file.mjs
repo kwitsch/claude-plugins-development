@@ -832,6 +832,45 @@ export function lintFileHandler(args) {
 		return {};
 	}
 }
+export function fileChangedHandler(args) {
+	try {
+		if (args?.event === "unlink") return {};
+		const cwd = args?.cwd;
+		const file = args?.file_path;
+		if (typeof cwd !== "string" || !cwd || typeof file !== "string" || !file) return {};
+		const s = scopedTarget(cwd, file, typeof args.scratchpad_dir === "string" ? args.scratchpad_dir : undefined);
+		if (!s) return {};
+		let recorded = null;
+		try {
+			recorded = readFileSync(writtenDigestPath(s.real), "utf8");
+		} catch {}
+		if (recorded !== null && recorded === fileDigest(s.fp)) return {};
+		try {
+			const status = execFileSync("git", [
+				"--no-optional-locks",
+				"status",
+				"--porcelain",
+				"--untracked-files=normal",
+				"--ignored=matching",
+				"--",
+				s.fp
+			], {
+				cwd: path.dirname(s.fp),
+				encoding: "utf8",
+				timeout: GIT_TIMEOUT_MS,
+				stdio: [
+					"ignore",
+					"pipe",
+					"ignore"
+				]
+			});
+			if (status === "" || status.startsWith("!!")) return {};
+		} catch {}
+		return lintResolved(s.fp, cwd, null, "FileChanged", "universal-lint (changed outside Write/Edit)");
+	} catch {
+		return {};
+	}
+}
 export function watchList(cwd, scratchpad) {
 	let out;
 	try {
@@ -895,8 +934,12 @@ function main() {
 			if (r.hookSpecificOutput) process.stdout.write(JSON.stringify(r));
 			return;
 		}
-		recordWrittenFor(input);
-		const ctx = lintFileHandler(input).hookSpecificOutput?.additionalContext;
+		let ctx;
+		if (ev === "FileChanged") ctx = fileChangedHandler(input).hookSpecificOutput?.additionalContext;
+		else {
+			recordWrittenFor(input);
+			ctx = lintFileHandler(input).hookSpecificOutput?.additionalContext;
+		}
 		if (ctx) {
 			process.stderr.write(ctx + "\n");
 			process.exitCode = 2;

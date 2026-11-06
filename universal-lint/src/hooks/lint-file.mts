@@ -1,21 +1,25 @@
 #!/usr/bin/env node
 /**
- * universal-lint plugin: PostToolUse Write|Edit lint-only checker.
+ * universal-lint plugin: lint-only checker for Write/Edit results and files changed outside them.
  *
  * @remarks
- * Command hook, invoked directly per event (no MCP server). stdin = hook JSON (PostToolUseHookInput). `asyncRewake:
- * true` in hooks.json: runs in the background (safe because linting never mutates the file); findings go to stderr
- * with exit 2, which wakes Claude with them; no finding = no output, exit 0.
+ * Command hook, invoked directly per event (no MCP server). stdin = hook JSON (PostToolUseHookInput); `main()`
+ * dispatches on `hook_event_name`: SessionStart/CwdChanged print the git watch list as `watchPaths` (stdout JSON,
+ * exit 0); FileChanged lints a watched file changed outside Write/Edit (unlink, scope, digest and git gates first);
+ * anything else is PostToolUse Write|Edit (digest recorded, then lint). `asyncRewake: true` in hooks.json for
+ * PostToolUse and FileChanged: runs in the background (safe because linting never mutates the file); findings go to
+ * stderr with exit 2, which wakes Claude with them; no finding = no output, exit 0.
  *
- * lint_file flow (every failure path returns `{}` silently, fail open): guard `tool_response.success !== false`,
- * extension in the registry or type-check-eligible, path inside cwd and not excluded (node_modules/vendor/.git,
- * .claude/worktrees, .claude/agent-memory, *.local.*; see `isExcludedPath`), file exists. Then up to two INDEPENDENT
- * checks run and their findings combine: (1) the language's chain tool (first on PATH wins; no per-file skip, since
- * no style mapping exists for linters) through spawnSync (cwd = project cwd, 30s timeout, stdout+stderr captured),
- * classified by exit code for most tools (checkstyle by stripped output, since its exit code counts only
- * ERROR-severity violations and the bundled default ruleset runs at `warning`); (2) for .ts/.tsx/.mts/.cts only, a
- * whole-project `tsc --noEmit` via the nearest tsconfig.json (see `runTypeCheck`). Any issues found: truncated,
- * joined text (stderr, exit 2); no finding from either check: nothing printed.
+ * lint flow (every failure path returns `{}` silently, fail open): guard `tool_response.success !== false`, then
+ * `scopedTarget` (real path strictly inside the real cwd, not excluded: node_modules/vendor/.git, .claude/worktrees,
+ * .claude/agent-memory, *.local.*, see `isExcludedPath`; not inside `scratchpad_dir`; no dangling link; lintable
+ * extension; file exists). Then up to two INDEPENDENT checks run and their findings combine: (1) the language's chain
+ * tool (first on PATH wins; no per-file skip, since no style mapping exists for linters) through spawnSync (cwd =
+ * project cwd, 30s timeout, stdout+stderr captured), classified by exit code for most tools (checkstyle by stripped
+ * output, since its exit code counts only ERROR-severity violations and the bundled default ruleset runs at
+ * `warning`); (2) for .ts/.tsx/.mts/.cts only, a whole-project `tsc --noEmit` via the nearest tsconfig.json (see
+ * `runTypeCheck`). Any issues found: truncated, joined text (stderr, exit 2); no finding from either check: nothing
+ * printed.
  *
  * @packageDocumentation
  */
@@ -1561,6 +1565,48 @@ export function lintFileHandler(args: PostToolUseHookInput): HookResult {
 }
 
 /**
+ * FileChanged: lint a watched file changed outside Write/Edit, whole file (no edit-range gate). Skips, first match
+ * wins: `unlink` event; out of scope (`scopedTarget`); content still equal to the digest Write/Edit recorded; git says
+ * ignored (`!!`) or unchanged (empty status). A git failure (no git, not a repo, timeout) lints. Returns {} for every
+ * skip and on any error (fail open).
+ *
+ * @param args - The FileChanged hook payload.
+ * @returns The hook result: findings as additionalContext, or an empty object.
+ */
+export function fileChangedHandler(args: PostToolUseHookInput): HookResult {
+  // shortcut: one process per FileChanged, no cross-process cap; add slot files under CLAUDE_PLUGIN_DATA if bulk changes overload the machine
+  try {
+    if (args?.event === "unlink") return {};
+    const cwd = args?.cwd;
+    const file = args?.file_path;
+    if (typeof cwd !== "string" || !cwd || typeof file !== "string" || !file) return {};
+    const s = scopedTarget(cwd, file, typeof args.scratchpad_dir === "string" ? args.scratchpad_dir : undefined);
+    if (!s) return {};
+    let recorded: string | null = null;
+    try {
+      recorded = readFileSync(writtenDigestPath(s.real), "utf8");
+    } catch {
+      // no digest: the file was not just written by Write/Edit
+    }
+    if (recorded !== null && recorded === fileDigest(s.fp)) return {};
+    try {
+      const status = execFileSync("git", ["--no-optional-locks", "status", "--porcelain", "--untracked-files=normal", "--ignored=matching", "--", s.fp], {
+        cwd: path.dirname(s.fp),
+        encoding: "utf8",
+        timeout: GIT_TIMEOUT_MS,
+        stdio: ["ignore", "pipe", "ignore"],
+      });
+      if (status === "" || status.startsWith("!!")) return {};
+    } catch {
+      // no git, not a repo, timeout or non-zero exit: lint
+    }
+    return lintResolved(s.fp, cwd, null, "FileChanged", "universal-lint (changed outside Write/Edit)");
+  } catch {
+    return {};
+  }
+}
+
+/**
  * Lintable, in-scope files of `cwd` per `git ls-files -co --exclude-standard` (tracked + untracked-not-ignored; in a
  * subdirectory git lists only paths below it, relative to it), each filtered through `scopedTarget` (drops excluded
  * paths, scratchpad files, dangling links and index entries deleted from disk).
@@ -1627,9 +1673,9 @@ function isMainModule(): boolean {
 
 /**
  * Read the hook's stdin JSON and dispatch on `hook_event_name`: SessionStart/CwdChanged print the watch-paths JSON on
- * stdout (exit 0); anything else (PostToolUse, or a payload without the field) records the Write/Edit digest and runs
- * lintFileHandler. Findings: their text on stderr and exit 2 (asyncRewake wakes Claude with it). Fails open on any
- * error — no output, exit 0.
+ * stdout (exit 0); FileChanged runs fileChangedHandler; anything else (PostToolUse, or a payload without the field)
+ * records the Write/Edit digest and runs lintFileHandler. Findings: their text on stderr and exit 2 (asyncRewake wakes
+ * Claude with it). Fails open on any error — no output, exit 0.
  */
 function main(): void {
   try {
@@ -1640,8 +1686,12 @@ function main(): void {
       if (r.hookSpecificOutput) process.stdout.write(JSON.stringify(r));
       return;
     }
-    recordWrittenFor(input);
-    const ctx = lintFileHandler(input).hookSpecificOutput?.additionalContext;
+    let ctx: string | undefined;
+    if (ev === "FileChanged") ctx = fileChangedHandler(input).hookSpecificOutput?.additionalContext;
+    else {
+      recordWrittenFor(input);
+      ctx = lintFileHandler(input).hookSpecificOutput?.additionalContext;
+    }
     if (ctx) {
       process.stderr.write(ctx + "\n");
       process.exitCode = 2;
