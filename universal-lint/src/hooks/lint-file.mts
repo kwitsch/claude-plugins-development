@@ -1421,7 +1421,123 @@ export function gateFinding(finding: Finding, ranges: Array<[number, number]> | 
 }
 
 /**
- * The lint_file tool handler. Returns {} on every guard failure / clean / skip (fail open).
+ * File holding the SHA-256 (base64) of the content Write/Edit last left at `real`:
+ * `CLAUDE_PLUGIN_DATA` (OS temp dir when unset)/written/<hashPath(real)>. Never inside the project tree.
+ *
+ * @param real - Real path of the written file.
+ * @returns Absolute path of the digest file.
+ */
+function writtenDigestPath(real: string): string {
+  return path.resolve(process.env.CLAUDE_PLUGIN_DATA || tmpdir(), "written", hashPath(real));
+}
+
+/**
+ * SHA-256 base64 of a file's bytes.
+ *
+ * @param fp - File to hash.
+ * @returns Base64 digest.
+ */
+function fileDigest(fp: string): string {
+  return createHash("sha256").update(readFileSync(fp)).digest("base64");
+}
+
+/**
+ * Record the on-disk content digest of a Write/Edit target, atomically (temp file + renameSync), so a FileChanged
+ * process can skip the file while its content still matches. One file per real path: concurrent hook processes need
+ * no locking. Fails open silently (cost: one duplicate lint, never a lost one).
+ *
+ * @param fp - Lexical path of the written file (read for the digest).
+ * @param real - Real path of the written file (the digest key).
+ */
+export function recordWritten(fp: string, real: string): void {
+  try {
+    const file = writtenDigestPath(real);
+    mkdirSync(path.dirname(file), { recursive: true });
+    const tmp = `${file}.${process.pid}.tmp`;
+    writeFileSync(tmp, fileDigest(fp));
+    renameSync(tmp, file);
+  } catch {
+    // fail open: a missing digest costs one duplicate lint
+  }
+}
+
+/**
+ * PostToolUse digest step: the `resolveLintTarget` guards (success !== false, non-empty cwd and tool_input.file_path),
+ * then `scopedTarget` for the real path, then `recordWritten`. Runs before the lint so the digest lands within
+ * milliseconds. Never throws.
+ *
+ * @param args - The PostToolUse hook payload.
+ */
+function recordWrittenFor(args: PostToolUseHookInput): void {
+  try {
+    if (args?.tool_response?.success === false) return;
+    const cwd = args?.cwd;
+    const file = args?.tool_input?.file_path;
+    if (typeof cwd !== "string" || !cwd || typeof file !== "string" || !file) return;
+    const s = scopedTarget(cwd, file, typeof args.scratchpad_dir === "string" ? args.scratchpad_dir : undefined);
+    if (s) recordWritten(s.fp, s.real);
+  } catch {
+    // fail open
+  }
+}
+
+/**
+ * Lint `resolved` (chain tool + tsc), gate the findings against `ranges` (null = whole file), and build the hook result.
+ *
+ * @param resolved - Lexical absolute path of the in-scope file.
+ * @param cwd - Payload cwd (spawn cwd and config search root).
+ * @param ranges - Edited line ranges, or null when the whole file counts.
+ * @param hookEventName - `hookSpecificOutput.hookEventName` of the result.
+ * @param label - Prefix of the findings text (`<label>: <findings>`).
+ * @returns The hook result: findings as additionalContext, or an empty object.
+ */
+function lintResolved(resolved: string, cwd: string, ranges: Array<[number, number]> | null, hookEventName: string, label: string): HookResult {
+  const rel = path.relative(cwd, resolved);
+  const ext = path.extname(resolved).toLowerCase();
+  const lang = EXT_MAP[ext];
+  const typeCheckEligible = TYPE_CHECK_EXTS.has(ext);
+  const oxlintConfig = lang === "jsts" ? resolveOxlintConfig(path.dirname(resolved), cwd) : null;
+
+  const findings: Finding[] = [];
+  let oxlintRan = false;
+  if (lang) {
+    // -c makes the detected config oxlint's root: oxlint ignores a nested
+    // oxlint.config.ts and rejects options.typeAware in a nested config otherwise.
+    const entry = oxlintConfig ? { chain: REGISTRY.oxlint.chain.map((t) => ({ ...t, args: [...t.args, "-c", oxlintConfig] })) } : REGISTRY[lang];
+    const chain = runChainLint(entry, resolved, cwd, rel);
+    if (chain.finding) findings.push(chain.finding);
+    oxlintRan = oxlintConfig !== null && chain.ran;
+  }
+  // Skip tsc only when oxlint actually ran with a typeCheck config; otherwise tsc is the only type check.
+  if (typeCheckEligible && !(oxlintRan && oxlintConfig && oxlintConfigTypeChecks(oxlintConfig))) {
+    const tsResult = runTypeCheck(resolved, cwd);
+    if (tsResult) findings.push(tsResult);
+  }
+  // Gate before truncate() so the context budget is spent on in-range text.
+  const kept = findings.flatMap((f) => {
+    const g = gateFinding(f, ranges, resolved);
+    return g ? [g] : [];
+  });
+  if (kept.length === 0) return {};
+
+  // truncate() is applied per-finding first (so a single finding's own text
+  // is capped exactly as before this change), then AGAIN over the joined
+  // whole -- two per-finding-capped blocks can still together exceed
+  // MAX_CONTEXT_CHARS when both are near the cap; the outer pass restores a
+  // hard whole-message ceiling. Idempotent/no-op for the single-finding
+  // case (already <= MAX_CONTEXT_CHARS from its own inner truncate()), so
+  // single-finding output is unchanged from before this change.
+  const blocks = kept.map((f) => `${f.tool} found issues in ${f.target}:\n${truncate(f.text)}`);
+  return {
+    hookSpecificOutput: {
+      hookEventName,
+      additionalContext: `${label}: ${truncate(blocks.join("\n\n"))}`,
+    },
+  };
+}
+
+/**
+ * The lint_file tool handler (PostToolUse Write|Edit). Returns {} on every guard failure / clean / skip (fail open).
  *
  * @param args - The PostToolUse hook payload.
  * @returns The hook result: findings as additionalContext, or an empty object.
@@ -1432,49 +1548,7 @@ export function lintFileHandler(args: PostToolUseHookInput): HookResult {
     if (!resolved) return {};
     const ranges = editRanges(args);
     if (ranges?.length === 0) return {}; // the Edit changed nothing
-    const cwd = args.cwd;
-    const rel = path.relative(cwd, resolved);
-    const ext = path.extname(resolved).toLowerCase();
-    const lang = EXT_MAP[ext];
-    const typeCheckEligible = TYPE_CHECK_EXTS.has(ext);
-    const oxlintConfig = lang === "jsts" ? resolveOxlintConfig(path.dirname(resolved), cwd) : null;
-
-    const findings: Finding[] = [];
-    let oxlintRan = false;
-    if (lang) {
-      // -c makes the detected config oxlint's root: oxlint ignores a nested
-      // oxlint.config.ts and rejects options.typeAware in a nested config otherwise.
-      const entry = oxlintConfig ? { chain: REGISTRY.oxlint.chain.map((t) => ({ ...t, args: [...t.args, "-c", oxlintConfig] })) } : REGISTRY[lang];
-      const chain = runChainLint(entry, resolved, cwd, rel);
-      if (chain.finding) findings.push(chain.finding);
-      oxlintRan = oxlintConfig !== null && chain.ran;
-    }
-    // Skip tsc only when oxlint actually ran with a typeCheck config; otherwise tsc is the only type check.
-    if (typeCheckEligible && !(oxlintRan && oxlintConfig && oxlintConfigTypeChecks(oxlintConfig))) {
-      const tsResult = runTypeCheck(resolved, cwd);
-      if (tsResult) findings.push(tsResult);
-    }
-    // Gate before truncate() so the context budget is spent on in-range text.
-    const kept = findings.flatMap((f) => {
-      const g = gateFinding(f, ranges, resolved);
-      return g ? [g] : [];
-    });
-    if (kept.length === 0) return {};
-
-    // truncate() is applied per-finding first (so a single finding's own text
-    // is capped exactly as before this change), then AGAIN over the joined
-    // whole -- two per-finding-capped blocks can still together exceed
-    // MAX_CONTEXT_CHARS when both are near the cap; the outer pass restores a
-    // hard whole-message ceiling. Idempotent/no-op for the single-finding
-    // case (already <= MAX_CONTEXT_CHARS from its own inner truncate()), so
-    // single-finding output is unchanged from before this change.
-    const blocks = kept.map((f) => `${f.tool} found issues in ${f.target}:\n${truncate(f.text)}`);
-    return {
-      hookSpecificOutput: {
-        hookEventName: "PostToolUse",
-        additionalContext: `universal-lint: ${truncate(blocks.join("\n\n"))}`,
-      },
-    };
+    return lintResolved(resolved, args.cwd, ranges, "PostToolUse", "universal-lint");
   } catch {
     return {};
   }
@@ -1500,6 +1574,7 @@ function isMainModule(): boolean {
 function main(): void {
   try {
     const input = JSON.parse(readFileSync(0, "utf8")) as PostToolUseHookInput;
+    recordWrittenFor(input);
     const ctx = lintFileHandler(input).hookSpecificOutput?.additionalContext;
     if (ctx) {
       process.stderr.write(ctx + "\n");

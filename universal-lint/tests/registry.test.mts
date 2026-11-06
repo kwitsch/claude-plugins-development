@@ -1,10 +1,11 @@
 // Unit tests of the exports of the built plugin/hooks/lint-file.mjs (ported from test/universal-lint/registry.test.mjs).
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "vitest";
-import { buildArgv, classifyCheckstyleOutput, classifyExit, editRanges, gateFinding, hasProjectMarkdownlintConfig, hasProjectYamllintConfig, isExcludedPath, isToolAvailable, lintFileHandler, looksLikeSolutionStyleTsconfig, oxlintConfigTypeChecks, parseRtkPrefix, REGISTRY, resolveCargoManifest, resolveCheckstyleConfig, resolveLintTarget, resolveOxlintConfig, resolveTsconfig, scopedTarget, stripTrailingCommas, truncate, tsBuildInfoPathFor, tscOutputHasSourceDiagnostic } from "../plugin/hooks/lint-file.mjs";
+import { buildArgv, classifyCheckstyleOutput, classifyExit, editRanges, gateFinding, hashPath, hasProjectMarkdownlintConfig, hasProjectYamllintConfig, isExcludedPath, isToolAvailable, lintFileHandler, looksLikeSolutionStyleTsconfig, oxlintConfigTypeChecks, parseRtkPrefix, recordWritten, REGISTRY, resolveCargoManifest, resolveCheckstyleConfig, resolveLintTarget, resolveOxlintConfig, resolveTsconfig, scopedTarget, stripTrailingCommas, truncate, tsBuildInfoPathFor, tscOutputHasSourceDiagnostic } from "../plugin/hooks/lint-file.mjs";
 
 const shellcheck = REGISTRY.shell.chain[0];
 const checkstyle = REGISTRY.java.chain[0];
@@ -926,4 +927,21 @@ test("resolveLintTarget: null for a file inside the payload scratchpad_dir", () 
   writeFileSync(path.join(dir, "s", "e.sh"), "echo hi\n");
   assert.equal(resolveLintTarget({ ...mockResolveArgs(dir, "s/e.sh"), scratchpad_dir: path.join(dir, "s") }), null);
   assert.equal(resolveLintTarget(mockResolveArgs(dir, "s/e.sh")), path.join(dir, "s", "e.sh"));
+});
+
+test("recordWritten: stores the SHA-256 base64 of the file bytes at CLAUDE_PLUGIN_DATA/written/<hashPath(real)>", () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "ul-rw-"));
+  const data = path.join(dir, "data");
+  const fp = path.join(dir, "a.sh");
+  writeFileSync(fp, "echo hi\n");
+  const real = realpathSync(fp);
+  const prev = process.env.CLAUDE_PLUGIN_DATA;
+  process.env.CLAUDE_PLUGIN_DATA = data;
+  try {
+    recordWritten(fp, real);
+  } finally {
+    if (prev === undefined) delete process.env.CLAUDE_PLUGIN_DATA;
+    else process.env.CLAUDE_PLUGIN_DATA = prev;
+  }
+  assert.equal(readFileSync(path.join(data, "written", hashPath(real)), "utf8"), createHash("sha256").update("echo hi\n").digest("base64"));
 });
