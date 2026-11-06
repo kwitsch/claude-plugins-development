@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { spawnSync } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
-import { accessSync, constants as fsConstants, existsSync, mkdirSync, readFileSync, realpathSync, renameSync, writeFileSync } from "node:fs";
+import { accessSync, appendFileSync, constants as fsConstants, existsSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import path from "node:path";
 import process from "node:process";
@@ -19,6 +19,7 @@ const DEBOUNCE_MS = (() => {
 	const n = raw ? Number(raw) : NaN;
 	return Number.isFinite(n) && n >= 0 ? n : 5e3;
 })();
+const EDITS_MAX_AGE_MS = 6e5;
 const TYPE_CHECK_EXTS = new Set([
 	".ts",
 	".tsx",
@@ -784,32 +785,49 @@ function isMainModule() {
 		return false;
 	}
 }
-async function debounceGate(resolved) {
+async function debounceGate(resolved, entry) {
 	const token = `${Date.now()}-${process.pid}-${randomBytes(6).toString("hex")}`;
 	const dir = path.join(tmpdir(), "universal-lint-debounce");
 	const marker = path.join(dir, hashPath(resolved) + ".mark");
+	const edits = path.join(dir, hashPath(resolved) + ".edits");
 	try {
 		mkdirSync(dir, { recursive: true });
 		const tmp = `${marker}.${token}.tmp`;
 		writeFileSync(tmp, token);
 		renameSync(tmp, marker);
+		appendFileSync(edits, JSON.stringify([Date.now(), entry]) + "\n");
 	} catch {
-		return true;
+		return [entry];
 	}
 	await sleep(DEBOUNCE_MS);
 	try {
-		return readFileSync(marker, "utf8").trim() === token;
+		if (readFileSync(marker, "utf8").trim() !== token) return null;
 	} catch {
-		return true;
+		return [entry];
 	}
+	const entries = [];
+	try {
+		const taken = `${edits}.${token}`;
+		renameSync(edits, taken);
+		const raw = readFileSync(taken, "utf8");
+		rmSync(taken, { force: true });
+		const now = Date.now();
+		for (const l of raw.split("\n")) {
+			if (!l) continue;
+			const [t, e] = JSON.parse(l);
+			if (now - t <= EDITS_MAX_AGE_MS) entries.push(e);
+		}
+	} catch {}
+	return entries.includes(entry) ? entries : [...entries, entry];
 }
 async function main() {
 	try {
 		const input = JSON.parse(readFileSync(0, "utf8"));
 		const resolved = resolveLintTarget(input);
 		if (!resolved) return;
-		if (!await debounceGate(resolved)) return;
-		const ctx = lintFileHandler(input).hookSpecificOutput?.additionalContext;
+		const edits = await debounceGate(resolved, editEntry(input));
+		if (!edits) return;
+		const ctx = lintFileHandler(input, edits).hookSpecificOutput?.additionalContext;
 		if (ctx) {
 			process.stderr.write(ctx + "\n");
 			process.exitCode = 2;
