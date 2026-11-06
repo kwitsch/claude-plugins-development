@@ -7,7 +7,7 @@ paths:
 
 # Hook design (do not "fix" without reading this)
 
-- **One async `command` hook:** PostToolUse `Write|Edit` → `${CLAUDE_PLUGIN_ROOT}/hooks/lint-file.mjs`, `timeout: 95`, `async: true`, no `statusMessage` (silent).
+- **One async `command` hook:** PostToolUse `Write|Edit` → `"${CLAUDE_PLUGIN_ROOT}/hooks/lint-file.mjs"` (the placeholder is quoted so a plugin path with a space survives; `claude plugin validate` warns otherwise), `timeout: 95`, `async: true`, no `statusMessage` (silent).
   - Invoked directly, no `node` prefix: the built file has a node shebang and the exec bit the build sets. One process per Write/Edit, no persistent process.
   - `timeout: 95` = 90 s lint budget + 5 s debounce wait (see "Timeout budget").
 - **Single-hook exception to the `mcp_tool`-preferred default** (kwitsch/claude-plugins prefers a persistent MCP stdio server for hooks, as `dprint` does here):

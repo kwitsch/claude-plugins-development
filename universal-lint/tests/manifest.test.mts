@@ -19,7 +19,7 @@ test("PostToolUse hook is wired to lint-file.mjs as an async command hook with t
   const h = json("hooks/hooks.json").hooks.PostToolUse[0];
   assert.equal(h.matcher, "Write|Edit");
   assert.equal(h.hooks[0].type, "command");
-  assert.equal(h.hooks[0].command, "${CLAUDE_PLUGIN_ROOT}/hooks/lint-file.mjs");
+  assert.equal(h.hooks[0].command, "\"${CLAUDE_PLUGIN_ROOT}/hooks/lint-file.mjs\"");
   assert.equal(h.hooks[0].timeout, 95);
   assert.equal(h.hooks[0].async, true);
 });
