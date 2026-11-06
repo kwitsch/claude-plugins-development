@@ -135,7 +135,7 @@ interface HookResult {
 /**
  * Lowercased file extension (incl. leading dot) -> language key. A subset of the universal-format plugin's EXT_MAP:
  * .json is deliberately excluded here, no exit-code-clean standalone JSON linter exists (see
- * `.claude/rules/hook-design.md`, "JSON: not covered").
+ * `.claude/rules/languages.md`, "JSON: not covered").
  */
 const EXT_MAP: Record<string, string> = {
   ".sh": "shell",
@@ -223,7 +223,7 @@ export const REGISTRY: Record<string, LangEntry> = {
     chain: [
       // name/onPath gates on the standalone cargo-clippy driver binary --
       // its presence on PATH is how the clippy rustup component is detected
-      // (see `.claude/rules/hook-design.md`, "Why probe cargo-clippy, not cargo clippy"). But
+      // (see `.claude/rules/languages.md`, "Rust"). But
       // that bare binary does NOT accept --manifest-path (it belongs to
       // cargo/its clippy subcommand, not the driver clippy-driver itself
       // invokes) -- spawnAs runs the actually-selected tool as `cargo
@@ -1081,7 +1081,7 @@ function runTypeCheck(resolved: string, cwd: string): Finding | null {
   } else {
     // Most real TS projects only have `typescript` as a local devDependency
     // (node_modules/.bin usually isn't on a hook's PATH) -- no npx fallback
-    // here (see `.claude/rules/hook-design.md`: the two-bin `typescript` package makes the
+    // here (see `.claude/rules/typescript-check.md`: the two-bin `typescript` package makes the
     // existing npx idiom's correctness unverified for this specific tool).
     const localTsc = path.join(cwd, "node_modules", ".bin", "tsc");
     if (!existsSync(localTsc)) return null;
