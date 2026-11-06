@@ -1,12 +1,12 @@
 // Per-file idle-window debounce (token marker); ported from test/universal-lint/debounce.bats.
 // Small non-zero windows via UNIVERSAL_LINT_DEBOUNCE_MS keep the tests fast.
 import assert from "node:assert/strict";
-import { createHash } from "node:crypto";
 import { existsSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { test } from "vitest";
+import { hashPath } from "../plugin/hooks/lint-file.mjs";
 import { makeEnv } from "./support/lint-hook.mts";
 
 const OUT = "a.sh:1:6: note: something [SC2086]";
@@ -67,7 +67,7 @@ test("debounce: two coalesced Edits are gated against the union of both edited r
   assert.match(r2.ctx, /L3-marker/);
   assert.doesNotMatch(r2.ctx, /L2-marker/);
   const dir = path.join(tmp, "universal-lint-debounce");
-  const hash = createHash("sha256").update(f).digest("hex");
+  const hash = hashPath(f);
   assert.ok(existsSync(path.join(dir, `${hash}.mark`))); // proves the directory is the one the hook used
   assert.ok(!existsSync(path.join(dir, `${hash}.edits`)));
 });

@@ -373,7 +373,7 @@ export function looksLikeSolutionStyleTsconfig(text) {
 	const hasNonEmptyFiles = !!filesMatch && filesMatch[1].trim() !== "";
 	return !hasNonEmptyFiles;
 }
-function hashPath(p) {
+export function hashPath(p) {
 	return createHash("sha256").update(p).digest("hex");
 }
 export function tsBuildInfoPathFor(tsconfigPath) {
@@ -660,10 +660,20 @@ export function editEntry(args) {
 }
 export function editRanges(text, needle) {
 	if (needle === "") return null;
-	const lineOf = (k) => text.slice(0, k).split("\n").length - 1;
+	if (!text.includes(needle) && text.includes("\r\n")) needle = needle.replace(/\r?\n/g, "\r\n");
+	let pos = 0;
+	let line = 0;
+	const lineOf = (k) => {
+		for (let n = text.indexOf("\n", pos); n !== -1 && n < k; n = text.indexOf("\n", pos)) {
+			line++;
+			pos = n + 1;
+		}
+		return line;
+	};
 	const ranges = [];
 	for (let i = text.indexOf(needle); i !== -1; i = text.indexOf(needle, i + needle.length)) {
-		ranges.push([lineOf(i), lineOf(i + needle.length - 1)]);
+		const start = lineOf(i);
+		ranges.push([start, lineOf(i + needle.length - 1)]);
 	}
 	return ranges.length > 0 ? ranges : null;
 }
@@ -675,10 +685,13 @@ export function gateFinding(finding, ranges, resolved) {
 	const classify = (raw) => {
 		const plain = raw.replace(ANSI_SGR_RE, "");
 		for (const own of [resolved, path.relative(finding.base, resolved)]) {
-			const at = /\s/.test(own) ? plain.indexOf(own) : -1;
+			let at = /\s/.test(own) ? plain.indexOf(own) : -1;
+			while (at > 0 && /[\w/\\.-]/.test(plain[at - 1])) at = plain.indexOf(own, at + 1);
 			const m = at === -1 ? null : /^[:(](\d+)/.exec(plain.slice(at + own.length));
 			if (m) return hit(Number(m[1]));
 		}
+		const row = LOC_ROW_RE.exec(plain);
+		if (row?.groups) return hit(Number(row.groups.line));
 		const a = LOC_PATH_RE.exec(plain);
 		if (a?.groups) {
 			const p = path.normalize(a.groups.path);
@@ -814,8 +827,10 @@ async function debounceGate(resolved, entry) {
 		const now = Date.now();
 		for (const l of raw.split("\n")) {
 			if (!l) continue;
-			const [t, e] = JSON.parse(l);
-			if (now - t <= EDITS_MAX_AGE_MS) entries.push(e);
+			try {
+				const [t, e] = JSON.parse(l);
+				if (now - t <= EDITS_MAX_AGE_MS) entries.push(e);
+			} catch {}
 		}
 	} catch {}
 	return entries.includes(entry) ? entries : [...entries, entry];

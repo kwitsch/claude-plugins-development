@@ -698,7 +698,7 @@ export function looksLikeSolutionStyleTsconfig(text: string): boolean {
  * @param p - Path string to hash.
  * @returns Lowercase sha256 hex digest.
  */
-function hashPath(p: string): string {
+export function hashPath(p: string): string {
   return createHash("sha256").update(p).digest("hex");
 }
 
@@ -1290,10 +1290,21 @@ export function editEntry(args: PostToolUseHookInput): string | null {
  */
 export function editRanges(text: string, needle: string): Array<[number, number]> | null {
   if (needle === "") return null;
-  const lineOf = (k: number): number => text.slice(0, k).split("\n").length - 1;
+  // The Edit tool sends `\n`; a CRLF file holds `\r\n`.
+  if (!text.includes(needle) && text.includes("\r\n")) needle = needle.replace(/\r?\n/g, "\r\n");
+  let pos = 0;
+  let line = 0;
+  const lineOf = (k: number): number => {
+    for (let n = text.indexOf("\n", pos); n !== -1 && n < k; n = text.indexOf("\n", pos)) {
+      line++;
+      pos = n + 1;
+    }
+    return line;
+  };
   const ranges: Array<[number, number]> = [];
   for (let i = text.indexOf(needle); i !== -1; i = text.indexOf(needle, i + needle.length)) {
-    ranges.push([lineOf(i), lineOf(i + needle.length - 1)]);
+    const start = lineOf(i);
+    ranges.push([start, lineOf(i + needle.length - 1)]);
   }
   return ranges.length > 0 ? ranges : null;
 }
@@ -1327,10 +1338,14 @@ export function gateFinding(finding: Finding, ranges: Array<[number, number]> | 
     const plain = raw.replace(ANSI_SGR_RE, "");
     // LOC_PATH_RE stops at whitespace, so a path with a space is looked up literally (absolute and base-relative).
     for (const own of [resolved, path.relative(finding.base, resolved)]) {
-      const at = /\s/.test(own) ? plain.indexOf(own) : -1;
+      let at = /\s/.test(own) ? plain.indexOf(own) : -1;
+      // Not inside a longer path: the match must start the line or follow a non-path character.
+      while (at > 0 && /[\w/\\.-]/.test(plain[at - 1])) at = plain.indexOf(own, at + 1);
       const m = at === -1 ? null : /^[:(](\d+)/.exec(plain.slice(at + own.length));
       if (m) return hit(Number(m[1]));
     }
+    const row = LOC_ROW_RE.exec(plain); // a stylish row first: its message text can look like `foo.bar(3)`
+    if (row?.groups) return hit(Number(row.groups.line));
     const a = LOC_PATH_RE.exec(plain);
     if (a?.groups) {
       const p = path.normalize(a.groups.path);
@@ -1502,8 +1517,12 @@ async function debounceGate(resolved: string, entry: string | null): Promise<Arr
     const now = Date.now();
     for (const l of raw.split("\n")) {
       if (!l) continue;
-      const [t, e] = JSON.parse(l) as [number, string | null];
-      if (now - t <= EDITS_MAX_AGE_MS) entries.push(e);
+      try {
+        const [t, e] = JSON.parse(l) as [number, string | null];
+        if (now - t <= EDITS_MAX_AGE_MS) entries.push(e);
+      } catch {
+        // torn line: skip it, keep the rest
+      }
     }
   } catch {
     // fail open: own entry only
