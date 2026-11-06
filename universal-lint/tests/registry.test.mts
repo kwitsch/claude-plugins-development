@@ -4,7 +4,7 @@ import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "vitest";
-import { buildArgv, classifyCheckstyleOutput, classifyExit, hasProjectMarkdownlintConfig, hasProjectYamllintConfig, isExcludedPath, isToolAvailable, lintFileHandler, looksLikeSolutionStyleTsconfig, parseRtkPrefix, REGISTRY, resolveCargoManifest, resolveCheckstyleConfig, resolveLintTarget, resolveTsconfig, truncate, tsBuildInfoPathFor, tscOutputHasSourceDiagnostic } from "../plugin/hooks/lint-file.mjs";
+import { buildArgv, classifyCheckstyleOutput, classifyExit, hasProjectMarkdownlintConfig, hasProjectYamllintConfig, isExcludedPath, isToolAvailable, lintFileHandler, looksLikeSolutionStyleTsconfig, oxlintConfigTypeChecks, parseRtkPrefix, REGISTRY, resolveCargoManifest, resolveCheckstyleConfig, resolveLintTarget, resolveOxlintConfig, resolveTsconfig, stripTrailingCommas, truncate, tsBuildInfoPathFor, tscOutputHasSourceDiagnostic } from "../plugin/hooks/lint-file.mjs";
 
 const shellcheck = REGISTRY.shell.chain[0];
 const checkstyle = REGISTRY.java.chain[0];
@@ -73,8 +73,8 @@ test("resolveCheckstyleConfig: nothing found -> null", () => {
   assert.equal(resolveCheckstyleConfig(dir, dir), null);
 });
 
-test("classifyExit: shellcheck/ktlint/eslint/ruff/golangci-lint/yamllint/markdownlint-cli2/markdownlint share the 0-clean/1-issues/else-skip contract", () => {
-  for (const name of ["shellcheck", "ktlint", "eslint", "ruff", "golangci-lint", "yamllint", "markdownlint-cli2", "markdownlint"]) {
+test("classifyExit: shellcheck/ktlint/eslint/oxlint/ruff/golangci-lint/yamllint/markdownlint-cli2/markdownlint share the 0-clean/1-issues/else-skip contract", () => {
+  for (const name of ["shellcheck", "ktlint", "eslint", "oxlint", "ruff", "golangci-lint", "yamllint", "markdownlint-cli2", "markdownlint"]) {
     assert.equal(classifyExit(name, 0), "clean");
     assert.equal(classifyExit(name, 1), "issues");
     assert.equal(classifyExit(name, 2), "skip");
@@ -615,4 +615,116 @@ test("resolveLintTarget: a .rs file resolves like any other eligible extension",
 
 test("lintFileHandler is exported (the universal-lint skill driver depends on it)", () => {
   assert.equal(typeof lintFileHandler, "function");
+});
+
+test("REGISTRY.oxlint: one-entry alternate jsts chain with exact name, npmSpec and args", () => {
+  assert.equal(REGISTRY.oxlint.chain.length, 1);
+  const oxlint = REGISTRY.oxlint.chain[0];
+  assert.equal(oxlint.name, "oxlint");
+  assert.equal(oxlint.npmSpec, "oxlint");
+  assert.deepEqual(oxlint.args, ["--no-error-on-unmatched-pattern"]);
+});
+
+/**
+ * Fresh project root with an empty `sub/` dir; writes each root-relative file.
+ *
+ * @param files - Root-relative path -> content.
+ * @returns The root and its `sub/` dir.
+ */
+function oxlRoot(files: Record<string, string>): { root: string; sub: string } {
+  const root = mkdtempSync(path.join(tmpdir(), "ul-oxl-"));
+  const sub = path.join(root, "sub");
+  mkdirSync(sub, { recursive: true });
+  for (const [rel, content] of Object.entries(files)) writeFileSync(path.join(root, rel), content);
+  return { root, sub };
+}
+
+test("resolveOxlintConfig: no config anywhere -> null", () => {
+  const { root, sub } = oxlRoot({});
+  assert.equal(resolveOxlintConfig(sub, root), null);
+});
+
+test("resolveOxlintConfig: each oxlint config name at root is found from sub/", () => {
+  for (const name of [".oxlintrc.json", ".oxlintrc.jsonc", "oxlint.config.ts"]) {
+    const { root, sub } = oxlRoot({ [name]: "{}" });
+    assert.equal(resolveOxlintConfig(sub, root), path.join(root, name), name);
+  }
+});
+
+test("resolveOxlintConfig: eslint config at root -> null", () => {
+  for (const name of ["eslint.config.mjs", ".eslintrc.json"]) {
+    const { root, sub } = oxlRoot({ [name]: "{}" });
+    assert.equal(resolveOxlintConfig(sub, root), null, name);
+  }
+});
+
+test("resolveOxlintConfig: eslint and oxlint config in the same dir -> oxlint path (oxlint wins the tie)", () => {
+  const { root, sub } = oxlRoot({ "eslint.config.mjs": "export default [];", ".oxlintrc.json": "{}" });
+  assert.equal(resolveOxlintConfig(sub, root), path.join(root, ".oxlintrc.json"));
+});
+
+test("resolveOxlintConfig: nearest config wins (oxlint in sub/, eslint at root -> sub path)", () => {
+  const { root, sub } = oxlRoot({ "eslint.config.js": "export default [];", "sub/.oxlintrc.json": "{}" });
+  assert.equal(resolveOxlintConfig(sub, root), path.join(sub, ".oxlintrc.json"));
+});
+
+test("resolveOxlintConfig: nearest config wins (eslint in sub/, oxlint at root -> null)", () => {
+  const { root, sub } = oxlRoot({ ".oxlintrc.json": "{}", "sub/eslint.config.js": "export default [];" });
+  assert.equal(resolveOxlintConfig(sub, root), null);
+});
+
+test("resolveOxlintConfig: oxlint config only above cwd -> null (walk bounded at cwd)", () => {
+  const { sub } = oxlRoot({ ".oxlintrc.json": "{}" });
+  assert.equal(resolveOxlintConfig(sub, sub), null);
+});
+
+/**
+ * Write one oxlint config into a fresh temp dir.
+ *
+ * @param name - Config file name.
+ * @param content - File content.
+ * @returns Absolute path of the written config.
+ */
+function oxlCfg(name: string, content: string): string {
+  const p = path.join(mkdtempSync(path.join(tmpdir(), "ul-oxl-")), name);
+  writeFileSync(p, content);
+  return p;
+}
+
+test("oxlintConfigTypeChecks: options.typeCheck true -> true", () => {
+  assert.equal(oxlintConfigTypeChecks(oxlCfg(".oxlintrc.json", "{\"options\":{\"typeAware\":true,\"typeCheck\":true}}")), true);
+});
+
+test("oxlintConfigTypeChecks: .jsonc with // and /* */ comments and trailing commas -> true", () => {
+  const text = "// project oxlint config\n{\n  \"options\": {\n    \"typeAware\": true, /* tsgolint */\n    \"typeCheck\": true,\n  },\n}\n";
+  assert.equal(oxlintConfigTypeChecks(oxlCfg(".oxlintrc.jsonc", text)), true);
+});
+
+test("oxlintConfigTypeChecks: typeCheck false / missing / no options / string \"true\" -> false", () => {
+  for (const text of ["{\"options\":{\"typeCheck\":false}}", "{\"options\":{\"typeAware\":true}}", "{}", "{\"options\":{\"typeCheck\":\"true\"}}"]) {
+    assert.equal(oxlintConfigTypeChecks(oxlCfg(".oxlintrc.json", text)), false, text);
+  }
+});
+
+test("oxlintConfigTypeChecks: string values containing ',}' / ',]' survive trailing-comma removal -> true", () => {
+  const text = "{\"ignorePatterns\": [\"a,}\", \"b,]\",],\n \"options\": {\"typeCheck\": true,},}";
+  assert.equal(oxlintConfigTypeChecks(oxlCfg(".oxlintrc.jsonc", text)), true);
+});
+
+test("stripTrailingCommas: removes only structural trailing commas", () => {
+  assert.equal(stripTrailingCommas("{\"a\": [1, 2 ,\n ], \"b\": \"x,}\\\",]\",}"), "{\"a\": [1, 2 \n ], \"b\": \"x,}\\\",]\"}");
+});
+
+test("oxlintConfigTypeChecks: malformed JSON -> false", () => {
+  assert.equal(oxlintConfigTypeChecks(oxlCfg(".oxlintrc.json", "{\"options\":")), false);
+});
+
+test("oxlintConfigTypeChecks: oxlint.config.ts is never read -> false even with typeCheck: true", () => {
+  assert.equal(oxlintConfigTypeChecks(oxlCfg("oxlint.config.ts", "export default { options: { typeCheck: true } };\n")), false);
+});
+
+test("oxlintConfigTypeChecks: a directory named .oxlintrc.json (EISDIR) -> false", () => {
+  const p = path.join(mkdtempSync(path.join(tmpdir(), "ul-oxl-")), ".oxlintrc.json");
+  mkdirSync(p);
+  assert.equal(oxlintConfigTypeChecks(p), false);
 });

@@ -7,13 +7,14 @@ paths:
 
 # Hook design (do not "fix" without reading this)
 
-- **One async `command` hook:** PostToolUse `Write|Edit` → `"${CLAUDE_PLUGIN_ROOT}/hooks/lint-file.mjs"` (the placeholder is quoted so a plugin path with a space survives; `claude plugin validate` warns otherwise), `timeout: 95`, `async: true`, no `statusMessage` (silent).
+- **One `asyncRewake` `command` hook:** PostToolUse `Write|Edit` → `"${CLAUDE_PLUGIN_ROOT}/hooks/lint-file.mjs"` (the placeholder is quoted so a plugin path with a space survives; `claude plugin validate` warns otherwise), `timeout: 95`, `asyncRewake: true` (not `async`), no `statusMessage` (silent).
+  - `asyncRewake` runs the hook in the background like `async`, but exit `2` wakes Claude with stderr as soon as the lint finishes, instead of the findings waiting for the next turn. Contract (same as the repo's `.claude/hooks/oxlint-edited.sh`): findings = the `universal-lint: …` text on stderr + exit `2`; nothing to report = no output, exit `0`.
   - Invoked directly, no `node` prefix: the built file has a node shebang and the exec bit the build sets. One process per Write/Edit, no persistent process.
   - `timeout: 95` = 90 s lint budget + 5 s debounce wait (see "Timeout budget").
 - **Single-hook exception to the `mcp_tool`-preferred default** (kwitsch/claude-plugins prefers a persistent MCP stdio server for hooks, as `dprint` does here):
   - A persistent MCP stdio server buys nothing for exactly one hook.
-  - `async: true` removes the one argument for a server (per-event spawn latency): the agentic loop doesn't wait either way.
-  - Safe because linting never mutates the file: findings arriving a turn later cost no correctness. `universal-format` stays synchronous for the opposite reason.
+  - Running in the background removes the one argument for a server (per-event spawn latency): the agentic loop doesn't wait either way.
+  - Safe because linting never mutates the file: findings arriving after the edit (rewake) cost no correctness. `universal-format` stays synchronous for the opposite reason.
   - Adding a second hook voids the exception.
 - **No launcher script, no `.mcp.json`:** a direct `.mjs` command hook needs neither; the script always runs under `node`, never `bun`.
 
@@ -37,7 +38,7 @@ paths:
 
 ## Runtime behavior (`lint_file`)
 
-- Every guard failure, clean result, skip (crash/misconfig) or missing tool returns `{}` silently (fail open); only issues produce a truncated `additionalContext`. The guard chain lives in `resolveLintTarget`/`lintFileHandler`.
+- Every guard failure, clean result, skip (crash/misconfig) or missing tool returns `{}` silently (fail open); only issues produce a truncated findings text (`lintFileHandler` returns it as `additionalContext`; `main` writes it to stderr and exits 2). The guard chain lives in `resolveLintTarget`/`lintFileHandler`.
 - First chain tool on `PATH` wins; there is no per-file style-conflict skip (a linter needn't reproduce exact output the way a formatter does).
 - Go entries target the edited file's **directory** (`go vet`/`golangci-lint` are package-scoped); checkstyle gets `-c <resolved config>`.
 - stdout+stderr are captured and **never ignored**, unlike the formatter sibling: the findings text IS the payload. `maxBuffer` is raised well above the 1 MB default for the same reason — a noisy linter's output would otherwise truncate as ENOBUFS.
@@ -48,7 +49,7 @@ paths:
 
 ### npx fallback
 
-- `eslint`, `markdownlint-cli2`, `markdownlint` and `stylelint` fall back to `npx --yes <package> ...` when absent from `PATH` (npm package name = bin name, so the single-positional idiom is safe; `npx` is assumed present since the hook already runs under node).
+- `eslint`, `oxlint`, `markdownlint-cli2`, `markdownlint` and `stylelint` fall back to `npx --yes <package> ...` when absent from `PATH` (npm package name = bin name, so the single-positional idiom is safe; `npx` is assumed present since the hook already runs under node).
 - `yamllint` has no npm package (PyPI only); `ruff`, `golangci-lint`, `go`, `ktlint`, `checkstyle` and the Rust/PHP tools have no safe npm equivalent either.
 
 ### rtk compaction

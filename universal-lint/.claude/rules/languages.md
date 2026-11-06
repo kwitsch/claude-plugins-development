@@ -1,10 +1,10 @@
 ---
 paths:
   - "src/hooks/**"
-  - "tests/{php,rust,stylelint,go,checkstyle,core}.test.mts"
+  - "tests/{php,rust,stylelint,go,checkstyle,core,oxlint}.test.mts"
 ---
 
-# Per-language notes: SCSS, PHP, Rust, JSON
+# Per-language notes: JS/TS, SCSS, PHP, Rust, JSON
 
 ## `.scss` limitation (accepted)
 
@@ -30,6 +30,17 @@ paths:
   - Inserting before `--` also breaks `runLintTool`'s "`tool.args` is a leading prefix of `argv`" slice, so cargo tools skip the `rtk` path.
 - **Coarse contract:** `classifyExit`'s shared `cargo-clippy`/`cargo` case is `0` clean, any non-zero `issues` (101 on a compile error), as for `go`/`phpstan` — a tool malfunction isn't separable from a finding by exit code (accepted). `status === null` (timeout/signal) skips before the switch.
 - `CARGO_SPAWN_TIMEOUT_MS` is a separate, larger budget (they compile the crate). A cold first build may exceed it and skip silently (fail-open); warm/incremental runs are fast.
+
+## JS/TS: eslint vs oxlint
+
+- `.js .jsx .mjs .cjs .ts .tsx .mts .cts` run `REGISTRY.jsts` (eslint) or the alternate chain `REGISTRY.oxlint` (not in `EXT_MAP`); `lintFileHandler` picks the key via `resolveOxlintConfig`.
+- Config names: eslint = `eslint.config.{js,mjs,cjs,ts,mts,cts}`, `.eslintrc`, `.eslintrc.{js,cjs,json,yaml,yml}`; oxlint = `.oxlintrc.json`, `.oxlintrc.jsonc`, `oxlint.config.ts` (probed on oxlint 1.91.0; `oxlint.config.js`/`.mjs` were not picked up).
+- The nearest directory with any config wins; within one directory oxlint names are checked first, so oxlint wins a same-dir tie (user decision: a project adding oxlint next to an existing eslint config is migrating; only oxlint runs, no co-existence). No config at all = eslint (pre-oxlint behavior).
+- The walk goes from the file's dir up to `cwd` inclusive (`walkUpToCwd`, like the checkstyle/cargo/tsconfig resolvers); configs above `cwd` are ignored.
+- Selection is by file name only (`existsSync`), never by content or `package.json#eslintConfig`: this repo's own `.oxlintrc.json` lists `"plugins": ["eslint", ...]`, so content-based selection would misfire.
+- `--no-error-on-unmatched-pattern` is passed because a file excluded by the project's oxlint `ignorePatterns` otherwise exits 1 ("No files found to lint"), which would be a false finding.
+- oxlint exit contract (1.91.0): 0 clean or warnings only, 1 errors / config parse failure / type errors. A broken oxlint config therefore surfaces as a finding carrying oxlint's parse error — accepted.
+- `-c <detected config>` is appended (`lintFileHandler`), making it oxlint's root config. Probed on 1.91.0: without it oxlint ignores a nested `oxlint.config.ts` and rejects `options.typeAware` in a nested config ("only supported in the root config"). No type-aware flags (`--type-aware`/`--type-check`) are forced; the project's config decides. Selected but unavailable oxlint (no PATH, no npx) = no lint, never an eslint fallback.
 
 ## JSON: not covered (do not "fix" without reading this)
 

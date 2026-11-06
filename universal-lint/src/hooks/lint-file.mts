@@ -3,9 +3,9 @@
  * universal-lint plugin: PostToolUse Write|Edit lint-only checker.
  *
  * @remarks
- * Command hook, invoked directly per event (no MCP server). stdin = hook JSON (PostToolUseHookInput), stdout = hook
- * result JSON (`hookSpecificOutput.additionalContext`) or nothing when there is no finding. `async: true` in
- * hooks.json: safe because linting never mutates the file; findings surface as context on the next turn.
+ * Command hook, invoked directly per event (no MCP server). stdin = hook JSON (PostToolUseHookInput). `asyncRewake:
+ * true` in hooks.json: runs in the background (safe because linting never mutates the file); findings go to stderr
+ * with exit 2, which wakes Claude with them; no finding = no output, exit 0.
  *
  * lint_file flow (every failure path returns `{}` silently, fail open): guard `tool_response.success !== false`,
  * extension in the registry or type-check-eligible, path inside cwd and not excluded (node_modules/vendor/.git,
@@ -15,7 +15,7 @@
  * classified by exit code for most tools (checkstyle by stripped output, since its exit code counts only
  * ERROR-severity violations and the bundled default ruleset runs at `warning`); (2) for .ts/.tsx/.mts/.cts only, a
  * whole-project `tsc --noEmit` via the nearest tsconfig.json (see `runTypeCheck`). Any issues found: truncated,
- * joined additionalContext; no finding from either check: nothing printed.
+ * joined text (stderr, exit 2); no finding from either check: nothing printed.
  *
  * @packageDocumentation
  */
@@ -72,7 +72,7 @@ const DEBOUNCE_MS = (() => {
   return Number.isFinite(n) && n >= 0 ? n : 5000;
 })();
 
-/** tsc only understands real TypeScript syntax; .js/.jsx/.mjs/.cjs stay eslint-only via the existing jsts chain. */
+/** tsc only understands real TypeScript syntax; .js/.jsx/.mjs/.cjs stay chain-linted only (eslint or oxlint, see resolveOxlintConfig). */
 const TYPE_CHECK_EXTS = new Set([".ts", ".tsx", ".mts", ".cts"]);
 
 /** One linter in a language's chain. */
@@ -186,6 +186,10 @@ export const REGISTRY: Record<string, LangEntry> = {
   },
   kotlin: { chain: [{ name: "ktlint", args: [] }] },
   jsts: { chain: [{ name: "eslint", args: [], npmSpec: "eslint" }] },
+  // Alternate jsts chain, picked by resolveOxlintConfig (not in EXT_MAP).
+  // --no-error-on-unmatched-pattern: a file excluded by the project's oxlint
+  // ignorePatterns otherwise exits 1 ("No files found to lint") -> false finding.
+  oxlint: { chain: [{ name: "oxlint", args: ["--no-error-on-unmatched-pattern"], npmSpec: "oxlint" }] },
   python: { chain: [{ name: "ruff", args: ["check"] }] },
   go: {
     chain: [
@@ -503,6 +507,64 @@ export function resolveTsconfig(fileDir: string, cwd: string): string | null {
   });
 }
 
+/** Eslint config file names, checked after the oxlint names within one directory. */
+const ESLINT_CONFIG_FILENAMES = [
+  "eslint.config.js",
+  "eslint.config.mjs",
+  "eslint.config.cjs",
+  "eslint.config.ts",
+  "eslint.config.mts",
+  "eslint.config.cts",
+  ".eslintrc",
+  ".eslintrc.js",
+  ".eslintrc.cjs",
+  ".eslintrc.json",
+  ".eslintrc.yaml",
+  ".eslintrc.yml",
+];
+
+/** Oxlint config file names, checked first within one directory (oxlint wins a same-dir tie). */
+const OXLINT_CONFIG_FILENAMES = [".oxlintrc.json", ".oxlintrc.jsonc", "oxlint.config.ts"];
+
+/**
+ * Nearest lint config (file dir up to cwd, inclusive) picks the jsts chain.
+ * Selection by file name only; in one dir oxlint names are checked first, so
+ * oxlint wins a same-dir tie, and no config at all means eslint.
+ *
+ * @param fileDir - Directory of the edited file.
+ * @param cwd - Project root.
+ * @returns Path of the nearest config if it is an oxlint config, else null (eslint).
+ */
+export function resolveOxlintConfig(fileDir: string, cwd: string): string | null {
+  const hit = walkUpToCwd(fileDir, cwd, (dir) => {
+    for (const n of [...OXLINT_CONFIG_FILENAMES, ...ESLINT_CONFIG_FILENAMES]) {
+      const p = path.join(dir, n);
+      if (existsSync(p)) return p;
+    }
+    return null;
+  });
+  return hit && OXLINT_CONFIG_FILENAMES.includes(path.basename(hit)) ? hit : null;
+}
+
+/**
+ * True when an oxlint JSON(C) config sets options.typeCheck: oxlint
+ * type-checks itself, so the separate tsc run is skipped. oxlint.config.ts
+ * can't be read without executing it -> false.
+ *
+ * @param configPath - The oxlint config that selected oxlint.
+ * @returns Whether its parsed `options.typeCheck` is literally `true`.
+ */
+export function oxlintConfigTypeChecks(configPath: string): boolean {
+  if (!configPath.endsWith(".json") && !configPath.endsWith(".jsonc")) return false;
+  try {
+    const text = stripTrailingCommas(stripJsonComments(readFileSync(configPath, "utf8")));
+    const cfg = JSON.parse(text) as { options?: { typeCheck?: unknown } } | null;
+    return cfg?.options?.typeCheck === true;
+  } catch {
+    return false; // unreadable or malformed -> keep tsc
+  }
+}
+
 /**
  * Strip // line comments and /* ... *\/ block comments from JSONC text, respecting
  * string literals (so a string containing "//" or "/\*" isn't misread as a
@@ -550,6 +612,37 @@ function stripJsonComments(text: string): string {
     }
     out += c;
     i++;
+  }
+  return out;
+}
+
+/**
+ * Drop JSONC trailing commas (a `,` followed only by whitespace before `}`/`]`),
+ * string-aware so a value like `"a,}"` is left intact. Run after stripJsonComments.
+ *
+ * @param text - Comment-free JSONC text.
+ * @returns The text without trailing commas.
+ */
+export function stripTrailingCommas(text: string): string {
+  let out = "";
+  let inString = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (inString) {
+      if (c === "\\") {
+        out += c + (text[i + 1] ?? "");
+        i++;
+        continue;
+      }
+      if (c === "\"") inString = false;
+    } else if (c === "\"") {
+      inString = true;
+    } else if (c === ",") {
+      let j = i + 1;
+      while (j < text.length && /\s/.test(text[j])) j++;
+      if (text[j] === "}" || text[j] === "]") continue;
+    }
+    out += c;
   }
   return out;
 }
@@ -813,6 +906,7 @@ export function classifyExit(toolName: string, status: number | null): "clean" |
     case "shellcheck": // 0 clean, 1 issues, 2/3/4 file-not-found/bad-invocation/bad-options
     case "ktlint": // 0 clean, 1 issues (lint-only mode; --format's quirk doesn't apply here)
     case "eslint": // 0 clean, 1 issues, 2 config/internal error
+    case "oxlint": // 0 clean (warnings don't fail), 1 lint errors / config load failure / type errors
     case "ruff": // 0 clean, 1 issues, 2 abnormal termination
     case "golangci-lint": // 0 clean, 1 issues, 2-7 warning-in-test/failure/timeout/no-go-files/no-config/error-logged
     case "yamllint": // 0 clean, 1 issues (run without --strict, matching eslint's warnings-don't-count precedent), 255 config/IO crash (POSIX-truncated from sys.exit(-1))
@@ -975,11 +1069,13 @@ function buildSpawnOpts(cwd: string, timeout: number): SpawnSyncOptionsWithStrin
  * @param resolved - Absolute path of the edited file.
  * @param cwd - Project root.
  * @param rel - Path of the file relative to cwd.
- * @returns The finding, or null on any guard failure, clean or skip verdict.
+ * @returns `ran`: a tool ran to a clean or issues verdict (false on no tool, guard
+ *   failure, spawn error/signal or skip verdict); `finding`: the issues, else null.
  */
-function runChainLint(lang: LangEntry, resolved: string, cwd: string, rel: string): Finding | null {
+function runChainLint(lang: LangEntry, resolved: string, cwd: string, rel: string): { ran: boolean; finding: Finding | null } {
+  const none = { ran: false, finding: null };
   const tool = selectLintTool(lang.chain);
-  if (!tool) return null;
+  if (!tool) return none;
   // Gate cargo runs on a resolvable manifest: a stray .rs outside any Cargo
   // project is a silent no-op, not a spurious "could not find Cargo.toml"
   // exit-101 finding. Resolved once here and threaded through buildArgv and
@@ -989,7 +1085,7 @@ function runChainLint(lang: LangEntry, resolved: string, cwd: string, rel: strin
   let manifest: string | null = null;
   if (tool.manifestPath) {
     manifest = resolveCargoManifest(path.dirname(resolved), cwd);
-    if (!manifest) return null;
+    if (!manifest) return none;
   }
 
   const argv = buildArgv(tool, resolved, cwd, manifest);
@@ -997,7 +1093,7 @@ function runChainLint(lang: LangEntry, resolved: string, cwd: string, rel: strin
   const timeout = tool.manifestPath ? CARGO_SPAWN_TIMEOUT_MS : SPAWN_TIMEOUT_MS;
   const spawnOpts = buildSpawnOpts(cwd, timeout);
   const result = runLintTool(tool, argv, spawnOpts);
-  if (result.error || result.signal) return null;
+  if (result.error || result.signal) return none;
 
   // Cargo entries are neither file-scoped nor targetsDir: the natural target
   // is the crate directory (the dir containing the resolved Cargo.toml). The
@@ -1013,9 +1109,8 @@ function runChainLint(lang: LangEntry, resolved: string, cwd: string, rel: strin
     verdict = classifyExit(tool.name, result.status);
     text = `${result.stdout ?? ""}\n${result.stderr ?? ""}`;
   }
-  if (verdict !== "issues") return null;
-
-  return { tool: tool.name, target, text };
+  if (verdict === "skip") return none;
+  return { ran: true, finding: verdict === "issues" ? { tool: tool.name, target, text } : null };
 }
 
 /**
@@ -1174,13 +1269,20 @@ export function lintFileHandler(args: PostToolUseHookInput): HookResult {
     const ext = path.extname(resolved).toLowerCase();
     const lang = EXT_MAP[ext];
     const typeCheckEligible = TYPE_CHECK_EXTS.has(ext);
+    const oxlintConfig = lang === "jsts" ? resolveOxlintConfig(path.dirname(resolved), cwd) : null;
 
     const findings: Finding[] = [];
+    let oxlintRan = false;
     if (lang) {
-      const chainResult = runChainLint(REGISTRY[lang], resolved, cwd, rel);
-      if (chainResult) findings.push(chainResult);
+      // -c makes the detected config oxlint's root: oxlint ignores a nested
+      // oxlint.config.ts and rejects options.typeAware in a nested config otherwise.
+      const entry = oxlintConfig ? { chain: REGISTRY.oxlint.chain.map((t) => ({ ...t, args: [...t.args, "-c", oxlintConfig] })) } : REGISTRY[lang];
+      const chain = runChainLint(entry, resolved, cwd, rel);
+      if (chain.finding) findings.push(chain.finding);
+      oxlintRan = oxlintConfig !== null && chain.ran;
     }
-    if (typeCheckEligible) {
+    // Skip tsc only when oxlint actually ran with a typeCheck config; otherwise tsc is the only type check.
+    if (typeCheckEligible && !(oxlintRan && oxlintConfig && oxlintConfigTypeChecks(oxlintConfig))) {
       const tsResult = runTypeCheck(resolved, cwd);
       if (tsResult) findings.push(tsResult);
     }
@@ -1251,8 +1353,8 @@ async function debounceGate(resolved: string): Promise<boolean> {
 
 /**
  * Read the hook's stdin JSON, run the cheap guards, debounce, then run
- * lintFileHandler and print the result JSON (or nothing). Fails open on any
- * error — no output, exit 0.
+ * lintFileHandler. Findings: their text on stderr and exit 2 (asyncRewake wakes
+ * Claude with it). Fails open on any error — no output, exit 0.
  *
  * @returns Resolves when the hook run is over.
  */
@@ -1262,9 +1364,10 @@ async function main(): Promise<void> {
     const resolved = resolveLintTarget(input);
     if (!resolved) return; // guards rejected — nothing to lint, no wait
     if (!(await debounceGate(resolved))) return; // superseded by a newer edit
-    const result = lintFileHandler(input);
-    if (result && Object.keys(result).length > 0) {
-      process.stdout.write(JSON.stringify(result) + "\n");
+    const ctx = lintFileHandler(input).hookSpecificOutput?.additionalContext;
+    if (ctx) {
+      process.stderr.write(ctx + "\n");
+      process.exitCode = 2;
     }
   } catch {
     // fail open — no output, exit 0
