@@ -27,7 +27,7 @@ function scratch(mutate: (hooks: typeof HOOKS) => unknown = () => {}) {
   mkdirSync(path.join(dir, "src/mcp"), { recursive: true });
   for (
     const f of [
-      "plugin.json",
+      "package.json",
       "plugin/.mcp.json",
       "src/mcp/hook-inputs.d.mts",
     ]

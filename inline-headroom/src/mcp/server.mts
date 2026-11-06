@@ -27,7 +27,7 @@ import { fileURLToPath } from "node:url";
 const SELF = fileURLToPath(import.meta.url);
 
 /**
- * The plugin version, read from plugin.json (its only home).
+ * The plugin version, read from the generated plugin.json (source: package.json).
  *
  * @returns The manifest `version`, or "0.0.0" when unreadable.
  */
