@@ -8,7 +8,7 @@ paths:
 # Hook design (do not "fix" without reading this)
 
 - **One `asyncRewake` `command` hook:** PostToolUse `Write|Edit` → `"${CLAUDE_PLUGIN_ROOT}/hooks/lint-file.mjs"` (the placeholder is quoted so a plugin path with a space survives; `claude plugin validate` warns otherwise), `timeout: 90`, `asyncRewake: true` (not `async`), no `statusMessage` (silent).
-  - `asyncRewake` runs the hook in the background like `async`, but exit `2` wakes Claude with stderr as soon as the lint finishes, instead of the findings waiting for the next turn. Contract (same as the repo's `.claude/hooks/oxlint-edited.sh`): findings = the `universal-lint: …` text on stderr + exit `2`; nothing to report = no output, exit `0`.
+  - `asyncRewake` runs the hook in the background like `async`, but exit `2` wakes Claude with stderr as soon as the lint finishes, instead of the findings waiting for the next turn. Contract: findings = the `universal-lint: …` text on stderr + exit `2`; nothing to report = no output, exit `0`.
   - Invoked directly, no `node` prefix: the built file has a node shebang and the exec bit the build sets. One process per Write/Edit, no persistent process.
   - `timeout: 90` = the lint budget (see "Timeout budget"). No debounce: every Write/Edit lints right away in its own process (user decision 2026-11-06, removed together with the edit coalescing it required).
 - **Single-hook exception to the `mcp_tool`-preferred default** (kwitsch/claude-plugins prefers a persistent MCP stdio server for hooks, as `dprint` does here):
