@@ -40,7 +40,7 @@ paths:
 - Selection is by file name only (`existsSync`), never by content or `package.json#eslintConfig`: this repo's own `.oxlintrc.json` lists `"plugins": ["eslint", ...]`, so content-based selection would misfire.
 - `--no-error-on-unmatched-pattern` is passed because a file excluded by the project's oxlint `ignorePatterns` otherwise exits 1 ("No files found to lint"), which would be a false finding.
 - oxlint exit contract (1.91.0): 0 clean or warnings only, 1 errors / config parse failure / type errors. A broken oxlint config therefore surfaces as a finding carrying oxlint's parse error — accepted.
-- No `-c` is passed (oxlint finds the nearest config itself) and no type-aware flags (`--type-aware`/`--type-check`) are forced; the project's config decides. Selected but unavailable oxlint (no PATH, no npx) = no lint, never an eslint fallback.
+- `-c <detected config>` is appended (`lintFileHandler`), making it oxlint's root config. Probed on 1.91.0: without it oxlint ignores a nested `oxlint.config.ts` and rejects `options.typeAware` in a nested config ("only supported in the root config"). No type-aware flags (`--type-aware`/`--type-check`) are forced; the project's config decides. Selected but unavailable oxlint (no PATH, no npx) = no lint, never an eslint fallback.
 
 ## JSON: not covered (do not "fix" without reading this)
 

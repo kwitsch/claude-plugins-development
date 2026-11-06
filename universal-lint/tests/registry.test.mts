@@ -4,7 +4,7 @@ import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "vitest";
-import { buildArgv, classifyCheckstyleOutput, classifyExit, hasProjectMarkdownlintConfig, hasProjectYamllintConfig, isExcludedPath, isToolAvailable, lintFileHandler, looksLikeSolutionStyleTsconfig, oxlintConfigTypeChecks, parseRtkPrefix, REGISTRY, resolveCargoManifest, resolveCheckstyleConfig, resolveLintTarget, resolveOxlintConfig, resolveTsconfig, truncate, tsBuildInfoPathFor, tscOutputHasSourceDiagnostic } from "../plugin/hooks/lint-file.mjs";
+import { buildArgv, classifyCheckstyleOutput, classifyExit, hasProjectMarkdownlintConfig, hasProjectYamllintConfig, isExcludedPath, isToolAvailable, lintFileHandler, looksLikeSolutionStyleTsconfig, oxlintConfigTypeChecks, parseRtkPrefix, REGISTRY, resolveCargoManifest, resolveCheckstyleConfig, resolveLintTarget, resolveOxlintConfig, resolveTsconfig, stripTrailingCommas, truncate, tsBuildInfoPathFor, tscOutputHasSourceDiagnostic } from "../plugin/hooks/lint-file.mjs";
 
 const shellcheck = REGISTRY.shell.chain[0];
 const checkstyle = REGISTRY.java.chain[0];
@@ -704,6 +704,15 @@ test("oxlintConfigTypeChecks: typeCheck false / missing / no options / string \"
   for (const text of ["{\"options\":{\"typeCheck\":false}}", "{\"options\":{\"typeAware\":true}}", "{}", "{\"options\":{\"typeCheck\":\"true\"}}"]) {
     assert.equal(oxlintConfigTypeChecks(oxlCfg(".oxlintrc.json", text)), false, text);
   }
+});
+
+test("oxlintConfigTypeChecks: string values containing ',}' / ',]' survive trailing-comma removal -> true", () => {
+  const text = "{\"ignorePatterns\": [\"a,}\", \"b,]\",],\n \"options\": {\"typeCheck\": true,},}";
+  assert.equal(oxlintConfigTypeChecks(oxlCfg(".oxlintrc.jsonc", text)), true);
+});
+
+test("stripTrailingCommas: removes only structural trailing commas", () => {
+  assert.equal(stripTrailingCommas("{\"a\": [1, 2 ,\n ], \"b\": \"x,}\\\",]\",}"), "{\"a\": [1, 2 \n ], \"b\": \"x,}\\\",]\"}");
 });
 
 test("oxlintConfigTypeChecks: malformed JSON -> false", () => {

@@ -293,7 +293,7 @@ export function resolveOxlintConfig(fileDir, cwd) {
 export function oxlintConfigTypeChecks(configPath) {
 	if (!configPath.endsWith(".json") && !configPath.endsWith(".jsonc")) return false;
 	try {
-		const text = stripJsonComments(readFileSync(configPath, "utf8")).replace(/,(\s*[}\]])/g, "$1");
+		const text = stripTrailingCommas(stripJsonComments(readFileSync(configPath, "utf8")));
 		const cfg = JSON.parse(text);
 		return cfg?.options?.typeCheck === true;
 	} catch {
@@ -336,6 +336,29 @@ function stripJsonComments(text) {
 		}
 		out += c;
 		i++;
+	}
+	return out;
+}
+export function stripTrailingCommas(text) {
+	let out = "";
+	let inString = false;
+	for (let i = 0; i < text.length; i++) {
+		const c = text[i];
+		if (inString) {
+			if (c === "\\") {
+				out += c + (text[i + 1] ?? "");
+				i++;
+				continue;
+			}
+			if (c === "\"") inString = false;
+		} else if (c === "\"") {
+			inString = true;
+		} else if (c === ",") {
+			let j = i + 1;
+			while (j < text.length && /\s/.test(text[j])) j++;
+			if (text[j] === "}" || text[j] === "]") continue;
+		}
+		out += c;
 	}
 	return out;
 }
@@ -522,18 +545,22 @@ function buildSpawnOpts(cwd, timeout) {
 	};
 }
 function runChainLint(lang, resolved, cwd, rel) {
+	const none = {
+		ran: false,
+		finding: null
+	};
 	const tool = selectLintTool(lang.chain);
-	if (!tool) return null;
+	if (!tool) return none;
 	let manifest = null;
 	if (tool.manifestPath) {
 		manifest = resolveCargoManifest(path.dirname(resolved), cwd);
-		if (!manifest) return null;
+		if (!manifest) return none;
 	}
 	const argv = buildArgv(tool, resolved, cwd, manifest);
 	const timeout = tool.manifestPath ? CARGO_SPAWN_TIMEOUT_MS : SPAWN_TIMEOUT_MS;
 	const spawnOpts = buildSpawnOpts(cwd, timeout);
 	const result = runLintTool(tool, argv, spawnOpts);
-	if (result.error || result.signal) return null;
+	if (result.error || result.signal) return none;
 	const target = tool.targetsDir ? path.relative(cwd, path.dirname(resolved)) || "." : manifest ? path.relative(cwd, path.dirname(manifest)) || "." : rel;
 	let verdict;
 	let text;
@@ -545,11 +572,14 @@ function runChainLint(lang, resolved, cwd, rel) {
 		verdict = classifyExit(tool.name, result.status);
 		text = `${result.stdout ?? ""}\n${result.stderr ?? ""}`;
 	}
-	if (verdict !== "issues") return null;
+	if (verdict === "skip") return none;
 	return {
-		tool: tool.name,
-		target,
-		text
+		ran: true,
+		finding: verdict === "issues" ? {
+			tool: tool.name,
+			target,
+			text
+		} : null
 	};
 }
 const TSC_SOURCE_DIAGNOSTIC_RE = /\.(?:ts|tsx|mts|cts)[:(]\d+/;
@@ -630,11 +660,21 @@ export function lintFileHandler(args) {
 		const typeCheckEligible = TYPE_CHECK_EXTS.has(ext);
 		const oxlintConfig = lang === "jsts" ? resolveOxlintConfig(path.dirname(resolved), cwd) : null;
 		const findings = [];
+		let oxlintRan = false;
 		if (lang) {
-			const chainResult = runChainLint(REGISTRY[oxlintConfig ? "oxlint" : lang], resolved, cwd, rel);
-			if (chainResult) findings.push(chainResult);
+			const entry = oxlintConfig ? { chain: REGISTRY.oxlint.chain.map((t) => ({
+				...t,
+				args: [
+					...t.args,
+					"-c",
+					oxlintConfig
+				]
+			})) } : REGISTRY[lang];
+			const chain = runChainLint(entry, resolved, cwd, rel);
+			if (chain.finding) findings.push(chain.finding);
+			oxlintRan = oxlintConfig !== null && chain.ran;
 		}
-		if (typeCheckEligible && !(oxlintConfig && oxlintConfigTypeChecks(oxlintConfig))) {
+		if (typeCheckEligible && !(oxlintRan && oxlintConfig && oxlintConfigTypeChecks(oxlintConfig))) {
 			const tsResult = runTypeCheck(resolved, cwd);
 			if (tsResult) findings.push(tsResult);
 		}

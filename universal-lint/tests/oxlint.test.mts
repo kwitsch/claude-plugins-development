@@ -10,14 +10,14 @@ const JS = "let x = 1;\n";
 
 test("oxlint: .oxlintrc.json selects oxlint, exit 1 surfaced, eslint never spawned", () => {
   const e = makeEnv();
-  e.file(".oxlintrc.json", "{}");
   e.recStub("oxlint", 1);
   e.recStub("eslint", 1);
+  const cfg = e.file(".oxlintrc.json", "{}");
   const f = e.file("src/a.ts", TS);
   const r = e.run(f, { out: "oxlint-finding-marker" });
   assert.match(r.ctx, /oxlint found issues in src\/a\.ts/);
   assert.match(r.ctx, /oxlint-finding-marker/);
-  assert.ok(e.lines().some((l) => l.includes(`oxlint --no-error-on-unmatched-pattern ${f}`)));
+  assert.ok(e.lines().some((l) => l.includes(`oxlint --no-error-on-unmatched-pattern -c ${cfg} ${f}`)));
   assert.ok(!e.lines().some((l) => l.startsWith("eslint ")));
 });
 
@@ -53,11 +53,21 @@ test("oxlint: eslint.config.mjs and .oxlintrc.json in the same dir -> eslint win
 
 test("oxlint: absent from PATH but npx present -> npx --yes oxlint fallback runs", () => {
   const e = makeEnv();
-  e.file(".oxlintrc.json", "{}");
+  const cfg = e.file(".oxlintrc.json", "{}");
   e.recStub("npx", 1);
   const f = e.file("a.js", JS);
   e.run(f, { out: "oxlint-finding-marker" });
-  assert.ok(e.lines().some((l) => l.includes(`npx --yes oxlint --no-error-on-unmatched-pattern ${f}`)));
+  assert.ok(e.lines().some((l) => l.includes(`npx --yes oxlint --no-error-on-unmatched-pattern -c ${cfg} ${f}`)));
+});
+
+test("oxlint: nested oxlint.config.ts is passed via -c (oxlint ignores nested .ts configs on its own)", () => {
+  const e = makeEnv();
+  e.file(".oxlintrc.json", "{}");
+  const cfg = e.file("pkg/oxlint.config.ts", "export default {};\n");
+  e.recStub("oxlint", 0);
+  const f = e.file("pkg/a.js", JS);
+  e.run(f);
+  assert.ok(e.lines().some((l) => l.includes(`oxlint --no-error-on-unmatched-pattern -c ${cfg} ${f}`)));
 });
 
 test("oxlint: selected but no oxlint and no npx -> {}, no eslint fallback", () => {
@@ -72,13 +82,14 @@ test("oxlint: selected but no oxlint and no npx -> {}, no eslint fallback", () =
  *
  * @param configName - Lint config file name at the project root.
  * @param config - Its content.
+ * @param oxlintExit - Exit code of the oxlint stub, or null for no oxlint (nor npx) at all.
  * @returns The hook result and whether tsc was spawned.
  */
-function gate(configName: string, config: string): { result: object; tscRan: boolean } {
+function gate(configName: string, config: string, oxlintExit: number | null = 0): { result: object; tscRan: boolean } {
   const e = makeEnv();
   e.file("tsconfig.json", TSCONFIG);
   e.file(configName, config);
-  e.recStub("oxlint", 0);
+  if (oxlintExit !== null) e.recStub("oxlint", oxlintExit);
   e.recStub("eslint", 0);
   e.recStub("tsc", 2);
   const r = e.run(e.file("a.ts", TS), { out: "a.ts(1,1): error TS2322: tsc-finding-marker" });
@@ -114,4 +125,18 @@ test("tsc gate: malformed .oxlintrc.json -> tsc spawned", () => {
 
 test("tsc gate: eslint config -> tsc spawned (eslint path unchanged)", () => {
   assert.equal(gate("eslint.config.mjs", "export default [];\n").tscRan, true);
+});
+
+const TYPE_CHECK_CFG = "{\"options\":{\"typeAware\":true,\"typeCheck\":true}}";
+
+test("tsc gate: typeCheck true but oxlint unavailable -> tsc spawned", () => {
+  assert.equal(gate(".oxlintrc.json", TYPE_CHECK_CFG, null).tscRan, true);
+});
+
+test("tsc gate: typeCheck true but oxlint skip verdict (exit 2) -> tsc spawned", () => {
+  assert.equal(gate(".oxlintrc.json", TYPE_CHECK_CFG, 2).tscRan, true);
+});
+
+test("tsc gate: typeCheck true and oxlint reports issues (exit 1) -> tsc not spawned", () => {
+  assert.equal(gate(".oxlintrc.json", TYPE_CHECK_CFG, 1).tscRan, false);
 });
