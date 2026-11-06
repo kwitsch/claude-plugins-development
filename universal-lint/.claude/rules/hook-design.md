@@ -3,19 +3,22 @@ paths:
   - "src/hooks/**"
   - "plugin/hooks/**"
   - "tests/{core,npx-fallback,rtk,truncation,manifest,registry,tsc}.test.mts"
+  - "tests/file-detection.test.mts"
 ---
 
 # Hook design (do not "fix" without reading this)
 
-- **One `asyncRewake` `command` hook:** PostToolUse `Write|Edit` → `"${CLAUDE_PLUGIN_ROOT}/hooks/lint-file.mjs"` (the placeholder is quoted so a plugin path with a space survives; `claude plugin validate` warns otherwise), `timeout: 90`, `asyncRewake: true` (not `async`), no `statusMessage` (silent).
-  - `asyncRewake` runs the hook in the background like `async`, but exit `2` wakes Claude with stderr as soon as the lint finishes, instead of the findings waiting for the next turn. Contract: findings = the `universal-lint: …` text on stderr + exit `2`; nothing to report = no output, exit `0`.
-  - Invoked directly, no `node` prefix: the built file has a node shebang and the exec bit the build sets. One process per Write/Edit, no persistent process.
-  - `timeout: 90` = the lint budget (see "Timeout budget"). No debounce: every Write/Edit lints right away in its own process (user decision 2026-11-06, removed together with the edit coalescing it required).
-- **Single-hook exception to the `mcp_tool`-preferred default** (kwitsch/claude-plugins prefers a persistent MCP stdio server for hooks, as `dprint` does here):
-  - A persistent MCP stdio server buys nothing for exactly one hook.
-  - Running in the background removes the one argument for a server (per-event spawn latency): the agentic loop doesn't wait either way.
+- **Four `command` hooks, one entry:** every event runs `"${CLAUDE_PLUGIN_ROOT}/hooks/lint-file.mjs"` (the placeholder is quoted so a plugin path with a space survives; `claude plugin validate` warns otherwise); `main()` dispatches on `hook_event_name`. No `async`, no `statusMessage` (silent), no matcher on the three non-tool events.
+  - PostToolUse `Write|Edit` (`PostToolUse[0]`, index pinned by `tests/manifest.test.mts`): `timeout: 90`, `asyncRewake: true`. Records the content digest (see "File detection"), then lints. A payload without `hook_event_name` is treated as PostToolUse.
+  - SessionStart and CwdChanged: `timeout: 30`. Print the watch list on stdout as `{"hookSpecificOutput":{"hookEventName":<event>,"watchPaths":[…]}}`, only when it is non-empty; always exit `0`. CwdChanged builds the list for `new_cwd`; empty output leaves Claude Code with an empty watch list.
+  - FileChanged: `timeout: 90`, `asyncRewake: true`. Lints a watched file changed outside Write/Edit with the same findings contract; the text is prefixed `universal-lint (changed outside Write/Edit): ` and `hookEventName` is `FileChanged`.
+  - `asyncRewake` runs the hook in the background like `async`, but exit `2` wakes Claude with stderr as soon as the lint finishes, instead of the findings waiting for the next turn. Contract: findings = the `universal-lint…: …` text on stderr + exit `2`; nothing to report = no output, exit `0`.
+  - Invoked directly, no `node` prefix: the built file has a node shebang and the exec bit the build sets. One process per event, no persistent process.
+  - No debounce: every Write/Edit lints right away in its own process (user decision 2026-11-06, removed together with the edit coalescing it required).
+- **Command hooks, no MCP server (user decision 2026-11-06)** (kwitsch/claude-plugins prefers a persistent MCP stdio server for hooks, as `dprint` does here):
+  - Background lints (`asyncRewake`) remove the one argument for a server (per-event spawn latency): the agentic loop doesn't wait either way. The watch-list hooks are short `git ls-files` calls.
   - Safe because linting never mutates the file: findings arriving after the edit (rewake) cost no correctness. `universal-format` stays synchronous for the opposite reason.
-  - Adding a second hook voids the exception.
+  - Cost: no in-process state. The Write/Edit → FileChanged digest goes through disk (`CLAUDE_PLUGIN_DATA/written/`), and there is no cross-process concurrency cap on parallel FileChanged lints (accepted; `shortcut:` comment on `fileChangedHandler`).
 - **No launcher script, no `.mcp.json`:** a direct `.mjs` command hook needs neither; the script always runs under `node`, never `bun`.
 
 ## Timeout budget (re-derive when `hooks.json` `timeout` or any `*_TIMEOUT_MS` changes)
@@ -27,6 +30,7 @@ paths:
 - **Cold npx:** the rtk-wrapped attempt is bounded by `RTK_NPX_ATTEMPT_TIMEOUT_MS` (5 s), then bare npx gets `NPX_SPAWN_TIMEOUT_MS` (55 s) → 60 s worst case, the same as the direct branch's doubling. Giving both the full npx budget would total 110 s > 90 s — the reason for the separate bound; don't unify them.
 - Overlapping lints of quick successive edits share the `--tsBuildInfoFile` (accepted, see `typescript-check.md`).
 - **Accepted:** when combined wall time exceeds the 90 s lint budget (cold npx 60 s + `tsc` 45 s = 105 s, rtk doubling, or both compounding) the hook is killed and that turn's async findings are silently lost. Fail-open, never a wrong result; the next edit's `tsc` hits a warm cache.
+- **git:** each git call (`git ls-files` for the watch list, `git status` for the FileChanged gate) is capped at `GIT_TIMEOUT_MS` (10 s). FileChanged nominal worst case: git 10 s + chain 30 s + `tsc` 45 s = 85 s < 90 s; the rtk-doubling/cold-npx overruns above apply unchanged (a kill loses that lint silently). SessionStart/CwdChanged: git 10 s plus one realpath per listed file, inside the 30 s hook timeout.
 
 ## Runtime behavior (`lint_file`)
 
@@ -72,8 +76,18 @@ paths:
 - **Parse errors are always kept:** an own-file miss whose segment or paragraph preamble matches `PARSE_ERROR_RE` (parse/syntax error wording, `unclosed`, `unterminated`, `end of file`, tsc `TS1xxx`, shellcheck `SC1xxx`) stays reportable, since an edit-caused parse error is often reported away from the edit (unclosed brace → EOF). Other own-file diagnostics outside the edit (e.g. a tsc call-site error in the same file) are dropped by design.
 - **Residuals:** a parse error phrased outside `PARSE_ERROR_RE` is gated; a path containing a space is not matched and counts as foreign (kept); a same-named file reached only by the suffix fallback can be mistaken for the edited file; a format the regexes miss is reported unchanged.
 
+## File detection (FileChanged + watch list)
+
+- **Scope (`scopedTarget`, port of dprint's `realish`/`inScope`), shared by every event** (PostToolUse through `resolveLintTarget`, the skill driver through it, FileChanged, the watch list): the path resolved against the payload `cwd` (never `process.cwd()`) must exist, have a lintable extension (`EXT_MAP` or `TYPE_CHECK_EXTS`), its real path must lie strictly inside realpath(cwd), not be excluded, not lie inside realpath(`scratchpad_dir`) when the payload has one, and not be a dangling link. The lint keeps the lexical path; the real path is the digest key. A Write/Edit through a symlink pointing outside the cwd, or into a scratchpad inside it, is not linted.
+- **Watch list** (`watchList`, SessionStart/CwdChanged): `git ls-files -co --exclude-standard -z` (tracked + untracked-not-ignored) in the cwd (`new_cwd` for CwdChanged), filtered through `scopedTarget`. Above `WATCH_LIMIT` (5000) lintable files nothing is watched (stderr note); a git failure (not a repo, no git, timeout) watches nothing.
+- **FileChanged skip order** (`fileChangedHandler`, first match wins, every skip = `{}`): `unlink` event; out of scope; content equals the digest Write/Edit recorded; `git --no-optional-locks status --porcelain --untracked-files=normal --ignored=matching -- <fp>` (cwd `dirname(fp)`) prints nothing (tracked, unchanged) or starts with `!!` (ignored). A git failure lints. `add` and `change` are handled alike.
+- **Digest store:** PostToolUse records the SHA-256 (base64) of the file on disk at `${CLAUDE_PLUGIN_DATA || os.tmpdir()}/written/<hashPath(real path)>` (temp file + `renameSync`, one file per real path, no locking) before it lints. A missing digest is no match; a write error is swallowed (cost: one duplicate lint). The skill driver records nothing. No pruning (bounded by the number of files ever written). Race: a FileChanged delivered before the digest lands lints twice (duplicate findings, never lost ones).
+- **FileChanged lints the whole file:** no edit-range gate (`ranges = null`).
+- **Static watch list (dprint F24):** files created after SessionStart/CwdChanged, or replaced by unlink+create, are not watched until the next SessionStart/CwdChanged. Refreshing after Bash commands is a follow-up.
+
 ## Path exclusions (`isExcludedPath`)
 
 - Skips `node_modules/`, `vendor/`, `.git/`, plus two Claude-Code-owned subtrees that can land inside a broad `cwd` (e.g. `$HOME`, or a repo root nesting worktrees): `.claude/worktrees/` (harness-created git worktrees, never this session's own content) and `.claude/agent-memory/` (gitignored agent runtime artifacts).
 - Any basename containing `.local.` (e.g. `settings.local.json`) is skipped in any directory, matching `.claude/.gitignore`'s `*.local.*` personal-override convention.
 - **Deliberately narrow — not a blanket `.claude/` exclusion.** Tracked content under `.claude/` (`rules/`, `agents/`, `skills/`, `settings.json`) must keep getting linted; a `.claude/rules/*.md` edit still triggers markdownlint.
+- Exclusion is checked on the path relative to the **real** cwd (inside `scopedTarget`), so a symlinked cwd or file cannot dodge it.
