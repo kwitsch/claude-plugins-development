@@ -34,7 +34,7 @@ jobs:
           p=""
           for d in */; do
             d=${d%/}
-            jq -e 'has("claudePlugin")' "$d/package.json" > /dev/null 2>&1 || continue
+            bash .github/scripts/is-plugin.sh "$d" || continue
             case "$TAG" in "$d"-*) [ ${#d} -gt ${#p} ] && p=$d ;; esac
           done
           if [ -z "$p" ]; then
