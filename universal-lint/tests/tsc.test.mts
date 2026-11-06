@@ -5,6 +5,14 @@ import { test } from "vitest";
 import { makeEnv } from "./support/lint-hook.mts";
 
 /** Project with src/** tsconfig and a 2-line src/a.ts, for the Edit-range tests. */
+/** Edit tool_response replacing line 1 of src/a.ts. */
+const EDIT_L1 = { structuredPatch: [{ oldStart: 1, oldLines: 2, newStart: 1, newLines: 2, lines: ["-const x = 1;", "+const x: number = 1;", " const y: string = 2;"] }] };
+
+/**
+ * Project with src/** tsconfig and a 2-line src/a.ts, for the Edit-range tests.
+ *
+ * @returns The env and the file.
+ */
 function srcProj() {
   const e = makeEnv();
   e.file("tsconfig.json", "{\"compilerOptions\":{\"noEmit\":true},\"include\":[\"src/**/*.ts\"]}");
@@ -16,7 +24,7 @@ test("tsc Edit: only the diagnostic on the edited line is reported", () => {
   e.recStub("tsc", 2);
   const r = e.run(a, {
     toolName: "Edit",
-    toolInput: { new_string: "const x: number = 1;" },
+    toolResponse: EDIT_L1,
     out: "src/a.ts(1,1): error TS2322: line1-marker\nsrc/a.ts(2,1): error TS2322: line2-marker",
   });
   assert.equal(r.status, 2);
@@ -27,7 +35,7 @@ test("tsc Edit: only the diagnostic on the edited line is reported", () => {
 test("tsc Edit: a diagnostic only outside the edited line -> exit 0", () => {
   const { e, a } = srcProj();
   e.recStub("tsc", 2);
-  const r = e.run(a, { toolName: "Edit", toolInput: { new_string: "const x: number = 1;" }, out: "src/a.ts(2,1): error TS2322: line2-marker" });
+  const r = e.run(a, { toolName: "Edit", toolResponse: EDIT_L1, out: "src/a.ts(2,1): error TS2322: line2-marker" });
   assert.equal(r.status, 0);
   assert.equal(r.ctx, "");
 });

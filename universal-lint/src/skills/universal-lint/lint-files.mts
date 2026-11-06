@@ -6,8 +6,7 @@
  * @remarks
  * Reads a newline-delimited list file (argv[2]); each path is resolved against `process.cwd()`, which must contain
  * the file (`lintFileHandler` hard-gates on containment and silently skips files outside it). `lintFileHandler` is
- * synchronous (spawnSync internally) and bypasses the hook's 5s debounce (which lives only in the hook's entry
- * point, never in the handler).
+ * synchronous (spawnSync internally).
  *
  * shortcut: `lintFileHandler` reruns a whole-project `tsc --noEmit` per .ts file; the incremental buildinfo cache
  * keeps repeats cheap. Batch-per-tsconfig dedup is a future optimization only if a large .ts batch ever bites.

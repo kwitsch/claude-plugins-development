@@ -4,7 +4,7 @@ import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "vitest";
-import { buildArgv, classifyCheckstyleOutput, classifyExit, editEntry, editRanges, gateFinding, hasProjectMarkdownlintConfig, hasProjectYamllintConfig, isExcludedPath, isToolAvailable, lintFileHandler, looksLikeSolutionStyleTsconfig, oxlintConfigTypeChecks, parseRtkPrefix, REGISTRY, resolveCargoManifest, resolveCheckstyleConfig, resolveLintTarget, resolveOxlintConfig, resolveTsconfig, stripTrailingCommas, truncate, tsBuildInfoPathFor, tscOutputHasSourceDiagnostic } from "../plugin/hooks/lint-file.mjs";
+import { buildArgv, classifyCheckstyleOutput, classifyExit, editRanges, gateFinding, hasProjectMarkdownlintConfig, hasProjectYamllintConfig, isExcludedPath, isToolAvailable, lintFileHandler, looksLikeSolutionStyleTsconfig, oxlintConfigTypeChecks, parseRtkPrefix, REGISTRY, resolveCargoManifest, resolveCheckstyleConfig, resolveLintTarget, resolveOxlintConfig, resolveTsconfig, stripTrailingCommas, truncate, tsBuildInfoPathFor, tscOutputHasSourceDiagnostic } from "../plugin/hooks/lint-file.mjs";
 
 const shellcheck = REGISTRY.shell.chain[0];
 const checkstyle = REGISTRY.java.chain[0];
@@ -729,28 +729,32 @@ test("oxlintConfigTypeChecks: a directory named .oxlintrc.json (EISDIR) -> false
   assert.equal(oxlintConfigTypeChecks(p), false);
 });
 
-test("editRanges: a multi-line single occurrence spans all its lines", () => {
-  assert.deepEqual(editRanges("a\nb\nc\nd\n", "b\nc"), [[1, 2]]);
+/**
+ * An Edit payload with the given structuredPatch hunks.
+ *
+ * @param hunks - The `structuredPatch` value.
+ * @returns The payload.
+ */
+const editArgs = (hunks: unknown) => ({ cwd: "/p", tool_name: "Edit", tool_input: { file_path: "a.sh" }, tool_response: { success: true, structuredPatch: hunks } });
+
+test("editRanges: replaced and added lines give the `+` run (0-based, inclusive)", () => {
+  assert.deepEqual(editRanges(editArgs([{ newStart: 3, lines: [" a", "-b", "+B", "+C", " d"] }])), [[3, 4]]);
 });
 
-test("editRanges: a trailing newline in the needle does not extend the range into the next line", () => {
-  assert.deepEqual(editRanges("a\nb\nc\n", "b\n"), [[1, 1]]);
+test("editRanges: a pure deletion gives the two lines around the deletion point", () => {
+  assert.deepEqual(editRanges(editArgs([{ newStart: 3, lines: [" a", "-b", " c"] }])), [[2, 3]]);
+  assert.deepEqual(editRanges(editArgs([{ newStart: 1, lines: ["-a", " b"] }])), [[0, 0]]);
 });
 
-test("editRanges: two non-overlapping occurrences give two ranges", () => {
-  assert.deepEqual(editRanges("x\ny\nx\n", "x"), [[0, 0], [2, 2]]);
+test("editRanges: several hunks and runs each give a range; `\\ No newline` is not a line", () => {
+  const hunks = [{ newStart: 1, lines: ["+x", " a", "-b", "+y", "\\ No newline at end of file"] }, { newStart: 20, lines: [" c", "+z"] }];
+  assert.deepEqual(editRanges(editArgs(hunks)), [[0, 0], [2, 2], [20, 20]]);
 });
 
-test("editRanges: an empty or absent needle gives null", () => {
-  assert.equal(editRanges("a\n", ""), null);
-  assert.equal(editRanges("a\n", "zzz"), null);
-});
-
-test("editEntry: Edit with a string new_string gives it; Write or a missing new_string gives null", () => {
-  assert.equal(editEntry({ cwd: "/p", tool_name: "Edit", tool_input: { file_path: "a.sh", new_string: "x" } }), "x");
-  assert.equal(editEntry({ cwd: "/p", tool_name: "Edit", tool_input: { file_path: "a.sh", new_string: "" } }), "");
-  assert.equal(editEntry({ cwd: "/p", tool_name: "Write", tool_input: { file_path: "a.sh", new_string: "x" } }), null);
-  assert.equal(editEntry({ cwd: "/p", tool_name: "Edit", tool_input: { file_path: "a.sh" } }), null);
+test("editRanges: Write, a missing or a malformed patch gives null (whole file)", () => {
+  assert.equal(editRanges({ ...editArgs([]), tool_name: "Write" }), null);
+  assert.equal(editRanges({ cwd: "/p", tool_name: "Edit", tool_input: { file_path: "a.sh" } }), null);
+  assert.equal(editRanges(editArgs([{ lines: [] }])), null);
 });
 
 /** Scratch base directory for the gateFinding tests; holds a real `other.ts` (a different existing file). */
@@ -844,13 +848,19 @@ test("gateFinding: a workspace-root-relative cargo path is matched by suffix (ow
   assert.equal(gateFinding(gf(text, crate), [[0, 0]], resolved), null);
 });
 
-test("gateFinding: a path broken by a space in a directory name is matched by suffix", () => {
+test("gateFinding: a path broken by a space in a directory name is not matched, so it is kept (fail open)", () => {
   const resolved = path.join(GATE_DIR, "my dir", "a.sh");
-  const text = `${resolved}:3:1: note: spaced-marker [SC2086]\n`;
-  const g = gateFinding(gf(text), [[2, 2]], resolved);
+  const g = gateFinding(gf(`${resolved}:3:1: note: spaced-marker [SC2086]\n`), [[0, 0]], resolved);
   assert.ok(g);
   assert.match(g.text, /spaced-marker/);
-  assert.equal(gateFinding(gf(text), [[0, 0]], resolved), null);
+});
+
+test("gateFinding: an own-file parse error outside the range is kept (location line or preamble)", () => {
+  const resolved = path.join(GATE_DIR, "a.ts");
+  assert.ok(gateFinding(gf("a.ts(9,1): error TS1005: ';' expected.\n"), [[0, 0]], resolved));
+  const rs = path.join(GATE_DIR, "src", "b.rs");
+  assert.ok(gateFinding(gf("error: this file contains an unclosed delimiter\n --> src/b.rs:40:3\n"), [[0, 0]], rs));
+  assert.equal(gateFinding(gf("a.ts(9,1): error TS2322: type-marker\n"), [[0, 0]], resolved), null);
 });
 
 test("gateFinding: text without any location is returned unchanged", () => {

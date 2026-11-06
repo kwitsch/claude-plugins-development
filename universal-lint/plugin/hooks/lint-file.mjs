@@ -1,11 +1,10 @@
 #!/usr/bin/env node
 import { spawnSync } from "node:child_process";
-import { createHash, randomBytes } from "node:crypto";
-import { accessSync, appendFileSync, constants as fsConstants, existsSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { accessSync, constants as fsConstants, existsSync, mkdirSync, readFileSync, realpathSync, renameSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import path from "node:path";
 import process from "node:process";
-import { setTimeout as sleep } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 const SPAWN_TIMEOUT_MS = 3e4;
 const NPX_SPAWN_TIMEOUT_MS = 55e3;
@@ -14,12 +13,6 @@ const MAX_CONTEXT_CHARS = 4e3;
 const MAX_BUFFER_BYTES = 10 * 1024 * 1024;
 const TSC_SPAWN_TIMEOUT_MS = 45e3;
 const CARGO_SPAWN_TIMEOUT_MS = 45e3;
-const DEBOUNCE_MS = (() => {
-	const raw = process.env.UNIVERSAL_LINT_DEBOUNCE_MS;
-	const n = raw ? Number(raw) : NaN;
-	return Number.isFinite(n) && n >= 0 ? n : 5e3;
-})();
-const EDITS_MAX_AGE_MS = 6e5;
 const TYPE_CHECK_EXTS = new Set([
 	".ts",
 	".tsx",
@@ -654,42 +647,44 @@ export function resolveLintTarget(args) {
 		return null;
 	}
 }
-export function editEntry(args) {
-	const newString = args?.tool_input?.new_string;
-	return args?.tool_name === "Edit" && typeof newString === "string" ? newString : null;
-}
-export function editRanges(text, needle) {
-	if (needle === "") return null;
-	if (!text.includes(needle) && text.includes("\r\n")) needle = needle.replace(/\r?\n/g, "\r\n");
-	let pos = 0;
-	let line = 0;
-	const lineOf = (k) => {
-		for (let n = text.indexOf("\n", pos); n !== -1 && n < k; n = text.indexOf("\n", pos)) {
-			line++;
-			pos = n + 1;
-		}
-		return line;
-	};
+export function editRanges(args) {
+	const patch = args?.tool_response?.structuredPatch;
+	if (args?.tool_name !== "Edit" || !Array.isArray(patch)) return null;
 	const ranges = [];
-	for (let i = text.indexOf(needle); i !== -1; i = text.indexOf(needle, i + needle.length)) {
-		const start = lineOf(i);
-		ranges.push([start, lineOf(i + needle.length - 1)]);
+	for (const h of patch) {
+		if (typeof h?.newStart !== "number" || !Array.isArray(h.lines)) return null;
+		let cur = h.newStart - 1;
+		let start = -1;
+		let deleted = false;
+		const flush = () => {
+			if (start !== -1) ranges.push([start, cur - 1]);
+			else if (deleted) ranges.push([Math.max(cur - 1, 0), Math.max(cur, 0)]);
+			start = -1;
+			deleted = false;
+		};
+		for (const l of h.lines) {
+			const c = typeof l === "string" ? l[0] : " ";
+			if (c === "+") {
+				if (start === -1) start = cur;
+				cur++;
+			} else if (c === "-") deleted = true;
+			else if (c !== "\\") {
+				flush();
+				cur++;
+			}
+		}
+		flush();
 	}
-	return ranges.length > 0 ? ranges : null;
+	return ranges;
 }
 const LOC_PATH_RE = /(?<path>[^\s:()[\]'"]+\.[A-Za-z0-9]+)[:(](?<line>\d+)(?:[:,]\d+)?/;
 const LOC_ROW_RE = /^\s*(?<line>\d+):\d+\s/;
 const LOC_SHELLCHECK_RE = /^In .+ line (?<line>\d+):/;
+const PARSE_ERROR_RE = /pars(?:e|ing) error|syntax ?error|unexpected (?:token|end|eof|character|indent)|unterminated|unclosed|end of (?:file|input)|\bexpected [`'"]|\b(?:TS1|SC1)\d{3}\b/i;
 export function gateFinding(finding, ranges, resolved) {
 	const hit = (line) => ranges === null || ranges.some(([s, e]) => s <= line - 1 && line - 1 <= e) ? "hit" : "miss";
 	const classify = (raw) => {
 		const plain = raw.replace(ANSI_SGR_RE, "");
-		for (const own of [resolved, path.relative(finding.base, resolved)]) {
-			let at = /\s/.test(own) ? plain.indexOf(own) : -1;
-			while (at > 0 && /[\w/\\.-]/.test(plain[at - 1])) at = plain.indexOf(own, at + 1);
-			const m = at === -1 ? null : /^[:(](\d+)/.exec(plain.slice(at + own.length));
-			if (m) return hit(Number(m[1]));
-		}
 		const row = LOC_ROW_RE.exec(plain);
 		if (row?.groups) return hit(Number(row.groups.line));
 		const a = LOC_PATH_RE.exec(plain);
@@ -699,7 +694,7 @@ export function gateFinding(finding, ranges, resolved) {
 			const own = abs === resolved || !path.isAbsolute(p) && !existsSync(abs) && resolved.endsWith(path.sep + p);
 			return own ? hit(Number(a.groups.line)) : "foreign";
 		}
-		const b = LOC_ROW_RE.exec(plain) ?? LOC_SHELLCHECK_RE.exec(plain);
+		const b = LOC_SHELLCHECK_RE.exec(plain);
 		return b?.groups ? hit(Number(b.groups.line)) : null;
 	};
 	let located = false;
@@ -716,9 +711,11 @@ export function gateFinding(finding, ranges, resolved) {
 		located = true;
 		const out = lines.slice(0, starts[0]);
 		let any = false;
+		const preambleParse = PARSE_ERROR_RE.test(out.join("\n"));
 		starts.forEach((start, n) => {
-			if (kinds[start] === "miss") return;
-			out.push(...lines.slice(start, starts[n + 1] ?? lines.length));
+			const seg = lines.slice(start, starts[n + 1] ?? lines.length);
+			if (kinds[start] === "miss" && !preambleParse && !PARSE_ERROR_RE.test(seg.join("\n"))) return;
+			out.push(...seg);
 			any = true;
 		});
 		if (any) {
@@ -732,26 +729,12 @@ export function gateFinding(finding, ranges, resolved) {
 		text: kept.join("\n\n")
 	} : null;
 }
-export function lintFileHandler(args, edits = [editEntry(args)]) {
+export function lintFileHandler(args) {
 	try {
 		const resolved = resolveLintTarget(args);
 		if (!resolved) return {};
-		const content = readFileSync(resolved, "utf8");
-		let ranges = [];
-		for (const e of edits) {
-			if (e === null) {
-				ranges = null;
-				break;
-			}
-			if (e === "") continue;
-			const r = editRanges(content, e);
-			if (r === null) {
-				ranges = null;
-				break;
-			}
-			ranges.push(...r);
-		}
-		if (ranges !== null && ranges.length === 0) return {};
+		const ranges = editRanges(args);
+		if (ranges?.length === 0) return {};
 		const cwd = args.cwd;
 		const rel = path.relative(cwd, resolved);
 		const ext = path.extname(resolved).toLowerCase();
@@ -798,55 +781,14 @@ function isMainModule() {
 		return false;
 	}
 }
-async function debounceGate(resolved, entry) {
-	const token = `${Date.now()}-${process.pid}-${randomBytes(6).toString("hex")}`;
-	const dir = path.join(tmpdir(), "universal-lint-debounce");
-	const marker = path.join(dir, hashPath(resolved) + ".mark");
-	const edits = path.join(dir, hashPath(resolved) + ".edits");
-	try {
-		mkdirSync(dir, { recursive: true });
-		const tmp = `${marker}.${token}.tmp`;
-		writeFileSync(tmp, token);
-		renameSync(tmp, marker);
-		appendFileSync(edits, JSON.stringify([Date.now(), entry]) + "\n");
-	} catch {
-		return [entry];
-	}
-	await sleep(DEBOUNCE_MS);
-	try {
-		if (readFileSync(marker, "utf8").trim() !== token) return null;
-	} catch {
-		return [entry];
-	}
-	const entries = [];
-	try {
-		const taken = `${edits}.${token}`;
-		renameSync(edits, taken);
-		const raw = readFileSync(taken, "utf8");
-		rmSync(taken, { force: true });
-		const now = Date.now();
-		for (const l of raw.split("\n")) {
-			if (!l) continue;
-			try {
-				const [t, e] = JSON.parse(l);
-				if (now - t <= EDITS_MAX_AGE_MS) entries.push(e);
-			} catch {}
-		}
-	} catch {}
-	return entries.includes(entry) ? entries : [...entries, entry];
-}
-async function main() {
+function main() {
 	try {
 		const input = JSON.parse(readFileSync(0, "utf8"));
-		const resolved = resolveLintTarget(input);
-		if (!resolved) return;
-		const edits = await debounceGate(resolved, editEntry(input));
-		if (!edits) return;
-		const ctx = lintFileHandler(input, edits).hookSpecificOutput?.additionalContext;
+		const ctx = lintFileHandler(input).hookSpecificOutput?.additionalContext;
 		if (ctx) {
 			process.stderr.write(ctx + "\n");
 			process.exitCode = 2;
 		}
 	} catch {}
 }
-if (isMainModule()) void main();
+if (isMainModule()) main();

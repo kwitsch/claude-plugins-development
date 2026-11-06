@@ -6,13 +6,17 @@ import { makeEnv } from "./support/lint-hook.mts";
 
 /** A 4-line shell script; the Edit tests below edit line 2. */
 const SH4 = "echo a\necho $1\necho b\necho $2\n";
+/** Edit tool_response replacing line 2 of SH4. */
+const EDIT_L2 = { structuredPatch: [{ oldStart: 1, oldLines: 4, newStart: 1, newLines: 4, lines: [" echo a", "-echo $x", "+echo $1", " echo b", " echo $2"] }] };
+/** Edit tool_response deleting a line between lines 1 and 2 of SH4 (pure deletion). */
+const DEL_L1 = { structuredPatch: [{ oldStart: 1, oldLines: 5, newStart: 1, newLines: 4, lines: [" echo a", "-rm x", " echo $1", " echo b", " echo $2"] }] };
 
 test("Edit: only findings on the edited line are reported (exit 2, line-2 text only)", () => {
   const e = makeEnv();
   e.recStub("shellcheck", 1);
   const r = e.run(e.file("a.sh", SH4), {
     toolName: "Edit",
-    toolInput: { new_string: "echo $1" },
+    toolResponse: EDIT_L2,
     out: "a.sh:2:6: note: line2-marker [SC2086]\na.sh:4:6: note: line4-marker [SC2086]",
   });
   assert.equal(r.status, 2);
@@ -23,17 +27,31 @@ test("Edit: only findings on the edited line are reported (exit 2, line-2 text o
 test("Edit: findings only outside the edited lines -> exit 0, no output", () => {
   const e = makeEnv();
   e.recStub("shellcheck", 1);
-  const r = e.run(e.file("a.sh", SH4), { toolName: "Edit", toolInput: { new_string: "echo $1" }, out: "a.sh:4:6: note: line4-marker [SC2086]" });
+  const r = e.run(e.file("a.sh", SH4), { toolName: "Edit", toolResponse: EDIT_L2, out: "a.sh:4:6: note: line4-marker [SC2086]" });
   assert.equal(r.status, 0);
   assert.equal(r.ctx, "");
 });
 
-test("Edit: a pure deletion (empty new_string) -> exit 0, linter never invoked", () => {
+test("Edit: a pure deletion is linted; the lines around the deletion point count as edited", () => {
   const e = makeEnv();
   e.recStub("shellcheck", 1);
-  const r = e.run(e.file("a.sh", SH4), { toolName: "Edit", toolInput: { new_string: "" }, out: "a.sh:2:6: note: x [SC2086]" });
-  assert.equal(r.status, 0);
-  assert.deepEqual(e.lines(), []);
+  const f = e.file("a.sh", SH4);
+  assert.equal(e.run(f, { toolName: "Edit", toolResponse: DEL_L1, out: "a.sh:2:6: note: del-marker [SC2086]" }).status, 2);
+  assert.equal(e.run(f, { toolName: "Edit", toolResponse: DEL_L1, out: "a.sh:4:6: note: far-marker [SC2086]" }).status, 0);
+});
+
+test("Edit: a parse error outside the edited lines is still reported (exit 2)", () => {
+  const e = makeEnv();
+  e.recStub("shellcheck", 1);
+  const r = e.run(e.file("a.sh", SH4), { toolName: "Edit", toolResponse: EDIT_L2, out: "a.sh:4:1: error: Couldn't parse this. [SC1073]" });
+  assert.equal(r.status, 2);
+  assert.match(r.ctx, /SC1073/);
+});
+
+test("Edit without a structuredPatch: the whole file counts as edited", () => {
+  const e = makeEnv();
+  e.recStub("shellcheck", 1);
+  assert.equal(e.run(e.file("a.sh", SH4), { toolName: "Edit", out: "a.sh:4:6: note: x [SC2086]" }).status, 2);
 });
 
 test("shellcheck finds an issue: exit 2 (asyncRewake) with the stub's text on stderr", () => {

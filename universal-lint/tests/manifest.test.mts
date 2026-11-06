@@ -15,12 +15,12 @@ test("plugin.json has the name and a version and no userConfig (deliberate, see 
   assert.ok(!("userConfig" in m));
 });
 
-test("PostToolUse hook is wired to lint-file.mjs as an asyncRewake command hook with timeout 95", () => {
+test("PostToolUse hook is wired to lint-file.mjs as an asyncRewake command hook with timeout 90", () => {
   const h = json("hooks/hooks.json").hooks.PostToolUse[0];
   assert.equal(h.matcher, "Write|Edit");
   assert.equal(h.hooks[0].type, "command");
   assert.equal(h.hooks[0].command, "\"${CLAUDE_PLUGIN_ROOT}/hooks/lint-file.mjs\"");
-  assert.equal(h.hooks[0].timeout, 95);
+  assert.equal(h.hooks[0].timeout, 90);
   assert.equal(h.hooks[0].asyncRewake, true);
   assert.equal(h.hooks[0].async, undefined);
 });

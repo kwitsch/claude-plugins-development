@@ -2,34 +2,21 @@
 paths:
   - "src/hooks/**"
   - "plugin/hooks/**"
-  - "tests/{core,debounce,npx-fallback,rtk,truncation,manifest,registry,tsc}.test.mts"
+  - "tests/{core,npx-fallback,rtk,truncation,manifest,registry,tsc}.test.mts"
 ---
 
 # Hook design (do not "fix" without reading this)
 
-- **One `asyncRewake` `command` hook:** PostToolUse `Write|Edit` → `"${CLAUDE_PLUGIN_ROOT}/hooks/lint-file.mjs"` (the placeholder is quoted so a plugin path with a space survives; `claude plugin validate` warns otherwise), `timeout: 95`, `asyncRewake: true` (not `async`), no `statusMessage` (silent).
+- **One `asyncRewake` `command` hook:** PostToolUse `Write|Edit` → `"${CLAUDE_PLUGIN_ROOT}/hooks/lint-file.mjs"` (the placeholder is quoted so a plugin path with a space survives; `claude plugin validate` warns otherwise), `timeout: 90`, `asyncRewake: true` (not `async`), no `statusMessage` (silent).
   - `asyncRewake` runs the hook in the background like `async`, but exit `2` wakes Claude with stderr as soon as the lint finishes, instead of the findings waiting for the next turn. Contract (same as the repo's `.claude/hooks/oxlint-edited.sh`): findings = the `universal-lint: …` text on stderr + exit `2`; nothing to report = no output, exit `0`.
   - Invoked directly, no `node` prefix: the built file has a node shebang and the exec bit the build sets. One process per Write/Edit, no persistent process.
-  - `timeout: 95` = 90 s lint budget + 5 s debounce wait (see "Timeout budget").
+  - `timeout: 90` = the lint budget (see "Timeout budget"). No debounce: every Write/Edit lints right away in its own process (user decision 2026-11-06, removed together with the edit coalescing it required).
 - **Single-hook exception to the `mcp_tool`-preferred default** (kwitsch/claude-plugins prefers a persistent MCP stdio server for hooks, as `dprint` does here):
   - A persistent MCP stdio server buys nothing for exactly one hook.
   - Running in the background removes the one argument for a server (per-event spawn latency): the agentic loop doesn't wait either way.
   - Safe because linting never mutates the file: findings arriving after the edit (rewake) cost no correctness. `universal-format` stays synchronous for the opposite reason.
   - Adding a second hook voids the exception.
 - **No launcher script, no `.mcp.json`:** a direct `.mjs` command hook needs neither; the script always runs under `node`, never `bun`.
-
-## Debounce (per-file idle window)
-
-- Each hook process writes a unique token to a per-file marker under `tmpdir()/universal-lint-debounce/<sha256(resolved path)>.mark` (atomic: temp file + `renameSync`), sleeps `DEBOUNCE_MS`, re-reads the marker, and lints only if its token is still the newest.
-  - A later edit overwrites the token, so older sleepers bail: N edits in the window → N sleeping processes, one linter run.
-- **Coalesced edits (`<hash>.edits`):** after the marker rename each process appends one line `JSON.stringify([Date.now(), editEntry(input)])` to `tmpdir()/universal-lint-debounce/<hash>.edits` (same `hashPath(resolved)` key as the marker). The winner renames the file to `<hash>.edits.<token>`, reads it, removes it, and gates against the union of all entries (`lintFileHandler(input, edits)`); its own entry is always included. Appends after the rename start a fresh file for the next winner.
-  - Entries older than `EDITS_MAX_AGE_MS` (10 min) are ignored: they come from a hook killed during its sleep and would otherwise widen a later run's range indefinitely.
-  - **Accepted residual:** an append opened just before the winner's rename whose write lands after the winner's read is lost with the renamed file (microsecond window). Every other ordering is safe.
-  - Every edits-file op (append, rename, read, parse, remove) fails open to the process's own entry; it never skips a lint. The extra I/O is microseconds and is not a term of the timeout budget.
-- `UNIVERSAL_LINT_DEBOUNCE_MS` overrides the window — a test-only fast path (the vitest harness `tests/support/lint-hook.mts` runs at `0`); NOT a `userConfig`, not part of the hook input contract. An explicitly empty value falls back to the real 5000 ms default (tested).
-- Markers live in `tmpdir()`, not `${CLAUDE_PLUGIN_DATA}` (unlike `tsBuildInfoPathFor`): ephemeral signalling files with no cross-update persistence need. No cleanup routine — tiny, the OS reclaims `tmpdir()`.
-- Every debounce filesystem op fails open: the lint runs on error, never silently skipped.
-- **Accepted residual:** a lint already past the gate can't be cancelled, so two edits spaced further apart than the window with a lint slower than the gap can still overlap. Only a persistent server could cancel in-flight lints (the rejected design). The overlap also keeps the `--tsBuildInfoFile` race possible, but rare.
 
 ## Timeout budget (re-derive when `hooks.json` `timeout` or any `*_TIMEOUT_MS` changes)
 
@@ -38,6 +25,7 @@ paths:
 - Nominal worst case, TS file: chain 30 s + `tsc` 45 s = 75 s → 15 s margin inside the 90 s lint budget.
 - **rtk-then-direct doubling:** `runLintTool`'s on-`PATH` branch tries `rtk` first; if that attempt times out it spawns the tool again at the same timeout. A phase can therefore cost 2× nominal (chain 60 s, on-`PATH` `tsc` 90 s). Pre-existing, applies to every chain tool, reworking it is out of scope. `manifestPath` (cargo) tools skip `rtk` — no doubling.
 - **Cold npx:** the rtk-wrapped attempt is bounded by `RTK_NPX_ATTEMPT_TIMEOUT_MS` (5 s), then bare npx gets `NPX_SPAWN_TIMEOUT_MS` (55 s) → 60 s worst case, the same as the direct branch's doubling. Giving both the full npx budget would total 110 s > 90 s — the reason for the separate bound; don't unify them.
+- Overlapping lints of quick successive edits share the `--tsBuildInfoFile` (accepted, see `typescript-check.md`).
 - **Accepted:** when combined wall time exceeds the 90 s lint budget (cold npx 60 s + `tsc` 45 s = 105 s, rtk doubling, or both compounding) the hook is killed and that turn's async findings are silently lost. Fail-open, never a wrong result; the next edit's `tsc` hits a warm cache.
 
 ## Runtime behavior (`lint_file`)
@@ -71,17 +59,18 @@ paths:
 ## Edit-range gate
 
 - After an `Edit` the hook exits 2 only when a diagnostic is not proven to sit in the edited file outside the edited lines. No registered tool (shellcheck, checkstyle, ktlint, eslint, oxlint, ruff check, golangci-lint, go vet, yamllint, markdownlint(-cli2), stylelint, phpstan, psalm, cargo clippy/check) nor `tsc` has a line-range check mode (`golangci-lint --new-from-rev`/`psalm --diff` are git-based; `ruff format --line-range` is not a check), so the scan stays file/project-scoped and `gateFinding` filters the raw text afterwards. `buildArgv`/`classifyExit`/rtk are unchanged.
-- **Range source:** every non-overlapping occurrence of `tool_input.new_string` in the post-edit file (`editRanges`, inclusive 0-based lines; a trailing `\n` does not spill into the next line), for every entry of the debounce window (see "Debounce"). All occurrences count (over-inclusion only keeps more).
-- **Whole file:** `Write`, any non-`Edit` tool, a missing `new_string`, or a non-empty `new_string` no longer found on disk. **Pure deletion** (empty `new_string`): no edited lines; a window of only deletions returns `{}` without linting.
+- **Range source:** the Edit `tool_response.structuredPatch` hunks (`editRanges`, inclusive 0-based lines): each run of `+` lines; a run of only `-` lines (pure deletion) gives the two lines around the deletion point, so deletions are linted too. `\ No newline at end of file` is not a line.
+- **Whole file:** `Write`, any non-`Edit` tool, or a missing/malformed `structuredPatch`. An empty patch (nothing changed) returns `{}` without linting.
 - **Location extraction**, per line after stripping `ANSI_SGR_RE`; first match wins:
   - A `LOC_PATH_RE` `<path>.<ext>[:(]<line>`: ruff, ktlint, golangci-lint, go vet, checkstyle `[WARN] /abs/A.java:3:`, markdownlint `a.md:12`, psalm, oxlint `,-[src/a.ts:3:7]`, cargo `--> src/a.rs:12:5`, tsc `a.ts(12,5)`/`a.ts:12:5`.
   - B `LOC_ROW_RE` `  <line>:<col>  ` rows (path-less, own file): eslint stylish, stylelint stylish, yamllint standard.
   - C `LOC_SHELLCHECK_RE` `In <file> line <n>:` (path-less, own file): shellcheck's default tty format.
 - **Base directory** (`Finding.base`, set in `runChainLint`/`runTypeCheck`): cargo → directory of the `--manifest-path` Cargo.toml; golangci-lint/go vet (`targetsDir`) → the edited file's directory; tsc and every other tool → the payload `cwd` (their spawn cwd).
-- **Path matching (user decision):** (1) `path.resolve(base, p) === resolved` → own file; (2) else, only for a relative `p` whose base-resolved path does not exist, a path-segment suffix match (`resolved.endsWith(sep + p)`) → own file (covers cargo workspace-root paths, cwd-relative go paths, a path split by a space); (3) else **foreign**: kept and reportable. Diagnostics in other files (e.g. tsc errors elsewhere) therefore still exit 2.
+- **Path matching (user decision):** (1) `path.resolve(base, p) === resolved` → own file; (2) else, only for a relative `p` whose base-resolved path does not exist, a path-segment suffix match (`resolved.endsWith(sep + p)`) → own file (covers cargo workspace-root paths, cwd-relative go paths); (3) else **foreign**: kept and reportable. Diagnostics in other files (e.g. tsc errors elsewhere) therefore still exit 2.
 - **Filtering** by blank-line paragraphs: a paragraph without a located line is kept but not reportable (headers, summaries, rtk notes); otherwise it is split into segments at located lines (each carries the unlocated lines after it, so tsc continuation lines stay with their diagnostic; earlier lines are the preamble). Own-file misses are dropped, hits and foreign segments kept; a paragraph whose segments are all dropped loses its preamble. Exact lines, no context slack.
 - **Result:** no located line at all → finding unchanged (fail open = report: rtk-compacted text, phpstan's table format); nothing reportable left → finding dropped; exit 2 only when at least one finding survives. The gate runs before `truncate()`.
-- **Residuals:** a pure deletion is never reported; a later edit rewriting an earlier `new_string` widens that run to the whole file; a same-named file reached only by the suffix fallback can be mistaken for the edited file; a format the regexes miss is reported unchanged.
+- **Parse errors are always kept:** an own-file miss whose segment or paragraph preamble matches `PARSE_ERROR_RE` (parse/syntax error wording, `unclosed`, `unterminated`, `end of file`, tsc `TS1xxx`, shellcheck `SC1xxx`) stays reportable, since an edit-caused parse error is often reported away from the edit (unclosed brace → EOF). Other own-file diagnostics outside the edit (e.g. a tsc call-site error in the same file) are dropped by design.
+- **Residuals:** a parse error phrased outside `PARSE_ERROR_RE` is gated; a path containing a space is not matched and counts as foreign (kept); a same-named file reached only by the suffix fallback can be mistaken for the edited file; a format the regexes miss is reported unchanged.
 
 ## Path exclusions (`isExcludedPath`)
 
