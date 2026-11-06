@@ -758,47 +758,74 @@ export function gateFinding(finding, ranges, resolved) {
 		text: kept.join("\n\n")
 	} : null;
 }
+function writtenDigestPath(real) {
+	return path.resolve(process.env.CLAUDE_PLUGIN_DATA || tmpdir(), "written", hashPath(real));
+}
+function fileDigest(fp) {
+	return createHash("sha256").update(readFileSync(fp)).digest("base64");
+}
+export function recordWritten(fp, real) {
+	try {
+		const file = writtenDigestPath(real);
+		mkdirSync(path.dirname(file), { recursive: true });
+		const tmp = `${file}.${process.pid}.tmp`;
+		writeFileSync(tmp, fileDigest(fp));
+		renameSync(tmp, file);
+	} catch {}
+}
+function recordWrittenFor(args) {
+	try {
+		if (args?.tool_response?.success === false) return;
+		const cwd = args?.cwd;
+		const file = args?.tool_input?.file_path;
+		if (typeof cwd !== "string" || !cwd || typeof file !== "string" || !file) return;
+		const s = scopedTarget(cwd, file, typeof args.scratchpad_dir === "string" ? args.scratchpad_dir : undefined);
+		if (s) recordWritten(s.fp, s.real);
+	} catch {}
+}
+function lintResolved(resolved, cwd, ranges, hookEventName, label) {
+	const rel = path.relative(cwd, resolved);
+	const ext = path.extname(resolved).toLowerCase();
+	const lang = EXT_MAP[ext];
+	const typeCheckEligible = TYPE_CHECK_EXTS.has(ext);
+	const oxlintConfig = lang === "jsts" ? resolveOxlintConfig(path.dirname(resolved), cwd) : null;
+	const findings = [];
+	let oxlintRan = false;
+	if (lang) {
+		const entry = oxlintConfig ? { chain: REGISTRY.oxlint.chain.map((t) => ({
+			...t,
+			args: [
+				...t.args,
+				"-c",
+				oxlintConfig
+			]
+		})) } : REGISTRY[lang];
+		const chain = runChainLint(entry, resolved, cwd, rel);
+		if (chain.finding) findings.push(chain.finding);
+		oxlintRan = oxlintConfig !== null && chain.ran;
+	}
+	if (typeCheckEligible && !(oxlintRan && oxlintConfig && oxlintConfigTypeChecks(oxlintConfig))) {
+		const tsResult = runTypeCheck(resolved, cwd);
+		if (tsResult) findings.push(tsResult);
+	}
+	const kept = findings.flatMap((f) => {
+		const g = gateFinding(f, ranges, resolved);
+		return g ? [g] : [];
+	});
+	if (kept.length === 0) return {};
+	const blocks = kept.map((f) => `${f.tool} found issues in ${f.target}:\n${truncate(f.text)}`);
+	return { hookSpecificOutput: {
+		hookEventName,
+		additionalContext: `${label}: ${truncate(blocks.join("\n\n"))}`
+	} };
+}
 export function lintFileHandler(args) {
 	try {
 		const resolved = resolveLintTarget(args);
 		if (!resolved) return {};
 		const ranges = editRanges(args);
 		if (ranges?.length === 0) return {};
-		const cwd = args.cwd;
-		const rel = path.relative(cwd, resolved);
-		const ext = path.extname(resolved).toLowerCase();
-		const lang = EXT_MAP[ext];
-		const typeCheckEligible = TYPE_CHECK_EXTS.has(ext);
-		const oxlintConfig = lang === "jsts" ? resolveOxlintConfig(path.dirname(resolved), cwd) : null;
-		const findings = [];
-		let oxlintRan = false;
-		if (lang) {
-			const entry = oxlintConfig ? { chain: REGISTRY.oxlint.chain.map((t) => ({
-				...t,
-				args: [
-					...t.args,
-					"-c",
-					oxlintConfig
-				]
-			})) } : REGISTRY[lang];
-			const chain = runChainLint(entry, resolved, cwd, rel);
-			if (chain.finding) findings.push(chain.finding);
-			oxlintRan = oxlintConfig !== null && chain.ran;
-		}
-		if (typeCheckEligible && !(oxlintRan && oxlintConfig && oxlintConfigTypeChecks(oxlintConfig))) {
-			const tsResult = runTypeCheck(resolved, cwd);
-			if (tsResult) findings.push(tsResult);
-		}
-		const kept = findings.flatMap((f) => {
-			const g = gateFinding(f, ranges, resolved);
-			return g ? [g] : [];
-		});
-		if (kept.length === 0) return {};
-		const blocks = kept.map((f) => `${f.tool} found issues in ${f.target}:\n${truncate(f.text)}`);
-		return { hookSpecificOutput: {
-			hookEventName: "PostToolUse",
-			additionalContext: `universal-lint: ${truncate(blocks.join("\n\n"))}`
-		} };
+		return lintResolved(resolved, args.cwd, ranges, "PostToolUse", "universal-lint");
 	} catch {
 		return {};
 	}
@@ -813,6 +840,7 @@ function isMainModule() {
 function main() {
 	try {
 		const input = JSON.parse(readFileSync(0, "utf8"));
+		recordWrittenFor(input);
 		const ctx = lintFileHandler(input).hookSpecificOutput?.additionalContext;
 		if (ctx) {
 			process.stderr.write(ctx + "\n");
