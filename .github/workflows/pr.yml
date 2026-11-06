@@ -15,7 +15,7 @@ jobs:
         id: changed
         run: |
           plugins=$(git diff --name-only "origin/${{ github.base_ref }}...HEAD" | cut -d/ -f1 | sort -u \
-            | while read -r d; do [ -f "$d/plugin/.claude-plugin/plugin.json" ] && echo "$d"; done | tr '\n' ' ')
+            | while read -r d; do jq -e 'has("claudePlugin")' "$d/package.json" > /dev/null 2>&1 && echo "$d"; done | tr '\n' ' ')
           echo "plugins=$plugins" >> "$GITHUB_OUTPUT"
           echo "changed: ${plugins:-none}"
 
@@ -78,7 +78,7 @@ jobs:
           for d in $dirs; do
             [ "$d" = "$PWD" ] && continue # workspace root
             p=$(jq -r .name "$d/package.json") # package name; a nested package's dir basename differs from it
-            if [ -f "$d/plugin/.claude-plugin/plugin.json" ]; then
+            if jq -e 'has("claudePlugin")' "$d/package.json" > /dev/null 2>&1; then # a plugin: its package.json has claudePlugin
               pnpm --filter "$p" run --if-present lint
               pnpm --filter "$p" build
               pnpm --filter "$p" test

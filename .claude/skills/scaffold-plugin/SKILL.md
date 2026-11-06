@@ -59,7 +59,7 @@ List the created files and the three commands above. Do not commit unless asked.
 
 ## Rules recap
 
-- `<name>/package.json` is the only place for `version`, `description`, `author`, `keywords` and `claudePlugin` (plugin-only manifest fields such as `userConfig`); `pnpm build` generates the manifest `plugin/.claude-plugin/plugin.json`.
+- `<name>/package.json` is the only place for `version`, `description`, `author`, `keywords` and `claudePlugin` (required, `{}` at least: marks the package as a plugin for CI; holds plugin-only manifest fields such as `userConfig`); `pnpm build` generates the manifest `plugin/.claude-plugin/plugin.json`.
 - `src/**/*.mts` → `plugin/**/*.mjs`, same relative path.
 - Scripts used by several components (skills, hooks, MCP) go in `src/bin/*.mts` → `plugin/bin/*.mjs`.
 - Runtime code: `node:` builtins only.

@@ -17,7 +17,7 @@ const isObject = (v: unknown): v is Record<string, unknown> => typeof v === "obj
  *
  * @remarks
  * Copies `name`, `version`, `description` (required non-empty strings), `author` (optional object with a
- * non-empty string `name`) and `keywords` (optional string array), then every key of the optional
+ * non-empty string `name`) and `keywords` (optional string array), then every key of the required
  * `claudePlugin` object (plugin-only manifest fields such as `userConfig`) verbatim. Other package.json keys
  * (`private`, `type`, `scripts`, `devDependencies`, …) are never copied. Absent optional keys are `undefined`,
  * which `JSON.stringify` drops.
@@ -38,10 +38,9 @@ export function pluginManifest(pkg: Record<string, unknown>): Record<string, unk
   if (keywords !== undefined && !(Array.isArray(keywords) && keywords.every((k: unknown) => typeof k === "string"))) {
     throw new Error("package.json: \"keywords\" must be an array of strings");
   }
-  if (claudePlugin !== undefined && !isObject(claudePlugin)) {
-    throw new Error("package.json: \"claudePlugin\" must be an object");
-  }
-  const extra = claudePlugin ?? {};
+  // claudePlugin marks the package as a plugin (CI detects plugins by it), so it is required, `{}` at least
+  if (!isObject(claudePlugin)) throw new Error("package.json: \"claudePlugin\" must be an object (`{}` at least)");
+  const extra = claudePlugin;
   // one source per field: a manifest key lives either top-level or in claudePlugin, never both
   for (const k of TOP_LEVEL) {
     if (Object.hasOwn(extra, k)) throw new Error(`package.json: claudePlugin.${k} duplicates a top-level field`);

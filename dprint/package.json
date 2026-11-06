@@ -19,5 +19,6 @@
   },
   "devDependencies": {
     "claude-engine-vitest": "workspace:*"
-  }
+  },
+  "claudePlugin": {}
 }

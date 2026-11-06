@@ -5,6 +5,7 @@
   "author": {
     "name": "__AUTHOR__"
   },
+  "claudePlugin": {},
   "private": true,
   "type": "module",
   "scripts": {

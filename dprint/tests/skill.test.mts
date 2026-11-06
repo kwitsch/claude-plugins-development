@@ -24,6 +24,11 @@ test("generated manifest equals pluginManifest(package.json)", () => {
   );
 });
 
+test("pluginManifest requires the claudePlugin marker CI detects plugins by", () => {
+  assert.throws(() => pluginManifest({ name: "x", version: "1.0.0", description: "d" }), /"claudePlugin" must be an object/);
+  assert.equal(pluginManifest({ name: "x", version: "1.0.0", description: "d", claudePlugin: {} }).name, "x");
+});
+
 test("SKILL.md frontmatter: name, model-invocable, allowed-tools without bare Bash", () => {
   assert.match(SKILL, /^name: dprint$/m);
   assert.doesNotMatch(SKILL, /^disable-model-invocation:\s*true/m);
