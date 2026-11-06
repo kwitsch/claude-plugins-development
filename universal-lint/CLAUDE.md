@@ -1,6 +1,6 @@
 # universal-lint
 
-Hook-driven plugin (plus one user-only on-demand skill): a PostToolUse `Write|Edit` `command` hook runs the just-written file's standard linter (check-only, never `--fix`/`--format`/`--write`) for Shell/Java/Kotlin/JS-TS/Python/Go/YAML/Markdown/CSS/SCSS/PHP/Rust, backed by the self-contained zero-dependency `src/hooks/lint-file.mts` (built to `plugin/hooks/lint-file.mjs`). TypeScript files (`.ts`/`.tsx`/`.mts`/`.cts`) additionally get a whole-project `tsc --noEmit` type-check. JSON is deliberately excluded.
+Hook-driven plugin (plus one user-only on-demand skill): four `command` hooks share one entry, `src/hooks/lint-file.mts` (self-contained, zero-dependency, built to `plugin/hooks/lint-file.mjs`), which dispatches on the event. PostToolUse `Write|Edit` runs the just-written file's standard linter (check-only, never `--fix`/`--format`/`--write`) for Shell/Java/Kotlin/JS-TS/Python/Go/YAML/Markdown/CSS/SCSS/PHP/Rust; SessionStart/CwdChanged print the cwd's lintable git files as `watchPaths`; FileChanged lints a watched file changed outside Write/Edit. TypeScript files (`.ts`/`.tsx`/`.mts`/`.cts`) additionally get a whole-project `tsc --noEmit` type-check. JSON is deliberately excluded.
 
 Ported from kwitsch/claude-plugins (`plugins/universal-lint/`, 0.10.3) with the behaviour unchanged; the only functional difference is where the markdownlint MD013-off config lives (see `.claude/rules/line-length-guard.md`).
 
@@ -8,7 +8,7 @@ Ported from kwitsch/claude-plugins (`plugins/universal-lint/`, 0.10.3) with the 
 
 Each part has a path-scoped rule in `.claude/rules/` (loaded when you work on matching files). Do not "fix" any behaviour documented there without reading the rule first:
 
-- Hook `lint-file` (`src/hooks/lint-file.mts`): `hook-design.md` (one async command hook, timeout budget, edit-range gate, runtime behaviour, npx fallback, rtk compaction, path exclusions), `typescript-check.md` (the `tsc` pass), `line-length-guard.md` (YAML/Markdown max-line-length guard), `languages.md` (SCSS limitation, PHP, Rust, why JSON is not covered).
+- Hook `lint-file` (`src/hooks/lint-file.mts`): `hook-design.md` (four command hooks with one entry, command hooks instead of an MCP server, timeout budget, edit-range gate, file detection, runtime behaviour, npx fallback, rtk compaction, path exclusions), `typescript-check.md` (the `tsc` pass), `line-length-guard.md` (YAML/Markdown max-line-length guard), `languages.md` (SCSS limitation, PHP, Rust, why JSON is not covered).
 - Skill `universal-lint` (`plugin/skills/universal-lint/`, driver `src/skills/universal-lint/lint-files.mts`): `skill-driver.md`.
 - Tests: `tests.md`.
 
