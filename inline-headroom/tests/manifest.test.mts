@@ -7,7 +7,7 @@ import { test } from "vitest";
 const json = (rel: string) => JSON.parse(readFileSync(new URL(`../plugin/${rel}`, import.meta.url), "utf8"));
 const manifest = json(".claude-plugin/plugin.json");
 
-test("plugin.json has name, author Kwitsch, a non-empty description and string keywords", () => {
+test("the manifest has name, author Kwitsch, a non-empty description and string keywords", () => {
   assert.equal(manifest.name, "inline-headroom");
   assert.equal(manifest.author.name, "Kwitsch");
   assert.ok(manifest.description.length > 0);
