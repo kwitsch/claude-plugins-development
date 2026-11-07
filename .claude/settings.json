@@ -1,4 +1,9 @@
 {
+  "attribution": {
+    "commit": "",
+    "pr": "",
+    "sessionUrl": false
+  },
   "permissions": {
     "allow": [
       "AskUserQuestion",
@@ -20,14 +25,9 @@
       "Edit(./*/plugin/**/CLAUDE.md)"
     ]
   },
-  "attribution": {
-    "commit": "",
-    "pr": "",
-    "sessionUrl": false
-  },
   "enabledPlugins": {
     "universal-format@kwitsch-plugins": false,
-    "universal-lint@kwitsch-plugins": false,
+    "universal-lint@kwitsch-plugins": true,
     "dprint@kwitsch-plugins": true
   },
   "extraKnownMarketplaces": {
