@@ -757,6 +757,60 @@ export function hasProjectMarkdownlintConfig(fileDir: string): boolean {
   return walkToRoot(fileDir, (dir) => MARKDOWNLINT_CONFIG_FILENAMES.some((name) => existsSync(path.join(dir, name))));
 }
 
+/**
+ * stylelint's per-directory config file names: cosmiconfig 10's default search places for module "stylelint", which
+ * stylelint 18.0.0 uses unchanged (verified in its source). `package.json` is the remaining search place and counts
+ * only with a `stylelint` key (`hasStylelintConfig`). Update together with stylelint's search places.
+ */
+const STYLELINT_CONFIG_FILENAMES = [
+  ".stylelintrc",
+  ".stylelintrc.json",
+  ".stylelintrc.yaml",
+  ".stylelintrc.yml",
+  ".stylelintrc.js",
+  ".stylelintrc.ts",
+  ".stylelintrc.cjs",
+  ".stylelintrc.mjs",
+  ".config/stylelintrc",
+  ".config/stylelintrc.json",
+  ".config/stylelintrc.yaml",
+  ".config/stylelintrc.yml",
+  ".config/stylelintrc.js",
+  ".config/stylelintrc.ts",
+  ".config/stylelintrc.cjs",
+  ".config/stylelintrc.mjs",
+  "stylelint.config.js",
+  "stylelint.config.ts",
+  "stylelint.config.cjs",
+  "stylelint.config.mjs",
+];
+
+/**
+ * True when stylelint could find a config for a file in `fileDir`, a superset of stylelint 18's own lookup: a
+ * STYLELINT_CONFIG_FILENAMES name or a `package.json` with a non-null top-level `stylelint` key in any directory from
+ * `fileDir` up to the filesystem root (stylelint itself stops at `$HOME`), else an existing stylelint global config dir
+ * (`$XDG_CONFIG_HOME/stylelint` or `~/.config/stylelint`, and macOS's `~/Library/Preferences/stylelint`, both checked
+ * on every platform; the directory counts by existence, not by the `config*` files stylelint reads in it). Without one
+ * stylelint only exits 78 (skip).
+ *
+ * @param fileDir - Directory of the edited file.
+ * @returns True when a stylelint config may govern the file; an unreadable or invalid `package.json` counts (fail open).
+ */
+function hasStylelintConfig(fileDir: string): boolean {
+  const hasKey = (dir: string): boolean => {
+    const pkg = path.join(dir, "package.json");
+    if (!existsSync(pkg)) return false;
+    try {
+      return (JSON.parse(readFileSync(pkg, "utf8")) as { stylelint?: unknown } | null)?.stylelint != null;
+    } catch {
+      return true; // unreadable or invalid: run stylelint and let classifyExit decide
+    }
+  };
+  if (walkToRoot(fileDir, (d) => STYLELINT_CONFIG_FILENAMES.some((n) => existsSync(path.join(d, n))) || hasKey(d))) return true;
+  const home = homedir();
+  return [process.env.XDG_CONFIG_HOME || path.join(home, ".config"), path.join(home, "Library", "Preferences")].some((d) => existsSync(path.join(d, "stylelint")));
+}
+
 /** File name of the MD013-off config, written into `CLAUDE_PLUGIN_DATA` (OS temp dir when unset), never into the project tree. */
 const MARKDOWNLINT_NO_LINE_LENGTH_CONFIG_NAME = "markdownlint-no-line-length.json";
 
@@ -1447,7 +1501,7 @@ function recordWrittenFor(s: { fp: string; real: string } | null): void {
 }
 
 /**
- * Lint `resolved` (chain tool when a lint config selects one for JS/TS, see the no-config note below, + tsc), gate the findings against `ranges` (null = whole file), and build the hook result.
+ * Lint `resolved` (chain tool unless JS/TS or CSS/SCSS has no lint config (see the no-config notes below), + tsc), gate the findings against `ranges` (null = whole file), and build the hook result.
  *
  * @param resolved - Lexical absolute path of the in-scope file.
  * @param cwd - Payload cwd (spawn cwd and config search root).
@@ -1464,10 +1518,12 @@ function lintResolved(resolved: string, cwd: string, ranges: Array<[number, numb
   const oxlintConfig = lang === "jsts" ? resolveOxlintConfig(path.dirname(resolved), cwd) : null;
   // No oxlint config and no eslint name up to / (eslint's own lookup): eslint would only exit 2 (skip), so no chain lint.
   const noJstsConfig = lang === "jsts" && !oxlintConfig && !walkToRoot(path.dirname(resolved), (d) => ESLINT_CONFIG_FILENAMES.some((n) => existsSync(path.join(d, n))));
+  // No stylelint config (stylelint's own search places, see hasStylelintConfig): stylelint would only exit 78 (skip), so no chain lint.
+  const noCssConfig = lang === "css" && !hasStylelintConfig(path.dirname(resolved));
 
   const findings: Finding[] = [];
   let oxlintRan = false;
-  if (lang && !noJstsConfig) {
+  if (lang && !noJstsConfig && !noCssConfig) {
     // -c makes the detected config oxlint's root: oxlint ignores a nested
     // oxlint.config.ts and rejects options.typeAware in a nested config otherwise.
     const entry = oxlintConfig ? { chain: REGISTRY.oxlint.chain.map((t) => ({ ...t, args: [...t.args, "-c", oxlintConfig] })) } : REGISTRY[lang];
