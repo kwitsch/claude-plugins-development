@@ -59,7 +59,7 @@ Legend: `[x]` finished. `[ ]` not finished; tag = `open` (code change, not start
 
 ## Dependencies
 
-- F01 before everything: each task's Verification compares against a fresh baseline.
+- Before each task: re-run `node universal-lint/scripts/perf.mts` (F01, done) for a fresh baseline; each task's Verification compares against it.
 - F02 + F03 together remove all false eslint findings seen in this analysis; F02 alone (the safety net) covers projects that have a config but no reachable binary. F04's walk from the file's directory fixes the sub-package case (91 of 128 historical pnpm findings).
 - F04 before F09: both rework the npx-fallback branch of `runLintTool`; F04 covers locally installed tools, F09 the npx-cache-only ones (markdown).
 - F11's savings and F04's are not additive for JS/TS (rtk scans PATH itself); F28 documents the rest.
