@@ -24,6 +24,7 @@ For an npm linter absent from PATH (oxlint in this repo, eslint/stylelint/markdo
 - Skill driver over 10 .mts: 11.5 s (10 failed rtk attempts + 10 npx) vs one batched direct oxlint 247 ms.
 - Sessions: JS/TS family about 1564 of 3154 lintable edits; 258/300 TS-family edits in surviving project dirs have a local oxlint or eslint.
 - In-session (live) FileChanged lint of lint-file.mts during a build: about 4.1 s.
+- 0.15.2 (before F04), `node universal-lint/scripts/perf.mts 5`, `.mts Write (this repo)` medians: real PATH 578 ms, no /mnt 473 ms (npx route: `npx --yes oxlint` resolving the root `node_modules/.bin/oxlint`).
 
 ## Code locations
 
