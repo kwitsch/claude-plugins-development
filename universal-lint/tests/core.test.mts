@@ -198,22 +198,13 @@ function runLate(env: Record<string, string>, input: string): Promise<number | n
   });
 }
 
-test("PostToolUse Edit: a 512 KB payload written 100 ms late is linted and records its digest (F05)", async () => {
+// Edit payloads carry the whole `tool_response.originalFile`, Write payloads the whole `tool_input.content`.
+test.each([["Edit", "tool_response", "originalFile"], ["Write", "tool_input", "content"]])("PostToolUse %s: a 512 KB payload written 100 ms late is linted and records its digest (F05)", async (toolName, holder, key) => {
   const e = makeEnv();
   e.recStub("shellcheck", 0);
   const f = e.file("a.sh", "echo hi\n");
-  const input = payload(f, e.cwd, { toolName: "Edit", toolResponse: { originalFile: PAD } });
-  assert.equal(await runLate(e.childEnv(), input), 0);
-  assert.ok(e.lines().some((l) => l.startsWith("shellcheck ")));
-  assert.ok(existsSync(path.join(e.data, "written", hashPath(realpathSync(f)))));
-});
-
-test("PostToolUse Write: a 512 KB payload written 100 ms late is linted and records its digest (F05)", async () => {
-  const e = makeEnv();
-  e.recStub("shellcheck", 0);
-  const f = e.file("a.sh", "echo hi\n");
-  const p = JSON.parse(payload(f, e.cwd)) as { tool_input: Record<string, unknown> };
-  p.tool_input.content = PAD;
+  const p = JSON.parse(payload(f, e.cwd, { toolName })) as Record<string, Record<string, unknown>>;
+  p[holder][key] = PAD;
   assert.equal(await runLate(e.childEnv(), JSON.stringify(p)), 0);
   assert.ok(e.lines().some((l) => l.startsWith("shellcheck ")));
   assert.ok(existsSync(path.join(e.data, "written", hashPath(realpathSync(f)))));
