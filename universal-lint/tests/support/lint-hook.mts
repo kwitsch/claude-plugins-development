@@ -1,5 +1,5 @@
 // Shared harness for the universal-lint tests (not a test file: vitest only runs *.test.mts).
-// Hermetic: PATH holds only bash + node plus the linter stubs a test adds; HOME and CLAUDE_PLUGIN_DATA are per-test.
+// Hermetic: PATH holds only bash, node, git plus the linter stubs a test adds; HOME and CLAUDE_PLUGIN_DATA are per-test.
 import { spawnSync } from "node:child_process";
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -26,6 +26,8 @@ export interface HookRun {
   status: number | null;
   /** Raw stderr. */
   stderr: string;
+  /** Raw stdout (the watch-paths JSON of SessionStart/CwdChanged). */
+  stdout: string;
   /** `{ rewake: <findings> }` on exit 2 (asyncRewake wakes Claude), `{}` otherwise (no finding). */
   result: { rewake?: string };
   /** The findings text (stderr on exit 2), or "" when there is none. */
@@ -70,6 +72,8 @@ export interface LintEnv {
   childEnv(opts?: RunOptions): Record<string, string>;
   /** Pipe one PostToolUse payload for `filePath` into a fresh hook process. */
   run(filePath: string, opts?: RunOptions): HookRun;
+  /** Pipe an arbitrary hook payload (FileChanged, SessionStart, CwdChanged, ...) into a fresh hook process. */
+  runEvent(payload: Record<string, unknown>, opts?: RunOptions): HookRun;
 }
 
 /**
@@ -87,11 +91,12 @@ export const payload = (filePath: string, cwd: string, opts: RunOptions = {}): s
  *
  * @param status - Exit status.
  * @param stderr - Raw stderr.
+ * @param stdout - Raw stdout.
  * @returns The run.
  */
-function toRun(status: number | null, stderr: string): HookRun {
+function toRun(status: number | null, stderr: string, stdout: string): HookRun {
   const ctx = status === 2 ? stderr.trim() : "";
-  return { status, stderr, result: ctx ? { rewake: ctx } : {}, ctx };
+  return { status, stderr, stdout, result: ctx ? { rewake: ctx } : {}, ctx };
 }
 
 /**
@@ -106,7 +111,7 @@ export function makeEnv(): LintEnv {
   const data = path.join(base, "data");
   const cwd = path.join(base, "proj");
   for (const d of [bin, home, cwd]) mkdirSync(d, { recursive: true });
-  for (const t of ["bash", "node"]) {
+  for (const t of ["bash", "node", "git"]) {
     const src = spawnSync("sh", ["-c", `command -v ${t}`], { encoding: "utf8" }).stdout.trim();
     if (src) symlinkSync(src, path.join(bin, t));
   }
@@ -142,10 +147,14 @@ export function makeEnv(): LintEnv {
       );
     },
     lines: () => readFileSync(record, "utf8").split("\n").filter(Boolean),
-    childEnv: (opts = {}) => ({ PATH: bin, HOME: home, RECORD: record, OUT: opts.out ?? "", CLAUDE_PLUGIN_DATA: data, ...opts.env }),
+    childEnv: (opts = {}) => ({ PATH: bin, HOME: home, RECORD: record, OUT: opts.out ?? "", CLAUDE_PLUGIN_DATA: data, GIT_CONFIG_NOSYSTEM: "1", ...opts.env }),
     run(filePath, opts) {
       const r = spawnSync(process.execPath, [HOOK], { input: payload(filePath, cwd, opts), env: env.childEnv(opts), encoding: "utf8" });
-      return toRun(r.status, r.stderr);
+      return toRun(r.status, r.stderr, r.stdout);
+    },
+    runEvent(p, opts) {
+      const r = spawnSync(process.execPath, [HOOK], { input: JSON.stringify(p), env: env.childEnv(opts), encoding: "utf8" });
+      return toRun(r.status, r.stderr, r.stdout);
     },
   };
   return env;

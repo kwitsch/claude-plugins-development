@@ -1,7 +1,10 @@
 // Guard clauses and basic per-linter smoke tests (shellcheck/eslint/ruff/ktlint); ported from test/universal-lint/core.bats.
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { existsSync, readFileSync, realpathSync } from "node:fs";
+import path from "node:path";
 import { test } from "vitest";
+import { hashPath } from "../plugin/hooks/lint-file.mjs";
 import { makeEnv } from "./support/lint-hook.mts";
 
 /** A 4-line shell script; the Edit tests below edit line 2. */
@@ -162,4 +165,19 @@ test("json extension -> linter never invoked (deliberately uncovered)", () => {
   e.recStub("eslint", 1);
   assert.deepEqual(e.run(e.file("a.json", "{\"a\":1}"), { out: "issue" }).result, {});
   assert.deepEqual(e.lines(), []);
+});
+
+test("PostToolUse records the on-disk content digest under CLAUDE_PLUGIN_DATA/written", () => {
+  const e = makeEnv();
+  const f = e.file("a.sh", "echo hi\n");
+  assert.equal(e.run(f).status, 0);
+  const digestFile = path.join(e.data, "written", hashPath(realpathSync(f)));
+  assert.equal(readFileSync(digestFile, "utf8"), createHash("sha256").update(readFileSync(f)).digest("base64"));
+});
+
+test("PostToolUse with success false records no digest", () => {
+  const e = makeEnv();
+  const f = e.file("a.sh", "echo hi\n");
+  e.run(f, { toolResponse: { success: false } });
+  assert.equal(existsSync(path.join(e.data, "written")), false);
 });

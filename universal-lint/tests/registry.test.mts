@@ -1,10 +1,11 @@
 // Unit tests of the exports of the built plugin/hooks/lint-file.mjs (ported from test/universal-lint/registry.test.mjs).
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "vitest";
-import { buildArgv, classifyCheckstyleOutput, classifyExit, editRanges, gateFinding, hasProjectMarkdownlintConfig, hasProjectYamllintConfig, isExcludedPath, isToolAvailable, lintFileHandler, looksLikeSolutionStyleTsconfig, oxlintConfigTypeChecks, parseRtkPrefix, REGISTRY, resolveCargoManifest, resolveCheckstyleConfig, resolveLintTarget, resolveOxlintConfig, resolveTsconfig, stripTrailingCommas, truncate, tsBuildInfoPathFor, tscOutputHasSourceDiagnostic } from "../plugin/hooks/lint-file.mjs";
+import { buildArgv, classifyCheckstyleOutput, classifyExit, editRanges, gateFinding, hashPath, hasProjectMarkdownlintConfig, hasProjectYamllintConfig, isExcludedPath, isToolAvailable, lintFileHandler, looksLikeSolutionStyleTsconfig, oxlintConfigTypeChecks, parseRtkPrefix, recordWritten, REGISTRY, resolveCargoManifest, resolveCheckstyleConfig, resolveLintTarget, resolveOxlintConfig, resolveTsconfig, scopedTarget, stripTrailingCommas, truncate, tsBuildInfoPathFor, tscOutputHasSourceDiagnostic, WATCH_LIMIT } from "../plugin/hooks/lint-file.mjs";
 
 const shellcheck = REGISTRY.shell.chain[0];
 const checkstyle = REGISTRY.java.chain[0];
@@ -879,4 +880,72 @@ test("gateFinding: ranges null keeps every own-file diagnostic", () => {
 test("gateFinding: only own-file misses and no foreign location gives null", () => {
   const resolved = path.join(GATE_DIR, "a.sh");
   assert.equal(gateFinding(gf("a.sh:2:1: note: x [SC1]\na.sh:4:1: note: y [SC2]\n"), [[0, 0]], resolved), null);
+});
+
+test("scopedTarget: lexical and real path of an in-cwd eligible file", () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "ul-st-"));
+  writeFileSync(path.join(dir, "a.sh"), "echo hi\n");
+  assert.deepEqual(scopedTarget(dir, "a.sh"), { fp: path.join(dir, "a.sh"), real: path.join(realpathSync(dir), "a.sh") });
+});
+
+test("scopedTarget: null for a symlink inside cwd pointing outside it", () => {
+  const root = mkdtempSync(path.join(tmpdir(), "ul-st-"));
+  const dir = path.join(root, "proj");
+  mkdirSync(dir);
+  writeFileSync(path.join(root, "o.sh"), "echo hi\n");
+  symlinkSync(path.join(root, "o.sh"), path.join(dir, "link.sh"));
+  assert.equal(scopedTarget(dir, "link.sh"), null);
+});
+
+test("scopedTarget: null for a dangling symlink", () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "ul-st-"));
+  symlinkSync(path.join(dir, "missing.sh"), path.join(dir, "dl.sh"));
+  assert.equal(scopedTarget(dir, "dl.sh"), null);
+});
+
+test("scopedTarget: null for a file inside the scratchpad dir, kept without one", () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "ul-st-"));
+  mkdirSync(path.join(dir, "s"));
+  writeFileSync(path.join(dir, "s", "e.sh"), "echo hi\n");
+  assert.equal(scopedTarget(dir, "s/e.sh", path.join(dir, "s")), null);
+  assert.equal(scopedTarget(dir, "s/e.sh")?.fp, path.join(dir, "s", "e.sh"));
+});
+
+test("scopedTarget: null for cwd itself, an excluded path and an unsupported extension", () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "ul-st-"));
+  mkdirSync(path.join(dir, "node_modules"));
+  writeFileSync(path.join(dir, "node_modules", "a.sh"), "echo hi\n");
+  writeFileSync(path.join(dir, "x.txt"), "hi\n");
+  assert.equal(scopedTarget(dir, "."), null);
+  assert.equal(scopedTarget(dir, "node_modules/a.sh"), null);
+  assert.equal(scopedTarget(dir, "x.txt"), null);
+});
+
+test("resolveLintTarget: null for a file inside the payload scratchpad_dir", () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "ul-rlt-"));
+  mkdirSync(path.join(dir, "s"));
+  writeFileSync(path.join(dir, "s", "e.sh"), "echo hi\n");
+  assert.equal(resolveLintTarget({ ...mockResolveArgs(dir, "s/e.sh"), scratchpad_dir: path.join(dir, "s") }), null);
+  assert.equal(resolveLintTarget(mockResolveArgs(dir, "s/e.sh")), path.join(dir, "s", "e.sh"));
+});
+
+test("recordWritten: stores the SHA-256 base64 of the file bytes at CLAUDE_PLUGIN_DATA/written/<hashPath(real)>", () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "ul-rw-"));
+  const data = path.join(dir, "data");
+  const fp = path.join(dir, "a.sh");
+  writeFileSync(fp, "echo hi\n");
+  const real = realpathSync(fp);
+  const prev = process.env.CLAUDE_PLUGIN_DATA;
+  process.env.CLAUDE_PLUGIN_DATA = data;
+  try {
+    recordWritten(fp, real);
+  } finally {
+    if (prev === undefined) delete process.env.CLAUDE_PLUGIN_DATA;
+    else process.env.CLAUDE_PLUGIN_DATA = prev;
+  }
+  assert.equal(readFileSync(path.join(data, "written", hashPath(real)), "utf8"), createHash("sha256").update("echo hi\n").digest("base64"));
+});
+
+test("WATCH_LIMIT is 5000", () => {
+  assert.equal(WATCH_LIMIT, 5000);
 });

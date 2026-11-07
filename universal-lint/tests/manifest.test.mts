@@ -25,6 +25,28 @@ test("PostToolUse hook is wired to lint-file.mjs as an asyncRewake command hook 
   assert.equal(h.hooks[0].async, undefined);
 });
 
+for (const ev of ["SessionStart", "CwdChanged"]) {
+  test(`${ev} hook is wired to lint-file.mjs as a sync command hook with timeout 30 and no matcher`, () => {
+    const h = json("hooks/hooks.json").hooks[ev][0];
+    assert.equal(h.matcher, undefined);
+    assert.equal(h.hooks[0].type, "command");
+    assert.equal(h.hooks[0].command, "\"${CLAUDE_PLUGIN_ROOT}/hooks/lint-file.mjs\"");
+    assert.equal(h.hooks[0].timeout, 30);
+    assert.equal(h.hooks[0].asyncRewake, undefined);
+    assert.equal(h.hooks[0].async, undefined);
+  });
+}
+
+test("FileChanged hook is wired to lint-file.mjs as an asyncRewake command hook with timeout 90 and no matcher", () => {
+  const h = json("hooks/hooks.json").hooks.FileChanged[0];
+  assert.equal(h.matcher, undefined);
+  assert.equal(h.hooks[0].type, "command");
+  assert.equal(h.hooks[0].command, "\"${CLAUDE_PLUGIN_ROOT}/hooks/lint-file.mjs\"");
+  assert.equal(h.hooks[0].timeout, 90);
+  assert.equal(h.hooks[0].asyncRewake, true);
+  assert.equal(h.hooks[0].async, undefined);
+});
+
 test("lint-file.mjs is executable and has a node shebang (it is invoked directly)", () => {
   accessSync(HOOK, constants.X_OK);
   assert.equal(readFileSync(HOOK, "utf8").split("\n")[0], "#!/usr/bin/env node");

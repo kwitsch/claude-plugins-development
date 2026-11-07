@@ -1,28 +1,32 @@
 #!/usr/bin/env node
 /**
- * universal-lint plugin: PostToolUse Write|Edit lint-only checker.
+ * universal-lint plugin: lint-only checker for Write/Edit results and files changed outside them.
  *
  * @remarks
- * Command hook, invoked directly per event (no MCP server). stdin = hook JSON (PostToolUseHookInput). `asyncRewake:
- * true` in hooks.json: runs in the background (safe because linting never mutates the file); findings go to stderr
- * with exit 2, which wakes Claude with them; no finding = no output, exit 0.
+ * Command hook, invoked directly per event (no MCP server). stdin = hook JSON (PostToolUseHookInput); `main()`
+ * dispatches on `hook_event_name`: SessionStart/CwdChanged print the git watch list as `watchPaths` (stdout JSON,
+ * exit 0); FileChanged lints a watched file changed outside Write/Edit (unlink, scope, digest and git gates first);
+ * anything else is PostToolUse Write|Edit (digest recorded, then lint). `asyncRewake: true` in hooks.json for
+ * PostToolUse and FileChanged: runs in the background (safe because linting never mutates the file); findings go to
+ * stderr with exit 2, which wakes Claude with them; no finding = no output, exit 0.
  *
- * lint_file flow (every failure path returns `{}` silently, fail open): guard `tool_response.success !== false`,
- * extension in the registry or type-check-eligible, path inside cwd and not excluded (node_modules/vendor/.git,
- * .claude/worktrees, .claude/agent-memory, *.local.*; see `isExcludedPath`), file exists. Then up to two INDEPENDENT
- * checks run and their findings combine: (1) the language's chain tool (first on PATH wins; no per-file skip, since
- * no style mapping exists for linters) through spawnSync (cwd = project cwd, 30s timeout, stdout+stderr captured),
- * classified by exit code for most tools (checkstyle by stripped output, since its exit code counts only
- * ERROR-severity violations and the bundled default ruleset runs at `warning`); (2) for .ts/.tsx/.mts/.cts only, a
- * whole-project `tsc --noEmit` via the nearest tsconfig.json (see `runTypeCheck`). Any issues found: truncated,
- * joined text (stderr, exit 2); no finding from either check: nothing printed.
+ * lint flow (every failure path returns `{}` silently, fail open): guard `tool_response.success !== false`, then
+ * `scopedTarget` (real path strictly inside the real cwd, not excluded: node_modules/vendor/.git, .claude/worktrees,
+ * .claude/agent-memory, *.local.*, see `isExcludedPath`; not inside `scratchpad_dir`; no dangling link; lintable
+ * extension; file exists). Then up to two INDEPENDENT checks run and their findings combine: (1) the language's chain
+ * tool (first on PATH wins; no per-file skip, since no style mapping exists for linters) through spawnSync (cwd =
+ * project cwd, 30s timeout, stdout+stderr captured), classified by exit code for most tools (checkstyle by stripped
+ * output, since its exit code counts only ERROR-severity violations and the bundled default ruleset runs at
+ * `warning`); (2) for .ts/.tsx/.mts/.cts only, a whole-project `tsc --noEmit` via the nearest tsconfig.json (see
+ * `runTypeCheck`). Any issues found: truncated, joined text (stderr, exit 2); no finding from either check: nothing
+ * printed.
  *
  * @packageDocumentation
  */
-import { spawnSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import type { SpawnSyncOptionsWithStringEncoding, SpawnSyncReturns } from "node:child_process";
 import { createHash } from "node:crypto";
-import { accessSync, constants as fsConstants, existsSync, mkdirSync, readFileSync, realpathSync, renameSync, writeFileSync } from "node:fs";
+import { accessSync, constants as fsConstants, existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import path from "node:path";
 import process from "node:process";
@@ -60,6 +64,12 @@ const TSC_SPAWN_TIMEOUT_MS = 45000;
  * as TSC_SPAWN_TIMEOUT_MS; stays under the hook-level timeout backstop.
  */
 const CARGO_SPAWN_TIMEOUT_MS = 45000;
+
+/** Above this many lintable files the watch list is empty (nothing watched), as dprint's watch-list.mts. */
+export const WATCH_LIMIT = 5000;
+
+/** Budget of each git call (ls-files for the watch list, status for the FileChanged gate). */
+const GIT_TIMEOUT_MS = 10000;
 
 /** tsc only understands real TypeScript syntax; .js/.jsx/.mjs/.cjs stay chain-linted only (eslint or oxlint, see resolveOxlintConfig). */
 const TYPE_CHECK_EXTS = new Set([".ts", ".tsx", ".mts", ".cts"]);
@@ -106,14 +116,24 @@ interface Finding {
   base: string;
 }
 
-/** The subset of Claude Code's PostToolUse hook payload this hook reads. */
+/** The subset of Claude Code's hook payloads this module reads (PostToolUse, FileChanged, SessionStart, CwdChanged). */
 interface PostToolUseHookInput {
   /** Project root the session runs in. */
   cwd: string;
+  /** Hook event (`PostToolUse`, `FileChanged`, `SessionStart`, `CwdChanged`); missing in older payloads (treated as PostToolUse). */
+  hook_event_name?: unknown;
+  /** The session scratchpad directory; files inside it are out of scope. */
+  scratchpad_dir?: unknown;
+  /** FileChanged: the changed file. */
+  file_path?: unknown;
+  /** FileChanged: `"change"`, `"add"` or `"unlink"`. */
+  event?: unknown;
+  /** CwdChanged: the new working directory. */
+  new_cwd?: unknown;
   /** Name of the tool that fired the hook (`Write` or `Edit`). */
   tool_name?: unknown;
-  /** The tool's input; `file_path` names the written file. */
-  tool_input: { file_path?: unknown };
+  /** The tool's input; `file_path` names the written file. Absent for non-tool events. */
+  tool_input?: { file_path?: unknown };
   /** The tool's result; `success: false` marks a failed Write/Edit, `structuredPatch` holds the Edit tool's diff hunks. */
   tool_response?: { success?: boolean; structuredPatch?: unknown };
   [key: string]: unknown;
@@ -1219,35 +1239,93 @@ export function isExcludedPath(rel: string): boolean {
 }
 
 /**
- * Run every cheap entry guard and return the resolved absolute lint target, or
- * null when any guard rejects (success===false, missing cwd/file_path, path
- * outside cwd, excluded path, unsupported extension, or file absent). Shared by
- * main() (to decide whether to lint at all) and lintFileHandler (to re-run the
- * guards before linting) so the two never diverge. Fails closed to null on any
- * unexpected error, matching lintFileHandler's fail-open-to-{} philosophy.
+ * realpath of `p`; for a missing path, the nearest existing ancestor's realpath joined with the missing rest (port of
+ * dprint's `realish`).
+ *
+ * @param p - Absolute path.
+ * @returns The real path.
+ * @throws When `p` itself exists but cannot be resolved (a dangling symlink), or on any non-ENOENT error.
+ */
+function realish(p: string): string {
+  try {
+    return realpathSync(p);
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw e;
+    try {
+      lstatSync(p);
+    } catch {
+      const dir = path.dirname(p);
+      return dir === p ? p : path.join(realish(dir), path.basename(p));
+    }
+    throw e; // p itself exists: a dangling symlink
+  }
+}
+
+/** The payload's `scratchpad_dir` when it is a string, else undefined. */
+function scratchpadOf(args: PostToolUseHookInput): string | undefined {
+  return typeof args.scratchpad_dir === "string" ? args.scratchpad_dir : undefined;
+}
+
+/**
+ * The real-path scope rule shared by every event (dprint's `inScope`): `file` resolved against `cwd` must exist, have a
+ * lintable extension, its real path must lie strictly inside realpath(cwd), not be excluded (`isExcludedPath` on the
+ * path relative to the real cwd), not lie inside realpath(scratchpad) when given, and not be a dangling link.
+ *
+ * @param cwd - Payload cwd (the scope root; never `process.cwd()`).
+ * @param file - Absolute or cwd-relative path.
+ * @param scratchpad - The session's `scratchpad_dir`, when the payload has one.
+ * @param roots - Pre-resolved `realish(cwd)` / `realish(scratchpad)`, so a caller scoping many files resolves them once.
+ * @returns `{ fp, real }` (lexical absolute path, real path) or null when out of scope.
+ */
+export function scopedTarget(cwd: string, file: string, scratchpad?: string, roots?: { cwd: string; scratchpad?: string }): { fp: string; real: string } | null {
+  try {
+    const fp = path.resolve(cwd, file);
+    const real = realish(fp);
+    const outside = (rel: string): boolean => rel === ".." || rel.startsWith(".." + path.sep) || path.isAbsolute(rel);
+    const rel = path.relative(roots?.cwd ?? realish(cwd), real);
+    if (rel === "" || outside(rel) || isExcludedPath(rel)) return null;
+    if (scratchpad) {
+      const rs = roots ? roots.scratchpad ?? realish(scratchpad) : realish(scratchpad);
+      if (real === rs || real.startsWith(rs + path.sep)) return null;
+    }
+    const ext = path.extname(fp).toLowerCase();
+    if (!EXT_MAP[ext] && !TYPE_CHECK_EXTS.has(ext)) return null;
+    if (!existsSync(fp)) return null;
+    return { fp, real };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * PostToolUse entry guards (success !== false, non-empty cwd and tool_input.file_path) then `scopedTarget`.
  *
  * @param args - The PostToolUse hook payload.
- * @returns The absolute path to lint, or null when a guard rejects.
+ * @returns `{ fp, real }` or null when a guard rejects or on any error.
  */
-export function resolveLintTarget(args: PostToolUseHookInput): string | null {
+function postToolScope(args: PostToolUseHookInput): { fp: string; real: string } | null {
   try {
     if (args?.tool_response?.success === false) return null;
     const cwd = typeof args?.cwd === "string" ? args.cwd : "";
     const fp = args?.tool_input?.file_path;
     if (!cwd || typeof fp !== "string" || !fp) return null;
-
-    const resolved = path.resolve(cwd, fp);
-    if (resolved !== cwd && !resolved.startsWith(cwd + path.sep)) return null;
-    const rel = path.relative(cwd, resolved);
-    if (isExcludedPath(rel)) return null;
-
-    const ext = path.extname(resolved).toLowerCase();
-    if (!EXT_MAP[ext] && !TYPE_CHECK_EXTS.has(ext)) return null;
-    if (!existsSync(resolved)) return null;
-    return resolved;
+    return scopedTarget(cwd, fp, scratchpadOf(args));
   } catch {
     return null;
   }
+}
+
+/**
+ * Run every cheap entry guard and return the resolved absolute lint target, or null when any guard rejects
+ * (success===false, missing cwd/file_path, or `scopedTarget` rejects: outside the real cwd, excluded, inside
+ * `scratchpad_dir`, dangling link, unsupported extension, file absent). Used by lintFileHandler (and through it by the
+ * skill driver). Fails closed to null on any unexpected error, matching lintFileHandler's fail-open-to-{} philosophy.
+ *
+ * @param args - The PostToolUse hook payload.
+ * @returns The lexical absolute path to lint, or null when a guard rejects.
+ */
+export function resolveLintTarget(args: PostToolUseHookInput): string | null {
+  return postToolScope(args)?.fp ?? null;
 }
 
 /**
@@ -1369,60 +1447,229 @@ export function gateFinding(finding: Finding, ranges: Array<[number, number]> | 
 }
 
 /**
- * The lint_file tool handler. Returns {} on every guard failure / clean / skip (fail open).
+ * File holding the SHA-256 (base64) of the content Write/Edit last left at `real`:
+ * `CLAUDE_PLUGIN_DATA` (OS temp dir when unset)/written/<hashPath(real)>. Never inside the project tree.
+ *
+ * @param real - Real path of the written file.
+ * @returns Absolute path of the digest file.
+ */
+function writtenDigestPath(real: string): string {
+  return path.resolve(process.env.CLAUDE_PLUGIN_DATA || tmpdir(), "written", hashPath(real));
+}
+
+/**
+ * SHA-256 base64 of a file's bytes.
+ *
+ * @param fp - File to hash.
+ * @returns Base64 digest.
+ */
+function fileDigest(fp: string): string {
+  return createHash("sha256").update(readFileSync(fp)).digest("base64");
+}
+
+/**
+ * Record the on-disk content digest of a Write/Edit target, atomically (temp file + renameSync), so a FileChanged
+ * process can skip the file while its content still matches. One file per real path: concurrent hook processes need
+ * no locking. Fails open silently (cost: one duplicate lint, never a lost one).
+ *
+ * @param fp - Lexical path of the written file (read for the digest).
+ * @param real - Real path of the written file (the digest key).
+ */
+export function recordWritten(fp: string, real: string): void {
+  try {
+    const file = writtenDigestPath(real);
+    mkdirSync(path.dirname(file), { recursive: true });
+    const tmp = `${file}.${process.pid}.tmp`;
+    writeFileSync(tmp, fileDigest(fp));
+    renameSync(tmp, file);
+  } catch {
+    // fail open: a missing digest costs one duplicate lint
+  }
+}
+
+/**
+ * PostToolUse digest step: `recordWritten` for the already-scoped target. Runs before the lint so the digest lands
+ * within milliseconds. Never throws.
+ *
+ * @param s - The `postToolScope` result, or null.
+ */
+function recordWrittenFor(s: { fp: string; real: string } | null): void {
+  if (s) recordWritten(s.fp, s.real);
+}
+
+/**
+ * Lint `resolved` (chain tool + tsc), gate the findings against `ranges` (null = whole file), and build the hook result.
+ *
+ * @param resolved - Lexical absolute path of the in-scope file.
+ * @param cwd - Payload cwd (spawn cwd and config search root).
+ * @param ranges - Edited line ranges, or null when the whole file counts.
+ * @param hookEventName - `hookSpecificOutput.hookEventName` of the result.
+ * @param label - Prefix of the findings text (`<label>: <findings>`).
+ * @returns The hook result: findings as additionalContext, or an empty object.
+ */
+function lintResolved(resolved: string, cwd: string, ranges: Array<[number, number]> | null, hookEventName: string, label: string): HookResult {
+  const rel = path.relative(cwd, resolved);
+  const ext = path.extname(resolved).toLowerCase();
+  const lang = EXT_MAP[ext];
+  const typeCheckEligible = TYPE_CHECK_EXTS.has(ext);
+  const oxlintConfig = lang === "jsts" ? resolveOxlintConfig(path.dirname(resolved), cwd) : null;
+
+  const findings: Finding[] = [];
+  let oxlintRan = false;
+  if (lang) {
+    // -c makes the detected config oxlint's root: oxlint ignores a nested
+    // oxlint.config.ts and rejects options.typeAware in a nested config otherwise.
+    const entry = oxlintConfig ? { chain: REGISTRY.oxlint.chain.map((t) => ({ ...t, args: [...t.args, "-c", oxlintConfig] })) } : REGISTRY[lang];
+    const chain = runChainLint(entry, resolved, cwd, rel);
+    if (chain.finding) findings.push(chain.finding);
+    oxlintRan = oxlintConfig !== null && chain.ran;
+  }
+  // Skip tsc only when oxlint actually ran with a typeCheck config; otherwise tsc is the only type check.
+  if (typeCheckEligible && !(oxlintRan && oxlintConfig && oxlintConfigTypeChecks(oxlintConfig))) {
+    const tsResult = runTypeCheck(resolved, cwd);
+    if (tsResult) findings.push(tsResult);
+  }
+  // Gate before truncate() so the context budget is spent on in-range text.
+  const kept = findings.flatMap((f) => {
+    const g = gateFinding(f, ranges, resolved);
+    return g ? [g] : [];
+  });
+  if (kept.length === 0) return {};
+
+  // truncate() is applied per-finding first (so a single finding's own text
+  // is capped exactly as before this change), then AGAIN over the joined
+  // whole -- two per-finding-capped blocks can still together exceed
+  // MAX_CONTEXT_CHARS when both are near the cap; the outer pass restores a
+  // hard whole-message ceiling. Idempotent/no-op for the single-finding
+  // case (already <= MAX_CONTEXT_CHARS from its own inner truncate()), so
+  // single-finding output is unchanged from before this change.
+  const blocks = kept.map((f) => `${f.tool} found issues in ${f.target}:\n${truncate(f.text)}`);
+  return {
+    hookSpecificOutput: {
+      hookEventName,
+      additionalContext: `${label}: ${truncate(blocks.join("\n\n"))}`,
+    },
+  };
+}
+
+/**
+ * The lint_file tool handler (PostToolUse Write|Edit). Returns {} on every guard failure / clean / skip (fail open).
  *
  * @param args - The PostToolUse hook payload.
  * @returns The hook result: findings as additionalContext, or an empty object.
  */
-export function lintFileHandler(args: PostToolUseHookInput): HookResult {
+export function lintFileHandler(args: PostToolUseHookInput, scoped: { fp: string; real: string } | null = postToolScope(args)): HookResult {
   try {
-    const resolved = resolveLintTarget(args);
+    const resolved = scoped?.fp;
     if (!resolved) return {};
     const ranges = editRanges(args);
     if (ranges?.length === 0) return {}; // the Edit changed nothing
-    const cwd = args.cwd;
-    const rel = path.relative(cwd, resolved);
-    const ext = path.extname(resolved).toLowerCase();
-    const lang = EXT_MAP[ext];
-    const typeCheckEligible = TYPE_CHECK_EXTS.has(ext);
-    const oxlintConfig = lang === "jsts" ? resolveOxlintConfig(path.dirname(resolved), cwd) : null;
+    return lintResolved(resolved, args.cwd, ranges, "PostToolUse", "universal-lint");
+  } catch {
+    return {};
+  }
+}
 
-    const findings: Finding[] = [];
-    let oxlintRan = false;
-    if (lang) {
-      // -c makes the detected config oxlint's root: oxlint ignores a nested
-      // oxlint.config.ts and rejects options.typeAware in a nested config otherwise.
-      const entry = oxlintConfig ? { chain: REGISTRY.oxlint.chain.map((t) => ({ ...t, args: [...t.args, "-c", oxlintConfig] })) } : REGISTRY[lang];
-      const chain = runChainLint(entry, resolved, cwd, rel);
-      if (chain.finding) findings.push(chain.finding);
-      oxlintRan = oxlintConfig !== null && chain.ran;
+/**
+ * FileChanged: lint a watched file changed outside Write/Edit, whole file (no edit-range gate). Skips, first match
+ * wins: `unlink` event; out of scope (`scopedTarget`); content still equal to the digest Write/Edit recorded; git says
+ * ignored (`!!`) or unchanged (empty status). A git failure (no git, not a repo, timeout) lints. Returns {} for every
+ * skip and on any error (fail open).
+ *
+ * @param args - The FileChanged hook payload.
+ * @returns The hook result: findings as additionalContext, or an empty object.
+ */
+export function fileChangedHandler(args: PostToolUseHookInput): HookResult {
+  // shortcut: one process per FileChanged, no cross-process cap; add slot files under CLAUDE_PLUGIN_DATA if bulk changes overload the machine
+  try {
+    if (args?.event === "unlink") return {};
+    const cwd = args?.cwd;
+    const file = args?.file_path;
+    if (typeof cwd !== "string" || !cwd || typeof file !== "string" || !file) return {};
+    const s = scopedTarget(cwd, file, scratchpadOf(args));
+    if (!s) return {};
+    let recorded: string | null = null;
+    try {
+      recorded = readFileSync(writtenDigestPath(s.real), "utf8");
+    } catch {
+      // no digest: the file was not just written by Write/Edit
     }
-    // Skip tsc only when oxlint actually ran with a typeCheck config; otherwise tsc is the only type check.
-    if (typeCheckEligible && !(oxlintRan && oxlintConfig && oxlintConfigTypeChecks(oxlintConfig))) {
-      const tsResult = runTypeCheck(resolved, cwd);
-      if (tsResult) findings.push(tsResult);
+    if (recorded !== null) {
+      if (recorded === fileDigest(s.fp)) return {};
+      rmSync(writtenDigestPath(s.real), { force: true }); // stale: a later restore of the old bytes must lint
     }
-    // Gate before truncate() so the context budget is spent on in-range text.
-    const kept = findings.flatMap((f) => {
-      const g = gateFinding(f, ranges, resolved);
-      return g ? [g] : [];
+    try {
+      const status = execFileSync("git", ["--no-optional-locks", "status", "--porcelain", "--untracked-files=normal", "--ignored=matching", "--", s.fp], {
+        cwd: path.dirname(s.fp),
+        encoding: "utf8",
+        timeout: GIT_TIMEOUT_MS,
+        stdio: ["ignore", "pipe", "ignore"],
+      });
+      if (status === "" || status.startsWith("!!")) return {};
+    } catch {
+      // no git, not a repo, timeout or non-zero exit: lint
+    }
+    return lintResolved(s.fp, cwd, null, "FileChanged", "universal-lint (changed outside Write/Edit)");
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * Lintable, in-scope files of `cwd` per `git ls-files -co --exclude-standard` (tracked + untracked-not-ignored; in a
+ * subdirectory git lists only paths below it, relative to it), each filtered through `scopedTarget` (drops excluded
+ * paths, scratchpad files, dangling links and index entries deleted from disk).
+ *
+ * @param cwd - Payload cwd (`new_cwd` for CwdChanged).
+ * @param scratchpad - The session's `scratchpad_dir`, when the payload has one.
+ * @returns Lexical absolute paths; [] on git failure or when more than WATCH_LIMIT remain (stderr note).
+ */
+export function watchList(cwd: string, scratchpad?: string): string[] {
+  let out: string;
+  try {
+    out = execFileSync("git", ["ls-files", "-co", "--exclude-standard", "-z"], {
+      cwd,
+      encoding: "utf8",
+      timeout: GIT_TIMEOUT_MS,
+      maxBuffer: MAX_BUFFER_BYTES,
+      stdio: ["ignore", "pipe", "ignore"],
     });
-    if (kept.length === 0) return {};
+  } catch {
+    return [];
+  }
+  let roots: { cwd: string; scratchpad?: string };
+  try {
+    roots = { cwd: realish(cwd), scratchpad: scratchpad ? realish(scratchpad) : undefined };
+  } catch {
+    return [];
+  }
+  // Set: unmerged index entries are listed once per stage
+  const list = [...new Set(out.split("\0").filter(Boolean).flatMap((rel) => {
+    const fp = scopedTarget(cwd, rel, scratchpad, roots)?.fp;
+    return fp ? [fp] : [];
+  }))];
+  if (list.length > WATCH_LIMIT) {
+    process.stderr.write(`universal-lint: watch list: ${list.length} files above ${WATCH_LIMIT}, FileChanged linting off for this cwd\n`);
+    return [];
+  }
+  return list;
+}
 
-    // truncate() is applied per-finding first (so a single finding's own text
-    // is capped exactly as before this change), then AGAIN over the joined
-    // whole -- two per-finding-capped blocks can still together exceed
-    // MAX_CONTEXT_CHARS when both are near the cap; the outer pass restores a
-    // hard whole-message ceiling. Idempotent/no-op for the single-finding
-    // case (already <= MAX_CONTEXT_CHARS from its own inner truncate()), so
-    // single-finding output is unchanged from before this change.
-    const blocks = kept.map((f) => `${f.tool} found issues in ${f.target}:\n${truncate(f.text)}`);
-    return {
-      hookSpecificOutput: {
-        hookEventName: "PostToolUse",
-        additionalContext: `universal-lint: ${truncate(blocks.join("\n\n"))}`,
-      },
-    };
+/**
+ * SessionStart/CwdChanged: the watch list as `hookSpecificOutput.watchPaths` (Claude Code then fires FileChanged for
+ * those files). Fails open to {}.
+ *
+ * @param args - The SessionStart/CwdChanged hook payload.
+ * @returns The watch-paths output, or {} when the list is empty or for any other event.
+ */
+export function watchPathsHandler(args: PostToolUseHookInput): { hookSpecificOutput?: { hookEventName: string; watchPaths: string[] } } {
+  try {
+    const ev = typeof args?.hook_event_name === "string" ? args.hook_event_name : "";
+    if (ev !== "SessionStart" && ev !== "CwdChanged") return {};
+    const cwd = typeof args.new_cwd === "string" && args.new_cwd ? args.new_cwd : args.cwd;
+    if (typeof cwd !== "string" || !cwd) return {};
+    const list = watchList(cwd, scratchpadOf(args));
+    return list.length > 0 ? { hookSpecificOutput: { hookEventName: ev, watchPaths: list } } : {};
   } catch {
     return {};
   }
@@ -1441,14 +1688,27 @@ function isMainModule(): boolean {
 }
 
 /**
- * Read the hook's stdin JSON and run lintFileHandler. Findings: their text on
- * stderr and exit 2 (asyncRewake wakes Claude with it). Fails open on any
- * error — no output, exit 0.
+ * Read the hook's stdin JSON and dispatch on `hook_event_name`: SessionStart/CwdChanged print the watch-paths JSON on
+ * stdout (exit 0); FileChanged runs fileChangedHandler; anything else (PostToolUse, or a payload without the field)
+ * records the Write/Edit digest and runs lintFileHandler. Findings: their text on stderr and exit 2 (asyncRewake wakes
+ * Claude with it). Fails open on any error — no output, exit 0.
  */
 function main(): void {
   try {
     const input = JSON.parse(readFileSync(0, "utf8")) as PostToolUseHookInput;
-    const ctx = lintFileHandler(input).hookSpecificOutput?.additionalContext;
+    const ev = input?.hook_event_name;
+    if (ev === "SessionStart" || ev === "CwdChanged") {
+      const r = watchPathsHandler(input);
+      if (r.hookSpecificOutput) process.stdout.write(JSON.stringify(r));
+      return;
+    }
+    let ctx: string | undefined;
+    if (ev === "FileChanged") ctx = fileChangedHandler(input).hookSpecificOutput?.additionalContext;
+    else {
+      const scoped = postToolScope(input);
+      recordWrittenFor(scoped);
+      ctx = lintFileHandler(input, scoped).hookSpecificOutput?.additionalContext;
+    }
     if (ctx) {
       process.stderr.write(ctx + "\n");
       process.exitCode = 2;
