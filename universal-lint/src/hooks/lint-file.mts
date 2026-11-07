@@ -38,14 +38,6 @@ const SPAWN_TIMEOUT_MS = 30000;
 /** Cold npx install can exceed SPAWN_TIMEOUT_MS; stay inside the 90s lint budget (hooks.json timeout 90). */
 const NPX_SPAWN_TIMEOUT_MS = 55000;
 
-/**
- * Bounds the rtk-wrapped npx attempt so a stalled rtk can't consume the bare-npx fallback's cold-install budget too.
- * Worst-case sequential total (this + NPX_SPAWN_TIMEOUT_MS = 60s) stays well inside the 90s lint budget (hooks.json
- * timeout 90; two full NPX budgets would total 110s and blow it), the same worst case the
- * direct-tool branch below already runs at (rtk attempt + fallback = 2 x SPAWN_TIMEOUT_MS).
- */
-const RTK_NPX_ATTEMPT_TIMEOUT_MS = 5000;
-
 /** Cap on the additionalContext findings text. */
 const MAX_CONTEXT_CHARS = 4000;
 
@@ -297,99 +289,11 @@ export function isToolAvailable(tool: LintTool, toolOnPath: boolean, npxOnPath: 
   return toolOnPath || (!!tool.npmSpec && npxOnPath);
 }
 
-/** Timeout of the `rtk rewrite` probe: a lightweight metadata probe, not a real lint run. */
-const RTK_PROBE_TIMEOUT_MS = 5000;
-
 /**
- * Parse `rtk rewrite <tool> <args...> "__RTK_PROBE__"` stdout into the rtk verb
- * tokens to run instead of the bare tool (e.g. "rtk lint __RTK_PROBE__" -> ["lint"],
- * "rtk go vet __RTK_PROBE__" -> ["go", "vet"]), or null when rtk has no filtered
- * equivalent for this tool (checkstyle, ktlint currently answer empty). Keys off
- * the placeholder token position, not the exit code: rtk rewrite's own --help
- * claims exit 0/1 for supported/unsupported, but the observed behavior (0.43.0)
- * is 3/1 -- do not "fix" this to check `=== 0`.
- *
- * @param stdout - stdout of the `rtk rewrite` probe.
- * @returns The rtk verb tokens, or null when rtk has no filtered equivalent.
- */
-export function parseRtkPrefix(stdout: string | undefined): string[] | null {
-  const tokens = String(stdout ?? "")
-    .trim()
-    .split(/\s+/);
-  const probeIdx = tokens.indexOf("__RTK_PROBE__");
-  if (tokens[0] !== "rtk" || probeIdx < 2) return null;
-  return tokens.slice(1, probeIdx);
-}
-
-/**
- * rtk verb-prefix cache (server-lifetime): tool.name -> string[] (supported) | null.
- */
-const rtkPrefixCache = new Map<string, string[] | null>();
-
-/**
- * Probe rtk once per tool name: does rtk have a filtered equivalent for this tool
- * + its static registry args? A placeholder final token avoids argv-splitting
- * hazards from a real file path containing spaces (rtk rewrite echoes back a
- * plain string, not a shell-quoted one). A transient probe failure (rtk itself
- * missing/erroring, or the probe timing out under load) is deliberately NOT
- * cached -- only a clean completion (supported or genuinely unsupported) is,
- * so a one-time hiccup doesn't permanently disable rtk for a tool it actually
- * supports for the rest of the server's lifetime.
- *
- * @param tool - Chain entry to probe.
- * @returns The rtk verb tokens, or null when unsupported or the probe failed.
- */
-function getRtkPrefix(tool: LintTool): string[] | null {
-  const cached = rtkPrefixCache.get(tool.name);
-  if (cached !== undefined) return cached;
-  const probe = spawnSync("rtk", ["rewrite", tool.name, ...tool.args, "__RTK_PROBE__"], { timeout: RTK_PROBE_TIMEOUT_MS, encoding: "utf8" });
-  if (probe.error || probe.signal) return null;
-  const prefix = parseRtkPrefix(probe.stdout);
-  rtkPrefixCache.set(tool.name, prefix);
-  return prefix;
-}
-
-/**
- * Runs argv through rtk; returns the spawnSync result when it counts as a real
- * answer, or null to signal "fall back to the un-accelerated call." A spawn
- * error or signal is always a failure. A clean non-zero exit is only trusted
- * when stdout carries real content (the wrapped tool's own findings text) --
- * an rtk-internal failure (misconfigured, can't reach npx, etc.) typically
- * exits non-zero with empty/whitespace-only stdout, and would otherwise be
- * misclassified as a real lint finding (its own stderr/error text shown to
- * the user as if it were lint output).
- *
- * @param argv - Arguments to hand to rtk.
- * @param spawnOpts - Options for spawnSync.
- * @returns The spawnSync result when it counts as a real answer, else null (fall back to the un-accelerated call).
- */
-function tryRtk(argv: string[], spawnOpts: SpawnSyncOptionsWithStringEncoding): SpawnSyncReturns<string> | null {
-  const result = spawnSync("rtk", argv, spawnOpts);
-  if (result.error || result.signal) return null;
-  if (result.status !== 0 && !String(result.stdout || "").trim()) return null;
-  return result;
-}
-
-/**
- * Run the resolved lint tool: rtk's own discovered verb first (e.g. `rtk lint`
- * for eslint -- rtk resolves the underlying binary itself, via npx internally,
- * when it's absent from PATH; see `.claude/rules/hook-design.md` for the empirical proof that wrapping
- * `npx --yes <pkg>` with rtk instead does NOT get rtk's compaction, since the
- * `--yes`/`-y` flag defeats rtk's own package-name detection), else npx directly
- * (when absent from PATH but npm-distributed -- its own, more generous timeout
- * since a cold `npx --yes <pkg>` install can exceed the local-binary budget),
- * else the tool directly. argv.slice(tool.args.length) strips the static
- * [name, ...args] prefix that rtkPrefix already reproduces, leaving only the
- * real target (file or directory) to append after it -- this assumes tool.args
- * is a leading, unmodified prefix of argv, which holds for every tool EXCEPT
- * manifestPath tools (cargo/cargo-clippy): buildArgv inserts `--manifest-path
- * <path>` BEFORE the existing `--` separator there, so tool.args is no longer
- * a leading prefix and a positional slice would silently drop the manifest
- * flag and separator. manifestPath tools therefore skip the rtk fast path
- * entirely here and always spawn directly -- correctness over rtk's output
- * compaction for this one tool shape. The npm-fallback rtk attempt is bounded
- * by the shorter RTK_NPX_ATTEMPT_TIMEOUT_MS, not NPX_SPAWN_TIMEOUT_MS -- see
- * that constant's comment for why reusing the full budget here would double it.
+ * Run the resolved lint tool: through `npx --yes <npmSpec>` when it is absent
+ * from PATH but npm-distributed (its own, longer timeout, since a cold
+ * `npx --yes <pkg>` install can exceed the local-binary budget), else spawn it
+ * directly (`spawnAs` when set).
  *
  * @param tool - The selected chain entry.
  * @param argv - Full argv from buildArgv.
@@ -398,33 +302,18 @@ function tryRtk(argv: string[], spawnOpts: SpawnSyncOptionsWithStringEncoding): 
  */
 function runLintTool(tool: LintTool, argv: string[], spawnOpts: SpawnSyncOptionsWithStringEncoding): SpawnSyncReturns<string> {
   if (tool.npmSpec && !onPath(tool.name)) {
-    if (!tool.manifestPath && onPath("rtk")) {
-      const rtkPrefix = getRtkPrefix(tool);
-      if (rtkPrefix) {
-        const rtkResult = tryRtk([...rtkPrefix, ...argv.slice(tool.args.length)], { ...spawnOpts, timeout: RTK_NPX_ATTEMPT_TIMEOUT_MS });
-        if (rtkResult) return rtkResult;
-      }
-    }
     return spawnSync("npx", ["--yes", tool.npmSpec, ...argv], {
       ...spawnOpts,
       timeout: NPX_SPAWN_TIMEOUT_MS,
     });
   }
-  if (!tool.manifestPath && onPath("rtk")) {
-    const rtkPrefix = getRtkPrefix(tool);
-    if (rtkPrefix) {
-      const rtkResult = tryRtk([...rtkPrefix, ...argv.slice(tool.args.length)], spawnOpts);
-      if (rtkResult) return rtkResult;
-    }
-  }
   // spawnAs decouples "which binary name gates PATH-availability /
-  // selectLintTool matching" (tool.name -- already probed as such above and
-  // by onPath/selectLintTool) from "which binary + args are actually
-  // spawned". Only the rust chain's clippy entry sets it today: it probes
-  // the standalone cargo-clippy driver binary (whose presence signals the
-  // clippy rustup component is installed) but must actually run via the
-  // `cargo clippy` subcommand, since the bare driver binary rejects
-  // buildArgv's --manifest-path.
+  // selectLintTool matching" (tool.name -- probed by onPath/selectLintTool)
+  // from "which binary + args are actually spawned". Only the rust chain's
+  // clippy entry sets it today: it probes the standalone cargo-clippy driver
+  // binary (whose presence signals the clippy rustup component is installed)
+  // but must actually run via the `cargo clippy` subcommand, since the bare
+  // driver binary rejects buildArgv's --manifest-path.
   const spawnName = tool.spawnAs?.name ?? tool.name;
   const spawnArgv = tool.spawnAs ? [...tool.spawnAs.args, ...argv] : argv;
   return spawnSync(spawnName, spawnArgv, spawnOpts);
@@ -767,8 +656,7 @@ export function hasProjectYamllintConfig(cwd: string): boolean {
  * surfaces it without --strict). -d overrides yamllint's own project-config
  * search entirely, so it is only ever passed when hasProjectYamllintConfig
  * found nothing. Single-line flow-style YAML (not the equivalent multi-line
- * block form) so the whole value survives as one argv element through rtk's
- * rewrite unchanged.
+ * block form), passed as one argv element.
  */
 const YAMLLINT_NO_LINE_LENGTH_CONFIG_DATA = "{extends: default, rules: {line-length: disable}}";
 
@@ -1185,9 +1073,7 @@ function runTypeCheck(resolved: string, cwd: string): Finding | null {
 
   let result: SpawnSyncReturns<string>;
   if (onPath("tsc")) {
-    // Reuses the shared chain-tool runner so tsc gets the same rtk-compaction
-    // attempt as every other tool, keyed off its static probe args.
-    result = runLintTool({ name: "tsc", args: staticArgs }, [...staticArgs, ...dynamicTail], spawnOpts);
+    result = spawnSync("tsc", [...staticArgs, ...dynamicTail], spawnOpts);
   } else {
     // Most real TS projects only have `typescript` as a local devDependency
     // (node_modules/.bin usually isn't on a hook's PATH) -- no npx fallback
@@ -1644,10 +1530,14 @@ export function watchList(cwd: string, scratchpad?: string): string[] {
     return [];
   }
   // Set: unmerged index entries are listed once per stage
-  const list = [...new Set(out.split("\0").filter(Boolean).flatMap((rel) => {
-    const fp = scopedTarget(cwd, rel, scratchpad, roots)?.fp;
-    return fp ? [fp] : [];
-  }))];
+  const list = [
+    ...new Set(
+      out.split("\0").filter(Boolean).flatMap((rel) => {
+        const fp = scopedTarget(cwd, rel, scratchpad, roots)?.fp;
+        return fp ? [fp] : [];
+      }),
+    ),
+  ];
   if (list.length > WATCH_LIMIT) {
     process.stderr.write(`universal-lint: watch list: ${list.length} files above ${WATCH_LIMIT}, FileChanged linting off for this cwd\n`);
     return [];
