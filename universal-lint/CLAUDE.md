@@ -31,4 +31,5 @@ pnpm --filter universal-lint build   # src/ + package.json -> plugin/
 pnpm --filter universal-lint test    # vitest over tests/*.test.mts against the built plugin/
 pnpm lint                            # repo root: oxlint (also type-checks src/ and tests/)
 claude plugin validate universal-lint/plugin
+node universal-lint/scripts/perf.mts [runs]   # per-event hook cost (dev only, measures plugin/)
 ```
