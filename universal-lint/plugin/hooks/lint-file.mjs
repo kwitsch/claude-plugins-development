@@ -922,15 +922,17 @@ export function watchList(cwd, scratchpad) {
 	} catch {
 		return [];
 	}
-	const list = [...new Set(out.split("\0").filter(Boolean).flatMap((rel) => {
+	const list = new Set();
+	for (const rel of out.split("\0")) {
+		if (!rel) continue;
 		const fp = scopedTarget(cwd, rel, scratchpad, roots)?.fp;
-		return fp ? [fp] : [];
-	}))];
-	if (list.length > WATCH_LIMIT) {
-		process.stderr.write(`universal-lint: watch list: ${list.length} files above ${WATCH_LIMIT}, FileChanged linting off for this cwd\n`);
-		return [];
+		if (fp) list.add(fp);
+		if (list.size > WATCH_LIMIT) {
+			process.stderr.write(`universal-lint: watch list: more than ${WATCH_LIMIT} files, FileChanged linting off for this cwd\n`);
+			return [];
+		}
 	}
-	return list;
+	return [...list];
 }
 export function watchPathsHandler(args) {
 	try {
