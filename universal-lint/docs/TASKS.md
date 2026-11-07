@@ -17,10 +17,10 @@ Legend: `[x]` finished. `[ ]` not finished; tag = `open` (code change, not start
 - [x] [F31](tasks/F31-rtk-shellcheck-overhead.md) Measure rtk's overhead for shellcheck/ruff with the real tools. Obsolete: rtk support removed in 0.15.0.
 - [x] [F03](tasks/F03-eslint-without-config.md) Skip the eslint chain when no eslint/oxlint config exists. Shipped in 0.15.2.
 - [x] [F04](tasks/F04-local-node-modules-bin.md) Run project-local `node_modules/.bin/<tool>` directly instead of npx. Shipped in 0.15.3.
+- [x] [F05](tasks/F05-stdin-eagain-large-payload.md) Read hook stdin robustly: payloads over about 190 KB, or from a late writer, were silently not linted. Shipped in 0.15.4.
 
 ## Stage 1: quick wins (high impact, low risk, small diffs)
 
-- [ ] [F05](tasks/F05-stdin-eagain-large-payload.md) Read hook stdin robustly: payloads over about 190 KB are silently not linted `open` priority:medium
 - [ ] [F06](tasks/F06-markdownlint-cli2-no-globs.md) Pass `--no-globs` to markdownlint-cli2 `open` priority:medium
 - [ ] [F07](tasks/F07-stylelint-without-config.md) Skip stylelint when the project has no stylelint config `open` priority:medium
 - [ ] [F08](tasks/F08-watchlist-early-stop.md) Stop the watch-list filter once `WATCH_LIMIT` is exceeded `open` priority:medium. Combine with F12.
