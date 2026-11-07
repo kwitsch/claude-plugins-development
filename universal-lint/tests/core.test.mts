@@ -1,11 +1,12 @@
 // Guard clauses and basic per-linter smoke tests (shellcheck/eslint/ruff/ktlint); ported from test/universal-lint/core.bats.
 import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync, realpathSync } from "node:fs";
 import path from "node:path";
 import { test } from "vitest";
 import { hashPath } from "../plugin/hooks/lint-file.mjs";
-import { makeEnv } from "./support/lint-hook.mts";
+import { HOOK, makeEnv, payload } from "./support/lint-hook.mts";
 
 /** A 4-line shell script; the Edit tests below edit line 2. */
 const SH4 = "echo a\necho $1\necho b\necho $2\n";
@@ -175,6 +176,47 @@ test("PostToolUse records the on-disk content digest under CLAUDE_PLUGIN_DATA/wr
   assert.equal(e.run(f).status, 0);
   const digestFile = path.join(e.data, "written", hashPath(realpathSync(f)));
   assert.equal(readFileSync(digestFile, "utf8"), createHash("sha256").update(readFileSync(f)).digest("base64"));
+});
+
+/** 512 KiB of ASCII padding for the F05 payloads: far above the pipe buffer (about 128-192 KB), so the wire payload is always larger than a pipe holds. */
+const PAD = "x".repeat(512 * 1024);
+
+/**
+ * Spawn the built hook with a stdin pipe and write `input` only 100 ms later (a late writer, F05).
+ *
+ * @param env - Child environment (`makeEnv().childEnv()`).
+ * @param input - The payload JSON.
+ * @returns The exit status once the hook has closed.
+ */
+function runLate(env: Record<string, string>, input: string): Promise<number | null> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, [HOOK], { env, stdio: ["pipe", "ignore", "ignore"] });
+    child.on("error", reject);
+    child.on("close", resolve);
+    child.stdin.on("error", () => {}); // EPIPE when a broken hook exits before the write: let the assertions report it
+    setTimeout(() => child.stdin.end(input), 100);
+  });
+}
+
+test("PostToolUse Edit: a 512 KB payload written 100 ms late is linted and records its digest (F05)", async () => {
+  const e = makeEnv();
+  e.recStub("shellcheck", 0);
+  const f = e.file("a.sh", "echo hi\n");
+  const input = payload(f, e.cwd, { toolName: "Edit", toolResponse: { originalFile: PAD } });
+  assert.equal(await runLate(e.childEnv(), input), 0);
+  assert.ok(e.lines().some((l) => l.startsWith("shellcheck ")));
+  assert.ok(existsSync(path.join(e.data, "written", hashPath(realpathSync(f)))));
+});
+
+test("PostToolUse Write: a 512 KB payload written 100 ms late is linted and records its digest (F05)", async () => {
+  const e = makeEnv();
+  e.recStub("shellcheck", 0);
+  const f = e.file("a.sh", "echo hi\n");
+  const p = JSON.parse(payload(f, e.cwd)) as { tool_input: Record<string, unknown> };
+  p.tool_input.content = PAD;
+  assert.equal(await runLate(e.childEnv(), JSON.stringify(p)), 0);
+  assert.ok(e.lines().some((l) => l.startsWith("shellcheck ")));
+  assert.ok(existsSync(path.join(e.data, "written", hashPath(realpathSync(f)))));
 });
 
 test("PostToolUse with success false records no digest", () => {
