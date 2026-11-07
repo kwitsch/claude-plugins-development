@@ -1,16 +1,16 @@
 ---
 id: F05
 title: Read hook stdin robustly; payloads over about 190 KB are silently not linted
-status: open
+status: done
 priority: medium
-area: universal-lint/src/hooks/lint-file.mts (main, recordWrittenFor, recordWritten, fileChangedHandler)
+area: universal-lint/src/hooks/lint-file.mts (main, recordWrittenFor, recordWritten, fileChangedHandler), universal-lint/tests/core.test.mts, universal-lint/.claude/rules/hook-design.md, universal-lint/.claude/rules/tests.md, universal-lint/scripts/perf.mts
 ---
 
 # F05 Read hook stdin robustly
 
 ## Status
 
-Open. watch-filechanged finding (confirmed, medium) plus a verifier missed item (Write is affected too, and plain shell pipes).
+Done in 0.15.4. `main` is now `async` and reads the payload with `await json(process.stdin)` (`node:stream/consumers`) to EOF, and the module ends with `if (isMainModule()) void main();`; fail open, the findings contract (stderr + exit 2), the event dispatch and `hooks.json` are unchanged. Root cause (probed during design): the hook's own `import process from "node:process"` evaluates the `process.stdin` getter, which makes fd 0 a non-blocking libuv pipe handle, so the synchronous read threw EAGAIN for any late or larger-than-pipe-buffer writer; this is why even `cat p512.json | lint-file.mjs` failed while a file redirect worked (a file never returns EAGAIN). Tests (`tests/core.test.mts`, two): a 512 KB Edit payload (padding in `tool_response.originalFile`) and a 512 KB Write payload (padding in `tool_input.content`), each written 100 ms late through an async `spawn` stdin pipe (`runLate`), are linted (the recording shellcheck stub ran) and record their digest under `CLAUDE_PLUGIN_DATA/written`; both failed against the 0.15.3 build. Measured with `node universal-lint/scripts/perf.mts 5` (file as stdin), medians in ms, before (0.15.3) -> after (0.15.4), real PATH / no /mnt: `empty payload {}` 44 -> 48 / 45 -> 44; `.sh Write` 146 -> 148 / 45 -> 49 (the async stream read costs about one event-loop turn per event; full run in `.claude/rules/hook-design.md` "Measured cost"). The live `claude -p` big.md check from Verification was not re-run (the vitest tests cover the mechanism).
 
 ## Problem
 
@@ -30,7 +30,7 @@ Open. watch-filechanged finding (confirmed, medium) plus a verifier missed item 
 
 ## Approach
 
-Replace the read with one that tolerates EAGAIN. Simplest: make `main` async and read `for await (const c of process.stdin) s += c;` (the top-level `if (isMainModule()) main()` stays). Synchronous alternative: a `readSync` loop on fd 0 that waits about 5 ms with `Atomics.wait` on EAGAIN and stops at EOF. Keep fail-open on JSON parse errors and the exit-code contract. Add the harness note to tests.md: drive concurrent hook runs with stdin from a file or a blocking pipe.
+Shipped: `main` is `async` and reads `(await json(process.stdin)) as PostToolUseHookInput`; the bottom call is `if (isMainModule()) void main();` (no top-level await, so importers never see an async module, and `main` cannot reject because its whole body is in the fail-open `try/catch`). `json()` was taken over the sketched `for await (const c of process.stdin) s += c;` because it decodes UTF-8 across chunk boundaries and parses in one stdlib call. Not taken: the synchronous `readSync` loop on fd 0 with `Atomics.wait` on EAGAIN: it works and keeps `main` synchronous, but is about 10-12 lines of hand-written I/O (buffer growth, EAGAIN versus other error codes, EOF, decode) plus up to 5 ms of polling per wait, replacing one stdlib call. Not taken: dropping the `node:process` import so fd 0 stays blocking: a one-line deletion that rests on an invisible invariant (any later `node:process` import or `process.stdin` access brings the bug back) and still fails when the parent hands over an already non-blocking file description; the async read is immune to both. The tests.md note was reworded to the post-fix truth: any pipe or a file works as stdin; drive concurrent hook runs with async `spawn`.
 
 ## Verification
 
