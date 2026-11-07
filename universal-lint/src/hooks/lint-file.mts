@@ -300,8 +300,8 @@ export function isToolAvailable(tool: LintTool, toolOnPath: boolean, npxOnPath: 
 }
 
 /**
- * Run the resolved lint tool: the project-local bin `local` when given (payload
- * cwd, its directory first on the child's PATH, chain budget); a local bin that
+ * Run the resolved lint tool: the project-local bin `local` when given (spawnOpts
+ * carries its package root as cwd, its directory first on the child's PATH, chain budget); a local bin that
  * cannot spawn (error code ENOENT/EACCES) falls through to the npx
  * route, any other outcome (including a timeout) is returned as is. Then through
  * `npx --yes <npmSpec>` when it is absent from PATH but npm-distributed (its own,
@@ -1045,7 +1045,9 @@ function runChainLint(lang: LangEntry, resolved: string, cwd: string, rel: strin
   const argv = buildArgv(tool, resolved, cwd, manifest);
   // Compile-heavy cargo tools get their own budget (mirrors TSC_SPAWN_TIMEOUT_MS).
   const timeout = tool.manifestPath ? CARGO_SPAWN_TIMEOUT_MS : SPAWN_TIMEOUT_MS;
-  const spawnOpts = buildSpawnOpts(cwd, timeout);
+  // A local bin runs from its package root (the dir holding node_modules): eslint <= 9 resolves its flat config from the spawn cwd.
+  const spawnCwd = sel.local ? path.join(sel.local, "../../..") : cwd;
+  const spawnOpts = buildSpawnOpts(spawnCwd, timeout);
   const result = runLintTool(tool, argv, spawnOpts, sel.local);
   if (result.error || result.signal) return none;
 
@@ -1065,7 +1067,7 @@ function runChainLint(lang: LangEntry, resolved: string, cwd: string, rel: strin
   }
   if (verdict === "skip") return none;
   // cargo prints paths relative to the crate (or workspace) root, go tools get the package dir, the rest run in cwd.
-  const base = manifest ? path.dirname(manifest) : tool.targetsDir ? path.dirname(resolved) : cwd;
+  const base = manifest ? path.dirname(manifest) : tool.targetsDir ? path.dirname(resolved) : spawnCwd;
   return { ran: true, finding: verdict === "issues" ? { tool: tool.name, target, text, base } : null };
 }
 
