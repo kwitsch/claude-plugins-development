@@ -1,5 +1,7 @@
 // stylelint (SCSS/CSS); ported from test/universal-lint/stylelint.bats.
 import assert from "node:assert/strict";
+import { symlinkSync } from "node:fs";
+import path from "node:path";
 import { test } from "vitest";
 import { makeEnv } from "./support/lint-hook.mts";
 
@@ -88,3 +90,14 @@ for (const [rel, content] of CONFIGS) {
     assert.ok(e.lines().some((l) => l.startsWith("stylelint ")));
   });
 }
+
+test("stylelint config in cwd, file reached through a symlinked dir outside cwd -> stylelint runs (stylelint falls back to searching cwd)", () => {
+  const e = makeEnv();
+  e.file(".stylelintrc.json", "{}\n");
+  e.file("sub/a.css", ".a{color:red;}\n");
+  e.recStub("stylelint", 0);
+  // The lexical walk from <base>/link never reaches cwd; only the walk from cwd finds the config.
+  symlinkSync(path.join(e.cwd, "sub"), path.join(path.dirname(e.cwd), "link"));
+  e.run(path.join(path.dirname(e.cwd), "link", "a.css"));
+  assert.ok(e.lines().some((l) => l.startsWith("stylelint ")));
+});

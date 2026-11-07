@@ -414,7 +414,7 @@ const STYLELINT_CONFIG_FILENAMES = [
 	"stylelint.config.cjs",
 	"stylelint.config.mjs"
 ];
-function hasStylelintConfig(fileDir) {
+function hasStylelintConfig(fileDir, cwd) {
 	const hasKey = (dir) => {
 		const pkg = path.join(dir, "package.json");
 		if (!existsSync(pkg)) return false;
@@ -424,7 +424,8 @@ function hasStylelintConfig(fileDir) {
 			return true;
 		}
 	};
-	if (walkToRoot(fileDir, (d) => STYLELINT_CONFIG_FILENAMES.some((n) => existsSync(path.join(d, n))) || hasKey(d))) return true;
+	const found = (d) => STYLELINT_CONFIG_FILENAMES.some((n) => existsSync(path.join(d, n))) || hasKey(d);
+	if (walkToRoot(fileDir, found) || walkToRoot(cwd, found)) return true;
 	const home = homedir();
 	return [process.env.XDG_CONFIG_HOME || path.join(home, ".config"), path.join(home, "Library", "Preferences")].some((d) => existsSync(path.join(d, "stylelint")));
 }
@@ -806,7 +807,7 @@ function lintResolved(resolved, cwd, ranges, hookEventName, label) {
 	const typeCheckEligible = TYPE_CHECK_EXTS.has(ext);
 	const oxlintConfig = lang === "jsts" ? resolveOxlintConfig(path.dirname(resolved), cwd) : null;
 	const noJstsConfig = lang === "jsts" && !oxlintConfig && !walkToRoot(path.dirname(resolved), (d) => ESLINT_CONFIG_FILENAMES.some((n) => existsSync(path.join(d, n))));
-	const noCssConfig = lang === "css" && !hasStylelintConfig(path.dirname(resolved));
+	const noCssConfig = lang === "css" && !hasStylelintConfig(path.dirname(resolved), cwd);
 	const findings = [];
 	let oxlintRan = false;
 	if (lang && !noJstsConfig && !noCssConfig) {

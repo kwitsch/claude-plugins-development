@@ -788,15 +788,17 @@ const STYLELINT_CONFIG_FILENAMES = [
 /**
  * True when stylelint could find a config for a file in `fileDir`, a superset of stylelint 18's own lookup: a
  * STYLELINT_CONFIG_FILENAMES name or a `package.json` with a non-null top-level `stylelint` key in any directory from
- * `fileDir` up to the filesystem root (stylelint itself stops at `$HOME`), else an existing stylelint global config dir
- * (`$XDG_CONFIG_HOME/stylelint` or `~/.config/stylelint`, and macOS's `~/Library/Preferences/stylelint`, both checked
- * on every platform; the directory counts by existence, not by the `config*` files stylelint reads in it). Without one
- * stylelint only exits 78 (skip).
+ * `fileDir` up to the filesystem root (stylelint itself stops at `$HOME`), and likewise from `cwd` (stylelint falls
+ * back to searching its cwd, which a symlinked file path can leave off the `fileDir` walk), else an existing stylelint
+ * global config dir (`$XDG_CONFIG_HOME/stylelint` or `~/.config/stylelint`, and macOS's `~/Library/Preferences/stylelint`,
+ * both checked on every platform; the directory counts by existence, not by the `config*` files stylelint reads in it).
+ * Without one stylelint only exits 78 (skip).
  *
  * @param fileDir - Directory of the edited file.
+ * @param cwd - Payload cwd, the second search start.
  * @returns True when a stylelint config may govern the file; an unreadable or invalid `package.json` counts (fail open).
  */
-function hasStylelintConfig(fileDir: string): boolean {
+function hasStylelintConfig(fileDir: string, cwd: string): boolean {
   const hasKey = (dir: string): boolean => {
     const pkg = path.join(dir, "package.json");
     if (!existsSync(pkg)) return false;
@@ -806,7 +808,8 @@ function hasStylelintConfig(fileDir: string): boolean {
       return true; // unreadable or invalid: run stylelint and let classifyExit decide
     }
   };
-  if (walkToRoot(fileDir, (d) => STYLELINT_CONFIG_FILENAMES.some((n) => existsSync(path.join(d, n))) || hasKey(d))) return true;
+  const found = (d: string): boolean => STYLELINT_CONFIG_FILENAMES.some((n) => existsSync(path.join(d, n))) || hasKey(d);
+  if (walkToRoot(fileDir, found) || walkToRoot(cwd, found)) return true;
   const home = homedir();
   return [process.env.XDG_CONFIG_HOME || path.join(home, ".config"), path.join(home, "Library", "Preferences")].some((d) => existsSync(path.join(d, "stylelint")));
 }
@@ -1519,7 +1522,7 @@ function lintResolved(resolved: string, cwd: string, ranges: Array<[number, numb
   // No oxlint config and no eslint name up to / (eslint's own lookup): eslint would only exit 2 (skip), so no chain lint.
   const noJstsConfig = lang === "jsts" && !oxlintConfig && !walkToRoot(path.dirname(resolved), (d) => ESLINT_CONFIG_FILENAMES.some((n) => existsSync(path.join(d, n))));
   // No stylelint config (stylelint's own search places, see hasStylelintConfig): stylelint would only exit 78 (skip), so no chain lint.
-  const noCssConfig = lang === "css" && !hasStylelintConfig(path.dirname(resolved));
+  const noCssConfig = lang === "css" && !hasStylelintConfig(path.dirname(resolved), cwd);
 
   const findings: Finding[] = [];
   let oxlintRan = false;
