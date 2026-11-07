@@ -4,8 +4,8 @@
 // its shebang (as hooks.json does) with a payload file as stdin for 14 cases, once with the real PATH and once with
 // the /mnt/ dirs removed, and prints a Markdown table of median (min-max) ms over `runs` timed rounds after one
 // warm-up round. Fixtures live in an os.tmpdir() directory removed at the end; nothing is written into the repo.
-// Needs the real linters on PATH to reproduce real costs. Exit 0 = every run passed its check, 1 = a case failed,
-// 2 = usage error or missing build.
+// Needs the real linters on PATH to reproduce real costs; the header lists which of them were found per PATH variant.
+// Exit 0 = every run passed its check, 1 = a case failed, 2 = usage error, missing build or a setup/spawn error.
 import { execFileSync, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { closeSync, existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
@@ -20,6 +20,8 @@ const HOOK = join(ROOT, "plugin/hooks/lint-file.mjs");
 const VERSION = String((JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8")) as Record<string, unknown>).version);
 /** Per-run kill timeout: above the hook's 90 s budget, so a hook-side kill shows as its own status. */
 const RUN_TIMEOUT_MS = 120_000;
+/** Linters the cases invoke (`.sh`, `.py`, `.yml`, `.md`, `.ts`); the header says which were found on PATH. */
+const TOOLS = ["shellcheck", "ruff", "yamllint", "markdownlint-cli2", "eslint"];
 /** Printed to stderr on a bad argument. */
 const USAGE = "usage: node universal-lint/scripts/perf.mts [runs=5]";
 
@@ -50,13 +52,14 @@ interface Run {
 }
 
 /**
- * Run git with a throwaway identity; output is discarded, a failure throws.
+ * Run git with a throwaway identity and the user's global signing and hook config neutralised (a `commit.gpgsign` or a
+ * global `core.hooksPath` pre-commit hook would otherwise fail the fixture commit); output is discarded, a failure throws.
  *
  * @param cwd - Repository directory.
  * @param args - git arguments.
  */
 function git(cwd: string, ...args: string[]): void {
-  execFileSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", ...args], { cwd, stdio: "ignore" });
+  execFileSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", "-c", "commit.gpgsign=false", "-c", "core.hooksPath=/dev/null", ...args], { cwd, stdio: "ignore" });
 }
 
 /**
@@ -133,6 +136,16 @@ function tscLabel(dir: string): string {
     throw new Error(`fixture tsconfig.json rejected by tsc: ${(e as { stdout?: string }).stdout ?? ""}`, { cause: e });
   }
   return `tsc ${version.replace(/^Version /, "")}`;
+}
+
+/**
+ * Whether an executable-named file `tool` exists in a directory of `path`.
+ *
+ * @param tool - Command name.
+ * @param path - A PATH value.
+ */
+function onPath(tool: string, path: string): boolean {
+  return path.split(":").some((d) => d !== "" && existsSync(join(d, tool))); // shortcut: existence only, exec bit not checked
 }
 
 /**
@@ -234,6 +247,8 @@ async function main(): Promise<void> {
     const load1 = loadavg()[0].toFixed(2);
     const total = (runs + 1) * envs.length;
     const pathField = mnt > 0 ? `PATH ${dirs.length} dirs (${mnt} on /mnt)` : `PATH ${dirs.length} dirs (0 on /mnt, no-/mnt variant skipped)`;
+    const names = mnt > 0 ? ["real PATH", "no /mnt"] : ["PATH"];
+    const toolField = paths.map((p, v) => `${names[v]} ${TOOLS.filter((t) => onPath(t, p)).join("+") || "none"}`).join("; ");
     /** One table cell: `med (min-max)`, or `-` for a variant that did not run. */
     const cell = (xs: number[] | undefined): string => {
       if (!xs) return "-";
@@ -241,7 +256,7 @@ async function main(): Promise<void> {
       return `${s.med} (${s.min}-${s.max})`;
     };
     const out = [
-      `universal-lint ${VERSION} perf, ${new Date().toISOString()}, ${release()}, ${availableParallelism()} cores, ${(totalmem() / 2 ** 30).toFixed(1)} GB RAM, node ${process.version}, ${tsc}, ${pathField}, load ${load0} -> ${load1}, runs ${runs} (+1 warm-up)`,
+      `universal-lint ${VERSION} perf, ${new Date().toISOString()}, ${release()}, ${availableParallelism()} cores, ${(totalmem() / 2 ** 30).toFixed(1)} GB RAM, node ${process.version}, ${tsc}, linters found (of ${TOOLS.join("/")}): ${toolField}, ${pathField}, load ${load0} -> ${load1}, runs ${runs} (+1 warm-up)`,
       "",
       "| Case | real PATH med (min-max) ms | no /mnt med (min-max) ms | status |",
       "| --- | ---: | ---: | --- |",
@@ -258,4 +273,7 @@ async function main(): Promise<void> {
   }
 }
 
-await main();
+await main().catch((e: unknown) => {
+  console.error(e); // 1 means "a case failed"; a setup or spawn error exits 2 (the fixture directory is already removed by main's finally)
+  process.exitCode = 2;
+});
