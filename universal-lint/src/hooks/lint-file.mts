@@ -410,7 +410,7 @@ export function resolveTsconfig(fileDir: string, cwd: string): string | null {
   });
 }
 
-/** Eslint config file names, checked after the oxlint names within one directory. */
+/** Eslint config file names, checked after the oxlint names within one directory; also walked by `lintResolved` from the file dir up to `/` when no oxlint config selects oxlint. */
 const ESLINT_CONFIG_FILENAMES = [
   "eslint.config.js",
   "eslint.config.mjs",
@@ -1384,7 +1384,7 @@ function recordWrittenFor(s: { fp: string; real: string } | null): void {
 }
 
 /**
- * Lint `resolved` (chain tool + tsc), gate the findings against `ranges` (null = whole file), and build the hook result.
+ * Lint `resolved` (chain tool when a lint config selects one for JS/TS, see the no-config note below, + tsc), gate the findings against `ranges` (null = whole file), and build the hook result.
  *
  * @param resolved - Lexical absolute path of the in-scope file.
  * @param cwd - Payload cwd (spawn cwd and config search root).
