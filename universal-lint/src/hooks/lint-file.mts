@@ -341,7 +341,7 @@ function spawnBin(bin: string, argv: string[], spawnOpts: SpawnSyncOptionsWithSt
  * other result (a timeout too) is returned. The cache route is skipped and plain npx runs, as in 0.15.7, when (1) a
  * `node_modules/.bin/<name>` exists from the spawn cwd up to `/` (npx runs that one before its cache; F04 user
  * decision), (2) npx holds `<dir>/concurrency.lock` (an install is in progress), or (3) the refresh stamp
- * `${CLAUDE_PLUGIN_DATA || os.tmpdir()}/npx-refreshed-<key>` is missing or older than `NPX_REFRESH_MS`. Every npx run
+ * `${CLAUDE_PLUGIN_DATA || os.tmpdir()}/npx-refreshed-<key>` is missing, older than `NPX_REFRESH_MS` or dated in the future. Every npx run
  * that spawned (no `error`, any exit status) renews the stamp (temp file + `renameSync`, errors swallowed), except in
  * case (1), whose npx run never touches the cache. The hook only reads the npm cache, never writes it.
  *
@@ -361,7 +361,8 @@ function runNpx(name: string, npmSpec: string, argv: string[], spawnOpts: SpawnS
   const stamp = path.resolve(process.env.CLAUDE_PLUGIN_DATA || tmpdir(), `npx-refreshed-${key}`);
   let fresh = false;
   try {
-    fresh = Date.now() - lstatSync(stamp).mtimeMs < NPX_REFRESH_MS;
+    const age = Date.now() - lstatSync(stamp).mtimeMs;
+    fresh = age >= 0 && age < NPX_REFRESH_MS; // a future mtime (clock jump, synced data dir) must not stay fresh
   } catch {
     /* no stamp yet: one npx run checks the registry first */
   }

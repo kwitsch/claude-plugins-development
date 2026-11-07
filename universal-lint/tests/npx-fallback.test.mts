@@ -204,6 +204,16 @@ test("npx cache: a refresh stamp older than NPX_REFRESH_MS sends one run through
   assert.equal(npx().length, 1);
 });
 
+test("npx cache: a refresh stamp dated in the future counts as stale -> one run through npx", () => {
+  const e = makeEnv();
+  e.recStub("npx", 0);
+  stamp(e, -60 * 60 * 1000);
+  localStub(e, CACHED, "markdownlint-cli2", 0);
+  e.run(e.file("a.md", "# T\n"));
+  assert.ok(e.lines().some((l) => l.startsWith("npx --yes markdownlint-cli2 ")));
+  assert.ok(!e.lines().some((l) => l.startsWith("local:")));
+});
+
 test("npx cache: a cached bin that cannot spawn (no exec bit) falls back to npx", () => {
   const e = makeEnv();
   e.recStub("npx", 0);

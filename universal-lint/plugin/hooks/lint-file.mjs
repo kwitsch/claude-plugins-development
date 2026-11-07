@@ -177,7 +177,8 @@ function runNpx(name, npmSpec, argv, spawnOpts) {
 	const stamp = path.resolve(process.env.CLAUDE_PLUGIN_DATA || tmpdir(), `npx-refreshed-${key}`);
 	let fresh = false;
 	try {
-		fresh = Date.now() - lstatSync(stamp).mtimeMs < NPX_REFRESH_MS;
+		const age = Date.now() - lstatSync(stamp).mtimeMs;
+		fresh = age >= 0 && age < NPX_REFRESH_MS;
 	} catch {}
 	if (fresh && !existsSync(path.join(dir, "concurrency.lock"))) {
 		const cached = spawnBin(path.join(dir, "node_modules", ".bin", name), argv, spawnOpts);
