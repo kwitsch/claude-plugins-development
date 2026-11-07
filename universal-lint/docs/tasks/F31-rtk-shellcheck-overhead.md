@@ -1,7 +1,7 @@
 ---
 id: F31
 title: Measure rtk's overhead for shellcheck/ruff with the real tools
-status: measurement-only
+status: done
 priority: low
 area: universal-lint/src/hooks/lint-file.mts (runLintTool on-PATH branch, tryRtk)
 ---
@@ -9,6 +9,8 @@ area: universal-lint/src/hooks/lint-file.mts (runLintTool on-PATH branch, tryRtk
 # F31 Measure rtk's overhead for shellcheck/ruff with the real tools
 
 ## Status
+
+Obsolete since universal-lint 0.15.0: rtk support was removed, so this problem no longer exists. The text below is kept as history.
 
 Measurement-only, open. bench-js-ts finding (confirmed, low). Measured with stub linters only; rtk compaction is a deliberate feature, so no change without a real-tool measurement and a user decision.
 

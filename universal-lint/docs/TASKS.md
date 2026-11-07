@@ -4,11 +4,16 @@ Source: performance analysis of the universal-lint hook (0.14.0) on 2026-11-07, 
 
 Measurements: every number in these documents is from one machine on one day, often under load (load average 6-8 while other benchmarks ran, about ±15% noise), and the machine's PATH carries 44 Windows `/mnt/c` dirs that inflate any PATH scan. Re-measure (F01) before relying on a number, and judge each change against a fresh baseline.
 
+rtk support was removed in 0.15.0. rtk mentions in the open tasks and notes describe the measured 0.14.x behavior.
+
 Legend: `[x]` finished. `[ ]` not finished; tag = `open` (code change, not started), `partial`, `docs-only` (only a documentation change intended), `measurement-only` (measure first; any code change is decided afterwards).
 
 ## Done
 
-(none yet)
+- [x] [F02](tasks/F02-rtk-failure-banner-as-finding.md) rtk failure banners are reported as eslint findings (false rewake on every JS/TS edit, pnpm install in the repo). Obsolete: rtk support removed in 0.15.0.
+- [x] [F14](tasks/F14-rtk-eslint-defeats-edit-gate.md) Bypass `rtk lint` on Edit: its compacted output has no line locations, so the edit-range gate passes everything. Obsolete: rtk support removed in 0.15.0.
+- [x] [F17](tasks/F17-persist-rtk-probe.md) Persist `rtk rewrite` probe results across hook processes. Obsolete: rtk support removed in 0.15.0.
+- [x] [F31](tasks/F31-rtk-shellcheck-overhead.md) Measure rtk's overhead for shellcheck/ruff with the real tools. Obsolete: rtk support removed in 0.15.0.
 
 ## Stage 0: baseline (do first)
 
@@ -16,9 +21,8 @@ Legend: `[x]` finished. `[ ]` not finished; tag = `open` (code change, not start
 
 ## Stage 1: quick wins (high impact, low risk, small diffs)
 
-- [ ] [F02](tasks/F02-rtk-failure-banner-as-finding.md) rtk failure banners are reported as eslint findings (false rewake on every JS/TS edit, pnpm install in the repo) `open` priority:high
 - [ ] [F03](tasks/F03-eslint-without-config.md) Skip the eslint chain when no eslint/oxlint config exists (about 0.85 s wasted per TS edit) `open` priority:high. Pairs with F02 (removes its no-config half).
-- [ ] [F04](tasks/F04-local-node-modules-bin.md) Run project-local `node_modules/.bin/<tool>` directly instead of a doomed `rtk` attempt plus npx `open` priority:high. Needs a user decision (languages.md "not generalized").
+- [ ] [F04](tasks/F04-local-node-modules-bin.md) Run project-local `node_modules/.bin/<tool>` directly instead of npx `open` priority:high. Needs a user decision (languages.md "not generalized").
 - [ ] [F05](tasks/F05-stdin-eagain-large-payload.md) Read hook stdin robustly: payloads over about 190 KB are silently not linted `open` priority:medium
 - [ ] [F06](tasks/F06-markdownlint-cli2-no-globs.md) Pass `--no-globs` to markdownlint-cli2 `open` priority:medium
 - [ ] [F07](tasks/F07-stylelint-without-config.md) Skip stylelint when the project has no stylelint config `open` priority:medium
@@ -31,10 +35,8 @@ Legend: `[x]` finished. `[ ]` not finished; tag = `open` (code change, not start
 - [ ] [F11](tasks/F11-persist-path-probes.md) Persist `onPath` probe results across hook processes `open` priority:medium. Ship with F28 (most of the WSL PATH cost is outside the plugin).
 - [ ] [F12](tasks/F12-watchlist-scope-fast-path.md) Cheapen the watch list's per-file scope check (extension first, per-dir realpath cache) `open` priority:medium
 - [ ] [F13](tasks/F13-dedup-whole-project-checks.md) Run tsc / go vet / cargo once per FileChanged burst, not once per file `open` priority:medium. After F10.
-- [ ] [F14](tasks/F14-rtk-eslint-defeats-edit-gate.md) Bypass `rtk lint` on Edit: its compacted output has no line locations, so the edit-range gate passes everything `open` priority:medium. After F02; documented-rule trade-off (rtk compaction).
 - [ ] [F15](tasks/F15-rearm-watches-after-checkout.md) Re-arm FileChanged watches after `git checkout` (prototype first) `open` priority:medium. After F12 (re-emission multiplies watch-list cost).
 - [ ] [F16](tasks/F16-skill-driver-batching.md) Skill driver: one linter call per tool group and one tsc per tsconfig `open` priority:medium. After F03 and F09 (they remove most of today's cost).
-- [ ] [F17](tasks/F17-persist-rtk-probe.md) Persist `rtk rewrite` probe results across hook processes `open` priority:low. After F11 (shared cache file).
 
 ## Stage 3: edge cases and low priority
 
@@ -52,9 +54,8 @@ Legend: `[x]` finished. `[ ]` not finished; tag = `open` (code change, not start
 ## Measurement and docs-only
 
 - [ ] [F28](tasks/F28-wsl-windows-path-docs.md) Document the WSL Windows-PATH penalty (mostly inside child processes) `docs-only` priority:medium. Pairs with F11.
-- [ ] [F29](tasks/F29-timeout-budget-docs.md) Timeout budget doc: rtk probe term, cold Rust leaf crate, SessionStart on 9P `docs-only` priority:low. Re-derive again after F10/F13/F18.
+- [ ] [F29](tasks/F29-timeout-budget-docs.md) Timeout budget doc: cold Rust leaf crate, SessionStart on 9P `docs-only` priority:low. Re-derive again after F10/F13/F18.
 - [ ] [F30](tasks/F30-go-rust-cost-model-docs.md) Document the Go/Rust cost model (scope, cold caches, bursts, gccgo PATH scan) `docs-only` priority:low
-- [ ] [F31](tasks/F31-rtk-shellcheck-overhead.md) Measure rtk's overhead for shellcheck/ruff with the real tools `measurement-only` priority:low
 - [ ] [F32](tasks/F32-filechanged-echo-race.md) Measure how often the FileChanged echo of Claude's own write beats the digest `measurement-only` priority:low
 - [ ] [F33](tasks/F33-watchpaths-size-recheck.md) watchPaths JSON size and watch count need no change; re-check on Claude Code upgrades `measurement-only` priority:low
 
@@ -63,12 +64,11 @@ Legend: `[x]` finished. `[ ]` not finished; tag = `open` (code change, not start
 - F01 before everything: each task's Verification compares against a fresh baseline.
 - F02 + F03 together remove all false eslint findings seen in this analysis; F02 alone (the safety net) covers projects that have a config but no reachable binary. F04's walk from the file's directory fixes the sub-package case (91 of 128 historical pnpm findings).
 - F04 before F09: both rework the npx-fallback branch of `runLintTool`; F04 covers locally installed tools, F09 the npx-cache-only ones (markdown).
-- F02 before F14: both change when `rtk lint` runs for eslint.
-- F11 before F17: one shared cache file. F11's savings and F04's are not additive for JS/TS (rtk scans PATH itself); F28 documents the rest.
+- F11's savings and F04's are not additive for JS/TS (rtk scans PATH itself); F28 documents the rest.
 - F08 and F12 touch the same loop in `watchList`; F15 and F19 come after them.
 - F10 before F13 (the slot cap bounds the peak; F13 removes redundant work inside it).
 - F03 and F09 before F16. F18 and F10/F13 change the timeout budget: update F29's text.
-- F27: add each test together with the task it guards (F02, F04, F05, F10, F11, F17, F18).
+- F27: add each test together with the task it guards (F04, F05, F10, F11, F18).
 
 ## Notes
 
