@@ -151,7 +151,7 @@ function onPath(tool: string, path: string): boolean {
 }
 
 /**
- * Spawn one run of `c` with `payloadFile` as stdin (a file descriptor, never a pipe: see F05) and time it.
+ * Spawn one run of `c` with `payloadFile` as stdin (a file descriptor, so the timing excludes the parent's pipe writes) and time it.
  *
  * @param c - The case; `payload: null` spawns the bare `node -e 0`, resolved through `env.PATH` like the hook's shebang.
  * @param payloadFile - Payload JSON file.
