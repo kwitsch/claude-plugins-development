@@ -53,6 +53,7 @@ Legend: `[x]` finished. `[ ]` not finished; tag = `open` (code change, not start
 - [ ] [F28](tasks/F28-wsl-windows-path-docs.md) Document the WSL Windows-PATH penalty (mostly inside child processes) `docs-only` priority:medium. Pairs with F11.
 - [ ] [F29](tasks/F29-timeout-budget-docs.md) Timeout budget doc: cold Rust leaf crate, SessionStart on 9P `docs-only` priority:low. Re-derive again after F10/F13/F18.
 - [ ] [F30](tasks/F30-go-rust-cost-model-docs.md) Document the Go/Rust cost model (scope, cold caches, bursts, gccgo PATH scan) `docs-only` priority:low
+- [ ] [F01](tasks/F01-measurement-baseline.md) F01 follow-ups (the harness itself is done, see Done): check whether the repo-explorer-mcp 0.10.3 project pin shadows the user-scope plugin, a burst case (N concurrent hook processes), live `claude -p --debug-file` runs, the `--import` preload for per-subprocess breakdowns `measurement-only` priority:low
 - [ ] [F32](tasks/F32-filechanged-echo-race.md) Measure how often the FileChanged echo of Claude's own write beats the digest `measurement-only` priority:low
 - [ ] [F33](tasks/F33-watchpaths-size-recheck.md) watchPaths JSON size and watch count need no change; re-check on Claude Code upgrades `measurement-only` priority:low
 

@@ -81,8 +81,8 @@ paths:
 
 ## Measured cost
 
-- **Label:** universal-lint 0.15.1, 2026-11-07, WSL2 6.18.33.2-microsoft-standard-WSL2, 12 cores, 9.5 GB, node v24.22.2, tsc 7.0.2, PATH 63 dirs / 44 on /mnt/c (load 1.42 -> 1.80 during the run). Medians in ms from `node universal-lint/scripts/perf.mts 5`. Numbers are machine- and load-dependent; re-measure before judging a change.
-- **Harness:** `node universal-lint/scripts/perf.mts [runs]` after `pnpm --filter universal-lint build` (dev only, measures `plugin/`): spawns the built hook through its shebang with a payload file as stdin, fixtures in `os.tmpdir()`, one warm-up round plus `runs` timed rounds (default 5), real PATH and PATH minus `/mnt/` dirs; exits 1 when a run misses its expected exit status or observable.
+- **Label:** universal-lint 0.15.1, 2026-11-07, WSL2 6.18.33.2-microsoft-standard-WSL2, 12 cores, 9.5 GB, node v24.22.2, tsc 7.0.2, linters found (of shellcheck/ruff/yamllint/markdownlint-cli2/eslint): none on either PATH variant, PATH 63 dirs / 44 on /mnt/c (load 1.42 -> 1.80 during the run). Medians in ms from `node universal-lint/scripts/perf.mts 5`. Numbers are machine- and load-dependent; re-measure before judging a change.
+- **Harness:** `node universal-lint/scripts/perf.mts [runs]` after `pnpm --filter universal-lint build` (dev only, measures `plugin/`): spawns the built hook through its shebang with a payload file as stdin, fixtures in `os.tmpdir()`, one warm-up round plus `runs` timed rounds (default 5), real PATH and PATH minus `/mnt/` dirs; exits 1 when a run misses its expected exit status or observable, 2 on a usage, missing-build or setup/spawn error. The header lists which linters were found on PATH (the `.sh`/`.py`/`.yml` rows time the missing-tool scan when they are absent, so installing one changes those rows).
 - **Live per-hook durations:** `claude -p --debug-file <f> ...`, then `grep 'lint-file.mjs.*finished with status' <f>`; findings appear in transcripts as `hook_blocking_error` attachments carrying `toolUseID`.
 
 | Case                           | real PATH | no /mnt | What runs                                                                                           |
