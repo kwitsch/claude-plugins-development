@@ -10,7 +10,7 @@ Development repository for Claude Code plugins. One top-level directory per plug
 
 - `package.json`: the only manifest source (`name`, `version`, `description`, `author`, `keywords`; plugin-only fields such as `userConfig` under `claudePlugin`, which is required, `{}` at least, and marks the package as a plugin) and the pnpm scripts `build` (`node ../development/scripts/build-plugin.mts`), `test`, optional `lint`. Edit here only.
 - `src/bin/`: scripts used from several places (skills, hooks, MCP), built to `plugin/bin/*.mjs`, which Claude Code puts on the Bash PATH while the plugin is enabled.
-- `scripts/`: optional plugin-specific build steps (`.mts`, run by Node 24's type stripping), e.g. dprint's `hooks.mts`.
+- `scripts/`: optional plugin-specific build steps and dev-only tools (`.mts`, run by Node 24's type stripping, never shipped), e.g. dprint's `hooks.mts` (build) and universal-lint's `perf.mts` (hook cost measurement).
 - `CLAUDE.md`: developer notes, never inside `plugin/` (a plugin-root CLAUDE.md is not loaded and triggers a validate warning). Notes for single parts go in `<name>/.claude/rules/*.md` with `paths:` relative to `<name>/` (loaded when Claude works on matching files; keep each under 40,000 characters, the on-demand load limit); `src/` holds only `.mts`.
 - Hand-written plugin content (`SKILL.md`, `hooks/hooks.json`, `agents/*.md`, `README.md`) lives directly in `plugin/` and is edited there.
 
