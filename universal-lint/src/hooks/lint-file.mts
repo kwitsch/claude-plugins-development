@@ -1649,7 +1649,7 @@ function isMainModule(): boolean {
  * Claude with it). Fails open on any error — no output, exit 0.
  *
  * @remarks
- * Reads stdin asynchronously to EOF, never `readFileSync(0)`: fd 0 is non-blocking, so a sync read throws EAGAIN on a late writer or a payload above the pipe buffer (hook-design.md "stdin", F05). Never rejects (the whole body is in the try/catch), so the bottom `void main()` is safe.
+ * Reads stdin asynchronously to EOF, never `readFileSync(0)`: fd 0 is non-blocking, so a sync read throws EAGAIN on a late writer or a payload above the pipe buffer (hook-design.md "stdin", F05). Never rejects (the whole body is in the try/catch), so the bottom `void main()` is safe. Never calls `process.exit`: the process ends when the event loop drains after stdin EOF, carrying `process.exitCode` 2 for findings, so the exit-code contract is unchanged.
  */
 async function main(): Promise<void> {
   try {
