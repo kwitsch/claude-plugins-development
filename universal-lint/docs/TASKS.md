@@ -16,10 +16,10 @@ Legend: `[x]` finished. `[ ]` not finished; tag = `open` (code change, not start
 - [x] [F17](tasks/F17-persist-rtk-probe.md) Persist `rtk rewrite` probe results across hook processes. Obsolete: rtk support removed in 0.15.0.
 - [x] [F31](tasks/F31-rtk-shellcheck-overhead.md) Measure rtk's overhead for shellcheck/ruff with the real tools. Obsolete: rtk support removed in 0.15.0.
 - [x] [F03](tasks/F03-eslint-without-config.md) Skip the eslint chain when no eslint/oxlint config exists. Shipped in 0.15.2.
+- [x] [F04](tasks/F04-local-node-modules-bin.md) Run project-local `node_modules/.bin/<tool>` directly instead of npx. Shipped in 0.15.3.
 
 ## Stage 1: quick wins (high impact, low risk, small diffs)
 
-- [ ] [F04](tasks/F04-local-node-modules-bin.md) Run project-local `node_modules/.bin/<tool>` directly instead of npx `open` priority:high. Needs a user decision (languages.md "not generalized").
 - [ ] [F05](tasks/F05-stdin-eagain-large-payload.md) Read hook stdin robustly: payloads over about 190 KB are silently not linted `open` priority:medium
 - [ ] [F06](tasks/F06-markdownlint-cli2-no-globs.md) Pass `--no-globs` to markdownlint-cli2 `open` priority:medium
 - [ ] [F07](tasks/F07-stylelint-without-config.md) Skip stylelint when the project has no stylelint config `open` priority:medium
@@ -62,7 +62,7 @@ Legend: `[x]` finished. `[ ]` not finished; tag = `open` (code change, not start
 - Before each task: re-run `node universal-lint/scripts/perf.mts` (F01, done) for a fresh baseline; each task's Verification compares against it.
 - F02 + F03 together remove all false eslint findings seen in this analysis; F02 alone (the safety net) covers projects that have a config but no reachable binary. F04's walk from the file's directory fixes the sub-package case (91 of 128 historical pnpm findings).
 - F04 before F09: both rework the npx-fallback branch of `runLintTool`; F04 covers locally installed tools, F09 the npx-cache-only ones (markdown).
-- F11's savings and F04's are not additive for JS/TS (rtk scans PATH itself); F28 documents the rest.
+- F11's savings and F04's are not additive for JS/TS (0.14.x estimate from the rtk era; rtk is gone since 0.15.0, re-measure in F11); F28 documents the rest.
 - F08 and F12 touch the same loop in `watchList`; F15 and F19 come after them.
 - F10 before F13 (the slot cap bounds the peak; F13 removes redundant work inside it).
 - F03 and F09 before F16. F18 and F10/F13 change the timeout budget: update F29's text.
