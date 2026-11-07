@@ -85,7 +85,10 @@ interface LintTool {
   guardYamlLineLength?: boolean;
   /** Disable markdownlint's MD013 when the project has no markdownlint config. */
   guardMarkdownLineLength?: boolean;
-  /** npm package to run via `npx --yes` when the binary is absent from PATH. */
+  /**
+   * npm package to run via `npx --yes` when the binary is absent from PATH. Its presence also opts the tool into
+   * the project-local `node_modules/.bin/<name>` lookup (`selectLintTool`), which runs before npx.
+   */
   npmSpec?: string;
   /** Binary and leading arguments actually spawned, when they differ from the probed `name`. */
   spawnAs?: { name: string; args: string[] };
@@ -1007,9 +1010,10 @@ function buildSpawnOpts(cwd: string, timeout: number): SpawnSyncOptionsWithStrin
 }
 
 /**
- * Run the language's chain-selected tool (existing chain/runLintTool
- * machinery, unchanged behavior) and return its finding, or null on any
- * guard failure / clean / skip verdict. selectLintTool's own null path
+ * Run the language's chain-selected tool and return its finding, or null on any
+ * guard failure / clean / skip verdict. The tool comes from `selectLintTool`
+ * (PATH, else a project-local `node_modules/.bin`, else npx) and runs through
+ * `runLintTool`, which is handed the local bin when one was selected. selectLintTool's own null path
  * already covers "nothing on PATH, no local bin and nothing npx-eligible" --
  * no separate pre-check needed (an earlier `isToolAvailable`-based short-circuit here was
  * logically redundant with it and has been removed).
