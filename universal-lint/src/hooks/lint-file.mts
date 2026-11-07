@@ -337,7 +337,7 @@ function spawnBin(bin: string, argv: string[], spawnOpts: SpawnSyncOptionsWithSt
  * @remarks
  * The cached bin is `<cache>/_npx/<sha512(npmSpec) hex[0:16]>/node_modules/.bin/<name>` with `<cache>` =
  * `npm_config_cache || NPM_CONFIG_CACHE || ~/.npm` (npm 7+ `libnpmexec` layout, verified on npm 11.19.1), spawned
- * through `spawnBin` with `spawnOpts` unchanged (npx's cwd, the chain budget); ENOENT/EACCES falls through to npx, any
+ * through `spawnBin` with `spawnOpts` unchanged (npx's cwd, npx's budget NPX_SPAWN_TIMEOUT_MS); ENOENT/EACCES falls through to npx, any
  * other result (a timeout too) is returned. The cache route is skipped and plain npx runs, as in 0.15.7, when (1) a
  * `node_modules/.bin/<name>` exists from the spawn cwd up to `/` (npx runs that one before its cache; F04 user
  * decision), (2) npx holds `<dir>/concurrency.lock` (an install is in progress), or (3) the refresh stamp
@@ -373,7 +373,7 @@ function runNpx(name: string, npmSpec: string, argv: string[], spawnOpts: SpawnS
   }
   // An npx install in progress holds concurrency.lock; a half-replaced tree could crash with exit 1, a false finding.
   if (fresh && !existsSync(path.join(dir, "concurrency.lock"))) {
-    const cached = spawnBin(path.join(dir, "node_modules", ".bin", name), argv, spawnOpts);
+    const cached = spawnBin(path.join(dir, "node_modules", ".bin", name), argv, { ...spawnOpts, timeout: NPX_SPAWN_TIMEOUT_MS });
     if (cached) return cached;
   }
   const result = npx();

@@ -181,7 +181,10 @@ function runNpx(name, npmSpec, argv, spawnOpts) {
 		fresh = age >= 0 && age < NPX_REFRESH_MS;
 	} catch {}
 	if (fresh && !existsSync(path.join(dir, "concurrency.lock"))) {
-		const cached = spawnBin(path.join(dir, "node_modules", ".bin", name), argv, spawnOpts);
+		const cached = spawnBin(path.join(dir, "node_modules", ".bin", name), argv, {
+			...spawnOpts,
+			timeout: NPX_SPAWN_TIMEOUT_MS
+		});
 		if (cached) return cached;
 	}
 	const result = npx();
