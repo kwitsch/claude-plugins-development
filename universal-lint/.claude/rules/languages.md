@@ -27,7 +27,6 @@ paths:
 - **`manifestPath` + `resolveCargoManifest`, not `targetsDir`:** cargo takes no positional file/dir target (it works on the crate/workspace from `Cargo.toml`), but `buildArgv` normally appends one, which cargo rejects.
   - `manifestPath` emits `--manifest-path <nearest Cargo.toml>` (found walking up to `cwd`, existence-only) inserted **before** any `--` so it stays a cargo option, not a rustc arg; it targets the right crate in a multi-crate workspace.
   - A `.rs` file outside any Cargo project is a silent no-op, gated in `runChainLint` before spawning.
-  - Inserting before `--` also breaks `runLintTool`'s "`tool.args` is a leading prefix of `argv`" slice, so cargo tools skip the `rtk` path.
 - **Coarse contract:** `classifyExit`'s shared `cargo-clippy`/`cargo` case is `0` clean, any non-zero `issues` (101 on a compile error), as for `go`/`phpstan` — a tool malfunction isn't separable from a finding by exit code (accepted). `status === null` (timeout/signal) skips before the switch.
 - `CARGO_SPAWN_TIMEOUT_MS` is a separate, larger budget (they compile the crate). A cold first build may exceed it and skip silently (fail-open); warm/incremental runs are fast.
 
