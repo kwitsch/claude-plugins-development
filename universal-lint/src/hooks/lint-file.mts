@@ -1067,22 +1067,18 @@ function runTypeCheck(resolved: string, cwd: string): Finding | null {
     return null; // can't create the cache dir -- fail open, no cache-less fallback
   }
 
-  const staticArgs = ["--noEmit", "--incremental"];
-  const dynamicTail = ["--tsBuildInfoFile", cachePath, "-p", tsconfigPath];
-  const spawnOpts = buildSpawnOpts(cwd, TSC_SPAWN_TIMEOUT_MS);
-
-  let result: SpawnSyncReturns<string>;
-  if (onPath("tsc")) {
-    result = spawnSync("tsc", [...staticArgs, ...dynamicTail], spawnOpts);
-  } else {
-    // Most real TS projects only have `typescript` as a local devDependency
-    // (node_modules/.bin usually isn't on a hook's PATH) -- no npx fallback
-    // here (see `.claude/rules/typescript-check.md`: the two-bin `typescript` package makes the
-    // existing npx idiom's correctness unverified for this specific tool).
-    const localTsc = path.join(cwd, "node_modules", ".bin", "tsc");
-    if (!existsSync(localTsc)) return null;
-    result = spawnSync(localTsc, [...staticArgs, ...dynamicTail], spawnOpts);
-  }
+  // Most real TS projects only have `typescript` as a local devDependency
+  // (node_modules/.bin usually isn't on a hook's PATH) -- no npx fallback
+  // here (see `.claude/rules/typescript-check.md`: the two-bin `typescript` package makes the
+  // existing npx idiom's correctness unverified for this specific tool).
+  const localTsc = path.join(cwd, "node_modules", ".bin", "tsc");
+  const bin = onPath("tsc") ? "tsc" : existsSync(localTsc) ? localTsc : null;
+  if (!bin) return null;
+  const result = spawnSync(
+    bin,
+    ["--noEmit", "--incremental", "--tsBuildInfoFile", cachePath, "-p", tsconfigPath],
+    buildSpawnOpts(cwd, TSC_SPAWN_TIMEOUT_MS),
+  );
   if (result.error || result.signal) return null;
   if (classifyExit("tsc", result.status) !== "issues") return null;
 

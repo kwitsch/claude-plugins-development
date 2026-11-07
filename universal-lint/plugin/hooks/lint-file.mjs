@@ -546,22 +546,17 @@ function runTypeCheck(resolved, cwd) {
 	} catch {
 		return null;
 	}
-	const staticArgs = ["--noEmit", "--incremental"];
-	const dynamicTail = [
+	const localTsc = path.join(cwd, "node_modules", ".bin", "tsc");
+	const bin = onPath("tsc") ? "tsc" : existsSync(localTsc) ? localTsc : null;
+	if (!bin) return null;
+	const result = spawnSync(bin, [
+		"--noEmit",
+		"--incremental",
 		"--tsBuildInfoFile",
 		cachePath,
 		"-p",
 		tsconfigPath
-	];
-	const spawnOpts = buildSpawnOpts(cwd, TSC_SPAWN_TIMEOUT_MS);
-	let result;
-	if (onPath("tsc")) {
-		result = spawnSync("tsc", [...staticArgs, ...dynamicTail], spawnOpts);
-	} else {
-		const localTsc = path.join(cwd, "node_modules", ".bin", "tsc");
-		if (!existsSync(localTsc)) return null;
-		result = spawnSync(localTsc, [...staticArgs, ...dynamicTail], spawnOpts);
-	}
+	], buildSpawnOpts(cwd, TSC_SPAWN_TIMEOUT_MS));
 	if (result.error || result.signal) return null;
 	if (classifyExit("tsc", result.status) !== "issues") return null;
 	const text = `${result.stdout ?? ""}\n${result.stderr ?? ""}`;
