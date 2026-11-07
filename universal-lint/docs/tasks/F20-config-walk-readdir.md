@@ -3,7 +3,7 @@ id: F20
 title: One readdirSync per directory in the upward config walks (9P)
 status: open
 priority: low
-area: universal-lint/src/hooks/lint-file.mts (walkUpToCwd, walkToRoot, resolveOxlintConfig, hasProjectMarkdownlintConfig, resolveCheckstyleConfig, hasProjectYamllintConfig, resolveTsconfig, resolveCargoManifest)
+area: universal-lint/src/hooks/lint-file.mts (walkUpToCwd, walkToRoot, resolveOxlintConfig, hasProjectMarkdownlintConfig, hasStylelintConfig, resolveCheckstyleConfig, hasProjectYamllintConfig, resolveTsconfig, resolveCargoManifest)
 ---
 
 # F20 One readdirSync per directory in the upward config walks
@@ -22,7 +22,7 @@ Open. Merges static config-walk finding (adjusted: medium → low; 0 of 4986 ses
 
 ## Code locations
 
-The `walkUpToCwd`/`walkToRoot` callbacks in `resolveOxlintConfig` (`[...OXLINT_CONFIG_FILENAMES, ...ESLINT_CONFIG_FILENAMES]` existsSync), `hasProjectMarkdownlintConfig` (`MARKDOWNLINT_CONFIG_FILENAMES.some(existsSync)`), `resolveCheckstyleConfig`, `hasProjectYamllintConfig`.
+The `walkUpToCwd`/`walkToRoot` callbacks in `resolveOxlintConfig` (`[...OXLINT_CONFIG_FILENAMES, ...ESLINT_CONFIG_FILENAMES]` existsSync), `hasProjectMarkdownlintConfig` (`MARKDOWNLINT_CONFIG_FILENAMES.some(existsSync)`), `hasStylelintConfig` (`STYLELINT_CONFIG_FILENAMES` plus the `package.json` `stylelint` key, F07), `resolveCheckstyleConfig`, `hasProjectYamllintConfig`.
 
 ## Approach
 

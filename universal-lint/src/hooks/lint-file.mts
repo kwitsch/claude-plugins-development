@@ -15,7 +15,7 @@
  * .claude/agent-memory, *.local.*, see `isExcludedPath`; not inside `scratchpad_dir`; no dangling link; lintable
  * extension; file exists). Then up to two INDEPENDENT checks run and their findings combine: (1) the language's chain
  * tool (first on PATH wins, else a project-local `node_modules/.bin`, else npx, see `selectLintTool`; no per-file skip, since no style mapping exists for linters; JS/TS runs one only when an
- * eslint or oxlint config exists, see `lintResolved`) through spawnSync (cwd =
+ * eslint or oxlint config exists, and CSS/SCSS only when a stylelint config exists, see `lintResolved`) through spawnSync (cwd =
  * project cwd, 30s timeout, stdout+stderr captured), classified by exit code for most tools (checkstyle by stripped
  * output, since its exit code counts only ERROR-severity violations and the bundled default ruleset runs at
  * `warning`); (2) for .ts/.tsx/.mts/.cts only, a whole-project `tsc --noEmit` via the nearest tsconfig.json (see
