@@ -179,6 +179,7 @@ test("npx cache: cold npm_config_cache -> first run via npx, second run direct",
   e.recStub("npx", 0);
   const f = e.file("a.md", "# T\n");
   e.run(f, { env });
+  /** The recorded `npx --yes markdownlint-cli2` invocations so far. */
   const npx = (): string[] => e.lines().filter((l) => l.startsWith("npx --yes markdownlint-cli2 "));
   assert.equal(npx().length, 1);
   assert.ok(existsSync(path.join(e.data, `npx-refreshed-${KEY}`)));
@@ -196,6 +197,7 @@ test("npx cache: a refresh stamp older than NPX_REFRESH_MS sends one run through
   localStub(e, CACHED, "markdownlint-cli2", 0);
   const f = e.file("a.md", "# T\n");
   e.run(f);
+  /** The recorded `npx --yes markdownlint-cli2` invocations so far. */
   const npx = (): string[] => e.lines().filter((l) => l.startsWith("npx --yes markdownlint-cli2 "));
   assert.equal(npx().length, 1);
   assert.ok(!e.lines().some((l) => l.startsWith("local:")));

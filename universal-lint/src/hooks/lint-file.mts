@@ -352,6 +352,11 @@ function spawnBin(bin: string, argv: string[], spawnOpts: SpawnSyncOptionsWithSt
  * @returns The spawnSync result of the cached bin or of npx.
  */
 function runNpx(name: string, npmSpec: string, argv: string[], spawnOpts: SpawnSyncOptionsWithStringEncoding): SpawnSyncReturns<string> {
+  /**
+   * Run `npx --yes <npmSpec> ...argv` with `spawnOpts` and the longer `NPX_SPAWN_TIMEOUT_MS` budget.
+   *
+   * @returns The spawnSync result of npx.
+   */
   const npx = (): SpawnSyncReturns<string> => spawnSync("npx", ["--yes", npmSpec, ...argv], { ...spawnOpts, timeout: NPX_SPAWN_TIMEOUT_MS });
   // npx runs a node_modules/.bin/<name> from its cwd up to / before its cache (npm 11.19.1 localFileExists): leave that to npx.
   if (walkToRoot(String(spawnOpts.cwd), (d) => existsSync(path.join(d, "node_modules", ".bin", name)))) return npx();
