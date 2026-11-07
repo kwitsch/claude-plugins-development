@@ -158,7 +158,8 @@ function runLintTool(tool, argv, spawnOpts, local) {
 				PATH
 			}
 		});
-		if (!result.error || result.signal) return result;
+		const code = result.error && "code" in result.error ? result.error.code : undefined;
+		if (code !== "ENOENT" && code !== "EACCES") return result;
 	}
 	if (tool.npmSpec && !onPath(tool.name)) {
 		return spawnSync("npx", [
