@@ -31,6 +31,7 @@ import { accessSync, constants as fsConstants, existsSync, lstatSync, mkdirSync,
 import { homedir, tmpdir } from "node:os";
 import path from "node:path";
 import process from "node:process";
+import { json } from "node:stream/consumers";
 import { fileURLToPath } from "node:url";
 
 /** Inner linter timeout; the hook-level timeout (hooks.json timeout: 90 = the lint budget) is the backstop. */
@@ -1646,10 +1647,19 @@ function isMainModule(): boolean {
  * stdout (exit 0); FileChanged runs fileChangedHandler; anything else (PostToolUse, or a payload without the field)
  * records the Write/Edit digest and runs lintFileHandler. Findings: their text on stderr and exit 2 (asyncRewake wakes
  * Claude with it). Fails open on any error — no output, exit 0.
+ *
+ * @remarks
+ * The payload is read asynchronously to EOF (`json(process.stdin)`), never with a synchronous `readFileSync` on fd 0:
+ * fd 0 is non-blocking (the `node:process` import opens `process.stdin`), so a synchronous read throws EAGAIN for a late
+ * writer or a payload above the pipe buffer (about 128-192 KB), which the fail-open catch turned into a silent skip
+ * (F05). A read or parse error fails open like any other. The exit-code contract is unchanged because `main` never calls
+ * `process.exit`: the process ends when the event loop drains after stdin EOF, carrying `process.exitCode` 2 for findings.
+ * `main` never rejects (its whole body is inside the try/catch), so the `void` call at the bottom of the module cannot
+ * raise an unhandled rejection.
  */
-function main(): void {
+async function main(): Promise<void> {
   try {
-    const input = JSON.parse(readFileSync(0, "utf8")) as PostToolUseHookInput;
+    const input = (await json(process.stdin)) as PostToolUseHookInput;
     const ev = input?.hook_event_name;
     if (ev === "SessionStart" || ev === "CwdChanged") {
       const r = watchPathsHandler(input);
@@ -1672,4 +1682,4 @@ function main(): void {
   }
 }
 
-if (isMainModule()) main();
+if (isMainModule()) void main();
