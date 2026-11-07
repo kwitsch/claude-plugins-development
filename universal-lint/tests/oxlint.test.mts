@@ -1,5 +1,7 @@
-// oxlint vs eslint selection by the nearest lint config file, and the oxlint-typeCheck tsc gate.
+// oxlint vs eslint vs no chain lint selection by the nearest lint config file, and the oxlint-typeCheck tsc gate.
 import assert from "node:assert/strict";
+import { writeFileSync } from "node:fs";
+import path from "node:path";
 import { test } from "vitest";
 import { makeEnv } from "./support/lint-hook.mts";
 
@@ -31,14 +33,27 @@ for (const code of [0, 2]) {
   });
 }
 
-test("oxlint: no lint config anywhere -> eslint runs, oxlint never spawned", () => {
+test("oxlint: no lint config anywhere -> no chain lint: eslint, oxlint and npx never spawned, {}", () => {
   const e = makeEnv();
   e.recStub("oxlint", 1);
-  e.recStub("eslint", 0);
-  e.run(e.file("a.js", JS));
-  assert.ok(e.lines().length > 0);
-  assert.ok(e.lines().every((l) => l.startsWith("eslint ")));
+  e.recStub("eslint", 1);
+  e.recStub("npx", 1);
+  const r = e.run(e.file("a.js", JS), { out: "noise" });
+  assert.deepEqual(r.result, {});
+  assert.deepEqual(e.lines(), []);
 });
+
+for (const placement of ["cwd", "one level above cwd"]) {
+  test(`oxlint: eslint.config.mjs in ${placement} -> eslint runs`, () => {
+    const e = makeEnv();
+    // one level above cwd is the per-env makeEnv base dir (holds bin/, home/, proj/), never higher
+    if (placement === "cwd") e.file("eslint.config.mjs", "export default [];\n");
+    else writeFileSync(path.join(e.cwd, "..", "eslint.config.mjs"), "export default [];\n");
+    e.recStub("eslint", 0);
+    e.run(e.file("a.js", JS));
+    assert.ok(e.lines().some((l) => l.startsWith("eslint ")));
+  });
+}
 
 test("oxlint: eslint.config.mjs and .oxlintrc.json in the same dir -> oxlint wins", () => {
   const e = makeEnv();
@@ -125,6 +140,18 @@ test("tsc gate: malformed .oxlintrc.json -> tsc spawned", () => {
 
 test("tsc gate: eslint config -> tsc spawned (eslint path unchanged)", () => {
   assert.equal(gate("eslint.config.mjs", "export default [];\n").tscRan, true);
+});
+
+test("tsc gate: no lint config -> tsc still spawned, no chain lint", () => {
+  const e = makeEnv();
+  e.file("tsconfig.json", TSCONFIG);
+  e.recStub("eslint", 1);
+  e.recStub("npx", 1);
+  e.recStub("tsc", 2);
+  const r = e.run(e.file("a.ts", TS), { out: "a.ts(1,1): error TS2322: tsc-finding-marker" });
+  assert.match(r.ctx, /tsc-finding-marker/);
+  assert.ok(e.lines().some((l) => l.startsWith("tsc ")));
+  assert.ok(!e.lines().some((l) => l.startsWith("eslint ") || l.startsWith("npx ")));
 });
 
 const TYPE_CHECK_CFG = "{\"options\":{\"typeAware\":true,\"typeCheck\":true}}";

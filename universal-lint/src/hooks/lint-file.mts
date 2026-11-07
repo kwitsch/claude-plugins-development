@@ -14,7 +14,8 @@
  * `scopedTarget` (real path strictly inside the real cwd, not excluded: node_modules/vendor/.git, .claude/worktrees,
  * .claude/agent-memory, *.local.*, see `isExcludedPath`; not inside `scratchpad_dir`; no dangling link; lintable
  * extension; file exists). Then up to two INDEPENDENT checks run and their findings combine: (1) the language's chain
- * tool (first on PATH wins; no per-file skip, since no style mapping exists for linters) through spawnSync (cwd =
+ * tool (first on PATH wins; no per-file skip, since no style mapping exists for linters; JS/TS runs one only when an
+ * eslint or oxlint config exists, see `lintResolved`) through spawnSync (cwd =
  * project cwd, 30s timeout, stdout+stderr captured), classified by exit code for most tools (checkstyle by stripped
  * output, since its exit code counts only ERROR-severity violations and the bundled default ruleset runs at
  * `warning`); (2) for .ts/.tsx/.mts/.cts only, a whole-project `tsc --noEmit` via the nearest tsconfig.json (see
@@ -63,7 +64,7 @@ export const WATCH_LIMIT = 5000;
 /** Budget of each git call (ls-files for the watch list, status for the FileChanged gate). */
 const GIT_TIMEOUT_MS = 10000;
 
-/** tsc only understands real TypeScript syntax; .js/.jsx/.mjs/.cjs stay chain-linted only (eslint or oxlint, see resolveOxlintConfig). */
+/** tsc only understands real TypeScript syntax; .js/.jsx/.mjs/.cjs get only the chain lint (eslint or oxlint, see lintResolved), none without a lint config. */
 const TYPE_CHECK_EXTS = new Set([".ts", ".tsx", ".mts", ".cts"]);
 
 /** One linter in a language's chain. */
@@ -431,11 +432,13 @@ const OXLINT_CONFIG_FILENAMES = [".oxlintrc.json", ".oxlintrc.jsonc", "oxlint.co
 /**
  * Nearest lint config (file dir up to cwd, inclusive) picks the jsts chain.
  * Selection by file name only; in one dir oxlint names are checked first, so
- * oxlint wins a same-dir tie, and no config at all means eslint.
+ * oxlint wins a same-dir tie. null means no oxlint config; `lintResolved` then
+ * runs eslint only when an eslint config name exists from the file's dir up to
+ * the filesystem root, else no chain lint.
  *
  * @param fileDir - Directory of the edited file.
  * @param cwd - Project root.
- * @returns Path of the nearest config if it is an oxlint config, else null (eslint).
+ * @returns Path of the nearest config if it is an oxlint config, else null.
  */
 export function resolveOxlintConfig(fileDir: string, cwd: string): string | null {
   const hit = walkUpToCwd(fileDir, cwd, (dir) => {
@@ -687,7 +690,8 @@ const MARKDOWNLINT_CONFIG_FILENAMES = [
  * directory up through that directory's own ancestors too (verified against
  * markdownlint-cli2's source, enumerateParents) -- bounding this at `cwd`
  * risks misdetecting "absent" for a real config living above the project
- * root (a workspace/monorepo case).
+ * root (a workspace/monorepo case). Eslint config detection (`lintResolved`)
+ * uses it too: eslint looks up its config past the project root as well.
  *
  * @param dir - Directory to start from.
  * @param checkDir - Probe called per directory.
@@ -1395,10 +1399,12 @@ function lintResolved(resolved: string, cwd: string, ranges: Array<[number, numb
   const lang = EXT_MAP[ext];
   const typeCheckEligible = TYPE_CHECK_EXTS.has(ext);
   const oxlintConfig = lang === "jsts" ? resolveOxlintConfig(path.dirname(resolved), cwd) : null;
+  // No oxlint config and no eslint name up to / (eslint's own lookup): eslint would only exit 2 (skip), so no chain lint.
+  const noJstsConfig = lang === "jsts" && !oxlintConfig && !walkToRoot(path.dirname(resolved), (d) => ESLINT_CONFIG_FILENAMES.some((n) => existsSync(path.join(d, n))));
 
   const findings: Finding[] = [];
   let oxlintRan = false;
-  if (lang) {
+  if (lang && !noJstsConfig) {
     // -c makes the detected config oxlint's root: oxlint ignores a nested
     // oxlint.config.ts and rejects options.typeAware in a nested config otherwise.
     const entry = oxlintConfig ? { chain: REGISTRY.oxlint.chain.map((t) => ({ ...t, args: [...t.args, "-c", oxlintConfig] })) } : REGISTRY[lang];
