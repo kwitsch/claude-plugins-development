@@ -1,6 +1,6 @@
 ---
 id: F29
-title: Timeout budget doc misses the rtk probe term, the cold Rust leaf crate and SessionStart on 9P
+title: Timeout budget doc misses the cold Rust leaf crate and SessionStart on 9P
 status: docs-only
 priority: low
 area: universal-lint/.claude/rules/hook-design.md (Timeout budget), universal-lint/src/hooks/lint-file.mts (RTK_PROBE_TIMEOUT_MS, NPX_SPAWN_TIMEOUT_MS TSDoc)
@@ -9,6 +9,8 @@ area: universal-lint/.claude/rules/hook-design.md (Timeout budget), universal-li
 # F29 Timeout budget doc corrections
 
 ## Status
+
+The rtk terms are gone since 0.15.0 (rtk removed, budget re-derived in hook-design.md). The cold Rust leaf crate and SessionStart-on-9P items remain.
 
 Docs-only, open. Merges static timeout-budget finding (adjusted, low), the watch-filechanged missed item (SessionStart budget line wrong on 9P) and the cold-leaf part of the bench-other-langs missed items. Re-derive again after F10, F13, F17 or F18 change the budget.
 

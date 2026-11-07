@@ -1,7 +1,7 @@
 ---
 id: F02
 title: rtk failure banners are reported as eslint findings (false rewake, pnpm install in the repo)
-status: open
+status: done
 priority: high
 area: universal-lint/src/hooks/lint-file.mts (tryRtk, runLintTool npx-fallback branch, getRtkPrefix, classifyExit 'eslint', gateFinding)
 ---
@@ -9,6 +9,8 @@ area: universal-lint/src/hooks/lint-file.mts (tryRtk, runLintTool npx-fallback b
 # F02 rtk failure banners are reported as eslint findings
 
 ## Status
+
+Obsolete since universal-lint 0.15.0: rtk support was removed, so this problem no longer exists. The text below is kept as history.
 
 Open. Merges bench-js-ts finding 1 (adjusted, high), the real-sessions eslint finding (adjusted, high: the safety-net part) and two verifier missed items (no-config scope, timeout-dependent self-healing). Top item of the analysis.
 

@@ -64,8 +64,6 @@ export interface LintEnv {
   stub(name: string, ...lines: string[]): void;
   /** Recording stub: appends `<name> <argv>` to `$RECORD`, prints `$OUT`, exits with `exitCode`. */
   recStub(name: string, exitCode: number): void;
-  /** rtk stub answering both `rtk rewrite ... __RTK_PROBE__` (prints `rtk <verb> __RTK_PROBE__`, exit 3) and `rtk <verb> ...` (records, prints `$OUT`). */
-  rtkStub(verb: string, exitCode: number): void;
   /** The recorded lines. */
   lines(): string[];
   /** Env of a child process. */
@@ -136,15 +134,6 @@ export function makeEnv(): LintEnv {
     },
     recStub(name, exitCode) {
       env.stub(name, `printf "%s %s\\n" "${name}" "$*" >> "$RECORD"`, "printf '%s\\n' \"$OUT\"", `exit ${exitCode}`);
-    },
-    rtkStub(verb, exitCode) {
-      env.stub(
-        "rtk",
-        `if [ "$1" = "rewrite" ]; then printf "rtk ${verb} __RTK_PROBE__\\n"; exit 3; fi`,
-        "printf \"%s %s\\n\" \"rtk\" \"$*\" >> \"$RECORD\"",
-        "printf '%s\\n' \"$OUT\"",
-        `exit ${exitCode}`,
-      );
     },
     lines: () => readFileSync(record, "utf8").split("\n").filter(Boolean),
     childEnv: (opts = {}) => ({ PATH: bin, HOME: home, RECORD: record, OUT: opts.out ?? "", CLAUDE_PLUGIN_DATA: data, GIT_CONFIG_NOSYSTEM: "1", ...opts.env }),

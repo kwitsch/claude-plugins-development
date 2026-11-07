@@ -117,7 +117,7 @@ test("tsc: .js file next to a real tsconfig.json never triggers tsc (extension-g
   assert.ok(!e.lines().some((l) => l.startsWith("tsc ")));
 });
 
-test("tsc: absent from PATH but present at node_modules/.bin/tsc -> that absolute path is invoked directly, no rtk attempt", () => {
+test("tsc: absent from PATH but present at node_modules/.bin/tsc -> that absolute path is invoked directly", () => {
   const { e, a } = proj();
   const local = e.file(
     "node_modules/.bin/tsc",
@@ -130,11 +130,9 @@ test("tsc: absent from PATH but present at node_modules/.bin/tsc -> that absolut
     ].join("\n"),
   );
   chmodSync(local, 0o755);
-  e.stub("rtk", "printf \"%s %s\\n\" \"rtk\" \"$*\" >> \"$RECORD\"", "exit 1");
   const r = e.run(a);
   assert.match(r.ctx, /local-tsc-marker/);
   assert.ok(e.lines().some((l) => l.startsWith("localtsc ")));
-  assert.ok(!e.lines().some((l) => l.includes("rtk")));
 });
 
 test("tsc: absent from PATH and no node_modules/.bin/tsc -> {}, no candidate", () => {
