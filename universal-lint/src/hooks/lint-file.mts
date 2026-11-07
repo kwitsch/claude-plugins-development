@@ -1649,13 +1649,7 @@ function isMainModule(): boolean {
  * Claude with it). Fails open on any error — no output, exit 0.
  *
  * @remarks
- * The payload is read asynchronously to EOF (`json(process.stdin)`), never with a synchronous `readFileSync` on fd 0:
- * fd 0 is non-blocking (the `node:process` import opens `process.stdin`), so a synchronous read throws EAGAIN for a late
- * writer or a payload above the pipe buffer (about 128-192 KB), which the fail-open catch turned into a silent skip
- * (F05). A read or parse error fails open like any other. The exit-code contract is unchanged because `main` never calls
- * `process.exit`: the process ends when the event loop drains after stdin EOF, carrying `process.exitCode` 2 for findings.
- * `main` never rejects (its whole body is inside the try/catch), so the `void` call at the bottom of the module cannot
- * raise an unhandled rejection.
+ * Reads stdin asynchronously to EOF, never `readFileSync(0)`: fd 0 is non-blocking, so a sync read throws EAGAIN on a late writer or a payload above the pipe buffer (hook-design.md "stdin", F05). Never rejects (the whole body is in the try/catch), so the bottom `void main()` is safe.
  */
 async function main(): Promise<void> {
   try {
