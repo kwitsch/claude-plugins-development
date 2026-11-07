@@ -28,6 +28,7 @@ paths:
 - `tsc`'s budget is below the npx one (a stale async finding arrives too late to be useful) and above the single-file one (a whole-project check is slower).
 - Nominal worst case, TS file: chain 30 s + `tsc` 45 s = 75 s → 15 s margin inside the 90 s lint budget.
 - **Cold npx:** the single bare `npx --yes` attempt gets `NPX_SPAWN_TIMEOUT_MS` (55 s), the npx-fallback branch's worst case.
+- **Local bin:** a project-local `node_modules/.bin/<name>` (see "Local `node_modules/.bin` and npx fallback") runs under the chain budget (`SPAWN_TIMEOUT_MS`, 30 s); only an instant spawn failure (ENOENT/EACCES) falls back to npx, a timeout is not retried, so the worst cases in this section (FileChanged 85 s) are unchanged.
 - Overlapping lints of quick successive edits share the `--tsBuildInfoFile` (accepted, see `typescript-check.md`).
 - **Accepted:** when combined wall time exceeds the 90 s lint budget (cold npx 55 s + `tsc` 45 s = 100 s) the hook is killed and that turn's async findings are silently lost. Fail-open, never a wrong result; the next edit's `tsc` hits a warm cache.
 - **git:** each git call (`git ls-files` for the watch list, `git status` for the FileChanged gate) is capped at `GIT_TIMEOUT_MS` (10 s). FileChanged nominal worst case: git 10 s + chain 30 s + `tsc` 45 s = 85 s < 90 s; the cold-npx overrun above applies unchanged (a kill loses that lint silently). SessionStart/CwdChanged: git 10 s plus one realpath per listed file, inside the 30 s hook timeout.
@@ -35,7 +36,7 @@ paths:
 ## Runtime behavior (`lint_file`)
 
 - Every guard failure, clean result, skip (crash/misconfig) or missing tool returns `{}` silently (fail open); only issues produce a truncated findings text (`lintFileHandler` returns it as `additionalContext`; `main` writes it to stderr and exits 2). The guard chain lives in `resolveLintTarget`/`lintFileHandler`.
-- First chain tool on `PATH` wins; there is no per-file style-conflict skip (a linter needn't reproduce exact output the way a formatter does).
+- Selection (`selectLintTool`): the first chain tool on `PATH` wins, else the first npm chain tool with a project-local bin, else the first npm chain tool via npx; there is no per-file style-conflict skip (a linter needn't reproduce exact output the way a formatter does).
 - Go entries target the edited file's **directory** (`go vet`/`golangci-lint` are package-scoped); checkstyle gets `-c <resolved config>`.
 - stdout+stderr are captured and **never ignored**, unlike the formatter sibling: the findings text IS the payload. `maxBuffer` is raised well above the 1 MB default for the same reason — a noisy linter's output would otherwise truncate as ENOBUFS.
 - Success is **classification, not a content diff** (the file is never modified): `classifyExit` applies each tool's documented exit-code contract.
@@ -43,9 +44,14 @@ paths:
 - `stylelint` (CSS/SCSS) does not share the 0-clean/1-issues contract: `0` clean, `2` real lint problem, anything else (`1` fatal, `64` bad usage, `78` bad config) skip (stylelint.io CLI docs).
 - `yamllint` runs without `--strict`, so warnings-only findings don't surface — consistent with `eslint` (warnings don't affect its exit code either).
 
-### npx fallback
+### Local `node_modules/.bin` and npx fallback
 
-- `eslint`, `oxlint`, `markdownlint-cli2`, `markdownlint` and `stylelint` fall back to `npx --yes <package> ...` when absent from `PATH` (npm package name = bin name, so the single-positional idiom is safe; `npx` is assumed present since the hook already runs under node).
+- `eslint`, `oxlint`, `markdownlint-cli2`, `markdownlint` and `stylelint` (the chain entries with `npmSpec`), when absent from `PATH`, run the nearest `node_modules/.bin/<name>` from the file's directory up to `cwd` inclusive (`localBin` over `walkUpToCwd`; directories outside `cwd` never count), keyed by bin name (`markdownlint`'s package is `markdownlint-cli`) (user decision, F04, 0.15.3; `tsc` keeps its own cwd-only lookup, see `typescript-check.md`).
+- The local bin is spawned directly with the payload `cwd` (so `Finding.base`, the target and the edit-range gate are unchanged) and the bin's directory first on the child's `PATH`, as npx does: oxlint 1.91 finds `tsgolint` only on `PATH` or in the spawn cwd's `node_modules/.bin`, else it exits 1 with "Failed to find tsgolint executable", a false finding.
+- eslint 10 looks up its flat config from the linted file (probed on 10.14.0), so a sub-package config is found from the payload `cwd`. Residual: an eslint <= 9 pinned in a sub-package looks up from `cwd` and, without a root config, exits 2 (skip).
+- A local bin that cannot spawn (ENOENT/EACCES, e.g. no exec bit or a missing shim interpreter) falls back to npx; a timeout does not (no second budget).
+- Without a local bin: `npx --yes <package> ...` as before (each package ships the one bin the chain entry names (`markdownlint-cli` -> `markdownlint`), so the single-positional idiom is safe; `npx` is assumed present since the hook already runs under node).
+- Trust: (1) a bin in `<cwd>/node_modules/.bin` is the one `npx` runs today (npm's own lookup starts at cwd); (2) a sub-package bin between the file and cwd is a new execution surface of the same trust class (the project tree the user asked to lint), never above cwd; (3) the local route never runs a bin above cwd, so where an in-tree bin exists, an above-cwd bin that npx's own walk would have reached instead is no longer run. Without an in-tree bin, the npx fallback is unchanged from 0.15.2 and resolves `<name>` as npm does (npm 11.19.1 walks from cwd up to `/`, probed), with the same trust as any `npx` the user runs; it is deliberately not blocked, since that would drop lint for a monorepo sub-package session whose linters sit at the monorepo root (user decision, F04, 0.15.3).
 - `yamllint` has no npm package (PyPI only); `ruff`, `golangci-lint`, `go`, `ktlint`, `checkstyle` and the Rust/PHP tools have no safe npm equivalent either.
 
 ## Edit-range gate
@@ -82,23 +88,24 @@ paths:
 
 ## Measured cost
 
-- **Label:** universal-lint 0.15.2, 2026-11-07, WSL2 6.18.33.2-microsoft-standard-WSL2, 12 cores, 9.5 GB, node v24.22.2, tsc 7.0.2, linters found (of shellcheck/ruff/yamllint/markdownlint-cli2/eslint): none on either PATH variant, PATH 63 dirs / 44 on /mnt/c (load 1.42 -> 1.74 during the run). Medians in ms from `node universal-lint/scripts/perf.mts 5`. Numbers are machine- and load-dependent; re-measure before judging a change.
-- **Harness:** `node universal-lint/scripts/perf.mts [runs]` after `pnpm --filter universal-lint build` (dev only, measures `plugin/`): spawns the built hook through its shebang with a payload file as stdin, fixtures in `os.tmpdir()`, one warm-up round plus `runs` timed rounds (default 5), real PATH and PATH minus `/mnt/` dirs; exits 1 when a run misses its expected exit status or observable, 2 on a usage, missing-build or setup/spawn error. The header lists which linters were found on PATH (the `.sh`/`.py`/`.yml` rows time the missing-tool scan when they are absent, so installing one changes those rows).
+- **Label:** universal-lint 0.15.3, 2026-11-07, WSL2 6.18.33.2-microsoft-standard-WSL2, 12 cores, 9.5 GB, node v24.22.2, tsc 7.0.2, linters found (of shellcheck/ruff/yamllint/markdownlint-cli2/eslint): none on either PATH variant, PATH 63 dirs / 44 on /mnt/c (load 1.29 -> 1.70 during the run). Medians in ms from `node universal-lint/scripts/perf.mts 5`. Numbers are machine- and load-dependent; re-measure before judging a change.
+- **Harness:** `node universal-lint/scripts/perf.mts [runs]` after `pnpm --filter universal-lint build` (dev only, measures `plugin/`): spawns the built hook through its shebang with a payload file as stdin, fixtures in `os.tmpdir()`, one warm-up round plus `runs` timed rounds (default 5), real PATH and PATH minus `/mnt/` dirs; exits 1 when a run misses its expected exit status or observable, 2 on a usage, missing-build or setup/spawn error. The header lists which linters were found on PATH (the `.sh`/`.py`/`.yml` rows time the missing-tool scan when they are absent, so installing one changes those rows). The `.mts Write (this repo)` row lints this checkout's `universal-lint/scripts/perf.mts` with `cwd` = the checkout root (the digest goes to the fixture's `CLAUDE_PLUGIN_DATA`, nothing is written into the repo); it times the local-bin route only when the checkout has its own `node_modules` (`pnpm install`) and `oxlint` is not on `PATH`.
 - **Live per-hook durations:** `claude -p --debug-file <f> ...`, then `grep 'lint-file.mjs.*finished with status' <f>`; findings appear in transcripts as `hook_blocking_error` attachments carrying `toolUseID`.
 
-| Case                           | real PATH | no /mnt | What runs                                                                        |
-| ------------------------------ | --------: | ------: | -------------------------------------------------------------------------------- |
-| floor `node -e 0`              |        24 |      25 | no hook: Node startup + PATH lookup                                              |
-| empty payload `{}`             |        38 |      39 | hook floor, nothing to lint                                                      |
-| out-of-scope `.json` Write     |        42 |      39 | scope guard only                                                                 |
-| `.sh` Write                    |       137 |      41 | shellcheck: missing tool                                                         |
-| `.py` Write                    |       131 |      44 | ruff: missing tool                                                               |
-| `.yml` Write                   |       135 |      43 | yamllint: missing tool                                                           |
-| `.md` Write                    |       987 |     829 | markdownlint-cli2: npx fallback, warm cache                                      |
-| `.ts` Write (no eslint config) |       128 |     136 | tsc 7.0.2 warm incremental only (no lint config: no chain lint), 30-line fixture |
-| `.ts` Edit (no eslint config)  |       136 |     132 | same as `.ts` Write: tsc only                                                    |
-| FileChanged tracked unchanged  |        46 |      45 | `git status` skip, ext4                                                          |
-| FileChanged ignored            |        46 |      44 | `git status` `!!` skip, ext4                                                     |
-| FileChanged unlink             |        39 |      38 | early return before any lint                                                     |
-| SessionStart fixture           |        45 |      47 | watch list, 6 lintable files                                                     |
-| SessionStart this repo         |        60 |      61 | watch list of the repo checkout                                                  |
+| Case                           | real PATH | no /mnt | What runs                                                                                               |
+| ------------------------------ | --------: | ------: | ------------------------------------------------------------------------------------------------------- |
+| floor `node -e 0`              |        24 |      25 | no hook: Node startup + PATH lookup                                                                     |
+| empty payload `{}`             |        38 |      39 | hook floor, nothing to lint                                                                             |
+| out-of-scope `.json` Write     |        41 |      41 | scope guard only                                                                                        |
+| `.sh` Write                    |       134 |      43 | shellcheck: missing tool                                                                                |
+| `.py` Write                    |       132 |      40 | ruff: missing tool                                                                                      |
+| `.yml` Write                   |       133 |      39 | yamllint: missing tool                                                                                  |
+| `.md` Write                    |       987 |     832 | markdownlint-cli2: npx fallback, warm cache                                                             |
+| `.ts` Write (no eslint config) |       138 |     136 | tsc 7.0.2 warm incremental only (no lint config: no chain lint), 30-line fixture                        |
+| `.ts` Edit (no eslint config)  |       133 |     137 | same as `.ts` Write: tsc only                                                                           |
+| `.mts` Write (this repo)       |       338 |     244 | oxlint 1.91.0 via the root `node_modules/.bin` (typeCheck config: no tsc), real file `scripts/perf.mts` |
+| FileChanged tracked unchanged  |        43 |      43 | `git status` skip, ext4                                                                                 |
+| FileChanged ignored            |        44 |      43 | `git status` `!!` skip, ext4                                                                            |
+| FileChanged unlink             |        38 |      38 | early return before any lint                                                                            |
+| SessionStart fixture           |        45 |      46 | watch list, 6 lintable files                                                                            |
+| SessionStart this repo         |        61 |      62 | watch list of the repo checkout                                                                         |
