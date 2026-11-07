@@ -21,10 +21,10 @@ Legend: `[x]` finished. `[ ]` not finished; tag = `open` (code change, not start
 - [x] [F06](tasks/F06-markdownlint-cli2-no-globs.md) Pass `--no-globs` to markdownlint-cli2 so a project config's top-level `globs` no longer makes every single-file lint lint the whole repo. Shipped in 0.15.5.
 - [x] [F07](tasks/F07-stylelint-without-config.md) Skip stylelint when the project has no stylelint config. Shipped in 0.15.6.
 - [x] [F08](tasks/F08-watchlist-early-stop.md) Stop the watch-list filter once `WATCH_LIMIT` is exceeded. Shipped in 0.15.7.
+- [x] [F09](tasks/F09-bypass-npx-cached-bin.md) Spawn the cached npx bin directly instead of `npx --yes`. Shipped in 0.15.8.
 
 ## Stage 2: structural changes
 
-- [ ] [F09](tasks/F09-bypass-npx-cached-bin.md) Spawn the cached npx bin directly instead of `npx --yes` (about 0.6 s per .md edit) `open` priority:high. After F04 (same branch of `runLintTool`).
 - [ ] [F10](tasks/F10-filechanged-concurrency-cap.md) Cap concurrent FileChanged lints across hook processes (slot files) `open` priority:high
 - [ ] [F11](tasks/F11-persist-path-probes.md) Persist `onPath` probe results across hook processes `open` priority:medium. Ship with F28 (most of the WSL PATH cost is outside the plugin).
 - [ ] [F12](tasks/F12-watchlist-scope-fast-path.md) Cheapen the watch list's per-file scope check (extension first, per-dir realpath cache) `open` priority:medium

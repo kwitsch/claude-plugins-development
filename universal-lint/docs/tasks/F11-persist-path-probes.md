@@ -41,4 +41,4 @@ First-on-PATH-wins semantics unchanged. No `userConfig`. Writes only under CLAUD
 
 ## Related
 
-F17 (rtk probe; share the file), F09 option 2 (cached npx bin path in the same file), F28 (the larger WSL cost outside the plugin), F04 (not additive), F27.
+F17 (rtk probe; share the file), F09 option 2 (cached npx bin path in the same file; not taken: F09 shipped option 1 in 0.15.8), F28 (the larger WSL cost outside the plugin), F04 (not additive), F27.
