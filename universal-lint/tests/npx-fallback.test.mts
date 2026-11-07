@@ -24,6 +24,7 @@ function localStub(e: LintEnv, dir: string, name: string, exit: number, executab
       "#!/usr/bin/env bash",
       `printf "%s %s\\n" "local:${dir}/${name}" "$*" >> "$RECORD"`,
       "printf 'path:%s\\n' \"${PATH%%:*}\" >> \"$RECORD\"",
+      "printf 'pwd:%s\\n' \"$PWD\" >> \"$RECORD\"",
       "printf '%s\\n' \"$OUT\"",
       `exit ${exit}`,
       "",
@@ -63,6 +64,7 @@ test("local bin: oxlint absent from PATH, <cwd>/node_modules/.bin/oxlint runs wi
   assert.match(r.ctx, /oxlint-local-marker/);
   assert.ok(e.lines().includes(`local:./oxlint --no-error-on-unmatched-pattern -c ${cfg} ${f}`));
   assert.ok(e.lines().includes(`path:${path.join(e.cwd, "node_modules", ".bin")}`));
+  assert.ok(e.lines().includes(`pwd:${e.cwd}`));
   assert.ok(!e.lines().some((l) => l.startsWith("npx")));
 });
 
@@ -73,6 +75,7 @@ test("local bin: the nearest node_modules/.bin from the file's dir wins over the
   localStub(e, "pkg", "oxlint", 0);
   e.run(e.file("pkg/a.js", "let x = 1;\n"));
   assert.deepEqual(e.lines().filter((l) => l.startsWith("local:")).map((l) => l.split(" ")[0]), ["local:pkg/oxlint"]);
+  assert.ok(e.lines().includes(`pwd:${path.join(e.cwd, "pkg")}`));
 });
 
 test("local bin: keyed by bin name, not package: a local markdownlint (markdownlint-cli) beats npx markdownlint-cli2", () => {

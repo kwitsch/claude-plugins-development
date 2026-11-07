@@ -258,7 +258,7 @@ async function main(): Promise<void> {
       return `${s.med} (${s.min}-${s.max})`;
     };
     const out = [
-      `universal-lint ${VERSION} perf, ${new Date().toISOString()}, ${release()}, ${availableParallelism()} cores, ${(totalmem() / 2 ** 30).toFixed(1)} GB RAM, node ${process.version}, ${tsc}, linters found (of ${TOOLS.join("/")}): ${toolField}, ${pathField}, load ${load0} -> ${load1}, runs ${runs} (+1 warm-up)`,
+      `universal-lint ${VERSION} perf, ${new Date().toISOString()}, ${release()}, ${availableParallelism()} cores, ${(totalmem() / 2 ** 30).toFixed(1)} GB RAM, node ${process.version}, ${tsc}, linters found (of ${TOOLS.join("/")}): ${toolField}, local oxlint ${existsSync(join(ROOT, "..", "node_modules", ".bin", "oxlint")) ? "yes" : "no"}, ${pathField}, load ${load0} -> ${load1}, runs ${runs} (+1 warm-up)`,
       "",
       "| Case | real PATH med (min-max) ms | no /mnt med (min-max) ms | status |",
       "| --- | ---: | ---: | --- |",

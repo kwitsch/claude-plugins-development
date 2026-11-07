@@ -537,7 +537,8 @@ function runChainLint(lang, resolved, cwd, rel) {
 	}
 	const argv = buildArgv(tool, resolved, cwd, manifest);
 	const timeout = tool.manifestPath ? CARGO_SPAWN_TIMEOUT_MS : SPAWN_TIMEOUT_MS;
-	const spawnOpts = buildSpawnOpts(cwd, timeout);
+	const spawnCwd = sel.local ? path.join(sel.local, "../../..") : cwd;
+	const spawnOpts = buildSpawnOpts(spawnCwd, timeout);
 	const result = runLintTool(tool, argv, spawnOpts, sel.local);
 	if (result.error || result.signal) return none;
 	const target = tool.targetsDir ? path.relative(cwd, path.dirname(resolved)) || "." : manifest ? path.relative(cwd, path.dirname(manifest)) || "." : rel;
@@ -552,7 +553,7 @@ function runChainLint(lang, resolved, cwd, rel) {
 		text = `${result.stdout ?? ""}\n${result.stderr ?? ""}`;
 	}
 	if (verdict === "skip") return none;
-	const base = manifest ? path.dirname(manifest) : tool.targetsDir ? path.dirname(resolved) : cwd;
+	const base = manifest ? path.dirname(manifest) : tool.targetsDir ? path.dirname(resolved) : spawnCwd;
 	return {
 		ran: true,
 		finding: verdict === "issues" ? {
