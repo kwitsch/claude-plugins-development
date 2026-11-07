@@ -132,12 +132,14 @@ test(".claude/rules path (not worktrees/agent-memory) -> linter still invoked", 
 
 test("eslint exit 2 (config/internal error) -> {} even though it printed text (skip, not issues)", () => {
   const e = makeEnv();
+  e.file("eslint.config.mjs", "export default [];\n");
   e.recStub("eslint", 2);
   assert.deepEqual(e.run(e.file("a.js", "let x = 1\n"), { out: "Oops! Something went wrong! :(" }).result, {});
 });
 
 test("eslint exit 1 -> issues surfaced", () => {
   const e = makeEnv();
+  e.file("eslint.config.mjs", "export default [];\n");
   e.recStub("eslint", 1);
   const r = e.run(e.file("a.js", "let x = 1\n"), { out: "a.js: 1:1  error  x is assigned a value but never used  no-unused-vars" });
   assert.match(r.ctx, /no-unused-vars/);

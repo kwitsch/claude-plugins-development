@@ -733,9 +733,10 @@ function lintResolved(resolved, cwd, ranges, hookEventName, label) {
 	const lang = EXT_MAP[ext];
 	const typeCheckEligible = TYPE_CHECK_EXTS.has(ext);
 	const oxlintConfig = lang === "jsts" ? resolveOxlintConfig(path.dirname(resolved), cwd) : null;
+	const noJstsConfig = lang === "jsts" && !oxlintConfig && !walkToRoot(path.dirname(resolved), (d) => ESLINT_CONFIG_FILENAMES.some((n) => existsSync(path.join(d, n))));
 	const findings = [];
 	let oxlintRan = false;
-	if (lang) {
+	if (lang && !noJstsConfig) {
 		const entry = oxlintConfig ? { chain: REGISTRY.oxlint.chain.map((t) => ({
 			...t,
 			args: [
