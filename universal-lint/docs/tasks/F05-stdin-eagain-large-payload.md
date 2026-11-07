@@ -10,11 +10,11 @@ area: universal-lint/src/hooks/lint-file.mts (main, recordWrittenFor, recordWrit
 
 ## Status
 
-Done in 0.15.4. `main` is now `async` and reads the payload with `await json(process.stdin)` (`node:stream/consumers`) to EOF, and the module ends with `if (isMainModule()) void main();`; fail open, the findings contract (stderr + exit 2), the event dispatch and `hooks.json` are unchanged. Root cause (probed during design): the hook's own `import process from "node:process"` evaluates the `process.stdin` getter, which makes fd 0 a non-blocking libuv pipe handle, so the synchronous read threw EAGAIN for any late or larger-than-pipe-buffer writer; this is why even `cat p512.json | lint-file.mjs` failed while a file redirect worked (a file never returns EAGAIN). Tests (`tests/core.test.mts`, two): a 512 KB Edit payload (padding in `tool_response.originalFile`) and a 512 KB Write payload (padding in `tool_input.content`), each written 100 ms late through an async `spawn` stdin pipe (`runLate`), are linted (the recording shellcheck stub ran) and record their digest under `CLAUDE_PLUGIN_DATA/written`; both failed against the 0.15.3 build. Measured with `node universal-lint/scripts/perf.mts 5` (file as stdin), medians in ms, before (0.15.3) -> after (0.15.4), real PATH / no /mnt: `empty payload {}` 44 -> 48 / 45 -> 44; `.sh Write` 146 -> 148 / 45 -> 49 (the async stream read costs about one event-loop turn per event; full run in `.claude/rules/hook-design.md` "Measured cost"). The live `claude -p` big.md check from Verification was not re-run (the vitest tests cover the mechanism).
+Done in 0.15.4. `main` is `async` and reads the payload with `await json(process.stdin)` to EOF; fail-open, the findings contract, the dispatch and `hooks.json` are unchanged (details: `.claude/rules/hook-design.md` "stdin"). Root cause: the `node:process` import makes fd 0 a non-blocking pipe handle, so the sync read threw EAGAIN for a late or larger-than-pipe-buffer writer (even `cat p512.json | lint-file.mjs` failed; a file redirect worked). Tests: `tests/core.test.mts` test.each over a 512 KB Edit and Write payload written 100 ms late through a spawn pipe, both failing against 0.15.3. Cost: see hook-design.md "Measured cost" (0.15.4 table); the live `claude -p` big.md check was not re-run.
 
 ## Problem
 
-`main` parses `JSON.parse(readFileSync(0, "utf8"))`. When stdin is non-blocking and the writer has not delivered everything yet, Node throws EAGAIN: payloads above the pipe/socket buffer (about 128-192 KB) or a late writer. The fail-open catch swallows it silently: no lint, no digest. Edit payloads carry the whole original file (`tool_response.originalFile`), Write payloads the whole content (`tool_input.content`), so any Write/Edit of a file over about 190 KB loses its PostToolUse lint. With no digest recorded, the FileChanged echo then lints the whole file (no edit-range gate), defeating the self-write dedupe.
+`main` parsed (0.15.3) `JSON.parse(readFileSync(0, "utf8"))`. When stdin is non-blocking and the writer has not delivered everything yet, Node throws EAGAIN: payloads above the pipe/socket buffer (about 128-192 KB) or a late writer. The fail-open catch swallows it silently: no lint, no digest. Edit payloads carry the whole original file (`tool_response.originalFile`), Write payloads the whole content (`tool_input.content`), so any Write/Edit of a file over about 190 KB loses its PostToolUse lint. With no digest recorded, the FileChanged echo then lints the whole file (no edit-range gate), defeating the self-write dedupe.
 
 ## Evidence
 
@@ -25,7 +25,7 @@ Done in 0.15.4. `main` is now `async` and reads the payload with `await json(pro
 
 ## Code locations
 
-- `main` (`readFileSync(0, "utf8")` inside the fail-open try; dispatch on `hook_event_name`)
+- `main` (was `readFileSync(0, "utf8")`, now `await json(process.stdin)`, inside the fail-open try; dispatch on `hook_event_name`)
 - `recordWrittenFor` / `recordWritten` (never reached on EAGAIN), `fileChangedHandler` (digest miss → whole-file lint)
 
 ## Approach
