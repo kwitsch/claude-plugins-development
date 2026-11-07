@@ -14,7 +14,7 @@
  * `scopedTarget` (real path strictly inside the real cwd, not excluded: node_modules/vendor/.git, .claude/worktrees,
  * .claude/agent-memory, *.local.*, see `isExcludedPath`; not inside `scratchpad_dir`; no dangling link; lintable
  * extension; file exists). Then up to two INDEPENDENT checks run and their findings combine: (1) the language's chain
- * tool (first on PATH wins; no per-file skip, since no style mapping exists for linters; JS/TS runs one only when an
+ * tool (first on PATH wins, else a project-local `node_modules/.bin`, else npx, see `selectLintTool`; no per-file skip, since no style mapping exists for linters; JS/TS runs one only when an
  * eslint or oxlint config exists, see `lintResolved`) through spawnSync (cwd =
  * project cwd, 30s timeout, stdout+stderr captured), classified by exit code for most tools (checkstyle by stripped
  * output, since its exit code counts only ERROR-severity violations and the bundled default ruleset runs at
@@ -85,7 +85,10 @@ interface LintTool {
   guardYamlLineLength?: boolean;
   /** Disable markdownlint's MD013 when the project has no markdownlint config. */
   guardMarkdownLineLength?: boolean;
-  /** npm package to run via `npx --yes` when the binary is absent from PATH. */
+  /**
+   * npm package to run via `npx --yes` when the binary is absent from PATH. Its presence also opts the tool into
+   * the project-local `node_modules/.bin/<name>` lookup (`selectLintTool`), which runs before npx.
+   */
   npmSpec?: string;
   /** Binary and leading arguments actually spawned, when they differ from the probed `name`. */
   spawnAs?: { name: string; args: string[] };
@@ -170,7 +173,8 @@ const EXT_MAP: Record<string, string> = {
 };
 
 /**
- * Linter registry. chain = first tool on PATH wins. Every entry runs check-only --
+ * Linter registry. chain = `selectLintTool` order: first tool on PATH, else first npm tool (`npmSpec`) with a
+ * project-local `node_modules/.bin`, else first npm tool via npx. Every entry runs check-only --
  * never --fix/--format/--write. Go entries target the edited file's DIRECTORY
  * (package), not the bare file: go vet/golangci-lint operate on packages, and a
  * lone file referencing sibling-file symbols would otherwise fail with spurious
@@ -281,6 +285,11 @@ function onPath(tool: string): boolean {
  * rather than calling onPath() internally so this stays a pure, unit-testable
  * function.
  *
+ * @remarks
+ * Models only the PATH-or-npx availability. It ignores the project-local
+ * `node_modules/.bin` route, so it is not the production selection:
+ * `selectLintTool` (PATH > local bin > npx) is.
+ *
  * @param tool - Chain entry to check.
  * @param toolOnPath - Whether the tool binary is on PATH.
  * @param npxOnPath - Whether npx is on PATH.
@@ -291,17 +300,30 @@ export function isToolAvailable(tool: LintTool, toolOnPath: boolean, npxOnPath: 
 }
 
 /**
- * Run the resolved lint tool: through `npx --yes <npmSpec>` when it is absent
- * from PATH but npm-distributed (its own, longer timeout, since a cold
- * `npx --yes <pkg>` install can exceed the local-binary budget), else spawn it
- * directly (`spawnAs` when set).
+ * Run the resolved lint tool: the project-local bin `local` when given (spawnOpts
+ * carries its package root as cwd, its directory first on the child's PATH, chain budget); a local bin that
+ * cannot spawn (error code ENOENT/EACCES) falls through to the npx
+ * route, any other outcome (including a timeout) is returned as is. Then through
+ * `npx --yes <npmSpec>` when it is absent from PATH but npm-distributed (its own,
+ * longer timeout, since a cold `npx --yes <pkg>` install can exceed the
+ * local-binary budget), else spawn it directly (`spawnAs` when set).
  *
  * @param tool - The selected chain entry.
  * @param argv - Full argv from buildArgv.
  * @param spawnOpts - Options for spawnSync.
+ * @param local - Project-local bin from selectLintTool, or null.
  * @returns The spawnSync result of whichever route ran.
  */
-function runLintTool(tool: LintTool, argv: string[], spawnOpts: SpawnSyncOptionsWithStringEncoding): SpawnSyncReturns<string> {
+function runLintTool(tool: LintTool, argv: string[], spawnOpts: SpawnSyncOptionsWithStringEncoding, local: string | null): SpawnSyncReturns<string> {
+  if (local) {
+    // Bin dir first on PATH, as npx does: oxlint finds tsgolint only on PATH or in the spawn cwd's node_modules/.bin.
+    const PATH = process.env.PATH ? path.dirname(local) + path.delimiter + process.env.PATH : path.dirname(local);
+    const result = spawnSync(local, argv, { ...spawnOpts, env: { ...process.env, PATH } });
+    // Spawn failure (ENOENT/EACCES) falls back to npx below; a timeout keeps its result (no second budget). The code is
+    // checked, not `signal`: a child that traps SIGTERM exits normally, so ETIMEDOUT arrives with signal null.
+    const code = result.error && "code" in result.error ? result.error.code : undefined;
+    if (code !== "ENOENT" && code !== "EACCES") return result;
+  }
   if (tool.npmSpec && !onPath(tool.name)) {
     return spawnSync("npx", ["--yes", tool.npmSpec, ...argv], {
       ...spawnOpts,
@@ -343,6 +365,23 @@ function walkUpToCwd(fileDir: string, cwd: string, checkDir: (dir: string) => st
     dir = parent;
   }
   return null;
+}
+
+/**
+ * The nearest project-local `node_modules/.bin/<name>`, walking from the file's directory up to `cwd` inclusive
+ * (`walkUpToCwd`). A directory outside `cwd` never counts (a lexical file path outside it, e.g. through a symlinked
+ * dir, would otherwise walk to `/`), so the local route never runs a bin above the project.
+ *
+ * @param name - Bin name (`LintTool.name`, not `npmSpec`: markdownlint's package is markdownlint-cli).
+ * @param fileDir - Directory of the linted file.
+ * @param cwd - Project root.
+ * @returns The bin's absolute path, or null.
+ */
+function localBin(name: string, fileDir: string, cwd: string): string | null {
+  return walkUpToCwd(fileDir, cwd, (dir) => {
+    const bin = path.join(dir, "node_modules", ".bin", name);
+    return !outside(path.relative(cwd, dir)) && existsSync(bin) ? bin : null;
+  });
 }
 
 /**
@@ -921,23 +960,33 @@ export function truncate(text: string): string {
 }
 
 /**
- * Two-pass tool selection, mirroring universal-format's selectFormatter: a chain
- * tool actually on PATH always wins over any other chain tool that's merely
- * npx-reachable, regardless of chain order. Without this, giving npmSpec to more
- * than one chain entry (e.g. markdownlint-cli2 before markdownlint) would let the
- * earlier entry's npx fallback shadow a later entry that's genuinely installed --
- * npx ships with node, so it's essentially always "available."
+ * Three-pass tool selection, PATH > project-local bin > npx (passes 1 and 3
+ * mirror universal-format's selectFormatter). PATH first, like `tsc`'s lookup:
+ * a tool the user has on PATH keeps running, only runs that used npx change.
+ * Each pass scans the whole chain, so an installed chain tool (on PATH, then in
+ * a local `node_modules/.bin`) always wins over one that's merely
+ * npx-reachable, regardless of chain order. Without this, giving npmSpec to
+ * more than one chain entry (e.g. markdownlint-cli2 before markdownlint) would
+ * let the earlier entry's npx fallback shadow a later entry that's genuinely
+ * installed -- npx ships with node, so it's essentially always "available."
  *
  * @param chain - A language's tool chain.
- * @returns The tool to run, or null when none is available.
+ * @param fileDir - Directory of the linted file (start of the local-bin walk).
+ * @param cwd - Project root (end of the local-bin walk).
+ * @returns The tool to run plus its project-local bin (null for the PATH and
+ *   npx routes), or null when none is available.
  */
-function selectLintTool(chain: LintTool[]): LintTool | null {
+function selectLintTool(chain: LintTool[], fileDir: string, cwd: string): { tool: LintTool; local: string | null } | null {
   for (const tool of chain) {
-    if (onPath(tool.name)) return tool;
+    if (onPath(tool.name)) return { tool, local: null };
+  }
+  for (const tool of chain) {
+    const local = tool.npmSpec ? localBin(tool.name, fileDir, cwd) : null;
+    if (local) return { tool, local };
   }
   if (!onPath("npx")) return null;
   for (const tool of chain) {
-    if (tool.npmSpec) return tool;
+    if (tool.npmSpec) return { tool, local: null };
   }
   return null;
 }
@@ -961,11 +1010,12 @@ function buildSpawnOpts(cwd: string, timeout: number): SpawnSyncOptionsWithStrin
 }
 
 /**
- * Run the language's chain-selected tool (existing chain/runLintTool
- * machinery, unchanged behavior) and return its finding, or null on any
- * guard failure / clean / skip verdict. selectLintTool's own null path
- * already covers "nothing on PATH and nothing npx-eligible" -- no separate
- * pre-check needed (an earlier `isToolAvailable`-based short-circuit here was
+ * Run the language's chain-selected tool and return its finding, or null on any
+ * guard failure / clean / skip verdict. The tool comes from `selectLintTool`
+ * (PATH, else a project-local `node_modules/.bin`, else npx) and runs through
+ * `runLintTool`, which is handed the local bin when one was selected. selectLintTool's own null path
+ * already covers "nothing on PATH, no local bin and nothing npx-eligible" --
+ * no separate pre-check needed (an earlier `isToolAvailable`-based short-circuit here was
  * logically redundant with it and has been removed).
  *
  * @param lang - Registry entry of the file's language.
@@ -977,8 +1027,9 @@ function buildSpawnOpts(cwd: string, timeout: number): SpawnSyncOptionsWithStrin
  */
 function runChainLint(lang: LangEntry, resolved: string, cwd: string, rel: string): { ran: boolean; finding: Finding | null } {
   const none = { ran: false, finding: null };
-  const tool = selectLintTool(lang.chain);
-  if (!tool) return none;
+  const sel = selectLintTool(lang.chain, path.dirname(resolved), cwd);
+  if (!sel) return none;
+  const { tool } = sel;
   // Gate cargo runs on a resolvable manifest: a stray .rs outside any Cargo
   // project is a silent no-op, not a spurious "could not find Cargo.toml"
   // exit-101 finding. Resolved once here and threaded through buildArgv and
@@ -994,8 +1045,10 @@ function runChainLint(lang: LangEntry, resolved: string, cwd: string, rel: strin
   const argv = buildArgv(tool, resolved, cwd, manifest);
   // Compile-heavy cargo tools get their own budget (mirrors TSC_SPAWN_TIMEOUT_MS).
   const timeout = tool.manifestPath ? CARGO_SPAWN_TIMEOUT_MS : SPAWN_TIMEOUT_MS;
-  const spawnOpts = buildSpawnOpts(cwd, timeout);
-  const result = runLintTool(tool, argv, spawnOpts);
+  // A local bin runs from its package root (the dir holding node_modules): eslint <= 9 resolves its flat config from the spawn cwd.
+  const spawnCwd = sel.local ? path.join(sel.local, "../../..") : cwd;
+  const spawnOpts = buildSpawnOpts(spawnCwd, timeout);
+  const result = runLintTool(tool, argv, spawnOpts, sel.local);
   if (result.error || result.signal) return none;
 
   // Cargo entries are neither file-scoped nor targetsDir: the natural target
@@ -1014,7 +1067,7 @@ function runChainLint(lang: LangEntry, resolved: string, cwd: string, rel: strin
   }
   if (verdict === "skip") return none;
   // cargo prints paths relative to the crate (or workspace) root, go tools get the package dir, the rest run in cwd.
-  const base = manifest ? path.dirname(manifest) : tool.targetsDir ? path.dirname(resolved) : cwd;
+  const base = manifest ? path.dirname(manifest) : tool.targetsDir ? path.dirname(resolved) : spawnCwd;
   return { ran: true, finding: verdict === "issues" ? { tool: tool.name, target, text, base } : null };
 }
 
@@ -1153,6 +1206,16 @@ function scratchpadOf(args: PostToolUseHookInput): string | undefined {
 }
 
 /**
+ * Whether a `path.relative(root, p)` result leaves `root` (`..`, `../x`, or another root).
+ *
+ * @param rel - Relative path from the root.
+ * @returns True when `p` lies outside the root.
+ */
+function outside(rel: string): boolean {
+  return rel === ".." || rel.startsWith(".." + path.sep) || path.isAbsolute(rel);
+}
+
+/**
  * The real-path scope rule shared by every event (dprint's `inScope`): `file` resolved against `cwd` must exist, have a
  * lintable extension, its real path must lie strictly inside realpath(cwd), not be excluded (`isExcludedPath` on the
  * path relative to the real cwd), not lie inside realpath(scratchpad) when given, and not be a dangling link.
@@ -1167,7 +1230,6 @@ export function scopedTarget(cwd: string, file: string, scratchpad?: string, roo
   try {
     const fp = path.resolve(cwd, file);
     const real = realish(fp);
-    const outside = (rel: string): boolean => rel === ".." || rel.startsWith(".." + path.sep) || path.isAbsolute(rel);
     const rel = path.relative(roots?.cwd ?? realish(cwd), real);
     if (rel === "" || outside(rel) || isExcludedPath(rel)) return null;
     if (scratchpad) {

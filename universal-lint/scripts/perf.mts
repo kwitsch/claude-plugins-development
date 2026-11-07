@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Usage: node universal-lint/scripts/perf.mts [runs=5]   (from any directory; run `pnpm --filter universal-lint build` first)
 // Per-event cost of the built hook plugin/hooks/lint-file.mjs (dev only, never shipped): spawns it directly through
-// its shebang (as hooks.json does) with a payload file as stdin for 14 cases, once with the real PATH and once with
+// its shebang (as hooks.json does) with a payload file as stdin for 15 cases, once with the real PATH and once with
 // the /mnt/ dirs removed, and prints a Markdown table of median (min-max) ms over `runs` timed rounds after one
 // warm-up round. Fixtures live in an os.tmpdir() directory removed at the end; nothing is written into the repo.
 // Needs the real linters on PATH to reproduce real costs; the header lists which of them were found per PATH variant.
@@ -20,8 +20,8 @@ const HOOK = join(ROOT, "plugin/hooks/lint-file.mjs");
 const VERSION = String((JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8")) as Record<string, unknown>).version);
 /** Per-run kill timeout: above the hook's 90 s budget, so a hook-side kill shows as its own status. */
 const RUN_TIMEOUT_MS = 120_000;
-/** Linters the cases invoke (`.sh`, `.py`, `.yml`, `.md`, `.ts`); the header says which were found on PATH. */
-const TOOLS = ["shellcheck", "ruff", "yamllint", "markdownlint-cli2", "eslint"];
+/** Linters the cases invoke (`.sh`, `.py`, `.yml`, `.md`, `.ts`, `.mts`); the header says which were found on PATH. */
+const TOOLS = ["shellcheck", "ruff", "yamllint", "markdownlint-cli2", "eslint", "oxlint"];
 /** Printed to stderr on a bad argument. */
 const USAGE = "usage: node universal-lint/scripts/perf.mts [runs=5]";
 
@@ -66,7 +66,7 @@ function git(cwd: string, ...args: string[]): void {
  * Write the fixture repo into `dir` (one commit of every tracked file) and build the case list.
  *
  * @param dir - Empty fixture directory.
- * @returns The 14 cases in run order.
+ * @returns The 15 cases in run order.
  */
 function makeFixtures(dir: string): Case[] {
   const sh = "#!/bin/sh\necho ok\n";
@@ -107,6 +107,8 @@ function makeFixtures(dir: string): Case[] {
     { name: ".md Write", cwd: dir, payload: post("Write", "a.md"), expect: 0 },
     { name: ".ts Write (no eslint config)", cwd: dir, payload: post("Write", "a.ts"), expect: 0 },
     { name: ".ts Edit (no eslint config)", cwd: dir, payload: post("Edit", "a.ts", edit), expect: 0 },
+    // A real repo file through the root .oxlintrc.json and node_modules/.bin/oxlint (F04's local-bin route); the digest lands in CLAUDE_PLUGIN_DATA.
+    { name: ".mts Write (this repo)", cwd: repo, payload: { hook_event_name: "PostToolUse", tool_name: "Write", tool_input: { file_path: join(repo, "universal-lint/scripts/perf.mts") }, tool_response: { success: true }, cwd: repo }, expect: 0 },
     { name: "FileChanged tracked unchanged", cwd: dir, payload: changed("change", "t.sh"), expect: 0 },
     { name: "FileChanged ignored", cwd: dir, payload: changed("change", "ign.sh"), expect: 0 },
     { name: "FileChanged unlink", cwd: dir, payload: changed("unlink", "a.sh"), expect: 0 },
@@ -256,7 +258,7 @@ async function main(): Promise<void> {
       return `${s.med} (${s.min}-${s.max})`;
     };
     const out = [
-      `universal-lint ${VERSION} perf, ${new Date().toISOString()}, ${release()}, ${availableParallelism()} cores, ${(totalmem() / 2 ** 30).toFixed(1)} GB RAM, node ${process.version}, ${tsc}, linters found (of ${TOOLS.join("/")}): ${toolField}, ${pathField}, load ${load0} -> ${load1}, runs ${runs} (+1 warm-up)`,
+      `universal-lint ${VERSION} perf, ${new Date().toISOString()}, ${release()}, ${availableParallelism()} cores, ${(totalmem() / 2 ** 30).toFixed(1)} GB RAM, node ${process.version}, ${tsc}, linters found (of ${TOOLS.join("/")}): ${toolField}, local oxlint ${existsSync(join(ROOT, "..", "node_modules", ".bin", "oxlint")) ? "yes" : "no"}, ${pathField}, load ${load0} -> ${load1}, runs ${runs} (+1 warm-up)`,
       "",
       "| Case | real PATH med (min-max) ms | no /mnt med (min-max) ms | status |",
       "| --- | ---: | ---: | --- |",

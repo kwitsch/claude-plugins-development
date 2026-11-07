@@ -148,7 +148,19 @@ function onPath(tool) {
 export function isToolAvailable(tool, toolOnPath, npxOnPath) {
 	return toolOnPath || !!tool.npmSpec && npxOnPath;
 }
-function runLintTool(tool, argv, spawnOpts) {
+function runLintTool(tool, argv, spawnOpts, local) {
+	if (local) {
+		const PATH = process.env.PATH ? path.dirname(local) + path.delimiter + process.env.PATH : path.dirname(local);
+		const result = spawnSync(local, argv, {
+			...spawnOpts,
+			env: {
+				...process.env,
+				PATH
+			}
+		});
+		const code = result.error && "code" in result.error ? result.error.code : undefined;
+		if (code !== "ENOENT" && code !== "EACCES") return result;
+	}
 	if (tool.npmSpec && !onPath(tool.name)) {
 		return spawnSync("npx", [
 			"--yes",
@@ -174,6 +186,12 @@ function walkUpToCwd(fileDir, cwd, checkDir) {
 		dir = parent;
 	}
 	return null;
+}
+function localBin(name, fileDir, cwd) {
+	return walkUpToCwd(fileDir, cwd, (dir) => {
+		const bin = path.join(dir, "node_modules", ".bin", name);
+		return !outside(path.relative(cwd, dir)) && existsSync(bin) ? bin : null;
+	});
 }
 export function resolveCheckstyleConfig(fileDir, cwd) {
 	const candidates = [
@@ -468,13 +486,26 @@ export function truncate(text) {
 	if (collapsed.length <= MAX_CONTEXT_CHARS) return collapsed;
 	return collapsed.slice(0, MAX_CONTEXT_CHARS) + "\n… (truncated)";
 }
-function selectLintTool(chain) {
+function selectLintTool(chain, fileDir, cwd) {
 	for (const tool of chain) {
-		if (onPath(tool.name)) return tool;
+		if (onPath(tool.name)) return {
+			tool,
+			local: null
+		};
+	}
+	for (const tool of chain) {
+		const local = tool.npmSpec ? localBin(tool.name, fileDir, cwd) : null;
+		if (local) return {
+			tool,
+			local
+		};
 	}
 	if (!onPath("npx")) return null;
 	for (const tool of chain) {
-		if (tool.npmSpec) return tool;
+		if (tool.npmSpec) return {
+			tool,
+			local: null
+		};
 	}
 	return null;
 }
@@ -496,8 +527,9 @@ function runChainLint(lang, resolved, cwd, rel) {
 		ran: false,
 		finding: null
 	};
-	const tool = selectLintTool(lang.chain);
-	if (!tool) return none;
+	const sel = selectLintTool(lang.chain, path.dirname(resolved), cwd);
+	if (!sel) return none;
+	const { tool } = sel;
 	let manifest = null;
 	if (tool.manifestPath) {
 		manifest = resolveCargoManifest(path.dirname(resolved), cwd);
@@ -505,8 +537,9 @@ function runChainLint(lang, resolved, cwd, rel) {
 	}
 	const argv = buildArgv(tool, resolved, cwd, manifest);
 	const timeout = tool.manifestPath ? CARGO_SPAWN_TIMEOUT_MS : SPAWN_TIMEOUT_MS;
-	const spawnOpts = buildSpawnOpts(cwd, timeout);
-	const result = runLintTool(tool, argv, spawnOpts);
+	const spawnCwd = sel.local ? path.join(sel.local, "../../..") : cwd;
+	const spawnOpts = buildSpawnOpts(spawnCwd, timeout);
+	const result = runLintTool(tool, argv, spawnOpts, sel.local);
 	if (result.error || result.signal) return none;
 	const target = tool.targetsDir ? path.relative(cwd, path.dirname(resolved)) || "." : manifest ? path.relative(cwd, path.dirname(manifest)) || "." : rel;
 	let verdict;
@@ -520,7 +553,7 @@ function runChainLint(lang, resolved, cwd, rel) {
 		text = `${result.stdout ?? ""}\n${result.stderr ?? ""}`;
 	}
 	if (verdict === "skip") return none;
-	const base = manifest ? path.dirname(manifest) : tool.targetsDir ? path.dirname(resolved) : cwd;
+	const base = manifest ? path.dirname(manifest) : tool.targetsDir ? path.dirname(resolved) : spawnCwd;
 	return {
 		ran: true,
 		finding: verdict === "issues" ? {
@@ -591,11 +624,13 @@ function realish(p) {
 function scratchpadOf(args) {
 	return typeof args.scratchpad_dir === "string" ? args.scratchpad_dir : undefined;
 }
+function outside(rel) {
+	return rel === ".." || rel.startsWith(".." + path.sep) || path.isAbsolute(rel);
+}
 export function scopedTarget(cwd, file, scratchpad, roots) {
 	try {
 		const fp = path.resolve(cwd, file);
 		const real = realish(fp);
-		const outside = (rel) => rel === ".." || rel.startsWith(".." + path.sep) || path.isAbsolute(rel);
 		const rel = path.relative(roots?.cwd ?? realish(cwd), real);
 		if (rel === "" || outside(rel) || isExcludedPath(rel)) return null;
 		if (scratchpad) {
