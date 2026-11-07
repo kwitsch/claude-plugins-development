@@ -8,7 +8,7 @@ Ported from kwitsch/claude-plugins (`plugins/universal-lint/`, 0.10.3) with the 
 
 Each part has a path-scoped rule in `.claude/rules/` (loaded when you work on matching files). Do not "fix" any behaviour documented there without reading the rule first:
 
-- Hook `lint-file` (`src/hooks/lint-file.mts`): `hook-design.md` (four command hooks with one entry, command hooks instead of an MCP server, timeout budget, edit-range gate, file detection, runtime behaviour, npx fallback, path exclusions), `typescript-check.md` (the `tsc` pass), `line-length-guard.md` (YAML/Markdown max-line-length guard), `languages.md` (SCSS limitation, PHP, Rust, why JSON is not covered).
+- Hook `lint-file` (`src/hooks/lint-file.mts`): `hook-design.md` (four command hooks with one entry, command hooks instead of an MCP server, timeout budget, edit-range gate, file detection, runtime behaviour, npx fallback, path exclusions, measured per-event cost and the `scripts/perf.mts` harness), `typescript-check.md` (the `tsc` pass), `line-length-guard.md` (YAML/Markdown max-line-length guard), `languages.md` (SCSS limitation, PHP, Rust, why JSON is not covered).
 - Skill `universal-lint` (`plugin/skills/universal-lint/`, driver `src/skills/universal-lint/lint-files.mts`): `skill-driver.md`.
 - Tests: `tests.md`.
 

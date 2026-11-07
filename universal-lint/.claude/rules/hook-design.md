@@ -4,6 +4,7 @@ paths:
   - "plugin/hooks/**"
   - "tests/{core,npx-fallback,truncation,manifest,registry,tsc}.test.mts"
   - "tests/file-detection.test.mts"
+  - "scripts/perf.mts"
 ---
 
 # Hook design (do not "fix" without reading this)
