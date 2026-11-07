@@ -1640,7 +1640,8 @@ export function fileChangedHandler(args: PostToolUseHookInput): HookResult {
 /**
  * Lintable, in-scope files of `cwd` per `git ls-files -co --exclude-standard` (tracked + untracked-not-ignored; in a
  * subdirectory git lists only paths below it, relative to it), each filtered through `scopedTarget` (drops excluded
- * paths, scratchpad files, dangling links and index entries deleted from disk).
+ * paths, scratchpad files, dangling links and index entries deleted from disk). The scan stops as soon as more than
+ * WATCH_LIMIT files are in scope, so files after that point are never scoped.
  *
  * @param cwd - Payload cwd (`new_cwd` for CwdChanged).
  * @param scratchpad - The session's `scratchpad_dir`, when the payload has one.
@@ -1665,20 +1666,18 @@ export function watchList(cwd: string, scratchpad?: string): string[] {
   } catch {
     return [];
   }
-  // Set: unmerged index entries are listed once per stage
-  const list = [
-    ...new Set(
-      out.split("\0").filter(Boolean).flatMap((rel) => {
-        const fp = scopedTarget(cwd, rel, scratchpad, roots)?.fp;
-        return fp ? [fp] : [];
-      }),
-    ),
-  ];
-  if (list.length > WATCH_LIMIT) {
-    process.stderr.write(`universal-lint: watch list: ${list.length} files above ${WATCH_LIMIT}, FileChanged linting off for this cwd\n`);
-    return [];
+  // Set: unmerged index entries are listed once per stage. Returns as soon as WATCH_LIMIT is exceeded: the rest is not scoped.
+  const list = new Set<string>();
+  for (const rel of out.split("\0")) {
+    if (!rel) continue;
+    const fp = scopedTarget(cwd, rel, scratchpad, roots)?.fp;
+    if (fp) list.add(fp);
+    if (list.size > WATCH_LIMIT) {
+      process.stderr.write(`universal-lint: watch list: more than ${WATCH_LIMIT} files, FileChanged linting off for this cwd\n`);
+      return [];
+    }
   }
-  return list;
+  return [...list];
 }
 
 /**
