@@ -14,6 +14,7 @@ test("markdown fallback: only markdownlint present -> used", () => {
   const r = e.run(e.file("a.md", "# hi\n"), { out: OUT });
   assert.match(r.ctx, /MD041/);
   assert.ok(e.lines().some((l) => l.startsWith("markdownlint ")));
+  assert.ok(!e.lines().some((l) => l.includes("--no-globs"))); // classic markdownlint has no such option
 });
 
 test("markdown fallback: markdownlint-cli2 present -> wins over markdownlint (chain order)", () => {
@@ -42,7 +43,7 @@ test("markdownlint-cli2 absent but npx present -> npx --yes markdownlint-cli2 fa
   const f = e.file("a.md", "# hi\n");
   const r = e.run(f, { out: OUT });
   assert.match(r.ctx, /MD041/);
-  assert.ok(e.lines().some((l) => l.includes(`npx --yes markdownlint-cli2 --config ${path.join(e.data, "markdownlint-no-line-length.json")} ${f}`)));
+  assert.ok(e.lines().some((l) => l.includes(`npx --yes markdownlint-cli2 --no-globs --config ${path.join(e.data, "markdownlint-no-line-length.json")} ${f}`)));
 });
 
 test("markdown: no project markdownlint config -> --config <MD013-off file> in recorded argv, and the file disables only MD013", () => {
@@ -54,12 +55,21 @@ test("markdown: no project markdownlint config -> --config <MD013-off file> in r
   assert.deepEqual(JSON.parse(readFileSync(cfg, "utf8")), { MD013: false });
 });
 
-test("markdown: project .markdownlint.json present -> no --config override, tool runs bare", () => {
+test("markdown: project .markdownlint.json present -> no --config override, only --no-globs before the file", () => {
   const e = makeEnv();
   e.file(".markdownlint.json", "{}\n");
   e.recStub("markdownlint-cli2", 0);
   const f = e.file("a.md", "# hi\n");
   e.run(f);
   assert.ok(!e.lines().some((l) => l.includes("markdownlint-no-line-length.json")));
-  assert.ok(e.lines().some((l) => l.includes(`markdownlint-cli2 ${f}`)));
+  assert.ok(e.lines().some((l) => l.includes(`markdownlint-cli2 --no-globs ${f}`)));
+});
+
+test("markdown: project .markdownlint-cli2.jsonc with top-level globs -> --no-globs precedes the file (a single-file lint, not the project's globs)", () => {
+  const e = makeEnv();
+  e.file(".markdownlint-cli2.jsonc", "{\"globs\":[\"**/*.md\"]}\n");
+  e.recStub("markdownlint-cli2", 0);
+  const f = e.file("a.md", "# hi\n");
+  e.run(f);
+  assert.ok(e.lines().some((l) => l === `markdownlint-cli2 --no-globs ${f}`));
 });
