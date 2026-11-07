@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Usage: node universal-lint/scripts/perf.mts [runs=5]   (from any directory; run `pnpm --filter universal-lint build` first)
 // Per-event cost of the built hook plugin/hooks/lint-file.mjs (dev only, never shipped): spawns it directly through
-// its shebang (as hooks.json does) with a payload file as stdin for 15 cases, once with the real PATH and once with
+// its shebang (as hooks.json does) with a payload file as stdin for 16 cases, once with the real PATH and once with
 // the /mnt/ dirs removed, and prints a Markdown table of median (min-max) ms over `runs` timed rounds after one
 // warm-up round. Fixtures live in an os.tmpdir() directory removed at the end; nothing is written into the repo.
 // Needs the real linters on PATH to reproduce real costs; the header lists which of them were found per PATH variant.
@@ -20,8 +20,8 @@ const HOOK = join(ROOT, "plugin/hooks/lint-file.mjs");
 const VERSION = String((JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8")) as Record<string, unknown>).version);
 /** Per-run kill timeout: above the hook's 90 s budget, so a hook-side kill shows as its own status. */
 const RUN_TIMEOUT_MS = 120_000;
-/** Linters the cases invoke (`.sh`, `.py`, `.yml`, `.md`, `.ts`, `.mts`); the header says which were found on PATH. */
-const TOOLS = ["shellcheck", "ruff", "yamllint", "markdownlint-cli2", "eslint", "oxlint"];
+/** Linters the cases invoke (`.sh`, `.py`, `.yml`, `.md`, `.css`, `.ts`, `.mts`); the header says which were found on PATH. */
+const TOOLS = ["shellcheck", "ruff", "yamllint", "markdownlint-cli2", "eslint", "oxlint", "stylelint"];
 /** Printed to stderr on a bad argument. */
 const USAGE = "usage: node universal-lint/scripts/perf.mts [runs=5]";
 
@@ -66,7 +66,7 @@ function git(cwd: string, ...args: string[]): void {
  * Write the fixture repo into `dir` (one commit of every tracked file) and build the case list.
  *
  * @param dir - Empty fixture directory.
- * @returns The 15 cases in run order.
+ * @returns The 16 cases in run order.
  */
 function makeFixtures(dir: string): Case[] {
   const sh = "#!/bin/sh\necho ok\n";
@@ -78,6 +78,7 @@ function makeFixtures(dir: string): Case[] {
     "a.py": "x = 1\n",
     "a.yml": "a: 1\n",
     "a.md": "# T\n\nText.\n",
+    "a.css": ".a{color:red;}\n",
     "a.ts": ["export const x: number = 1;", "export const y: string = \"2\";", ...fns, ""].join("\n"),
     "tsconfig.json": "{\"compilerOptions\":{\"strict\":true,\"noEmit\":true},\"include\":[\"a.ts\"]}\n",
     ".gitignore": "ign.sh\ndata/\n",
@@ -105,6 +106,7 @@ function makeFixtures(dir: string): Case[] {
     { name: ".py Write", cwd: dir, payload: post("Write", "a.py"), expect: 0 },
     { name: ".yml Write", cwd: dir, payload: post("Write", "a.yml"), expect: 0 },
     { name: ".md Write", cwd: dir, payload: post("Write", "a.md"), expect: 0 },
+    { name: ".css Write (no stylelint config)", cwd: dir, payload: post("Write", "a.css"), expect: 0 },
     { name: ".ts Write (no eslint config)", cwd: dir, payload: post("Write", "a.ts"), expect: 0 },
     { name: ".ts Edit (no eslint config)", cwd: dir, payload: post("Edit", "a.ts", edit), expect: 0 },
     // A real repo file through the root .oxlintrc.json and node_modules/.bin/oxlint (F04's local-bin route); the digest lands in CLAUDE_PLUGIN_DATA.
