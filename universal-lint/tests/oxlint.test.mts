@@ -1,6 +1,5 @@
 // oxlint vs eslint vs no chain lint selection by the nearest lint config file, and the oxlint-typeCheck tsc gate.
 import assert from "node:assert/strict";
-import { writeFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "vitest";
 import { makeEnv } from "./support/lint-hook.mts";
@@ -43,14 +42,13 @@ test("oxlint: no lint config anywhere -> no chain lint: eslint, oxlint and npx n
   assert.deepEqual(e.lines(), []);
 });
 
-for (const placement of ["cwd", "one level above cwd"]) {
-  test(`oxlint: eslint.config.mjs in ${placement} -> eslint runs`, () => {
+for (const [name, dir] of [["eslint.config.mjs", "src"], ["eslint.config.mjs", "."], [".eslintrc.json", ".."]]) {
+  test(`oxlint: ${name} in ${dir} -> eslint runs`, () => {
     const e = makeEnv();
-    // one level above cwd is the per-env makeEnv base dir (holds bin/, home/, proj/), never higher
-    if (placement === "cwd") e.file("eslint.config.mjs", "export default [];\n");
-    else writeFileSync(path.join(e.cwd, "..", "eslint.config.mjs"), "export default [];\n");
+    // ".." is the per-env makeEnv base dir (holds bin/, home/, proj/), never higher
+    e.file(path.join(dir, name), "export default [];\n");
     e.recStub("eslint", 0);
-    e.run(e.file("a.js", JS));
+    e.run(e.file("src/a.js", JS));
     assert.ok(e.lines().some((l) => l.startsWith("eslint ")));
   });
 }
