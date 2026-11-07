@@ -40,6 +40,9 @@ Path-scoped rules in `.claude/rules/` load when you work on matching files:
   migrations, the `/headroom` counters table.
 
 `docs/claude-code-verification.md` (not auto-loaded) holds the engine-shape evidence and the open live-check list.
+`docs/linux-token-efficiency-concepts.md` (not auto-loaded) records the deprecated linux-token-efficiency plugin's
+mechanisms (rtk Bash rewrite, context-mode deny-steering, codebase-memory graph hooks, terse output style) for
+future ports.
 
 ## Tests
 
