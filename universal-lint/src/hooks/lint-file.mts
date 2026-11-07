@@ -799,6 +799,12 @@ const STYLELINT_CONFIG_FILENAMES = [
  * @returns True when a stylelint config may govern the file; an unreadable or invalid `package.json` counts (fail open).
  */
 function hasStylelintConfig(fileDir: string, cwd: string): boolean {
+  /**
+   * Whether `dir` has a `package.json` with a non-null top-level `stylelint` key.
+   *
+   * @param dir - Directory to probe.
+   * @returns True with the key, or when the `package.json` is unreadable or invalid (fail open); false without one.
+   */
   const hasKey = (dir: string): boolean => {
     const pkg = path.join(dir, "package.json");
     if (!existsSync(pkg)) return false;
@@ -808,6 +814,12 @@ function hasStylelintConfig(fileDir: string, cwd: string): boolean {
       return true; // unreadable or invalid: run stylelint and let classifyExit decide
     }
   };
+  /**
+   * Whether `d` holds a stylelint config file name or a `package.json` with the key.
+   *
+   * @param d - Directory to probe.
+   * @returns True when stylelint would find a config there.
+   */
   const found = (d: string): boolean => STYLELINT_CONFIG_FILENAMES.some((n) => existsSync(path.join(d, n))) || hasKey(d);
   if (walkToRoot(fileDir, found) || walkToRoot(cwd, found)) return true;
   const home = homedir();
