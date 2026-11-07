@@ -5,7 +5,7 @@ import { mkdirSync, mkdtempSync, readFileSync, realpathSync, symlinkSync, writeF
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "vitest";
-import { buildArgv, classifyCheckstyleOutput, classifyExit, editRanges, gateFinding, hashPath, hasProjectMarkdownlintConfig, hasProjectYamllintConfig, isExcludedPath, isToolAvailable, lintFileHandler, looksLikeSolutionStyleTsconfig, oxlintConfigTypeChecks, parseRtkPrefix, recordWritten, REGISTRY, resolveCargoManifest, resolveCheckstyleConfig, resolveLintTarget, resolveOxlintConfig, resolveTsconfig, scopedTarget, stripTrailingCommas, truncate, tsBuildInfoPathFor, tscOutputHasSourceDiagnostic, WATCH_LIMIT } from "../plugin/hooks/lint-file.mjs";
+import { buildArgv, classifyCheckstyleOutput, classifyExit, editRanges, gateFinding, hashPath, hasProjectMarkdownlintConfig, hasProjectYamllintConfig, isExcludedPath, isToolAvailable, lintFileHandler, looksLikeSolutionStyleTsconfig, oxlintConfigTypeChecks, recordWritten, REGISTRY, resolveCargoManifest, resolveCheckstyleConfig, resolveLintTarget, resolveOxlintConfig, resolveTsconfig, scopedTarget, stripTrailingCommas, truncate, tsBuildInfoPathFor, tscOutputHasSourceDiagnostic, WATCH_LIMIT } from "../plugin/hooks/lint-file.mjs";
 
 const shellcheck = REGISTRY.shell.chain[0];
 const checkstyle = REGISTRY.java.chain[0];
@@ -158,28 +158,6 @@ test("isToolAvailable: true via npx only when npmSpec is set and npx is on PATH"
   assert.equal(isToolAvailable({ name: "eslint", args: [], npmSpec: "eslint" }, false, true), true);
   assert.equal(isToolAvailable({ name: "eslint", args: [], npmSpec: "eslint" }, false, false), false);
   assert.equal(isToolAvailable({ name: "shellcheck", args: [] }, false, true), false);
-});
-
-test("parseRtkPrefix: extracts a single-token verb (eslint -> lint)", () => {
-  assert.deepEqual(parseRtkPrefix("rtk lint __RTK_PROBE__\n"), ["lint"]);
-});
-
-test("parseRtkPrefix: extracts a multi-token verb (go vet)", () => {
-  assert.deepEqual(parseRtkPrefix("rtk go vet __RTK_PROBE__"), ["go", "vet"]);
-});
-
-test("parseRtkPrefix: same-name verb (ruff check)", () => {
-  assert.deepEqual(parseRtkPrefix("rtk ruff check __RTK_PROBE__"), ["ruff", "check"]);
-});
-
-test("parseRtkPrefix: empty stdout (no rtk equivalent, e.g. checkstyle/ktlint) -> null", () => {
-  assert.equal(parseRtkPrefix(""), null);
-  assert.equal(parseRtkPrefix("\n"), null);
-});
-
-test("parseRtkPrefix: unexpected output -> null", () => {
-  assert.equal(parseRtkPrefix("something unexpected"), null);
-  assert.equal(parseRtkPrefix("rtk __RTK_PROBE__"), null); // empty prefix
 });
 
 test("REGISTRY: css chain of 1 (stylelint), carries npmSpec", () => {
