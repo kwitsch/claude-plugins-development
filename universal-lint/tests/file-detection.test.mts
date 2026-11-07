@@ -83,7 +83,7 @@ test("SessionStart: above WATCH_LIMIT lintable files nothing is watched (stderr 
 
 test("SessionStart: a real repo with 5002 lintable files watches nothing (stderr note)", () => {
   const e = makeEnv();
-  for (let i = 1; i <= 5002; i++) writeFileSync(path.join(e.cwd, `f${i}.sh`), "");
+  for (let i = 1; i <= 5002; i++) e.file(`f${i}.sh`);
   gitInit(e);
   const r = e.runEvent({ hook_event_name: "SessionStart", source: "startup", cwd: e.cwd });
   assert.equal(r.status, 0);
@@ -93,7 +93,7 @@ test("SessionStart: a real repo with 5002 lintable files watches nothing (stderr
 
 test("SessionStart: exactly WATCH_LIMIT distinct lintable files are still watched, duplicate index stages counted once", () => {
   const e = makeEnv();
-  for (let i = 1; i <= 5000; i++) writeFileSync(path.join(e.cwd, `f${i}.sh`), "");
+  for (let i = 1; i <= 5000; i++) e.file(`f${i}.sh`);
   // Remove the git symlink first: writing the stub through it would overwrite the real git binary.
   rmSync(path.join(e.bin, "git"));
   // Every name twice, as git lists unmerged index entries once per stage: 10000 raw lines, 5000 distinct files.
