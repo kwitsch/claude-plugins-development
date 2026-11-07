@@ -191,9 +191,7 @@ function runNpx(name, npmSpec, argv, spawnOpts) {
 	if (!result.error) {
 		try {
 			mkdirSync(path.dirname(stamp), { recursive: true });
-			const tmp = `${stamp}.${process.pid}.tmp`;
-			writeFileSync(tmp, "");
-			renameSync(tmp, stamp);
+			writeFileSync(stamp, "");
 		} catch {}
 	}
 	return result;

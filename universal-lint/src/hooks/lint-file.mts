@@ -342,7 +342,7 @@ function spawnBin(bin: string, argv: string[], spawnOpts: SpawnSyncOptionsWithSt
  * `node_modules/.bin/<name>` exists from the spawn cwd up to `/` (npx runs that one before its cache; F04 user
  * decision), (2) npx holds `<dir>/concurrency.lock` (an install is in progress), or (3) the refresh stamp
  * `${CLAUDE_PLUGIN_DATA || os.tmpdir()}/npx-refreshed-<key>` is missing, older than `NPX_REFRESH_MS` or dated in the future. Every npx run
- * that spawned (no `error`, any exit status) renews the stamp (temp file + `renameSync`, errors swallowed), except in
+ * that spawned (no `error`, any exit status) renews the stamp (errors swallowed), except in
  * case (1), whose npx run never touches the cache. The hook only reads the npm cache, never writes it.
  *
  * @param name - Bin name of the chain entry (`LintTool.name`).
@@ -380,9 +380,7 @@ function runNpx(name: string, npmSpec: string, argv: string[], spawnOpts: SpawnS
   if (!result.error) {
     try {
       mkdirSync(path.dirname(stamp), { recursive: true });
-      const tmp = `${stamp}.${process.pid}.tmp`;
-      writeFileSync(tmp, "");
-      renameSync(tmp, stamp);
+      writeFileSync(stamp, "");
     } catch {
       /* unwritable data dir: the next lint goes through npx again */
     }
