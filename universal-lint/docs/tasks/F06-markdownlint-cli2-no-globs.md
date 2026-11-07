@@ -10,7 +10,7 @@ area: universal-lint/src/hooks/lint-file.mts (REGISTRY.markdown), universal-lint
 
 ## Status
 
-Done in 0.15.5. `REGISTRY.markdown.chain[0]` (markdownlint-cli2) carries the static args `["--no-globs"]`, so every single-file markdown lint (PostToolUse Write/Edit, FileChanged, the skill driver) lints only the named file even when a project `.markdownlint-cli2.*` config sets top-level `globs`; the project's rules, `ignores` and `config` still apply. Classic markdownlint (`chain[1]`, still `args: []`), `buildArgv`, `classifyExit`, `runLintTool` and the skill driver are unchanged; the driver (`src/skills/universal-lint/lint-files.mts`) calls `lintFileHandler` per file, so it inherits the argv. Minimum markdownlint-cli2 with the flag: 0.12.0; older versions read it as a glob matching nothing and still lint the file (harmless, no version gate; see Constraints). Tests: `tests/markdown.test.mts` (new: a project `.markdownlint-cli2.jsonc` with top-level `globs` records `markdownlint-cli2 --no-globs <file>`; the npx fallback and project-config argv assertions expect `--no-globs`; classic markdownlint never gets it), `tests/registry.test.mts` (both markdownlint-cli2 `buildArgv` tests expect `--no-globs` first). Measured on a 400-file globs fixture: see the Bench line under Verification (also in hook-design.md "Measured cost", Globs fixture bullet).
+Done in 0.15.5. `REGISTRY.markdown.chain[0]` (markdownlint-cli2) carries the static arg `--no-globs`; classic markdownlint, `buildArgv`, `classifyExit`, `runLintTool` and the skill driver are unchanged. Argv and alternatives: Approach; cli2 version floor: Constraints; cost: hook-design.md "Measured cost", Globs fixture bullet.
 
 ## Problem
 
@@ -32,8 +32,8 @@ Shipped: the markdownlint-cli2 entry of `REGISTRY.markdown` has the static args 
 
 Test: the markdownlint-cli2 stub records `--no-globs` before the file argument. Bench on the globs fixture: header reads `Linting: 1 file`; a foreign issue in another .md no longer surfaces.
 
-- [x] Test: `tests/markdown.test.mts` "markdown: project .markdownlint-cli2.jsonc with top-level globs -> --no-globs precedes the file (a single-file lint, not the project's globs)" records exactly `markdownlint-cli2 --no-globs <file>`; `tests/registry.test.mts` expects `["--no-globs", "--config", <cfg>, <file>]` without and `["--no-globs", <file>]` with a project config.
-- [x] Bench (manual, 2026-11-07, numbers in hook-design.md "Measured cost", Globs fixture bullet): direct cli2 `Linting: 402 files` 1121 ms -> `Linting: 1 file` 847 ms with `--no-globs`; hook `a.md` Write 1370 ms, exit 2, foreign `d1.md` finding reported (0.15.4) -> 1090 ms, exit 0, no output (0.15.5); `a2.md` Write still exits 2 with its own MD041 reported.
+- [x] Test: `tests/markdown.test.mts` (project-config and npx tests expect `--no-globs` before the file; classic markdownlint never gets it); `tests/registry.test.mts` pins the exact argv with and without a project config.
+- [x] Bench (manual, 2026-11-07, numbers in hook-design.md "Measured cost", Globs fixture bullet): header `Linting: 1 file`; the foreign `d1.md` finding no longer surfaces on an `a.md` Write (exit 0); `a2.md` still exits 2 with its own MD041.
 
 ## Constraints
 

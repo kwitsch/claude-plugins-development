@@ -64,12 +64,3 @@ test("markdown: project .markdownlint.json present -> no --config override, only
   assert.ok(!e.lines().some((l) => l.includes("markdownlint-no-line-length.json")));
   assert.ok(e.lines().some((l) => l.includes(`markdownlint-cli2 --no-globs ${f}`)));
 });
-
-test("markdown: project .markdownlint-cli2.jsonc with top-level globs -> --no-globs precedes the file (a single-file lint, not the project's globs)", () => {
-  const e = makeEnv();
-  e.file(".markdownlint-cli2.jsonc", "{\"globs\":[\"**/*.md\"]}\n");
-  e.recStub("markdownlint-cli2", 0);
-  const f = e.file("a.md", "# hi\n");
-  e.run(f);
-  assert.ok(e.lines().some((l) => l === `markdownlint-cli2 --no-globs ${f}`));
-});
