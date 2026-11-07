@@ -14,7 +14,7 @@
  * `scopedTarget` (real path strictly inside the real cwd, not excluded: node_modules/vendor/.git, .claude/worktrees,
  * .claude/agent-memory, *.local.*, see `isExcludedPath`; not inside `scratchpad_dir`; no dangling link; lintable
  * extension; file exists). Then up to two INDEPENDENT checks run and their findings combine: (1) the language's chain
- * tool (first on PATH wins; no per-file skip, since no style mapping exists for linters; JS/TS runs one only when an
+ * tool (first on PATH wins, else a project-local `node_modules/.bin`, else npx, see `selectLintTool`; no per-file skip, since no style mapping exists for linters; JS/TS runs one only when an
  * eslint or oxlint config exists, see `lintResolved`) through spawnSync (cwd =
  * project cwd, 30s timeout, stdout+stderr captured), classified by exit code for most tools (checkstyle by stripped
  * output, since its exit code counts only ERROR-severity violations and the bundled default ruleset runs at
@@ -170,7 +170,8 @@ const EXT_MAP: Record<string, string> = {
 };
 
 /**
- * Linter registry. chain = first tool on PATH wins. Every entry runs check-only --
+ * Linter registry. chain = `selectLintTool` order: first tool on PATH, else first npm tool (`npmSpec`) with a
+ * project-local `node_modules/.bin`, else first npm tool via npx. Every entry runs check-only --
  * never --fix/--format/--write. Go entries target the edited file's DIRECTORY
  * (package), not the bare file: go vet/golangci-lint operate on packages, and a
  * lone file referencing sibling-file symbols would otherwise fail with spurious
@@ -281,6 +282,11 @@ function onPath(tool: string): boolean {
  * rather than calling onPath() internally so this stays a pure, unit-testable
  * function.
  *
+ * @remarks
+ * Models only the PATH-or-npx availability. It ignores the project-local
+ * `node_modules/.bin` route, so it is not the production selection:
+ * `selectLintTool` (PATH > local bin > npx) is.
+ *
  * @param tool - Chain entry to check.
  * @param toolOnPath - Whether the tool binary is on PATH.
  * @param npxOnPath - Whether npx is on PATH.
@@ -293,7 +299,7 @@ export function isToolAvailable(tool: LintTool, toolOnPath: boolean, npxOnPath: 
 /**
  * Run the resolved lint tool: the project-local bin `local` when given (payload
  * cwd, its directory first on the child's PATH, chain budget); a local bin that
- * cannot spawn (error without a signal: ENOENT/EACCES) falls through to the npx
+ * cannot spawn (error code ENOENT/EACCES) falls through to the npx
  * route, any other outcome (including a timeout) is returned as is. Then through
  * `npx --yes <npmSpec>` when it is absent from PATH but npm-distributed (its own,
  * longer timeout, since a cold `npx --yes <pkg>` install can exceed the
@@ -310,8 +316,10 @@ function runLintTool(tool: LintTool, argv: string[], spawnOpts: SpawnSyncOptions
     // Bin dir first on PATH, as npx does: oxlint finds tsgolint only on PATH or in the spawn cwd's node_modules/.bin.
     const PATH = process.env.PATH ? path.dirname(local) + path.delimiter + process.env.PATH : path.dirname(local);
     const result = spawnSync(local, argv, { ...spawnOpts, env: { ...process.env, PATH } });
-    // Spawn failure (ENOENT/EACCES: error, no signal) falls back to npx below; a timeout keeps its result (no second budget).
-    if (!result.error || result.signal) return result;
+    // Spawn failure (ENOENT/EACCES) falls back to npx below; a timeout keeps its result (no second budget). The code is
+    // checked, not `signal`: a child that traps SIGTERM exits normally, so ETIMEDOUT arrives with signal null.
+    const code = result.error && "code" in result.error ? result.error.code : undefined;
+    if (code !== "ENOENT" && code !== "EACCES") return result;
   }
   if (tool.npmSpec && !onPath(tool.name)) {
     return spawnSync("npx", ["--yes", tool.npmSpec, ...argv], {
