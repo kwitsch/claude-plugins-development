@@ -399,21 +399,20 @@ test("buildArgv: markdownlint-cli2 gets --config <MD013-off file in CLAUDE_PLUGI
   process.env.CLAUDE_PLUGIN_DATA = dataDir;
   try {
     const argv = buildArgv(markdownlintCli2, path.join(dir, "a.md"), dir);
-    assert.equal(argv[0], "--config");
-    assert.equal(argv[1], path.join(dataDir, "markdownlint-no-line-length.json"));
-    assert.equal(argv[2], path.join(dir, "a.md"));
-    assert.deepEqual(JSON.parse(readFileSync(argv[1], "utf8")), { MD013: false });
+    const cfg = path.join(dataDir, "markdownlint-no-line-length.json");
+    assert.deepEqual(argv, ["--no-globs", "--config", cfg, path.join(dir, "a.md")]);
+    assert.deepEqual(JSON.parse(readFileSync(cfg, "utf8")), { MD013: false });
   } finally {
     if (prev === undefined) delete process.env.CLAUDE_PLUGIN_DATA;
     else process.env.CLAUDE_PLUGIN_DATA = prev;
   }
 });
 
-test("buildArgv: markdownlint-cli2 runs bare when a project config exists", () => {
+test("buildArgv: markdownlint-cli2 runs with only --no-globs when a project config exists", () => {
   const markdownlintCli2 = REGISTRY.markdown.chain[0];
   const dir = mkdtempSync(path.join(tmpdir(), "ul-md-"));
   writeFileSync(path.join(dir, ".markdownlint.json"), "{}");
-  assert.deepEqual(buildArgv(markdownlintCli2, path.join(dir, "a.md"), dir), [path.join(dir, "a.md")]);
+  assert.deepEqual(buildArgv(markdownlintCli2, path.join(dir, "a.md"), dir), ["--no-globs", path.join(dir, "a.md")]);
 });
 
 test("REGISTRY: php chain is phpstan -> psalm, neither carries npmSpec", () => {

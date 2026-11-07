@@ -215,7 +215,7 @@ export const REGISTRY: Record<string, LangEntry> = {
     chain: [
       {
         name: "markdownlint-cli2",
-        args: [],
+        args: ["--no-globs"], // a project config's top-level `globs` would lint the whole repo per edit; cli2 only (classic markdownlint has no such option)
         npmSpec: "markdownlint-cli2",
         guardMarkdownLineLength: true,
       },
