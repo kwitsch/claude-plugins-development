@@ -1,6 +1,6 @@
-// eslint npx fallback (present/absent), ported from test/universal-lint/npx-fallback.bats; the project-local node_modules/.bin route (F04).
+// eslint npx fallback (present/absent), ported from test/universal-lint/npx-fallback.bats; the project-local node_modules/.bin route (F04) and the npx-cache route (F09).
 import assert from "node:assert/strict";
-import { chmodSync, symlinkSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, rmSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "vitest";
 import { makeEnv } from "./support/lint-hook.mts";
@@ -32,6 +32,39 @@ function localStub(e: LintEnv, dir: string, name: string, exit: number, executab
   );
   if (executable) chmodSync(p, 0o755);
   return p;
+}
+
+/** npm 11.19.1's `_npx` dir name for markdownlint-cli2 (sha512 hex[0:16], verified against ~/.npm/_npx); hard-coded so a wrong hash in the hook fails. */
+const KEY = "3c2a9ea6c4b6e0a2";
+
+/** `localStub` dir of the cached bin in the per-test HOME's npm cache (`e.file` resolves against cwd = `<base>/proj`, HOME = `<base>/home`). */
+const CACHED = `../home/.npm/_npx/${KEY}`;
+
+/**
+ * Create the hook's npx refresh stamp for markdownlint-cli2 in the env's CLAUDE_PLUGIN_DATA, `ageMs` old.
+ *
+ * @param e - Test environment.
+ * @param ageMs - Age of the stamp's mtime in milliseconds.
+ * @returns The stamp's absolute path.
+ */
+function stamp(e: LintEnv, ageMs = 0): string {
+  mkdirSync(e.data, { recursive: true });
+  const p = path.join(e.data, `npx-refreshed-${KEY}`);
+  writeFileSync(p, "");
+  const t = new Date(Date.now() - ageMs);
+  utimesSync(p, t, t);
+  return p;
+}
+
+/**
+ * The markdownlint-cli2 argv the hook passes for a `.md` file without a project markdownlint config.
+ *
+ * @param e - Test environment.
+ * @param f - Absolute path of the linted file.
+ * @returns The space-joined argv.
+ */
+function mdArgv(e: LintEnv, f: string): string {
+  return `--no-globs --config ${path.join(e.data, "markdownlint-no-line-length.json")} ${f}`;
 }
 
 test("eslint absent but npx present -> npx --yes eslint fallback runs, issues surfaced", () => {
@@ -119,5 +152,86 @@ test("local bin: a chain tool on PATH still wins over a local bin", () => {
   localStub(e, ".", "oxlint", 1);
   e.run(e.file("a.js", "let x = 1;\n"));
   assert.ok(e.lines().some((l) => l.startsWith("oxlint ")));
+  assert.ok(!e.lines().some((l) => l.startsWith("local:")));
+});
+
+test("npx cache: a cached markdownlint-cli2 bin runs directly (bin dir first on PATH, cwd as npx), npx never invoked; once it is gone npx runs", () => {
+  const e = makeEnv();
+  e.recStub("npx", 0);
+  stamp(e);
+  const bin = localStub(e, CACHED, "markdownlint-cli2", 1);
+  const f = e.file("a.md", "# T\n");
+  const r = e.run(f, { out: "cache-marker" });
+  assert.match(r.ctx, /cache-marker/);
+  assert.ok(e.lines().includes(`local:${CACHED}/markdownlint-cli2 ${mdArgv(e, f)}`));
+  assert.ok(e.lines().includes(`path:${path.join(e.home, ".npm", "_npx", KEY, "node_modules", ".bin")}`));
+  assert.ok(e.lines().includes(`pwd:${e.cwd}`));
+  assert.ok(!e.lines().some((l) => l.startsWith("npx")));
+  rmSync(bin);
+  e.run(f);
+  assert.ok(e.lines().some((l) => l.includes(`npx --yes markdownlint-cli2 ${mdArgv(e, f)}`)));
+});
+
+test("npx cache: cold npm_config_cache -> first run via npx, second run direct", () => {
+  const e = makeEnv();
+  const base = path.dirname(e.cwd); // makeEnv base dir: holds bin/, home/, data/, proj/ (= cwd)
+  const env = { npm_config_cache: path.join(base, "cache") };
+  e.recStub("npx", 0);
+  const f = e.file("a.md", "# T\n");
+  e.run(f, { env });
+  const npx = (): string[] => e.lines().filter((l) => l.startsWith("npx --yes markdownlint-cli2 "));
+  assert.equal(npx().length, 1);
+  assert.ok(existsSync(path.join(e.data, `npx-refreshed-${KEY}`)));
+  assert.equal(existsSync(path.join(base, "cache")), false); // the hook never creates the npm cache root
+  localStub(e, `../cache/_npx/${KEY}`, "markdownlint-cli2", 0); // what npx's install leaves
+  e.run(f, { env });
+  assert.ok(e.lines().includes(`local:../cache/_npx/${KEY}/markdownlint-cli2 ${mdArgv(e, f)}`));
+  assert.equal(npx().length, 1);
+});
+
+test("npx cache: a refresh stamp older than NPX_REFRESH_MS sends one run through npx, the renewed stamp makes the next run direct", () => {
+  const e = makeEnv();
+  e.recStub("npx", 0);
+  stamp(e, 25 * 60 * 60 * 1000);
+  localStub(e, CACHED, "markdownlint-cli2", 0);
+  const f = e.file("a.md", "# T\n");
+  e.run(f);
+  const npx = (): string[] => e.lines().filter((l) => l.startsWith("npx --yes markdownlint-cli2 "));
+  assert.equal(npx().length, 1);
+  assert.ok(!e.lines().some((l) => l.startsWith("local:")));
+  e.run(f);
+  assert.ok(e.lines().includes(`local:${CACHED}/markdownlint-cli2 ${mdArgv(e, f)}`));
+  assert.equal(npx().length, 1);
+});
+
+test("npx cache: a cached bin that cannot spawn (no exec bit) falls back to npx", () => {
+  const e = makeEnv();
+  e.recStub("npx", 0);
+  stamp(e);
+  localStub(e, CACHED, "markdownlint-cli2", 0, false);
+  e.run(e.file("a.md", "# T\n"));
+  assert.ok(e.lines().some((l) => l.startsWith("npx --yes markdownlint-cli2 ")));
+  assert.ok(!e.lines().some((l) => l.startsWith("local:")));
+});
+
+test("npx cache: an npx install in progress (concurrency.lock) -> npx, the cached bin never runs", () => {
+  const e = makeEnv();
+  e.recStub("npx", 0);
+  stamp(e);
+  localStub(e, CACHED, "markdownlint-cli2", 0);
+  mkdirSync(path.join(e.home, ".npm", "_npx", KEY, "concurrency.lock"));
+  e.run(e.file("a.md", "# T\n"));
+  assert.ok(e.lines().some((l) => l.startsWith("npx --yes markdownlint-cli2 ")));
+  assert.ok(!e.lines().some((l) => l.startsWith("local:")));
+});
+
+test("npx cache: a node_modules/.bin/<name> above cwd (npx's own lookup runs it first) -> npx, the cached bin never runs", () => {
+  const e = makeEnv();
+  e.recStub("npx", 0);
+  stamp(e);
+  localStub(e, CACHED, "markdownlint-cli2", 0);
+  localStub(e, "..", "markdownlint-cli2", 0); // the makeEnv base dir above cwd
+  e.run(e.file("a.md", "# T\n"));
+  assert.ok(e.lines().some((l) => l.startsWith("npx --yes markdownlint-cli2 ")));
   assert.ok(!e.lines().some((l) => l.startsWith("local:")));
 });

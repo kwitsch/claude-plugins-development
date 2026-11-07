@@ -40,6 +40,13 @@ const SPAWN_TIMEOUT_MS = 30000;
 /** Cold npx install can exceed SPAWN_TIMEOUT_MS; stay inside the 90s lint budget (hooks.json timeout 90). */
 const NPX_SPAWN_TIMEOUT_MS = 55000;
 
+/**
+ * How long a package in npx's cache runs directly (runNpx) before one lint goes through `npx --yes` again: npx (npm
+ * 11.19.1) checks a name-only spec against the registry's `latest` on every call and upgrades its cache, the direct
+ * route never does.
+ */
+const NPX_REFRESH_MS = 24 * 60 * 60 * 1000;
+
 /** Cap on the additionalContext findings text. */
 const MAX_CONTEXT_CHARS = 4000;
 
@@ -87,8 +94,9 @@ interface LintTool {
   /** Disable markdownlint's MD013 when the project has no markdownlint config. */
   guardMarkdownLineLength?: boolean;
   /**
-   * npm package to run via `npx --yes` when the binary is absent from PATH. Its presence also opts the tool into
-   * the project-local `node_modules/.bin/<name>` lookup (`selectLintTool`), which runs before npx.
+   * npm package to run via npx (its npx-cached bin directly when npx would run that, `runNpx`) when the binary is
+   * absent from PATH. Its presence also opts the tool into the project-local `node_modules/.bin/<name>` lookup
+   * (`selectLintTool`), which runs before npx.
    */
   npmSpec?: string;
   /** Binary and leading arguments actually spawned, when they differ from the probed `name`. */
@@ -301,13 +309,93 @@ export function isToolAvailable(tool: LintTool, toolOnPath: boolean, npxOnPath: 
 }
 
 /**
- * Run the resolved lint tool: the project-local bin `local` when given (spawnOpts
- * carries its package root as cwd, its directory first on the child's PATH, chain budget); a local bin that
- * cannot spawn (error code ENOENT/EACCES) falls through to the npx
- * route, any other outcome (including a timeout) is returned as is. Then through
- * `npx --yes <npmSpec>` when it is absent from PATH but npm-distributed (its own,
- * longer timeout, since a cold `npx --yes <pkg>` install can exceed the
- * local-binary budget), else spawn it directly (`spawnAs` when set).
+ * Spawn a bin by absolute path with its directory first on the child's PATH, as npx does: oxlint finds tsgolint only
+ * on PATH or in the spawn cwd's `node_modules/.bin`. Shared by the project-local route (`runLintTool`) and the
+ * npx-cache route (`runNpx`).
+ *
+ * @param bin - Absolute path of the bin to spawn.
+ * @param argv - Full argv from buildArgv.
+ * @param spawnOpts - Options for spawnSync (cwd and timeout kept as given; env gets the bin's directory first on PATH).
+ * @returns The spawnSync result, or null when the bin could not spawn (error code ENOENT/EACCES: missing, dangling or
+ *   not executable), so the caller falls through to its next route; any other outcome, a timeout too, is returned.
+ */
+function spawnBin(bin: string, argv: string[], spawnOpts: SpawnSyncOptionsWithStringEncoding): SpawnSyncReturns<string> | null {
+  // Bin dir first on PATH, as npx does: oxlint finds tsgolint only on PATH or in the spawn cwd's node_modules/.bin.
+  const PATH = process.env.PATH ? path.dirname(bin) + path.delimiter + process.env.PATH : path.dirname(bin);
+  const result = spawnSync(bin, argv, { ...spawnOpts, env: { ...process.env, PATH } });
+  // Spawn failure (ENOENT/EACCES) lets the caller fall back; a timeout keeps its result (no second budget). The code is
+  // checked, not `signal`: a child that traps SIGTERM exits normally, so ETIMEDOUT arrives with signal null.
+  const code = result.error && "code" in result.error ? result.error.code : undefined;
+  return code === "ENOENT" || code === "EACCES" ? null : result;
+}
+
+/**
+ * Run an npm-distributed chain tool that is absent from PATH: npx's own cached bin directly when npx would run it,
+ * else `npx --yes <npmSpec> ...argv` with its own, longer timeout (`NPX_SPAWN_TIMEOUT_MS`: a cold install can exceed
+ * the chain budget).
+ *
+ * @remarks
+ * The cached bin is `<cache>/_npx/<sha512(npmSpec) hex[0:16]>/node_modules/.bin/<name>` with `<cache>` =
+ * `npm_config_cache || NPM_CONFIG_CACHE || ~/.npm` (npm 7+ `libnpmexec` layout, verified on npm 11.19.1), spawned
+ * through `spawnBin` with `spawnOpts` unchanged (npx's cwd, the chain budget); ENOENT/EACCES falls through to npx, any
+ * other result (a timeout too) is returned. The cache route is skipped and plain npx runs, as in 0.15.7, when (1) a
+ * `node_modules/.bin/<name>` exists from the spawn cwd up to `/` (npx runs that one before its cache; F04 user
+ * decision), (2) npx holds `<dir>/concurrency.lock` (an install is in progress), or (3) the refresh stamp
+ * `${CLAUDE_PLUGIN_DATA || os.tmpdir()}/npx-refreshed-<key>` is missing or older than `NPX_REFRESH_MS`. Every npx run
+ * that spawned (no `error`, any exit status) renews the stamp (temp file + `renameSync`, errors swallowed), except in
+ * case (1), whose npx run never touches the cache. The hook only reads the npm cache, never writes it.
+ *
+ * @param name - Bin name of the chain entry (`LintTool.name`).
+ * @param npmSpec - npm package of the chain entry (`LintTool.npmSpec`); also the cache key's input.
+ * @param argv - Full argv from buildArgv.
+ * @param spawnOpts - Options for spawnSync; its cwd is npx's cwd and the cached bin's.
+ * @returns The spawnSync result of the cached bin or of npx.
+ */
+function runNpx(name: string, npmSpec: string, argv: string[], spawnOpts: SpawnSyncOptionsWithStringEncoding): SpawnSyncReturns<string> {
+  const npx = (): SpawnSyncReturns<string> => spawnSync("npx", ["--yes", npmSpec, ...argv], { ...spawnOpts, timeout: NPX_SPAWN_TIMEOUT_MS });
+  // npx runs a node_modules/.bin/<name> from its cwd up to / before its cache (npm 11.19.1 localFileExists): leave that to npx.
+  if (walkToRoot(String(spawnOpts.cwd), (d) => existsSync(path.join(d, "node_modules", ".bin", name)))) return npx();
+  // libnpmexec's cache key: sha512 hex of the sorted, newline-joined spec list, first 16 chars (one bare spec hashes as itself).
+  const key = createHash("sha512").update(npmSpec).digest("hex").slice(0, 16);
+  const dir = path.join(process.env.npm_config_cache || process.env.NPM_CONFIG_CACHE || path.join(homedir(), ".npm"), "_npx", key);
+  const stamp = path.resolve(process.env.CLAUDE_PLUGIN_DATA || tmpdir(), `npx-refreshed-${key}`);
+  let fresh = false;
+  try {
+    fresh = Date.now() - lstatSync(stamp).mtimeMs < NPX_REFRESH_MS;
+  } catch {
+    /* no stamp yet: one npx run checks the registry first */
+  }
+  // An npx install in progress holds concurrency.lock; a half-replaced tree could crash with exit 1, a false finding.
+  if (fresh && !existsSync(path.join(dir, "concurrency.lock"))) {
+    const cached = spawnBin(path.join(dir, "node_modules", ".bin", name), argv, spawnOpts);
+    if (cached) return cached;
+  }
+  const result = npx();
+  if (!result.error) {
+    try {
+      mkdirSync(path.dirname(stamp), { recursive: true });
+      const tmp = `${stamp}.${process.pid}.tmp`;
+      writeFileSync(tmp, "");
+      renameSync(tmp, stamp);
+    } catch {
+      /* unwritable data dir: the next lint goes through npx again */
+    }
+  }
+  return result;
+}
+
+/**
+ * Run the resolved lint tool through the fall-through chain local bin -> npx-cache bin -> npx: the project-local bin
+ * `local` when given (`spawnBin`; spawnOpts carries its package root as cwd, its directory goes first on the child's
+ * PATH, chain budget), then, for an npm-distributed tool absent from PATH, `runNpx` (npx's cached bin directly when
+ * npx would run it, else `npx --yes <npmSpec>` with its own, longer timeout, since a cold install can exceed the
+ * local-binary budget), else spawn it directly (`spawnAs` when set). A bin that cannot spawn (error code
+ * ENOENT/EACCES) falls through to the next route; any other outcome (including a timeout) is returned as is.
+ *
+ * @remarks
+ * After a local-bin ENOENT/EACCES fall-through, `runNpx` runs without `selectLintTool`'s npx-on-PATH gate: a cached
+ * bin still runs, and a miss then fails to spawn npx (ENOENT), which `runChainLint` treats as no finding (fail open).
+ * No `onPath("npx")` guard on purpose.
  *
  * @param tool - The selected chain entry.
  * @param argv - Full argv from buildArgv.
@@ -316,21 +404,9 @@ export function isToolAvailable(tool: LintTool, toolOnPath: boolean, npxOnPath: 
  * @returns The spawnSync result of whichever route ran.
  */
 function runLintTool(tool: LintTool, argv: string[], spawnOpts: SpawnSyncOptionsWithStringEncoding, local: string | null): SpawnSyncReturns<string> {
-  if (local) {
-    // Bin dir first on PATH, as npx does: oxlint finds tsgolint only on PATH or in the spawn cwd's node_modules/.bin.
-    const PATH = process.env.PATH ? path.dirname(local) + path.delimiter + process.env.PATH : path.dirname(local);
-    const result = spawnSync(local, argv, { ...spawnOpts, env: { ...process.env, PATH } });
-    // Spawn failure (ENOENT/EACCES) falls back to npx below; a timeout keeps its result (no second budget). The code is
-    // checked, not `signal`: a child that traps SIGTERM exits normally, so ETIMEDOUT arrives with signal null.
-    const code = result.error && "code" in result.error ? result.error.code : undefined;
-    if (code !== "ENOENT" && code !== "EACCES") return result;
-  }
-  if (tool.npmSpec && !onPath(tool.name)) {
-    return spawnSync("npx", ["--yes", tool.npmSpec, ...argv], {
-      ...spawnOpts,
-      timeout: NPX_SPAWN_TIMEOUT_MS,
-    });
-  }
+  const viaLocal = local ? spawnBin(local, argv, spawnOpts) : null;
+  if (viaLocal) return viaLocal;
+  if (tool.npmSpec && !onPath(tool.name)) return runNpx(tool.name, tool.npmSpec, argv, spawnOpts);
   // spawnAs decouples "which binary name gates PATH-availability /
   // selectLintTool matching" (tool.name -- probed by onPath/selectLintTool)
   // from "which binary + args are actually spawned". Only the rust chain's
