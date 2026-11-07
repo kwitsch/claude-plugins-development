@@ -20,7 +20,7 @@ One config for all packages, at the repo root; no per-plugin lint or vitest conf
 
 - Lint + type check: root `.oxlintrc.json` (oxlint, type-aware) with the solution `tsconfig.json` (`tsconfig.src.json` strict, `tsconfig.tests.json` relaxed for plugin `*/tests/`); `pnpm lint` is the type check. Details: `.claude/rules/lint-config.md`.
 - Build: the shared `development/scripts/build-plugin.mts` builds the plugin in the cwd (layout check, oxc-transform type stripping, oxc-minify, `plugin.json` generated from `package.json` by `plugin-manifest.mts`); a plugin's `build` script may run its own steps first.
-- `vitest.config.mts` at the root is the one vitest config. Tooling is root devDependencies only; an async oxlint hook checks every edited `.ts`/`.mts`. Details: `.claude/rules/lint-config.md`.
+- `vitest.config.mts` at the root is the one vitest config. Tooling is root devDependencies only. Details: `.claude/rules/lint-config.md`.
 
 ## Commands
 

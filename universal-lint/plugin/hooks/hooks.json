@@ -8,7 +8,7 @@
           {
             "type": "command",
             "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/lint-file.mjs\"",
-            "timeout": 95,
+            "timeout": 90,
             "asyncRewake": true
           }
         ]

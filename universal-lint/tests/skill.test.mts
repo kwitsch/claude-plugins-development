@@ -57,10 +57,6 @@ test("driver never invokes a fix/format/write path (read-only)", () => {
   assert.doesNotMatch(readFileSync(DRIVER, "utf8"), /--fix|--format|--write/i);
 });
 
-test("skill dir does not use the off-label debounce knob", () => {
-  for (const f of skillFiles) assert.ok(!readFileSync(f, "utf8").includes("UNIVERSAL_LINT_DEBOUNCE_MS"), f);
-});
-
 test("lint-files.mjs reports an aggregated finding for a supported file", () => {
   const e = makeEnv();
   e.recStub("shellcheck", 1);

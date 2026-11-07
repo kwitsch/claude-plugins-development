@@ -21,24 +21,23 @@
  */
 import { spawnSync } from "node:child_process";
 import type { SpawnSyncOptionsWithStringEncoding, SpawnSyncReturns } from "node:child_process";
-import { createHash, randomBytes } from "node:crypto";
+import { createHash } from "node:crypto";
 import { accessSync, constants as fsConstants, existsSync, mkdirSync, readFileSync, realpathSync, renameSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import path from "node:path";
 import process from "node:process";
-import { setTimeout as sleep } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 
-/** Inner linter timeout; the hook-level timeout (hooks.json: 95 = 5s debounce wait + 90s lint budget) is the backstop. */
+/** Inner linter timeout; the hook-level timeout (hooks.json timeout: 90 = the lint budget) is the backstop. */
 const SPAWN_TIMEOUT_MS = 30000;
 
-/** Cold npx install can exceed SPAWN_TIMEOUT_MS; stay inside the 90s lint budget (hooks.json timeout 95 minus the 5s debounce wait). */
+/** Cold npx install can exceed SPAWN_TIMEOUT_MS; stay inside the 90s lint budget (hooks.json timeout 90). */
 const NPX_SPAWN_TIMEOUT_MS = 55000;
 
 /**
  * Bounds the rtk-wrapped npx attempt so a stalled rtk can't consume the bare-npx fallback's cold-install budget too.
  * Worst-case sequential total (this + NPX_SPAWN_TIMEOUT_MS = 60s) stays well inside the 90s lint budget (hooks.json
- * timeout 95 minus the 5s debounce wait; two full NPX budgets would total 110s and blow it), the same worst case the
+ * timeout 90; two full NPX budgets would total 110s and blow it), the same worst case the
  * direct-tool branch below already runs at (rtk attempt + fallback = 2 x SPAWN_TIMEOUT_MS).
  */
 const RTK_NPX_ATTEMPT_TIMEOUT_MS = 5000;
@@ -61,16 +60,6 @@ const TSC_SPAWN_TIMEOUT_MS = 45000;
  * as TSC_SPAWN_TIMEOUT_MS; stays under the hook-level timeout backstop.
  */
 const CARGO_SPAWN_TIMEOUT_MS = 45000;
-
-/**
- * Per-file debounce: a lint only starts after the file has been idle for this long; each new edit re-arms it.
- * Overridable via UNIVERSAL_LINT_DEBOUNCE_MS (test-only fast path, NOT part of the hook's public input contract).
- */
-const DEBOUNCE_MS = (() => {
-  const raw = process.env.UNIVERSAL_LINT_DEBOUNCE_MS;
-  const n = raw ? Number(raw) : NaN;
-  return Number.isFinite(n) && n >= 0 ? n : 5000;
-})();
 
 /** tsc only understands real TypeScript syntax; .js/.jsx/.mjs/.cjs stay chain-linted only (eslint or oxlint, see resolveOxlintConfig). */
 const TYPE_CHECK_EXTS = new Set([".ts", ".tsx", ".mts", ".cts"]);
@@ -113,16 +102,20 @@ interface Finding {
   target: string;
   /** The tool's raw findings text. */
   text: string;
+  /** Absolute directory the tool's relative paths are resolved against. */
+  base: string;
 }
 
 /** The subset of Claude Code's PostToolUse hook payload this hook reads. */
 interface PostToolUseHookInput {
   /** Project root the session runs in. */
   cwd: string;
+  /** Name of the tool that fired the hook (`Write` or `Edit`). */
+  tool_name?: unknown;
   /** The tool's input; `file_path` names the written file. */
   tool_input: { file_path?: unknown };
-  /** The tool's result; `success: false` marks a failed Write/Edit. */
-  tool_response?: { success?: boolean };
+  /** The tool's result; `success: false` marks a failed Write/Edit, `structuredPatch` holds the Edit tool's diff hunks. */
+  tool_response?: { success?: boolean; structuredPatch?: unknown };
   [key: string]: unknown;
 }
 
@@ -681,14 +674,12 @@ export function looksLikeSolutionStyleTsconfig(text: string): boolean {
 
 /**
  * Shared sha256-hex digest of a path string, used to derive both the tsc
- * buildinfo cache key below and the debounce marker filename further down --
- * one hashing scheme kept in one place instead of two independent inline
- * derivations that would otherwise have to be changed in lockstep.
+ * buildinfo cache key below (tests reuse it too).
  *
  * @param p - Path string to hash.
  * @returns Lowercase sha256 hex digest.
  */
-function hashPath(p: string): string {
+export function hashPath(p: string): string {
   return createHash("sha256").update(p).digest("hex");
 }
 
@@ -1110,7 +1101,9 @@ function runChainLint(lang: LangEntry, resolved: string, cwd: string, rel: strin
     text = `${result.stdout ?? ""}\n${result.stderr ?? ""}`;
   }
   if (verdict === "skip") return none;
-  return { ran: true, finding: verdict === "issues" ? { tool: tool.name, target, text } : null };
+  // cargo prints paths relative to the crate (or workspace) root, go tools get the package dir, the rest run in cwd.
+  const base = manifest ? path.dirname(manifest) : tool.targetsDir ? path.dirname(resolved) : cwd;
+  return { ran: true, finding: verdict === "issues" ? { tool: tool.name, target, text, base } : null };
 }
 
 /**
@@ -1127,6 +1120,9 @@ function runChainLint(lang: LangEntry, resolved: string, cwd: string, rel: strin
  * reports both and this only needs one true location to fire.
  */
 const TSC_SOURCE_DIAGNOSTIC_RE = /\.(?:ts|tsx|mts|cts)[:(]\d+/;
+/** ANSI SGR escape sequences (colour codes), stripped before matching tool output. */
+// eslint-disable-next-line no-control-regex -- stripping ANSI SGR sequences from colorized tool output
+const ANSI_SGR_RE = /\x1b\[[0-9;]*m/g;
 /**
  * Whether tsc's output holds a diagnostic anchored to a real source file (see TSC_SOURCE_DIAGNOSTIC_RE).
  *
@@ -1134,8 +1130,7 @@ const TSC_SOURCE_DIAGNOSTIC_RE = /\.(?:ts|tsx|mts|cts)[:(]\d+/;
  * @returns True when a diagnostic is anchored to a real source file.
  */
 export function tscOutputHasSourceDiagnostic(text: string): boolean {
-  // eslint-disable-next-line no-control-regex -- stripping ANSI SGR sequences from tsc's colorized output
-  const plain = text.replace(/\x1b\[[0-9;]*m/g, "");
+  const plain = text.replace(ANSI_SGR_RE, "");
   return TSC_SOURCE_DIAGNOSTIC_RE.test(plain);
 }
 
@@ -1197,6 +1192,7 @@ function runTypeCheck(resolved: string, cwd: string): Finding | null {
     tool: "tsc",
     target: path.relative(cwd, path.dirname(tsconfigPath)) || ".",
     text,
+    base: cwd,
   };
 }
 
@@ -1226,7 +1222,7 @@ export function isExcludedPath(rel: string): boolean {
  * Run every cheap entry guard and return the resolved absolute lint target, or
  * null when any guard rejects (success===false, missing cwd/file_path, path
  * outside cwd, excluded path, unsupported extension, or file absent). Shared by
- * main() (to decide whether/what to debounce) and lintFileHandler (to re-run the
+ * main() (to decide whether to lint at all) and lintFileHandler (to re-run the
  * guards before linting) so the two never diverge. Fails closed to null on any
  * unexpected error, matching lintFileHandler's fail-open-to-{} philosophy.
  *
@@ -1255,6 +1251,124 @@ export function resolveLintTarget(args: PostToolUseHookInput): string | null {
 }
 
 /**
+ * Inclusive 0-based line ranges an Edit changed, from the `structuredPatch` hunks of its tool_response: each run of
+ * `+` lines, and for a run of only `-` lines (pure deletion) the two lines around the deletion point.
+ *
+ * @param args - The PostToolUse hook payload.
+ * @returns The ranges, or null when the whole file counts as edited (Write, other tool, missing or malformed patch).
+ */
+export function editRanges(args: PostToolUseHookInput): Array<[number, number]> | null {
+  const patch = args?.tool_response?.structuredPatch;
+  if (args?.tool_name !== "Edit" || !Array.isArray(patch)) return null;
+  const ranges: Array<[number, number]> = [];
+  for (const h of patch as Array<{ newStart?: unknown; lines?: unknown }>) {
+    if (typeof h?.newStart !== "number" || !Array.isArray(h.lines)) return null;
+    let cur = h.newStart - 1;
+    let start = -1;
+    let deleted = false;
+    const flush = (): void => {
+      if (start !== -1) ranges.push([start, cur - 1]);
+      else if (deleted) ranges.push([Math.max(cur - 1, 0), Math.max(cur, 0)]);
+      start = -1;
+      deleted = false;
+    };
+    for (const l of h.lines as unknown[]) {
+      const c = typeof l === "string" ? l[0] : " ";
+      if (c === "+") {
+        if (start === -1) start = cur;
+        cur++;
+      } else if (c === "-") deleted = true;
+      else if (c !== "\\") {
+        // context line; `\ No newline at end of file` is not a line
+        flush();
+        cur++;
+      }
+    }
+    flush();
+  }
+  return ranges;
+}
+
+/**
+ * Location regex A: `<path>.<ext>:<line>` or `<path>.<ext>(<line>` (ruff, ktlint, golangci-lint, go vet, checkstyle,
+ * markdownlint, psalm, oxlint `,-[src/a.ts:3:7]`, cargo `--> src/a.rs:12:5`, tsc `a.ts(12,5)` / `a.ts:12:5`).
+ */
+const LOC_PATH_RE = /(?<path>[^\s:()[\]'"]+\.[A-Za-z0-9]+)[:(](?<line>\d+)(?:[:,]\d+)?/;
+/** Location regex B: path-less `  <line>:<col>  ` rows (eslint/stylelint stylish, yamllint standard). */
+const LOC_ROW_RE = /^\s*(?<line>\d+):\d+\s/;
+/** Location regex C: shellcheck's default tty header `In <file> line <line>:` (path-less: the edited file is its only target). */
+const LOC_SHELLCHECK_RE = /^In .+ line (?<line>\d+):/;
+
+/**
+ * Parse/syntax error wording (plus tsc's TS1xxx and shellcheck's SC1xxx parser codes). An edit-caused parse error is
+ * often reported away from the edit (unclosed brace -> EOF), so such a diagnostic is kept even outside the range.
+ * shortcut: wording heuristic, a tool phrasing parse errors differently is still gated; extend the list when one shows up.
+ */
+const PARSE_ERROR_RE = /pars(?:e|ing) error|syntax ?error|unexpected (?:token|end|eof|character|indent)|unterminated|unclosed|end of (?:file|input)|\bexpected [`'"]|\b(?:TS1|SC1)\d{3}\b/i;
+
+/**
+ * Drop the diagnostics of `finding` located in `resolved` outside `ranges`. Text is split into blank-line paragraphs;
+ * a paragraph's located lines start segments that carry the unlocated lines after them (lines before the first one
+ * are the preamble). Own-file misses are dropped unless the segment or the preamble reads as a parse error
+ * (`PARSE_ERROR_RE`); hits and foreign locations (a path not tied to `resolved`) are kept
+ * and reportable. A paragraph whose segments are all dropped loses its preamble too; unlocated paragraphs are kept but
+ * not reportable.
+ *
+ * @param finding - One tool's finding.
+ * @param ranges - Inclusive 0-based edited line ranges, or null when every line counts as edited.
+ * @param resolved - Absolute path of the edited file.
+ * @returns The finding with only the kept text, `finding` itself when no line is located (unknown format, fail open),
+ *   or null when nothing reportable remains.
+ */
+export function gateFinding(finding: Finding, ranges: Array<[number, number]> | null, resolved: string): Finding | null {
+  const hit = (line: number): "hit" | "miss" => (ranges === null || ranges.some(([s, e]) => s <= line - 1 && line - 1 <= e) ? "hit" : "miss");
+  const classify = (raw: string): "hit" | "miss" | "foreign" | null => {
+    const plain = raw.replace(ANSI_SGR_RE, "");
+    const row = LOC_ROW_RE.exec(plain); // a stylish row first: its message text can look like `foo.bar(3)`
+    if (row?.groups) return hit(Number(row.groups.line));
+    const a = LOC_PATH_RE.exec(plain);
+    if (a?.groups) {
+      const p = path.normalize(a.groups.path);
+      const abs = path.resolve(finding.base, p);
+      // Suffix fallback only when the base-resolved path is not a real file, so a same-named other file stays foreign.
+      const own = abs === resolved || (!path.isAbsolute(p) && !existsSync(abs) && resolved.endsWith(path.sep + p));
+      return own ? hit(Number(a.groups.line)) : "foreign";
+    }
+    const b = LOC_SHELLCHECK_RE.exec(plain);
+    return b?.groups ? hit(Number(b.groups.line)) : null;
+  };
+
+  let located = false;
+  let reportable = false;
+  const kept: string[] = [];
+  for (const para of finding.text.split(/\n\s*\n/)) {
+    const lines = para.split("\n");
+    const kinds = lines.map(classify);
+    const starts = kinds.flatMap((k, i) => (k === null ? [] : [i]));
+    if (starts.length === 0) {
+      kept.push(para);
+      continue;
+    }
+    located = true;
+    const out = lines.slice(0, starts[0]);
+    let any = false;
+    const preambleParse = PARSE_ERROR_RE.test(out.join("\n"));
+    starts.forEach((start, n) => {
+      const seg = lines.slice(start, starts[n + 1] ?? lines.length);
+      if (kinds[start] === "miss" && !preambleParse && !PARSE_ERROR_RE.test(seg.join("\n"))) return;
+      out.push(...seg);
+      any = true;
+    });
+    if (any) {
+      kept.push(out.join("\n"));
+      reportable = true;
+    }
+  }
+  if (!located) return finding;
+  return reportable ? { ...finding, text: kept.join("\n\n") } : null;
+}
+
+/**
  * The lint_file tool handler. Returns {} on every guard failure / clean / skip (fail open).
  *
  * @param args - The PostToolUse hook payload.
@@ -1264,6 +1378,8 @@ export function lintFileHandler(args: PostToolUseHookInput): HookResult {
   try {
     const resolved = resolveLintTarget(args);
     if (!resolved) return {};
+    const ranges = editRanges(args);
+    if (ranges?.length === 0) return {}; // the Edit changed nothing
     const cwd = args.cwd;
     const rel = path.relative(cwd, resolved);
     const ext = path.extname(resolved).toLowerCase();
@@ -1286,7 +1402,12 @@ export function lintFileHandler(args: PostToolUseHookInput): HookResult {
       const tsResult = runTypeCheck(resolved, cwd);
       if (tsResult) findings.push(tsResult);
     }
-    if (findings.length === 0) return {};
+    // Gate before truncate() so the context budget is spent on in-range text.
+    const kept = findings.flatMap((f) => {
+      const g = gateFinding(f, ranges, resolved);
+      return g ? [g] : [];
+    });
+    if (kept.length === 0) return {};
 
     // truncate() is applied per-finding first (so a single finding's own text
     // is capped exactly as before this change), then AGAIN over the joined
@@ -1295,7 +1416,7 @@ export function lintFileHandler(args: PostToolUseHookInput): HookResult {
     // hard whole-message ceiling. Idempotent/no-op for the single-finding
     // case (already <= MAX_CONTEXT_CHARS from its own inner truncate()), so
     // single-finding output is unchanged from before this change.
-    const blocks = findings.map((f) => `${f.tool} found issues in ${f.target}:\n${truncate(f.text)}`);
+    const blocks = kept.map((f) => `${f.tool} found issues in ${f.target}:\n${truncate(f.text)}`);
     return {
       hookSpecificOutput: {
         hookEventName: "PostToolUse",
@@ -1320,50 +1441,13 @@ function isMainModule(): boolean {
 }
 
 /**
- * Debounced gate. Writes a unique token for `resolved` to a per-file marker under
- * tmpdir()/universal-lint-debounce (keyed by sha256 of the resolved absolute path),
- * waits DEBOUNCE_MS, then returns true only if this invocation's token is still the
- * newest — i.e. no later edit's process overwrote it. On any filesystem error,
- * returns true (fail open: run the lint rather than silently skip). The marker
- * write is atomic (temp file + renameSync) so a concurrent process never reads a
- * torn token. No cleanup: markers are tiny and the OS reclaims tmpdir().
- *
- * @param resolved - Absolute file path.
- * @returns True when this invocation is still the newest edit of the file.
+ * Read the hook's stdin JSON and run lintFileHandler. Findings: their text on
+ * stderr and exit 2 (asyncRewake wakes Claude with it). Fails open on any
+ * error — no output, exit 0.
  */
-async function debounceGate(resolved: string): Promise<boolean> {
-  const token = `${Date.now()}-${process.pid}-${randomBytes(6).toString("hex")}`;
-  const dir = path.join(tmpdir(), "universal-lint-debounce");
-  const marker = path.join(dir, hashPath(resolved) + ".mark");
-  try {
-    mkdirSync(dir, { recursive: true });
-    const tmp = `${marker}.${token}.tmp`;
-    writeFileSync(tmp, token);
-    renameSync(tmp, marker);
-  } catch {
-    return true; // couldn't arm the marker — fail open, just run
-  }
-  await sleep(DEBOUNCE_MS);
-  try {
-    return readFileSync(marker, "utf8").trim() === token;
-  } catch {
-    return true; // marker unreadable/deleted — fail open, run
-  }
-}
-
-/**
- * Read the hook's stdin JSON, run the cheap guards, debounce, then run
- * lintFileHandler. Findings: their text on stderr and exit 2 (asyncRewake wakes
- * Claude with it). Fails open on any error — no output, exit 0.
- *
- * @returns Resolves when the hook run is over.
- */
-async function main(): Promise<void> {
+function main(): void {
   try {
     const input = JSON.parse(readFileSync(0, "utf8")) as PostToolUseHookInput;
-    const resolved = resolveLintTarget(input);
-    if (!resolved) return; // guards rejected — nothing to lint, no wait
-    if (!(await debounceGate(resolved))) return; // superseded by a newer edit
     const ctx = lintFileHandler(input).hookSpecificOutput?.additionalContext;
     if (ctx) {
       process.stderr.write(ctx + "\n");
@@ -1374,4 +1458,4 @@ async function main(): Promise<void> {
   }
 }
 
-if (isMainModule()) void main();
+if (isMainModule()) main();

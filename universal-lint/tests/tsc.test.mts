@@ -4,6 +4,42 @@ import { chmodSync } from "node:fs";
 import { test } from "vitest";
 import { makeEnv } from "./support/lint-hook.mts";
 
+/** Project with src/** tsconfig and a 2-line src/a.ts, for the Edit-range tests. */
+/** Edit tool_response replacing line 1 of src/a.ts. */
+const EDIT_L1 = { structuredPatch: [{ oldStart: 1, oldLines: 2, newStart: 1, newLines: 2, lines: ["-const x = 1;", "+const x: number = 1;", " const y: string = 2;"] }] };
+
+/**
+ * Project with src/** tsconfig and a 2-line src/a.ts, for the Edit-range tests.
+ *
+ * @returns The env and the file.
+ */
+function srcProj() {
+  const e = makeEnv();
+  e.file("tsconfig.json", "{\"compilerOptions\":{\"noEmit\":true},\"include\":[\"src/**/*.ts\"]}");
+  return { e, a: e.file("src/a.ts", "const x: number = 1;\nconst y: string = 2;\n") };
+}
+
+test("tsc Edit: only the diagnostic on the edited line is reported", () => {
+  const { e, a } = srcProj();
+  e.recStub("tsc", 2);
+  const r = e.run(a, {
+    toolName: "Edit",
+    toolResponse: EDIT_L1,
+    out: "src/a.ts(1,1): error TS2322: line1-marker\nsrc/a.ts(2,1): error TS2322: line2-marker",
+  });
+  assert.equal(r.status, 2);
+  assert.match(r.ctx, /line1-marker/);
+  assert.doesNotMatch(r.ctx, /line2-marker/);
+});
+
+test("tsc Edit: a diagnostic only outside the edited line -> exit 0", () => {
+  const { e, a } = srcProj();
+  e.recStub("tsc", 2);
+  const r = e.run(a, { toolName: "Edit", toolResponse: EDIT_L1, out: "src/a.ts(2,1): error TS2322: line2-marker" });
+  assert.equal(r.status, 0);
+  assert.equal(r.ctx, "");
+});
+
 /** A tsconfig.json that governs `*.ts` in the project root. */
 const TSCONFIG = "{\"compilerOptions\":{\"noEmit\":true},\"include\":[\"*.ts\"]}";
 const TS = "const x: number = 1;\n";

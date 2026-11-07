@@ -1,11 +1,10 @@
 #!/usr/bin/env node
 import { spawnSync } from "node:child_process";
-import { createHash, randomBytes } from "node:crypto";
+import { createHash } from "node:crypto";
 import { accessSync, constants as fsConstants, existsSync, mkdirSync, readFileSync, realpathSync, renameSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import path from "node:path";
 import process from "node:process";
-import { setTimeout as sleep } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 const SPAWN_TIMEOUT_MS = 3e4;
 const NPX_SPAWN_TIMEOUT_MS = 55e3;
@@ -14,11 +13,6 @@ const MAX_CONTEXT_CHARS = 4e3;
 const MAX_BUFFER_BYTES = 10 * 1024 * 1024;
 const TSC_SPAWN_TIMEOUT_MS = 45e3;
 const CARGO_SPAWN_TIMEOUT_MS = 45e3;
-const DEBOUNCE_MS = (() => {
-	const raw = process.env.UNIVERSAL_LINT_DEBOUNCE_MS;
-	const n = raw ? Number(raw) : NaN;
-	return Number.isFinite(n) && n >= 0 ? n : 5e3;
-})();
 const TYPE_CHECK_EXTS = new Set([
 	".ts",
 	".tsx",
@@ -372,7 +366,7 @@ export function looksLikeSolutionStyleTsconfig(text) {
 	const hasNonEmptyFiles = !!filesMatch && filesMatch[1].trim() !== "";
 	return !hasNonEmptyFiles;
 }
-function hashPath(p) {
+export function hashPath(p) {
 	return createHash("sha256").update(p).digest("hex");
 }
 export function tsBuildInfoPathFor(tsconfigPath) {
@@ -573,18 +567,21 @@ function runChainLint(lang, resolved, cwd, rel) {
 		text = `${result.stdout ?? ""}\n${result.stderr ?? ""}`;
 	}
 	if (verdict === "skip") return none;
+	const base = manifest ? path.dirname(manifest) : tool.targetsDir ? path.dirname(resolved) : cwd;
 	return {
 		ran: true,
 		finding: verdict === "issues" ? {
 			tool: tool.name,
 			target,
-			text
+			text,
+			base
 		} : null
 	};
 }
 const TSC_SOURCE_DIAGNOSTIC_RE = /\.(?:ts|tsx|mts|cts)[:(]\d+/;
+const ANSI_SGR_RE = /\x1b\[[0-9;]*m/g;
 export function tscOutputHasSourceDiagnostic(text) {
-	const plain = text.replace(/\x1b\[[0-9;]*m/g, "");
+	const plain = text.replace(ANSI_SGR_RE, "");
 	return TSC_SOURCE_DIAGNOSTIC_RE.test(plain);
 }
 function runTypeCheck(resolved, cwd) {
@@ -622,7 +619,8 @@ function runTypeCheck(resolved, cwd) {
 	return {
 		tool: "tsc",
 		target: path.relative(cwd, path.dirname(tsconfigPath)) || ".",
-		text
+		text,
+		base: cwd
 	};
 }
 export function isExcludedPath(rel) {
@@ -649,10 +647,94 @@ export function resolveLintTarget(args) {
 		return null;
 	}
 }
+export function editRanges(args) {
+	const patch = args?.tool_response?.structuredPatch;
+	if (args?.tool_name !== "Edit" || !Array.isArray(patch)) return null;
+	const ranges = [];
+	for (const h of patch) {
+		if (typeof h?.newStart !== "number" || !Array.isArray(h.lines)) return null;
+		let cur = h.newStart - 1;
+		let start = -1;
+		let deleted = false;
+		const flush = () => {
+			if (start !== -1) ranges.push([start, cur - 1]);
+			else if (deleted) ranges.push([Math.max(cur - 1, 0), Math.max(cur, 0)]);
+			start = -1;
+			deleted = false;
+		};
+		for (const l of h.lines) {
+			const c = typeof l === "string" ? l[0] : " ";
+			if (c === "+") {
+				if (start === -1) start = cur;
+				cur++;
+			} else if (c === "-") deleted = true;
+			else if (c !== "\\") {
+				flush();
+				cur++;
+			}
+		}
+		flush();
+	}
+	return ranges;
+}
+const LOC_PATH_RE = /(?<path>[^\s:()[\]'"]+\.[A-Za-z0-9]+)[:(](?<line>\d+)(?:[:,]\d+)?/;
+const LOC_ROW_RE = /^\s*(?<line>\d+):\d+\s/;
+const LOC_SHELLCHECK_RE = /^In .+ line (?<line>\d+):/;
+const PARSE_ERROR_RE = /pars(?:e|ing) error|syntax ?error|unexpected (?:token|end|eof|character|indent)|unterminated|unclosed|end of (?:file|input)|\bexpected [`'"]|\b(?:TS1|SC1)\d{3}\b/i;
+export function gateFinding(finding, ranges, resolved) {
+	const hit = (line) => ranges === null || ranges.some(([s, e]) => s <= line - 1 && line - 1 <= e) ? "hit" : "miss";
+	const classify = (raw) => {
+		const plain = raw.replace(ANSI_SGR_RE, "");
+		const row = LOC_ROW_RE.exec(plain);
+		if (row?.groups) return hit(Number(row.groups.line));
+		const a = LOC_PATH_RE.exec(plain);
+		if (a?.groups) {
+			const p = path.normalize(a.groups.path);
+			const abs = path.resolve(finding.base, p);
+			const own = abs === resolved || !path.isAbsolute(p) && !existsSync(abs) && resolved.endsWith(path.sep + p);
+			return own ? hit(Number(a.groups.line)) : "foreign";
+		}
+		const b = LOC_SHELLCHECK_RE.exec(plain);
+		return b?.groups ? hit(Number(b.groups.line)) : null;
+	};
+	let located = false;
+	let reportable = false;
+	const kept = [];
+	for (const para of finding.text.split(/\n\s*\n/)) {
+		const lines = para.split("\n");
+		const kinds = lines.map(classify);
+		const starts = kinds.flatMap((k, i) => k === null ? [] : [i]);
+		if (starts.length === 0) {
+			kept.push(para);
+			continue;
+		}
+		located = true;
+		const out = lines.slice(0, starts[0]);
+		let any = false;
+		const preambleParse = PARSE_ERROR_RE.test(out.join("\n"));
+		starts.forEach((start, n) => {
+			const seg = lines.slice(start, starts[n + 1] ?? lines.length);
+			if (kinds[start] === "miss" && !preambleParse && !PARSE_ERROR_RE.test(seg.join("\n"))) return;
+			out.push(...seg);
+			any = true;
+		});
+		if (any) {
+			kept.push(out.join("\n"));
+			reportable = true;
+		}
+	}
+	if (!located) return finding;
+	return reportable ? {
+		...finding,
+		text: kept.join("\n\n")
+	} : null;
+}
 export function lintFileHandler(args) {
 	try {
 		const resolved = resolveLintTarget(args);
 		if (!resolved) return {};
+		const ranges = editRanges(args);
+		if (ranges?.length === 0) return {};
 		const cwd = args.cwd;
 		const rel = path.relative(cwd, resolved);
 		const ext = path.extname(resolved).toLowerCase();
@@ -678,8 +760,12 @@ export function lintFileHandler(args) {
 			const tsResult = runTypeCheck(resolved, cwd);
 			if (tsResult) findings.push(tsResult);
 		}
-		if (findings.length === 0) return {};
-		const blocks = findings.map((f) => `${f.tool} found issues in ${f.target}:\n${truncate(f.text)}`);
+		const kept = findings.flatMap((f) => {
+			const g = gateFinding(f, ranges, resolved);
+			return g ? [g] : [];
+		});
+		if (kept.length === 0) return {};
+		const blocks = kept.map((f) => `${f.tool} found issues in ${f.target}:\n${truncate(f.text)}`);
 		return { hookSpecificOutput: {
 			hookEventName: "PostToolUse",
 			additionalContext: `universal-lint: ${truncate(blocks.join("\n\n"))}`
@@ -695,31 +781,9 @@ function isMainModule() {
 		return false;
 	}
 }
-async function debounceGate(resolved) {
-	const token = `${Date.now()}-${process.pid}-${randomBytes(6).toString("hex")}`;
-	const dir = path.join(tmpdir(), "universal-lint-debounce");
-	const marker = path.join(dir, hashPath(resolved) + ".mark");
-	try {
-		mkdirSync(dir, { recursive: true });
-		const tmp = `${marker}.${token}.tmp`;
-		writeFileSync(tmp, token);
-		renameSync(tmp, marker);
-	} catch {
-		return true;
-	}
-	await sleep(DEBOUNCE_MS);
-	try {
-		return readFileSync(marker, "utf8").trim() === token;
-	} catch {
-		return true;
-	}
-}
-async function main() {
+function main() {
 	try {
 		const input = JSON.parse(readFileSync(0, "utf8"));
-		const resolved = resolveLintTarget(input);
-		if (!resolved) return;
-		if (!await debounceGate(resolved)) return;
 		const ctx = lintFileHandler(input).hookSpecificOutput?.additionalContext;
 		if (ctx) {
 			process.stderr.write(ctx + "\n");
@@ -727,4 +791,4 @@ async function main() {
 		}
 	} catch {}
 }
-if (isMainModule()) void main();
+if (isMainModule()) main();

@@ -4,7 +4,7 @@ import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "vitest";
-import { buildArgv, classifyCheckstyleOutput, classifyExit, hasProjectMarkdownlintConfig, hasProjectYamllintConfig, isExcludedPath, isToolAvailable, lintFileHandler, looksLikeSolutionStyleTsconfig, oxlintConfigTypeChecks, parseRtkPrefix, REGISTRY, resolveCargoManifest, resolveCheckstyleConfig, resolveLintTarget, resolveOxlintConfig, resolveTsconfig, stripTrailingCommas, truncate, tsBuildInfoPathFor, tscOutputHasSourceDiagnostic } from "../plugin/hooks/lint-file.mjs";
+import { buildArgv, classifyCheckstyleOutput, classifyExit, editRanges, gateFinding, hasProjectMarkdownlintConfig, hasProjectYamllintConfig, isExcludedPath, isToolAvailable, lintFileHandler, looksLikeSolutionStyleTsconfig, oxlintConfigTypeChecks, parseRtkPrefix, REGISTRY, resolveCargoManifest, resolveCheckstyleConfig, resolveLintTarget, resolveOxlintConfig, resolveTsconfig, stripTrailingCommas, truncate, tsBuildInfoPathFor, tscOutputHasSourceDiagnostic } from "../plugin/hooks/lint-file.mjs";
 
 const shellcheck = REGISTRY.shell.chain[0];
 const checkstyle = REGISTRY.java.chain[0];
@@ -727,4 +727,156 @@ test("oxlintConfigTypeChecks: a directory named .oxlintrc.json (EISDIR) -> false
   const p = path.join(mkdtempSync(path.join(tmpdir(), "ul-oxl-")), ".oxlintrc.json");
   mkdirSync(p);
   assert.equal(oxlintConfigTypeChecks(p), false);
+});
+
+/**
+ * An Edit payload with the given structuredPatch hunks.
+ *
+ * @param hunks - The `structuredPatch` value.
+ * @returns The payload.
+ */
+const editArgs = (hunks: unknown) => ({ cwd: "/p", tool_name: "Edit", tool_input: { file_path: "a.sh" }, tool_response: { success: true, structuredPatch: hunks } });
+
+test("editRanges: replaced and added lines give the `+` run (0-based, inclusive)", () => {
+  assert.deepEqual(editRanges(editArgs([{ newStart: 3, lines: [" a", "-b", "+B", "+C", " d"] }])), [[3, 4]]);
+});
+
+test("editRanges: a pure deletion gives the two lines around the deletion point", () => {
+  assert.deepEqual(editRanges(editArgs([{ newStart: 3, lines: [" a", "-b", " c"] }])), [[2, 3]]);
+  assert.deepEqual(editRanges(editArgs([{ newStart: 1, lines: ["-a", " b"] }])), [[0, 0]]);
+});
+
+test("editRanges: several hunks and runs each give a range; `\\ No newline` is not a line", () => {
+  const hunks = [{ newStart: 1, lines: ["+x", " a", "-b", "+y", "\\ No newline at end of file"] }, { newStart: 20, lines: [" c", "+z"] }];
+  assert.deepEqual(editRanges(editArgs(hunks)), [[0, 0], [2, 2], [20, 20]]);
+});
+
+test("editRanges: Write, a missing or a malformed patch gives null (whole file)", () => {
+  assert.equal(editRanges({ ...editArgs([]), tool_name: "Write" }), null);
+  assert.equal(editRanges({ cwd: "/p", tool_name: "Edit", tool_input: { file_path: "a.sh" } }), null);
+  assert.equal(editRanges(editArgs([{ lines: [] }])), null);
+});
+
+/** Scratch base directory for the gateFinding tests; holds a real `other.ts` (a different existing file). */
+const GATE_DIR = mkdtempSync(path.join(tmpdir(), "ul-gate-"));
+writeFileSync(path.join(GATE_DIR, "other.ts"), "");
+
+/**
+ * A finding as runChainLint/runTypeCheck build it.
+ *
+ * @param text - The tool's raw findings text.
+ * @param base - Directory the tool's relative paths resolve against.
+ * @returns The finding.
+ */
+const gf = (text: string, base: string = GATE_DIR) => ({ tool: "t", target: ".", text, base });
+
+test("gateFinding: eslint stylish keeps only rows on edited lines; all rows missing drops header and summary (null)", () => {
+  const resolved = path.join(GATE_DIR, "a.js");
+  const text = `${resolved}\n  1:7  error  bad-one  r1\n  3:1  error  bad-three  r3\n\n✖ 2 problems\n`;
+  const g = gateFinding(gf(text), [[0, 0]], resolved);
+  assert.ok(g);
+  assert.match(g.text, /bad-one/);
+  assert.doesNotMatch(g.text, /bad-three/);
+  assert.ok(g.text.includes(resolved));
+  assert.match(g.text, /✖ 2 problems/);
+  assert.equal(gateFinding(gf(text), [[5, 5]], resolved), null);
+});
+
+test("gateFinding: an oxlint block is dropped whole on a miss and kept on a hit", () => {
+  const resolved = path.join(GATE_DIR, "a.ts");
+  const text = "  x eslint(no-unused-vars): oxlint-marker\n   ,-[a.ts:3:7]\n 2 |\n 3 | const x = 1;\n   :       ^\n   `----\n\nFound 0 warnings and 1 error.\n";
+  assert.equal(gateFinding(gf(text), [[0, 0]], resolved), null);
+  const g = gateFinding(gf(text), [[2, 2]], resolved);
+  assert.ok(g);
+  assert.match(g.text, /oxlint-marker/);
+});
+
+test("gateFinding: tsc one-paragraph output keeps the hit diagnostic with its continuation, drops the miss", () => {
+  const resolved = path.join(GATE_DIR, "a.ts");
+  const text = "a.ts(1,7): error TS2322: diag-one\n  continuation-one\na.ts(9,1): error TS2322: diag-nine\n";
+  const g = gateFinding(gf(text), [[0, 0]], resolved);
+  assert.ok(g);
+  assert.match(g.text, /diag-one/);
+  assert.match(g.text, /continuation-one/);
+  assert.doesNotMatch(g.text, /diag-nine/);
+});
+
+test("gateFinding: a tsc diagnostic in a different existing file is foreign and kept", () => {
+  const resolved = path.join(GATE_DIR, "a.ts");
+  const g = gateFinding(gf("other.ts(1,1): error TS2322: foreign-marker\n"), [[5, 5]], resolved);
+  assert.ok(g);
+  assert.match(g.text, /foreign-marker/);
+});
+
+test("gateFinding: checkstyle absolute path hits and misses", () => {
+  const resolved = path.join(GATE_DIR, "A.java");
+  const text = `Starting audit...\n[WARN] ${resolved}:3: checkstyle-marker [Rule]\nAudit done.\n`;
+  const g = gateFinding(gf(text), [[2, 2]], resolved);
+  assert.ok(g);
+  assert.match(g.text, /checkstyle-marker/);
+  assert.equal(gateFinding(gf(text), [[0, 0]], resolved), null);
+});
+
+test("gateFinding: shellcheck tty `In <file> line N:` block", () => {
+  const resolved = path.join(GATE_DIR, "a.sh");
+  const text = `\nIn ${resolved} line 3:\necho $1\n     ^-- SC2086 (info): shellcheck-marker\n\nFor more information:\n  https://www.shellcheck.net/wiki/SC2086 -- Double quote\n`;
+  const g = gateFinding(gf(text), [[2, 2]], resolved);
+  assert.ok(g);
+  assert.match(g.text, /shellcheck-marker/);
+  assert.equal(gateFinding(gf(text), [[0, 0]], resolved), null);
+});
+
+test("gateFinding: cargo `--> src/a.rs:L` against the crate directory hits", () => {
+  const crate = path.join(GATE_DIR, "crate");
+  mkdirSync(path.join(crate, "src"), { recursive: true });
+  const resolved = path.join(crate, "src", "a.rs");
+  const text = "warning: unused variable: `x` cargo-marker\n --> src/a.rs:12:5\n   |\n12 |     let x = 1;\n";
+  const g = gateFinding(gf(text, crate), [[11, 11]], resolved);
+  assert.ok(g);
+  assert.match(g.text, /cargo-marker/);
+  assert.equal(gateFinding(gf(text, crate), [[0, 0]], resolved), null);
+});
+
+test("gateFinding: a workspace-root-relative cargo path is matched by suffix (own file, so a miss drops it)", () => {
+  const crate = path.join(GATE_DIR, "wscrate");
+  mkdirSync(path.join(crate, "src"), { recursive: true });
+  const resolved = path.join(crate, "src", "a.rs");
+  const text = "warning: ws-marker\n --> wscrate/src/a.rs:3:1\n";
+  const g = gateFinding(gf(text, crate), [[2, 2]], resolved);
+  assert.ok(g);
+  assert.match(g.text, /ws-marker/);
+  assert.equal(gateFinding(gf(text, crate), [[0, 0]], resolved), null);
+});
+
+test("gateFinding: a path broken by a space in a directory name is not matched, so it is kept (fail open)", () => {
+  const resolved = path.join(GATE_DIR, "my dir", "a.sh");
+  const g = gateFinding(gf(`${resolved}:3:1: note: spaced-marker [SC2086]\n`), [[0, 0]], resolved);
+  assert.ok(g);
+  assert.match(g.text, /spaced-marker/);
+});
+
+test("gateFinding: an own-file parse error outside the range is kept (location line or preamble)", () => {
+  const resolved = path.join(GATE_DIR, "a.ts");
+  assert.ok(gateFinding(gf("a.ts(9,1): error TS1005: ';' expected.\n"), [[0, 0]], resolved));
+  const rs = path.join(GATE_DIR, "src", "b.rs");
+  assert.ok(gateFinding(gf("error: this file contains an unclosed delimiter\n --> src/b.rs:40:3\n"), [[0, 0]], rs));
+  assert.equal(gateFinding(gf("a.ts(9,1): error TS2322: type-marker\n"), [[0, 0]], resolved), null);
+});
+
+test("gateFinding: text without any location is returned unchanged", () => {
+  const f = gf("something went wrong\n");
+  assert.equal(gateFinding(f, [[0, 0]], path.join(GATE_DIR, "a.ts")), f);
+});
+
+test("gateFinding: ranges null keeps every own-file diagnostic", () => {
+  const resolved = path.join(GATE_DIR, "a.ts");
+  const g = gateFinding(gf("a.ts(1,7): error TS1: diag-one\na.ts(9,1): error TS2: diag-nine\n"), null, resolved);
+  assert.ok(g);
+  assert.match(g.text, /diag-one/);
+  assert.match(g.text, /diag-nine/);
+});
+
+test("gateFinding: only own-file misses and no foreign location gives null", () => {
+  const resolved = path.join(GATE_DIR, "a.sh");
+  assert.equal(gateFinding(gf("a.sh:2:1: note: x [SC1]\na.sh:4:1: note: y [SC2]\n"), [[0, 0]], resolved), null);
 });

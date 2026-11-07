@@ -1,6 +1,6 @@
 // Shared harness for the universal-lint tests (not a test file: vitest only runs *.test.mts).
 // Hermetic: PATH holds only bash + node plus the linter stubs a test adds; HOME and CLAUDE_PLUGIN_DATA are per-test.
-import { spawn, spawnSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -36,10 +36,12 @@ export interface HookRun {
 export interface RunOptions {
   /** Value of the stubs' `$OUT` (their stdout). */
   out?: string;
-  /** UNIVERSAL_LINT_DEBOUNCE_MS; default "0" (a test fast path). `undefined` keeps the default, "" is passed through. */
-  debounceMs?: string;
   /** Extra environment variables. */
   env?: Record<string, string>;
+  /** Payload `tool_name`; default "Write" (whole file counts as edited). */
+  toolName?: string;
+  /** Extra payload `tool_response` fields (e.g. an Edit's `structuredPatch`), merged over `{ success: true }`. */
+  toolResponse?: Record<string, unknown>;
 }
 
 /** A fresh isolated environment. */
@@ -68,8 +70,6 @@ export interface LintEnv {
   childEnv(opts?: RunOptions): Record<string, string>;
   /** Pipe one PostToolUse payload for `filePath` into a fresh hook process. */
   run(filePath: string, opts?: RunOptions): HookRun;
-  /** Same, asynchronously, with the child exposed (for debounce tests). */
-  start(filePath: string, opts?: RunOptions): { child: ReturnType<typeof spawn>; done: Promise<HookRun> };
 }
 
 /**
@@ -77,9 +77,10 @@ export interface LintEnv {
  *
  * @param filePath - Written file.
  * @param cwd - Payload cwd.
+ * @param opts - Run options; `toolName` and `toolResponse` shape the payload.
  * @returns The JSON text.
  */
-export const payload = (filePath: string, cwd: string): string => JSON.stringify({ hook_event_name: "PostToolUse", tool_name: "Write", tool_input: { file_path: filePath }, tool_response: { success: true }, cwd });
+export const payload = (filePath: string, cwd: string, opts: RunOptions = {}): string => JSON.stringify({ hook_event_name: "PostToolUse", tool_name: opts.toolName ?? "Write", tool_input: { file_path: filePath }, tool_response: { success: true, ...opts.toolResponse }, cwd });
 
 /**
  * Build a HookRun from the exit status and raw stderr.
@@ -141,22 +142,10 @@ export function makeEnv(): LintEnv {
       );
     },
     lines: () => readFileSync(record, "utf8").split("\n").filter(Boolean),
-    childEnv: (opts = {}) => {
-      const e: Record<string, string> = { PATH: bin, HOME: home, RECORD: record, OUT: opts.out ?? "", CLAUDE_PLUGIN_DATA: data, ...opts.env };
-      e.UNIVERSAL_LINT_DEBOUNCE_MS = opts.debounceMs ?? "0";
-      return e;
-    },
+    childEnv: (opts = {}) => ({ PATH: bin, HOME: home, RECORD: record, OUT: opts.out ?? "", CLAUDE_PLUGIN_DATA: data, ...opts.env }),
     run(filePath, opts) {
-      const r = spawnSync(process.execPath, [HOOK], { input: payload(filePath, cwd), env: env.childEnv(opts), encoding: "utf8" });
+      const r = spawnSync(process.execPath, [HOOK], { input: payload(filePath, cwd, opts), env: env.childEnv(opts), encoding: "utf8" });
       return toRun(r.status, r.stderr);
-    },
-    start(filePath, opts) {
-      const child = spawn(process.execPath, [HOOK], { env: env.childEnv(opts), stdio: ["pipe", "ignore", "pipe"] });
-      let stderr = "";
-      child.stderr.on("data", (d: Buffer) => (stderr += d.toString()));
-      child.stdin.end(payload(filePath, cwd));
-      const done = new Promise<HookRun>((resolve) => child.on("close", (code) => resolve(toRun(code, stderr))));
-      return { child, done };
     },
   };
   return env;
