@@ -1,16 +1,16 @@
 ---
 id: F09
 title: Spawn the cached npx bin directly instead of npx --yes
-status: open
+status: done
 priority: high
-area: universal-lint/src/hooks/lint-file.mts (runLintTool npx-fallback branch, REGISTRY npmSpec entries, NPX_SPAWN_TIMEOUT_MS)
+area: universal-lint/src/hooks/lint-file.mts (runLintTool npx-fallback branch, runNpx, spawnBin, NPX_REFRESH_MS, REGISTRY npmSpec entries, NPX_SPAWN_TIMEOUT_MS)
 ---
 
 # F09 Spawn the cached npx bin directly instead of npx --yes
 
 ## Status
 
-Open. Merges bench-other-langs finding (confirmed, high), the real-sessions missed item (npx overhead for tools not installed locally, high) and step 2 of the static npx finding. Largest per-edit waste on the most edited file type (.md).
+Done in 0.15.8. Shipped: option 1 (computed `_npx` path) plus two "would npx run this?" guards and a 24 h refresh stamp. `runLintTool`'s npx branch delegates to `runNpx`, which spawns `${npm_config_cache || NPM_CONFIG_CACHE || ~/.npm}/_npx/<sha512(npmSpec) hex[0:16]>/node_modules/.bin/<name>` directly through `spawnBin` (F04's local-bin spawn moved into a helper: bin dir first on PATH, npx's cwd, chain budget `SPAWN_TIMEOUT_MS`), so local bin -> npx-cache bin -> npx is one fall-through chain ending in the single npx spawn; only ENOENT/EACCES falls through, a timeout is returned as is. Plain `npx --yes`, exactly as in 0.15.7, runs instead when a `node_modules/.bin/<name>` exists from the spawn cwd up to `/` (npx's own lookup runs that one before its cache; F04 user decision), when npx holds the cache dir's `concurrency.lock` (install in progress), or when the refresh stamp `${CLAUDE_PLUGIN_DATA || os.tmpdir()}/npx-refreshed-<key>` is missing or older than `NPX_REFRESH_MS` (24 h); every npx run that spawned renews the stamp (temp file + `renameSync`, errors swallowed), except the above-cwd one, which never touches the cache. The hook only reads the npm cache, never writes it. Measured (same machine and session, label in hook-design.md "Measured cost"), 0.15.7 -> 0.15.8: `.md Write` (`perf.mts 5`) real PATH 1066 -> 476 ms, no /mnt 874 -> 287 ms; `.css` Write with a stylelint config (manual, 1 warm-up + 5 runs) 951 -> 359 ms. The skill driver takes the same route through `lintFileHandler`.
 
 ## Problem
 
@@ -27,20 +27,19 @@ Tools that are neither on PATH nor in `node_modules/.bin` (typical for markdownl
 
 ## Code locations
 
-`runLintTool` (`spawnSync("npx", ["--yes", tool.npmSpec, ...argv], { timeout: NPX_SPAWN_TIMEOUT_MS })`); `REGISTRY` entries with `npmSpec` (markdownlint-cli2, markdownlint, stylelint, eslint, oxlint).
+`runLintTool` (local bin through `spawnBin`, then `runNpx` for an npm chain tool absent from PATH, else a direct spawn); `runNpx` (above-cwd walk via `walkToRoot`, cache key and dir, refresh stamp, `concurrency.lock` check, the `spawnSync("npx", ["--yes", npmSpec, ...argv], { timeout: NPX_SPAWN_TIMEOUT_MS })` fallback and the stamp renewal); `spawnBin`; `NPX_REFRESH_MS`; `REGISTRY` entries with `npmSpec` (markdownlint-cli2, markdownlint, stylelint, eslint, oxlint).
 
 ## Approach
 
-Two options, pick one (both keep npx as the cold-install route and fallback):
+Shipped option 1: compute `${npm_config_cache || NPM_CONFIG_CACHE || ~/.npm}/_npx/<sha512(npmSpec).hex.slice(0,16)>/node_modules/.bin/<tool.name>` and spawn it directly under `SPAWN_TIMEOUT_MS`, without an existence pre-check (a missing, dangling or non-executable bin gives ENOENT/EACCES, which falls through to npx). Depends on npm's `_npx` layout (npm 7+); a cache dir set only in `.npmrc` is just a miss. Added on top: the above-cwd `node_modules/.bin/<name>` walk (npx would run that bin first; F04 user decision), the `concurrency.lock` check (a half-replaced tree could crash with exit 1, a false finding; a no-op on npm 10.x and older, which have no lock) and the 24 h refresh stamp in plugin data (not the `_npx/<key>` dir mtime: `libnpmexec` ships `with-lock.js` only from 10.2.0 (npm 11.x), so on Node 22 LTS's npm 10.9 the dir mtime moves only on installs).
 
-1. Compute `${npm_config_cache || ~/.npm}/_npx/<sha512(npmSpec).hex.slice(0,16)>/node_modules/.bin/<tool.name>`; if it exists, spawn it directly under `SPAWN_TIMEOUT_MS`. Depends on npm's `_npx` layout (npm 7+); a cache dir set only in `.npmrc` is just a miss.
-2. More robust: after the first successful npx run, resolve the bin path once (`npx --yes -p <pkg> -c 'command -v <bin>'`), persist it in the F11 cache file under `CLAUDE_PLUGIN_DATA`, re-validate with one `accessSync`, and fall back to npx when it is gone.
+Not taken: option 2 (after the first npx run, resolve the bin path with `npx --yes -p <pkg> -c 'command -v <bin>'`, persist it in the F11 cache file under `CLAUDE_PLUGIN_DATA`, re-validate with one `accessSync`): it needs F11's cache file, which does not exist yet, costs a second npm boot per cold or refreshed spec, and still needs a staleness rule.
 
-Accepted cost: the npx package is not refreshed until npx runs again (npx's own reuse of an existing cache dir behaves much the same). Decide how this interacts with the rtk attempt in the npx branch (markdownlint-cli2 has no rtk verb; for eslint see F02).
+Accepted cost: npx checks a name-only spec against the registry's `latest` on every call (npm 11.19.1 `libnpmexec` `getManifest` with `preferOnline: true`), so npx's own reuse of a cache dir does not behave like a direct bin, and without a refresh rule the direct route would lag new releases without bound. The shipped 24 h stamp bounds the lag to one day, at the cost of one npx run per package per day. The original question of how this interacts with the rtk attempt in the npx branch (markdownlint-cli2 has no rtk verb; for eslint see F02) is obsolete: rtk support was removed in 0.15.0.
 
 ## Verification
 
-Bench: .md hook from about 1.1 s to about 300-350 ms; stylelint-config .css about 350 ms. Test: with a fake cached bin present the npx stub records nothing; after removing it the npx fallback runs. Cold cache (fresh `npm_config_cache`): first run via npx, second run direct.
+Tests (`tests/npx-fallback.test.mts`, markdownlint-cli2 as the representative tool, cache key `3c2a9ea6c4b6e0a2` hard-coded): with a fake cached bin and a fresh stamp the bin runs directly (bin dir first on PATH, npx's cwd) and the npx stub records nothing, after removing it the npx fallback runs; a cold `npm_config_cache` runs npx first (stamp written, the hook creates no cache root) and the cached bin the second time; a stamp older than 24 h sends one run through npx and the renewed stamp makes the next run direct; a cached bin without the exec bit, an npx `concurrency.lock` and a `node_modules/.bin/markdownlint-cli2` above cwd each send the lint through npx. Bench (0.15.7 vs 0.15.8, same session): `.md Write` real PATH 1066 -> 476 ms (`perf.mts 5`; target was about 300-350 ms); stylelint-config `.css` Write 951 -> 359 ms (manual; target about 350 ms).
 
 ## Constraints
 
