@@ -1,7 +1,7 @@
 ---
 id: F11
 title: Persist onPath probe results across hook processes
-status: open
+status: done
 priority: medium
 area: universal-lint/src/hooks/lint-file.mts (onPath, probeCache, isToolAvailable, selectLintTool, runLintTool, runTypeCheck)
 ---
@@ -10,7 +10,7 @@ area: universal-lint/src/hooks/lint-file.mts (onPath, probeCache, isToolAvailabl
 
 ## Status
 
-Open. Merges the PATH-probe findings of all four measuring dimensions (bench-js-ts, bench-other-langs, real-sessions, static; each adjusted from high to medium) and the verifier missed item that the stale "server-lifetime" doc comments belong here. Setup-specific (WSL `appendWindowsPath`); the lints run in the background (asyncRewake), so the cost delays the rewake and burns CPU but does not block the agent.
+Done in 0.15.10. Shipped inside `onPath` only (callers, selection order and bare-name spawns unchanged): one JSON file per PATH string, `${CLAUDE_PLUGIN_DATA || os.tmpdir()}/probe-<hashPath(PATH)>.json`, layout `{"hits": {"<tool>": "<absolute dir>"}, "misses": {"<tool>": <Date.now() ms>}}` with a time per miss entry (instead of the `{ tool: absoluteDir | null }` + file-mtime TTL sketched below, so a rewrite never extends older misses). Read once per process (`loadProbeStore`), rewritten after each fresh probe (`saveProbeStore`, temp + `renameSync`); a hit is re-validated with one `accessSync` on its stored dir, a miss is trusted for `PROBE_MISS_TTL_MS` = 10 min (future-dated = expired); a hit through a relative PATH entry is never persisted; every read/parse/write failure fails open. The `probeCache` "server-lifetime" comment is fixed. The rtk parts of this task (`rtkPrefixCache`, `onPath("rtk")`, sharing the file with F17) were obsolete since 0.15.0 (rtk removed). Measured with `perf.mts`, 0.15.9 (committed build output of `33cb1a6`) -> 0.15.10, medians real PATH / no /mnt in ms: `.sh` 142 / 48 -> 48 / 45, `.py` 144 / 46 -> 45 / 43, `.yml` 146 / 46 -> 47 / 43, `.md` 479 / 299 -> 292 / 276; acceptance (`.sh`/`.py`/`.yml` within 15 ms of no /mnt: met; `.md` at least 150 ms faster: met). Details in `.claude/rules/hook-design.md` ("PATH probe cache", "Measured cost"). F28 (the WSL PATH cost outside the plugin) stays open.
 
 ## Problem
 
