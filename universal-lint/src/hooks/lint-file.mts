@@ -28,7 +28,7 @@
 import { execFileSync, spawnSync } from "node:child_process";
 import type { SpawnSyncOptionsWithStringEncoding, SpawnSyncReturns } from "node:child_process";
 import { createHash } from "node:crypto";
-import { accessSync, constants as fsConstants, existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { accessSync, constants as fsConstants, existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { availableParallelism, homedir, tmpdir } from "node:os";
 import path from "node:path";
 import process from "node:process";
@@ -89,7 +89,8 @@ const HOOK_TIMEOUT_MS = 90000;
  * `fileChangedHandler` reserves before waiting mirrors `runChainLint`'s one spawn timeout per tool
  * (`CARGO_SPAWN_TIMEOUT_MS` for a `manifestPath` tool, else `SPAWN_TIMEOUT_MS`) and `runTypeCheck`'s
  * `TSC_SPAWN_TIMEOUT_MS`; update it together with them (a chain that runs a second tool per file needs a larger
- * reservation).
+ * reservation). `coalesceProjectCheck` (F13) stops waiting for a project-check lock at uptime `FILE_CHANGED_BUDGET_MS`
+ * minus the check's spawn timeout and then runs unlocked, so the lock wait stays inside this budget.
  */
 const FILE_CHANGED_BUDGET_MS = HOOK_TIMEOUT_MS - 5000;
 
@@ -1811,7 +1812,8 @@ export function lintFileHandler(args: PostToolUseHookInput, scoped: { fp: string
 }
 
 /**
- * Whether a FileChanged slot file may be removed: stale when its mtime is `HOOK_TIMEOUT_MS` (90 s) or more ago, or
+ * Whether a FileChanged slot file (also used for `fc-locks/<key>.lock`, see `coalesceProjectCheck`) may be removed:
+ * stale when its mtime is `HOOK_TIMEOUT_MS` (90 s) or more ago, or
  * `HOOK_TIMEOUT_MS` or more in the future (clock jumped back, synced data dir), or its pid no longer exists
  * (`process.kill(pid, 0)` throws ESRCH). Held: pid alive, EPERM (alive, another user's process), or an empty or
  * unparsable pid (a holder between its `wx` create and its write, or a garbage file; the mtime decides). A missing or
@@ -1860,6 +1862,79 @@ export function acquireSlot(untilMs: number): string | null {
     }
     if (process.uptime() * 1000 >= untilMs) return null;
     Atomics.wait(tick, 0, 0, 100);
+  }
+}
+
+/**
+ * Run a whole-project check (`tsc -p`, `go vet <dir>`, `cargo ... --manifest-path`) once per FileChanged burst and
+ * project. State under `${CLAUDE_PLUGIN_DATA || tmpdir()}/fc-locks/`: `<key>.lock` (exclusive `wx` create holding
+ * this pid, reclaimed per `slotStale`) and `<key>.last` (`Date.now()` taken before the spawn of the last run that
+ * completed without error or signal). Skips (returns null) when `.last` is newer than `file`'s ctime and not in the
+ * future: a completed run started after the file's last change, so its process reported this file's findings.
+ * Otherwise claims the lock, re-checking `.last` every 100 ms (`Atomics.wait`) while a live holder runs, until process
+ * uptime reaches `FILE_CHANGED_BUDGET_MS - reserveMs`, after which it runs unlocked; after a claim it re-checks `.last`
+ * once more, then runs, writes `.last` on completion and releases in `finally`. Any stat, mkdir, claim or `.last`
+ * error runs unlocked (fail open, as before F13). FileChanged only: `lintResolved` enables it from `hookEventName`.
+ *
+ * @param key - Project key (`hashPath` of `<tool name>:<tsconfig path | package dir | Cargo.toml path>`).
+ * @param file - The changed file (its ctime decides whether the last completed run covers it).
+ * @param reserveMs - The check's spawn timeout; the lock wait stops this long before `FILE_CHANGED_BUDGET_MS`.
+ * @param run - Spawns the check.
+ * @returns `run`'s result, or null when a completed run already covers `file`.
+ */
+export function coalesceProjectCheck(key: string, file: string, reserveMs: number, run: () => SpawnSyncReturns<string>): SpawnSyncReturns<string> | null {
+  const dir = path.resolve(process.env.CLAUDE_PLUGIN_DATA || tmpdir(), "fc-locks");
+  const lock = path.join(dir, `${key}.lock`);
+  const last = path.join(dir, `${key}.last`);
+  let changed: number;
+  try {
+    // statSync: a symlinked file's target is what the check reads; ctime: copies can preserve an old mtime.
+    changed = statSync(file).ctimeMs;
+    mkdirSync(dir, { recursive: true });
+  } catch {
+    return run();
+  }
+  // A missing, empty or partial stamp gives NaN or a smaller number (not covered); a future-dated stamp never covers.
+  const covered = (): boolean => {
+    try {
+      const t = Number(readFileSync(last, "utf8"));
+      return t > changed && t <= Date.now();
+    } catch {
+      return false;
+    }
+  };
+  const tick = new Int32Array(new SharedArrayBuffer(4));
+  for (;;) {
+    if (covered()) return null;
+    try {
+      if (slotStale(lock)) rmSync(lock, { force: true });
+      writeFileSync(lock, String(process.pid), { flag: "wx" });
+      break;
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code !== "EEXIST") return run();
+    }
+    if (process.uptime() * 1000 >= FILE_CHANGED_BUDGET_MS - reserveMs) return run();
+    Atomics.wait(tick, 0, 0, 100);
+  }
+  try {
+    // The previous holder may have finished between the last check and this claim.
+    if (covered()) return null;
+    const start = Date.now();
+    const r = run();
+    if (!r.error && !r.signal) {
+      try {
+        writeFileSync(last, String(start));
+      } catch {
+        // no stamp: the next process runs the check again
+      }
+    }
+    return r;
+  } finally {
+    try {
+      rmSync(lock, { force: true });
+    } catch {
+      // slotStale reclaims it once this pid is gone
+    }
   }
 }
 
