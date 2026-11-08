@@ -502,6 +502,7 @@ export const register = (on, options) => {
 	const firstTurns = new Map();
 	const ownCalls = new Set();
 	on("session.start", async function onSessionStart($, e, next) {
+		firstTurns.clear();
 		await $.command.register({
 			name: "jev",
 			description: "Jev pilot: status, /jev report, /jev candidates, /jev export, /jev clear"
@@ -883,6 +884,11 @@ export const register = (on, options) => {
 	let scratchpad;
 	on("tool.check", async function onToolCheck($, e, next) {
 		const base = await next(e);
+		if (e.tool === ESTIMATE_TOOL && base.decision !== "deny") return {
+			...base,
+			decision: "allow",
+			reason: "jevfort: estimate_effort is answered locally"
+		};
 		if (e.tool_use_id && ownCalls.has(e.tool_use_id)) {
 			if (base.decision === "deny") return base;
 			return {

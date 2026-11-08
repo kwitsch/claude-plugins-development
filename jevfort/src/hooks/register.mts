@@ -698,6 +698,8 @@ export const register = (on: On, options: Options): void => {
   // Calls Jev made itself: `tool.check` approves them, their commands come from a vetted list.
   const ownCalls = new Set<string>();
   on("session.start", async function onSessionStart($: Engine, e: unknown, next: Next<unknown, unknown>): Promise<unknown> {
+    // A new conversation (also after /clear) gets its own first-turn estimate.
+    firstTurns.clear();
     await $.command.register({
       name: "jev",
       description: "Jev pilot: status, /jev report, /jev candidates, /jev export, /jev clear",
@@ -1013,6 +1015,8 @@ export const register = (on: On, options: Options): void => {
     const base = await next(e);
     // Jev's own calls come from the vetted candidate list: approve them so auto mode's classifier doesn't refuse
     // them. This and the scratchpad branch are the only places jevfort loosens Claude Code's verdict. A settings deny rule still wins.
+    // The estimate tool is answered by this hook, so there is nothing to prompt for.
+    if (e.tool === ESTIMATE_TOOL && base.decision !== "deny") return { ...base, decision: "allow", reason: "jevfort: estimate_effort is answered locally" };
     if (e.tool_use_id && ownCalls.has(e.tool_use_id)) {
       if (base.decision === "deny") return base;
       return { ...base, decision: "allow", reason: "Jev pilot: vetted action from its read-only/project-script list" };
