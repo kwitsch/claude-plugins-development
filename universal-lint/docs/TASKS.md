@@ -23,10 +23,10 @@ Legend: `[x]` finished. `[ ]` not finished; tag = `open` (code change, not start
 - [x] [F08](tasks/F08-watchlist-early-stop.md) Stop the watch-list filter once `WATCH_LIMIT` is exceeded. Shipped in 0.15.7.
 - [x] [F09](tasks/F09-bypass-npx-cached-bin.md) Spawn the cached npx bin directly instead of `npx --yes`. Shipped in 0.15.8.
 - [x] [F10](tasks/F10-filechanged-concurrency-cap.md) Cap concurrent FileChanged lints across hook processes (slot files). Shipped in 0.15.9.
+- [x] [F11](tasks/F11-persist-path-probes.md) Persist `onPath` probe results across hook processes. Shipped in 0.15.10. F28 (docs: the WSL PATH cost outside the plugin) stays open.
 
 ## Stage 2: structural changes
 
-- [ ] [F11](tasks/F11-persist-path-probes.md) Persist `onPath` probe results across hook processes `open` priority:medium. Ship with F28 (most of the WSL PATH cost is outside the plugin).
 - [ ] [F12](tasks/F12-watchlist-scope-fast-path.md) Cheapen the watch list's per-file scope check (extension first, per-dir realpath cache) `open` priority:medium
 - [ ] [F13](tasks/F13-dedup-whole-project-checks.md) Run tsc / go vet / cargo once per FileChanged burst, not once per file `open` priority:medium. After F10.
 - [ ] [F15](tasks/F15-rearm-watches-after-checkout.md) Re-arm FileChanged watches after `git checkout` (prototype first) `open` priority:medium. After F12 (re-emission multiplies watch-list cost).
@@ -59,7 +59,7 @@ Legend: `[x]` finished. `[ ]` not finished; tag = `open` (code change, not start
 - Before each task: re-run `node universal-lint/scripts/perf.mts` (F01, done) for a fresh baseline; each task's Verification compares against it.
 - F02 + F03 together remove all false eslint findings seen in this analysis; F02 alone (the safety net) covers projects that have a config but no reachable binary. F04's walk from the file's directory fixes the sub-package case (91 of 128 historical pnpm findings).
 - F04 before F09: both rework the npx-fallback branch of `runLintTool`; F04 covers locally installed tools, F09 the npx-cache-only ones (markdown).
-- F11's savings and F04's are not additive for JS/TS (0.14.x estimate from the rtk era; rtk is gone since 0.15.0, re-measure in F11); F28 documents the rest.
+- F11's savings and F04's are not additive for JS/TS: measured in F11 (0.15.9 -> 0.15.10, `perf.mts` medians, real PATH), `.mts` Write (local oxlint, F04 route) 387 -> 263 ms and `.ts` Write (tsc on PATH) 151 -> 141 ms, against `.sh`/`.py`/`.yml` (one missing PATH tool each) 142/144/146 -> 48/45/47 ms and `.md` 479 -> 292 ms; F28 documents the rest.
 - F08 (done) shortened the `watchList` loop; F12 still changes the per-file check inside it; F15 and F19 come after F12.
 - F10 before F13 (the slot cap bounds the peak; F13 removes redundant work inside it).
 - F03 and F09 before F16. F18 and F10/F13 change the timeout budget: update F29's text.
