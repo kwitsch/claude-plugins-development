@@ -8,7 +8,6 @@ import { adjustEffort, bestAction, difficultyQuestion, doneQuestion, effortKeeps
 import { hints, NONE, promptQuestions } from "./prompt.mjs";
 import { buildReport } from "./report.mjs";
 import { SUMMARY_MODEL, SYSTEM } from "./summarize.mjs";
-const MODES = ["active", "off"];
 const MAX_TAKES_PER_TURN = 3;
 const WRITE_TOOLS = new Set([
 	"Edit",
@@ -20,12 +19,6 @@ const PLUGIN_NAME = "jevfort";
 const DONE_PROMPT = "Jev: the user's request doesn't look finished yet. Continue with what remains. If it is actually complete, say so in one line.";
 const ACTIVE = new Set(["running", "pending"]);
 const asText = (v) => String(v);
-async function currentMode($, configured) {
-	const stored = await $.store.get("mode");
-	if (MODES.includes(stored)) return stored;
-	if (MODES.includes(configured)) return configured;
-	return "active";
-}
 async function askJev($, state, questions) {
 	const startedAt = await $.clock.now();
 	const done = async (r) => ({
@@ -306,9 +299,7 @@ async function blockSkill($, name) {
 	const list = await $.store.get(SKILL_BLOCKLIST_KEY) ?? [];
 	if (!list.includes(name)) await $.store.set(SKILL_BLOCKLIST_KEY, [...list, name]);
 }
-async function checkDone($, e, configuredMode, threshold) {
-	const m = await currentMode($, configuredMode);
-	if (m === "off") return false;
+async function checkDone($, e, threshold) {
 	const agents = await $.agent.list().catch(() => undefined);
 	if (!agents) return false;
 	const waitingOn = agents.filter((a) => ACTIVE.has(a.status)).length;
@@ -374,8 +365,6 @@ export const register = (on, options) => {
 			donePending = e.origin?.kind === "plugin" && e.origin.name === PLUGIN_NAME;
 			if (donePending) return next(e);
 			if (options.classify === false || e.command || e.isMeta || e.text.trim().length < 3) return next(e);
-			const m = await currentMode($, options.mode);
-			if (m === "off") return next(e);
 			const questions = promptQuestions(await skillOptions($));
 			const previous = await previousReply($);
 			const r = await askJev($, {
@@ -420,9 +409,8 @@ export const register = (on, options) => {
 			return next(e);
 		});
 		on("tool.call", { tool: "Agent" }, async function onAgentCall($, e, next) {
-			const m = await currentMode($, options.mode);
 			const claudeType = e.subagent_type ?? "";
-			if (m === "off" || offered.size < 2 || claudeType === "fork") return next(e);
+			if (offered.size < 2 || claudeType === "fork") return next(e);
 			const criteria = {};
 			for (const [name, description] of offered) criteria[name] = clip(description, 200);
 			const r = await askJev($, {
@@ -460,8 +448,6 @@ export const register = (on, options) => {
 	if (options.compaction !== false) {
 		on("session.compact", async function onCompact($, e, next) {
 			if (e.agentId || e.trigger !== "manual" && e.trigger !== "auto") return next(e);
-			const m = await currentMode($, options.mode);
-			if (m === "off") return next(e);
 			const items = compactItems(e.messages);
 			if (items.length < 3) return next(e);
 			const request = splitTurn(e.messages)?.request ?? "";
@@ -506,16 +492,12 @@ export const register = (on, options) => {
 	on("session.start", async function onSessionStart($, e, next) {
 		await $.command.register({
 			name: "jev",
-			description: "Jev pilot: status, /jev report, /jev candidates, /jev export, /jev clear, or switch mode with /jev active|off"
+			description: "Jev pilot: status, /jev report, /jev candidates, /jev export, /jev clear"
 		});
 		return next(e);
 	});
 	on("command.run", { command: "jev" }, async function onJevCommand($, e) {
 		const arg = e.args.trim();
-		if (MODES.includes(arg)) {
-			await $.store.set("mode", arg);
-			return { text: `Jev pilot mode: ${arg}` };
-		}
 		if (arg === "report") {
 			return { text: buildReport(await readLog($), takeThreshold) };
 		}
@@ -550,7 +532,7 @@ export const register = (on, options) => {
 		const counts = Object.entries(await stats($)).map(([k, v]) => `${k}=${v}`).join(", ") || "none yet";
 		const lines = recentDecisions().slice(-10).map((d) => `- ${d.kind}${d.applied ? "" : " (pass)"}: ${d.text}${d.ms !== undefined ? ` [${Math.round(d.ms)}ms]` : ""}`);
 		return { text: [
-			`Jev pilot: mode ${await currentMode($, options.mode)}, routing ${routing}, take steps ${takeSteps} (p ≥ ${takeThreshold}), done check ${doneCheck}, subagents ${subagents}`,
+			`Jev pilot: routing ${routing}, take steps ${takeSteps} (p ≥ ${takeThreshold}), done check ${doneCheck}, subagents ${subagents}`,
 			`Decisions (all sessions): ${counts}`,
 			lines.length ? `Recent:\n${lines.join("\n")}` : "No decisions this session yet.",
 			"Full analysis: /jev report"
@@ -572,7 +554,7 @@ export const register = (on, options) => {
 			donePending = false;
 			if (doneCheck && !exempt && e.reason === "answer") {
 				try {
-					if (await checkDone($, e, options.mode, doneThreshold)) {
+					if (await checkDone($, e, doneThreshold)) {
 						$.prompt.submit({ text: DONE_PROMPT }).catch((err) => {
 							donePending = false;
 							void record($, {
@@ -613,8 +595,7 @@ export const register = (on, options) => {
 		return result;
 	});
 	on("turn.step", async function* onTurnStep($, e, next) {
-		const m = await currentMode($, options.mode);
-		if (m === "off" || e.agentId && !subagents) return yield* next(e);
+		if (e.agentId && !subagents) return yield* next(e);
 		const turn = turns.get(e.turnId) ?? { taken: 0 };
 		turns.set(e.turnId, turn);
 		const ctx = await readTurn($, e.agentId);
@@ -825,22 +806,20 @@ export const register = (on, options) => {
 		}
 		const input = e.input ?? {};
 		if (WRITE_TOOLS.has(e.tool) && base.decision !== "deny" && !(base.decision === "ask" && base.rule !== undefined)) {
-			if (await currentMode($, options.mode) !== "off") {
-				scratchpad ??= {
-					roots: [
-						await $.env.get("CLAUDE_CODE_TMPDIR"),
-						await $.env.get("TMPDIR"),
-						"/tmp"
-					].filter((r) => Boolean(r)),
-					sid: await $.session.id()
+			scratchpad ??= {
+				roots: [
+					await $.env.get("CLAUDE_CODE_TMPDIR"),
+					await $.env.get("TMPDIR"),
+					"/tmp"
+				].filter((r) => Boolean(r)),
+				sid: await $.session.id()
+			};
+			if (inScratchpad(asText(input.file_path ?? input.notebook_path ?? ""), scratchpad.sid, scratchpad.roots)) {
+				return {
+					...base,
+					decision: "allow",
+					reason: "jevfort: write inside this session's scratchpad"
 				};
-				if (inScratchpad(asText(input.file_path ?? input.notebook_path ?? ""), scratchpad.sid, scratchpad.roots)) {
-					return {
-						...base,
-						decision: "allow",
-						reason: "jevfort: write inside this session's scratchpad"
-					};
-				}
 			}
 		}
 		return base;
