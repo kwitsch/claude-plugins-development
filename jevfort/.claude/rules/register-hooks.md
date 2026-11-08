@@ -21,9 +21,14 @@ the shapes below: `inline-headroom/docs/claude-code-verification.md`.
   another file. It also rejects `$.<noun>` as a bare value (bound, passed or read), so same-file helpers take the
   whole `$` typed `Engine` (`askJev($, …)`, `record($, …)`, `buildCandidates($, …)`).
 - One hook per event without a matcher (`registered twice without a matcher` fails validate and test). Hence:
-  `tool.call` has one unmatched hook (outcome of Jev's own calls, skill blocklist) plus one with the matcher
-  `{ tool: "Agent" }`; `turn.step`, `tool.check`, `turn.complete`, `session.start`, `prompt.submit`,
-  `agent.offer` and `session.compact` have one each; `command.run` and `ui.render` carry matchers.
+  `tool.call` has one unmatched hook (answers the `estimate_effort` tool, outcome of Jev's own calls, skill
+  blocklist) plus one with the matcher `{ tool: "Agent" }`; `turn.step`, `tool.check`, `turn.complete`,
+  `session.start`, `prompt.submit`, `agent.offer` and `session.compact` have one each; `command.run` and `ui.render`
+  carry matchers.
+- `session.start` registers the `estimate_effort` tool with `$.tool.register(ESTIMATE_SPEC)` whatever `routing`
+  says (a throw is logged as `kind: "error"`). A registered tool that no hook answers fails, so the unmatched
+  `tool.call` hook answers `mcp__jevfort__estimate_effort` itself and never calls `next(e)`: `{ result }` (the JSON
+  estimate) or, on invalid input, `{ isError: true, result }` without a Jev request. Calls are logged as kind `estimate`.
 - `tool.call` failure is `isError: true` or `deny: string`; there is no `exitCode`.
 - `turn.step` `usage` may be `null`; `command.run` returning `{}` prints no row and records no model context.
 - `cc-plugin-sec-default` skips every user-tier `prompt.compose`/`prompt.section`/`prompt.context` hook, so the mod
