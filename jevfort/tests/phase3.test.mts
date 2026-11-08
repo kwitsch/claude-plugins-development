@@ -8,15 +8,11 @@ import { hints } from "../plugin/hooks/prompt.mjs";
 
 // The manifest defaults (jevfort/package.json claudePlugin.userConfig): the kit does not fill userConfig defaults.
 const DEFAULTS = {
-  mode: "active",
   routing: "effort",
   takeSteps: true,
-  gate: true,
   doneCheck: true,
   takeThreshold: 0.85,
   subagents: true,
-  dangerDeny: 0.8,
-  scopeDeny: 0.2,
   doneThreshold: 0.15,
   bypass: true,
   classify: true,

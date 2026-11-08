@@ -1,8 +1,8 @@
 /**
  * Claude Code function-hooks module of jevfort: every hook and every `$` use. The pure logic lives in the sibling
  * modules, which must never touch `$`. A port of nim-f/jev-pilot 0.5.0 `hooks/register.ts` plus the `$`-using parts
- * of its `jev`, `log`, `context`, `candidates`, `summarize`, `prompt`, `agents`, `compact`, `mode` and `view`
- * modules, with the modes `active` and `off` only and with the endpoint read from `JEV_URL`.
+ * of its `jev`, `log`, `context`, `candidates`, `summarize`, `prompt`, `agents`, `compact` and `view`
+ * modules, without upstream's modes (disable the plugin to turn it off) and with the endpoint read from `JEV_URL`.
  *
  * @remarks
  * EARLY ACCESS API. No engine type import (the engine typings are not in the repo): the used `$` members and
@@ -22,8 +22,8 @@ import { choice, jevUrl, MODEL, noul, score, TIMEOUT_MS } from "./jev.mjs";
 import type { Answer, ChoiceAnswer, JevResult, Question } from "./jev.mjs";
 import { LOG_KEY, MAX_ENTRIES, recentDecisions, remember, statsKey } from "./log.mjs";
 import type { Entry } from "./log.mjs";
-import { adjustEffort, bashRiskQuestion, bestAction, difficultyQuestion, doneQuestion, effortKeepsCache, gateBash, inScopeQuestion, inScratchpad, lowerModel, nextActionQuestion, pickCandidate, route, shouldContinue, singleActionQuestion } from "./policy.mjs";
-import type { GateThresholds, Route } from "./policy.mjs";
+import { adjustEffort, bestAction, difficultyQuestion, doneQuestion, effortKeepsCache, inScratchpad, lowerModel, nextActionQuestion, pickCandidate, route, shouldContinue, singleActionQuestion } from "./policy.mjs";
+import type { Route } from "./policy.mjs";
 import { hints, NONE, promptQuestions } from "./prompt.mjs";
 import { buildReport } from "./report.mjs";
 import { SUMMARY_MODEL, SYSTEM } from "./summarize.mjs";
@@ -99,7 +99,7 @@ type AgentCall = ToolCall & { subagent_type?: string; prompt: string; descriptio
 type ToolResult = { deny?: unknown; isError?: boolean } & Record<string, unknown>;
 /** A `tool.check` event. */
 type Check = { tool: string; tool_use_id?: string; agentId?: string; input?: unknown } & Record<string, unknown>;
-/** A `tool.check` result; `rule` is the settings rule that decided, absent for a mode or a tool's own check. */
+/** A `tool.check` result; `rule` is the settings rule that decided, absent for a tool's own check. */
 type Verdict = { decision: string; reason?: string; rule?: string } & Record<string, unknown>;
 /** A `prompt.submit` event; `origin` says who sent it (`{ kind: "plugin", name }` for another plugin's `$.prompt.submit`). */
 type PromptEvent = { command?: unknown; isMeta?: boolean; text: string; context?: readonly string[]; origin?: { kind?: string; name?: string } } & Record<string, unknown>;
@@ -130,10 +130,6 @@ type On = {
 /** The plugin options the engine passes to `register` (the manifest's `userConfig` values). */
 type Options = Partial<Record<string, unknown>>;
 
-/** The modes: `active` applies Jev's decisions, `off` disables the mod. */
-type Mode = "active" | "off";
-/** Every mode. */
-const MODES: readonly Mode[] = ["active", "off"];
 /** How many steps Jev may take in one turn. */
 const MAX_TAKES_PER_TURN = 3;
 /** The file tools whose writes into the session scratchpad are always allowed. */
@@ -145,8 +141,8 @@ const PLUGIN_NAME = "jevfort";
 /** The done check's follow-up message. */
 const DONE_PROMPT = "Jev: the user's request doesn't look finished yet. Continue with what remains. If it is actually complete, say so in one line.";
 
-/** Subagent statuses that mean the work is still going (the engine documents `running`, `completed`, `failed`, `killed` and others). */
-const ACTIVE = new Set(["running", "pending"]);
+/** Subagent statuses that mean the work is over (the engine documents `running`, `completed`, `failed`, `killed` and others); any other status counts as still going. */
+const FINISHED = new Set(["completed", "failed", "killed", "idle"]);
 
 /**
  * `String(v)` for a tool-input field, typed `unknown` so the lint's base-to-string check accepts a `?? ""` fallback.
@@ -155,21 +151,6 @@ const ACTIVE = new Set(["running", "pending"]);
  * @returns Its string form.
  */
 const asText = (v: unknown): string => String(v);
-
-/**
- * `/jev <mode>` stored in `$.store` wins over the configured mode. A stored value outside {@link MODES} (a legacy
- * retired mode) falls back to the configured one, an unknown configured value to `active`.
- *
- * @param $ - Engine interface.
- * @param configured - The `mode` option.
- * @returns The mode in force.
- */
-async function currentMode($: Engine, configured: unknown): Promise<Mode> {
-  const stored = await $.store.get("mode");
-  if (MODES.includes(stored as Mode)) return stored as Mode;
-  if (MODES.includes(configured as Mode)) return configured as Mode;
-  return "active";
-}
 
 /**
  * Asks Jev; never throws. Any failure is `{ ok: false }` so callers fall back to Claude Code's own behaviour. The
@@ -278,8 +259,8 @@ async function readTurn($: Engine, agentId?: string): Promise<TurnContext | unde
   const messages = await $.session.messages(agentId ? { agentId } : {});
   if (!Array.isArray(messages)) return undefined;
   // Jev's own done follow-up is not the user's request.
-  // shortcut: SessionMessage has no origin marker, so the synthetic message is matched by its text here only; a user quoting it loses that one message from the scored request.
-  return splitTurn(messages.filter((m) => !(m.role === "user" && m.text.includes(DONE_PROMPT))));
+  // shortcut: SessionMessage has no origin marker, so the synthetic message is matched by its exact text; a user sending exactly that text loses that one message from the scored request.
+  return splitTurn(messages.filter((m) => !(m.role === "user" && m.text.trim() === DONE_PROMPT)));
 }
 
 /**
@@ -535,18 +516,15 @@ async function blockSkill($: Engine, name: string): Promise<void> {
  *
  * @param $ - Engine interface.
  * @param e - The `turn.complete` event.
- * @param configuredMode - The configured `mode` option.
  * @param threshold - The `doneThreshold`: below this `done` probability the request counts as unfinished.
  * @returns Whether to send Claude back with a follow-up message.
  */
-async function checkDone($: Engine, e: TurnEnd, configuredMode: unknown, threshold: number): Promise<boolean> {
-  const m = await currentMode($, configuredMode);
-  if (m === "off") return false;
+async function checkDone($: Engine, e: TurnEnd, threshold: number): Promise<boolean> {
   // Waiting on background work (a subagent) is not stopping early: that work will wake the session when it finishes.
   // shortcut: background Bash commands are not exposed to $ (only subagents are), so waiting on one still triggers a follow-up; upgrade when the engine lists background tasks.
   const agents = await $.agent.list().catch(() => undefined);
   if (!agents) return false;
-  const waitingOn = agents.filter((a) => ACTIVE.has(a.status)).length;
+  const waitingOn = agents.filter((a) => !FINISHED.has(a.status)).length;
   if (waitingOn > 0) {
     await record($, { kind: "done", applied: false, text: `skipped: waiting on ${waitingOn} background task(s)`, data: { skipped: "background", continued: false } });
     return false;
@@ -581,7 +559,6 @@ async function checkDone($: Engine, e: TurnEnd, configuredMode: unknown, thresho
 export const register = (on: On, options: Options): void => {
   const routing = options.routing === "model" || options.routing === "off" ? options.routing : "effort";
   const takeSteps = options.takeSteps !== false;
-  const gate = options.gate !== false;
   const doneCheck = options.doneCheck !== false;
   const takeThreshold = typeof options.takeThreshold === "number" ? options.takeThreshold : 0.85;
   const subagents = options.subagents !== false;
@@ -593,10 +570,6 @@ export const register = (on: On, options: Options): void => {
     const v = options[key];
     return typeof v === "number" ? v : fallback;
   };
-  const gateThresholds: GateThresholds = {
-    dangerDeny: threshold("dangerDeny", 0.8),
-    scopeDeny: threshold("scopeDeny", 0.2),
-  };
   const doneThreshold = threshold("doneThreshold", 0.15);
 
   // Draws `/jev` output as Markdown, so the report's tables render as tables.
@@ -607,40 +580,42 @@ export const register = (on: On, options: Options): void => {
   });
 
   // The next main-loop turn after a done follow-up is exempt, so Jev sends Claude back at most once per request.
-  // Armed only by a prompt this plugin submitted itself (`origin`), cleared by any other prompt, so a user turn neither
-  // consumes nor inherits it and a user pasting the follow-up text triggers nothing. A hot reload forgets it: at worst one more follow-up.
+  // Armed only by a prompt this plugin submitted itself (`origin`), cleared by a user's own prompt (`composer`, not meta), so a
+  // user turn neither consumes nor inherits it, a user pasting the follow-up text triggers nothing, and a meta prompt in
+  // between (a background-task notification) does not re-open the follow-up turn to a second check. A hot reload forgets it: at worst one more follow-up.
   let donePending = false;
+  // Why the last follow-up failed to submit: its rejection arrives after the hook frame ended, so it is logged by the next turn.complete.
+  let lostFollowUp: string | undefined;
   // Phase 3: classify each prompt as it is sent and, when Jev is confident, add a short hint only Claude reads.
   // This one hook also notes Jev's own done follow-up passing through, which arms the exemption.
-  {
-    on("prompt.submit", async function onPromptSubmit($: Engine, e: PromptEvent, next: Next<PromptEvent, unknown>): Promise<unknown> {
-      donePending = e.origin?.kind === "plugin" && e.origin.name === PLUGIN_NAME;
-      if (donePending) return next(e);
-      if (options.classify === false || e.command || e.isMeta || e.text.trim().length < 3) return next(e);
-      const m = await currentMode($, options.mode);
-      if (m === "off") return next(e);
+  on("prompt.submit", async function onPromptSubmit($: Engine, e: PromptEvent, next: Next<PromptEvent, unknown>): Promise<unknown> {
+    if (e.origin?.kind === "plugin" && e.origin.name === PLUGIN_NAME) {
+      donePending = true;
+      return next(e);
+    }
+    if (e.origin?.kind === "composer" && !e.isMeta) donePending = false;
+    if (options.classify === false || e.command || e.isMeta || e.text.trim().length < 3) return next(e);
 
-      const questions = promptQuestions(await skillOptions($));
-      const previous = await previousReply($);
-      const r = await askJev($, { request: clip(e.text, 3000), ...(previous ? { previous_reply: previous } : {}) }, questions);
-      if (!r.ok) return next(e);
-      const kind = choice(r.answers, "kind");
-      const needsPlan = noul(r.answers, "needs_plan");
-      const skillAnswer = choice(r.answers, "skill");
-      const skill = skillAnswer ? { name: skillAnswer.choice, p: skillAnswer.probabilities[skillAnswer.choice] ?? 0 } : undefined;
-      const added = hints(kind?.choice, needsPlan, skill, takeThreshold);
+    const questions = promptQuestions(await skillOptions($));
+    const previous = await previousReply($);
+    const r = await askJev($, { request: clip(e.text, 3000), ...(previous ? { previous_reply: previous } : {}) }, questions);
+    if (!r.ok) return next(e);
+    const kind = choice(r.answers, "kind");
+    const needsPlan = noul(r.answers, "needs_plan");
+    const skillAnswer = choice(r.answers, "skill");
+    const skill = skillAnswer ? { name: skillAnswer.choice, p: skillAnswer.probabilities[skillAnswer.choice] ?? 0 } : undefined;
+    const added = hints(kind?.choice, needsPlan, skill, takeThreshold);
 
-      await record($, {
-        kind: "classify",
-        applied: added.length > 0,
-        text: `${kind?.choice ?? "?"}${needsPlan !== undefined ? `, plan ${needsPlan.toFixed(2)}` : ""}${skill && skill.name !== NONE ? `, skill ${skill.name} ${skill.p.toFixed(2)}` : ""}${added.length ? " → hint" : ""}`,
-        ms: r.ms,
-        data: { request: clip(e.text, 120), kind: kind?.choice, kindP: kind?.confidence, needsPlan, skill: skill?.name, skillP: skill?.p, hints: added.length },
-      });
-      if (!added.length) return next(e);
-      return next({ ...e, context: [...(e.context ?? []), ...added] });
+    await record($, {
+      kind: "classify",
+      applied: added.length > 0,
+      text: `${kind?.choice ?? "?"}${needsPlan !== undefined ? `, plan ${needsPlan.toFixed(2)}` : ""}${skill && skill.name !== NONE ? `, skill ${skill.name} ${skill.p.toFixed(2)}` : ""}${added.length ? " → hint" : ""}`,
+      ms: r.ms,
+      data: { request: clip(e.text, 120), kind: kind?.choice, kindP: kind?.confidence, needsPlan, skill: skill?.name, skillP: skill?.p, hints: added.length },
     });
-  }
+    if (!added.length) return next(e);
+    return next({ ...e, context: [...(e.context ?? []), ...added] });
+  });
 
   // Phase 3: when Claude starts a general-purpose subagent, Jev may pick a more specialised agent type.
   if (options.agentTypes !== false) {
@@ -653,9 +628,8 @@ export const register = (on: On, options: Options): void => {
     });
 
     on("tool.call", { tool: "Agent" }, async function onAgentCall($: Engine, e: AgentCall, next: Next<AgentCall, ToolResult>): Promise<ToolResult> {
-      const m = await currentMode($, options.mode);
       const claudeType = e.subagent_type ?? "";
-      if (m === "off" || offered.size < 2 || claudeType === "fork") return next(e);
+      if (offered.size < 2 || claudeType === "fork") return next(e);
 
       const criteria: Record<string, string | null> = {};
       for (const [name, description] of offered) criteria[name] = clip(description, 200);
@@ -684,8 +658,6 @@ export const register = (on: On, options: Options): void => {
   if (options.compaction !== false) {
     on("session.compact", async function onCompact($: Engine, e: CompactEvent, next: Next<CompactEvent, unknown>): Promise<unknown> {
       if (e.agentId || (e.trigger !== "manual" && e.trigger !== "auto")) return next(e);
-      const m = await currentMode($, options.mode);
-      if (m === "off") return next(e);
       const items = compactItems(e.messages);
       if (items.length < 3) return next(e);
 
@@ -717,22 +689,18 @@ export const register = (on: On, options: Options): void => {
   }
 
   const turns = new Map<string, { route?: Route; taken: number; bypassId?: string; bypassAction?: string }>();
-  // Calls Jev made itself skip the gate: their commands come from a vetted list.
+  // Calls Jev made itself: `tool.check` approves them, their commands come from a vetted list.
   const ownCalls = new Set<string>();
   on("session.start", async function onSessionStart($: Engine, e: unknown, next: Next<unknown, unknown>): Promise<unknown> {
     await $.command.register({
       name: "jev",
-      description: "Jev pilot: status, /jev report, /jev candidates, /jev export, /jev clear, or switch mode with /jev active|off",
+      description: "Jev pilot: status, /jev report, /jev candidates, /jev export, /jev clear",
     });
     return next(e);
   });
 
   on("command.run", { command: "jev" }, async function onJevCommand($: Engine, e: CommandEvent): Promise<{ text: string }> {
     const arg = e.args.trim();
-    if ((MODES as readonly string[]).includes(arg)) {
-      await $.store.set("mode", arg);
-      return { text: `Jev pilot mode: ${arg}` };
-    }
     if (arg === "report") {
       return { text: buildReport(await readLog($), takeThreshold) };
     }
@@ -777,7 +745,7 @@ export const register = (on: On, options: Options): void => {
       .map((d) => `- ${d.kind}${d.applied ? "" : " (pass)"}: ${d.text}${d.ms !== undefined ? ` [${Math.round(d.ms)}ms]` : ""}`);
     return {
       text: [
-        `Jev pilot: mode ${await currentMode($, options.mode)}, routing ${routing}, take steps ${takeSteps} (p ≥ ${takeThreshold}), gate ${gate}, done check ${doneCheck}, subagents ${subagents}`,
+        `Jev pilot: routing ${routing}, take steps ${takeSteps} (p ≥ ${takeThreshold}), done check ${doneCheck}, subagents ${subagents}`,
         `Decisions (all sessions): ${counts}`,
         lines.length ? `Recent:\n${lines.join("\n")}` : "No decisions this session yet.",
         "Full analysis: /jev report",
@@ -790,18 +758,22 @@ export const register = (on: On, options: Options): void => {
     if (e.reason === "aborted" || e.reason === "error") {
       await record($, { kind: "turn", applied: false, text: `turn ${e.reason}`, turnId: e.turnId, data: { reason: e.reason } });
     }
+    if (lostFollowUp !== undefined) {
+      await record($, { kind: "error", applied: false, text: `done follow-up not sent: ${lostFollowUp}` }).catch(() => undefined);
+      lostFollowUp = undefined;
+    }
     // Done check: runs here because cc-plugin-sec-default passes classic.Stop on past every user-tier hook.
     if (e.agentId === undefined) {
       const exempt = donePending;
       donePending = false;
       if (doneCheck && !exempt && e.reason === "answer") {
         try {
-          if (await checkDone($, e, options.mode, doneThreshold)) {
-            // Not awaited: it resolves only once the new turn starts, which waits for this turn to end.
+          if (await checkDone($, e, doneThreshold)) {
+            // Not awaited: it resolves only once the new turn starts, which waits for this turn to end. No `$` call in the
+            // rejection handler: it runs after this frame, so the next turn.complete logs the error in-frame.
             $.prompt.submit({ text: DONE_PROMPT }).catch((err: unknown) => {
               donePending = false;
-              // The frame may be over by now, so this is best effort.
-              void record($, { kind: "error", applied: false, text: `done follow-up not sent: ${String(err)}` }).catch(() => undefined);
+              lostFollowUp = String(err);
             });
           }
         } catch (err) {
@@ -830,8 +802,7 @@ export const register = (on: On, options: Options): void => {
   // model. One Jev request carries both. Every answer is logged; when Claude takes the step, its call is compared
   // with Jev's top action so the take threshold can be calibrated.
   on("turn.step", async function* onTurnStep($: Engine, e: Step, next: (e: Step) => StepRun): StepRun {
-    const m = await currentMode($, options.mode);
-    if (m === "off" || (e.agentId && !subagents)) return yield* next(e);
+    if (e.agentId && !subagents) return yield* next(e);
 
     const turn = turns.get(e.turnId) ?? { taken: 0 };
     turns.set(e.turnId, turn);
@@ -979,7 +950,7 @@ export const register = (on: On, options: Options): void => {
 
   // The scratchpad lookups, resolved once: neither the temp roots nor the session id change within a session.
   let scratchpad: { roots: string[]; sid: string } | undefined;
-  // Permission gate: never asks; only denies a dangerous Bash command the request does not ask for.
+  // Permission check: approves Jev's own vetted calls and writes into this session's scratchpad; every other verdict stays Claude Code's.
   on("tool.check", async function onToolCheck($: Engine, e: Check, next: Next<Check, Verdict>): Promise<Verdict> {
     const base = await next(e);
     // Jev's own calls come from the vetted candidate list: approve them so auto mode's classifier doesn't refuse
@@ -989,44 +960,17 @@ export const register = (on: On, options: Options): void => {
       return { ...base, decision: "allow", reason: "Jev pilot: vetted action from its read-only/project-script list" };
     }
     const input = (e.input ?? {}) as Record<string, unknown>;
-    // Writes into this session's scratchpad are allowed in every permission mode while jevfort is on, also with the gate off.
+    // Writes into this session's scratchpad are allowed in every permission mode.
     // A mode's ask becomes allow; a settings deny or ask rule (`rule` set) still wins.
     if (WRITE_TOOLS.has(e.tool) && base.decision !== "deny" && !(base.decision === "ask" && base.rule !== undefined)) {
-      if ((await currentMode($, options.mode)) !== "off") {
-        scratchpad ??= {
-          roots: [await $.env.get("CLAUDE_CODE_TMPDIR"), await $.env.get("TMPDIR"), "/tmp"].filter((r): r is string => Boolean(r)),
-          sid: await $.session.id(),
-        };
-        if (inScratchpad(asText(input.file_path ?? input.notebook_path ?? ""), scratchpad.sid, scratchpad.roots)) {
-          return { ...base, decision: "allow", reason: "jevfort: write inside this session's scratchpad" };
-        }
+      scratchpad ??= {
+        roots: [await $.env.get("CLAUDE_CODE_TMPDIR"), await $.env.get("TMPDIR"), "/tmp"].filter((r): r is string => Boolean(r)),
+        sid: await $.session.id(),
+      };
+      if (inScratchpad(asText(input.file_path ?? input.notebook_path ?? ""), scratchpad.sid, scratchpad.roots)) {
+        return { ...base, decision: "allow", reason: "jevfort: write inside this session's scratchpad" };
       }
     }
-    if (!gate || e.tool !== "Bash" || (base.decision !== "allow" && base.decision !== "ask") || !e.tool_use_id) return base;
-    const m = await currentMode($, options.mode);
-    if (m === "off") return base;
-    const ctx = await readTurn($, e.agentId);
-    const request = clip(ctx?.request ?? "", 3000);
-    const cwd = await $.session.cwd();
-
-    const r = await askJev(
-      $,
-      { request, command: asText(input.command ?? ""), cwd },
-      { risk: bashRiskQuestion, in_scope: inScopeQuestion("running the command in `command`") },
-    );
-    if (!r.ok) return base;
-    const risk = score(r.answers, "risk");
-    const inScope = noul(r.answers, "in_scope");
-    const denyReason = gateBash(risk, inScope, gateThresholds);
-    const decision = denyReason === undefined ? "allow" : "deny";
-    await record($, {
-      kind: "gate",
-      applied: denyReason !== undefined,
-      text: `${decision} Bash: ${clip(String(input.command), 50)}`,
-      ms: r.ms,
-      data: { tool: "Bash", target: clip(String(input.command), 200), decision, danger: risk?.probabilities["2"], inScope },
-    });
-    if (denyReason === undefined) return base;
-    return { ...base, decision: "deny", reason: denyReason };
+    return base;
   });
 };
