@@ -1,7 +1,7 @@
 ---
 id: F12
 title: Cheapen the watch list's per-file scope check (extension first, per-dir realpath cache)
-status: open
+status: done
 priority: medium
 area: universal-lint/src/hooks/lint-file.mts (watchList, scopedTarget, realish, isExcludedPath, watchPathsHandler)
 ---
@@ -10,7 +10,7 @@ area: universal-lint/src/hooks/lint-file.mts (watchList, scopedTarget, realish, 
 
 ## Status
 
-Open. Merges watch-filechanged finding (adjusted, medium; the proposed lstat-only variant was shown NOT semantics-preserving), real-sessions finding (confirmed, medium), static watchList finding (confirmed, medium) and the watch-filechanged missed items (SessionStart 30 s timeout on 9P; lstat-only repro).
+Done in 0.15.11. Shipped: `scopedTarget` checks the extension (`EXT_MAP`/`TYPE_CHECK_EXTS`, pure string work) right after `path.resolve`, before any filesystem call; every later step returns null or throws into null, so the result is unchanged for every caller. `watchList` passes a per-call memo through the existing `roots` argument (`roots.dirs`, lexical dirname -> `realish(dirname)`): each lintable entry costs one `lstatSync` (missing -> dropped; symlinked leaf -> today's full `realish`) plus one cached JS `realish` per distinct directory, and the redundant `existsSync` is skipped in that mode. PostToolUse, the skill driver and FileChanged call `scopedTarget` without `dirs`. The memo holds for one `watchList` call, so a directory replaced by a symlink during the scan keeps its earlier real path for the files after it (today each file re-resolves). Harmless: `watchPaths` is only the subscription list; every FileChanged re-runs `scopedTarget` without the memo before linting. Tests: `registry.test.mts` "scopedTarget: roots.dirs gives the same result as the plain call"; `file-detection.test.mts` SessionStart cases for an outside-symlinked directory (excluded), an inside-symlinked directory (lexical path kept) and escaping/dangling/inside leaf links plus a deleted tracked file. Identity: stdout and stderr byte-identical, 0.15.10 (committed build output of `f5934e0`) vs 0.15.11, on synthetic 2k, 5k (4,990 lintable), 12k (4,000 lintable), 20k and 50k (over the limit), 20k with 4,900 lintable, a depth-25 tree, an edge-case fixture (with and without a scratchpad inside cwd), this repo, and the 9P repos `/mnt/c/repos/blocky-dev`, `/mnt/c/repos/claude-plugins`, `/mnt/c/repos/copilot-qa-suite`. Measured (2026-11-08, SessionStart medians of 1 warm-up + 5 runs, base -> new): synthetic 12k 490 -> 139 ms (target ~250 ms: met); 20k with 4,900 lintable 735 -> 184 ms; blocky-dev 2190 -> 801 ms (target ~800 ms: met); claude-plugins 1033 -> 452 ms; `perf.mts` SessionStart fixture 48 -> 47 ms, this repo 64 -> 56 ms. The targets were derived from the `.native` variant; `.native` is a possible follow-up only with its own JS/native equivalence proof on 9P.
 
 ## Problem
 
@@ -30,7 +30,7 @@ Open. Merges watch-filechanged finding (adjusted, medium; the proposed lstat-onl
 ## Approach
 
 1. In `scopedTarget`, move the `EXT_MAP`/`TYPE_CHECK_EXTS` check before `realish` (pure string work; also helps PostToolUse/FileChanged on unsupported files).
-2. In `watchList` only: per call, memoize `realpathSync.native(dirname)` per directory; the file's real path is `join(dirReal, basename)` after one `lstatSync` (missing → drop; symlink leaf → full `scopedTarget`). Then apply the real-relative `isExcludedPath` and scratchpad checks as now.
+2. In `watchList` only: per call, memoize the JS `realish(dirname)` per directory (not `realpathSync.native`: native and JS realpath are not proven equivalent on 9P/case-insensitive mounts), passed to `scopedTarget` as `roots.dirs`; the file's real path is `join(dirReal, basename)` after one `lstatSync` (missing → drop; symlink leaf → full `realish`). Then apply the real-relative `isExcludedPath` and scratchpad checks as now.
 3. Re-derive the SessionStart/CwdChanged budget sentence in hook-design.md (F29).
 
 ## Verification

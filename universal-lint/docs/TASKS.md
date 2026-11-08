@@ -24,10 +24,10 @@ Legend: `[x]` finished. `[ ]` not finished; tag = `open` (code change, not start
 - [x] [F09](tasks/F09-bypass-npx-cached-bin.md) Spawn the cached npx bin directly instead of `npx --yes`. Shipped in 0.15.8.
 - [x] [F10](tasks/F10-filechanged-concurrency-cap.md) Cap concurrent FileChanged lints across hook processes (slot files). Shipped in 0.15.9.
 - [x] [F11](tasks/F11-persist-path-probes.md) Persist `onPath` probe results across hook processes. Shipped in 0.15.10. F28 (docs: the WSL PATH cost outside the plugin) stays open.
+- [x] [F12](tasks/F12-watchlist-scope-fast-path.md) Cheapen the watch list's per-file scope check (extension first, per-call directory realpath memo). Shipped in 0.15.11.
 
 ## Stage 2: structural changes
 
-- [ ] [F12](tasks/F12-watchlist-scope-fast-path.md) Cheapen the watch list's per-file scope check (extension first, per-dir realpath cache) `open` priority:medium
 - [ ] [F13](tasks/F13-dedup-whole-project-checks.md) Run tsc / go vet / cargo once per FileChanged burst, not once per file `open` priority:medium. After F10.
 - [ ] [F15](tasks/F15-rearm-watches-after-checkout.md) Re-arm FileChanged watches after `git checkout` (prototype first) `open` priority:medium. After F12 (re-emission multiplies watch-list cost).
 - [ ] [F16](tasks/F16-skill-driver-batching.md) Skill driver: one linter call per tool group and one tsc per tsconfig `open` priority:medium. After F03 and F09 (they remove most of today's cost).
@@ -48,7 +48,7 @@ Legend: `[x]` finished. `[ ]` not finished; tag = `open` (code change, not start
 ## Measurement and docs-only
 
 - [ ] [F28](tasks/F28-wsl-windows-path-docs.md) Document the WSL Windows-PATH penalty (mostly inside child processes) `docs-only` priority:medium. Pairs with F11.
-- [ ] [F29](tasks/F29-timeout-budget-docs.md) Timeout budget doc: cold Rust leaf crate, SessionStart on 9P `docs-only` priority:low. Re-derive again after F10/F13/F18.
+- [ ] [F29](tasks/F29-timeout-budget-docs.md) Timeout budget doc: cold Rust leaf crate, SessionStart on 9P `docs-only` priority:low. Re-derive again after F10/F12/F13/F18.
 - [ ] [F30](tasks/F30-go-rust-cost-model-docs.md) Document the Go/Rust cost model (scope, cold caches, bursts, gccgo PATH scan) `docs-only` priority:low
 - [ ] [F01](tasks/F01-measurement-baseline.md) F01 follow-ups (the harness itself is done, see Done): check whether the repo-explorer-mcp 0.10.3 project pin shadows the user-scope plugin, a burst case (N concurrent hook processes), live `claude -p --debug-file` runs, the `--import` preload for per-subprocess breakdowns `measurement-only` priority:low
 - [ ] [F32](tasks/F32-filechanged-echo-race.md) Measure how often the FileChanged echo of Claude's own write beats the digest `measurement-only` priority:low
@@ -60,7 +60,7 @@ Legend: `[x]` finished. `[ ]` not finished; tag = `open` (code change, not start
 - F02 + F03 together remove all false eslint findings seen in this analysis; F02 alone (the safety net) covers projects that have a config but no reachable binary. F04's walk from the file's directory fixes the sub-package case (91 of 128 historical pnpm findings).
 - F04 before F09: both rework the npx-fallback branch of `runLintTool`; F04 covers locally installed tools, F09 the npx-cache-only ones (markdown).
 - F11's savings and F04's are not additive for JS/TS: measured in F11 (0.15.9 -> 0.15.10, `perf.mts` medians, real PATH), `.mts` Write (local oxlint, F04 route) 387 -> 263 ms and `.ts` Write (tsc on PATH) 151 -> 141 ms, against `.sh`/`.py`/`.yml` (one missing PATH tool each) 142/144/146 -> 48/45/47 ms and `.md` 479 -> 292 ms; F28 documents the rest.
-- F08 (done) shortened the `watchList` loop; F12 still changes the per-file check inside it; F15 and F19 come after F12.
+- F08 (done) shortened the `watchList` loop; F12 (done) cheapened the per-file check inside it; F15 and F19 come after F12.
 - F10 before F13 (the slot cap bounds the peak; F13 removes redundant work inside it).
 - F03 and F09 before F16. F18 and F10/F13 change the timeout budget: update F29's text.
 - F27: add each test together with the task it guards (F04, F05, F10, F11, F18).
