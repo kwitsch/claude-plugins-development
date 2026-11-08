@@ -1289,10 +1289,13 @@ function buildSpawnOpts(cwd: string, timeout: number): SpawnSyncOptionsWithStrin
  * @param resolved - Absolute path of the edited file.
  * @param cwd - Project root.
  * @param rel - Path of the file relative to cwd.
+ * @param coalesce - FileChanged: run a directory- or crate-scoped tool (`go vet`, `golangci-lint`, `cargo`) through
+ *   `coalesceProjectCheck`, once per burst and package/crate; file-scoped tools always run.
  * @returns `ran`: a tool ran to a clean or issues verdict (false on no tool, guard
- *   failure, spawn error/signal or skip verdict); `finding`: the issues, else null.
+ *   failure, spawn error/signal or skip verdict); `finding`: the issues, else null. `{ ran: false, finding: null }`
+ *   also when `coalesceProjectCheck` skipped the run (a completed run already covers the file).
  */
-function runChainLint(lang: LangEntry, resolved: string, cwd: string, rel: string): { ran: boolean; finding: Finding | null } {
+function runChainLint(lang: LangEntry, resolved: string, cwd: string, rel: string, coalesce = false): { ran: boolean; finding: Finding | null } {
   const none = { ran: false, finding: null };
   const sel = selectLintTool(lang.chain, path.dirname(resolved), cwd);
   if (!sel) return none;
@@ -1315,8 +1318,11 @@ function runChainLint(lang: LangEntry, resolved: string, cwd: string, rel: strin
   // A local bin runs from its package root (the dir holding node_modules): eslint <= 9 resolves its flat config from the spawn cwd.
   const spawnCwd = sel.local ? path.join(sel.local, "../../..") : cwd;
   const spawnOpts = buildSpawnOpts(spawnCwd, timeout);
-  const result = runLintTool(tool, argv, spawnOpts, sel.local);
-  if (result.error || result.signal) return none;
+  const spawnTool = () => runLintTool(tool, argv, spawnOpts, sel.local);
+  // Directory- and crate-scoped tools check the whole package/crate: one run per FileChanged burst covers every file.
+  const key = coalesce ? (tool.targetsDir ? hashPath(`${tool.name}:${path.dirname(resolved)}`) : manifest ? hashPath(`${tool.name}:${manifest}`) : null) : null;
+  const result = key ? coalesceProjectCheck(key, resolved, timeout, spawnTool) : spawnTool();
+  if (!result || result.error || result.signal) return none;
 
   // Cargo entries are neither file-scoped nor targetsDir: the natural target
   // is the crate directory (the dir containing the resolved Cargo.toml). The
@@ -1378,9 +1384,11 @@ export function tscOutputHasSourceDiagnostic(text: string): boolean {
  *
  * @param resolved - Absolute path of the edited file.
  * @param cwd - Project root.
- * @returns The finding, or null.
+ * @param coalesce - FileChanged: run tsc through `coalesceProjectCheck`, once per burst and tsconfig.
+ * @returns The finding, or null (also when `coalesceProjectCheck` skipped the run because a completed run covers the
+ *   file).
  */
-function runTypeCheck(resolved: string, cwd: string): Finding | null {
+function runTypeCheck(resolved: string, cwd: string, coalesce = false): Finding | null {
   const tsconfigPath = resolveTsconfig(path.dirname(resolved), cwd);
   if (!tsconfigPath) return null;
 
@@ -1398,12 +1406,9 @@ function runTypeCheck(resolved: string, cwd: string): Finding | null {
   const localTsc = path.join(cwd, "node_modules", ".bin", "tsc");
   const bin = onPath("tsc") ? "tsc" : existsSync(localTsc) ? localTsc : null;
   if (!bin) return null;
-  const result = spawnSync(
-    bin,
-    ["--noEmit", "--incremental", "--tsBuildInfoFile", cachePath, "-p", tsconfigPath],
-    buildSpawnOpts(cwd, TSC_SPAWN_TIMEOUT_MS),
-  );
-  if (result.error || result.signal) return null;
+  const spawnTsc = () => spawnSync(bin, ["--noEmit", "--incremental", "--tsBuildInfoFile", cachePath, "-p", tsconfigPath], buildSpawnOpts(cwd, TSC_SPAWN_TIMEOUT_MS));
+  const result = coalesce ? coalesceProjectCheck(hashPath(`tsc:${tsconfigPath}`), resolved, TSC_SPAWN_TIMEOUT_MS, spawnTsc) : spawnTsc();
+  if (!result || result.error || result.signal) return null;
   if (classifyExit("tsc", result.status) !== "issues") return null;
 
   const text = `${result.stdout ?? ""}\n${result.stderr ?? ""}`;
@@ -1740,12 +1745,14 @@ function recordWrittenFor(s: { fp: string; real: string } | null): void {
  * @param resolved - Lexical absolute path of the in-scope file.
  * @param cwd - Payload cwd (spawn cwd and config search root).
  * @param ranges - Edited line ranges, or null when the whole file counts.
- * @param hookEventName - `hookSpecificOutput.hookEventName` of the result.
+ * @param hookEventName - `hookSpecificOutput.hookEventName` of the result. `hookEventName === "FileChanged"` also
+ *   enables `coalesceProjectCheck` for the whole-project check.
  * @param label - Prefix of the findings text (`<label>: <findings>`).
  * @returns The hook result: findings as additionalContext, or an empty object.
  */
 function lintResolved(resolved: string, cwd: string, ranges: Array<[number, number]> | null, hookEventName: string, label: string): HookResult {
   const rel = path.relative(cwd, resolved);
+  const coalesce = hookEventName === "FileChanged";
   const ext = path.extname(resolved).toLowerCase();
   const lang = EXT_MAP[ext];
   const typeCheckEligible = TYPE_CHECK_EXTS.has(ext);
@@ -1761,13 +1768,13 @@ function lintResolved(resolved: string, cwd: string, ranges: Array<[number, numb
     // -c makes the detected config oxlint's root: oxlint ignores a nested
     // oxlint.config.ts and rejects options.typeAware in a nested config otherwise.
     const entry = oxlintConfig ? { chain: REGISTRY.oxlint.chain.map((t) => ({ ...t, args: [...t.args, "-c", oxlintConfig] })) } : REGISTRY[lang];
-    const chain = runChainLint(entry, resolved, cwd, rel);
+    const chain = runChainLint(entry, resolved, cwd, rel, coalesce);
     if (chain.finding) findings.push(chain.finding);
     oxlintRan = oxlintConfig !== null && chain.ran;
   }
   // Skip tsc only when oxlint actually ran with a typeCheck config; otherwise tsc is the only type check.
   if (typeCheckEligible && !(oxlintRan && oxlintConfig && oxlintConfigTypeChecks(oxlintConfig))) {
-    const tsResult = runTypeCheck(resolved, cwd);
+    const tsResult = runTypeCheck(resolved, cwd, coalesce);
     if (tsResult) findings.push(tsResult);
   }
   // Gate before truncate() so the context budget is spent on in-range text.
@@ -1943,8 +1950,9 @@ export function coalesceProjectCheck(key: string, file: string, reserveMs: numbe
  * wins: `unlink` event; out of scope (`scopedTarget`); content still equal to the digest Write/Edit recorded; git says
  * ignored (`!!`) or unchanged (empty status). A git failure (no git, not a repo, timeout) lints. Then waits for one of
  * `FILE_CHANGED_SLOTS` cross-process slots (`acquireSlot`) until `FILE_CHANGED_BUDGET_MS` minus the file's lint
- * budget; no slot in time skips with a stderr note; a slot error lints without a slot. Returns {} for every skip and on
- * any error (fail open).
+ * budget; no slot in time skips with a stderr note; a slot error lints without a slot. Inside `lintResolved` the
+ * whole-project check (tsc, go vet/golangci-lint, cargo) runs through `coalesceProjectCheck`: once per burst and project
+ * (F13). Returns {} for every skip and on any error (fail open).
  *
  * @param args - The FileChanged hook payload.
  * @returns The hook result: findings as additionalContext, or an empty object.

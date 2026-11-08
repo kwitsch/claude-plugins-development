@@ -641,7 +641,7 @@ function buildSpawnOpts(cwd, timeout) {
 		maxBuffer: MAX_BUFFER_BYTES
 	};
 }
-function runChainLint(lang, resolved, cwd, rel) {
+function runChainLint(lang, resolved, cwd, rel, coalesce = false) {
 	const none = {
 		ran: false,
 		finding: null
@@ -658,8 +658,10 @@ function runChainLint(lang, resolved, cwd, rel) {
 	const timeout = tool.manifestPath ? CARGO_SPAWN_TIMEOUT_MS : SPAWN_TIMEOUT_MS;
 	const spawnCwd = sel.local ? path.join(sel.local, "../../..") : cwd;
 	const spawnOpts = buildSpawnOpts(spawnCwd, timeout);
-	const result = runLintTool(tool, argv, spawnOpts, sel.local);
-	if (result.error || result.signal) return none;
+	const spawnTool = () => runLintTool(tool, argv, spawnOpts, sel.local);
+	const key = coalesce ? tool.targetsDir ? hashPath(`${tool.name}:${path.dirname(resolved)}`) : manifest ? hashPath(`${tool.name}:${manifest}`) : null : null;
+	const result = key ? coalesceProjectCheck(key, resolved, timeout, spawnTool) : spawnTool();
+	if (!result || result.error || result.signal) return none;
 	const target = tool.targetsDir ? path.relative(cwd, path.dirname(resolved)) || "." : manifest ? path.relative(cwd, path.dirname(manifest)) || "." : rel;
 	let verdict;
 	let text;
@@ -689,7 +691,7 @@ export function tscOutputHasSourceDiagnostic(text) {
 	const plain = text.replace(ANSI_SGR_RE, "");
 	return TSC_SOURCE_DIAGNOSTIC_RE.test(plain);
 }
-function runTypeCheck(resolved, cwd) {
+function runTypeCheck(resolved, cwd, coalesce = false) {
 	const tsconfigPath = resolveTsconfig(path.dirname(resolved), cwd);
 	if (!tsconfigPath) return null;
 	const cachePath = tsBuildInfoPathFor(tsconfigPath);
@@ -701,7 +703,7 @@ function runTypeCheck(resolved, cwd) {
 	const localTsc = path.join(cwd, "node_modules", ".bin", "tsc");
 	const bin = onPath("tsc") ? "tsc" : existsSync(localTsc) ? localTsc : null;
 	if (!bin) return null;
-	const result = spawnSync(bin, [
+	const spawnTsc = () => spawnSync(bin, [
 		"--noEmit",
 		"--incremental",
 		"--tsBuildInfoFile",
@@ -709,7 +711,8 @@ function runTypeCheck(resolved, cwd) {
 		"-p",
 		tsconfigPath
 	], buildSpawnOpts(cwd, TSC_SPAWN_TIMEOUT_MS));
-	if (result.error || result.signal) return null;
+	const result = coalesce ? coalesceProjectCheck(hashPath(`tsc:${tsconfigPath}`), resolved, TSC_SPAWN_TIMEOUT_MS, spawnTsc) : spawnTsc();
+	if (!result || result.error || result.signal) return null;
 	if (classifyExit("tsc", result.status) !== "issues") return null;
 	const text = `${result.stdout ?? ""}\n${result.stderr ?? ""}`;
 	if (result.status === 1 && !tscOutputHasSourceDiagnostic(text)) return null;
@@ -900,6 +903,7 @@ function recordWrittenFor(s) {
 }
 function lintResolved(resolved, cwd, ranges, hookEventName, label) {
 	const rel = path.relative(cwd, resolved);
+	const coalesce = hookEventName === "FileChanged";
 	const ext = path.extname(resolved).toLowerCase();
 	const lang = EXT_MAP[ext];
 	const typeCheckEligible = TYPE_CHECK_EXTS.has(ext);
@@ -917,12 +921,12 @@ function lintResolved(resolved, cwd, ranges, hookEventName, label) {
 				oxlintConfig
 			]
 		})) } : REGISTRY[lang];
-		const chain = runChainLint(entry, resolved, cwd, rel);
+		const chain = runChainLint(entry, resolved, cwd, rel, coalesce);
 		if (chain.finding) findings.push(chain.finding);
 		oxlintRan = oxlintConfig !== null && chain.ran;
 	}
 	if (typeCheckEligible && !(oxlintRan && oxlintConfig && oxlintConfigTypeChecks(oxlintConfig))) {
-		const tsResult = runTypeCheck(resolved, cwd);
+		const tsResult = runTypeCheck(resolved, cwd, coalesce);
 		if (tsResult) findings.push(tsResult);
 	}
 	const kept = findings.flatMap((f) => {
