@@ -28,7 +28,7 @@ import { execFileSync, spawnSync } from "node:child_process";
 import type { SpawnSyncOptionsWithStringEncoding, SpawnSyncReturns } from "node:child_process";
 import { createHash } from "node:crypto";
 import { accessSync, constants as fsConstants, existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
-import { homedir, tmpdir } from "node:os";
+import { availableParallelism, homedir, tmpdir } from "node:os";
 import path from "node:path";
 import process from "node:process";
 import { json } from "node:stream/consumers";
@@ -71,6 +71,19 @@ export const WATCH_LIMIT = 5000;
 
 /** Budget of each git call (ls-files for the watch list, status for the FileChanged gate). */
 const GIT_TIMEOUT_MS = 10000;
+
+/**
+ * hooks.json `timeout` of PostToolUse and FileChanged (90 s), the backstop that kills a hook process; a slot file whose
+ * mtime is this far from now (past or future) was left by a killed holder or survived a clock jump. Re-derive with
+ * hook-design.md "Timeout budget" when hooks.json changes.
+ */
+const HOOK_TIMEOUT_MS = 90000;
+
+/**
+ * Concurrent FileChanged lints across all hook processes sharing one plugin data dir (3 on 12 cores, at least 2).
+ * Exported for the tests.
+ */
+export const FILE_CHANGED_SLOTS = Math.max(2, Math.floor(availableParallelism() / 4));
 
 /** tsc only understands real TypeScript syntax; .js/.jsx/.mjs/.cjs get only the chain lint (eslint or oxlint, see lintResolved), none without a lint config. */
 const TYPE_CHECK_EXTS = new Set([".ts", ".tsx", ".mts", ".cts"]);
@@ -1669,6 +1682,59 @@ export function lintFileHandler(args: PostToolUseHookInput, scoped: { fp: string
     return lintResolved(resolved, args.cwd, ranges, "PostToolUse", "universal-lint");
   } catch {
     return {};
+  }
+}
+
+/**
+ * Whether a FileChanged slot file may be removed: stale when its mtime is `HOOK_TIMEOUT_MS` (90 s) or more ago, or
+ * `HOOK_TIMEOUT_MS` or more in the future (clock jumped back, synced data dir), or its pid no longer exists
+ * (`process.kill(pid, 0)` throws ESRCH). Held: pid alive, EPERM (alive, another user's process), or an empty or
+ * unparsable pid (a holder between its `wx` create and its write, or a garbage file; the mtime decides). A missing or
+ * unreadable slot is not stale (the following `wx` create decides).
+ *
+ * @param slot - Slot file path.
+ * @returns True when the slot may be removed; false when held, missing or unreadable.
+ */
+function slotStale(slot: string): boolean {
+  try {
+    // Both directions: a fresh slot's sub-ms mtime can be ahead of integer Date.now(); the pid check covers small clock jumps.
+    if (Math.abs(Date.now() - lstatSync(slot).mtimeMs) >= HOOK_TIMEOUT_MS) return true;
+    const pid = Number(readFileSync(slot, "utf8"));
+    if (Number.isInteger(pid) && pid > 0) process.kill(pid, 0);
+    return false;
+  } catch (e) {
+    return (e as NodeJS.ErrnoException).code === "ESRCH";
+  }
+}
+
+/**
+ * Claim one of `FILE_CHANGED_SLOTS` cross-process FileChanged slots: `${CLAUDE_PLUGIN_DATA || tmpdir()}/fc-slots/<i>`,
+ * created exclusively (`wx`) holding this pid, after removing the slot when `slotStale` says so. While every slot is
+ * held, sleeps 100 ms (`Atomics.wait`, no busy loop) between rounds until `process.uptime()` reaches `untilMs`; one
+ * full round over all slots is always tried first, so `acquireSlot(0)` tries once without waiting.
+ *
+ * @param untilMs - Process uptime (ms) after which waiting gives up.
+ * @returns The held slot file (the caller removes it), or null when none came free in time.
+ * @throws On any slot error other than a held slot (EEXIST); the caller then lints without a slot (fail open).
+ */
+export function acquireSlot(untilMs: number): string | null {
+  const dir = path.resolve(process.env.CLAUDE_PLUGIN_DATA || tmpdir(), "fc-slots");
+  mkdirSync(dir, { recursive: true });
+  const tick = new Int32Array(new SharedArrayBuffer(4));
+  for (;;) {
+    for (let i = 0; i < FILE_CHANGED_SLOTS; i++) {
+      const slot = path.join(dir, String(i));
+      // A waiter racing this removal can delete a slot just re-created: one extra lint for a moment (accepted).
+      if (slotStale(slot)) rmSync(slot, { force: true });
+      try {
+        writeFileSync(slot, String(process.pid), { flag: "wx" });
+        return slot;
+      } catch (e) {
+        if ((e as NodeJS.ErrnoException).code !== "EEXIST") throw e;
+      }
+    }
+    if (process.uptime() * 1000 >= untilMs) return null;
+    Atomics.wait(tick, 0, 0, 100);
   }
 }
 

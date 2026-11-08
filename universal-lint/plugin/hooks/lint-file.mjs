@@ -2,7 +2,7 @@
 import { execFileSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { accessSync, constants as fsConstants, existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
-import { homedir, tmpdir } from "node:os";
+import { availableParallelism, homedir, tmpdir } from "node:os";
 import path from "node:path";
 import process from "node:process";
 import { json } from "node:stream/consumers";
@@ -16,6 +16,8 @@ const TSC_SPAWN_TIMEOUT_MS = 45e3;
 const CARGO_SPAWN_TIMEOUT_MS = 45e3;
 export const WATCH_LIMIT = 5e3;
 const GIT_TIMEOUT_MS = 1e4;
+const HOOK_TIMEOUT_MS = 9e4;
+export const FILE_CHANGED_SLOTS = Math.max(2, Math.floor(availableParallelism() / 4));
 const TYPE_CHECK_EXTS = new Set([
 	".ts",
 	".tsx",
@@ -875,6 +877,35 @@ export function lintFileHandler(args, scoped = postToolScope(args)) {
 		return lintResolved(resolved, args.cwd, ranges, "PostToolUse", "universal-lint");
 	} catch {
 		return {};
+	}
+}
+function slotStale(slot) {
+	try {
+		if (Math.abs(Date.now() - lstatSync(slot).mtimeMs) >= HOOK_TIMEOUT_MS) return true;
+		const pid = Number(readFileSync(slot, "utf8"));
+		if (Number.isInteger(pid) && pid > 0) process.kill(pid, 0);
+		return false;
+	} catch (e) {
+		return e.code === "ESRCH";
+	}
+}
+export function acquireSlot(untilMs) {
+	const dir = path.resolve(process.env.CLAUDE_PLUGIN_DATA || tmpdir(), "fc-slots");
+	mkdirSync(dir, { recursive: true });
+	const tick = new Int32Array(new SharedArrayBuffer(4));
+	for (;;) {
+		for (let i = 0; i < FILE_CHANGED_SLOTS; i++) {
+			const slot = path.join(dir, String(i));
+			if (slotStale(slot)) rmSync(slot, { force: true });
+			try {
+				writeFileSync(slot, String(process.pid), { flag: "wx" });
+				return slot;
+			} catch (e) {
+				if (e.code !== "EEXIST") throw e;
+			}
+		}
+		if (process.uptime() * 1e3 >= untilMs) return null;
+		Atomics.wait(tick, 0, 0, 100);
 	}
 }
 export function fileChangedHandler(args) {

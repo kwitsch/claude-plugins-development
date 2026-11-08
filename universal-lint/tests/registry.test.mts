@@ -1,11 +1,12 @@
 // Unit tests of the exports of the built plugin/hooks/lint-file.mjs (ported from test/universal-lint/registry.test.mjs).
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "vitest";
-import { buildArgv, classifyCheckstyleOutput, classifyExit, editRanges, gateFinding, hashPath, hasProjectMarkdownlintConfig, hasProjectYamllintConfig, isExcludedPath, isToolAvailable, lintFileHandler, looksLikeSolutionStyleTsconfig, oxlintConfigTypeChecks, recordWritten, REGISTRY, resolveCargoManifest, resolveCheckstyleConfig, resolveLintTarget, resolveOxlintConfig, resolveTsconfig, scopedTarget, stripTrailingCommas, truncate, tsBuildInfoPathFor, tscOutputHasSourceDiagnostic, WATCH_LIMIT } from "../plugin/hooks/lint-file.mjs";
+import { acquireSlot, buildArgv, classifyCheckstyleOutput, classifyExit, editRanges, FILE_CHANGED_SLOTS, gateFinding, hashPath, hasProjectMarkdownlintConfig, hasProjectYamllintConfig, isExcludedPath, isToolAvailable, lintFileHandler, looksLikeSolutionStyleTsconfig, oxlintConfigTypeChecks, recordWritten, REGISTRY, resolveCargoManifest, resolveCheckstyleConfig, resolveLintTarget, resolveOxlintConfig, resolveTsconfig, scopedTarget, stripTrailingCommas, truncate, tsBuildInfoPathFor, tscOutputHasSourceDiagnostic, WATCH_LIMIT } from "../plugin/hooks/lint-file.mjs";
 
 const shellcheck = REGISTRY.shell.chain[0];
 const checkstyle = REGISTRY.java.chain[0];
@@ -316,6 +317,66 @@ test("tsBuildInfoPathFor: falls back to the OS temp dir (not cwd/'.') when CLAUD
   } finally {
     if (prev !== undefined) process.env.CLAUDE_PLUGIN_DATA = prev;
   }
+});
+
+/**
+ * Run `fn` with CLAUDE_PLUGIN_DATA set to a fresh temp dir, restoring the previous value afterwards.
+ *
+ * @param fn - Test body; receives the data dir.
+ */
+function withDataDir(fn: (dataDir: string) => void): void {
+  const dataDir = mkdtempSync(path.join(tmpdir(), "ul-data-"));
+  const prev = process.env.CLAUDE_PLUGIN_DATA;
+  process.env.CLAUDE_PLUGIN_DATA = dataDir;
+  try {
+    fn(dataDir);
+  } finally {
+    if (prev === undefined) delete process.env.CLAUDE_PLUGIN_DATA;
+    else process.env.CLAUDE_PLUGIN_DATA = prev;
+  }
+}
+
+/**
+ * Path of slot `i` under `dataDir`, as acquireSlot builds it.
+ *
+ * @param dataDir - Plugin data dir.
+ * @param i - Slot index.
+ * @returns The slot file path.
+ */
+const slotPath = (dataDir: string, i: number) => path.join(path.resolve(dataDir), "fc-slots", String(i));
+
+test("acquireSlot: takes free slots holding this pid; a live pid with an mtime under 90 s in the future and an empty slot count as held; gives up after one round when all are held (F10)", () => {
+  withDataDir((dataDir) => {
+    for (let i = 0; i < FILE_CHANGED_SLOTS; i++) {
+      assert.equal(acquireSlot(0), slotPath(dataDir, i));
+      assert.equal(readFileSync(slotPath(dataDir, i), "utf8"), String(process.pid));
+    }
+    assert.equal(acquireSlot(0), null);
+    const future = new Date(Date.now() + 60000);
+    utimesSync(slotPath(dataDir, 1), future, future);
+    assert.equal(acquireSlot(0), null);
+    writeFileSync(slotPath(dataDir, 0), "");
+    assert.equal(acquireSlot(0), null);
+  });
+});
+
+test.each([
+  ["a dead pid", (slot: string) => writeFileSync(slot, String(spawnSync(process.execPath, ["-e", "0"]).pid))],
+  ["an mtime 91 s old", (slot: string) => {
+    const d = new Date(Date.now() - 91000);
+    utimesSync(slot, d, d);
+  }],
+  ["an mtime 91 s in the future", (slot: string) => {
+    const d = new Date(Date.now() + 91000);
+    utimesSync(slot, d, d);
+  }],
+])("acquireSlot: reclaims a slot whose pid is dead or whose mtime is at least 90 s old or at least 90 s in the future (F10): %s", (_label, makeStale) => {
+  withDataDir((dataDir) => {
+    for (let i = 0; i < FILE_CHANGED_SLOTS; i++) assert.notEqual(acquireSlot(0), null);
+    makeStale(slotPath(dataDir, 0));
+    assert.equal(acquireSlot(0), slotPath(dataDir, 0));
+    assert.equal(readFileSync(slotPath(dataDir, 0), "utf8"), String(process.pid));
+  });
 });
 
 test("REGISTRY: yaml/markdown chain entries carry their line-length guard flags", () => {
