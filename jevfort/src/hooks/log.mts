@@ -6,7 +6,7 @@
  */
 
 /** What a decision was about. */
-export type Kind = "take" | "compare" | "route" | "done" | "outcome" | "turn" | "bypass" | "classify" | "agent" | "compact" | "error";
+export type Kind = "take" | "compare" | "route" | "done" | "outcome" | "turn" | "bypass" | "classify" | "agent" | "compact" | "estimate" | "error";
 
 /** One logged decision. */
 export type Entry = {

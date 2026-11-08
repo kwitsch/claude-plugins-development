@@ -79,6 +79,15 @@ const step = { turnId: "t1", index: 0, model: "claude-opus-5-5", effort: "high",
 
 const easy = { type: "score", score: 0.2, probabilities: { "0": 0.85, "1": 0.1, "2": 0.05, "3": 0 }, confidence: 0.8 };
 
+// A Jev score answer; a mechanical (noul) answer; the question ids of the i-th Jev request; Jev answers in request order (the last repeats, a number is an HTTP error status).
+const scored = (score: number, confidence = 0.9) => ({ type: "score", score, probabilities: {}, confidence });
+const mech = (p: number) => ({ type: "noul", noul: p });
+const questionKeys = (sent: Record<string, unknown>[], i: number) => Object.keys((sent[i] as { questions: object }).questions);
+const inOrder = (...answers: (Record<string, unknown> | number)[]): Jev => {
+  let n = 0;
+  return () => answers[Math.min(n++, answers.length - 1)];
+};
+
 async function drain(stream: AsyncGenerator<unknown, unknown>) {
   const chunks: Chunk[] = [];
   for (;;) {
@@ -572,4 +581,53 @@ test("There is no mode: a stored legacy mode is ignored and /jev off is no comma
   await drain($.turn.step(step));
   expect(urls).toHaveLength(1);
   expect(seen).toHaveLength(1);
+});
+
+// The estimate_effort tool: registered at session.start, answered by the unmatched tool.call hook on every call.
+test("session.start registers estimate_effort", async ($, on) => {
+  setup(on, { messages: [], jev: () => ({}) });
+  const registered: Record<string, unknown>[] = [];
+  on("command.register", async () => ({ value: undefined }));
+  on("tool.register", async (_$, e) => {
+    registered.push(e);
+    return { value: { tool: "mcp__jevfort__estimate_effort" } };
+  });
+  on("session.start", async () => ({}));
+  await $.session.start({ cwd: CWD, surface: "terminal", isInteractive: true });
+  expect(registered).toHaveLength(1);
+  expect(registered[0]).toMatchObject({
+    name: "estimate_effort",
+    inputSchema: { properties: { model: { enum: ["haiku", "sonnet", "opus", "fable"] } }, required: ["model", "defaultEffort", "minEffort", "maxEffort", "prompt"] },
+  });
+});
+
+const ESTIMATE = { tool: "mcp__jevfort__estimate_effort", model: "opus", defaultEffort: "high", minEffort: "low", maxEffort: "xhigh", prompt: "add a retry to the HTTP client" };
+const estimateCall = async ($: Runner, input: Record<string, unknown> = {}) => (await $.tool.call({ ...ESTIMATE, ...input })) as { result?: string; isError?: boolean };
+
+test("estimate_effort returns Jev's estimate with the model bias", async ($, on) => {
+  const { sent } = setup(on, { messages: [], jev: () => ({ effort: scored(1.6), mechanical: mech(0.1) }) });
+  expect(await estimateCall($)).toEqual({ result: JSON.stringify({ effort: "medium", source: "jev" }) });
+  expect(questionKeys(sent, 0)).toEqual(["effort", "mechanical"]);
+  expect((sent[0] as { state: { request: string } }).state.request).toBe(ESTIMATE.prompt);
+});
+
+test("estimate_effort falls back to defaultEffort when Jev is unreachable", async ($, on) => {
+  setup(on, { messages: [], jev: () => 401 });
+  expect(await estimateCall($)).toEqual({ result: JSON.stringify({ effort: "high", source: "fallback" }) });
+  expect(await runJev($, "")).toContain("estimate (pass): opus: high (fallback, HTTP 401)");
+});
+
+test("estimate_effort rejects invalid input without asking Jev", async ($, on) => {
+  const { sent } = setup(on, { messages: [], jev: () => ({ effort: scored(1.6) }) });
+  expect(await estimateCall($, { model: "gpt" })).toEqual({ isError: true, result: "estimate_effort: model must be one of haiku, sonnet, opus, fable" });
+  expect(await estimateCall($, { minEffort: "high", maxEffort: "low" })).toEqual({ isError: true, result: "estimate_effort: minEffort must not be above maxEffort" });
+  expect(sent).toHaveLength(0);
+});
+
+test("estimate_effort estimates on every call, also for haiku", async ($, on) => {
+  const { sent } = setup(on, { messages: [], jev: inOrder({ effort: scored(0.2) }, { effort: scored(3), mechanical: mech(0.9) }) });
+  expect(await estimateCall($, { model: "haiku" })).toEqual({ result: JSON.stringify({ effort: "medium", source: "jev" }) });
+  expect(await estimateCall($, { model: "haiku" })).toEqual({ result: JSON.stringify({ effort: "low", source: "mechanical" }) });
+  expect(questionKeys(sent, 0)).toEqual(["effort", "mechanical"]);
+  expect(questionKeys(sent, 1)).toEqual(["effort", "mechanical"]);
 });
