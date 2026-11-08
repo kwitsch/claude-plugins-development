@@ -208,12 +208,29 @@ test("A follow-up that failed to submit exempts nothing", { options: { classify:
   });
   await $.turn.complete(answered("t1", "One file only."));
   await expect.poll(() => sent.length).toBe(1);
-  // The submit was rejected, so the next turn is checked again.
+  // The submit was rejected, so the next turn is checked again, and logs the lost follow-up in its own frame.
   await $.turn.complete(answered("t2", "Still one file."));
   expect(sent).toHaveLength(2);
+  expect(await runJev($, "")).toContain("done follow-up not sent");
 });
 
-for (const [status, asked] of [["completed", 1], ["failed", 1], ["killed", 1], ["idle", 1], ["running", 0], ["pending", 0]] as const) {
+test("A meta prompt between the follow-up and its turn keeps the exemption", { options: { classify: false } }, async ($, on) => {
+  const { sent } = setup(on, { messages: [user("rename foo to bar in all files")], jev: () => ({ done: { type: "noul", noul: 0.04 } }) });
+  followUps(on);
+  await ownSubmit($);
+  await $.prompt.submit({ text: "<task-notification>done</task-notification>", wait: false, isMeta: true, origin: { kind: "system" } });
+  await $.turn.complete(answered("t1", "Done."));
+  expect(sent).toHaveLength(0);
+});
+
+test("A user message quoting the follow-up text stays the scored request", { options: { classify: false } }, async ($, on) => {
+  const { sent } = setup(on, { messages: [user(`${FOLLOW_UP} Also rename baz.`)], jev: () => ({ done: { type: "noul", noul: 0.9 } }) });
+  followUps(on);
+  await $.turn.complete(answered("t1", "Renamed."));
+  expect((sent[0] as { state: { request: string } }).state.request).toContain("rename baz");
+});
+
+for (const [status, asked] of [["completed", 1], ["failed", 1], ["killed", 1], ["idle", 1], ["running", 0], ["pending", 0], ["starting", 0]] as const) {
   test(`The done check with a ${status} subagent asks Jev ${asked} time(s)`, async ($, on) => {
     const { sent } = setup(on, { messages: [user("rename foo to bar in all files")], jev: () => ({ done: { type: "noul", noul: 0.04 } }), agents: [{ status }] });
     followUps(on);

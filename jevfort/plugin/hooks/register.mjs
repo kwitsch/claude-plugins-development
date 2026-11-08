@@ -17,7 +17,12 @@ const WRITE_TOOLS = new Set([
 const SINGLE_ACTION = .8;
 const PLUGIN_NAME = "jevfort";
 const DONE_PROMPT = "Jev: the user's request doesn't look finished yet. Continue with what remains. If it is actually complete, say so in one line.";
-const ACTIVE = new Set(["running", "pending"]);
+const FINISHED = new Set([
+	"completed",
+	"failed",
+	"killed",
+	"idle"
+]);
 const asText = (v) => String(v);
 async function askJev($, state, questions) {
 	const startedAt = await $.clock.now();
@@ -109,7 +114,7 @@ async function clearLog($) {
 async function readTurn($, agentId) {
 	const messages = await $.session.messages(agentId ? { agentId } : {});
 	if (!Array.isArray(messages)) return undefined;
-	return splitTurn(messages.filter((m) => !(m.role === "user" && m.text.includes(DONE_PROMPT))));
+	return splitTurn(messages.filter((m) => !(m.role === "user" && m.text.trim() === DONE_PROMPT)));
 }
 async function previousReply($) {
 	const messages = await $.session.messages({}).catch(() => undefined);
@@ -302,7 +307,7 @@ async function blockSkill($, name) {
 async function checkDone($, e, threshold) {
 	const agents = await $.agent.list().catch(() => undefined);
 	if (!agents) return false;
-	const waitingOn = agents.filter((a) => ACTIVE.has(a.status)).length;
+	const waitingOn = agents.filter((a) => !FINISHED.has(a.status)).length;
 	if (waitingOn > 0) {
 		await record($, {
 			kind: "done",
@@ -360,9 +365,13 @@ export const register = (on, options) => {
 		return Markdown({ text: e.props.text });
 	});
 	let donePending = false;
+	let lostFollowUp;
 	on("prompt.submit", async function onPromptSubmit($, e, next) {
-		donePending = e.origin?.kind === "plugin" && e.origin.name === PLUGIN_NAME;
-		if (donePending) return next(e);
+		if (e.origin?.kind === "plugin" && e.origin.name === PLUGIN_NAME) {
+			donePending = true;
+			return next(e);
+		}
+		if (e.origin?.kind === "composer" && !e.isMeta) donePending = false;
 		if (options.classify === false || e.command || e.isMeta || e.text.trim().length < 3) return next(e);
 		const questions = promptQuestions(await skillOptions($));
 		const previous = await previousReply($);
@@ -547,6 +556,14 @@ export const register = (on, options) => {
 				data: { reason: e.reason }
 			});
 		}
+		if (lostFollowUp !== undefined) {
+			await record($, {
+				kind: "error",
+				applied: false,
+				text: `done follow-up not sent: ${lostFollowUp}`
+			}).catch(() => undefined);
+			lostFollowUp = undefined;
+		}
 		if (e.agentId === undefined) {
 			const exempt = donePending;
 			donePending = false;
@@ -555,11 +572,7 @@ export const register = (on, options) => {
 					if (await checkDone($, e, doneThreshold)) {
 						$.prompt.submit({ text: DONE_PROMPT }).catch((err) => {
 							donePending = false;
-							void record($, {
-								kind: "error",
-								applied: false,
-								text: `done follow-up not sent: ${String(err)}`
-							}).catch(() => undefined);
+							lostFollowUp = String(err);
 						});
 					}
 				} catch (err) {
