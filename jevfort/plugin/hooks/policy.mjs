@@ -145,3 +145,20 @@ export function gateEdit(inScope, t = DEFAULT_GATE) {
 export function shouldContinue(done, threshold = .15) {
 	return done !== undefined && done < threshold;
 }
+export function inScratchpad(file, sessionId, roots) {
+	if (!file.startsWith("/") || !sessionId) return false;
+	const parts = [];
+	for (const seg of file.split("/")) {
+		if (seg === "" || seg === ".") continue;
+		if (seg === "..") parts.pop();
+		else parts.push(seg);
+	}
+	const path = `/${parts.join("/")}`;
+	for (const root of roots) {
+		const prefix = `${root.replace(/\/+$/, "")}/`;
+		if (prefix === "/" || !path.startsWith(prefix)) continue;
+		const rest = path.slice(prefix.length).split("/");
+		if (rest.length >= 5 && /^claude-\d+$/.test(rest[0]) && rest[2] === sessionId && rest[3] === "scratchpad") return true;
+	}
+	return false;
+}
