@@ -1,6 +1,6 @@
 // Manifest and wiring contract of the built plugin/ (plugin.json is generated from package.json by pnpm build).
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { test } from "vitest";
 
 /** Parsed JSON of a file under plugin/. */
@@ -46,4 +46,10 @@ test("userConfig declares exactly the 18 upstream options, mode active|off only"
 
 test("hooks.json is exactly the mods module list", () => {
   assert.deepEqual(json("hooks/hooks.json"), { modules: ["./register.mjs"] });
+});
+
+test("the built hooks modules exist", () => {
+  for (const f of ["register", "jev", "policy", "candidates", "context", "log", "report", "prompt", "agents", "compact", "summarize"]) {
+    assert.ok(existsSync(new URL(`../plugin/hooks/${f}.mjs`, import.meta.url)), f);
+  }
 });
