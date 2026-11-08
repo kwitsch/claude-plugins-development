@@ -22,12 +22,15 @@ the shapes below: `inline-headroom/docs/claude-code-verification.md`.
   whole `$` typed `Engine` (`askJev($, …)`, `record($, …)`, `buildCandidates($, …)`).
 - One hook per event without a matcher (`registered twice without a matcher` fails validate and test). Hence:
   `tool.call` has one unmatched hook (outcome of Jev's own calls, skill blocklist) plus one with the matcher
-  `{ tool: "Agent" }`; `turn.step`, `tool.check`, `classic.Stop`, `turn.complete`, `session.start`, `prompt.submit`,
+  `{ tool: "Agent" }`; `turn.step`, `tool.check`, `turn.complete`, `session.start`, `prompt.submit`,
   `agent.offer` and `session.compact` have one each; `command.run` and `ui.render` carry matchers.
 - `tool.call` failure is `isError: true` or `deny: string`; there is no `exitCode`.
 - `turn.step` `usage` may be `null`; `command.run` returning `{}` prints no row and records no model context.
 - `cc-plugin-sec-default` skips every user-tier `prompt.compose`/`prompt.section`/`prompt.context` hook, so the mod
-  registers none of them; the prompt classifier uses `prompt.submit` and adds `context` entries.
+  registers none of them; the prompt classifier uses `prompt.submit` and adds `context` entries. It also passes
+  `classic.Stop` on past every user-tier hook (notice `its classic.Stop hook was skipped`), so the done check runs in
+  `turn.complete` and continues with an unawaited `$.prompt.submit({ text: DONE_PROMPT })`, exempting the next
+  main-loop turn via `donePending`.
 
 ## Storage calls must run in-frame
 

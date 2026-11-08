@@ -20,6 +20,10 @@ commit 90cc1f1, directory `hooks/`) into this repository's layout. Upstream has 
   `register*` functions of `prompt`/`agents`/`compact`/`view` moved there. Upstream `mode.ts` and `view.ts` have no
   file. The other `src/hooks/*.mts` are pure.
 - No `claude-code` type import: `$`, events and `on` are typed structurally at the top of `register.mts`.
+- Upstream blocks `Stop`. Here the done check runs on `turn.complete` (main-loop turns ending with `reason: "answer"`)
+  and sends one framed follow-up message (`DONE_PROMPT`) through `$.prompt.submit`, because `cc-plugin-sec-default`
+  skips user-tier `classic.Stop` hooks. The unfinished answer stays visible. Background Bash work is not detected,
+  only subagents (`$.agent.list()`).
 
 ## Layout
 
