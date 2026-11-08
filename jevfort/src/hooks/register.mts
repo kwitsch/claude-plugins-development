@@ -794,21 +794,19 @@ export const register = (on: On, options: Options): void => {
     if (e.agentId === undefined) {
       const exempt = donePending;
       donePending = false;
-      let again = false;
       if (doneCheck && !exempt && e.reason === "answer") {
         try {
-          again = await checkDone($, e, options.mode, doneThreshold);
+          if (await checkDone($, e, options.mode, doneThreshold)) {
+            // Not awaited: it resolves only once the new turn starts, which waits for this turn to end.
+            $.prompt.submit({ text: DONE_PROMPT }).catch((err: unknown) => {
+              donePending = false;
+              // The frame may be over by now, so this is best effort.
+              void record($, { kind: "error", applied: false, text: `done follow-up not sent: ${String(err)}` }).catch(() => undefined);
+            });
+          }
         } catch (err) {
           await record($, { kind: "error", applied: false, text: `done check failed: ${String(err)}` }).catch(() => undefined);
         }
-      }
-      if (again) {
-        // Not awaited: it resolves only once the new turn starts, which waits for this turn to end.
-        $.prompt.submit({ text: DONE_PROMPT }).catch((err: unknown) => {
-          donePending = false;
-          // The frame may be over by now, so this is best effort.
-          void record($, { kind: "error", applied: false, text: `done follow-up not sent: ${String(err)}` }).catch(() => undefined);
-        });
       }
     }
     return next(e);
@@ -991,8 +989,9 @@ export const register = (on: On, options: Options): void => {
     const input = (e.input ?? {}) as Record<string, unknown>;
     // Writes into this session's scratchpad are always allowed, in every permission mode, also with the gate or the mod off.
     if (base.decision !== "deny" && WRITE_TOOLS.has(e.tool)) {
-      const roots = [await $.env.get("CLAUDE_CODE_TMPDIR"), await $.env.get("TMPDIR"), "/tmp"].filter((r): r is string => Boolean(r));
-      if (inScratchpad(asText(input.file_path ?? input.notebook_path ?? ""), await $.session.id(), roots)) {
+      const [tmpA, tmpB, sid] = await Promise.all([$.env.get("CLAUDE_CODE_TMPDIR"), $.env.get("TMPDIR"), $.session.id()]);
+      const roots = [tmpA, tmpB, "/tmp"].filter((r): r is string => Boolean(r));
+      if (inScratchpad(asText(input.file_path ?? input.notebook_path ?? ""), sid, roots)) {
         return { ...base, decision: "allow", reason: "jevfort: write inside this session's scratchpad" };
       }
     }
