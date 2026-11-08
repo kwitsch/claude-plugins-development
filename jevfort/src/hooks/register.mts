@@ -205,6 +205,28 @@ async function askJev($: Engine, state: unknown, questions: Record<string, Quest
 }
 
 /**
+ * The stored log, oldest first.
+ *
+ * @param $ - Engine interface.
+ * @returns The entries.
+ */
+async function readLog($: Engine): Promise<Entry[]> {
+  return ((await $.store.get(LOG_KEY)) as Entry[] | undefined) ?? [];
+}
+
+/**
+ * The decision counters.
+ *
+ * @param $ - Engine interface.
+ * @returns Counts by stats key.
+ */
+async function stats($: Engine): Promise<Record<string, number>> {
+  return ((await $.store.get("stats")) as Record<string, number> | undefined) ?? {};
+}
+/** Tail of the queue that serializes record()'s store writes. */
+let storeQueue: Promise<void> = Promise.resolve();
+
+/**
  * Logs a decision: this session's buffer, the capped store log, the counters, and the status line.
  *
  * @param $ - Engine interface.
@@ -214,24 +236,19 @@ async function record($: Engine, d: Omit<Entry, "at">): Promise<void> {
   const entry: Entry = { ...d, at: await $.clock.now() };
   remember(entry);
 
-  const log = ((await $.store.get(LOG_KEY)) as Entry[] | undefined) ?? [];
-  await $.store.set(LOG_KEY, [...log, entry].slice(-MAX_ENTRIES));
+  // Serialized: parallel hooks would otherwise read the same log and tally and lose each other's writes.
+  const run = storeQueue.then(async () => {
+    const log = await readLog($);
+    await $.store.set(LOG_KEY, [...log, entry].slice(-MAX_ENTRIES));
 
-  const tally = ((await $.store.get("stats")) as Record<string, number> | undefined) ?? {};
-  const key = statsKey(d);
-  await $.store.set("stats", { ...tally, [key]: (tally[key] ?? 0) + 1 });
+    const tally = await stats($);
+    const key = statsKey(d);
+    await $.store.set("stats", { ...tally, [key]: (tally[key] ?? 0) + 1 });
+  });
+  storeQueue = run.catch(() => undefined);
+  await run;
 
   if (d.kind !== "outcome" && d.kind !== "turn") void $.ui.status(`jev: ${d.text}`.slice(0, 80));
-}
-
-/**
- * The stored log, oldest first.
- *
- * @param $ - Engine interface.
- * @returns The entries.
- */
-async function readLog($: Engine): Promise<Entry[]> {
-  return ((await $.store.get(LOG_KEY)) as Entry[] | undefined) ?? [];
 }
 
 /**
@@ -244,15 +261,6 @@ async function clearLog($: Engine): Promise<void> {
   await $.store.set("stats", {});
 }
 
-/**
- * The decision counters.
- *
- * @param $ - Engine interface.
- * @returns Counts by stats key.
- */
-async function stats($: Engine): Promise<Record<string, number>> {
-  return ((await $.store.get("stats")) as Record<string, number> | undefined) ?? {};
-}
 
 /**
  * The current turn of the main loop or of a subagent.
@@ -734,6 +742,7 @@ export const register = (on: On, options: Options): void => {
     const result = await next(e);
     if (e.tool_use_id && ownCalls.has(e.tool_use_id)) {
       const isError = result.deny !== undefined || result.isError === true;
+      ownCalls.delete(e.tool_use_id);
       await record($, { kind: "outcome", applied: true, text: `${e.tool} ${isError ? "failed" : "ok"}`, data: { id: e.tool_use_id, isError } });
       // A skill the Skill tool refused is never offered to Jev again.
       const skill = e.skill;

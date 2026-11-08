@@ -80,31 +80,36 @@ async function askJev($, state, questions) {
 		});
 	}
 }
+async function readLog($) {
+	return await $.store.get(LOG_KEY) ?? [];
+}
+async function stats($) {
+	return await $.store.get("stats") ?? {};
+}
+let storeQueue = Promise.resolve();
 async function record($, d) {
 	const entry = {
 		...d,
 		at: await $.clock.now()
 	};
 	remember(entry);
-	const log = await $.store.get(LOG_KEY) ?? [];
-	await $.store.set(LOG_KEY, [...log, entry].slice(-MAX_ENTRIES));
-	const tally = await $.store.get("stats") ?? {};
-	const key = statsKey(d);
-	await $.store.set("stats", {
-		...tally,
-		[key]: (tally[key] ?? 0) + 1
+	const run = storeQueue.then(async () => {
+		const log = await readLog($);
+		await $.store.set(LOG_KEY, [...log, entry].slice(-MAX_ENTRIES));
+		const tally = await stats($);
+		const key = statsKey(d);
+		await $.store.set("stats", {
+			...tally,
+			[key]: (tally[key] ?? 0) + 1
+		});
 	});
+	storeQueue = run.catch(() => undefined);
+	await run;
 	if (d.kind !== "outcome" && d.kind !== "turn") void $.ui.status(`jev: ${d.text}`.slice(0, 80));
-}
-async function readLog($) {
-	return await $.store.get(LOG_KEY) ?? [];
 }
 async function clearLog($) {
 	await $.store.set(LOG_KEY, []);
 	await $.store.set("stats", {});
-}
-async function stats($) {
-	return await $.store.get("stats") ?? {};
 }
 async function readTurn($, agentId) {
 	const messages = await $.session.messages(agentId ? { agentId } : {});
@@ -530,6 +535,7 @@ export const register = (on, options) => {
 		const result = await next(e);
 		if (e.tool_use_id && ownCalls.has(e.tool_use_id)) {
 			const isError = result.deny !== undefined || result.isError === true;
+			ownCalls.delete(e.tool_use_id);
 			await record($, {
 				kind: "outcome",
 				applied: true,
