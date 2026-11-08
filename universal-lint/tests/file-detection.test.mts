@@ -309,3 +309,152 @@ test("FileChanged: with every slot held a .ts file gives up at uptime 10 s with 
   assert.equal(readdirSync(dir).length, FILE_CHANGED_SLOTS);
   for (let i = 0; i < FILE_CHANGED_SLOTS; i++) assert.equal(readFileSync(path.join(dir, String(i)), "utf8"), String(process.pid));
 });
+
+/** A tsconfig.json governing `*.ts` in the project root. */
+const TSCONFIG = "{\"compilerOptions\":{\"noEmit\":true},\"include\":[\"*.ts\"]}";
+
+/**
+ * Drop a bash stub that sleeps `ms` (node + Atomics.wait: no `sleep` on the hermetic PATH), records `<name> <argv>`,
+ * prints `out` and exits with `code`.
+ *
+ * @param e - Test environment.
+ * @param name - Stub name (tsc, go, cargo).
+ * @param ms - Sleep before recording, in milliseconds.
+ * @param out - stdout line (no single quotes).
+ * @param code - Exit status.
+ */
+function slowStub(e: LintEnv, name: string, ms: number, out: string, code: number): void {
+  e.stub(
+    name,
+    `node -e "Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ${ms})"`,
+    `printf "%s %s\\n" ${name} "$*" >> "$RECORD"`,
+    `printf '%s\\n' '${out}'`,
+    `exit ${code}`,
+  );
+}
+
+/**
+ * Pipe one FileChanged payload for `file` into the hook without blocking, keeping its stderr.
+ *
+ * @param e - Test environment.
+ * @param file - Changed file (absolute).
+ * @returns The hook's exit status and stderr once it closes.
+ */
+function changedAsyncRun(e: LintEnv, file: string): Promise<{ status: number | null; stderr: string }> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, [HOOK], { env: e.childEnv({ out: OUT }), stdio: ["pipe", "ignore", "pipe"] });
+    let stderr = "";
+    child.stderr.setEncoding("utf8");
+    child.stderr.on("data", (d: string) => {
+      stderr += d;
+    });
+    child.on("error", reject);
+    child.on("close", (status) => resolve({ status, stderr }));
+    child.stdin.on("error", () => {}); // EPIPE when a broken hook exits before the write: let the assertions report it
+    child.stdin.end(JSON.stringify({ hook_event_name: "FileChanged", cwd: e.cwd, file_path: file, event: "change" }));
+  });
+}
+
+/**
+ * Block the test thread for `ms` milliseconds.
+ *
+ * @param ms - Milliseconds to wait.
+ */
+const waitMs = (ms: number): void => {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+};
+
+/**
+ * Recorded stub calls whose line starts with `prefix`.
+ *
+ * @param e - Test environment.
+ * @param prefix - Line prefix, e.g. `"tsc "`.
+ * @returns The count.
+ */
+const calls = (e: LintEnv, prefix: string): number => e.lines().filter((l) => l.startsWith(prefix)).length;
+
+test("FileChanged: 10 concurrent .ts events run tsc once, the finding is reported once (F13)", async () => {
+  const e = makeEnv();
+  e.file("tsconfig.json", TSCONFIG);
+  // No eslint/oxlint config: the chain is skipped, tsc is the only spawn.
+  slowStub(e, "tsc", 1000, "f0.ts(1,1): error TS2322: marker", 2);
+  const files = Array.from({ length: 10 }, (_, i) => e.file(`f${i}.ts`, `export const f${i} = ${i};\n`));
+  gitInit(e);
+  for (const [i, f] of files.entries()) writeFileSync(f, `export const f${i} = ${i + 1};\n`);
+  const runs = await Promise.all(files.map((f) => changedAsyncRun(e, f)));
+  // Deterministic count: late arrivals are covered by .last (their ctime precedes the holder's start) and lock
+  // waiters re-check .last after the claim; the 1 s sleep only exercises the waiter path, the count does not need it.
+  assert.equal(calls(e, "tsc "), 1);
+  assert.equal(runs.filter((r) => r.status === 2).length, 1);
+  assert.equal(runs.filter((r) => r.status === 0).length, 9);
+  const reporters = runs.filter((r) => r.stderr.includes("TS2322: marker"));
+  assert.equal(reporters.length, 1);
+  assert.equal(reporters[0].status, 2);
+  for (const r of runs) if (r !== reporters[0]) assert.equal(r.stderr, "");
+  const locks = readdirSync(path.join(e.data, "fc-locks"));
+  assert.equal(locks.filter((n) => n.endsWith(".last")).length, 1);
+  assert.equal(locks.filter((n) => n.endsWith(".lock")).length, 0);
+});
+
+test("FileChanged: 5 concurrent .go events run go vet once (F13)", async () => {
+  const e = makeEnv();
+  slowStub(e, "go", 500, "pkg/a0.go:1:1: vet marker", 1);
+  const files = Array.from({ length: 5 }, (_, i) => e.file(`pkg/a${i}.go`, "package pkg\n"));
+  gitInit(e);
+  for (const f of files) writeFileSync(f, "package pkg\n\n// changed\n");
+  const runs = await Promise.all(files.map((f) => changedAsyncRun(e, f)));
+  assert.equal(calls(e, "go vet"), 1);
+  assert.equal(runs.filter((r) => r.status === 2).length, 1);
+  assert.equal(runs.filter((r) => r.status === 0).length, 4);
+});
+
+test("FileChanged: 5 concurrent .rs events run cargo check once (F13)", async () => {
+  const e = makeEnv();
+  e.file("Cargo.toml", "[package]\nname = \"x\"\n");
+  slowStub(e, "cargo", 500, "error: cargo marker", 101);
+  const files = Array.from({ length: 5 }, (_, i) => e.file(`src/m${i}.rs`, "fn f() {}\n"));
+  gitInit(e);
+  for (const f of files) writeFileSync(f, "fn f() {}\n// changed\n");
+  const runs = await Promise.all(files.map((f) => changedAsyncRun(e, f)));
+  assert.equal(calls(e, "cargo check"), 1);
+  assert.equal(runs.filter((r) => r.status === 2).length, 1);
+  assert.equal(runs.filter((r) => r.status === 0).length, 4);
+});
+
+test("FileChanged: a change after the last completed check runs tsc again, a newer stamp covers it (F13)", () => {
+  const e = makeEnv();
+  e.file("tsconfig.json", TSCONFIG);
+  slowStub(e, "tsc", 0, "a.ts(1,1): error TS2322: marker", 2);
+  const a = e.file("a.ts", "export const a = 1;\n");
+  gitInit(e);
+  writeFileSync(a, "export const a = 2;\n");
+  assert.equal(changed(e, a).status, 2);
+  assert.equal(calls(e, "tsc "), 1);
+  waitMs(50); // coarse kernel clock: the rewrite's ctime must land past the first run's .last
+  writeFileSync(a, "export const a = 3;\n");
+  assert.equal(changed(e, a).status, 2);
+  assert.equal(calls(e, "tsc "), 2);
+  waitMs(50); // coarse kernel clock: keep this rewrite's ctime clear of the second run's .last
+  writeFileSync(a, "export const a = 4;\n");
+  waitMs(20); // coarse kernel clock: the forced stamp below must be newer than this rewrite's ctime
+  const dir = path.join(e.data, "fc-locks");
+  const lasts = readdirSync(dir).filter((n) => n.endsWith(".last"));
+  assert.equal(lasts.length, 1);
+  writeFileSync(path.join(dir, lasts[0]), String(Date.now()));
+  const r = changed(e, a);
+  assert.equal(r.status, 0);
+  assert.equal(calls(e, "tsc "), 2);
+});
+
+test("FileChanged: an unusable fc-locks dir runs tsc unlocked (fail open, F13)", () => {
+  const e = makeEnv();
+  e.file("tsconfig.json", TSCONFIG);
+  slowStub(e, "tsc", 0, "a.ts(1,1): error TS2322: marker", 2);
+  const a = e.file("a.ts", "export const a = 1;\n");
+  gitInit(e);
+  writeFileSync(a, "export const a = 2;\n");
+  mkdirSync(e.data, { recursive: true });
+  writeFileSync(path.join(e.data, "fc-locks"), ""); // a regular file: mkdirSync(<data>/fc-locks) throws
+  assert.equal(changed(e, a).status, 2);
+  assert.equal(calls(e, "tsc "), 1);
+});
