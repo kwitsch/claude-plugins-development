@@ -4,7 +4,7 @@ import { compactInstructions, compactItems, RELEVANCE } from "./compact.mjs";
 import { clip, splitTurn, summarize, toolCalls } from "./context.mjs";
 import { choice, jevUrl, MODEL, noul, score, TIMEOUT_MS } from "./jev.mjs";
 import { LOG_KEY, MAX_ENTRIES, recentDecisions, remember, statsKey } from "./log.mjs";
-import { adjustEffort, bestAction, difficultyQuestion, doneQuestion, effortKeepsCache, inScratchpad, lowerModel, nextActionQuestion, pickCandidate, route, shouldContinue, singleActionQuestion } from "./policy.mjs";
+import { adjustEffort, bestAction, difficultyQuestion, doneQuestion, effortKeepsCache, effortQuestion, ESTIMATE_SPEC, ESTIMATE_TOOL, estimateEffort, inScratchpad, lowerModel, mechanicalQuestion, nextActionQuestion, parseEstimateInput, pickCandidate, route, shouldContinue, singleActionQuestion } from "./policy.mjs";
 import { hints, NONE, promptQuestions } from "./prompt.mjs";
 import { buildReport } from "./report.mjs";
 import { SUMMARY_MODEL, SYSTEM } from "./summarize.mjs";
@@ -501,6 +501,15 @@ export const register = (on, options) => {
 			name: "jev",
 			description: "Jev pilot: status, /jev report, /jev candidates, /jev export, /jev clear"
 		});
+		try {
+			await $.tool.register(ESTIMATE_SPEC);
+		} catch (err) {
+			await record($, {
+				kind: "error",
+				applied: false,
+				text: `estimate_effort not registered: ${String(err)}`
+			}).catch(() => undefined);
+		}
 		return next(e);
 	});
 	on("command.run", { command: "jev" }, async function onJevCommand($, e) {
@@ -587,6 +596,31 @@ export const register = (on, options) => {
 		return next(e);
 	});
 	on("tool.call", async function onToolCall($, e, next) {
+		if (e.tool === ESTIMATE_TOOL) {
+			const input = parseEstimateInput(e);
+			if (typeof input === "string") return {
+				isError: true,
+				result: `estimate_effort: ${input}`
+			};
+			const r = await askJev($, { request: clip(input.prompt, 4e3) }, {
+				effort: effortQuestion,
+				mechanical: mechanicalQuestion
+			});
+			const est = estimateEffort(r.ok ? score(r.answers, "effort") : undefined, r.ok ? noul(r.answers, "mechanical") : undefined, input);
+			await record($, {
+				kind: "estimate",
+				applied: est.source !== "fallback",
+				text: `${input.model}: ${est.effort} (${est.source}${r.ok ? "" : `, ${r.error}`})`,
+				ms: r.ms,
+				data: {
+					model: input.model,
+					effort: est.effort,
+					source: est.source,
+					error: r.ok ? undefined : r.error
+				}
+			});
+			return { result: JSON.stringify(est) };
+		}
 		const result = await next(e);
 		if (e.tool_use_id && ownCalls.has(e.tool_use_id)) {
 			const isError = result.deny !== undefined || result.isError === true;

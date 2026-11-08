@@ -22,7 +22,7 @@ import { choice, jevUrl, MODEL, noul, score, TIMEOUT_MS } from "./jev.mjs";
 import type { Answer, ChoiceAnswer, JevResult, Question } from "./jev.mjs";
 import { LOG_KEY, MAX_ENTRIES, recentDecisions, remember, statsKey } from "./log.mjs";
 import type { Entry } from "./log.mjs";
-import { adjustEffort, bestAction, difficultyQuestion, doneQuestion, effortKeepsCache, inScratchpad, lowerModel, nextActionQuestion, pickCandidate, route, shouldContinue, singleActionQuestion } from "./policy.mjs";
+import { adjustEffort, bestAction, difficultyQuestion, doneQuestion, effortKeepsCache, effortQuestion, ESTIMATE_SPEC, ESTIMATE_TOOL, estimateEffort, inScratchpad, lowerModel, mechanicalQuestion, nextActionQuestion, parseEstimateInput, pickCandidate, route, shouldContinue, singleActionQuestion } from "./policy.mjs";
 import type { Route } from "./policy.mjs";
 import { hints, NONE, promptQuestions } from "./prompt.mjs";
 import { buildReport } from "./report.mjs";
@@ -58,8 +58,8 @@ type Engine = {
   };
   /** Slash commands. */
   command: { register(spec: { name: string; description: string }): Promise<unknown>; list(): Promise<CommandInfo[]> };
-  /** Tools. */
-  tool: { list(): Promise<ToolInfo[]> };
+  /** Tools: the listed ones, and registering this plugin's own (`estimate_effort`). */
+  tool: { list(): Promise<ToolInfo[]>; register(spec: typeof ESTIMATE_SPEC): Promise<{ tool?: string }> };
   /** Model requests. */
   model: { complete(spec: { model: string; system: string; prompt: string; maxTokens: number; timeoutMs: number }): Promise<Completion> };
   /** User interface. */
@@ -696,6 +696,12 @@ export const register = (on: On, options: Options): void => {
       name: "jev",
       description: "Jev pilot: status, /jev report, /jev candidates, /jev export, /jev clear",
     });
+    // Registered whatever `routing` says: Skills and subagents call it too. Turn start does not depend on it.
+    try {
+      await $.tool.register(ESTIMATE_SPEC);
+    } catch (err) {
+      await record($, { kind: "error", applied: false, text: `estimate_effort not registered: ${String(err)}` }).catch(() => undefined);
+    }
     return next(e);
   });
 
@@ -784,8 +790,23 @@ export const register = (on: On, options: Options): void => {
     return next(e);
   });
 
-  // Outcome of each call Jev made itself, for the report.
+  // Answers the estimate_effort tool itself (never `next(e)`: a registered tool no hook answers fails), and logs the
+  // outcome of each call Jev made itself, for the report.
   on("tool.call", async function onToolCall($: Engine, e: ToolCall, next: Next<ToolCall, ToolResult>): Promise<ToolResult> {
+    if (e.tool === ESTIMATE_TOOL) {
+      const input = parseEstimateInput(e);
+      if (typeof input === "string") return { isError: true, result: `estimate_effort: ${input}` };
+      const r = await askJev($, { request: clip(input.prompt, 4000) }, { effort: effortQuestion, mechanical: mechanicalQuestion });
+      const est = estimateEffort(r.ok ? score(r.answers, "effort") : undefined, r.ok ? noul(r.answers, "mechanical") : undefined, input);
+      await record($, {
+        kind: "estimate",
+        applied: est.source !== "fallback",
+        text: `${input.model}: ${est.effort} (${est.source}${r.ok ? "" : `, ${r.error}`})`,
+        ms: r.ms,
+        data: { model: input.model, effort: est.effort, source: est.source, error: r.ok ? undefined : r.error },
+      });
+      return { result: JSON.stringify(est) };
+    }
     const result = await next(e);
     if (e.tool_use_id && ownCalls.has(e.tool_use_id)) {
       const isError = result.deny !== undefined || result.isError === true;
