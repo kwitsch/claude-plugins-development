@@ -5,7 +5,8 @@
  * @remarks
  * Command hook, invoked directly per event (no MCP server). stdin = hook JSON (PostToolUseHookInput); `main()`
  * dispatches on `hook_event_name`: SessionStart/CwdChanged print the git watch list as `watchPaths` (stdout JSON,
- * exit 0); FileChanged lints a watched file changed outside Write/Edit (unlink, scope, digest and git gates first);
+ * exit 0); FileChanged lints a watched file changed outside Write/Edit (unlink, scope, digest and git gates, then a
+ * cross-process slot);
  * anything else is PostToolUse Write|Edit (digest recorded, then lint). `asyncRewake: true` in hooks.json for
  * PostToolUse and FileChanged: runs in the background (safe because linting never mutates the file); findings go to
  * stderr with exit 2, which wakes Claude with them; no finding = no output, exit 0.
@@ -78,6 +79,16 @@ const GIT_TIMEOUT_MS = 10000;
  * hook-design.md "Timeout budget" when hooks.json changes.
  */
 const HOOK_TIMEOUT_MS = 90000;
+
+/**
+ * FileChanged nominal worst case (85 s): git status + slot wait + lint end by then; the 5 s under `HOOK_TIMEOUT_MS`
+ * cover node startup before `process.uptime()` counts, the findings gate and the exit. The per-file lint budget
+ * `fileChangedHandler` reserves before waiting mirrors `runChainLint`'s one spawn timeout per tool
+ * (`CARGO_SPAWN_TIMEOUT_MS` for a `manifestPath` tool, else `SPAWN_TIMEOUT_MS`) and `runTypeCheck`'s
+ * `TSC_SPAWN_TIMEOUT_MS`; update it together with them (a chain that runs a second tool per file needs a larger
+ * reservation).
+ */
+const FILE_CHANGED_BUDGET_MS = HOOK_TIMEOUT_MS - 5000;
 
 /**
  * Concurrent FileChanged lints across all hook processes sharing one plugin data dir (3 on 12 cores, at least 2).
@@ -1741,14 +1752,15 @@ export function acquireSlot(untilMs: number): string | null {
 /**
  * FileChanged: lint a watched file changed outside Write/Edit, whole file (no edit-range gate). Skips, first match
  * wins: `unlink` event; out of scope (`scopedTarget`); content still equal to the digest Write/Edit recorded; git says
- * ignored (`!!`) or unchanged (empty status). A git failure (no git, not a repo, timeout) lints. Returns {} for every
- * skip and on any error (fail open).
+ * ignored (`!!`) or unchanged (empty status). A git failure (no git, not a repo, timeout) lints. Then waits for one of
+ * `FILE_CHANGED_SLOTS` cross-process slots (`acquireSlot`) until `FILE_CHANGED_BUDGET_MS` minus the file's lint
+ * budget; no slot in time skips with a stderr note; a slot error lints without a slot. Returns {} for every skip and on
+ * any error (fail open).
  *
  * @param args - The FileChanged hook payload.
  * @returns The hook result: findings as additionalContext, or an empty object.
  */
 export function fileChangedHandler(args: PostToolUseHookInput): HookResult {
-  // shortcut: one process per FileChanged, no cross-process cap; add slot files under CLAUDE_PLUGIN_DATA if bulk changes overload the machine
   try {
     if (args?.event === "unlink") return {};
     const cwd = args?.cwd;
@@ -1777,7 +1789,28 @@ export function fileChangedHandler(args: PostToolUseHookInput): HookResult {
     } catch {
       // no git, not a repo, timeout or non-zero exit: lint
     }
-    return lintResolved(s.fp, cwd, null, "FileChanged", "universal-lint (changed outside Write/Edit)");
+    const ext = path.extname(s.fp).toLowerCase();
+    // The wait gets what git left of FILE_CHANGED_BUDGET_MS once this file's nominal lint budget (chain + tsc) is reserved.
+    const lintMs = (EXT_MAP[ext] === "rust" ? CARGO_SPAWN_TIMEOUT_MS : SPAWN_TIMEOUT_MS) + (TYPE_CHECK_EXTS.has(ext) ? TSC_SPAWN_TIMEOUT_MS : 0);
+    let slot: string | null | undefined; // undefined: slot error, lint without a slot (fail open, as before F10)
+    try {
+      slot = acquireSlot(FILE_CHANGED_BUDGET_MS - lintMs);
+    } catch {
+      // unusable slot dir or slot file: slot stays undefined
+    }
+    if (slot === null) {
+      process.stderr.write(`universal-lint: FileChanged: no lint slot free in time, ${s.fp} not linted\n`);
+      return {};
+    }
+    try {
+      return lintResolved(s.fp, cwd, null, "FileChanged", "universal-lint (changed outside Write/Edit)");
+    } finally {
+      try {
+        if (slot) rmSync(slot, { force: true });
+      } catch {
+        // left for slotStale: this pid is gone once the process exits
+      }
+    }
   } catch {
     return {};
   }
