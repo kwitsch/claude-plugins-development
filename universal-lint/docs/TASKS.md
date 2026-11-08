@@ -22,10 +22,10 @@ Legend: `[x]` finished. `[ ]` not finished; tag = `open` (code change, not start
 - [x] [F07](tasks/F07-stylelint-without-config.md) Skip stylelint when the project has no stylelint config. Shipped in 0.15.6.
 - [x] [F08](tasks/F08-watchlist-early-stop.md) Stop the watch-list filter once `WATCH_LIMIT` is exceeded. Shipped in 0.15.7.
 - [x] [F09](tasks/F09-bypass-npx-cached-bin.md) Spawn the cached npx bin directly instead of `npx --yes`. Shipped in 0.15.8.
+- [x] [F10](tasks/F10-filechanged-concurrency-cap.md) Cap concurrent FileChanged lints across hook processes (slot files). Shipped in 0.15.9.
 
 ## Stage 2: structural changes
 
-- [ ] [F10](tasks/F10-filechanged-concurrency-cap.md) Cap concurrent FileChanged lints across hook processes (slot files) `open` priority:high
 - [ ] [F11](tasks/F11-persist-path-probes.md) Persist `onPath` probe results across hook processes `open` priority:medium. Ship with F28 (most of the WSL PATH cost is outside the plugin).
 - [ ] [F12](tasks/F12-watchlist-scope-fast-path.md) Cheapen the watch list's per-file scope check (extension first, per-dir realpath cache) `open` priority:medium
 - [ ] [F13](tasks/F13-dedup-whole-project-checks.md) Run tsc / go vet / cargo once per FileChanged burst, not once per file `open` priority:medium. After F10.
