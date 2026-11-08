@@ -961,23 +961,29 @@ function slotStale(slot) {
 		return e.code === "ESRCH";
 	}
 }
+function claimFile(file) {
+	if (slotStale(file)) rmSync(file, { force: true });
+	try {
+		writeFileSync(file, String(process.pid), { flag: "wx" });
+		return true;
+	} catch (e) {
+		if (e.code !== "EEXIST") throw e;
+		return false;
+	}
+}
+function sleep100() {
+	Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 100);
+}
 export function acquireSlot(untilMs) {
 	const dir = path.resolve(process.env.CLAUDE_PLUGIN_DATA || tmpdir(), "fc-slots");
 	mkdirSync(dir, { recursive: true });
-	const tick = new Int32Array(new SharedArrayBuffer(4));
 	for (;;) {
 		for (let i = 0; i < FILE_CHANGED_SLOTS; i++) {
 			const slot = path.join(dir, String(i));
-			if (slotStale(slot)) rmSync(slot, { force: true });
-			try {
-				writeFileSync(slot, String(process.pid), { flag: "wx" });
-				return slot;
-			} catch (e) {
-				if (e.code !== "EEXIST") throw e;
-			}
+			if (claimFile(slot)) return slot;
 		}
 		if (process.uptime() * 1e3 >= untilMs) return null;
-		Atomics.wait(tick, 0, 0, 100);
+		sleep100();
 	}
 }
 export function coalesceProjectCheck(key, file, reserveMs, run) {
@@ -987,7 +993,6 @@ export function coalesceProjectCheck(key, file, reserveMs, run) {
 	let changed;
 	try {
 		changed = statSync(file).ctimeMs;
-		mkdirSync(dir, { recursive: true });
 	} catch {
 		return run();
 	}
@@ -999,18 +1004,16 @@ export function coalesceProjectCheck(key, file, reserveMs, run) {
 			return false;
 		}
 	};
-	const tick = new Int32Array(new SharedArrayBuffer(4));
 	for (;;) {
 		if (covered()) return null;
 		try {
-			if (slotStale(lock)) rmSync(lock, { force: true });
-			writeFileSync(lock, String(process.pid), { flag: "wx" });
-			break;
-		} catch (e) {
-			if (e.code !== "EEXIST") return run();
+			mkdirSync(dir, { recursive: true });
+			if (claimFile(lock)) break;
+		} catch {
+			return run();
 		}
 		if (process.uptime() * 1e3 >= FILE_CHANGED_BUDGET_MS - reserveMs) return run();
-		Atomics.wait(tick, 0, 0, 100);
+		sleep100();
 	}
 	try {
 		if (covered()) return null;

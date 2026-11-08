@@ -1842,6 +1842,30 @@ function slotStale(slot: string): boolean {
 }
 
 /**
+ * Claim `file` exclusively (`wx`, holding this pid), first removing it when `slotStale` says so.
+ *
+ * @param file - Slot or lock file path.
+ * @returns True when claimed; false when held (EEXIST).
+ * @throws On any other error.
+ */
+function claimFile(file: string): boolean {
+  // A waiter racing this removal can delete a file just re-created: one extra run for a moment (accepted).
+  if (slotStale(file)) rmSync(file, { force: true });
+  try {
+    writeFileSync(file, String(process.pid), { flag: "wx" });
+    return true;
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code !== "EEXIST") throw e;
+    return false;
+  }
+}
+
+/** Sleep 100 ms without a busy loop. */
+function sleep100(): void {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 100);
+}
+
+/**
  * Claim one of `FILE_CHANGED_SLOTS` cross-process FileChanged slots: `${CLAUDE_PLUGIN_DATA || tmpdir()}/fc-slots/<i>`,
  * created exclusively (`wx`) holding this pid, after removing the slot when `slotStale` says so. While every slot is
  * held, sleeps 100 ms (`Atomics.wait`, no busy loop) between rounds until `process.uptime()` reaches `untilMs`; one
@@ -1854,21 +1878,13 @@ function slotStale(slot: string): boolean {
 export function acquireSlot(untilMs: number): string | null {
   const dir = path.resolve(process.env.CLAUDE_PLUGIN_DATA || tmpdir(), "fc-slots");
   mkdirSync(dir, { recursive: true });
-  const tick = new Int32Array(new SharedArrayBuffer(4));
   for (;;) {
     for (let i = 0; i < FILE_CHANGED_SLOTS; i++) {
       const slot = path.join(dir, String(i));
-      // A waiter racing this removal can delete a slot just re-created: one extra lint for a moment (accepted).
-      if (slotStale(slot)) rmSync(slot, { force: true });
-      try {
-        writeFileSync(slot, String(process.pid), { flag: "wx" });
-        return slot;
-      } catch (e) {
-        if ((e as NodeJS.ErrnoException).code !== "EEXIST") throw e;
-      }
+      if (claimFile(slot)) return slot;
     }
     if (process.uptime() * 1000 >= untilMs) return null;
-    Atomics.wait(tick, 0, 0, 100);
+    sleep100();
   }
 }
 
@@ -1897,7 +1913,6 @@ export function coalesceProjectCheck(key: string, file: string, reserveMs: numbe
   try {
     // statSync: a symlinked file's target is what the check reads; ctime: copies can preserve an old mtime.
     changed = statSync(file).ctimeMs;
-    mkdirSync(dir, { recursive: true });
   } catch {
     return run();
   }
@@ -1910,18 +1925,16 @@ export function coalesceProjectCheck(key: string, file: string, reserveMs: numbe
       return false;
     }
   };
-  const tick = new Int32Array(new SharedArrayBuffer(4));
   for (;;) {
     if (covered()) return null;
     try {
-      if (slotStale(lock)) rmSync(lock, { force: true });
-      writeFileSync(lock, String(process.pid), { flag: "wx" });
-      break;
-    } catch (e) {
-      if ((e as NodeJS.ErrnoException).code !== "EEXIST") return run();
+      mkdirSync(dir, { recursive: true }); // only once the cheap `.last` check did not cover the file
+      if (claimFile(lock)) break;
+    } catch {
+      return run();
     }
     if (process.uptime() * 1000 >= FILE_CHANGED_BUDGET_MS - reserveMs) return run();
-    Atomics.wait(tick, 0, 0, 100);
+    sleep100();
   }
   try {
     // The previous holder may have finished between the last check and this claim.
