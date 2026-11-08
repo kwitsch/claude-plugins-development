@@ -585,33 +585,31 @@ export const register = (on: On, options: Options): void => {
   let donePending = false;
   // Phase 3: classify each prompt as it is sent and, when Jev is confident, add a short hint only Claude reads.
   // This one hook also notes Jev's own done follow-up passing through, which arms the exemption.
-  {
-    on("prompt.submit", async function onPromptSubmit($: Engine, e: PromptEvent, next: Next<PromptEvent, unknown>): Promise<unknown> {
-      donePending = e.origin?.kind === "plugin" && e.origin.name === PLUGIN_NAME;
-      if (donePending) return next(e);
-      if (options.classify === false || e.command || e.isMeta || e.text.trim().length < 3) return next(e);
+  on("prompt.submit", async function onPromptSubmit($: Engine, e: PromptEvent, next: Next<PromptEvent, unknown>): Promise<unknown> {
+    donePending = e.origin?.kind === "plugin" && e.origin.name === PLUGIN_NAME;
+    if (donePending) return next(e);
+    if (options.classify === false || e.command || e.isMeta || e.text.trim().length < 3) return next(e);
 
-      const questions = promptQuestions(await skillOptions($));
-      const previous = await previousReply($);
-      const r = await askJev($, { request: clip(e.text, 3000), ...(previous ? { previous_reply: previous } : {}) }, questions);
-      if (!r.ok) return next(e);
-      const kind = choice(r.answers, "kind");
-      const needsPlan = noul(r.answers, "needs_plan");
-      const skillAnswer = choice(r.answers, "skill");
-      const skill = skillAnswer ? { name: skillAnswer.choice, p: skillAnswer.probabilities[skillAnswer.choice] ?? 0 } : undefined;
-      const added = hints(kind?.choice, needsPlan, skill, takeThreshold);
+    const questions = promptQuestions(await skillOptions($));
+    const previous = await previousReply($);
+    const r = await askJev($, { request: clip(e.text, 3000), ...(previous ? { previous_reply: previous } : {}) }, questions);
+    if (!r.ok) return next(e);
+    const kind = choice(r.answers, "kind");
+    const needsPlan = noul(r.answers, "needs_plan");
+    const skillAnswer = choice(r.answers, "skill");
+    const skill = skillAnswer ? { name: skillAnswer.choice, p: skillAnswer.probabilities[skillAnswer.choice] ?? 0 } : undefined;
+    const added = hints(kind?.choice, needsPlan, skill, takeThreshold);
 
-      await record($, {
-        kind: "classify",
-        applied: added.length > 0,
-        text: `${kind?.choice ?? "?"}${needsPlan !== undefined ? `, plan ${needsPlan.toFixed(2)}` : ""}${skill && skill.name !== NONE ? `, skill ${skill.name} ${skill.p.toFixed(2)}` : ""}${added.length ? " → hint" : ""}`,
-        ms: r.ms,
-        data: { request: clip(e.text, 120), kind: kind?.choice, kindP: kind?.confidence, needsPlan, skill: skill?.name, skillP: skill?.p, hints: added.length },
-      });
-      if (!added.length) return next(e);
-      return next({ ...e, context: [...(e.context ?? []), ...added] });
+    await record($, {
+      kind: "classify",
+      applied: added.length > 0,
+      text: `${kind?.choice ?? "?"}${needsPlan !== undefined ? `, plan ${needsPlan.toFixed(2)}` : ""}${skill && skill.name !== NONE ? `, skill ${skill.name} ${skill.p.toFixed(2)}` : ""}${added.length ? " → hint" : ""}`,
+      ms: r.ms,
+      data: { request: clip(e.text, 120), kind: kind?.choice, kindP: kind?.confidence, needsPlan, skill: skill?.name, skillP: skill?.p, hints: added.length },
     });
-  }
+    if (!added.length) return next(e);
+    return next({ ...e, context: [...(e.context ?? []), ...added] });
+  });
 
   // Phase 3: when Claude starts a general-purpose subagent, Jev may pick a more specialised agent type.
   if (options.agentTypes !== false) {

@@ -360,48 +360,46 @@ export const register = (on, options) => {
 		return Markdown({ text: e.props.text });
 	});
 	let donePending = false;
-	{
-		on("prompt.submit", async function onPromptSubmit($, e, next) {
-			donePending = e.origin?.kind === "plugin" && e.origin.name === PLUGIN_NAME;
-			if (donePending) return next(e);
-			if (options.classify === false || e.command || e.isMeta || e.text.trim().length < 3) return next(e);
-			const questions = promptQuestions(await skillOptions($));
-			const previous = await previousReply($);
-			const r = await askJev($, {
-				request: clip(e.text, 3e3),
-				...previous ? { previous_reply: previous } : {}
-			}, questions);
-			if (!r.ok) return next(e);
-			const kind = choice(r.answers, "kind");
-			const needsPlan = noul(r.answers, "needs_plan");
-			const skillAnswer = choice(r.answers, "skill");
-			const skill = skillAnswer ? {
-				name: skillAnswer.choice,
-				p: skillAnswer.probabilities[skillAnswer.choice] ?? 0
-			} : undefined;
-			const added = hints(kind?.choice, needsPlan, skill, takeThreshold);
-			await record($, {
-				kind: "classify",
-				applied: added.length > 0,
-				text: `${kind?.choice ?? "?"}${needsPlan !== undefined ? `, plan ${needsPlan.toFixed(2)}` : ""}${skill && skill.name !== NONE ? `, skill ${skill.name} ${skill.p.toFixed(2)}` : ""}${added.length ? " → hint" : ""}`,
-				ms: r.ms,
-				data: {
-					request: clip(e.text, 120),
-					kind: kind?.choice,
-					kindP: kind?.confidence,
-					needsPlan,
-					skill: skill?.name,
-					skillP: skill?.p,
-					hints: added.length
-				}
-			});
-			if (!added.length) return next(e);
-			return next({
-				...e,
-				context: [...e.context ?? [], ...added]
-			});
+	on("prompt.submit", async function onPromptSubmit($, e, next) {
+		donePending = e.origin?.kind === "plugin" && e.origin.name === PLUGIN_NAME;
+		if (donePending) return next(e);
+		if (options.classify === false || e.command || e.isMeta || e.text.trim().length < 3) return next(e);
+		const questions = promptQuestions(await skillOptions($));
+		const previous = await previousReply($);
+		const r = await askJev($, {
+			request: clip(e.text, 3e3),
+			...previous ? { previous_reply: previous } : {}
+		}, questions);
+		if (!r.ok) return next(e);
+		const kind = choice(r.answers, "kind");
+		const needsPlan = noul(r.answers, "needs_plan");
+		const skillAnswer = choice(r.answers, "skill");
+		const skill = skillAnswer ? {
+			name: skillAnswer.choice,
+			p: skillAnswer.probabilities[skillAnswer.choice] ?? 0
+		} : undefined;
+		const added = hints(kind?.choice, needsPlan, skill, takeThreshold);
+		await record($, {
+			kind: "classify",
+			applied: added.length > 0,
+			text: `${kind?.choice ?? "?"}${needsPlan !== undefined ? `, plan ${needsPlan.toFixed(2)}` : ""}${skill && skill.name !== NONE ? `, skill ${skill.name} ${skill.p.toFixed(2)}` : ""}${added.length ? " → hint" : ""}`,
+			ms: r.ms,
+			data: {
+				request: clip(e.text, 120),
+				kind: kind?.choice,
+				kindP: kind?.confidence,
+				needsPlan,
+				skill: skill?.name,
+				skillP: skill?.p,
+				hints: added.length
+			}
 		});
-	}
+		if (!added.length) return next(e);
+		return next({
+			...e,
+			context: [...e.context ?? [], ...added]
+		});
+	});
 	if (options.agentTypes !== false) {
 		const offered = new Map();
 		on("agent.offer", function onAgentOffer($, e, next) {
