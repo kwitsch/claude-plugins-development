@@ -68,6 +68,10 @@ type Engine = {
     // The element factories are plain functions, called detached from the object (`const { Markdown } = …`).
     resolve(e: unknown): { Markdown: (props: { text: string }) => unknown };
   };
+  /** Prompts sent as this plugin. */
+  prompt: { submit(input: { text: string }): Promise<unknown> };
+  /** The session's subagents. */
+  agent: { list(): Promise<{ status: string }[]> };
 };
 /** Continues the hook chain with an event. */
 type Next<E, R> = (e: E) => Promise<R>;
@@ -97,10 +101,6 @@ type ToolResult = { deny?: unknown; isError?: boolean } & Record<string, unknown
 type Check = { tool: string; tool_use_id?: string; agentId?: string; input?: unknown } & Record<string, unknown>;
 /** A `tool.check` result. */
 type Verdict = { decision: string; reason?: string } & Record<string, unknown>;
-/** A `classic.Stop` event. */
-type StopEvent = { stop_hook_active?: boolean; background_tasks?: readonly unknown[]; last_assistant_message?: string } & Record<string, unknown>;
-/** A `classic.Stop` result. */
-type StopResult = { block?: string } & Record<string, unknown>;
 /** A `prompt.submit` event. */
 type PromptEvent = { command?: unknown; isMeta?: boolean; text: string; context?: readonly string[] } & Record<string, unknown>;
 /** An `agent.offer` event. */
@@ -110,7 +110,7 @@ type CompactEvent = { agentId?: string; trigger: string; messages: readonly Sess
 /** A `ui.render` event of the `/jev` command output. */
 type RenderEvent = { props: { isErrored?: boolean; text: string } } & Record<string, unknown>;
 /** A `turn.complete` event. */
-type TurnEnd = { turnId: string; reason?: string } & Record<string, unknown>;
+type TurnEnd = { turnId: string; reason?: string; agentId?: string; answer?: string } & Record<string, unknown>;
 /** A `command.run` event. */
 type CommandEvent = { args: string } & Record<string, unknown>;
 /** The `on` the engine passes to `register`, one overload per hooked event. */
@@ -122,7 +122,6 @@ type On = {
   (event: "tool.call", matcher: { tool: "Agent" }, hook: Hook<AgentCall, ToolResult>): void;
   (event: "turn.step", hook: ($: Engine, e: Step, next: (e: Step) => StepRun) => StepRun): void;
   (event: "tool.check", hook: Hook<Check, Verdict>): void;
-  (event: "classic.Stop", hook: Hook<StopEvent, StopResult>): void;
   (event: "prompt.submit", hook: Hook<PromptEvent, unknown>): void;
   (event: "agent.offer", hook: Hook<OfferEvent, unknown>): void;
   (event: "session.compact", hook: Hook<CompactEvent, unknown>): void;
@@ -141,6 +140,11 @@ const MAX_TAKES_PER_TURN = 3;
 const GATED = new Set(["Bash", "Edit", "Write", "NotebookEdit"]);
 /** From this `single_action` probability on, a taken step bypasses the whole turn. */
 const SINGLE_ACTION = 0.8;
+/** The done check's follow-up message; also how the prompt classifier recognises it. */
+const DONE_PROMPT = "Jev: the user's request doesn't look finished yet. Continue with what remains. If it is actually complete, say so in one line.";
+
+/** Subagent statuses that mean the work is over. */
+const FINISHED = new Set(["completed", "done", "failed", "error", "killed", "cancelled", "canceled", "stopped", "aborted"]);
 
 /**
  * `String(v)` for a tool-input field, typed `unknown` so the lint's base-to-string check accepts a `?? ""` fallback.
@@ -261,7 +265,6 @@ async function clearLog($: Engine): Promise<void> {
   await $.store.set("stats", {});
 }
 
-
 /**
  * The current turn of the main loop or of a subagent.
  *
@@ -272,7 +275,8 @@ async function clearLog($: Engine): Promise<void> {
 async function readTurn($: Engine, agentId?: string): Promise<TurnContext | undefined> {
   const messages = await $.session.messages(agentId ? { agentId } : {});
   if (!Array.isArray(messages)) return undefined;
-  return splitTurn(messages);
+  // Jev's own done follow-up is not the user's request.
+  return splitTurn(messages.filter((m) => !(m.role === "user" && m.text.includes(DONE_PROMPT))));
 }
 
 /**
@@ -521,6 +525,52 @@ async function blockSkill($: Engine, name: string): Promise<void> {
 }
 
 /**
+ * The done check after a main-loop answer: asks Jev whether the request is finished and records the verdict.
+ *
+ * @remarks
+ * Module level because the engine accepts `$` passed only to top-level functions.
+ *
+ * @param $ - Engine interface.
+ * @param e - The `turn.complete` event.
+ * @param configuredMode - The configured `mode` option.
+ * @param threshold - The `doneThreshold`: below this `done` probability the request counts as unfinished.
+ * @returns Whether to send Claude back with a follow-up message.
+ */
+async function checkDone($: Engine, e: TurnEnd, configuredMode: unknown, threshold: number): Promise<boolean> {
+  const m = await currentMode($, configuredMode);
+  if (m === "off") return false;
+  // Waiting on background work (a subagent) is not stopping early: that work will wake the session when it finishes.
+  // shortcut: background Bash commands are not visible to $; upgrade if the engine exposes them.
+  const agents = await $.agent.list().catch(() => undefined);
+  if (!agents) return false;
+  // Anything not known to be finished counts as waiting: the engine's status names are not declared, so err towards no follow-up.
+  const waitingOn = agents.filter((a) => !FINISHED.has(a.status)).length;
+  if (waitingOn > 0) {
+    await record($, { kind: "done", applied: false, text: `skipped: waiting on ${waitingOn} background task(s)`, data: { skipped: "background", continued: false } });
+    return false;
+  }
+
+  const ctx = await readTurn($);
+  if (!ctx) return false;
+  const r = await askJev(
+    $,
+    { request: clip(ctx.request, 3000), final_message: clip(e.answer ?? "", 2000), recent: summarize(ctx.steps) },
+    { done: doneQuestion },
+  );
+  if (!r.ok) return false;
+  const done = noul(r.answers, "done");
+  const unfinished = shouldContinue(done, threshold);
+  await record($, {
+    kind: "done",
+    applied: unfinished,
+    text: unfinished ? `not finished (p=${(done ?? 0).toFixed(2)}), continuing` : `finished (p=${(done ?? 0).toFixed(2)})`,
+    ms: r.ms,
+    data: { p: done, continued: unfinished },
+  });
+  return unfinished;
+}
+
+/**
  * Module entry point called by the engine.
  *
  * @param on - Registers a hook for an event.
@@ -556,10 +606,19 @@ export const register = (on: On, options: Options): void => {
     return Markdown({ text: e.props.text });
   });
 
+  // The next main-loop turn after a done follow-up is exempt, so Jev sends Claude back at most once per request.
+  // Set only once the follow-up passed `prompt.submit`, so a follow-up that never went out exempts nothing.
+  // A hot reload forgets it: at worst one more follow-up.
+  let donePending = false;
   // Phase 3: classify each prompt as it is sent and, when Jev is confident, add a short hint only Claude reads.
-  if (options.classify !== false) {
+  // This one hook also notes Jev's own done follow-up passing through, which arms the exemption.
+  {
     on("prompt.submit", async function onPromptSubmit($: Engine, e: PromptEvent, next: Next<PromptEvent, unknown>): Promise<unknown> {
-      if (e.command || e.isMeta || e.text.trim().length < 3) return next(e);
+      if (e.text.includes(DONE_PROMPT)) {
+        donePending = true;
+        return next(e);
+      }
+      if (options.classify === false || e.command || e.isMeta || e.text.trim().length < 3) return next(e);
       const m = await currentMode($, options.mode);
       if (m === "off") return next(e);
 
@@ -662,7 +721,6 @@ export const register = (on: On, options: Options): void => {
   const turns = new Map<string, { route?: Route; taken: number; bypassId?: string; bypassAction?: string }>();
   // Calls Jev made itself skip the gate: their commands come from a vetted list.
   const ownCalls = new Set<string>();
-
   on("session.start", async function onSessionStart($: Engine, e: unknown, next: Next<unknown, unknown>): Promise<unknown> {
     await $.command.register({
       name: "jev",
@@ -733,6 +791,27 @@ export const register = (on: On, options: Options): void => {
     turns.delete(e.turnId);
     if (e.reason === "aborted" || e.reason === "error") {
       await record($, { kind: "turn", applied: false, text: `turn ${e.reason}`, turnId: e.turnId, data: { reason: e.reason } });
+    }
+    // Done check: runs here because cc-plugin-sec-default passes classic.Stop on past every user-tier hook.
+    if (e.agentId === undefined) {
+      const exempt = donePending;
+      donePending = false;
+      let again = false;
+      if (doneCheck && !exempt && e.reason === "answer") {
+        try {
+          again = await checkDone($, e, options.mode, doneThreshold);
+        } catch (err) {
+          await record($, { kind: "error", applied: false, text: `done check failed: ${String(err)}` }).catch(() => undefined);
+        }
+      }
+      if (again) {
+        // Not awaited: it resolves only once the new turn starts, which waits for this turn to end.
+        $.prompt.submit({ text: DONE_PROMPT }).catch((err: unknown) => {
+          donePending = false;
+          // The frame may be over by now, so this is best effort.
+          void record($, { kind: "error", applied: false, text: `done follow-up not sent: ${String(err)}` }).catch(() => undefined);
+        });
+      }
     }
     return next(e);
   });
@@ -960,41 +1039,5 @@ export const register = (on: On, options: Options): void => {
     if (!verdict) return base;
     const tighter = verdict.decision === "deny" || base.decision === "allow";
     return tighter ? { ...base, decision: verdict.decision, reason: verdict.reason } : base;
-  });
-
-  // Done check: when Claude stops, send it back once if the request looks unfinished.
-  on("classic.Stop", async function onStop($: Engine, e: StopEvent, next: Next<StopEvent, StopResult>): Promise<StopResult> {
-    if (!doneCheck || e.stop_hook_active) return next(e);
-    const m = await currentMode($, options.mode);
-    if (m === "off") return next(e);
-    // Waiting on background work (a subagent, a background command) is not stopping early: that work will wake the
-    // session when it finishes.
-    const waitingOn = e.background_tasks?.length ?? 0;
-    if (waitingOn > 0) {
-      await record($, { kind: "done", applied: false, text: `skipped: waiting on ${waitingOn} background task(s)`, data: { skipped: "background", continued: false } });
-      return next(e);
-    }
-
-    const ctx = await readTurn($);
-    if (!ctx) return next(e);
-    const r = await askJev(
-      $,
-      { request: clip(ctx.request, 3000), final_message: clip(e.last_assistant_message ?? "", 2000), recent: summarize(ctx.steps) },
-      { done: doneQuestion },
-    );
-    if (!r.ok) return next(e);
-    const done = noul(r.answers, "done");
-    const unfinished = shouldContinue(done, doneThreshold);
-    await record($, {
-      kind: "done",
-      applied: unfinished,
-      text: unfinished ? `not finished (p=${(done ?? 0).toFixed(2)}), continuing` : `finished (p=${(done ?? 0).toFixed(2)})`,
-      ms: r.ms,
-      data: { p: done, continued: unfinished },
-    });
-    if (!unfinished) return next(e);
-    const below = await next(e);
-    if (below.block) return below;
-    return { ...below, block: "Jev: the user's request doesn't look finished yet. Continue with what remains. If it is actually complete, say so in one line." };
   });
 };

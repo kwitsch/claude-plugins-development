@@ -39,7 +39,7 @@ type Chunk = { kind: string; [k: string]: unknown };
 type Runner = Parameters<Parameters<typeof test>[2]>[0];
 
 // Answers every call the mod makes on `$`, with Jev's answers from `jev` (a number is an HTTP error status).
-function setup(on: On, opts: { messages: Msg[]; jev: Jev; files?: string[]; packageJson?: object; env?: Record<string, string> }) {
+function setup(on: On, opts: { messages: Msg[]; jev: Jev; files?: string[]; packageJson?: object; env?: Record<string, string>; agents?: { status: string }[] }) {
   const sent: Record<string, unknown>[] = [];
   const urls: string[] = [];
   mock.env(on, { TYPESAFE_API_KEY: "test-key", ...opts.env });
@@ -51,6 +51,7 @@ function setup(on: On, opts: { messages: Msg[]; jev: Jev; files?: string[]; pack
   on("fs.stat", (_$, e) => ((opts.files ?? []).includes(String(e.path)) ? { value: { kind: "file", size: 100, mtimeMs: 0, isLink: false } } : { deny: "ENOENT" }));
   on("fs.read", (_$, e) => (opts.packageJson && e.path === `${CWD}/package.json` ? { value: JSON.stringify(opts.packageJson) } : { deny: "ENOENT" }));
   on("ui.status", () => ({ value: undefined }));
+  on("agent.list", () => ({ value: opts.agents ?? [] }));
   on("http.fetch", (_$, e) => {
     urls.push(String(e.url));
     const body = JSON.parse(String((e.init as { body?: string } | undefined)?.body ?? "{}")) as { questions: Record<string, unknown> };
@@ -61,6 +62,20 @@ function setup(on: On, opts: { messages: Msg[]; jev: Jev; files?: string[]; pack
   });
   return { sent, urls };
 }
+
+// Stubs beneath the done check: the turn's end, and the follow-up messages the mod submits (their texts).
+function followUps(on: On) {
+  const submitted: string[] = [];
+  on("turn.complete", () => ({ text: "" }));
+  on("prompt.submit", (_$, e) => {
+    submitted.push(String(e.text));
+    return { value: {} };
+  });
+  return submitted;
+}
+
+// A main-loop `turn.complete` that ended with an answer; `extra` adds or overrides fields (an `agentId`).
+const answered = (turnId: string, answer: string, extra: Record<string, unknown> = {}) => ({ turnId, reason: "answer", answer, durationMs: 1, isAborted: false, ...extra });
 
 const user = (text: string): Msg => ({ role: "user", text, toolUses: [] });
 
@@ -173,13 +188,49 @@ test("The gate leaves a harmless command alone", async ($, on) => {
 });
 
 test("The done check sends Claude back once when work is unfinished", async ($, on) => {
-  setup(on, { messages: [user("rename foo to bar in all files")], jev: () => ({ done: { type: "noul", noul: 0.04 } }) });
-  on("classic.Stop", () => ({}));
+  const { sent } = setup(on, { messages: [user("rename foo to bar in all files")], jev: () => ({ done: { type: "noul", noul: 0.04 } }) });
+  const submitted = followUps(on);
 
-  const first = (await $.classic.Stop({ stop_hook_active: false, last_assistant_message: "I renamed it in one file. Want me to do the rest?" })) as { block?: string };
-  expect(first.block).toBeDefined();
-  const again = (await $.classic.Stop({ stop_hook_active: true, last_assistant_message: "Done." })) as { block?: string };
-  expect(again.block).toBeUndefined();
+  await $.turn.complete(answered("t1", "I renamed it in one file. Want me to do the rest?"));
+  await expect.poll(() => submitted.length).toBe(1);
+  expect(submitted[0]).toContain("doesn't look finished yet");
+  // The follow-up message is not classified: the only Jev request is the done question.
+  expect(sent).toHaveLength(1);
+  expect(Object.keys((sent[0] as { questions: object }).questions)).toEqual(["done"]);
+
+  // The follow-up turn is exempt: no second Jev request, no second follow-up.
+  await $.turn.complete(answered("t2", "Done."));
+  expect(sent).toHaveLength(1);
+  expect(submitted).toHaveLength(1);
+});
+
+test("A follow-up that failed to submit exempts nothing", async ($, on) => {
+  const { sent } = setup(on, { messages: [user("rename foo to bar in all files")], jev: () => ({ done: { type: "noul", noul: 0.04 } }) });
+  on("turn.complete", () => ({ text: "" }));
+  on("prompt.submit", () => {
+    throw new Error("rejected");
+  });
+  await $.turn.complete(answered("t1", "One file only."));
+  await expect.poll(() => sent.length).toBe(1);
+  // The submit was rejected, so the next turn is checked again.
+  await $.turn.complete(answered("t2", "Still one file."));
+  expect(sent).toHaveLength(2);
+});
+
+test("The done check stays quiet only for unfinished subagents", async ($, on) => {
+  const { sent } = setup(on, { messages: [user("rename foo to bar in all files")], jev: () => ({ done: { type: "noul", noul: 0.04 } }), agents: [{ status: "completed" }] });
+  followUps(on);
+  await $.turn.complete(answered("t1", "One file only."));
+  expect(sent).toHaveLength(1);
+});
+
+test("The done check skips subagent turns", async ($, on) => {
+  const { sent } = setup(on, { messages: [user("rename foo to bar in all files")], jev: () => ({ done: { type: "noul", noul: 0.04 } }) });
+  const submitted = followUps(on);
+
+  await $.turn.complete(answered("t1", "I renamed it in one file.", { agentId: "a1" }));
+  expect(sent).toHaveLength(0);
+  expect(submitted).toHaveLength(0);
 });
 
 // Jev's own calls skip auto mode's classifier: the mod approves them itself, but a settings deny rule beneath still wins.
@@ -369,16 +420,17 @@ test("Built-in commands are never offered as skills, and a skill that fails is b
 });
 
 test("The done check stays quiet while background work is running", async ($, on) => {
-  const { sent } = setup(on, { messages: [user("find every localStorage use with a subagent")], jev: () => ({ done: { type: "noul", noul: 0.02 } }) });
-  on("classic.Stop", () => ({}));
+  const { sent } = setup(on, {
+    messages: [user("find every localStorage use with a subagent")],
+    jev: () => ({ done: { type: "noul", noul: 0.02 } }),
+    agents: [{ status: "running" }],
+  });
+  const submitted = followUps(on);
 
-  const waiting = (await $.classic.Stop({
-    stop_hook_active: false,
-    last_assistant_message: "The subagent is running; I will report back.",
-    background_tasks: [{ id: "a1", type: "agent", status: "running", description: "Find localStorage reads/writes" }],
-  })) as { block?: string };
-  expect(waiting.block).toBeUndefined();
+  await $.turn.complete(answered("t1", "The subagent is running; I will report back."));
   expect(sent).toHaveLength(0);
+  expect(submitted).toHaveLength(0);
+  expect(await runJev($, "")).toContain("skipped: waiting on 1 background task(s)");
 });
 
 test("By default Jev takes no steps inside a longer turn", async ($, on) => {
