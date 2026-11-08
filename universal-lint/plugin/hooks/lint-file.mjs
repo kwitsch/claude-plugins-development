@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { execFileSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { accessSync, constants as fsConstants, existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { accessSync, constants as fsConstants, existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { availableParallelism, homedir, tmpdir } from "node:os";
 import path from "node:path";
 import process from "node:process";
@@ -974,6 +974,54 @@ export function acquireSlot(untilMs) {
 		}
 		if (process.uptime() * 1e3 >= untilMs) return null;
 		Atomics.wait(tick, 0, 0, 100);
+	}
+}
+export function coalesceProjectCheck(key, file, reserveMs, run) {
+	const dir = path.resolve(process.env.CLAUDE_PLUGIN_DATA || tmpdir(), "fc-locks");
+	const lock = path.join(dir, `${key}.lock`);
+	const last = path.join(dir, `${key}.last`);
+	let changed;
+	try {
+		changed = statSync(file).ctimeMs;
+		mkdirSync(dir, { recursive: true });
+	} catch {
+		return run();
+	}
+	const covered = () => {
+		try {
+			const t = Number(readFileSync(last, "utf8"));
+			return t > changed && t <= Date.now();
+		} catch {
+			return false;
+		}
+	};
+	const tick = new Int32Array(new SharedArrayBuffer(4));
+	for (;;) {
+		if (covered()) return null;
+		try {
+			if (slotStale(lock)) rmSync(lock, { force: true });
+			writeFileSync(lock, String(process.pid), { flag: "wx" });
+			break;
+		} catch (e) {
+			if (e.code !== "EEXIST") return run();
+		}
+		if (process.uptime() * 1e3 >= FILE_CHANGED_BUDGET_MS - reserveMs) return run();
+		Atomics.wait(tick, 0, 0, 100);
+	}
+	try {
+		if (covered()) return null;
+		const start = Date.now();
+		const r = run();
+		if (!r.error && !r.signal) {
+			try {
+				writeFileSync(last, String(start));
+			} catch {}
+		}
+		return r;
+	} finally {
+		try {
+			rmSync(lock, { force: true });
+		} catch {}
 	}
 }
 export function fileChangedHandler(args) {
