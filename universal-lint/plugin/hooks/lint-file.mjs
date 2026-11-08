@@ -10,6 +10,7 @@ import { fileURLToPath } from "node:url";
 const SPAWN_TIMEOUT_MS = 3e4;
 const NPX_SPAWN_TIMEOUT_MS = 55e3;
 const NPX_REFRESH_MS = 24 * 60 * 60 * 1e3;
+const PROBE_MISS_TTL_MS = 10 * 60 * 1e3;
 const MAX_CONTEXT_CHARS = 4e3;
 const MAX_BUFFER_BYTES = 10 * 1024 * 1024;
 const TSC_SPAWN_TIMEOUT_MS = 45e3;
@@ -135,18 +136,67 @@ export const REGISTRY = {
 	}] }
 };
 const probeCache = new Map();
+let probeStore = null;
+function probeFilePath() {
+	return path.resolve(process.env.CLAUDE_PLUGIN_DATA || tmpdir(), `probe-${hashPath(process.env.PATH || "")}.json`);
+}
+function loadProbeStore(file) {
+	const isObject = (v) => typeof v === "object" && v !== null && !Array.isArray(v);
+	try {
+		const s = JSON.parse(readFileSync(file, "utf8"));
+		if (isObject(s) && isObject(s?.hits) && isObject(s?.misses)) return s;
+	} catch {}
+	return {
+		hits: {},
+		misses: {}
+	};
+}
+function saveProbeStore(file, store) {
+	try {
+		mkdirSync(path.dirname(file), { recursive: true });
+		const tmp = `${file}.${process.pid}.tmp`;
+		writeFileSync(tmp, JSON.stringify(store));
+		renameSync(tmp, file);
+	} catch {}
+}
 function onPath(tool) {
 	const cached = probeCache.get(tool);
 	if (cached !== undefined) return cached;
-	let found = false;
+	const file = probeFilePath();
+	probeStore ??= loadProbeStore(file);
+	const known = probeStore.hits[tool];
+	if (typeof known === "string" && path.isAbsolute(known)) {
+		try {
+			accessSync(path.join(known, tool), fsConstants.X_OK);
+			probeCache.set(tool, true);
+			return true;
+		} catch {}
+	}
+	const at = probeStore.misses[tool];
+	if (typeof at === "number") {
+		const age = Date.now() - at;
+		if (age >= 0 && age < PROBE_MISS_TTL_MS) {
+			probeCache.set(tool, false);
+			return false;
+		}
+	}
+	let foundDir = null;
 	for (const dir of (process.env.PATH || "").split(path.delimiter)) {
 		if (!dir) continue;
 		try {
 			accessSync(path.join(dir, tool), fsConstants.X_OK);
-			found = true;
+			foundDir = dir;
 			break;
 		} catch {}
 	}
+	if (foundDir === null || path.isAbsolute(foundDir)) {
+		Reflect.deleteProperty(probeStore.hits, tool);
+		Reflect.deleteProperty(probeStore.misses, tool);
+		if (foundDir === null) probeStore.misses[tool] = Date.now();
+		else probeStore.hits[tool] = foundDir;
+		saveProbeStore(file, probeStore);
+	}
+	const found = foundDir !== null;
 	probeCache.set(tool, found);
 	return found;
 }
