@@ -1,7 +1,7 @@
 // Pure tests of the built plugin/hooks/policy.mjs.
 import assert from "node:assert/strict";
 import { test } from "vitest";
-import { inScratchpad } from "../plugin/hooks/policy.mjs";
+import { gateBash, inScratchpad } from "../plugin/hooks/policy.mjs";
 
 const ROOTS = ["/tmp"];
 const SP = "/tmp/claude-1000/-proj/sid-1/scratchpad";
@@ -29,4 +29,14 @@ test("inScratchpad rejects other sessions, the directory itself, traversal, rela
 test("inScratchpad honours a custom root with a trailing slash", () => {
   assert.equal(inScratchpad("/var/folders/T/claude-501/-proj/sid-1/scratchpad/x", "sid-1", ["/var/folders/T/", "/tmp"]), true);
   assert.equal(inScratchpad("/var/folders/T/claude-501/-proj/sid-1/scratchpad/x", "sid-1", ["/tmp"]), false);
+});
+
+const danger = (p: number) => ({ type: "score" as const, score: 2 * p, probabilities: { "0": 0, "1": 1 - p, "2": p }, confidence: 0.9 });
+
+test("gateBash only ever denies: dangerous and out of scope", () => {
+  assert.equal(gateBash(danger(0.95), 0.03)?.decision, "deny");
+  assert.equal(gateBash(danger(0.95), 0.9), undefined);
+  assert.equal(gateBash(danger(0.95), undefined), undefined);
+  assert.equal(gateBash(danger(0.6), 0.03), undefined);
+  assert.equal(gateBash(undefined, 0.03), undefined);
 });

@@ -22,8 +22,8 @@ import { choice, jevUrl, MODEL, noul, score, TIMEOUT_MS } from "./jev.mjs";
 import type { Answer, ChoiceAnswer, JevResult, Question } from "./jev.mjs";
 import { LOG_KEY, MAX_ENTRIES, recentDecisions, remember, statsKey } from "./log.mjs";
 import type { Entry } from "./log.mjs";
-import { adjustEffort, bashRiskQuestion, bestAction, difficultyQuestion, doneQuestion, effortKeepsCache, gateBash, gateEdit, inScopeQuestion, lowerModel, nextActionQuestion, pickCandidate, route, shouldContinue, singleActionQuestion } from "./policy.mjs";
-import type { GateThresholds, GateVerdict, Route } from "./policy.mjs";
+import { adjustEffort, bashRiskQuestion, bestAction, difficultyQuestion, doneQuestion, effortKeepsCache, gateBash, inScopeQuestion, inScratchpad, lowerModel, nextActionQuestion, pickCandidate, route, shouldContinue, singleActionQuestion } from "./policy.mjs";
+import type { GateThresholds, Route } from "./policy.mjs";
 import { hints, NONE, promptQuestions } from "./prompt.mjs";
 import { buildReport } from "./report.mjs";
 import { SUMMARY_MODEL, SYSTEM } from "./summarize.mjs";
@@ -47,8 +47,8 @@ type Engine = {
   http: { fetch(url: string, init: { method: string; headers: Record<string, string>; body: string }): Promise<FetchResponse> };
   /** This plugin's key-value store. */
   store: { get(key: string): Promise<unknown>; set(key: string, value: unknown): Promise<unknown> };
-  /** The session's transcript and directory. */
-  session: { messages(opts: { agentId?: string }): Promise<SessionMessage[]>; cwd(): Promise<string> };
+  /** The session's transcript, directory and id. */
+  session: { messages(opts: { agentId?: string }): Promise<SessionMessage[]>; cwd(): Promise<string>; id(): Promise<string> };
   /** Filesystem. */
   fs: {
     exists(path: string): Promise<boolean>;
@@ -136,8 +136,8 @@ type Mode = "active" | "off";
 const MODES: readonly Mode[] = ["active", "off"];
 /** How many steps Jev may take in one turn. */
 const MAX_TAKES_PER_TURN = 3;
-/** The tools the permission gate checks. */
-const GATED = new Set(["Bash", "Edit", "Write", "NotebookEdit"]);
+/** The file tools whose writes into the session scratchpad are always allowed. */
+const WRITE_TOOLS = new Set(["Edit", "Write", "NotebookEdit"]);
 /** From this `single_action` probability on, a taken step bypasses the whole turn. */
 const SINGLE_ACTION = 0.8;
 /** The done check's follow-up message; also how the prompt classifier recognises it. */
@@ -592,10 +592,8 @@ export const register = (on: On, options: Options): void => {
     return typeof v === "number" ? v : fallback;
   };
   const gateThresholds: GateThresholds = {
-    dangerAsk: threshold("dangerAsk", 0.5),
     dangerDeny: threshold("dangerDeny", 0.8),
     scopeDeny: threshold("scopeDeny", 0.2),
-    editScope: threshold("editScope", 0.15),
   };
   const doneThreshold = threshold("doneThreshold", 0.15);
 
@@ -981,63 +979,47 @@ export const register = (on: On, options: Options): void => {
     return result;
   });
 
-  // Permission gate: only ever tightens what Claude Code already allows.
+  // Permission gate: never asks; only denies a dangerous Bash command the request does not ask for.
   on("tool.check", async function onToolCheck($: Engine, e: Check, next: Next<Check, Verdict>): Promise<Verdict> {
     const base = await next(e);
     // Jev's own calls come from the vetted candidate list: approve them so auto mode's classifier doesn't refuse
-    // them. A settings deny rule still wins.
+    // them. This and the scratchpad branch are the only places jevfort loosens Claude Code's verdict. A settings deny rule still wins.
     if (e.tool_use_id && ownCalls.has(e.tool_use_id)) {
       if (base.decision === "deny") return base;
       return { ...base, decision: "allow", reason: "Jev pilot: vetted action from its read-only/project-script list" };
     }
-    if (!gate || !GATED.has(e.tool) || (base.decision !== "allow" && base.decision !== "ask") || !e.tool_use_id) return base;
+    const input = (e.input ?? {}) as Record<string, unknown>;
+    // Writes into this session's scratchpad are always allowed, in every permission mode, also with the gate or the mod off.
+    if (base.decision !== "deny" && WRITE_TOOLS.has(e.tool)) {
+      const roots = [await $.env.get("CLAUDE_CODE_TMPDIR"), await $.env.get("TMPDIR"), "/tmp"].filter((r): r is string => Boolean(r));
+      if (inScratchpad(asText(input.file_path ?? input.notebook_path ?? ""), await $.session.id(), roots)) {
+        return { ...base, decision: "allow", reason: "jevfort: write inside this session's scratchpad" };
+      }
+    }
+    if (!gate || e.tool !== "Bash" || base.decision === "deny" || !e.tool_use_id) return base;
     const m = await currentMode($, options.mode);
     if (m === "off") return base;
     const ctx = await readTurn($, e.agentId);
-    const input = (e.input ?? {}) as Record<string, unknown>;
     const request = clip(ctx?.request ?? "", 3000);
     const cwd = await $.session.cwd();
 
-    let verdict: GateVerdict;
-    if (e.tool === "Bash") {
-      const r = await askJev(
-        $,
-        { request, command: asText(input.command ?? ""), cwd },
-        { risk: bashRiskQuestion, in_scope: inScopeQuestion("running the command in `command`") },
-      );
-      if (!r.ok) return base;
-      const risk = score(r.answers, "risk");
-      const inScope = noul(r.answers, "in_scope");
-      verdict = gateBash(risk, inScope, gateThresholds);
-      await record($, {
-        kind: "gate",
-        applied: verdict !== undefined,
-        text: `${verdict?.decision ?? "allow"} Bash: ${clip(String(input.command), 50)}`,
-        ms: r.ms,
-        data: { tool: "Bash", target: clip(String(input.command), 200), decision: verdict?.decision ?? "allow", danger: risk?.probabilities["2"], inScope },
-      });
-    } else {
-      const change = clip(asText(input.new_string ?? input.content ?? input.new_source ?? ""), 1200);
-      const file = asText(input.file_path ?? input.notebook_path ?? "");
-      const r = await askJev(
-        $,
-        { request, tool: e.tool, file, change, cwd },
-        { in_scope: inScopeQuestion("this change to the file in `file`") },
-      );
-      if (!r.ok) return base;
-      const inScope = noul(r.answers, "in_scope");
-      verdict = gateEdit(inScope, gateThresholds);
-      await record($, {
-        kind: "gate",
-        applied: verdict !== undefined,
-        text: `${verdict?.decision ?? "allow"} ${e.tool}: ${file}`,
-        ms: r.ms,
-        data: { tool: e.tool, target: file, decision: verdict?.decision ?? "allow", inScope },
-      });
-    }
-    // Only ever tighter: allow → ask/deny, ask → deny.
+    const r = await askJev(
+      $,
+      { request, command: asText(input.command ?? ""), cwd },
+      { risk: bashRiskQuestion, in_scope: inScopeQuestion("running the command in `command`") },
+    );
+    if (!r.ok) return base;
+    const risk = score(r.answers, "risk");
+    const inScope = noul(r.answers, "in_scope");
+    const verdict = gateBash(risk, inScope, gateThresholds);
+    await record($, {
+      kind: "gate",
+      applied: verdict !== undefined,
+      text: `${verdict?.decision ?? "allow"} Bash: ${clip(String(input.command), 50)}`,
+      ms: r.ms,
+      data: { tool: "Bash", target: clip(String(input.command), 200), decision: verdict?.decision ?? "allow", danger: risk?.probabilities["2"], inScope },
+    });
     if (!verdict) return base;
-    const tighter = verdict.decision === "deny" || base.decision === "allow";
-    return tighter ? { ...base, decision: verdict.decision, reason: verdict.reason } : base;
+    return { ...base, decision: verdict.decision, reason: verdict.reason };
   });
 };

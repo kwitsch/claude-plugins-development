@@ -116,31 +116,18 @@ export function lowerModel(current, target) {
 	return c > MODEL_TIER(target) ? target : undefined;
 }
 export const DEFAULT_GATE = {
-	dangerAsk: .5,
 	dangerDeny: .8,
-	scopeDeny: .2,
-	editScope: .15
+	scopeDeny: .2
 };
 export function gateBash(risk, inScope, t = DEFAULT_GATE) {
 	const dangerous = risk?.probabilities["2"] ?? 0;
-	if (dangerous < t.dangerAsk) return undefined;
-	if (inScope !== undefined && inScope < t.scopeDeny && dangerous >= t.dangerDeny) {
+	if (dangerous >= t.dangerDeny && inScope !== undefined && inScope < t.scopeDeny) {
 		return {
 			decision: "deny",
 			reason: "Jev: this command could destroy or leak data and the request does not seem to ask for it. Use a safer command or ask the user first."
 		};
 	}
-	return {
-		decision: "ask",
-		reason: `Jev: this command looks risky (${Math.round(dangerous * 100)}% likely to reach outside the project or destroy data).`
-	};
-}
-export function gateEdit(inScope, t = DEFAULT_GATE) {
-	if (inScope === undefined || inScope >= t.editScope) return undefined;
-	return {
-		decision: "ask",
-		reason: "Jev: this change doesn't look like part of the request."
-	};
+	return undefined;
 }
 export function shouldContinue(done, threshold = .15) {
 	return done !== undefined && done < threshold;

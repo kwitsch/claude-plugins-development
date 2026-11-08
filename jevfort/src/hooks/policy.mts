@@ -200,13 +200,13 @@ export function lowerModel(current: string, target: string | undefined): string 
   return c > MODEL_TIER(target) ? target : undefined;
 }
 
-/** A gate decision that tightens the permission, or `undefined` to leave it. */
-export type GateVerdict = { decision: "ask" | "deny"; reason: string } | undefined;
+/** A gate decision that denies a call, or `undefined` to leave Claude Code's verdict. The gate never asks. */
+export type GateVerdict = { decision: "deny"; reason: string } | undefined;
 
 /** The gate's thresholds. */
-export type GateThresholds = { dangerAsk: number; dangerDeny: number; scopeDeny: number; editScope: number };
+export type GateThresholds = { dangerDeny: number; scopeDeny: number };
 /** The gate thresholds of the manifest defaults. */
-export const DEFAULT_GATE: GateThresholds = { dangerAsk: 0.5, dangerDeny: 0.8, scopeDeny: 0.2, editScope: 0.15 };
+export const DEFAULT_GATE: GateThresholds = { dangerDeny: 0.8, scopeDeny: 0.2 };
 
 /**
  * The gate verdict for a Bash command.
@@ -214,27 +214,14 @@ export const DEFAULT_GATE: GateThresholds = { dangerAsk: 0.5, dangerDeny: 0.8, s
  * @param risk - The risk answer.
  * @param inScope - The in-scope probability.
  * @param t - The thresholds.
- * @returns Ask, deny, or `undefined` to allow.
+ * @returns Deny, or `undefined` to leave Claude Code's verdict.
  */
 export function gateBash(risk: ScoreAnswer | undefined, inScope: number | undefined, t: GateThresholds = DEFAULT_GATE): GateVerdict {
   const dangerous = risk?.probabilities["2"] ?? 0;
-  if (dangerous < t.dangerAsk) return undefined;
-  if (inScope !== undefined && inScope < t.scopeDeny && dangerous >= t.dangerDeny) {
+  if (dangerous >= t.dangerDeny && inScope !== undefined && inScope < t.scopeDeny) {
     return { decision: "deny", reason: "Jev: this command could destroy or leak data and the request does not seem to ask for it. Use a safer command or ask the user first." };
   }
-  return { decision: "ask", reason: `Jev: this command looks risky (${Math.round(dangerous * 100)}% likely to reach outside the project or destroy data).` };
-}
-
-/**
- * The gate verdict for an edit.
- *
- * @param inScope - The in-scope probability.
- * @param t - The thresholds.
- * @returns Ask, or `undefined` to allow.
- */
-export function gateEdit(inScope: number | undefined, t: GateThresholds = DEFAULT_GATE): GateVerdict {
-  if (inScope === undefined || inScope >= t.editScope) return undefined;
-  return { decision: "ask", reason: "Jev: this change doesn't look like part of the request." };
+  return undefined;
 }
 
 /**
