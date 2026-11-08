@@ -4,7 +4,7 @@ import { compactInstructions, compactItems, RELEVANCE } from "./compact.mjs";
 import { clip, splitTurn, summarize, toolCalls } from "./context.mjs";
 import { choice, jevUrl, MODEL, noul, score, TIMEOUT_MS } from "./jev.mjs";
 import { LOG_KEY, MAX_ENTRIES, recentDecisions, remember, statsKey } from "./log.mjs";
-import { adjustEffort, bashRiskQuestion, bestAction, difficultyQuestion, doneQuestion, effortKeepsCache, gateBash, inScopeQuestion, inScratchpad, lowerModel, nextActionQuestion, pickCandidate, route, shouldContinue, singleActionQuestion } from "./policy.mjs";
+import { adjustEffort, bestAction, difficultyQuestion, doneQuestion, effortKeepsCache, inScratchpad, lowerModel, nextActionQuestion, pickCandidate, route, shouldContinue, singleActionQuestion } from "./policy.mjs";
 import { hints, NONE, promptQuestions } from "./prompt.mjs";
 import { buildReport } from "./report.mjs";
 import { SUMMARY_MODEL, SYSTEM } from "./summarize.mjs";
@@ -349,7 +349,6 @@ async function checkDone($, e, configuredMode, threshold) {
 export const register = (on, options) => {
 	const routing = options.routing === "model" || options.routing === "off" ? options.routing : "effort";
 	const takeSteps = options.takeSteps !== false;
-	const gate = options.gate !== false;
 	const doneCheck = options.doneCheck !== false;
 	const takeThreshold = typeof options.takeThreshold === "number" ? options.takeThreshold : .85;
 	const subagents = options.subagents !== false;
@@ -359,10 +358,6 @@ export const register = (on, options) => {
 	const threshold = (key, fallback) => {
 		const v = options[key];
 		return typeof v === "number" ? v : fallback;
-	};
-	const gateThresholds = {
-		dangerDeny: threshold("dangerDeny", .8),
-		scopeDeny: threshold("scopeDeny", .2)
 	};
 	const doneThreshold = threshold("doneThreshold", .15);
 	on("ui.render", {
@@ -555,7 +550,7 @@ export const register = (on, options) => {
 		const counts = Object.entries(await stats($)).map(([k, v]) => `${k}=${v}`).join(", ") || "none yet";
 		const lines = recentDecisions().slice(-10).map((d) => `- ${d.kind}${d.applied ? "" : " (pass)"}: ${d.text}${d.ms !== undefined ? ` [${Math.round(d.ms)}ms]` : ""}`);
 		return { text: [
-			`Jev pilot: mode ${await currentMode($, options.mode)}, routing ${routing}, take steps ${takeSteps} (p ≥ ${takeThreshold}), gate ${gate}, done check ${doneCheck}, subagents ${subagents}`,
+			`Jev pilot: mode ${await currentMode($, options.mode)}, routing ${routing}, take steps ${takeSteps} (p ≥ ${takeThreshold}), done check ${doneCheck}, subagents ${subagents}`,
 			`Decisions (all sessions): ${counts}`,
 			lines.length ? `Recent:\n${lines.join("\n")}` : "No decisions this session yet.",
 			"Full analysis: /jev report"
@@ -848,43 +843,6 @@ export const register = (on, options) => {
 				}
 			}
 		}
-		if (!gate || e.tool !== "Bash" || base.decision !== "allow" && base.decision !== "ask" || !e.tool_use_id) return base;
-		const m = await currentMode($, options.mode);
-		if (m === "off") return base;
-		const ctx = await readTurn($, e.agentId);
-		const request = clip(ctx?.request ?? "", 3e3);
-		const cwd = await $.session.cwd();
-		const r = await askJev($, {
-			request,
-			command: asText(input.command ?? ""),
-			cwd
-		}, {
-			risk: bashRiskQuestion,
-			in_scope: inScopeQuestion("running the command in `command`")
-		});
-		if (!r.ok) return base;
-		const risk = score(r.answers, "risk");
-		const inScope = noul(r.answers, "in_scope");
-		const denyReason = gateBash(risk, inScope, gateThresholds);
-		const decision = denyReason === undefined ? "allow" : "deny";
-		await record($, {
-			kind: "gate",
-			applied: denyReason !== undefined,
-			text: `${decision} Bash: ${clip(String(input.command), 50)}`,
-			ms: r.ms,
-			data: {
-				tool: "Bash",
-				target: clip(String(input.command), 200),
-				decision,
-				danger: risk?.probabilities["2"],
-				inScope
-			}
-		});
-		if (denyReason === undefined) return base;
-		return {
-			...base,
-			decision: "deny",
-			reason: denyReason
-		};
+		return base;
 	});
 };
