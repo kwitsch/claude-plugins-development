@@ -247,3 +247,31 @@ export function gateEdit(inScope: number | undefined, t: GateThresholds = DEFAUL
 export function shouldContinue(done: number | undefined, threshold = 0.15): boolean {
   return done !== undefined && done < threshold;
 }
+
+/**
+ * Whether a file lies inside this session's scratchpad directory, `<root>/claude-<digits>/<project slug>/<session id>/scratchpad/<at least one segment>`.
+ * The project slug is not checked: it comes from the session-start directory, which differs from the cwd in a worktree.
+ *
+ * @param file - The absolute path of the file.
+ * @param sessionId - The session id.
+ * @param roots - The candidate temp roots (`CLAUDE_CODE_TMPDIR`, `TMPDIR`, `/tmp`).
+ * @returns Whether the normalized path is a file below the session's scratchpad.
+ */
+export function inScratchpad(file: string, sessionId: string, roots: readonly string[]): boolean {
+  if (!file.startsWith("/") || !sessionId) return false;
+  const parts: string[] = [];
+  for (const seg of file.split("/")) {
+    if (seg === "" || seg === ".") continue;
+    if (seg === "..") parts.pop();
+    else parts.push(seg);
+  }
+  const path = `/${parts.join("/")}`;
+  // shortcut: lexical containment only, a symlink inside the scratchpad can point elsewhere; upgrade when the engine offers realpath/lstat.
+  for (const root of roots) {
+    const prefix = `${root.replace(/\/+$/, "")}/`;
+    if (prefix === "/" || !path.startsWith(prefix)) continue;
+    const rest = path.slice(prefix.length).split("/");
+    if (rest.length >= 5 && /^claude-\d+$/.test(rest[0]) && rest[2] === sessionId && rest[3] === "scratchpad") return true;
+  }
+  return false;
+}
