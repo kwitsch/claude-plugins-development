@@ -28,7 +28,7 @@ Legend: `[x]` finished. `[ ]` not finished; tag = `open` (code change, not start
 
 ## Stage 2: structural changes
 
-- [ ] [F13](tasks/F13-dedup-whole-project-checks.md) Run tsc / go vet / cargo once per FileChanged burst, not once per file `open` priority:medium. After F10.
+- [x] [F13](tasks/F13-dedup-whole-project-checks.md) Run tsc / go vet / cargo once per FileChanged burst, not once per file. Shipped in 0.15.12.
 - [ ] [F15](tasks/F15-rearm-watches-after-checkout.md) Re-arm FileChanged watches after `git checkout` (prototype first) `open` priority:medium. After F12 (re-emission multiplies watch-list cost).
 - [ ] [F16](tasks/F16-skill-driver-batching.md) Skill driver: one linter call per tool group and one tsc per tsconfig `open` priority:medium. After F03 and F09 (they remove most of today's cost).
 
