@@ -1482,29 +1482,51 @@ function outside(rel: string): boolean {
 }
 
 /**
- * The real-path scope rule shared by every event (dprint's `inScope`): `file` resolved against `cwd` must exist, have a
- * lintable extension, its real path must lie strictly inside realpath(cwd), not be excluded (`isExcludedPath` on the
- * path relative to the real cwd), not lie inside realpath(scratchpad) when given, and not be a dangling link.
+ * The real-path scope rule shared by every event (dprint's `inScope`): `file` resolved against `cwd` must have a
+ * lintable extension (checked first, pure string work before any filesystem call), exist, its real path must lie
+ * strictly inside realpath(cwd), not be excluded (`isExcludedPath` on the path relative to the real cwd), not lie inside
+ * realpath(scratchpad) when given, and not be a dangling link.
  *
  * @param cwd - Payload cwd (the scope root; never `process.cwd()`).
  * @param file - Absolute or cwd-relative path.
  * @param scratchpad - The session's `scratchpad_dir`, when the payload has one.
  * @param roots - Pre-resolved `realish(cwd)` / `realish(scratchpad)`, so a caller scoping many files resolves them once.
+ *   `dirs` (only `watchList` passes it, a fresh map per call) memoizes lexical dirname -> `realish(dirname)`: one lstat
+ *   per file, a non-symlink leaf's real path is `realish(dirname)/basename`, a symlinked leaf takes the full `realish`,
+ *   and a missing leaf is out of scope. Same results as without it.
  * @returns `{ fp, real }` (lexical absolute path, real path) or null when out of scope.
  */
-export function scopedTarget(cwd: string, file: string, scratchpad?: string, roots?: { cwd: string; scratchpad?: string }): { fp: string; real: string } | null {
+export function scopedTarget(cwd: string, file: string, scratchpad?: string, roots?: { cwd: string; scratchpad?: string; dirs?: Map<string, string> }): { fp: string; real: string } | null {
   try {
     const fp = path.resolve(cwd, file);
-    const real = realish(fp);
+    const ext = path.extname(fp).toLowerCase();
+    if (!EXT_MAP[ext] && !TYPE_CHECK_EXTS.has(ext)) return null;
+    let real: string;
+    if (roots?.dirs) {
+      // A non-symlink lstat hit proves existence and makes realish(dirname)/basename equal realish(fp).
+      const st = lstatSync(fp, { throwIfNoEntry: false });
+      if (!st) return null;
+      if (st.isSymbolicLink()) {
+        real = realish(fp);
+      } else {
+        const dir = path.dirname(fp);
+        let dirReal = roots.dirs.get(dir);
+        if (dirReal === undefined) {
+          dirReal = realish(dir);
+          roots.dirs.set(dir, dirReal);
+        }
+        real = path.join(dirReal, path.basename(fp));
+      }
+    } else {
+      real = realish(fp);
+    }
     const rel = path.relative(roots?.cwd ?? realish(cwd), real);
     if (rel === "" || outside(rel) || isExcludedPath(rel)) return null;
     if (scratchpad) {
       const rs = roots ? roots.scratchpad ?? realish(scratchpad) : realish(scratchpad);
       if (real === rs || real.startsWith(rs + path.sep)) return null;
     }
-    const ext = path.extname(fp).toLowerCase();
-    if (!EXT_MAP[ext] && !TYPE_CHECK_EXTS.has(ext)) return null;
-    if (!existsSync(fp)) return null;
+    if (!roots?.dirs && !existsSync(fp)) return null;
     return { fp, real };
   } catch {
     return null;
@@ -1910,8 +1932,9 @@ export function fileChangedHandler(args: PostToolUseHookInput): HookResult {
 
 /**
  * Lintable, in-scope files of `cwd` per `git ls-files -co --exclude-standard` (tracked + untracked-not-ignored; in a
- * subdirectory git lists only paths below it, relative to it), each filtered through `scopedTarget` (drops excluded
- * paths, scratchpad files, dangling links and index entries deleted from disk). The scan stops as soon as more than
+ * subdirectory git lists only paths below it, relative to it), each filtered through `scopedTarget` with a per-call
+ * directory realpath memo (`roots.dirs`) (drops excluded paths, scratchpad files, dangling links and index entries
+ * deleted from disk). The scan stops as soon as more than
  * WATCH_LIMIT files are in scope, so files after that point are never scoped.
  *
  * @param cwd - Payload cwd (`new_cwd` for CwdChanged).
@@ -1931,9 +1954,9 @@ export function watchList(cwd: string, scratchpad?: string): string[] {
   } catch {
     return [];
   }
-  let roots: { cwd: string; scratchpad?: string };
+  let roots: { cwd: string; scratchpad?: string; dirs: Map<string, string> };
   try {
-    roots = { cwd: realish(cwd), scratchpad: scratchpad ? realish(scratchpad) : undefined };
+    roots = { cwd: realish(cwd), scratchpad: scratchpad ? realish(scratchpad) : undefined, dirs: new Map() };
   } catch {
     return [];
   }
