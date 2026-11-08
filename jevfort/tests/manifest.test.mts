@@ -7,15 +7,15 @@ import { test } from "vitest";
 const json = (rel: string) => JSON.parse(readFileSync(new URL(`../plugin/${rel}`, import.meta.url), "utf8"));
 const manifest = json(".claude-plugin/plugin.json");
 
-test("the manifest has name jevfort, version 0.3.0, author Kwitsch, a description and keywords", () => {
+test("the manifest has name jevfort, version 0.4.0, author Kwitsch, a description and keywords", () => {
   assert.equal(manifest.name, "jevfort");
-  assert.equal(manifest.version, "0.3.0");
+  assert.equal(manifest.version, "0.4.0");
   assert.equal(manifest.author.name, "Kwitsch");
   assert.ok(manifest.description.length > 0);
   assert.ok(Array.isArray(manifest.keywords) && manifest.keywords.length > 0);
 });
 
-test("userConfig declares exactly 12 options: no mode selector, no gate", () => {
+test("userConfig declares exactly 14 options: no mode selector, no gate", () => {
   assert.deepEqual(Object.keys(manifest.userConfig).sort(), [
     "agentTypes",
     "bypass",
@@ -23,7 +23,9 @@ test("userConfig declares exactly 12 options: no mode selector, no gate", () => 
     "compaction",
     "doneCheck",
     "doneThreshold",
+    "maxEffort",
     "measureSteps",
+    "minEffort",
     "routing",
     "subagents",
     "takeOnlyForBypass",
@@ -34,6 +36,12 @@ test("userConfig declares exactly 12 options: no mode selector, no gate", () => 
     assert.ok(v.type.length > 0 && v.title.length > 0 && v.description.length > 0, k);
   }
   assert.ok(!/shadow/i.test(readFileSync(new URL("../package.json", import.meta.url), "utf8")));
+});
+
+test("minEffort and maxEffort are effort-level strings defaulting to low and xhigh", () => {
+  const levels = ["low", "medium", "high", "xhigh", "max"];
+  assert.deepEqual({ ...manifest.userConfig.minEffort, title: "", description: "" }, { type: "string", title: "", description: "", options: levels, default: "low" });
+  assert.deepEqual({ ...manifest.userConfig.maxEffort, title: "", description: "" }, { type: "string", title: "", description: "", options: levels, default: "xhigh" });
 });
 
 test("hooks.json is exactly the mods module list", () => {
