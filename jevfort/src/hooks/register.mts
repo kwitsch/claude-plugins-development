@@ -99,10 +99,10 @@ type AgentCall = ToolCall & { subagent_type?: string; prompt: string; descriptio
 type ToolResult = { deny?: unknown; isError?: boolean } & Record<string, unknown>;
 /** A `tool.check` event. */
 type Check = { tool: string; tool_use_id?: string; agentId?: string; input?: unknown } & Record<string, unknown>;
-/** A `tool.check` result. */
-type Verdict = { decision: string; reason?: string } & Record<string, unknown>;
-/** A `prompt.submit` event. */
-type PromptEvent = { command?: unknown; isMeta?: boolean; text: string; context?: readonly string[] } & Record<string, unknown>;
+/** A `tool.check` result; `rule` is the settings rule that decided, absent for a mode or a tool's own check. */
+type Verdict = { decision: string; reason?: string; rule?: string } & Record<string, unknown>;
+/** A `prompt.submit` event; `origin` says who sent it (`{ kind: "plugin", name }` for another plugin's `$.prompt.submit`). */
+type PromptEvent = { command?: unknown; isMeta?: boolean; text: string; context?: readonly string[]; origin?: { kind?: string; name?: string } } & Record<string, unknown>;
 /** An `agent.offer` event. */
 type OfferEvent = { agent: string; description: string } & Record<string, unknown>;
 /** A `session.compact` event. */
@@ -140,11 +140,13 @@ const MAX_TAKES_PER_TURN = 3;
 const WRITE_TOOLS = new Set(["Edit", "Write", "NotebookEdit"]);
 /** From this `single_action` probability on, a taken step bypasses the whole turn. */
 const SINGLE_ACTION = 0.8;
-/** The done check's follow-up message; also how the prompt classifier recognises it. */
+/** This plugin's name: the `origin.name` of the prompts it submits itself. */
+const PLUGIN_NAME = "jevfort";
+/** The done check's follow-up message. */
 const DONE_PROMPT = "Jev: the user's request doesn't look finished yet. Continue with what remains. If it is actually complete, say so in one line.";
 
-/** Subagent statuses that mean the work is over. */
-const FINISHED = new Set(["completed", "done", "failed", "error", "killed", "cancelled", "canceled", "stopped", "aborted"]);
+/** Subagent statuses that mean the work is still going (the engine documents `running`, `completed`, `failed`, `killed` and others). */
+const ACTIVE = new Set(["running", "pending"]);
 
 /**
  * `String(v)` for a tool-input field, typed `unknown` so the lint's base-to-string check accepts a `?? ""` fallback.
@@ -276,6 +278,7 @@ async function readTurn($: Engine, agentId?: string): Promise<TurnContext | unde
   const messages = await $.session.messages(agentId ? { agentId } : {});
   if (!Array.isArray(messages)) return undefined;
   // Jev's own done follow-up is not the user's request.
+  // shortcut: SessionMessage has no origin marker, so the synthetic message is matched by its text here only; a user quoting it loses that one message from the scored request.
   return splitTurn(messages.filter((m) => !(m.role === "user" && m.text.includes(DONE_PROMPT))));
 }
 
@@ -540,11 +543,10 @@ async function checkDone($: Engine, e: TurnEnd, configuredMode: unknown, thresho
   const m = await currentMode($, configuredMode);
   if (m === "off") return false;
   // Waiting on background work (a subagent) is not stopping early: that work will wake the session when it finishes.
-  // shortcut: background Bash commands are not visible to $; upgrade if the engine exposes them.
+  // shortcut: background Bash commands are not exposed to $ (only subagents are), so waiting on one still triggers a follow-up; upgrade when the engine lists background tasks.
   const agents = await $.agent.list().catch(() => undefined);
   if (!agents) return false;
-  // Anything not known to be finished counts as waiting: the engine's status names are not declared, so err towards no follow-up.
-  const waitingOn = agents.filter((a) => !FINISHED.has(a.status)).length;
+  const waitingOn = agents.filter((a) => ACTIVE.has(a.status)).length;
   if (waitingOn > 0) {
     await record($, { kind: "done", applied: false, text: `skipped: waiting on ${waitingOn} background task(s)`, data: { skipped: "background", continued: false } });
     return false;
@@ -605,17 +607,15 @@ export const register = (on: On, options: Options): void => {
   });
 
   // The next main-loop turn after a done follow-up is exempt, so Jev sends Claude back at most once per request.
-  // Set only once the follow-up passed `prompt.submit`, so a follow-up that never went out exempts nothing.
-  // A hot reload forgets it: at worst one more follow-up.
+  // Armed only by a prompt this plugin submitted itself (`origin`), cleared by any other prompt, so a user turn neither
+  // consumes nor inherits it and a user pasting the follow-up text triggers nothing. A hot reload forgets it: at worst one more follow-up.
   let donePending = false;
   // Phase 3: classify each prompt as it is sent and, when Jev is confident, add a short hint only Claude reads.
   // This one hook also notes Jev's own done follow-up passing through, which arms the exemption.
   {
     on("prompt.submit", async function onPromptSubmit($: Engine, e: PromptEvent, next: Next<PromptEvent, unknown>): Promise<unknown> {
-      if (e.text.includes(DONE_PROMPT)) {
-        donePending = true;
-        return next(e);
-      }
+      donePending = e.origin?.kind === "plugin" && e.origin.name === PLUGIN_NAME;
+      if (donePending) return next(e);
       if (options.classify === false || e.command || e.isMeta || e.text.trim().length < 3) return next(e);
       const m = await currentMode($, options.mode);
       if (m === "off") return next(e);
@@ -977,6 +977,8 @@ export const register = (on: On, options: Options): void => {
     return result;
   });
 
+  // The scratchpad lookups, resolved once: neither the temp roots nor the session id change within a session.
+  let scratchpad: { roots: string[]; sid: string } | undefined;
   // Permission gate: never asks; only denies a dangerous Bash command the request does not ask for.
   on("tool.check", async function onToolCheck($: Engine, e: Check, next: Next<Check, Verdict>): Promise<Verdict> {
     const base = await next(e);
@@ -987,15 +989,20 @@ export const register = (on: On, options: Options): void => {
       return { ...base, decision: "allow", reason: "Jev pilot: vetted action from its read-only/project-script list" };
     }
     const input = (e.input ?? {}) as Record<string, unknown>;
-    // Writes into this session's scratchpad are always allowed, in every permission mode, also with the gate or the mod off.
-    if (base.decision !== "deny" && WRITE_TOOLS.has(e.tool)) {
-      const [tmpA, tmpB, sid] = await Promise.all([$.env.get("CLAUDE_CODE_TMPDIR"), $.env.get("TMPDIR"), $.session.id()]);
-      const roots = [tmpA, tmpB, "/tmp"].filter((r): r is string => Boolean(r));
-      if (inScratchpad(asText(input.file_path ?? input.notebook_path ?? ""), sid, roots)) {
-        return { ...base, decision: "allow", reason: "jevfort: write inside this session's scratchpad" };
+    // Writes into this session's scratchpad are allowed in every permission mode while jevfort is on, also with the gate off.
+    // A mode's ask becomes allow; a settings deny or ask rule (`rule` set) still wins.
+    if (WRITE_TOOLS.has(e.tool) && base.decision !== "deny" && !(base.decision === "ask" && base.rule !== undefined)) {
+      if ((await currentMode($, options.mode)) !== "off") {
+        scratchpad ??= {
+          roots: [await $.env.get("CLAUDE_CODE_TMPDIR"), await $.env.get("TMPDIR"), "/tmp"].filter((r): r is string => Boolean(r)),
+          sid: await $.session.id(),
+        };
+        if (inScratchpad(asText(input.file_path ?? input.notebook_path ?? ""), scratchpad.sid, scratchpad.roots)) {
+          return { ...base, decision: "allow", reason: "jevfort: write inside this session's scratchpad" };
+        }
       }
     }
-    if (!gate || e.tool !== "Bash" || base.decision === "deny" || !e.tool_use_id) return base;
+    if (!gate || e.tool !== "Bash" || (base.decision !== "allow" && base.decision !== "ask") || !e.tool_use_id) return base;
     const m = await currentMode($, options.mode);
     if (m === "off") return base;
     const ctx = await readTurn($, e.agentId);
@@ -1010,15 +1017,16 @@ export const register = (on: On, options: Options): void => {
     if (!r.ok) return base;
     const risk = score(r.answers, "risk");
     const inScope = noul(r.answers, "in_scope");
-    const verdict = gateBash(risk, inScope, gateThresholds);
+    const denyReason = gateBash(risk, inScope, gateThresholds);
+    const decision = denyReason === undefined ? "allow" : "deny";
     await record($, {
       kind: "gate",
-      applied: verdict !== undefined,
-      text: `${verdict?.decision ?? "allow"} Bash: ${clip(String(input.command), 50)}`,
+      applied: denyReason !== undefined,
+      text: `${decision} Bash: ${clip(String(input.command), 50)}`,
       ms: r.ms,
-      data: { tool: "Bash", target: clip(String(input.command), 200), decision: verdict?.decision ?? "allow", danger: risk?.probabilities["2"], inScope },
+      data: { tool: "Bash", target: clip(String(input.command), 200), decision, danger: risk?.probabilities["2"], inScope },
     });
-    if (!verdict) return base;
-    return { ...base, decision: verdict.decision, reason: verdict.reason };
+    if (denyReason === undefined) return base;
+    return { ...base, decision: "deny", reason: denyReason };
   });
 };

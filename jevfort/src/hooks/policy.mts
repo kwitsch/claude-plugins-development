@@ -200,9 +200,6 @@ export function lowerModel(current: string, target: string | undefined): string 
   return c > MODEL_TIER(target) ? target : undefined;
 }
 
-/** A gate decision that denies a call, or `undefined` to leave Claude Code's verdict. The gate never asks. */
-export type GateVerdict = { decision: "deny"; reason: string } | undefined;
-
 /** The gate's thresholds. */
 export type GateThresholds = { dangerDeny: number; scopeDeny: number };
 /** The gate thresholds of the manifest defaults. */
@@ -214,12 +211,12 @@ export const DEFAULT_GATE: GateThresholds = { dangerDeny: 0.8, scopeDeny: 0.2 };
  * @param risk - The risk answer.
  * @param inScope - The in-scope probability.
  * @param t - The thresholds.
- * @returns Deny, or `undefined` to leave Claude Code's verdict.
+ * @returns The reason to deny with, or `undefined` to leave Claude Code's verdict. The gate never asks.
  */
-export function gateBash(risk: ScoreAnswer | undefined, inScope: number | undefined, t: GateThresholds = DEFAULT_GATE): GateVerdict {
+export function gateBash(risk: ScoreAnswer | undefined, inScope: number | undefined, t: GateThresholds = DEFAULT_GATE): string | undefined {
   const dangerous = risk?.probabilities["2"] ?? 0;
   if (dangerous >= t.dangerDeny && inScope !== undefined && inScope < t.scopeDeny) {
-    return { decision: "deny", reason: "Jev: this command could destroy or leak data and the request does not seem to ask for it. Use a safer command or ask the user first." };
+    return "Jev: this command could destroy or leak data and the request does not seem to ask for it. Use a safer command or ask the user first.";
   }
   return undefined;
 }
@@ -242,18 +239,14 @@ export function shouldContinue(done: number | undefined, threshold = 0.15): bool
  * @param file - The absolute path of the file.
  * @param sessionId - The session id.
  * @param roots - The candidate temp roots (`CLAUDE_CODE_TMPDIR`, `TMPDIR`, `/tmp`).
- * @returns Whether the normalized path is a file below the session's scratchpad.
+ * @returns Whether the path is a file below the session's scratchpad; any `..` segment rejects it.
  */
 export function inScratchpad(file: string, sessionId: string, roots: readonly string[]): boolean {
   if (!file.startsWith("/") || !sessionId) return false;
-  const parts: string[] = [];
-  for (const seg of file.split("/")) {
-    if (seg === "" || seg === ".") continue;
-    if (seg === "..") parts.pop();
-    else parts.push(seg);
-  }
-  const path = `/${parts.join("/")}`;
-  // shortcut: lexical containment only, a symlink inside the scratchpad can point elsewhere; upgrade when the engine offers realpath/lstat.
+  const segs = file.split("/");
+  if (segs.includes("..")) return false;
+  const path = `/${segs.filter((seg) => seg !== "" && seg !== ".").join("/")}`;
+  // shortcut: lexical containment only. A symlink inside the scratchpad, or a pre-made `claude-<digits>` dir under a shared /tmp, can point elsewhere; upgrade when $.fs offers realpath/lstat.
   for (const root of roots) {
     const prefix = `${root.replace(/\/+$/, "")}/`;
     if (prefix === "/" || !path.startsWith(prefix)) continue;

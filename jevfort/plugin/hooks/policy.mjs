@@ -122,10 +122,7 @@ export const DEFAULT_GATE = {
 export function gateBash(risk, inScope, t = DEFAULT_GATE) {
 	const dangerous = risk?.probabilities["2"] ?? 0;
 	if (dangerous >= t.dangerDeny && inScope !== undefined && inScope < t.scopeDeny) {
-		return {
-			decision: "deny",
-			reason: "Jev: this command could destroy or leak data and the request does not seem to ask for it. Use a safer command or ask the user first."
-		};
+		return "Jev: this command could destroy or leak data and the request does not seem to ask for it. Use a safer command or ask the user first.";
 	}
 	return undefined;
 }
@@ -134,13 +131,9 @@ export function shouldContinue(done, threshold = .15) {
 }
 export function inScratchpad(file, sessionId, roots) {
 	if (!file.startsWith("/") || !sessionId) return false;
-	const parts = [];
-	for (const seg of file.split("/")) {
-		if (seg === "" || seg === ".") continue;
-		if (seg === "..") parts.pop();
-		else parts.push(seg);
-	}
-	const path = `/${parts.join("/")}`;
+	const segs = file.split("/");
+	if (segs.includes("..")) return false;
+	const path = `/${segs.filter((seg) => seg !== "" && seg !== ".").join("/")}`;
 	for (const root of roots) {
 		const prefix = `${root.replace(/\/+$/, "")}/`;
 		if (prefix === "/" || !path.startsWith(prefix)) continue;
