@@ -356,10 +356,12 @@ export const register = (on, options) => {
 		return typeof v === "number" ? v : fallback;
 	};
 	const doneThreshold = threshold("doneThreshold", .15);
-	const effortRange = bounds(options.minEffort, options.maxEffort) ?? {
+	const configuredRange = bounds(options.minEffort, options.maxEffort);
+	const effortRange = configuredRange ?? {
 		minEffort: "low",
 		maxEffort: "xhigh"
 	};
+	const badRange = !configuredRange && (options.minEffort !== undefined || options.maxEffort !== undefined) ? `minEffort ${String(options.minEffort)}, maxEffort ${String(options.maxEffort)}` : undefined;
 	on("ui.render", {
 		component: "CommandOutput",
 		props: { command: "jev" }
@@ -503,6 +505,11 @@ export const register = (on, options) => {
 	const ownCalls = new Set();
 	on("session.start", async function onSessionStart($, e, next) {
 		firstTurns.clear();
+		if (badRange) await record($, {
+			kind: "error",
+			applied: false,
+			text: `invalid effort bounds (${badRange}): using low..xhigh`
+		}).catch(() => undefined);
 		await $.command.register({
 			name: "jev",
 			description: "Jev pilot: status, /jev report, /jev candidates, /jev export, /jev clear"
@@ -709,11 +716,12 @@ export const register = (on, options) => {
 		let held;
 		let firstTurn;
 		if (routing !== "off" && e.index === 0) {
-			questions.difficulty = difficultyQuestion;
+			if (routing === "model") questions.difficulty = difficultyQuestion;
 			const loop = e.agentId ?? "";
 			const first = firstTurns.get(loop);
 			const family = modelFamily(e.model);
-			if (!first) {
+			const fresh = !first || first.family !== family;
+			if (fresh) {
 				firstTurn = {
 					family,
 					from: e.effort
@@ -721,7 +729,7 @@ export const register = (on, options) => {
 				firstTurns.set(loop, firstTurn);
 			}
 			const sessionEffort = isEffort(e.effort) ? e.effort : undefined;
-			estimate = family && sessionEffort && (!first || EVERY_TURN_MODELS.includes(family)) ? {
+			estimate = family && sessionEffort && (fresh || EVERY_TURN_MODELS.includes(family)) ? {
 				model: family,
 				defaultEffort: sessionEffort,
 				...effortRange
@@ -784,9 +792,9 @@ export const register = (on, options) => {
 			});
 			return yield* next(routed(e));
 		}
-		if (questions.difficulty) {
-			const difficulty = score(r.answers, "difficulty");
-			turn.route = route(difficulty, routing === "model" ? "model" : "effort");
+		if (questions.difficulty || estimate) {
+			const difficulty = questions.difficulty ? score(r.answers, "difficulty") : undefined;
+			turn.route = difficulty ? route(difficulty, "model") : undefined;
 			const model = lowerModel(e.model, turn.route?.model);
 			const mechanical = noul(r.answers, "mechanical");
 			const est = estimate ? estimateEffort(score(r.answers, "effort"), mechanical, estimate) : undefined;
@@ -801,7 +809,7 @@ export const register = (on, options) => {
 			await record($, {
 				kind: "route",
 				applied: lowered || raised,
-				text: `difficulty ${(difficulty?.score ?? 0).toFixed(2)} → ${lowered || raised ? `${model ?? e.model}, effort ${effort ?? String(e.effort)}` : "no change"}${source ? ` · ${source}` : ""}`,
+				text: `${difficulty ? `difficulty ${difficulty.score.toFixed(2)}` : "effort"} → ${lowered || raised ? `${model ?? e.model}, effort ${effort ?? String(e.effort)}` : "no change"}${source ? ` · ${source}` : ""}`,
 				ms: r.ms,
 				turnId: e.turnId,
 				data: {

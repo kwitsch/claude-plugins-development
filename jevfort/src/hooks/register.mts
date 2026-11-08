@@ -572,7 +572,10 @@ export const register = (on: On, options: Options): void => {
   };
   const doneThreshold = threshold("doneThreshold", 0.15);
   // The bounds of the turn-start effort estimate; invalid or inverted options fall back to low..xhigh together.
-  const effortRange: { minEffort: Effort; maxEffort: Effort } = bounds(options.minEffort, options.maxEffort) ?? { minEffort: "low", maxEffort: "xhigh" };
+  const configuredRange = bounds(options.minEffort, options.maxEffort);
+  const effortRange: { minEffort: Effort; maxEffort: Effort } = configuredRange ?? { minEffort: "low", maxEffort: "xhigh" };
+  /** Set when the user configured `minEffort`/`maxEffort` but they are invalid or inverted; logged at session start. */
+  const badRange = !configuredRange && (options.minEffort !== undefined || options.maxEffort !== undefined) ? `minEffort ${String(options.minEffort)}, maxEffort ${String(options.maxEffort)}` : undefined;
 
   // Draws `/jev` output as Markdown, so the report's tables render as tables.
   on("ui.render", { component: "CommandOutput", props: { command: "jev" } }, function onRenderJev($: Engine, e: RenderEvent, next: (e: RenderEvent) => unknown): unknown {
@@ -700,6 +703,7 @@ export const register = (on: On, options: Options): void => {
   on("session.start", async function onSessionStart($: Engine, e: unknown, next: Next<unknown, unknown>): Promise<unknown> {
     // A new conversation (also after /clear) gets its own first-turn estimate.
     firstTurns.clear();
+    if (badRange) await record($, { kind: "error", applied: false, text: `invalid effort bounds (${badRange}): using low..xhigh` }).catch(() => undefined);
     await $.command.register({
       name: "jev",
       description: "Jev pilot: status, /jev report, /jev candidates, /jev export, /jev clear",
@@ -872,22 +876,25 @@ export const register = (on: On, options: Options): void => {
       candidates = (await buildCandidates($, ctx.request, ctx.steps, calls, e.index)).filter((c) => !(last && sameCall(last, { tool: c.tool, input: c.input })));
       if (candidates.length) questions.next_action = nextActionQuestion(candidates);
     }
-    // Step 0: the difficulty (model routing) and the effort estimate, or a Haiku/Fable turn's held first-turn estimate.
+    // Step 0: the difficulty (only for model routing) and the effort estimate, or a Haiku/Fable turn's held first-turn
+    // estimate.
     let estimate: EstimateBounds | undefined;
     let held: Effort | undefined;
     let firstTurn: { family?: EstimateModel; from: unknown; effort?: Effort } | undefined;
     if (routing !== "off" && e.index === 0) {
-      questions.difficulty = difficultyQuestion;
+      if (routing === "model") questions.difficulty = difficultyQuestion;
       const loop = e.agentId ?? "";
       const first = firstTurns.get(loop);
       const family = modelFamily(e.model);
+      // A model switch starts a new first turn, so a switch to Haiku/Fable gets its own estimate.
+      const fresh = !first || first.family !== family;
       // Written before asking Jev: a failed first turn still counts, so later Haiku/Fable turns never re-ask.
-      if (!first) {
+      if (fresh) {
         firstTurn = { family, from: e.effort };
         firstTurns.set(loop, firstTurn);
       }
       const sessionEffort = isEffort(e.effort) ? e.effort : undefined;
-      estimate = family && sessionEffort && (!first || EVERY_TURN_MODELS.includes(family)) ? { model: family, defaultEffort: sessionEffort, ...effortRange } : undefined;
+      estimate = family && sessionEffort && (fresh || EVERY_TURN_MODELS.includes(family)) ? { model: family, defaultEffort: sessionEffort, ...effortRange } : undefined;
       if (estimate) {
         questions.effort = effortQuestion;
         questions.mechanical = mechanicalQuestion;
@@ -938,9 +945,9 @@ export const register = (on: On, options: Options): void => {
       return yield* next(routed(e));
     }
 
-    if (questions.difficulty) {
-      const difficulty = score(r.answers, "difficulty");
-      turn.route = route(difficulty, routing === "model" ? "model" : "effort");
+    if (questions.difficulty || estimate) {
+      const difficulty = questions.difficulty ? score(r.answers, "difficulty") : undefined;
+      turn.route = difficulty ? route(difficulty, "model") : undefined;
       const model = lowerModel(e.model, turn.route?.model);
       const mechanical = noul(r.answers, "mechanical");
       const est = estimate ? estimateEffort(score(r.answers, "effort"), mechanical, estimate) : undefined;
@@ -955,7 +962,7 @@ export const register = (on: On, options: Options): void => {
       await record($, {
         kind: "route",
         applied: lowered || raised,
-        text: `difficulty ${(difficulty?.score ?? 0).toFixed(2)} → ${lowered || raised ? `${model ?? e.model}, effort ${effort ?? String(e.effort)}` : "no change"}${source ? ` · ${source}` : ""}`,
+        text: `${difficulty ? `difficulty ${difficulty.score.toFixed(2)}` : "effort"} → ${lowered || raised ? `${model ?? e.model}, effort ${effort ?? String(e.effort)}` : "no change"}${source ? ` · ${source}` : ""}`,
         ms: r.ms,
         turnId: e.turnId,
         data: { score: difficulty?.score, confidence: difficulty?.confidence, effort, model, lowered, raised, estimate: est?.effort, source, mechanical },

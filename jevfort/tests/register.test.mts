@@ -310,7 +310,7 @@ test("Inside a longer turn Jev's measured top action is compared with Claude's c
   expect(report).not.toContain("shadow");
 });
 
-test("Passes are logged too: a \"claude\" pick, an unchanged route", async ($, on) => {
+test("Passes are logged too: a \"claude\" pick, an unchanged route", { options: { routing: "model" } }, async ($, on) => {
   setup(on, {
     messages: [user("refactor the auth module to use JWT")],
     files: [],
@@ -604,6 +604,22 @@ test("session.start registers estimate_effort", async ($, on) => {
   });
 });
 
+test("Inverted effort bounds are logged as an error at session start", { options: { minEffort: "high", maxEffort: "low" } }, async ($, on) => {
+  setup(on, { messages: [], jev: () => ({}) });
+  on("command.register", async () => ({ value: undefined }));
+  on("tool.register", async () => ({ value: { tool: "mcp__jevfort__estimate_effort" } }));
+  on("session.start", async () => ({}));
+  await $.session.start({ cwd: CWD, surface: "terminal", isInteractive: true });
+  expect(await runJev($, "report")).toContain("1 errors");
+});
+
+test("Effort routing does not ask Jev the difficulty question", async ($, on) => {
+  const { sent } = setup(on, { messages: [user("what does this project do?")], jev: () => ({ effort: scored(1.6) }) });
+  claudeBeneath(on, []);
+  await drain($.turn.step(step));
+  expect(questionKeys(sent, 0)).not.toContain("difficulty");
+});
+
 const ESTIMATE = { tool: "mcp__jevfort__estimate_effort", model: "opus", defaultEffort: "high", minEffort: "low", maxEffort: "xhigh", prompt: "add a retry to the HTTP client" };
 const estimateCall = async ($: Runner, input: Record<string, unknown> = {}) => (await $.tool.call({ ...ESTIMATE, ...input })) as { result?: string; isError?: boolean };
 
@@ -692,8 +708,8 @@ for (const [model, estimated] of [["claude-haiku-5-5", "medium"], ["claude-fable
     await drain($.turn.step(turnStep("t1", model, "high")));
     await drain($.turn.step(turnStep("t2", model, "high")));
     expect(questionKeys(sent, 0)).toEqual(expect.arrayContaining(["effort", "mechanical"]));
-    expect(questionKeys(sent, 1)).not.toContain("effort");
-    expect(questionKeys(sent, 1)).not.toContain("mechanical");
+    // A held turn in effort routing has nothing to ask Jev at step 0.
+    expect(sent).toHaveLength(1);
     expect(seen.map((s) => s.effort)).toEqual([estimated, estimated]);
   });
 }
@@ -713,7 +729,7 @@ test("A changed session effort ends the Haiku hold", async ($, on) => {
   claudeBeneath(on, seen);
   await drain($.turn.step(turnStep("t1", "claude-haiku-5-5", "high")));
   await drain($.turn.step(turnStep("t2", "claude-haiku-5-5", "medium")));
-  expect(questionKeys(sent, 1)).not.toContain("effort");
+  expect(sent).toHaveLength(1);
   expect(seen.map((s) => s.effort)).toEqual(["xhigh", "medium"]);
 });
 
@@ -724,16 +740,18 @@ test("A failed first Haiku turn is not re-asked and later turns keep the session
   await drain($.turn.step(turnStep("t1", "claude-haiku-5-5", "high")));
   await drain($.turn.step(turnStep("t2", "claude-haiku-5-5", "high")));
   expect(questionKeys(sent, 0)).toEqual(expect.arrayContaining(["effort", "mechanical"]));
-  expect(questionKeys(sent, 1)).not.toContain("effort");
+  expect(sent).toHaveLength(1);
   expect(seen.map((s) => s.effort)).toEqual(["high", "high"]);
 });
 
-test("A session that starts on Opus and moves to Haiku gets no Haiku estimate", async ($, on) => {
+test("A switch from Opus to Haiku starts a new first turn with its own estimate", async ($, on) => {
   const seen: { effort?: string }[] = [];
   const { sent } = setup(on, { messages: [user("what does this project do?")], jev: inOrder({ difficulty: easy, effort: scored(0.2) }, { difficulty: easy, effort: scored(0.2) }) });
   claudeBeneath(on, seen);
   await drain($.turn.step(turnStep("t1", "claude-opus-5-5", "high")));
   await drain($.turn.step(turnStep("t2", "claude-haiku-5-5", "high")));
-  expect(questionKeys(sent, 1)).not.toContain("effort");
-  expect(seen.map((s) => s.effort)).toEqual(["low", "high"]);
+  await drain($.turn.step(turnStep("t3", "claude-haiku-5-5", "high")));
+  expect(questionKeys(sent, 1)).toEqual(expect.arrayContaining(["effort", "mechanical"]));
+  expect(sent).toHaveLength(2);
+  expect(seen.map((s) => s.effort)).toEqual(["low", "medium", "medium"]);
 });

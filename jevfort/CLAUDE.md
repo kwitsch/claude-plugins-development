@@ -3,8 +3,7 @@
 Mods-API plugin: one TypeScript function-hooks module and its pure helper modules, the `/jev` command, one
 engine-registered tool (`estimate_effort`, seen by the model as `mcp__jevfort__estimate_effort`, deferred: Skills and
 subagents load it via ToolSearch), no skills, agents, command hooks or MCP servers. A port of nim-f/jev-pilot
-(https://github.com/nim-f/jev-pilot, version 0.5.0,
-commit 90cc1f1, directory `hooks/`) into this repository's layout. Upstream has no LICENSE file; it is credited in
+(<https://github.com/nim-f/jev-pilot>, version 0.5.0, commit 90cc1f1, directory `hooks/`) into this repository's layout. Upstream has no LICENSE file; it is credited in
 `plugin/README.md`.
 
 ## Differences from upstream
@@ -32,9 +31,10 @@ commit 90cc1f1, directory `hooks/`) into this repository's layout. Upstream has 
   exemption of the next turn, meta prompts keep it. A rejected follow-up is logged by the next `turn.complete`.
 - Effort routing: the turn's effort comes from the effort estimate (`estimateEffort` in `policy.mts`, shared with the
   `estimate_effort` tool; its two questions ride in the step-0 Jev request), not from upstream's difficulty->effort
-  mapping, which is gone; the difficulty score only lowers the model (`routing: "model"`). Opus/Sonnet sessions are
-  estimated every turn; Haiku/Fable sessions only on each loop's first turn, whose estimate is then held until the
-  session model or effort changes. Bounds: options `minEffort`/`maxEffort`.
+  mapping, which is gone; the difficulty question is asked only with `routing: "model"` and only lowers the model.
+  Opus/Sonnet sessions are estimated every turn; Haiku/Fable sessions only on each loop's first turn, whose estimate is
+  then held while the session effort is unchanged. A model switch starts a new first turn. Bounds: options
+  `minEffort`/`maxEffort`; invalid or inverted values fall back to `low`/`xhigh` with a logged error at session start.
 
 ## Layout
 
