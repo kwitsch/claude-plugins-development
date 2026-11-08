@@ -22,8 +22,8 @@ import { choice, jevUrl, MODEL, noul, score, TIMEOUT_MS } from "./jev.mjs";
 import type { Answer, ChoiceAnswer, JevResult, Question } from "./jev.mjs";
 import { LOG_KEY, MAX_ENTRIES, recentDecisions, remember, statsKey } from "./log.mjs";
 import type { Entry } from "./log.mjs";
-import { adjustEffort, bestAction, difficultyQuestion, doneQuestion, effortKeepsCache, effortQuestion, ESTIMATE_SPEC, ESTIMATE_TOOL, estimateEffort, inScratchpad, lowerModel, mechanicalQuestion, nextActionQuestion, parseEstimateInput, pickCandidate, route, shouldContinue, singleActionQuestion } from "./policy.mjs";
-import type { Route } from "./policy.mjs";
+import { bestAction, bounds, difficultyQuestion, doneQuestion, EFFORT_ORDER, effortQuestion, ESTIMATE_SPEC, ESTIMATE_TOOL, estimateEffort, EVERY_TURN_MODELS, inScratchpad, isEffort, lowerModel, mechanicalQuestion, modelFamily, nextActionQuestion, parseEstimateInput, pickCandidate, route, shouldContinue, singleActionQuestion } from "./policy.mjs";
+import type { Effort, EstimateBounds, EstimateModel, Route } from "./policy.mjs";
 import { hints, NONE, promptQuestions } from "./prompt.mjs";
 import { buildReport } from "./report.mjs";
 import { SUMMARY_MODEL, SYSTEM } from "./summarize.mjs";
@@ -571,6 +571,8 @@ export const register = (on: On, options: Options): void => {
     return typeof v === "number" ? v : fallback;
   };
   const doneThreshold = threshold("doneThreshold", 0.15);
+  // The bounds of the turn-start effort estimate; invalid or inverted options fall back to low..xhigh together.
+  const effortRange: { minEffort: Effort; maxEffort: Effort } = bounds(options.minEffort, options.maxEffort) ?? { minEffort: "low", maxEffort: "xhigh" };
 
   // Draws `/jev` output as Markdown, so the report's tables render as tables.
   on("ui.render", { component: "CommandOutput", props: { command: "jev" } }, function onRenderJev($: Engine, e: RenderEvent, next: (e: RenderEvent) => unknown): unknown {
@@ -688,7 +690,11 @@ export const register = (on: On, options: Options): void => {
     });
   }
 
-  const turns = new Map<string, { route?: Route; taken: number; bypassId?: string; bypassAction?: string }>();
+  // Per-turn state: the difficulty route, the effort sent on every step of the turn, Jev's takes and the bypass.
+  const turns = new Map<string, { route?: Route; effort?: Effort; taken: number; bypassId?: string; bypassAction?: string }>();
+  // What each loop's first turn (key `agentId`, `""` for the main loop) saw and estimated: the session model's family,
+  // the session effort (`from`) and the estimate (unset when none was made or Jev failed). Drives the Haiku/Fable hold.
+  const firstTurns = new Map<string, { family?: EstimateModel; from: unknown; effort?: Effort }>();
   // Calls Jev made itself: `tool.check` approves them, their commands come from a vetted list.
   const ownCalls = new Set<string>();
   on("session.start", async function onSessionStart($: Engine, e: unknown, next: Next<unknown, unknown>): Promise<unknown> {
@@ -819,8 +825,9 @@ export const register = (on: On, options: Options): void => {
     return result;
   });
 
-  // Each model request: Jev may take the step itself, and at step 0 rates the turn's difficulty to lower effort or
-  // model. One Jev request carries both. Every answer is logged; when Claude takes the step, its call is compared
+  // Each model request: Jev may take the step itself, and at step 0 estimates the turn's effort (every turn on
+  // Opus/Sonnet, the loop's first turn only on Haiku/Fable, which then hold it) and rates its difficulty to lower the
+  // model. One Jev request carries all of it. Every answer is logged; when Claude takes the step, its call is compared
   // with Jev's top action so the take threshold can be calibrated.
   on("turn.step", async function* onTurnStep($: Engine, e: Step, next: (e: Step) => StepRun): StepRun {
     if (e.agentId && !subagents) return yield* next(e);
@@ -863,13 +870,36 @@ export const register = (on: On, options: Options): void => {
       candidates = (await buildCandidates($, ctx.request, ctx.steps, calls, e.index)).filter((c) => !(last && sameCall(last, { tool: c.tool, input: c.input })));
       if (candidates.length) questions.next_action = nextActionQuestion(candidates);
     }
-    if (routing !== "off" && e.index === 0) questions.difficulty = difficultyQuestion;
+    // Step 0: the difficulty (model routing) and the effort estimate, or a Haiku/Fable turn's held first-turn estimate.
+    let estimate: EstimateBounds | undefined;
+    let held: Effort | undefined;
+    let firstTurn: { family?: EstimateModel; from: unknown; effort?: Effort } | undefined;
+    if (routing !== "off" && e.index === 0) {
+      questions.difficulty = difficultyQuestion;
+      const loop = e.agentId ?? "";
+      const first = firstTurns.get(loop);
+      const family = modelFamily(e.model);
+      // Written before asking Jev: a failed first turn still counts, so later Haiku/Fable turns never re-ask.
+      if (!first) {
+        firstTurn = { family, from: e.effort };
+        firstTurns.set(loop, firstTurn);
+      }
+      const sessionEffort = isEffort(e.effort) ? e.effort : undefined;
+      estimate = family && sessionEffort && (!first || EVERY_TURN_MODELS.includes(family)) ? { model: family, defaultEffort: sessionEffort, ...effortRange } : undefined;
+      if (estimate) {
+        questions.effort = effortQuestion;
+        questions.mechanical = mechanicalQuestion;
+      }
+      // Haiku/Fable after the first turn: hold the first turn's estimate while model and session effort are unchanged.
+      held = !estimate && first?.effort && first.family === family && first.from === e.effort ? first.effort : undefined;
+      if (held && held !== e.effort) turn.effort = held;
+    }
     if (bypass && e.index === 0 && questions.next_action && !e.agentId) questions.single_action = singleActionQuestion;
-    // Effort lowered at step 0 holds for every step of the turn.
+    // The turn's effort, set at step 0, holds for every step of the turn whatever model the step runs on.
     const routed = (step: Step): Step => {
-      if (!turn.route) return step;
-      const effort = effortKeepsCache(step.model) ? adjustEffort(step.effort, turn.route.effort) : undefined;
-      const model = lowerModel(step.model, turn.route.model);
+      if (!turn.route && !turn.effort) return step;
+      const effort = turn.effort;
+      const model = lowerModel(step.model, turn.route?.model);
       return effort || model ? { ...step, ...(effort ? { effort } : {}), ...(model ? { model } : {}) } : step;
     };
 
@@ -903,23 +933,30 @@ export const register = (on: On, options: Options): void => {
     const r = await askJev($, state, questions);
     if (!r.ok) {
       await record($, { kind: "error", applied: false, text: `unavailable: ${r.error}`, ms: r.ms, turnId: e.turnId });
-      return yield* next(e);
+      return yield* next(routed(e));
     }
 
     if (questions.difficulty) {
       const difficulty = score(r.answers, "difficulty");
       turn.route = route(difficulty, routing === "model" ? "model" : "effort");
-      const effort = effortKeepsCache(e.model) ? adjustEffort(e.effort, turn.route?.effort) : undefined;
       const model = lowerModel(e.model, turn.route?.model);
-      const raised = effort === "high";
+      const mechanical = noul(r.answers, "mechanical");
+      const est = estimate ? estimateEffort(score(r.answers, "effort"), mechanical, estimate) : undefined;
+      if (est) {
+        turn.effort = est.effort !== e.effort ? est.effort : undefined;
+        if (firstTurn) firstTurn.effort = est.effort;
+      }
+      const effort = turn.effort;
+      const raised = effort !== undefined && EFFORT_ORDER.indexOf(effort) > (isEffort(e.effort) ? EFFORT_ORDER.indexOf(e.effort) : -1);
       const lowered = Boolean((effort && !raised) || model);
+      const source = est?.source ?? (held ? "held" : undefined);
       await record($, {
         kind: "route",
         applied: lowered || raised,
-        text: `difficulty ${(difficulty?.score ?? 0).toFixed(2)} → ${lowered || raised ? `${model ?? e.model}, effort ${effort ?? String(e.effort)}` : effortKeepsCache(e.model) ? "no change" : `no change (effort is left alone on ${e.model})`}`,
+        text: `difficulty ${(difficulty?.score ?? 0).toFixed(2)} → ${lowered || raised ? `${model ?? e.model}, effort ${effort ?? String(e.effort)}` : "no change"}${source ? ` · ${source}` : ""}`,
         ms: r.ms,
         turnId: e.turnId,
-        data: { score: difficulty?.score, confidence: difficulty?.confidence, effort, model, lowered, raised },
+        data: { score: difficulty?.score, confidence: difficulty?.confidence, effort, model, lowered, raised, estimate: est?.effort, source, mechanical },
       });
     }
 

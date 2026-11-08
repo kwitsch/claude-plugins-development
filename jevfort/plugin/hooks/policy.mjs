@@ -191,29 +191,11 @@ export const HIGH_FROM = 1.8;
 export function route(answer, mode) {
 	if (!answer || answer.confidence < MIN_CONFIDENCE) return undefined;
 	const level = answer.score;
-	if (level < LOW_BELOW) return {
-		level,
-		effort: "low",
-		...mode === "model" ? { model: "claude-haiku-5-5" } : {}
-	};
-	if (level < HIGH_FROM) return {
-		level,
-		effort: "medium",
-		...mode === "model" ? { model: "claude-sonnet-5-5" } : {}
-	};
+	if (mode === "effort" || level >= HIGH_FROM) return { level };
 	return {
 		level,
-		effort: "high"
+		model: level < LOW_BELOW ? "claude-haiku-5-5" : "claude-sonnet-5-5"
 	};
-}
-export const effortKeepsCache = (model) => /(opus|sonnet)-5-5/.test(model);
-export function adjustEffort(current, target) {
-	if (!target || typeof current !== "string") return undefined;
-	const ci = EFFORT_ORDER.indexOf(current);
-	const ti = EFFORT_ORDER.indexOf(target);
-	if (ci < 0) return undefined;
-	if (target === "high") return ci < ti ? target : undefined;
-	return ci > ti ? target : undefined;
 }
 const MODEL_TIER = (model) => /haiku/.test(model) ? 0 : /sonnet/.test(model) ? 1 : /opus|fable/.test(model) ? 2 : -1;
 export function lowerModel(current, target) {
