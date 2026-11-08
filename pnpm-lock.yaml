@@ -45,6 +45,12 @@ importers:
         specifier: workspace:*
         version: link:../development/vitest/claude-engine
 
+  jevfort:
+    devDependencies:
+      claude-engine-vitest:
+        specifier: workspace:*
+        version: link:../development/vitest/claude-engine
+
   universal-lint: {}
 
 packages:
