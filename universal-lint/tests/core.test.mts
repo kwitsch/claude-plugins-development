@@ -2,11 +2,11 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, readFileSync, realpathSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "vitest";
 import { hashPath } from "../plugin/hooks/lint-file.mjs";
-import { HOOK, makeEnv, payload } from "./support/lint-hook.mts";
+import { HOOK, type LintEnv, makeEnv, payload } from "./support/lint-hook.mts";
 
 /** A 4-line shell script; the Edit tests below edit line 2. */
 const SH4 = "echo a\necho $1\necho b\necho $2\n";
@@ -215,4 +215,102 @@ test("PostToolUse with success false records no digest", () => {
   const f = e.file("a.sh", "echo hi\n");
   e.run(f, { toolResponse: { success: false } });
   assert.equal(existsSync(path.join(e.data, "written")), false);
+});
+
+/** shellcheck output that makes a recording stub's exit 1 a finding. */
+const SC_OUT = "a.sh:1:6: note: Double quote to prevent globbing. [SC2086]";
+
+/** Shape of the onPath probe store file (F11). */
+type ProbeFile = { hits: Record<string, string>; misses: Record<string, number> };
+
+/**
+ * Probe file of an env for a PATH string (default: the env's own PATH, its bin dir).
+ *
+ * @param e - The environment.
+ * @param PATH - PATH string the hook ran with.
+ * @returns Absolute path of `probe-<hashPath(PATH)>.json` under the env's data dir.
+ */
+const probeFile = (e: LintEnv, PATH = e.bin): string => path.join(e.data, `probe-${hashPath(PATH)}.json`);
+
+/**
+ * Read and parse a probe file.
+ *
+ * @param f - Probe file path.
+ * @returns The parsed store.
+ */
+const readProbe = (f: string): ProbeFile => JSON.parse(readFileSync(f, "utf8")) as ProbeFile;
+
+/**
+ * Write a probe file by hand (creates the data dir, which makeEnv does not).
+ *
+ * @param e - The environment.
+ * @param store - Store to write.
+ */
+function writeProbe(e: LintEnv, store: ProbeFile): void {
+  mkdirSync(e.data, { recursive: true });
+  writeFileSync(probeFile(e), JSON.stringify(store));
+}
+
+test("probe file: a persisted miss is served without a PATH scan, then expires after PROBE_MISS_TTL_MS", () => {
+  const e = makeEnv();
+  const f = e.file("a.sh", "echo $1\n");
+  assert.deepEqual(e.run(f, { out: SC_OUT }).result, {});
+  const first = readProbe(probeFile(e));
+  assert.equal(typeof first.misses.shellcheck, "number");
+  e.recStub("shellcheck", 1);
+  assert.deepEqual(e.run(f, { out: SC_OUT }).result, {}); // persisted miss answered: the new stub is not seen
+  assert.deepEqual(e.lines(), []);
+  const expired = readProbe(probeFile(e));
+  expired.misses.shellcheck = Date.now() - 11 * 60 * 1000;
+  writeFileSync(probeFile(e), JSON.stringify(expired));
+  assert.equal(e.run(f, { out: SC_OUT }).status, 2);
+  assert.ok(e.lines().some((l) => l.startsWith("shellcheck ")));
+
+  const future = makeEnv();
+  writeProbe(future, { hits: {}, misses: { shellcheck: Date.now() + 60_000 } });
+  future.recStub("shellcheck", 1);
+  assert.equal(future.run(future.file("a.sh", "echo $1\n"), { out: SC_OUT }).status, 2); // future-dated miss = expired
+});
+
+test("probe file: a persisted hit is re-validated and replaced by a miss once the tool is gone", () => {
+  const e = makeEnv();
+  const f = e.file("a.sh", "echo $1\n");
+  e.recStub("shellcheck", 1);
+  assert.equal(e.run(f, { out: SC_OUT }).status, 2);
+  assert.equal(readProbe(probeFile(e)).hits.shellcheck, e.bin);
+  rmSync(path.join(e.bin, "shellcheck"));
+  assert.deepEqual(e.run(f, { out: SC_OUT }).result, {});
+  const after = readProbe(probeFile(e));
+  assert.equal("shellcheck" in after.hits, false);
+  assert.equal(typeof after.misses.shellcheck, "number");
+});
+
+test("probe file: a PATH change uses another probe file", () => {
+  const e = makeEnv();
+  const f = e.file("a.sh", "echo $1\n");
+  assert.deepEqual(e.run(f, { out: SC_OUT }).result, {});
+  assert.equal(typeof readProbe(probeFile(e)).misses.shellcheck, "number");
+  const extra = path.join(e.data, "..", "extra-bin");
+  mkdirSync(extra, { recursive: true });
+  const stub = path.join(extra, "shellcheck");
+  writeFileSync(stub, ["#!/usr/bin/env bash", `printf "%s %s\\n" "shellcheck" "$*" >> "$RECORD"`, "printf '%s\\n' \"$OUT\"", "exit 1", ""].join("\n"));
+  chmodSync(stub, 0o755);
+  const PATH = [e.bin, extra].join(path.delimiter);
+  assert.equal(e.run(f, { out: SC_OUT, env: { PATH } }).status, 2);
+  assert.ok(existsSync(probeFile(e)));
+  assert.equal(readProbe(probeFile(e, PATH)).hits.shellcheck, extra);
+});
+
+test("probe file: a corrupt store or an unusable data dir fails open", () => {
+  const e = makeEnv();
+  mkdirSync(e.data, { recursive: true });
+  writeFileSync(probeFile(e), "{not json");
+  e.recStub("shellcheck", 1);
+  assert.equal(e.run(e.file("a.sh", "echo $1\n"), { out: SC_OUT }).status, 2);
+  assert.equal(readProbe(probeFile(e)).hits.shellcheck, e.bin);
+
+  const file = makeEnv();
+  writeFileSync(file.data, ""); // CLAUDE_PLUGIN_DATA is a regular file: nothing can be persisted
+  file.recStub("shellcheck", 1);
+  assert.equal(file.run(file.file("a.sh", "echo $1\n"), { out: SC_OUT }).status, 2);
 });
