@@ -29,7 +29,7 @@ Legend: `[x]` finished. `[ ]` not finished; tag = `open` (code change, not start
 ## Stage 2: structural changes
 
 - [x] [F13](tasks/F13-dedup-whole-project-checks.md) Run tsc / go vet / cargo once per FileChanged burst, not once per file. Shipped in 0.15.12.
-- [ ] [F15](tasks/F15-rearm-watches-after-checkout.md) Re-arm FileChanged watches after `git checkout` (prototype first) `open` priority:medium. After F12 (re-emission multiplies watch-list cost).
+- [x] [F15](tasks/F15-rearm-watches-after-checkout.md) Re-arm FileChanged watches after `git checkout` (prototype first). Closed docs-only in 0.15.13: on Claude Code 2.1.319 the loss is limited to unlink-reported files (1 and 3 of 50 in two runs) and a re-emitted list cannot re-arm them (measured; upstream report in the task doc).
 - [ ] [F16](tasks/F16-skill-driver-batching.md) Skill driver: one linter call per tool group and one tsc per tsconfig `open` priority:medium. After F03 and F09 (they remove most of today's cost).
 
 ## Stage 3: edge cases and low priority
@@ -60,7 +60,7 @@ Legend: `[x]` finished. `[ ]` not finished; tag = `open` (code change, not start
 - F02 + F03 together remove all false eslint findings seen in this analysis; F02 alone (the safety net) covers projects that have a config but no reachable binary. F04's walk from the file's directory fixes the sub-package case (91 of 128 historical pnpm findings).
 - F04 before F09: both rework the npx-fallback branch of `runLintTool`; F04 covers locally installed tools, F09 the npx-cache-only ones (markdown).
 - F11's savings and F04's are not additive for JS/TS: measured in F11 (0.15.9 -> 0.15.10, `perf.mts` medians, real PATH), `.mts` Write (local oxlint, F04 route) 387 -> 263 ms and `.ts` Write (tsc on PATH) 151 -> 141 ms, against `.sh`/`.py`/`.yml` (one missing PATH tool each) 142/144/146 -> 48/45/47 ms and `.md` 479 -> 292 ms; F28 documents the rest.
-- F08 (done) shortened the `watchList` loop; F12 (done) cheapened the per-file check inside it; F15 and F19 come after F12.
+- F08 (done) shortened the `watchList` loop; F12 (done) cheapened the per-file check inside it; F19 comes after F12 (F15 closed docs-only, no re-emission).
 - F10 before F13 (the slot cap bounds the peak; F13 removes redundant work inside it).
 - F03 and F09 before F16. F18 and F10/F13 change the timeout budget: update F29's text.
 - F27: add each test together with the task it guards (F04, F05, F10, F11, F18).
