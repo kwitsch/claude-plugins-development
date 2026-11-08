@@ -17,6 +17,7 @@ const CARGO_SPAWN_TIMEOUT_MS = 45e3;
 export const WATCH_LIMIT = 5e3;
 const GIT_TIMEOUT_MS = 1e4;
 const HOOK_TIMEOUT_MS = 9e4;
+const FILE_CHANGED_BUDGET_MS = HOOK_TIMEOUT_MS - 5e3;
 export const FILE_CHANGED_SLOTS = Math.max(2, Math.floor(availableParallelism() / 4));
 const TYPE_CHECK_EXTS = new Set([
 	".ts",
@@ -945,7 +946,23 @@ export function fileChangedHandler(args) {
 			});
 			if (status === "" || status.startsWith("!!")) return {};
 		} catch {}
-		return lintResolved(s.fp, cwd, null, "FileChanged", "universal-lint (changed outside Write/Edit)");
+		const ext = path.extname(s.fp).toLowerCase();
+		const lintMs = (EXT_MAP[ext] === "rust" ? CARGO_SPAWN_TIMEOUT_MS : SPAWN_TIMEOUT_MS) + (TYPE_CHECK_EXTS.has(ext) ? TSC_SPAWN_TIMEOUT_MS : 0);
+		let slot;
+		try {
+			slot = acquireSlot(FILE_CHANGED_BUDGET_MS - lintMs);
+		} catch {}
+		if (slot === null) {
+			process.stderr.write(`universal-lint: FileChanged: no lint slot free in time, ${s.fp} not linted\n`);
+			return {};
+		}
+		try {
+			return lintResolved(s.fp, cwd, null, "FileChanged", "universal-lint (changed outside Write/Edit)");
+		} finally {
+			try {
+				if (slot) rmSync(slot, { force: true });
+			} catch {}
+		}
 	} catch {
 		return {};
 	}
