@@ -204,6 +204,26 @@ test("The done check sends Claude back once when work is unfinished", async ($, 
   expect(submitted).toHaveLength(1);
 });
 
+test("A follow-up that failed to submit exempts nothing", async ($, on) => {
+  const { sent } = setup(on, { messages: [user("rename foo to bar in all files")], jev: () => ({ done: { type: "noul", noul: 0.04 } }) });
+  on("turn.complete", () => ({ text: "" }));
+  on("prompt.submit", () => {
+    throw new Error("rejected");
+  });
+  await $.turn.complete(answered("t1", "One file only."));
+  await expect.poll(() => sent.length).toBe(1);
+  // The submit was rejected, so the next turn is checked again.
+  await $.turn.complete(answered("t2", "Still one file."));
+  expect(sent).toHaveLength(2);
+});
+
+test("The done check stays quiet only for unfinished subagents", async ($, on) => {
+  const { sent } = setup(on, { messages: [user("rename foo to bar in all files")], jev: () => ({ done: { type: "noul", noul: 0.04 } }), agents: [{ status: "completed" }] });
+  followUps(on);
+  await $.turn.complete(answered("t1", "One file only."));
+  expect(sent).toHaveLength(1);
+});
+
 test("The done check skips subagent turns", async ($, on) => {
   const { sent } = setup(on, { messages: [user("rename foo to bar in all files")], jev: () => ({ done: { type: "noul", noul: 0.04 } }) });
   const submitted = followUps(on);

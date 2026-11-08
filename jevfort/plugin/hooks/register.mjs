@@ -18,6 +18,17 @@ const GATED = new Set([
 ]);
 const SINGLE_ACTION = .8;
 const DONE_PROMPT = "Jev: the user's request doesn't look finished yet. Continue with what remains. If it is actually complete, say so in one line.";
+const FINISHED = new Set([
+	"completed",
+	"done",
+	"failed",
+	"error",
+	"killed",
+	"cancelled",
+	"canceled",
+	"stopped",
+	"aborted"
+]);
 const asText = (v) => String(v);
 async function currentMode($, configured) {
 	const stored = await $.store.get("mode");
@@ -115,7 +126,7 @@ async function clearLog($) {
 async function readTurn($, agentId) {
 	const messages = await $.session.messages(agentId ? { agentId } : {});
 	if (!Array.isArray(messages)) return undefined;
-	return splitTurn(messages);
+	return splitTurn(messages.filter((m) => !(m.role === "user" && m.text.includes(DONE_PROMPT))));
 }
 async function previousReply($) {
 	const messages = await $.session.messages({}).catch(() => undefined);
@@ -310,7 +321,7 @@ async function checkDone($, e, configuredMode, threshold) {
 	if (m === "off") return false;
 	const agents = await $.agent.list().catch(() => undefined);
 	if (!agents) return false;
-	const waitingOn = agents.filter((a) => a.status === "pending" || a.status === "running" || a.status === "waiting").length;
+	const waitingOn = agents.filter((a) => !FINISHED.has(a.status)).length;
 	if (waitingOn > 0) {
 		await record($, {
 			kind: "done",
@@ -374,9 +385,14 @@ export const register = (on, options) => {
 		const { Markdown } = $.ui.resolve(e);
 		return Markdown({ text: e.props.text });
 	});
-	if (options.classify !== false) {
+	let donePending = false;
+	{
 		on("prompt.submit", async function onPromptSubmit($, e, next) {
-			if (e.command || e.isMeta || e.text.trim().length < 3 || e.text.includes(DONE_PROMPT)) return next(e);
+			if (e.text.includes(DONE_PROMPT)) {
+				donePending = true;
+				return next(e);
+			}
+			if (options.classify === false || e.command || e.isMeta || e.text.trim().length < 3) return next(e);
 			const m = await currentMode($, options.mode);
 			if (m === "off") return next(e);
 			const questions = promptQuestions(await skillOptions($));
@@ -506,7 +522,6 @@ export const register = (on, options) => {
 	}
 	const turns = new Map();
 	const ownCalls = new Set();
-	let donePending = false;
 	on("session.start", async function onSessionStart($, e, next) {
 		await $.command.register({
 			name: "jev",
@@ -574,10 +589,26 @@ export const register = (on, options) => {
 		if (e.agentId === undefined) {
 			const exempt = donePending;
 			donePending = false;
-			if (doneCheck && !exempt && e.reason === "answer" && await checkDone($, e, options.mode, doneThreshold)) {
-				donePending = true;
-				void $.prompt.submit({ text: DONE_PROMPT }).catch(() => {
+			let again = false;
+			if (doneCheck && !exempt && e.reason === "answer") {
+				try {
+					again = await checkDone($, e, options.mode, doneThreshold);
+				} catch (err) {
+					await record($, {
+						kind: "error",
+						applied: false,
+						text: `done check failed: ${String(err)}`
+					}).catch(() => undefined);
+				}
+			}
+			if (again) {
+				$.prompt.submit({ text: DONE_PROMPT }).catch((err) => {
 					donePending = false;
+					void record($, {
+						kind: "error",
+						applied: false,
+						text: `done follow-up not sent: ${String(err)}`
+					}).catch(() => undefined);
 				});
 			}
 		}

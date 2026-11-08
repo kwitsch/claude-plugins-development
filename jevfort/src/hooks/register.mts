@@ -143,6 +143,9 @@ const SINGLE_ACTION = 0.8;
 /** The done check's follow-up message; also how the prompt classifier recognises it. */
 const DONE_PROMPT = "Jev: the user's request doesn't look finished yet. Continue with what remains. If it is actually complete, say so in one line.";
 
+/** Subagent statuses that mean the work is over. */
+const FINISHED = new Set(["completed", "done", "failed", "error", "killed", "cancelled", "canceled", "stopped", "aborted"]);
+
 /**
  * `String(v)` for a tool-input field, typed `unknown` so the lint's base-to-string check accepts a `?? ""` fallback.
  *
@@ -262,7 +265,6 @@ async function clearLog($: Engine): Promise<void> {
   await $.store.set("stats", {});
 }
 
-
 /**
  * The current turn of the main loop or of a subagent.
  *
@@ -273,7 +275,8 @@ async function clearLog($: Engine): Promise<void> {
 async function readTurn($: Engine, agentId?: string): Promise<TurnContext | undefined> {
   const messages = await $.session.messages(agentId ? { agentId } : {});
   if (!Array.isArray(messages)) return undefined;
-  return splitTurn(messages);
+  // Jev's own done follow-up is not the user's request.
+  return splitTurn(messages.filter((m) => !(m.role === "user" && m.text.includes(DONE_PROMPT))));
 }
 
 /**
@@ -540,7 +543,8 @@ async function checkDone($: Engine, e: TurnEnd, configuredMode: unknown, thresho
   // shortcut: background Bash commands are not visible to $; upgrade if the engine exposes them.
   const agents = await $.agent.list().catch(() => undefined);
   if (!agents) return false;
-  const waitingOn = agents.filter((a) => a.status === "pending" || a.status === "running" || a.status === "waiting").length;
+  // Anything not known to be finished counts as waiting: the engine's status names are not declared, so err towards no follow-up.
+  const waitingOn = agents.filter((a) => !FINISHED.has(a.status)).length;
   if (waitingOn > 0) {
     await record($, { kind: "done", applied: false, text: `skipped: waiting on ${waitingOn} background task(s)`, data: { skipped: "background", continued: false } });
     return false;
@@ -602,10 +606,19 @@ export const register = (on: On, options: Options): void => {
     return Markdown({ text: e.props.text });
   });
 
+  // The next main-loop turn after a done follow-up is exempt, so Jev sends Claude back at most once per request.
+  // Set only once the follow-up passed `prompt.submit`, so a follow-up that never went out exempts nothing.
+  // A hot reload forgets it: at worst one more follow-up.
+  let donePending = false;
   // Phase 3: classify each prompt as it is sent and, when Jev is confident, add a short hint only Claude reads.
-  if (options.classify !== false) {
+  // This one hook also notes Jev's own done follow-up passing through, which arms the exemption.
+  {
     on("prompt.submit", async function onPromptSubmit($: Engine, e: PromptEvent, next: Next<PromptEvent, unknown>): Promise<unknown> {
-      if (e.command || e.isMeta || e.text.trim().length < 3 || e.text.includes(DONE_PROMPT)) return next(e);
+      if (e.text.includes(DONE_PROMPT)) {
+        donePending = true;
+        return next(e);
+      }
+      if (options.classify === false || e.command || e.isMeta || e.text.trim().length < 3) return next(e);
       const m = await currentMode($, options.mode);
       if (m === "off") return next(e);
 
@@ -708,10 +721,6 @@ export const register = (on: On, options: Options): void => {
   const turns = new Map<string, { route?: Route; taken: number; bypassId?: string; bypassAction?: string }>();
   // Calls Jev made itself skip the gate: their commands come from a vetted list.
   const ownCalls = new Set<string>();
-  // The next main-loop turn after a done follow-up is exempt, so Jev sends Claude back at most once per request.
-  // A hot reload forgets it: at worst one more follow-up.
-  let donePending = false;
-
   on("session.start", async function onSessionStart($: Engine, e: unknown, next: Next<unknown, unknown>): Promise<unknown> {
     await $.command.register({
       name: "jev",
@@ -787,11 +796,20 @@ export const register = (on: On, options: Options): void => {
     if (e.agentId === undefined) {
       const exempt = donePending;
       donePending = false;
-      if (doneCheck && !exempt && e.reason === "answer" && (await checkDone($, e, options.mode, doneThreshold))) {
-        donePending = true;
+      let again = false;
+      if (doneCheck && !exempt && e.reason === "answer") {
+        try {
+          again = await checkDone($, e, options.mode, doneThreshold);
+        } catch (err) {
+          await record($, { kind: "error", applied: false, text: `done check failed: ${String(err)}` }).catch(() => undefined);
+        }
+      }
+      if (again) {
         // Not awaited: it resolves only once the new turn starts, which waits for this turn to end.
-        void $.prompt.submit({ text: DONE_PROMPT }).catch(() => {
+        $.prompt.submit({ text: DONE_PROMPT }).catch((err: unknown) => {
           donePending = false;
+          // The frame may be over by now, so this is best effort.
+          void record($, { kind: "error", applied: false, text: `done follow-up not sent: ${String(err)}` }).catch(() => undefined);
         });
       }
     }
