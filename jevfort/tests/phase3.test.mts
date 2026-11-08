@@ -8,7 +8,6 @@ import { hints } from "../plugin/hooks/prompt.mjs";
 
 // The manifest defaults (jevfort/package.json claudePlugin.userConfig): the kit does not fill userConfig defaults.
 const DEFAULTS = {
-  mode: "active",
   routing: "effort",
   takeSteps: true,
   doneCheck: true,

@@ -7,7 +7,6 @@ import { expect } from "vitest";
 
 // The manifest defaults (jevfort/package.json claudePlugin.userConfig): the kit does not fill userConfig defaults.
 const DEFAULTS = {
-  mode: "active",
   routing: "effort",
   takeSteps: true,
   doneCheck: true,
@@ -351,12 +350,6 @@ for (const c of scratch) {
   });
 }
 
-test("Scratchpad writes are left alone with jevfort mode off", async ($, on) => {
-  setup(on, { messages: [user("anything")], jev: () => ({}), store: { mode: "off" } });
-  on("tool.check", () => ({ decision: "ask" }));
-  expect(await decision($, { tool: "Write", input: { file_path: `${SP}/x` }, tool_use_id: "toolu_sp3" })).toBe("ask");
-});
-
 test("A settings ask rule beats the scratchpad allow", async ($, on) => {
   setup(on, { messages: [user("anything")], jev: () => ({}) });
   on("tool.check", () => ({ decision: "ask", rule: "Write(/tmp/**)" }));
@@ -550,15 +543,16 @@ test("A blank JEV_URL counts as unset", async ($, on) => {
   expect(urls).toEqual([DEFAULT_URL]);
 });
 
-test("/jev shadow is not a mode: the status stays active; /jev off stops every Jev request", async ($, on) => {
+test("There is no mode: a stored legacy mode is ignored and /jev off is no command", async ($, on) => {
   const seen: unknown[] = [];
-  const { urls } = setup(on, { messages: [user("what does this project do?")], jev: () => ({ difficulty: easy }) });
+  const { urls } = setup(on, { messages: [user("what does this project do?")], jev: () => ({ difficulty: easy }), store: { mode: "off" } });
   claudeBeneath(on, seen);
-  expect(await runJev($, "shadow")).not.toContain("Jev pilot mode:");
-  expect(await runJev($, "")).toContain("mode active");
-  expect(await runJev($, "off")).toBe("Jev pilot mode: off");
+  const status = await runJev($, "off");
+  expect(status).toContain("Jev pilot: routing");
+  expect(status).not.toContain("Jev pilot mode");
+  // Only the first line: the recent-decisions list is module state shared across tests and may mention a model.
+  expect(status.split("\n")[0]).not.toContain("mode");
   await drain($.turn.step(step));
-  expect(urls).toEqual([]);
+  expect(urls).toHaveLength(1);
   expect(seen).toHaveLength(1);
-  expect(await runJev($, "")).toContain("mode off");
 });
