@@ -265,8 +265,8 @@ export const ESTIMATE_SPEC = {
   },
 };
 
-/** A turn's routing: the difficulty score and the effort or model to use. */
-export type Route = { level: number; effort?: Effort; model?: string };
+/** A turn's routing: the difficulty score and, in model mode, the model to use. */
+export type Route = { level: number; model?: string };
 
 /**
  * Cut points on Jev's 0–3 difficulty score. Tuned on effortless's 75 hand-labelled prompts: 57% of picks
@@ -277,7 +277,8 @@ export const LOW_BELOW = 1.0;
 export const HIGH_FROM = 1.8;
 
 /**
- * Trivial → low (Haiku in model mode), routine → medium (Sonnet), big → high.
+ * The difficulty route: in model mode trivial → Haiku and routine → Sonnet, big jobs keep the model; effort mode only
+ * carries the score. The turn's effort comes from {@link estimateEffort}.
  *
  * @param answer - The difficulty answer.
  * @param mode - Whether to also pick a cheaper model.
@@ -286,35 +287,8 @@ export const HIGH_FROM = 1.8;
 export function route(answer: ScoreAnswer | undefined, mode: "effort" | "model"): Route | undefined {
   if (!answer || answer.confidence < MIN_CONFIDENCE) return undefined;
   const level = answer.score;
-  if (level < LOW_BELOW) return { level, effort: "low", ...(mode === "model" ? { model: "claude-haiku-5-5" } : {}) };
-  if (level < HIGH_FROM) return { level, effort: "medium", ...(mode === "model" ? { model: "claude-sonnet-5-5" } : {}) };
-  return { level, effort: "high" };
-}
-
-/**
- * Models where a change of effort keeps the prompt cache (Opus and Sonnet 5.5). On others it rewrites the cache,
- * which costs more than lower effort saves.
- *
- * @param model - The model id.
- * @returns Whether effort may be changed.
- */
-export const effortKeepsCache = (model: string): boolean => /(opus|sonnet)-5-5/.test(model);
-
-/**
- * The effort to send instead of `current`, or nothing: low and medium only lower it; high only raises it, from low
- * or medium, so a big job never runs below high and a person's xhigh or max is never lowered on a big job.
- *
- * @param current - The step's effort.
- * @param target - The route's effort.
- * @returns The effort to send, or `undefined` to leave it.
- */
-export function adjustEffort(current: unknown, target: Effort | undefined): Effort | undefined {
-  if (!target || typeof current !== "string") return undefined;
-  const ci = EFFORT_ORDER.indexOf(current as Effort);
-  const ti = EFFORT_ORDER.indexOf(target);
-  if (ci < 0) return undefined;
-  if (target === "high") return ci < ti ? target : undefined;
-  return ci > ti ? target : undefined;
+  if (mode === "effort" || level >= HIGH_FROM) return { level };
+  return { level, model: level < LOW_BELOW ? "claude-haiku-5-5" : "claude-sonnet-5-5" };
 }
 
 /**

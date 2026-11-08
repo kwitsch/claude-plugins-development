@@ -2,7 +2,7 @@
 import { expect, test } from "vitest";
 import { commandKey, coversStep, dedupeSkills, isSafeToOffer, mentionedPaths, quotedTerms, relevant } from "../plugin/hooks/candidates.mjs";
 import { splitTurn } from "../plugin/hooks/context.mjs";
-import { adjustEffort, effortKeepsCache, route } from "../plugin/hooks/policy.mjs";
+import { route } from "../plugin/hooks/policy.mjs";
 import { buildReport, when } from "../plugin/hooks/report.mjs";
 
 test("quoted terms become searches, file names do not", () => {
@@ -96,23 +96,10 @@ test("a step matches only when Jev's one action would replace all of it", () => 
 
 const rated = (score: number, confidence = 0.9) => ({ type: "score" as const, score, probabilities: {}, confidence });
 
-test("effort: trivial goes low, routine medium, big jobs high", () => {
-  expect(route(rated(0.95), "effort")?.effort).toBe("low");
-  expect(route(rated(1.5), "effort")?.effort).toBe("medium");
-  expect(route(rated(2.9), "effort")?.effort).toBe("high");
-  expect(route(rated(2.9, 0.3), "effort")).toBeUndefined();
-});
-
-test("effort is raised only to high, and a big job never lowers xhigh", () => {
-  expect(adjustEffort("high", "low")).toBe("low");
-  expect(adjustEffort("low", "medium")).toBeUndefined();
-  expect(adjustEffort("low", "high")).toBe("high");
-  expect(adjustEffort("medium", "high")).toBe("high");
-  expect(adjustEffort("xhigh", "high")).toBeUndefined();
-});
-
-test("effort is only changed on models where that keeps the cache", () => {
-  expect(effortKeepsCache("claude-opus-5-5")).toBe(true);
-  expect(effortKeepsCache("claude-sonnet-5-5")).toBe(true);
-  expect(effortKeepsCache("claude-opus-5")).toBe(false);
+test("route: in model mode trivial goes to Haiku and routine to Sonnet; effort mode only rates", () => {
+  expect(route(rated(0.95), "model")).toEqual({ level: 0.95, model: "claude-haiku-5-5" });
+  expect(route(rated(1.5), "model")).toEqual({ level: 1.5, model: "claude-sonnet-5-5" });
+  expect(route(rated(2.9), "model")).toEqual({ level: 2.9 });
+  expect(route(rated(0.95), "effort")).toEqual({ level: 0.95 });
+  expect(route(rated(2.9, 0.3), "model")).toBeUndefined();
 });

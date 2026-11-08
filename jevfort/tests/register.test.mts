@@ -19,6 +19,8 @@ const DEFAULTS = {
   compaction: true,
   takeOnlyForBypass: true,
   measureSteps: true,
+  minEffort: "low",
+  maxEffort: "xhigh",
 };
 
 const { test, mock } = createKit({ module: new URL("../plugin/hooks/register.mjs", import.meta.url), plugin: "jevfort", options: DEFAULTS });
@@ -138,6 +140,7 @@ test("An unsure Jev hands the step to Claude, with effort lowered for an easy tu
     jev: () => ({
       next_action: { type: "choice", choice: "read src/app.ts", probabilities: { "read src/app.ts": 0.6, claude: 0.4 }, confidence: 0.3 },
       difficulty: easy,
+      effort: easy,
     }),
   });
   claudeBeneath(on, seen);
@@ -149,7 +152,7 @@ test("An unsure Jev hands the step to Claude, with effort lowered for an easy tu
 
 test("model routing moves a trivial turn to Haiku", { options: { routing: "model" } }, async ($, on) => {
   const seen: unknown[] = [];
-  setup(on, { messages: [user("hi, what time zone is UTC+2?")], jev: () => ({ difficulty: easy }) });
+  setup(on, { messages: [user("hi, what time zone is UTC+2?")], jev: () => ({ difficulty: easy, effort: easy }) });
   claudeBeneath(on, seen);
 
   await drain($.turn.step(step));
@@ -499,7 +502,7 @@ test("By default Jev takes no steps inside a longer turn", async ($, on) => {
 
 test("Effort lowered at step 0 holds for the later steps of the turn", async ($, on) => {
   const seen: { effort?: string }[] = [];
-  setup(on, { messages: [user("what does this project do?")], jev: () => ({ difficulty: easy }) });
+  setup(on, { messages: [user("what does this project do?")], jev: () => ({ difficulty: easy, effort: easy }) });
   claudeBeneath(on, seen);
   await drain($.turn.step(step));
   await drain($.turn.step({ ...step, index: 1 }));
@@ -518,14 +521,14 @@ test("Effort routing sees the reply a short follow-up answers", async ($, on) =>
   expect(state.previous_reply).toBe("Here is the plan: 1. … Want me to build it?");
 });
 
-test("A big job asked at medium effort runs at high; on an older model effort is left alone", async ($, on) => {
+test("A big job asked at medium effort runs at xhigh, on an older Opus id too", async ($, on) => {
   const seen: { effort?: string }[] = [];
   const hard = { type: "score", score: 2.9, probabilities: {}, confidence: 0.95 };
-  setup(on, { messages: [user("migrate the whole app to TypeScript")], jev: () => ({ difficulty: hard }) });
+  setup(on, { messages: [user("migrate the whole app to TypeScript")], jev: () => ({ difficulty: hard, effort: hard }) });
   claudeBeneath(on, seen);
   await drain($.turn.step({ ...step, effort: "medium" }));
   await drain($.turn.step({ ...step, turnId: "t2", model: "claude-opus-5", effort: "medium" }));
-  expect(seen.map((s) => s.effort)).toEqual(["high", "medium"]);
+  expect(seen.map((s) => s.effort)).toEqual(["xhigh", "xhigh"]);
 });
 
 // JEV_URL: the endpoint is read per request; unset or blank means the TypeSafe API, http(s) is accepted for any host.
@@ -630,4 +633,107 @@ test("estimate_effort estimates on every call, also for haiku", async ($, on) =>
   expect(await estimateCall($, { model: "haiku" })).toEqual({ result: JSON.stringify({ effort: "low", source: "mechanical" }) });
   expect(questionKeys(sent, 0)).toEqual(["effort", "mechanical"]);
   expect(questionKeys(sent, 1)).toEqual(["effort", "mechanical"]);
+});
+
+// Turn-start effort estimate: Jev's effort score plus the session model's bias, within minEffort..maxEffort.
+test("A mechanical turn runs at minEffort even on a hard score", async ($, on) => {
+  const seen: { effort?: string }[] = [];
+  setup(on, { messages: [user("rename foo to bar in src/a.ts")], jev: () => ({ difficulty: easy, effort: scored(2.9), mechanical: mech(0.9) }) });
+  claudeBeneath(on, seen);
+  await drain($.turn.step(step));
+  expect(seen.map((s) => s.effort)).toEqual(["low"]);
+});
+
+test("maxEffort caps a confident hard estimate", { options: { maxEffort: "medium" } }, async ($, on) => {
+  const seen: { effort?: string }[] = [];
+  setup(on, { messages: [user("migrate the whole app to TypeScript")], jev: () => ({ difficulty: easy, effort: scored(2.9) }) });
+  claudeBeneath(on, seen);
+  await drain($.turn.step(step));
+  expect(seen.map((s) => s.effort)).toEqual(["medium"]);
+});
+
+test("minEffort raises a confident easy estimate", { options: { minEffort: "medium" } }, async ($, on) => {
+  const seen: { effort?: string }[] = [];
+  setup(on, { messages: [user("what does this project do?")], jev: () => ({ difficulty: easy, effort: scored(0.2) }) });
+  claudeBeneath(on, seen);
+  await drain($.turn.step(step));
+  expect(seen.map((s) => s.effort)).toEqual(["medium"]);
+});
+
+test("An inverted minEffort/maxEffort config falls back to low..xhigh", { options: { minEffort: "max", maxEffort: "low" } }, async ($, on) => {
+  const seen: { effort?: string }[] = [];
+  setup(on, { messages: [user("migrate the whole app to TypeScript")], jev: () => ({ difficulty: easy, effort: scored(2.9) }) });
+  claudeBeneath(on, seen);
+  await drain($.turn.step(step));
+  expect(seen.map((s) => s.effort)).toEqual(["xhigh"]);
+});
+
+// Cadence (USER DECISION U1): Opus/Sonnet every turn; Haiku/Fable only on the loop's first turn, then held.
+const turnStep = (turnId: string, model: string, effort: string) => ({ turnId, index: 0, model, effort, messageCount: 1 });
+
+for (const model of ["claude-opus-5-5", "claude-sonnet-5-5"]) {
+  test(`On ${model} every turn is estimated`, async ($, on) => {
+    const seen: { effort?: string }[] = [];
+    const { sent } = setup(on, { messages: [user("what does this project do?")], jev: inOrder({ difficulty: easy, effort: scored(0.2) }, { difficulty: easy, effort: scored(2.9) }) });
+    claudeBeneath(on, seen);
+    await drain($.turn.step(turnStep("t1", model, "high")));
+    await drain($.turn.step(turnStep("t2", model, "high")));
+    expect(questionKeys(sent, 0)).toEqual(expect.arrayContaining(["effort", "mechanical"]));
+    expect(questionKeys(sent, 1)).toEqual(expect.arrayContaining(["effort", "mechanical"]));
+    expect(seen.map((s) => s.effort)).toEqual(["low", "xhigh"]);
+  });
+}
+
+for (const [model, estimated] of [["claude-haiku-5-5", "medium"], ["claude-fable-5", "low"]] as const) {
+  test(`On ${model} only the first turn is estimated and later turns hold it`, async ($, on) => {
+    const seen: { effort?: string }[] = [];
+    const { sent } = setup(on, { messages: [user("what does this project do?")], jev: inOrder({ difficulty: easy, effort: scored(0.2) }, { difficulty: easy, effort: scored(2.9) }) });
+    claudeBeneath(on, seen);
+    await drain($.turn.step(turnStep("t1", model, "high")));
+    await drain($.turn.step(turnStep("t2", model, "high")));
+    expect(questionKeys(sent, 0)).toEqual(expect.arrayContaining(["effort", "mechanical"]));
+    expect(questionKeys(sent, 1)).not.toContain("effort");
+    expect(questionKeys(sent, 1)).not.toContain("mechanical");
+    expect(seen.map((s) => s.effort)).toEqual([estimated, estimated]);
+  });
+}
+
+test("A held Haiku effort still applies when Jev fails on a later turn", async ($, on) => {
+  const seen: { effort?: string }[] = [];
+  setup(on, { messages: [user("what does this project do?")], jev: inOrder({ difficulty: easy, effort: scored(0.2) }, 401) });
+  claudeBeneath(on, seen);
+  await drain($.turn.step(turnStep("t1", "claude-haiku-5-5", "high")));
+  await drain($.turn.step(turnStep("t2", "claude-haiku-5-5", "high")));
+  expect(seen.map((s) => s.effort)).toEqual(["medium", "medium"]);
+});
+
+test("A changed session effort ends the Haiku hold", async ($, on) => {
+  const seen: { effort?: string }[] = [];
+  const { sent } = setup(on, { messages: [user("what does this project do?")], jev: inOrder({ difficulty: easy, effort: scored(2.5) }, { difficulty: easy, effort: scored(0.2) }) });
+  claudeBeneath(on, seen);
+  await drain($.turn.step(turnStep("t1", "claude-haiku-5-5", "high")));
+  await drain($.turn.step(turnStep("t2", "claude-haiku-5-5", "medium")));
+  expect(questionKeys(sent, 1)).not.toContain("effort");
+  expect(seen.map((s) => s.effort)).toEqual(["xhigh", "medium"]);
+});
+
+test("A failed first Haiku turn is not re-asked and later turns keep the session effort", async ($, on) => {
+  const seen: { effort?: string }[] = [];
+  const { sent } = setup(on, { messages: [user("what does this project do?")], jev: inOrder(401, { difficulty: easy, effort: scored(0.2) }) });
+  claudeBeneath(on, seen);
+  await drain($.turn.step(turnStep("t1", "claude-haiku-5-5", "high")));
+  await drain($.turn.step(turnStep("t2", "claude-haiku-5-5", "high")));
+  expect(questionKeys(sent, 0)).toEqual(expect.arrayContaining(["effort", "mechanical"]));
+  expect(questionKeys(sent, 1)).not.toContain("effort");
+  expect(seen.map((s) => s.effort)).toEqual(["high", "high"]);
+});
+
+test("A session that starts on Opus and moves to Haiku gets no Haiku estimate", async ($, on) => {
+  const seen: { effort?: string }[] = [];
+  const { sent } = setup(on, { messages: [user("what does this project do?")], jev: inOrder({ difficulty: easy, effort: scored(0.2) }, { difficulty: easy, effort: scored(0.2) }) });
+  claudeBeneath(on, seen);
+  await drain($.turn.step(turnStep("t1", "claude-opus-5-5", "high")));
+  await drain($.turn.step(turnStep("t2", "claude-haiku-5-5", "high")));
+  expect(questionKeys(sent, 1)).not.toContain("effort");
+  expect(seen.map((s) => s.effort)).toEqual(["low", "high"]);
 });
