@@ -22,8 +22,8 @@ import { choice, jevUrl, MODEL, noul, score, TIMEOUT_MS } from "./jev.mjs";
 import type { Answer, ChoiceAnswer, JevResult, Question } from "./jev.mjs";
 import { LOG_KEY, MAX_ENTRIES, recentDecisions, remember, statsKey } from "./log.mjs";
 import type { Entry } from "./log.mjs";
-import { adjustEffort, bashRiskQuestion, bestAction, difficultyQuestion, doneQuestion, effortKeepsCache, gateBash, inScopeQuestion, inScratchpad, lowerModel, nextActionQuestion, pickCandidate, route, shouldContinue, singleActionQuestion } from "./policy.mjs";
-import type { GateThresholds, Route } from "./policy.mjs";
+import { adjustEffort, bestAction, difficultyQuestion, doneQuestion, effortKeepsCache, inScratchpad, lowerModel, nextActionQuestion, pickCandidate, route, shouldContinue, singleActionQuestion } from "./policy.mjs";
+import type { Route } from "./policy.mjs";
 import { hints, NONE, promptQuestions } from "./prompt.mjs";
 import { buildReport } from "./report.mjs";
 import { SUMMARY_MODEL, SYSTEM } from "./summarize.mjs";
@@ -581,7 +581,6 @@ async function checkDone($: Engine, e: TurnEnd, configuredMode: unknown, thresho
 export const register = (on: On, options: Options): void => {
   const routing = options.routing === "model" || options.routing === "off" ? options.routing : "effort";
   const takeSteps = options.takeSteps !== false;
-  const gate = options.gate !== false;
   const doneCheck = options.doneCheck !== false;
   const takeThreshold = typeof options.takeThreshold === "number" ? options.takeThreshold : 0.85;
   const subagents = options.subagents !== false;
@@ -592,10 +591,6 @@ export const register = (on: On, options: Options): void => {
   const threshold = (key: string, fallback: number): number => {
     const v = options[key];
     return typeof v === "number" ? v : fallback;
-  };
-  const gateThresholds: GateThresholds = {
-    dangerDeny: threshold("dangerDeny", 0.8),
-    scopeDeny: threshold("scopeDeny", 0.2),
   };
   const doneThreshold = threshold("doneThreshold", 0.15);
 
@@ -717,7 +712,7 @@ export const register = (on: On, options: Options): void => {
   }
 
   const turns = new Map<string, { route?: Route; taken: number; bypassId?: string; bypassAction?: string }>();
-  // Calls Jev made itself skip the gate: their commands come from a vetted list.
+  // Calls Jev made itself: `tool.check` approves them, their commands come from a vetted list.
   const ownCalls = new Set<string>();
   on("session.start", async function onSessionStart($: Engine, e: unknown, next: Next<unknown, unknown>): Promise<unknown> {
     await $.command.register({
@@ -777,7 +772,7 @@ export const register = (on: On, options: Options): void => {
       .map((d) => `- ${d.kind}${d.applied ? "" : " (pass)"}: ${d.text}${d.ms !== undefined ? ` [${Math.round(d.ms)}ms]` : ""}`);
     return {
       text: [
-        `Jev pilot: mode ${await currentMode($, options.mode)}, routing ${routing}, take steps ${takeSteps} (p ≥ ${takeThreshold}), gate ${gate}, done check ${doneCheck}, subagents ${subagents}`,
+        `Jev pilot: mode ${await currentMode($, options.mode)}, routing ${routing}, take steps ${takeSteps} (p ≥ ${takeThreshold}), done check ${doneCheck}, subagents ${subagents}`,
         `Decisions (all sessions): ${counts}`,
         lines.length ? `Recent:\n${lines.join("\n")}` : "No decisions this session yet.",
         "Full analysis: /jev report",
@@ -979,7 +974,7 @@ export const register = (on: On, options: Options): void => {
 
   // The scratchpad lookups, resolved once: neither the temp roots nor the session id change within a session.
   let scratchpad: { roots: string[]; sid: string } | undefined;
-  // Permission gate: never asks; only denies a dangerous Bash command the request does not ask for.
+  // Permission check: approves Jev's own vetted calls and writes into this session's scratchpad; every other verdict stays Claude Code's.
   on("tool.check", async function onToolCheck($: Engine, e: Check, next: Next<Check, Verdict>): Promise<Verdict> {
     const base = await next(e);
     // Jev's own calls come from the vetted candidate list: approve them so auto mode's classifier doesn't refuse
@@ -989,7 +984,7 @@ export const register = (on: On, options: Options): void => {
       return { ...base, decision: "allow", reason: "Jev pilot: vetted action from its read-only/project-script list" };
     }
     const input = (e.input ?? {}) as Record<string, unknown>;
-    // Writes into this session's scratchpad are allowed in every permission mode while jevfort is on, also with the gate off.
+    // Writes into this session's scratchpad are allowed in every permission mode.
     // A mode's ask becomes allow; a settings deny or ask rule (`rule` set) still wins.
     if (WRITE_TOOLS.has(e.tool) && base.decision !== "deny" && !(base.decision === "ask" && base.rule !== undefined)) {
       if ((await currentMode($, options.mode)) !== "off") {
@@ -1002,31 +997,6 @@ export const register = (on: On, options: Options): void => {
         }
       }
     }
-    if (!gate || e.tool !== "Bash" || (base.decision !== "allow" && base.decision !== "ask") || !e.tool_use_id) return base;
-    const m = await currentMode($, options.mode);
-    if (m === "off") return base;
-    const ctx = await readTurn($, e.agentId);
-    const request = clip(ctx?.request ?? "", 3000);
-    const cwd = await $.session.cwd();
-
-    const r = await askJev(
-      $,
-      { request, command: asText(input.command ?? ""), cwd },
-      { risk: bashRiskQuestion, in_scope: inScopeQuestion("running the command in `command`") },
-    );
-    if (!r.ok) return base;
-    const risk = score(r.answers, "risk");
-    const inScope = noul(r.answers, "in_scope");
-    const denyReason = gateBash(risk, inScope, gateThresholds);
-    const decision = denyReason === undefined ? "allow" : "deny";
-    await record($, {
-      kind: "gate",
-      applied: denyReason !== undefined,
-      text: `${decision} Bash: ${clip(String(input.command), 50)}`,
-      ms: r.ms,
-      data: { tool: "Bash", target: clip(String(input.command), 200), decision, danger: risk?.probabilities["2"], inScope },
-    });
-    if (denyReason === undefined) return base;
-    return { ...base, decision: "deny", reason: denyReason };
+    return base;
   });
 };
