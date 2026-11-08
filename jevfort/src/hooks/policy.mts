@@ -200,13 +200,10 @@ export function lowerModel(current: string, target: string | undefined): string 
   return c > MODEL_TIER(target) ? target : undefined;
 }
 
-/** A gate decision that tightens the permission, or `undefined` to leave it. */
-export type GateVerdict = { decision: "ask" | "deny"; reason: string } | undefined;
-
 /** The gate's thresholds. */
-export type GateThresholds = { dangerAsk: number; dangerDeny: number; scopeDeny: number; editScope: number };
+export type GateThresholds = { dangerDeny: number; scopeDeny: number };
 /** The gate thresholds of the manifest defaults. */
-export const DEFAULT_GATE: GateThresholds = { dangerAsk: 0.5, dangerDeny: 0.8, scopeDeny: 0.2, editScope: 0.15 };
+export const DEFAULT_GATE: GateThresholds = { dangerDeny: 0.8, scopeDeny: 0.2 };
 
 /**
  * The gate verdict for a Bash command.
@@ -214,27 +211,14 @@ export const DEFAULT_GATE: GateThresholds = { dangerAsk: 0.5, dangerDeny: 0.8, s
  * @param risk - The risk answer.
  * @param inScope - The in-scope probability.
  * @param t - The thresholds.
- * @returns Ask, deny, or `undefined` to allow.
+ * @returns The reason to deny with, or `undefined` to leave Claude Code's verdict. The gate never asks.
  */
-export function gateBash(risk: ScoreAnswer | undefined, inScope: number | undefined, t: GateThresholds = DEFAULT_GATE): GateVerdict {
+export function gateBash(risk: ScoreAnswer | undefined, inScope: number | undefined, t: GateThresholds = DEFAULT_GATE): string | undefined {
   const dangerous = risk?.probabilities["2"] ?? 0;
-  if (dangerous < t.dangerAsk) return undefined;
-  if (inScope !== undefined && inScope < t.scopeDeny && dangerous >= t.dangerDeny) {
-    return { decision: "deny", reason: "Jev: this command could destroy or leak data and the request does not seem to ask for it. Use a safer command or ask the user first." };
+  if (dangerous >= t.dangerDeny && inScope !== undefined && inScope < t.scopeDeny) {
+    return "Jev: this command could destroy or leak data and the request does not seem to ask for it. Use a safer command or ask the user first.";
   }
-  return { decision: "ask", reason: `Jev: this command looks risky (${Math.round(dangerous * 100)}% likely to reach outside the project or destroy data).` };
-}
-
-/**
- * The gate verdict for an edit.
- *
- * @param inScope - The in-scope probability.
- * @param t - The thresholds.
- * @returns Ask, or `undefined` to allow.
- */
-export function gateEdit(inScope: number | undefined, t: GateThresholds = DEFAULT_GATE): GateVerdict {
-  if (inScope === undefined || inScope >= t.editScope) return undefined;
-  return { decision: "ask", reason: "Jev: this change doesn't look like part of the request." };
+  return undefined;
 }
 
 /**
@@ -246,4 +230,28 @@ export function gateEdit(inScope: number | undefined, t: GateThresholds = DEFAUL
  */
 export function shouldContinue(done: number | undefined, threshold = 0.15): boolean {
   return done !== undefined && done < threshold;
+}
+
+/**
+ * Whether a file lies inside this session's scratchpad directory, `<root>/claude-<digits>/<project slug>/<session id>/scratchpad/<at least one segment>`.
+ * The project slug is not checked: it comes from the session-start directory, which differs from the cwd in a worktree.
+ *
+ * @param file - The absolute path of the file.
+ * @param sessionId - The session id.
+ * @param roots - The candidate temp roots (`CLAUDE_CODE_TMPDIR`, `TMPDIR`, `/tmp`).
+ * @returns Whether the path is a file below the session's scratchpad; any `..` segment rejects it.
+ */
+export function inScratchpad(file: string, sessionId: string, roots: readonly string[]): boolean {
+  if (!file.startsWith("/") || !sessionId) return false;
+  const segs = file.split("/");
+  if (segs.includes("..")) return false;
+  const path = `/${segs.filter((seg) => seg !== "" && seg !== ".").join("/")}`;
+  // shortcut: lexical containment only. A symlink inside the scratchpad, or a pre-made `claude-<digits>` dir under a shared /tmp, can point elsewhere; upgrade when $.fs offers realpath/lstat.
+  for (const root of roots) {
+    const prefix = `${root.replace(/\/+$/, "")}/`;
+    if (prefix === "/" || !path.startsWith(prefix)) continue;
+    const rest = path.slice(prefix.length).split("/");
+    if (rest.length >= 5 && /^claude-\d+$/.test(rest[0]) && rest[2] === sessionId && rest[3] === "scratchpad") return true;
+  }
+  return false;
 }

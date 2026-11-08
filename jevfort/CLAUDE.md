@@ -23,11 +23,13 @@ commit 90cc1f1, directory `hooks/`) into this repository's layout. Upstream has 
 - Upstream blocks `Stop`. Here the done check runs on `turn.complete` (main-loop turns ending with `reason: "answer"`)
   and sends one framed follow-up message (`DONE_PROMPT`) through `$.prompt.submit`, because `cc-plugin-sec-default`
   skips user-tier `classic.Stop` hooks. The unfinished answer stays visible. Background Bash work is not detected,
-  only subagents (`$.agent.list()`).
+  only subagents (`$.agent.list()`, waiting = status `running` or `pending`). The follow-up is
+  recognised by `origin: { kind: "plugin", name: "jevfort" }` in `prompt.submit`, not by its text; any other prompt clears the
+  exemption of the next turn.
 
 ## Layout
 
-`package.json` is the only manifest source (`claudePlugin.userConfig`, 18 options). `pnpm build` compiles
+`package.json` is the only manifest source (`claudePlugin.userConfig`, 16 options). `pnpm build` compiles
 `src/**/*.mts` to `plugin/**/*.mjs` (`plugin/hooks/` unmangled and uncompressed) and generates
 `plugin/.claude-plugin/plugin.json`. Tests (`tests/*.test.mts`, vitest + `claude-engine-vitest`) run against `plugin/`.
 
