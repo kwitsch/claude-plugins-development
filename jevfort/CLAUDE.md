@@ -7,16 +7,18 @@ commit 90cc1f1, directory `hooks/`) into this repository's layout. Upstream has 
 
 ## Differences from upstream
 
-- No shadow mode: `mode` is `active` or `off`. `/jev shadow` is gone, every "apply only when active" guard is
-  unconditional, the report has no shadow rows. `Entry.applied` stays and means "acted" vs "pass" (status suffix
-  ` (pass)`). A stored legacy `mode: "shadow"` falls back to the configured mode, a configured `"shadow"` to `active`.
+- No modes: upstream's `mode` option and `/jev <mode>` are gone; jevfort is on while the plugin is enabled. Every
+  "apply only when active" guard is unconditional, the report has no shadow rows. `Entry.applied` stays and means
+  "acted" vs "pass" (status suffix ` (pass)`). A `mode` key left in `$.store` by an older version is never read.
+- No permission gate: upstream's Bash and edit gate (risk and in-scope questions, `gate` option, thresholds, report
+  rows) is gone. `tool.check` only approves Jev's own vetted calls and writes into the session scratchpad.
 - The endpoint is read per request from the `JEV_URL` environment variable (`$.env.get`), trimmed; unset or blank
   means `https://api.typesafe.ai/v1/systemone` (`DEFAULT_JEV_URL` in `jev.mts`). `http:` and `https:` are accepted for
   any host; any other value is a logged Jev error (`JEV_URL must be an http(s) URL`), no request is sent and Claude
   proceeds unchanged. No `userConfig` entry for the URL.
 - Every `$` use and every `on(...)` call lives in `src/hooks/register.mts` (engine rule, see
   `.claude/rules/register-hooks.md`); upstream's `askJev`, `record`, `readLog`, `clearLog`, `stats`, `readTurn`,
-  `previousReply`, `buildCandidates`, `packageRunner`, `summarizeResult`, `skillOptions`, `currentMode` and the
+  `previousReply`, `buildCandidates`, `packageRunner`, `summarizeResult`, `skillOptions` and the
   `register*` functions of `prompt`/`agents`/`compact`/`view` moved there. Upstream `mode.ts` and `view.ts` have no
   file. The other `src/hooks/*.mts` are pure.
 - No `claude-code` type import: `$`, events and `on` are typed structurally at the top of `register.mts`.
@@ -29,7 +31,7 @@ commit 90cc1f1, directory `hooks/`) into this repository's layout. Upstream has 
 
 ## Layout
 
-`package.json` is the only manifest source (`claudePlugin.userConfig`, 16 options). `pnpm build` compiles
+`package.json` is the only manifest source (`claudePlugin.userConfig`, 12 options). `pnpm build` compiles
 `src/**/*.mts` to `plugin/**/*.mjs` (`plugin/hooks/` unmangled and uncompressed) and generates
 `plugin/.claude-plugin/plugin.json`. Tests (`tests/*.test.mts`, vitest + `claude-engine-vitest`) run against `plugin/`.
 
