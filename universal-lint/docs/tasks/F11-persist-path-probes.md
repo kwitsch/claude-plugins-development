@@ -20,7 +20,7 @@ Done in 0.15.10. Shipped inside `onPath` only (callers, selection order and bare
 
 - onPath miss: 86-107 ms real PATH (63 accessSync), 0.1-0.6 ms without /mnt; hit 0.02-0.2 ms. Repeated probes are not cached by the OS.
 - Hook medians, real vs no-/mnt PATH (N=7-9): .sh 143-151/43-44, .py 133-152/42-45, .yml 153-215/43-70, .java 193/63, .kt 178/73, .php 266/53, .md 1113-1364/930-1077 (two misses ≈ 215 ms).
-- Not all of the gap is onPath: .mts 890-1026 vs 575-621 ms, but only about 110 ms is onPath; `rtk oxlint` costs 241-257 ms vs 59-72 ms because rtk scans PATH itself (F28). Go's gap is about half `go vet`'s own gccgo PATH scan (F30).
+- Not all of the gap is onPath: .mts 890-1026 vs 575-621 ms, but only about 110 ms is onPath; `rtk oxlint` cost 241-257 ms vs 59-72 ms because rtk scanned PATH itself (rtk removed in 0.15.0). Go's gap is about half `go vet`'s own gccgo PATH scan (F30).
 - Probing all chain names in one parallel async pass: 45-60 ms total.
 
 ## Code locations
