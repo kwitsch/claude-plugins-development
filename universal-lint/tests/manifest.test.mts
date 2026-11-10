@@ -56,6 +56,12 @@ test("lint-file.mjs has no static node:crypto import (loaded lazily on first has
   assert.doesNotMatch(readFileSync(HOOK, "utf8"), /\b(?:from|import)\s*["'](?:node:)?crypto["']/);
 });
 
+test("lint-file.mjs keeps the createRequire fallback next to getBuiltinModule (Node 18.14 floor, F26)", () => {
+  const text = readFileSync(HOOK, "utf8");
+  assert.ok(text.includes("getBuiltinModule"));
+  assert.ok(text.includes("createRequire"));
+});
+
 test("plugin README first ## heading is Install, with the install command and no ## Hooks section", () => {
   const readme = readFileSync(path.join(PLUGIN, "README.md"), "utf8");
   assert.equal(/^## .*/m.exec(readme)?.[0], "## Install");

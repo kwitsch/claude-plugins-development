@@ -22,7 +22,7 @@ Done in 0.15.23. Merges bench-js-ts floor finding (confirmed, low), static node-
 
 Raw import cost with fs/path already loaded: `node:crypto` 5.3-5.5 ms, `node:child_process` 1.2-1.6 ms.
 
-- Node floor: `process.getBuiltinModule` exists from Node 22.3 / 20.16 (the floor was 18.14 for `os.availableParallelism`); repo baseline is Node 24, Node 20 is EOL. On older Node the first hash throws a TypeError inside `main`'s catch-all: the event is silently not linted, exit 0, no crash. Not guarded (user decision). Events that never hash are unaffected.
+- Node floor: unchanged at 18.14 (`os.availableParallelism`). `process.getBuiltinModule` exists from Node 22.3 / 20.16; older Node falls back to `createRequire(import.meta.url)("node:crypto")` (the `node:module` import measured 0 ms). The review found every lint path hashes (`recordWritten`/`fileDigest`, `probeFilePath`/`hashPath`, `runNpx`), so an unguarded `getBuiltinModule` would have meant silent fail open, i.e. zero linting on old Node. Events that never hash skip both.
 - Lazy `node:child_process` not shipped: about 2 ms more, inside noise, seven call sites.
 - No hooks.json filter (user decision); hooks.json is unchanged. Prototype (Claude Code 2.1.321; three throwaway copies of the built `plugin/`, each hooks.json command wrapped by a spy script that logs event and file path, then pipes stdin to the unchanged `lint-file.mjs`; fresh scratch git repo per run; `claude -p --plugin-dir <copy> --debug-file <log> --allowedTools "Write Edit Bash Read" --model haiku`; steps: Write c.json, Write d.sh, Write sub/e.sh, Write F.SH, Edit a.sh, Edit b.json, sleep, external append to a.sh, `rm d.sh`):
   - Caveat: the runs were NOT isolated. Debug logs show `Loaded 23 installed plugins`, `Processing 17 enabled plugins` and `Plugin "universal-lint" from --plugin-dir overrides installed version`. The spawn counts still stand because the spy logs only the prototype plugin's spawns and only a.sh was watched.
@@ -42,7 +42,7 @@ Write/Edit of .json/.toml/.bats/.txt and FileChanged events the hook cannot act 
 
 ## Code locations
 
-The non-exported `createHash` wrapper (lazy `node:crypto` via `process.getBuiltinModule`) and its three callers `runNpx` (npx cache key), `hashPath` and `fileDigest`; `main`; `isMainModule`; `postToolScope`/`scopedTarget` (extension check before realpath, F12); `fileChangedHandler` (`unlink` check); hooks.json (matcher `Write|Edit`, no FileChanged matcher; unchanged).
+The non-exported `createHash` wrapper (lazy `node:crypto` via `process.getBuiltinModule`, `createRequire` fallback on older Node) and its three callers `runNpx` (npx cache key), `hashPath` and `fileDigest`; `main`; `isMainModule`; `postToolScope`/`scopedTarget` (extension check before realpath, F12); `fileChangedHandler` (`unlink` check); hooks.json (matcher `Write|Edit`, no FileChanged matcher; unchanged).
 
 ## Approach
 

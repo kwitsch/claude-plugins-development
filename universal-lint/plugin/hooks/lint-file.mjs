@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { execFileSync, spawn } from "node:child_process";
 import { accessSync, constants as fsConstants, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import { availableParallelism, homedir, tmpdir } from "node:os";
 import path from "node:path";
 import process from "node:process";
@@ -8,7 +9,7 @@ import { json } from "node:stream/consumers";
 import { setTimeout as sleep } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 function createHash(algorithm) {
-	return process.getBuiltinModule("node:crypto").createHash(algorithm);
+	return (process.getBuiltinModule?.("node:crypto") ?? createRequire(import.meta.url)("node:crypto")).createHash(algorithm);
 }
 const SPAWN_TIMEOUT_MS = 3e4;
 const NPX_SPAWN_TIMEOUT_MS = 55e3;
