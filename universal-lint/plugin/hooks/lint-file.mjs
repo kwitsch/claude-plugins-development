@@ -601,10 +601,10 @@ export function classifyCheckstyleOutput(stdout) {
 		text: ""
 	};
 }
-export function truncate(text) {
+export function truncate(text, max = MAX_CONTEXT_CHARS) {
 	const collapsed = text.replace(/\n{3,}/g, "\n\n").trim();
-	if (collapsed.length <= MAX_CONTEXT_CHARS) return collapsed;
-	return collapsed.slice(0, MAX_CONTEXT_CHARS) + "\n… (truncated)";
+	if (collapsed.length <= max) return collapsed;
+	return collapsed.slice(0, max) + "\n… (truncated)";
 }
 function selectLintTool(chain, fileDir, cwd) {
 	for (const tool of chain) {
@@ -1039,7 +1039,7 @@ export function lintFilesHandler(cwd, files) {
 		if (out.verdict !== "issues") return;
 		const { tool, manifest } = members[0].plan;
 		const targets = new Set(members.map(({ fp }) => chainTarget(tool, manifest, cwd, fp)));
-		chainBlocks.push(`universal-lint: ${tool.name} found issues in ${[...targets].join(", ")}:\n${truncate(out.text)}`);
+		chainBlocks.push(`universal-lint: ${tool.name} found issues in ${[...targets].join(", ")}:\n${truncate(out.text, MAX_CONTEXT_CHARS * members.length)}`);
 	};
 	for (const group of groups.values()) {
 		const { plan } = group[0];

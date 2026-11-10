@@ -1223,15 +1223,16 @@ export function classifyCheckstyleOutput(stdout: string): { status: "clean" | "i
 }
 
 /**
- * Trim, collapse runs of 3+ blank lines to one, and cap at MAX_CONTEXT_CHARS.
+ * Trim, collapse runs of 3+ blank lines to one, and cap at `max` (default MAX_CONTEXT_CHARS).
  *
  * @param text - Findings text.
+ * @param max - Character cap; the skill driver passes MAX_CONTEXT_CHARS times the files of a batched run.
  * @returns The text trimmed, collapsed and capped.
  */
-export function truncate(text: string): string {
+export function truncate(text: string, max = MAX_CONTEXT_CHARS): string {
   const collapsed = text.replace(/\n{3,}/g, "\n\n").trim();
-  if (collapsed.length <= MAX_CONTEXT_CHARS) return collapsed;
-  return collapsed.slice(0, MAX_CONTEXT_CHARS) + "\n… (truncated)";
+  if (collapsed.length <= max) return collapsed;
+  return collapsed.slice(0, max) + "\n… (truncated)";
 }
 
 /**
@@ -1915,7 +1916,7 @@ export function lintFileHandler(args: PostToolUseHookInput, scoped: { fp: string
  * never share a run; go (`targetsDir`) and cargo (`manifestPath`) by the full argv, one run per package dir or crate
  * without extra targets. A file-scoped group spawns once per chunk of at most `BATCH_MAX_FILES` files with all chunk
  * files appended as targets, through `runLintTool` and the unchanged per-spawn timeout; `chainOutcome` classifies it.
- * An `issues` run becomes the block `universal-lint: <tool> found issues in <targets>:\n<truncate(text)>`, where
+ * An `issues` run becomes the block `universal-lint: <tool> found issues in <targets>:\n<truncate(text)>` (cap MAX_CONTEXT_CHARS times the files of the run; the tsc block keeps MAX_CONTEXT_CHARS), where
  * `<targets>` joins the run's unique per-file targets with `", "` (the file, the package dir, or the crate dir,
  * relative to `cwd`) and names every file of the run, including those the tool found clean.
  * Fail-open per file: a multi-file chunk whose run is a skip verdict, spawn error, signal or timeout is rerun one file at a
@@ -1974,7 +1975,8 @@ export function lintFilesHandler(cwd: string, files: readonly string[]): string[
     if (out.verdict !== "issues") return;
     const { tool, manifest } = members[0].plan;
     const targets = new Set(members.map(({ fp }) => chainTarget(tool, manifest, cwd, fp)));
-    chainBlocks.push(`universal-lint: ${tool.name} found issues in ${[...targets].join(", ")}:\n${truncate(out.text)}`);
+    // One block now carries up to BATCH_MAX_FILES files: keep the old per-file budget so later files' findings are not cut.
+    chainBlocks.push(`universal-lint: ${tool.name} found issues in ${[...targets].join(", ")}:\n${truncate(out.text, MAX_CONTEXT_CHARS * members.length)}`);
   };
   for (const group of groups.values()) {
     const { plan } = group[0];

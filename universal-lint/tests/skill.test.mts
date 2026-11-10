@@ -168,6 +168,19 @@ test("lint-files.mjs reruns files singly when the batch run is killed", () => {
   assert.ok(r.stdout.includes("shellcheck found issues in a.sh:"), r.stdout);
 });
 
+test("lint-files.mjs caps a batched block per file, not per run", () => {
+  const e = makeEnv();
+  e.recStub("shellcheck", 1);
+  const files = [e.file("a.sh", "echo hi\n"), e.file("b.sh", "echo hi\n"), e.file("c.sh", "echo hi\n")];
+  const out = Array.from({ length: 200 }, (_, i) => `a.sh:${i + 1}:1: note: x [SC2086]`).join("\n");
+  const r = driver(e, files, out);
+  assert.equal(r.status, 0);
+  assert.ok(r.stdout.includes("a.sh:200:1:"), r.stdout);
+  assert.ok(!r.stdout.includes("(truncated)"), r.stdout);
+  const single = driver(e, [files[0]], out);
+  assert.ok(single.stdout.includes("… (truncated)"), single.stdout);
+});
+
 test("lint-files.mjs splits a tool's files into one run per argv prefix (markdownlint config vs none)", () => {
   const e = makeEnv();
   e.file("d1/.markdownlint.json", "{}\n");
