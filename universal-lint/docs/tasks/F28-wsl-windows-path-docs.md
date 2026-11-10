@@ -1,7 +1,7 @@
 ---
 id: F28
 title: Document the WSL Windows-PATH penalty (mostly inside child processes)
-status: docs-only
+status: done
 priority: medium
 area: universal-lint/plugin/README.md (troubleshooting), universal-lint/.claude/rules/hook-design.md
 ---
@@ -10,15 +10,27 @@ area: universal-lint/plugin/README.md (troubleshooting), universal-lint/.claude/
 
 ## Status
 
-Docs-only, open. Merges the static missed item and the real-sessions missed item (both: most of the real-vs-Linux-PATH gap is outside the plugin's `onPath`), plus the bench-other-langs missed item on `go vet`'s gccgo PATH scan as an optional mitigation.
+Closed docs-only in 0.15.25, no code change. Shipped: a "Troubleshooting" section ("Slow lints on WSL") at the end of `plugin/README.md` (cause, the `go vet` example, the two user options `appendWindowsPath = false` in `/etc/wsl.conf` or a `/mnt`-trimmed PATH for Claude Code, and the statement that the plugin never rewrites PATH), and one sentence on the "Selection (`selectLintTool`)" bullet of `.claude/rules/hook-design.md`. The re-measurement on 0.15.25 (Evidence) refutes this task's original premise that a trimmed PATH speeds up every lint by 0.1-0.6 s: after rtk's removal (0.15.0), the direct local and npx-cached bins (F04, F09) and the persisted `onPath` probes (F11), the hook itself shows no real-vs-/mnt gap that matters (largest median difference 15 ms, within run-to-run spread). The remaining WSL cost is inside child processes that search PATH themselves; `go vet` is the one measured example.
+
+GCCGO env on the go vet spawn: not pursued (user decision). The cost stays at about 95 ms per `go vet` run on WSL (go 1.22.2, one-file package). Reasons: Go's `work` package `init()` runs `LookPath` on `GCCGO` (or `gccgo`) on every go command (`go vet`, and `go list` under golangci-lint too) regardless of `-compiler`; an OS env `GCCGO` overrides a user's `go env -w GCCGO=...` (`cfg.Getenv` reads `os.Getenv` first, then the GOENV file; verified empirically), so an unconditional spawn-env override breaks gccgo users with exit 2 on every edit, unless the hook spawns `go env` first, which costs more than it saves. The benefit is WSL-only and gccgo-absent-only (9 `.go` edits in the mined transcripts); the README's `appendWindowsPath = false` fix removes the cost for every child process at once; and the plugin does not rewrite tool-resolution env (this task's PATH stance; F24 set only output-noise npm flags).
+
+Reopen trigger: only if Go edits become a measured budget problem on WSL AND the hook can read `GCCGO`/`GOFLAGS` from `go env` (or the GOENV file) without an extra spawn per run. No follow-up task.
+
+User-side Go workaround (this doc only, not the README): a user who never uses gccgo can run `go env -w GCCGO=/nonexistent/gccgo` once; go then checks that one absolute path instead of scanning PATH for `gccgo`.
 
 ## Problem
 
-On WSL with `appendWindowsPath` (default), PATH carries the Windows dirs on /mnt/c (9P). Every PATH lookup that misses scans them at about 1.5-2 ms per dir. The plugin's own `onPath` misses explain only part of the cost; npx, npm, rtk and go scan PATH themselves inside the child processes, which no plugin-side cache (F11) can remove.
+On WSL with `appendWindowsPath` (the default), PATH carries the Windows dirs under /mnt (9P, slow lookups); on the measuring machine 44 of 63 dirs. Every PATH lookup that misses scans all of them. The plugin's own `onPath` misses are cached across hook processes since F11; tools that search PATH themselves inside child processes (`go vet` looking for `gccgo`) pay on every run, which no plugin-side cache can remove.
 
 ## Evidence
 
-Real vs Linux-only PATH, end to end: .mts 890-1026 vs 575-621 ms (onPath ≈ 110 ms of the gap), .md 1364-1644 vs 1038-1077 ms (onPath ≈ 180-215 ms), .ts with eslint+tsc 985 vs 659 ms. `rtk oxlint` 241-257 ms vs 59-72 ms (rtk searching PATH for oxlint). `go vet` scans PATH for gccgo on every run: small package 210 ms vs 106-114 ms with a gccgo stub early on PATH or `GCCGO=/nonexistent/gccgo`; 337 → 244 ms on a bigger package; this explains most of Go's 495 vs 255 ms gap. Running Claude processes have 61-63 PATH dirs, 44 of them /mnt/*; hooks inherit it.
+Measured 2026-11-10 on 0.15.25, WSL2, probe cache warm.
+
+- `node universal-lint/scripts/perf.mts 5` header: `universal-lint 0.15.25 perf, 2026-11-10T22:29:36.031Z, 6.18.33.2-microsoft-standard-WSL2, 12 cores, 9.5 GB RAM, node v24.22.2, tsc 7.0.2, linters found (of shellcheck/ruff/yamllint/markdownlint-cli2/eslint/oxlint/stylelint): real PATH none; no /mnt none, local oxlint yes, PATH 63 dirs (44 on /mnt), load 1.12 -> 1.37, runs 5 (+1 warm-up)`
+- Medians real PATH vs no /mnt (ms), 16 rows: floor node -e 0 26 vs 26; empty payload 44 vs 42; out-of-scope .json Write 39 vs 44; .sh Write 49 vs 49; .py Write 49 vs 48; .yml Write 48 vs 48; .md Write 291 vs 306; .css Write (no stylelint config) 49 vs 47; .ts Write (no eslint config) 150 vs 148; .ts Edit (no eslint config) 152 vs 147; .mts Write (this repo) 275 vs 287; FileChanged tracked unchanged 54 vs 52; FileChanged ignored 52 vs 51; FileChanged unlink 41 vs 41; SessionStart fixture 47 vs 47; SessionStart this repo 57 vs 56.
+- Largest median difference 15 ms (.md Write; ranges real 288-295, no /mnt 294-310), within run-to-run spread; the >50 ms investigate guard is not tripped.
+- `go vet`: go 1.22.2 (`/usr/bin/go`, `gccgo` not on PATH), module = `go.mod` + one-file `package main`, command `go -C <module dir> vet ./...` after one warm-up run, 3 runs per mode: real PATH 169, 169, 176 ms (about 170); real PATH + `GCCGO=/nonexistent/gccgo` 73, 70, 75 ms (about 75); `PATH=/usr/bin:/bin` 73, 72, 76 ms (about 75). Gap about 95 ms per run; GCCGO set and the minimal PATH give about the same time, so the cost is the gccgo PATH scan.
+- Caveats: probe cache warm (a cold probe pays once per 10 min miss TTL, F11); go 1.22.2 and one trivial package only, vet cache state not forced or verified; perf.mts has no Go row (the go numbers are a separate run); numbers are machine- and load-dependent (about +/-15%); a machine without /mnt dirs on PATH gets a single perf column.
 
 ## Code locations
 
@@ -26,11 +38,11 @@ None in code. Related symbols for context: `onPath`, `runLintTool`, `REGISTRY.go
 
 ## Approach
 
-Add a short troubleshooting note to plugin/README.md: on WSL, `[interop] appendWindowsPath=false` in `/etc/wsl.conf` (or a trimmed PATH for Claude Code) speeds up every lint by 0.1-0.6 s; give the measured numbers. Mention in hook-design.md that the plugin cannot rewrite PATH (it would change which tools are found). Optional code follow-up (decide separately, low): set `GCCGO` to an absolute non-existent path in the go vet spawn env when unset (9 .go edits in transcripts).
+Superseded: the original plan said a trimmed PATH "speeds up every lint by 0.1-0.6 s" and proposed an optional GCCGO follow-up in the go vet spawn env. The re-measurement refutes the first (Evidence) and the user decided against the second (Status). Shipped instead: the README troubleshooting note quotes only the `go vet` pair (real vs minimal PATH) and says the hook itself shows no measurable difference; the hook-design.md sentence states that the plugin does not rewrite PATH (it would change which tools `selectLintTool` finds) and carries the hook-side figure.
 
 ## Verification
 
-Docs review; the numbers reproduce with F01's harness (real vs /mnt-trimmed PATH).
+Docs review. Re-measure with `pnpm --filter universal-lint build`, then `node universal-lint/scripts/perf.mts 5` (real vs /mnt-trimmed PATH) and the `go vet` loop described in Evidence. Checks: `wc -c universal-lint/.claude/rules/hook-design.md` below 40000; the README section names `appendWindowsPath = false`, `wsl --shutdown` and the trimmed-PATH one-liner and contains no `GCCGO` and no hook-side figure; `pnpm --filter universal-lint test` and `claude plugin validate universal-lint/plugin` pass.
 
 ## Constraints
 
@@ -38,4 +50,4 @@ No PATH rewriting by default (skipping /mnt/* dirs could hide intentionally inst
 
 ## Related
 
-F11 (plugin-side part), F04, F30 (Go), F01.
+F11 (plugin-side part), F04, F09, F30 (Go), F01.
