@@ -6,6 +6,9 @@ import { test } from "vitest";
 import { makeEnv } from "./support/lint-hook.mts";
 import type { LintEnv } from "./support/lint-hook.mts";
 
+/** Stub line recording the npm_config notice-off vars the spawn received as `env:<update_notifier>,<fund>,<audit>`. */
+const ENV_REC = "printf 'env:%s,%s,%s\\n' \"$npm_config_update_notifier\" \"$npm_config_fund\" \"$npm_config_audit\" >> \"$RECORD\"";
+
 /**
  * Drop a recording stub at `<cwd>/<dir>/node_modules/.bin/<name>`: it appends `local:<dir>/<name> <argv>`,
  * `path:<first PATH entry>`, `pwd:<cwd>` and `env:<npm_config_update_notifier>,<npm_config_fund>,<npm_config_audit>` to
@@ -26,7 +29,7 @@ function localStub(e: LintEnv, dir: string, name: string, exit: number, executab
       `printf "%s %s\\n" "local:${dir}/${name}" "$*" >> "$RECORD"`,
       "printf 'path:%s\\n' \"${PATH%%:*}\" >> \"$RECORD\"",
       "printf 'pwd:%s\\n' \"$PWD\" >> \"$RECORD\"",
-      "printf 'env:%s,%s,%s\\n' \"$npm_config_update_notifier\" \"$npm_config_fund\" \"$npm_config_audit\" >> \"$RECORD\"",
+      ENV_REC,
       "printf '%s\\n' \"$OUT\"",
       `exit ${exit}`,
       "",
@@ -255,7 +258,7 @@ test("npx env: the bare npx spawn gets the notice-off npm_config vars, so no npm
   e.stub(
     "npx",
     "printf \"%s %s\\n\" \"npx\" \"$*\" >> \"$RECORD\"",
-    "printf 'env:%s,%s,%s\\n' \"$npm_config_update_notifier\" \"$npm_config_fund\" \"$npm_config_audit\" >> \"$RECORD\"",
+    ENV_REC,
     "if [ \"$npm_config_update_notifier\" != \"false\" ]; then printf \"npm notice New major version of npm available\\n\" >&2; fi",
     "printf '%s\\n' \"$OUT\"",
     "exit 1",
