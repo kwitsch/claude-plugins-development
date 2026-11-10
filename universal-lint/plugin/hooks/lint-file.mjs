@@ -1073,17 +1073,22 @@ async function lintResolved(resolved, cwd, ranges, hookEventName, label) {
 	const ext = path.extname(resolved).toLowerCase();
 	const typeCheckEligible = TYPE_CHECK_EXTS.has(ext);
 	const { entry, oxlintConfig } = chainEntryFor(resolved, cwd);
+	const typeChecksViaOxlint = typeCheckEligible && oxlintConfig !== null && oxlintConfigTypeChecks(oxlintConfig);
+	const chainP = entry ? runChainLint(entry, resolved, cwd, rel, coalesce) : Promise.resolve({
+		ran: false,
+		finding: null
+	});
+	let chain;
+	let tsResult = null;
+	if (typeCheckEligible && !typeChecksViaOxlint) {
+		[chain, tsResult] = await Promise.all([chainP, runTypeCheck(resolved, cwd, coalesce)]);
+	} else {
+		chain = await chainP;
+		if (typeCheckEligible && !chain.ran) tsResult = await runTypeCheck(resolved, cwd, coalesce);
+	}
 	const findings = [];
-	let oxlintRan = false;
-	if (entry) {
-		const chain = await runChainLint(entry, resolved, cwd, rel, coalesce);
-		if (chain.finding) findings.push(chain.finding);
-		oxlintRan = oxlintConfig !== null && chain.ran;
-	}
-	if (typeCheckEligible && !(oxlintRan && oxlintConfig && oxlintConfigTypeChecks(oxlintConfig))) {
-		const tsResult = await runTypeCheck(resolved, cwd, coalesce);
-		if (tsResult) findings.push(tsResult);
-	}
+	if (chain.finding) findings.push(chain.finding);
+	if (tsResult) findings.push(tsResult);
 	const kept = findings.flatMap((f) => {
 		const g = gateFinding(f, ranges, resolved);
 		return g ? [g] : [];

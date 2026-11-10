@@ -1978,6 +1978,14 @@ function chainEntryFor(resolved: string, cwd: string): { entry: LangEntry | null
  * Lint `resolved` (chain tool from `chainEntryFor` unless JS/TS or CSS/SCSS has no lint config, run by `runChainLint`,
  * + tsc), gate the findings against `ranges` (null = whole file), and build the hook result.
  *
+ * @remarks
+ * tsc is decided up front (F18): for a type-check-eligible file whose oxlint config does not type-check (or that has
+ * no oxlint config) the chain and tsc run at once with `Promise.all` (findings order chain then tsc). With an oxlint
+ * `typeCheck: true` config the chain runs first and tsc only when oxlint did not run (`!chain.ran`), never
+ * speculatively. This is the same predicate as the sequential rule: tsc iff `typeCheckEligible &&
+ * !(oxlintConfig && chain.ran && oxlintConfigTypeChecks(oxlintConfig))`. Each child keeps its own timeout, so a
+ * rejection (a throw in a sync preamble) lands in the handler's catch (`{}`) as before.
+ *
  * @param resolved - Lexical absolute path of the in-scope file.
  * @param cwd - Payload cwd (spawn cwd and config search root).
  * @param ranges - Edited line ranges, or null when the whole file counts.
@@ -1993,18 +2001,22 @@ async function lintResolved(resolved: string, cwd: string, ranges: Array<[number
   const typeCheckEligible = TYPE_CHECK_EXTS.has(ext);
   const { entry, oxlintConfig } = chainEntryFor(resolved, cwd);
 
+  // Read the oxlint config only for a type-check-eligible file (no extra read for .js/.mjs); a read/parse failure is false: tsc kept.
+  const typeChecksViaOxlint = typeCheckEligible && oxlintConfig !== null && oxlintConfigTypeChecks(oxlintConfig);
+  const chainP: Promise<{ ran: boolean; finding: Finding | null }> = entry ? runChainLint(entry, resolved, cwd, rel, coalesce) : Promise.resolve({ ran: false, finding: null });
+  let chain: { ran: boolean; finding: Finding | null };
+  let tsResult: Finding | null = null;
+  if (typeCheckEligible && !typeChecksViaOxlint) {
+    // tsc does not depend on the chain outcome: run both at once (each keeps its own timeout).
+    [chain, tsResult] = await Promise.all([chainP, runTypeCheck(resolved, cwd, coalesce)]);
+  } else {
+    chain = await chainP;
+    // Skip tsc only when oxlint actually ran with a typeCheck config; otherwise tsc is the only type check.
+    if (typeCheckEligible && !chain.ran) tsResult = await runTypeCheck(resolved, cwd, coalesce);
+  }
   const findings: Finding[] = [];
-  let oxlintRan = false;
-  if (entry) {
-    const chain = await runChainLint(entry, resolved, cwd, rel, coalesce);
-    if (chain.finding) findings.push(chain.finding);
-    oxlintRan = oxlintConfig !== null && chain.ran;
-  }
-  // Skip tsc only when oxlint actually ran with a typeCheck config; otherwise tsc is the only type check.
-  if (typeCheckEligible && !(oxlintRan && oxlintConfig && oxlintConfigTypeChecks(oxlintConfig))) {
-    const tsResult = await runTypeCheck(resolved, cwd, coalesce);
-    if (tsResult) findings.push(tsResult);
-  }
+  if (chain.finding) findings.push(chain.finding);
+  if (tsResult) findings.push(tsResult);
   // Gate before truncate() so the context budget is spent on in-range text.
   const kept = findings.flatMap((f) => {
     const g = gateFinding(f, ranges, resolved);

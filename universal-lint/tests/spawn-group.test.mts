@@ -1,12 +1,13 @@
 // spawnGroup: detached process-group spawn with its own timeout, SIGTERM->SIGKILL escalation and per-stream cap (F18).
 import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
 import type { SpawnSyncOptionsWithStringEncoding } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { test } from "vitest";
 import { spawnGroup } from "../plugin/hooks/lint-file.mjs";
-import { makeEnv } from "./support/lint-hook.mts";
+import { HOOK, makeEnv, payload } from "./support/lint-hook.mts";
 
 /**
  * Options as `buildSpawnOpts` builds them, with a test-chosen timeout (the F18 test seam).
@@ -95,3 +96,23 @@ test("spawnGroup: a normal exit carries status, stdout and stderr and no error (
   assert.equal(r.stdout, "out\n");
   assert.equal(r.stderr, "err\n");
 });
+
+test("hook: SIGTERM to the hook kills its live linter groups before it exits (F18)", async () => {
+  const e = makeEnv();
+  const pidfile = path.join(e.cwd, "sleep.pid");
+  // node, not sleep: the hook's PATH holds only bash/node/git, so a `sleep` stub would exit at once and prove nothing.
+  e.stub("shellcheck", `node -e "setTimeout(() => {}, 30000)" & echo $! > "${pidfile}"`, "wait");
+  const f = e.file("a.sh", "#!/bin/sh\necho hi\n");
+  const hook = spawn(process.execPath, [HOOK], { env: e.childEnv(), stdio: ["pipe", "ignore", "ignore"] });
+  const exited = new Promise<void>((resolve) => hook.on("exit", () => resolve()));
+  hook.stdin.end(payload(f, e.cwd));
+  const until = Date.now() + 5000;
+  while (!existsSync(pidfile) || readFileSync(pidfile, "utf8").trim() === "") {
+    assert.ok(Date.now() < until, "the shellcheck stub never started");
+    await sleep(50);
+  }
+  const pid = Number(readFileSync(pidfile, "utf8"));
+  hook.kill("SIGTERM");
+  await exited;
+  assert.ok(await waitGone(pid, 2000), `forked sleep ${pid} survived the hook's SIGTERM`);
+}, 15_000);
