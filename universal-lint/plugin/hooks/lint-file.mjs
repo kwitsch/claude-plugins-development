@@ -641,28 +641,29 @@ function buildSpawnOpts(cwd, timeout) {
 		maxBuffer: MAX_BUFFER_BYTES
 	};
 }
-function runChainLint(lang, resolved, cwd, rel, coalesce = false) {
-	const none = {
-		ran: false,
-		finding: null
-	};
+function planChainLint(lang, resolved, cwd) {
 	const sel = selectLintTool(lang.chain, path.dirname(resolved), cwd);
-	if (!sel) return none;
+	if (!sel) return null;
 	const { tool } = sel;
 	let manifest = null;
 	if (tool.manifestPath) {
 		manifest = resolveCargoManifest(path.dirname(resolved), cwd);
-		if (!manifest) return none;
+		if (!manifest) return null;
 	}
 	const argv = buildArgv(tool, resolved, cwd, manifest);
 	const timeout = tool.manifestPath ? CARGO_SPAWN_TIMEOUT_MS : SPAWN_TIMEOUT_MS;
 	const spawnCwd = sel.local ? path.join(sel.local, "../../..") : cwd;
-	const spawnOpts = buildSpawnOpts(spawnCwd, timeout);
-	const spawnTool = () => runLintTool(tool, argv, spawnOpts, sel.local);
-	const key = coalesce ? tool.targetsDir ? hashPath(`${tool.name}:${path.dirname(resolved)}`) : manifest ? hashPath(`${tool.name}:${manifest}`) : null : null;
-	const result = key ? coalesceProjectCheck(key, resolved, timeout, spawnTool) : spawnTool();
-	if (!result || result.error || result.signal) return none;
-	const target = tool.targetsDir ? path.relative(cwd, path.dirname(resolved)) || "." : manifest ? path.relative(cwd, path.dirname(manifest)) || "." : rel;
+	return {
+		tool,
+		local: sel.local,
+		argv,
+		spawnCwd,
+		timeout,
+		manifest
+	};
+}
+function chainOutcome(tool, result) {
+	if (!result || result.error || result.signal) return null;
 	let verdict;
 	let text;
 	if (tool.classify === "output") {
@@ -673,6 +674,27 @@ function runChainLint(lang, resolved, cwd, rel, coalesce = false) {
 		verdict = classifyExit(tool.name, result.status);
 		text = `${result.stdout ?? ""}\n${result.stderr ?? ""}`;
 	}
+	return {
+		verdict,
+		text
+	};
+}
+function runChainLint(lang, resolved, cwd, rel, coalesce = false) {
+	const none = {
+		ran: false,
+		finding: null
+	};
+	const plan = planChainLint(lang, resolved, cwd);
+	if (!plan) return none;
+	const { tool, argv, timeout, spawnCwd, manifest } = plan;
+	const spawnOpts = buildSpawnOpts(spawnCwd, timeout);
+	const spawnTool = () => runLintTool(tool, argv, spawnOpts, plan.local);
+	const key = coalesce ? tool.targetsDir ? hashPath(`${tool.name}:${path.dirname(resolved)}`) : manifest ? hashPath(`${tool.name}:${manifest}`) : null : null;
+	const result = key ? coalesceProjectCheck(key, resolved, timeout, spawnTool) : spawnTool();
+	const outcome = chainOutcome(tool, result);
+	if (!outcome) return none;
+	const target = tool.targetsDir ? path.relative(cwd, path.dirname(resolved)) || "." : manifest ? path.relative(cwd, path.dirname(manifest)) || "." : rel;
+	const { verdict, text } = outcome;
 	if (verdict === "skip") return none;
 	const base = manifest ? path.dirname(manifest) : tool.targetsDir ? path.dirname(resolved) : spawnCwd;
 	return {
@@ -901,26 +923,38 @@ export function recordWritten(fp, real) {
 function recordWrittenFor(s) {
 	if (s) recordWritten(s.fp, s.real);
 }
+function chainEntryFor(resolved, cwd) {
+	const ext = path.extname(resolved).toLowerCase();
+	const lang = EXT_MAP[ext];
+	const oxlintConfig = lang === "jsts" ? resolveOxlintConfig(path.dirname(resolved), cwd) : null;
+	const noJstsConfig = lang === "jsts" && !oxlintConfig && !walkToRoot(path.dirname(resolved), (d) => ESLINT_CONFIG_FILENAMES.some((n) => existsSync(path.join(d, n))));
+	const noCssConfig = lang === "css" && !hasStylelintConfig(path.dirname(resolved), cwd);
+	if (!lang || noJstsConfig || noCssConfig) return {
+		entry: null,
+		oxlintConfig
+	};
+	const entry = oxlintConfig ? { chain: REGISTRY.oxlint.chain.map((t) => ({
+		...t,
+		args: [
+			...t.args,
+			"-c",
+			oxlintConfig
+		]
+	})) } : REGISTRY[lang];
+	return {
+		entry,
+		oxlintConfig
+	};
+}
 function lintResolved(resolved, cwd, ranges, hookEventName, label) {
 	const rel = path.relative(cwd, resolved);
 	const coalesce = hookEventName === "FileChanged";
 	const ext = path.extname(resolved).toLowerCase();
-	const lang = EXT_MAP[ext];
 	const typeCheckEligible = TYPE_CHECK_EXTS.has(ext);
-	const oxlintConfig = lang === "jsts" ? resolveOxlintConfig(path.dirname(resolved), cwd) : null;
-	const noJstsConfig = lang === "jsts" && !oxlintConfig && !walkToRoot(path.dirname(resolved), (d) => ESLINT_CONFIG_FILENAMES.some((n) => existsSync(path.join(d, n))));
-	const noCssConfig = lang === "css" && !hasStylelintConfig(path.dirname(resolved), cwd);
+	const { entry, oxlintConfig } = chainEntryFor(resolved, cwd);
 	const findings = [];
 	let oxlintRan = false;
-	if (lang && !noJstsConfig && !noCssConfig) {
-		const entry = oxlintConfig ? { chain: REGISTRY.oxlint.chain.map((t) => ({
-			...t,
-			args: [
-				...t.args,
-				"-c",
-				oxlintConfig
-			]
-		})) } : REGISTRY[lang];
+	if (entry) {
 		const chain = runChainLint(entry, resolved, cwd, rel, coalesce);
 		if (chain.finding) findings.push(chain.finding);
 		oxlintRan = oxlintConfig !== null && chain.ran;
