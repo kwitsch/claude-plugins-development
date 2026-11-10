@@ -14,7 +14,7 @@ Closed docs-only in 0.15.27. bench-other-langs finding (adjusted, low); the veri
 
 1. Burst: "N edits run N full invocations" holds only for PostToolUse `Write`/`Edit` (no debounce, user decision). FileChanged coalesces per package or `Cargo.toml` key through `coalesceProjectCheck` (F13).
 2. With golangci-lint on `PATH`, `go vet` never runs (`selectLintTool` takes the first chain tool). The Go figures were taken with golangci-lint absent (a stub in the analysis), so they are `go vet` timings; a golangci-lint run is unmeasured.
-3. The cold leaf-crate loss is documented by F29 and the gccgo PATH scan by F28 (measured about 95 ms, not "about 100"). languages.md restates both figures with that provenance: the cold leaf in the Rust cost bullet, the gccgo scan in the Go cost bullet.
+3. The cold leaf-crate loss is documented by F29 and the gccgo PATH scan by F28 (measured about 95 ms, not "about 100"). languages.md restates both figures with that provenance: the cold leaf in the Rust `CARGO_SPAWN_TIMEOUT_MS` bullet, the gccgo scan in the Go cost bullet.
 4. Dependents are not checked: confirmed in `buildArgv` (`--manifest-path`, no `-p`/`--workspace`). The lock serialization is cargo's own build-directory lock; the hook adds only a per-`Cargo.toml` lock, and only under FileChanged.
 5. Not re-measured. Every number is from the 0.14.0 analysis of 2026-11-07 (one machine under load); the session-share percentages are dropped because they are method-dependent.
 
