@@ -43,3 +43,28 @@ rtk-then-direct fallback and every classification unchanged; fail open (timeout 
 ## Related
 
 F13 (dedup for bursts), F29 (budget), F30 (cold Rust leaf), F27.
+
+## Measured
+
+### Baseline (0.15.14, committed `plugin/` of 6f98108, before any `src/` edit)
+
+universal-lint 0.15.14 perf, 2026-11-10T17:41:49.174Z, 6.18.33.2-microsoft-standard-WSL2, 12 cores, 9.5 GB RAM, node v24.22.2, tsc 7.0.2, linters found (of shellcheck/ruff/yamllint/markdownlint-cli2/eslint/oxlint/stylelint): real PATH none; no /mnt none, local oxlint yes, PATH 63 dirs (44 on /mnt), load 1.26 -> 1.60, runs 5 (+1 warm-up)
+
+| Case                             | real PATH med (min-max) ms | no /mnt med (min-max) ms | status |
+| -------------------------------- | -------------------------: | -----------------------: | ------ |
+| floor node -e 0                  |                 28 (28-30) |               28 (26-29) | ok     |
+| empty payload                    |                 48 (44-51) |               46 (44-48) | ok     |
+| out-of-scope .json Write         |                 46 (44-48) |               48 (43-52) | ok     |
+| .sh Write                        |                 48 (46-55) |               50 (45-54) | ok     |
+| .py Write                        |                 48 (45-49) |               52 (47-55) | ok     |
+| .yml Write                       |                 47 (44-52) |               52 (46-63) | ok     |
+| .md Write                        |              298 (292-305) |            302 (292-335) | ok     |
+| .css Write (no stylelint config) |                 49 (48-52) |               47 (46-53) | ok     |
+| .ts Write (no eslint config)     |              152 (146-156) |            154 (146-166) | ok     |
+| .ts Edit (no eslint config)      |              157 (150-158) |            152 (144-157) | ok     |
+| .mts Write (this repo)           |              325 (276-402) |            331 (300-370) | ok     |
+| FileChanged tracked unchanged    |                 51 (50-55) |               54 (52-60) | ok     |
+| FileChanged ignored              |                 52 (48-55) |               52 (49-63) | ok     |
+| FileChanged unlink               |                 47 (44-51) |               48 (47-53) | ok     |
+| SessionStart fixture             |                 56 (49-59) |               56 (53-64) | ok     |
+| SessionStart this repo           |                 63 (62-66) |               63 (61-70) | ok     |
