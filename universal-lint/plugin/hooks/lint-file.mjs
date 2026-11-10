@@ -337,7 +337,13 @@ async function runNpx(name, npmSpec, argv, spawnOpts) {
 		...argv
 	], {
 		...spawnOpts,
-		timeout: NPX_SPAWN_TIMEOUT_MS
+		timeout: NPX_SPAWN_TIMEOUT_MS,
+		env: {
+			...spawnOpts.env ?? process.env,
+			npm_config_update_notifier: "false",
+			npm_config_fund: "false",
+			npm_config_audit: "false"
+		}
 	});
 	const rel = path.join("node_modules", ".bin", name);
 	if (walkToRoot(String(spawnOpts.cwd), (d) => configExists(d, rel))) return npx();

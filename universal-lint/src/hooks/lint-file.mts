@@ -609,6 +609,9 @@ async function spawnBin(bin: string, argv: string[], spawnOpts: SpawnSyncOptions
  * `${CLAUDE_PLUGIN_DATA || os.tmpdir()}/npx-refreshed-<key>` is missing, older than `NPX_REFRESH_MS` or dated in the future. Every npx run
  * that spawned (no `error`, any exit status) renews the stamp (errors swallowed), except in
  * case (1), whose npx run never touches the cache. The hook only reads the npm cache, never writes it.
+ * Only the bare `npx --yes` spawn carries `npm_config_update_notifier`, `npm_config_fund` and `npm_config_audit` = `false`
+ * (F24): npm's notice lines would otherwise land in the finding text. No `npm_config_loglevel` is set, so install
+ * errors still reach stderr.
  *
  * @param name - Bin name of the chain entry (`LintTool.name`).
  * @param npmSpec - npm package of the chain entry (`LintTool.npmSpec`); also the cache key's input.
@@ -618,11 +621,17 @@ async function spawnBin(bin: string, argv: string[], spawnOpts: SpawnSyncOptions
  */
 async function runNpx(name: string, npmSpec: string, argv: string[], spawnOpts: SpawnSyncOptionsWithStringEncoding): Promise<SpawnSyncReturns<string>> {
   /**
-   * Run `npx --yes <npmSpec> ...argv` with `spawnOpts` and the longer `NPX_SPAWN_TIMEOUT_MS` budget.
+   * Run `npx --yes <npmSpec> ...argv` with `spawnOpts`, the longer `NPX_SPAWN_TIMEOUT_MS` budget and npm's
+   * update-notifier, fund and audit messages switched off through `npm_config_*` env vars (F24).
    *
    * @returns The spawn result of npx.
    */
-  const npx = (): Promise<SpawnSyncReturns<string>> => spawnGroup("npx", ["--yes", npmSpec, ...argv], { ...spawnOpts, timeout: NPX_SPAWN_TIMEOUT_MS });
+  const npx = (): Promise<SpawnSyncReturns<string>> =>
+    spawnGroup("npx", ["--yes", npmSpec, ...argv], {
+      ...spawnOpts,
+      timeout: NPX_SPAWN_TIMEOUT_MS,
+      env: { ...(spawnOpts.env ?? process.env), npm_config_update_notifier: "false", npm_config_fund: "false", npm_config_audit: "false" },
+    });
   // npx runs a node_modules/.bin/<name> from its cwd up to / before its cache (npm 11.19.1 localFileExists): leave that to npx.
   const rel = path.join("node_modules", ".bin", name);
   if (walkToRoot(String(spawnOpts.cwd), (d) => configExists(d, rel))) return npx();

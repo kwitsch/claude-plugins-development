@@ -7,8 +7,9 @@ import { makeEnv } from "./support/lint-hook.mts";
 import type { LintEnv } from "./support/lint-hook.mts";
 
 /**
- * Drop a recording stub at `<cwd>/<dir>/node_modules/.bin/<name>`: it appends `local:<dir>/<name> <argv>` and
- * `path:<first PATH entry>` to `$RECORD`, prints `$OUT` and exits with `exit`.
+ * Drop a recording stub at `<cwd>/<dir>/node_modules/.bin/<name>`: it appends `local:<dir>/<name> <argv>`,
+ * `path:<first PATH entry>`, `pwd:<cwd>` and `env:<npm_config_update_notifier>,<npm_config_fund>,<npm_config_audit>` to
+ * `$RECORD`, prints `$OUT` and exits with `exit`.
  *
  * @param e - Test environment.
  * @param dir - Directory holding `node_modules`, relative to the env's cwd (`..` = the makeEnv base dir above cwd).
@@ -25,6 +26,7 @@ function localStub(e: LintEnv, dir: string, name: string, exit: number, executab
       `printf "%s %s\\n" "local:${dir}/${name}" "$*" >> "$RECORD"`,
       "printf 'path:%s\\n' \"${PATH%%:*}\" >> \"$RECORD\"",
       "printf 'pwd:%s\\n' \"$PWD\" >> \"$RECORD\"",
+      "printf 'env:%s,%s,%s\\n' \"$npm_config_update_notifier\" \"$npm_config_fund\" \"$npm_config_audit\" >> \"$RECORD\"",
       "printf '%s\\n' \"$OUT\"",
       `exit ${exit}`,
       "",
@@ -246,4 +248,33 @@ test("npx cache: a node_modules/.bin/<name> above cwd (npx's own lookup runs it 
   e.run(e.file("a.md", "# T\n"));
   assert.ok(e.lines().some((l) => l.startsWith("npx --yes markdownlint-cli2 ")));
   assert.ok(!e.lines().some((l) => l.startsWith("local:")));
+});
+
+test("npx env: the bare npx spawn gets the notice-off npm_config vars, so no npm notice reaches the finding", () => {
+  const e = makeEnv();
+  e.stub(
+    "npx",
+    "printf \"%s %s\\n\" \"npx\" \"$*\" >> \"$RECORD\"",
+    "printf 'env:%s,%s,%s\\n' \"$npm_config_update_notifier\" \"$npm_config_fund\" \"$npm_config_audit\" >> \"$RECORD\"",
+    "if [ \"$npm_config_update_notifier\" != \"false\" ]; then printf \"npm notice New major version of npm available\\n\" >&2; fi",
+    "printf '%s\\n' \"$OUT\"",
+    "exit 1",
+  );
+  const f = e.file("a.md", "# T\n");
+  const r = e.run(f, { out: "a.md:1 MD041 npx-finding-marker" });
+  assert.match(r.ctx, /npx-finding-marker/);
+  assert.doesNotMatch(r.ctx, /npm notice/);
+  assert.ok(e.lines().includes("env:false,false,false"));
+  assert.ok(e.lines().some((l) => l.startsWith("npx --yes ")));
+});
+
+test("npx env: the cached-bin direct route gets no npm_config vars (env belongs to the npx spawn only)", () => {
+  const e = makeEnv();
+  e.recStub("npx", 0);
+  stamp(e);
+  localStub(e, CACHED, "markdownlint-cli2", 0);
+  e.run(e.file("a.md", "# T\n"));
+  assert.ok(e.lines().some((l) => l.startsWith("local:")));
+  assert.ok(e.lines().includes("env:,,"));
+  assert.ok(!e.lines().some((l) => l.startsWith("npx")));
 });
