@@ -53,7 +53,7 @@ Reconsider only if a generated file's FileChanged lint is shown to put findings 
 
 ## Approach
 
-Proposed (not adopted): in `watchList`, after the scope loop on the in-scope list (before the scope loop would run check-attr before the F08 early stop), pipe the listed paths through one `git check-attr -z --stdin linguist-generated` (execFileSync with `input`, `GIT_TIMEOUT_MS`); drop entries whose value is `set`/`true`. On git failure keep today's list. Watch-list only: Write/Edit of such a file still lints. Document as a watch-list-only exclusion. Most of the per-event cost already disappears with F04 (about 100 ms per ignored file), so weigh the policy cost against that.
+Proposed (not adopted): in `watchList`, after the scope loop, on the in-scope list only, so it cannot defeat the F08 early stop, pipe the listed paths through one `git check-attr -z --stdin linguist-generated` (execFileSync with `input`, `GIT_TIMEOUT_MS`); drop entries whose value is `set`/`true`. On git failure keep today's list. Watch-list only: Write/Edit of such a file still lints. Document as a watch-list-only exclusion. Most of the per-event cost already disappears with F04 (about 100 ms per ignored file), so weigh the policy cost against that.
 
 ## Verification
 
