@@ -43,7 +43,7 @@ Legend: `[x]` finished. `[ ]` not finished; tag = `open` (code change, not start
 - [x] [F24](tasks/F24-npm-notice-in-findings.md) Keep "npm notice" lines out of npx-run findings `done` priority:low. Shipped in 0.15.21: the bare `npx --yes` spawn sets `npm_config_update_notifier`, `npm_config_fund` and `npm_config_audit` to `false`; no loglevel change, so install errors still show.
 - [x] [F25](tasks/F25-digest-size-bound.md) Bound digest hashing and FileChanged lint by file size `done` priority:low. Closed docs-only in 0.15.22: hashing costs about 11 ms per 10 MB against a 30-55 s lint and the digest store holds 6 files, and a size skip would make FileChanged lint the file or change lint policy (F19); reopen triggers in the task doc.
 - [x] [F26](tasks/F26-per-process-floor-and-hook-filter.md) Per-process floor (about 40 ms) for events the hook cannot act on `done` priority:low. Shipped in 0.15.23: `node:crypto` loads lazily (no-op spawn 46 -> 39.5 ms); no hooks.json filter (Claude Code 2.1.321: `if` needs 46 handlers, a FileChanged matcher cannot skip echoes or unlinks; prototype in the task doc).
-- [ ] [F27](tasks/F27-tests-miss-perf-paths.md) Test the performance-relevant hook paths `open` priority:low. Add each test with the code task it guards.
+- [x] [F27](tasks/F27-tests-miss-perf-paths.md) Test the performance-relevant hook paths `done` priority:low. Shipped in 0.15.24: one missing hook test (2 MiB output under the buffer cap, truncation.test.mts) and the LOC_PATH_RE token-start anchor with its gateFinding test; the other items were covered by the tests added with F04, F05, F09, F10, F11, F13, F16, F18, F20, F21, F26 or are obsolete (rtk, removed in 0.15.0).
 
 ## Measurement and docs-only
 
@@ -63,7 +63,7 @@ Legend: `[x]` finished. `[ ]` not finished; tag = `open` (code change, not start
 - F08 (done) shortened the `watchList` loop; F12 (done) cheapened the per-file check inside it; F19 (closed docs-only in 0.15.16) adds nothing to it (F15 closed docs-only, no re-emission).
 - F10 before F13 (the slot cap bounds the peak; F13 removes redundant work inside it).
 - F03 and F09 before F16. F10/F13/F18 changed the timeout budget (re-derived in hook-design.md with F18); F29 keeps only its remaining items.
-- F27: add each test together with the task it guards (F04, F05, F10, F11, F18).
+- F27 (done, 0.15.24): the per-task tests were added with F04, F05, F10, F11, F18; the audit table in the F27 doc maps each item to its test.
 
 ## Notes
 
