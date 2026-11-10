@@ -389,6 +389,9 @@ export function configExists(dir, name, prefilter = dir.startsWith("/mnt/")) {
 	}
 	return existsSync(path.join(dir, name));
 }
+function anyConfigExists(dir, names) {
+	return names.some((n) => configExists(dir, n));
+}
 function walkUpToCwd(fileDir, cwd, checkDir) {
 	let dir = fileDir;
 	for (;;) {
@@ -420,13 +423,14 @@ export function resolveCheckstyleConfig(fileDir, cwd) {
 }
 export function resolveCargoManifest(fileDir, cwd) {
 	return walkUpToCwd(fileDir, cwd, (dir) => {
-		return configExists(dir, "Cargo.toml") ? path.join(dir, "Cargo.toml") : null;
+		const p = path.join(dir, "Cargo.toml");
+		return configExists(dir, "Cargo.toml") ? p : null;
 	});
 }
 export function resolveTsconfig(fileDir, cwd) {
 	return walkUpToCwd(fileDir, cwd, (dir) => {
-		if (!configExists(dir, "tsconfig.json")) return null;
 		const p = path.join(dir, "tsconfig.json");
+		if (!configExists(dir, "tsconfig.json")) return null;
 		let text;
 		try {
 			text = readFileSync(p, "utf8");
@@ -569,7 +573,7 @@ export function hasProjectYamllintConfig(cwd) {
 	let dir = path.resolve(cwd);
 	const home = path.resolve(homedir());
 	for (;;) {
-		if (YAMLLINT_CONFIG_FILENAMES.some((name) => configExists(dir, name))) return true;
+		if (anyConfigExists(dir, YAMLLINT_CONFIG_FILENAMES)) return true;
 		if (dir === home) return false;
 		const parent = path.dirname(dir);
 		if (parent === dir) return false;
@@ -598,7 +602,7 @@ function walkToRoot(dir, checkDir) {
 	}
 }
 export function hasProjectMarkdownlintConfig(fileDir) {
-	return walkToRoot(fileDir, (dir) => MARKDOWNLINT_CONFIG_FILENAMES.some((name) => configExists(dir, name)));
+	return walkToRoot(fileDir, (dir) => anyConfigExists(dir, MARKDOWNLINT_CONFIG_FILENAMES));
 }
 const STYLELINT_CONFIG_FILENAMES = [
 	".stylelintrc",
@@ -632,7 +636,7 @@ function hasStylelintConfig(fileDir, cwd) {
 			return true;
 		}
 	};
-	const found = (d) => STYLELINT_CONFIG_FILENAMES.some((n) => configExists(d, n)) || hasKey(d);
+	const found = (d) => anyConfigExists(d, STYLELINT_CONFIG_FILENAMES) || hasKey(d);
 	if (walkToRoot(fileDir, found) || walkToRoot(cwd, found)) return true;
 	const home = homedir();
 	return [process.env.XDG_CONFIG_HOME || path.join(home, ".config"), path.join(home, "Library", "Preferences")].some((d) => existsSync(path.join(d, "stylelint")));
@@ -1057,7 +1061,7 @@ function chainEntryFor(resolved, cwd) {
 	const ext = path.extname(resolved).toLowerCase();
 	const lang = EXT_MAP[ext];
 	const oxlintConfig = lang === "jsts" ? resolveOxlintConfig(path.dirname(resolved), cwd) : null;
-	const noJstsConfig = lang === "jsts" && !oxlintConfig && !walkToRoot(path.dirname(resolved), (d) => ESLINT_CONFIG_FILENAMES.some((n) => configExists(d, n)));
+	const noJstsConfig = lang === "jsts" && !oxlintConfig && !walkToRoot(path.dirname(resolved), (d) => anyConfigExists(d, ESLINT_CONFIG_FILENAMES));
 	const noCssConfig = lang === "css" && !hasStylelintConfig(path.dirname(resolved), cwd);
 	if (!lang || noJstsConfig || noCssConfig) return {
 		entry: null,

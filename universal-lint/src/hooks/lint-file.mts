@@ -721,6 +721,17 @@ export function configExists(dir: string, name: string, prefilter: boolean = dir
 }
 
 /**
+ * Whether any of `names` exists in `dir`, probed through configExists.
+ *
+ * @param dir - Directory to probe.
+ * @param names - Candidate config file names.
+ * @returns True when at least one name exists.
+ */
+function anyConfigExists(dir: string, names: readonly string[]): boolean {
+  return names.some((n) => configExists(dir, n));
+}
+
+/**
  * Walk from `fileDir` up to `cwd` (inclusive), calling `checkDir(dir)` at each
  * level; returns the first non-null result, or null if none found. Shared
  * walk/termination logic for resolveCheckstyleConfig and resolveTsconfig --
@@ -793,7 +804,8 @@ export function resolveCheckstyleConfig(fileDir: string, cwd: string): string | 
  */
 export function resolveCargoManifest(fileDir: string, cwd: string): string | null {
   return walkUpToCwd(fileDir, cwd, (dir) => {
-    return configExists(dir, "Cargo.toml") ? path.join(dir, "Cargo.toml") : null;
+    const p = path.join(dir, "Cargo.toml");
+    return configExists(dir, "Cargo.toml") ? p : null;
   });
 }
 
@@ -811,8 +823,8 @@ export function resolveCargoManifest(fileDir: string, cwd: string): string | nul
  */
 export function resolveTsconfig(fileDir: string, cwd: string): string | null {
   return walkUpToCwd(fileDir, cwd, (dir) => {
-    if (!configExists(dir, "tsconfig.json")) return null;
     const p = path.join(dir, "tsconfig.json");
+    if (!configExists(dir, "tsconfig.json")) return null;
     let text: string;
     try {
       text = readFileSync(p, "utf8");
@@ -1056,7 +1068,7 @@ export function hasProjectYamllintConfig(cwd: string): boolean {
   let dir = path.resolve(cwd);
   const home = path.resolve(homedir());
   for (;;) {
-    if (YAMLLINT_CONFIG_FILENAMES.some((name) => configExists(dir, name))) return true;
+    if (anyConfigExists(dir, YAMLLINT_CONFIG_FILENAMES)) return true;
     if (dir === home) return false;
     const parent = path.dirname(dir);
     if (parent === dir) return false; // filesystem root
@@ -1126,7 +1138,7 @@ function walkToRoot(dir: string, checkDir: (dir: string) => boolean): boolean {
  * @returns True when a markdownlint config governs the file.
  */
 export function hasProjectMarkdownlintConfig(fileDir: string): boolean {
-  return walkToRoot(fileDir, (dir) => MARKDOWNLINT_CONFIG_FILENAMES.some((name) => configExists(dir, name)));
+  return walkToRoot(fileDir, (dir) => anyConfigExists(dir, MARKDOWNLINT_CONFIG_FILENAMES));
 }
 
 /**
@@ -1192,7 +1204,7 @@ function hasStylelintConfig(fileDir: string, cwd: string): boolean {
    * @param d - Directory to probe.
    * @returns True when stylelint would find a config there.
    */
-  const found = (d: string): boolean => STYLELINT_CONFIG_FILENAMES.some((n) => configExists(d, n)) || hasKey(d);
+  const found = (d: string): boolean => anyConfigExists(d, STYLELINT_CONFIG_FILENAMES) || hasKey(d);
   if (walkToRoot(fileDir, found) || walkToRoot(cwd, found)) return true;
   const home = homedir();
   return [process.env.XDG_CONFIG_HOME || path.join(home, ".config"), path.join(home, "Library", "Preferences")].some((d) => existsSync(path.join(d, "stylelint")));
@@ -1991,7 +2003,7 @@ function chainEntryFor(resolved: string, cwd: string): { entry: LangEntry | null
   const lang = EXT_MAP[ext];
   const oxlintConfig = lang === "jsts" ? resolveOxlintConfig(path.dirname(resolved), cwd) : null;
   // No oxlint config and no eslint name up to / (eslint's own lookup): eslint would only exit 2 (skip), so no chain lint.
-  const noJstsConfig = lang === "jsts" && !oxlintConfig && !walkToRoot(path.dirname(resolved), (d) => ESLINT_CONFIG_FILENAMES.some((n) => configExists(d, n)));
+  const noJstsConfig = lang === "jsts" && !oxlintConfig && !walkToRoot(path.dirname(resolved), (d) => anyConfigExists(d, ESLINT_CONFIG_FILENAMES));
   // No stylelint config (stylelint's own search places, see hasStylelintConfig): stylelint would only exit 78 (skip), so no chain lint.
   const noCssConfig = lang === "css" && !hasStylelintConfig(path.dirname(resolved), cwd);
   if (!lang || noJstsConfig || noCssConfig) return { entry: null, oxlintConfig };
