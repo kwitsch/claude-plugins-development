@@ -53,7 +53,7 @@ test("lint-file.mjs is executable and has a node shebang (it is invoked directly
 });
 
 test("lint-file.mjs has no static node:crypto import (loaded lazily on first hash, F26)", () => {
-  assert.doesNotMatch(readFileSync(HOOK, "utf8"), /^import[^;]*from "node:crypto";/m);
+  assert.doesNotMatch(readFileSync(HOOK, "utf8"), /\b(?:from|import)\s*["'](?:node:)?crypto["']/);
 });
 
 test("plugin README first ## heading is Install, with the install command and no ## Hooks section", () => {
