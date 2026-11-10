@@ -801,10 +801,7 @@ function chainOutcome(tool, result) {
 	};
 }
 async function runChainLint(lang, resolved, cwd, rel, coalesce = false) {
-	const none = {
-		ran: false,
-		finding: null
-	};
+	const none = NO_CHAIN;
 	const plan = planChainLint(lang, resolved, cwd);
 	if (!plan) return none;
 	const { tool, argv, timeout, spawnCwd, manifest } = plan;
@@ -1067,24 +1064,27 @@ function chainEntryFor(resolved, cwd) {
 		oxlintConfig
 	};
 }
+const NO_CHAIN = {
+	ran: false,
+	finding: null
+};
+function tscNeeded(typeCheckEligible, oxlintConfig, chainRan) {
+	return typeCheckEligible && !(oxlintConfig !== null && chainRan && oxlintConfigTypeChecks(oxlintConfig));
+}
 async function lintResolved(resolved, cwd, ranges, hookEventName, label) {
 	const rel = path.relative(cwd, resolved);
 	const coalesce = hookEventName === "FileChanged";
 	const ext = path.extname(resolved).toLowerCase();
 	const typeCheckEligible = TYPE_CHECK_EXTS.has(ext);
 	const { entry, oxlintConfig } = chainEntryFor(resolved, cwd);
-	const typeChecksViaOxlint = typeCheckEligible && oxlintConfig !== null && oxlintConfigTypeChecks(oxlintConfig);
-	const chainP = entry ? runChainLint(entry, resolved, cwd, rel, coalesce) : Promise.resolve({
-		ran: false,
-		finding: null
-	});
+	const chainP = entry ? runChainLint(entry, resolved, cwd, rel, coalesce) : Promise.resolve(NO_CHAIN);
 	let chain;
 	let tsResult = null;
-	if (typeCheckEligible && !typeChecksViaOxlint) {
+	if (tscNeeded(typeCheckEligible, oxlintConfig, true)) {
 		[chain, tsResult] = await Promise.all([chainP, runTypeCheck(resolved, cwd, coalesce)]);
 	} else {
 		chain = await chainP;
-		if (typeCheckEligible && !chain.ran) tsResult = await runTypeCheck(resolved, cwd, coalesce);
+		if (tscNeeded(typeCheckEligible, oxlintConfig, chain.ran)) tsResult = await runTypeCheck(resolved, cwd, coalesce);
 	}
 	const findings = [];
 	if (chain.finding) findings.push(chain.finding);
@@ -1184,8 +1184,7 @@ export async function lintFilesHandler(cwd, files) {
 	const tsFirst = new Map();
 	for (const [fp, oxlintConfig] of oxlintConfigs) {
 		try {
-			if (!TYPE_CHECK_EXTS.has(path.extname(fp).toLowerCase())) continue;
-			if (oxlintConfig && ran.has(fp) && oxlintConfigTypeChecks(oxlintConfig)) continue;
+			if (!tscNeeded(TYPE_CHECK_EXTS.has(path.extname(fp).toLowerCase()), oxlintConfig, ran.has(fp))) continue;
 			const tsconfig = resolveTsconfig(path.dirname(fp), cwd);
 			if (tsconfig && !tsFirst.has(tsconfig)) tsFirst.set(tsconfig, fp);
 		} catch {}

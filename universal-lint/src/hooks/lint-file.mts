@@ -1528,8 +1528,8 @@ function chainOutcome(tool: LintTool, result: SpawnSyncReturns<string> | null): 
  *   failure, spawn error/signal or skip verdict); `finding`: the issues, else null. `{ ran: false, finding: null }`
  *   also when `coalesceProjectCheck` skipped the run (a completed run already covers the file).
  */
-async function runChainLint(lang: LangEntry, resolved: string, cwd: string, rel: string, coalesce = false): Promise<{ ran: boolean; finding: Finding | null }> {
-  const none = { ran: false, finding: null };
+async function runChainLint(lang: LangEntry, resolved: string, cwd: string, rel: string, coalesce = false): Promise<ChainResult> {
+  const none = NO_CHAIN;
   const plan = planChainLint(lang, resolved, cwd);
   if (!plan) return none;
   const { tool, argv, timeout, spawnCwd, manifest } = plan;
@@ -1974,6 +1974,19 @@ function chainEntryFor(resolved: string, cwd: string): { entry: LangEntry | null
   return { entry, oxlintConfig };
 }
 
+/** Outcome of `runChainLint`; see there. */
+type ChainResult = { ran: boolean; finding: Finding | null };
+const NO_CHAIN: ChainResult = { ran: false, finding: null };
+
+/**
+ * Whether tsc must run for a file: it is type-check eligible and no oxlint run with a `typeCheck: true` config
+ * covered it (`chainRan`: the chain tool reached a clean or issues verdict). The one skip rule, shared by `lintResolved`
+ * and `lintFilesHandler`.
+ */
+function tscNeeded(typeCheckEligible: boolean, oxlintConfig: string | null, chainRan: boolean): boolean {
+  return typeCheckEligible && !(oxlintConfig !== null && chainRan && oxlintConfigTypeChecks(oxlintConfig));
+}
+
 /**
  * Lint `resolved` (chain tool from `chainEntryFor` unless JS/TS or CSS/SCSS has no lint config, run by `runChainLint`,
  * + tsc), gate the findings against `ranges` (null = whole file), and build the hook result.
@@ -2001,18 +2014,16 @@ async function lintResolved(resolved: string, cwd: string, ranges: Array<[number
   const typeCheckEligible = TYPE_CHECK_EXTS.has(ext);
   const { entry, oxlintConfig } = chainEntryFor(resolved, cwd);
 
-  // Read the oxlint config only for a type-check-eligible file (no extra read for .js/.mjs); a read/parse failure is false: tsc kept.
-  const typeChecksViaOxlint = typeCheckEligible && oxlintConfig !== null && oxlintConfigTypeChecks(oxlintConfig);
-  const chainP: Promise<{ ran: boolean; finding: Finding | null }> = entry ? runChainLint(entry, resolved, cwd, rel, coalesce) : Promise.resolve({ ran: false, finding: null });
-  let chain: { ran: boolean; finding: Finding | null };
+  const chainP: Promise<ChainResult> = entry ? runChainLint(entry, resolved, cwd, rel, coalesce) : Promise.resolve(NO_CHAIN);
+  let chain: ChainResult;
   let tsResult: Finding | null = null;
-  if (typeCheckEligible && !typeChecksViaOxlint) {
+  // tsc needed even when the chain runs fine (no oxlint typeCheck config): start it at once.
+  if (tscNeeded(typeCheckEligible, oxlintConfig, true)) {
     // tsc does not depend on the chain outcome: run both at once (each keeps its own timeout).
     [chain, tsResult] = await Promise.all([chainP, runTypeCheck(resolved, cwd, coalesce)]);
   } else {
     chain = await chainP;
-    // Skip tsc only when oxlint actually ran with a typeCheck config; otherwise tsc is the only type check.
-    if (typeCheckEligible && !chain.ran) tsResult = await runTypeCheck(resolved, cwd, coalesce);
+    if (tscNeeded(typeCheckEligible, oxlintConfig, chain.ran)) tsResult = await runTypeCheck(resolved, cwd, coalesce);
   }
   const findings: Finding[] = [];
   if (chain.finding) findings.push(chain.finding);
@@ -2165,9 +2176,7 @@ export async function lintFilesHandler(cwd: string, files: readonly string[]): P
   const tsFirst = new Map<string, string>();
   for (const [fp, oxlintConfig] of oxlintConfigs) {
     try {
-      if (!TYPE_CHECK_EXTS.has(path.extname(fp).toLowerCase())) continue;
-      // Skip tsc only when oxlint actually ran with a typeCheck config (as in lintResolved).
-      if (oxlintConfig && ran.has(fp) && oxlintConfigTypeChecks(oxlintConfig)) continue;
+      if (!tscNeeded(TYPE_CHECK_EXTS.has(path.extname(fp).toLowerCase()), oxlintConfig, ran.has(fp))) continue;
       const tsconfig = resolveTsconfig(path.dirname(fp), cwd);
       if (tsconfig && !tsFirst.has(tsconfig)) tsFirst.set(tsconfig, fp);
     } catch {
