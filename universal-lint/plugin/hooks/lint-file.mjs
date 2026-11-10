@@ -642,6 +642,12 @@ function buildSpawnOpts(cwd, timeout) {
 		maxBuffer: MAX_BUFFER_BYTES
 	};
 }
+function isFileScoped(tool) {
+	return !tool.targetsDir && !tool.manifestPath;
+}
+function chainTarget(tool, manifest, cwd, fp) {
+	return tool.targetsDir ? path.relative(cwd, path.dirname(fp)) || "." : manifest ? path.relative(cwd, path.dirname(manifest)) || "." : path.relative(cwd, fp);
+}
 function planChainLint(lang, resolved, cwd) {
 	const sel = selectLintTool(lang.chain, path.dirname(resolved), cwd);
 	if (!sel) return null;
@@ -694,7 +700,7 @@ function runChainLint(lang, resolved, cwd, rel, coalesce = false) {
 	const result = key ? coalesceProjectCheck(key, resolved, timeout, spawnTool) : spawnTool();
 	const outcome = chainOutcome(tool, result);
 	if (!outcome) return none;
-	const target = tool.targetsDir ? path.relative(cwd, path.dirname(resolved)) || "." : manifest ? path.relative(cwd, path.dirname(manifest)) || "." : rel;
+	const target = chainTarget(tool, manifest, cwd, resolved);
 	const { verdict, text } = outcome;
 	if (verdict === "skip") return none;
 	const base = manifest ? path.dirname(manifest) : tool.targetsDir ? path.dirname(resolved) : spawnCwd;
@@ -1006,7 +1012,7 @@ export function lintFilesHandler(cwd, files) {
 			const plan = entry ? planChainLint(entry, fp, cwd) : null;
 			oxlintConfigs.set(fp, oxlintConfig);
 			if (!plan) continue;
-			const fileScoped = !plan.tool.targetsDir && !plan.tool.manifestPath;
+			const fileScoped = isFileScoped(plan.tool);
 			const key = [
 				plan.tool.name,
 				plan.local ?? "",
@@ -1032,12 +1038,12 @@ export function lintFilesHandler(cwd, files) {
 		for (const m of members) ran.add(m.fp);
 		if (out.verdict !== "issues") return;
 		const { tool, manifest } = members[0].plan;
-		const targets = new Set(members.map(({ fp }) => tool.targetsDir ? path.relative(cwd, path.dirname(fp)) || "." : manifest ? path.relative(cwd, path.dirname(manifest)) || "." : path.relative(cwd, fp)));
+		const targets = new Set(members.map(({ fp }) => chainTarget(tool, manifest, cwd, fp)));
 		chainBlocks.push(`universal-lint: ${tool.name} found issues in ${[...targets].join(", ")}:\n${truncate(out.text)}`);
 	};
 	for (const group of groups.values()) {
 		const { plan } = group[0];
-		const fileScoped = !plan.tool.targetsDir && !plan.tool.manifestPath;
+		const fileScoped = isFileScoped(plan.tool);
 		const step = fileScoped ? BATCH_MAX_FILES : group.length;
 		for (let i = 0; i < group.length; i += step) {
 			const chunk = group.slice(i, i + step);

@@ -1300,6 +1300,16 @@ interface ChainPlan {
   manifest: string | null;
 }
 
+/** Whether the tool takes the file path as its target (neither a directory- nor a crate-scoped tool), so a batch may swap the target. */
+function isFileScoped(tool: ChainPlan["tool"]): boolean {
+  return !tool.targetsDir && !tool.manifestPath;
+}
+
+/** Report-header target of a chain run: the package dir, the crate dir, or the file itself. */
+function chainTarget(tool: ChainPlan["tool"], manifest: string | null | undefined, cwd: string, fp: string): string {
+  return tool.targetsDir ? path.relative(cwd, path.dirname(fp)) || "." : manifest ? path.relative(cwd, path.dirname(manifest)) || "." : path.relative(cwd, fp);
+}
+
 /**
  * Plan the chain tool run for one file (the first half of `runChainLint`, shared with `lintFilesHandler`): select the
  * tool, gate cargo on a resolvable manifest, build the argv and pick the timeout and spawn cwd. Spawns nothing.
@@ -1392,7 +1402,7 @@ function runChainLint(lang: LangEntry, resolved: string, cwd: string, rel: strin
   // Cargo entries are neither file-scoped nor targetsDir: the natural target
   // is the crate directory (the dir containing the resolved Cargo.toml). The
   // gate above guarantees `manifest` is non-null here.
-  const target = tool.targetsDir ? path.relative(cwd, path.dirname(resolved)) || "." : manifest ? path.relative(cwd, path.dirname(manifest)) || "." : rel;
+  const target = chainTarget(tool, manifest, cwd, resolved);
   const { verdict, text } = outcome;
   if (verdict === "skip") return none;
   // cargo prints paths relative to the crate (or workspace) root, go tools get the package dir, the rest run in cwd.
@@ -1616,8 +1626,8 @@ function postToolScope(args: PostToolUseHookInput): { fp: string; real: string }
 /**
  * Run every cheap entry guard and return the resolved absolute lint target, or null when any guard rejects
  * (success===false, missing cwd/file_path, or `scopedTarget` rejects: outside the real cwd, excluded, inside
- * `scratchpad_dir`, dangling link, unsupported extension, file absent). Used by lintFileHandler (and through it by the
- * skill driver). Fails closed to null on any unexpected error, matching lintFileHandler's fail-open-to-{} philosophy.
+ * `scratchpad_dir`, dangling link, unsupported extension, file absent). Used by lintFileHandler; the skill driver's lintFilesHandler
+ * scopes through `scopedTarget` directly and must be kept in step. Fails closed to null on any unexpected error, matching lintFileHandler's fail-open-to-{} philosophy.
  *
  * @param args - The PostToolUse hook payload.
  * @returns The lexical absolute path to lint, or null when a guard rejects.
@@ -1944,7 +1954,7 @@ export function lintFilesHandler(cwd: string, files: readonly string[]): string[
       const plan = entry ? planChainLint(entry, fp, cwd) : null;
       oxlintConfigs.set(fp, oxlintConfig);
       if (!plan) continue;
-      const fileScoped = !plan.tool.targetsDir && !plan.tool.manifestPath;
+      const fileScoped = isFileScoped(plan.tool);
       const key = [plan.tool.name, plan.local ?? "", plan.spawnCwd, ...(fileScoped ? plan.argv.slice(0, -1) : plan.argv)].join("\0");
       const group = groups.get(key);
       if (group) group.push({ fp, plan });
@@ -1962,12 +1972,12 @@ export function lintFilesHandler(cwd: string, files: readonly string[]): string[
     for (const m of members) ran.add(m.fp);
     if (out.verdict !== "issues") return;
     const { tool, manifest } = members[0].plan;
-    const targets = new Set(members.map(({ fp }) => (tool.targetsDir ? path.relative(cwd, path.dirname(fp)) || "." : manifest ? path.relative(cwd, path.dirname(manifest)) || "." : path.relative(cwd, fp))));
+    const targets = new Set(members.map(({ fp }) => chainTarget(tool, manifest, cwd, fp)));
     chainBlocks.push(`universal-lint: ${tool.name} found issues in ${[...targets].join(", ")}:\n${truncate(out.text)}`);
   };
   for (const group of groups.values()) {
     const { plan } = group[0];
-    const fileScoped = !plan.tool.targetsDir && !plan.tool.manifestPath;
+    const fileScoped = isFileScoped(plan.tool);
     const step = fileScoped ? BATCH_MAX_FILES : group.length;
     for (let i = 0; i < group.length; i += step) {
       const chunk = group.slice(i, i + step);
