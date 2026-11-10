@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { execFileSync, spawnSync } from "node:child_process";
+import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { accessSync, constants as fsConstants, existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { availableParallelism, homedir, tmpdir } from "node:os";
@@ -15,6 +15,7 @@ const MAX_CONTEXT_CHARS = 4e3;
 const MAX_BUFFER_BYTES = 10 * 1024 * 1024;
 const TSC_SPAWN_TIMEOUT_MS = 45e3;
 const CARGO_SPAWN_TIMEOUT_MS = 45e3;
+const KILL_GRACE_MS = 1e3;
 const BATCH_MAX_FILES = 100;
 export const WATCH_LIMIT = 5e3;
 const GIT_TIMEOUT_MS = 1e4;
@@ -203,6 +204,118 @@ function onPath(tool) {
 }
 export function isToolAvailable(tool, toolOnPath, npxOnPath) {
 	return toolOnPath || !!tool.npmSpec && npxOnPath;
+}
+const GROUP_KILL_SIGNALS = [
+	"SIGTERM",
+	"SIGINT",
+	"SIGHUP"
+];
+const liveGroups = new Set();
+let groupSignalHandlerInstalled = false;
+function killGroup(pgid, sig) {
+	try {
+		process.kill(-pgid, sig);
+	} catch {}
+}
+function installSignalHandler() {
+	if (groupSignalHandlerInstalled) return;
+	groupSignalHandlerInstalled = true;
+	const onSignal = (sig) => {
+		for (const pgid of liveGroups) killGroup(pgid, "SIGKILL");
+		liveGroups.clear();
+		for (const s of GROUP_KILL_SIGNALS) process.removeListener(s, onSignal);
+		process.kill(process.pid, sig);
+	};
+	for (const s of GROUP_KILL_SIGNALS) process.on(s, onSignal);
+}
+export function spawnGroup(cmd, argv, opts) {
+	installSignalHandler();
+	const maxBuffer = opts.maxBuffer ?? MAX_BUFFER_BYTES;
+	const timeout = opts.timeout ?? SPAWN_TIMEOUT_MS;
+	return new Promise((resolve) => {
+		let error;
+		let done = false;
+		let killTimer;
+		let child;
+		try {
+			child = spawn(cmd, [...argv], {
+				cwd: opts.cwd,
+				env: opts.env,
+				stdio: [
+					"ignore",
+					"pipe",
+					"pipe"
+				],
+				detached: true
+			});
+		} catch (e) {
+			error = e instanceof Error ? e : new Error(String(e));
+			resolve({
+				pid: 0,
+				output: [
+					null,
+					"",
+					""
+				],
+				stdout: "",
+				stderr: "",
+				status: null,
+				signal: null,
+				error
+			});
+			return;
+		}
+		const pid = child.pid;
+		if (pid !== undefined) liveGroups.add(pid);
+		const kill = () => {
+			if (pid === undefined || killTimer) return;
+			killGroup(pid, "SIGTERM");
+			killTimer = setTimeout(() => killGroup(pid, "SIGKILL"), KILL_GRACE_MS);
+		};
+		const fail = (code) => {
+			error ??= Object.assign(new Error(`spawnGroup ${cmd}: ${code}`), { code });
+			kill();
+		};
+		const timer = setTimeout(() => fail("ETIMEDOUT"), timeout);
+		const out = [];
+		const err = [];
+		const collect = (chunks) => {
+			let total = 0;
+			return (chunk) => {
+				if (total > maxBuffer) return;
+				total += chunk.length;
+				if (total > maxBuffer) fail("ENOBUFS");
+				else chunks.push(chunk);
+			};
+		};
+		child.stdout?.on("data", collect(out));
+		child.stderr?.on("data", collect(err));
+		const finish = (status, signal, stdout, stderr) => {
+			if (done) return;
+			done = true;
+			clearTimeout(timer);
+			if (killTimer) clearTimeout(killTimer);
+			if (pid !== undefined) liveGroups.delete(pid);
+			resolve({
+				pid: pid ?? 0,
+				output: [
+					null,
+					stdout,
+					stderr
+				],
+				stdout,
+				stderr,
+				status,
+				signal,
+				error
+			});
+		};
+		child.on("error", (e) => {
+			error = e;
+			finish(null, null, "", "");
+		});
+		child.on("close", (status, signal) => finish(status, signal, Buffer.concat(out).toString("utf8"), Buffer.concat(err).toString("utf8")));
+	});
 }
 function spawnBin(bin, argv, spawnOpts) {
 	const PATH = process.env.PATH ? path.dirname(bin) + path.delimiter + process.env.PATH : path.dirname(bin);

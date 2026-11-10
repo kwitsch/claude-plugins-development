@@ -25,8 +25,8 @@
  *
  * @packageDocumentation
  */
-import { execFileSync, spawnSync } from "node:child_process";
-import type { SpawnSyncOptionsWithStringEncoding, SpawnSyncReturns } from "node:child_process";
+import { execFileSync, spawn, spawnSync } from "node:child_process";
+import type { ChildProcess, SpawnSyncOptionsWithStringEncoding, SpawnSyncReturns } from "node:child_process";
 import { createHash } from "node:crypto";
 import { accessSync, constants as fsConstants, existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { availableParallelism, homedir, tmpdir } from "node:os";
@@ -54,7 +54,7 @@ const PROBE_MISS_TTL_MS = 10 * 60 * 1000;
 /** Cap on the additionalContext findings text. */
 const MAX_CONTEXT_CHARS = 4000;
 
-/** spawnSync's 1MB default truncates a noisy linter's output as ENOBUFS. */
+/** Per-stream output cap of `spawnGroup` (spawnSync's 1MB default truncated a noisy linter's output as ENOBUFS). */
 const MAX_BUFFER_BYTES = 10 * 1024 * 1024;
 
 /**
@@ -69,6 +69,9 @@ const TSC_SPAWN_TIMEOUT_MS = 45000;
  * as TSC_SPAWN_TIMEOUT_MS; stays under the hook-level timeout backstop.
  */
 const CARGO_SPAWN_TIMEOUT_MS = 45000;
+
+/** SIGKILL follows the timeout's SIGTERM to the process group after this long (a child trapping SIGTERM must still die). */
+const KILL_GRACE_MS = 1000;
 
 /**
  * Most files per chain-tool spawn in `lintFilesHandler` (the skill driver's batch path). Caps the argv length (sized
@@ -431,6 +434,135 @@ function onPath(tool: string): boolean {
  */
 export function isToolAvailable(tool: LintTool, toolOnPath: boolean, npxOnPath: boolean): boolean {
   return toolOnPath || (!!tool.npmSpec && npxOnPath);
+}
+
+/** Signals on which the hook or driver kills its live linter groups before exiting (`installSignalHandler`). */
+const GROUP_KILL_SIGNALS: NodeJS.Signals[] = ["SIGTERM", "SIGINT", "SIGHUP"];
+
+/** Process-group ids (the leader's pid) of every `spawnGroup` child still running: added after spawn, removed on resolution. */
+const liveGroups = new Set<number>();
+
+/** Whether `installSignalHandler` already ran (one handler per process). */
+let groupSignalHandlerInstalled = false;
+
+/**
+ * Send `sig` to the process group led by `pgid` (`process.kill(-pgid)`); ESRCH (the group is already gone) and any
+ * other error are swallowed. POSIX only (the plugin's hook runs through a shebang `.mjs`, so Windows is unsupported).
+ *
+ * @param pgid - The group leader's pid.
+ * @param sig - The signal to send.
+ */
+function killGroup(pgid: number, sig: NodeJS.Signals): void {
+  try {
+    process.kill(-pgid, sig);
+  } catch {
+    // ESRCH: already gone
+  }
+}
+
+/**
+ * Install, once per process, one handler for SIGTERM, SIGINT and SIGHUP that SIGKILLs every live `spawnGroup` group
+ * (the children are detached, so the signal that kills the hook or driver would not reach them), removes itself and
+ * re-raises the signal on this process so the default exit still happens. Normal exit is unchanged. A SIGKILL of the
+ * hook cannot be handled: its children die on EPIPE at their next write (tsc runs to its natural end).
+ */
+function installSignalHandler(): void {
+  if (groupSignalHandlerInstalled) return;
+  groupSignalHandlerInstalled = true;
+  const onSignal = (sig: NodeJS.Signals): void => {
+    for (const pgid of liveGroups) killGroup(pgid, "SIGKILL");
+    liveGroups.clear();
+    for (const s of GROUP_KILL_SIGNALS) process.removeListener(s, onSignal);
+    process.kill(process.pid, sig);
+  };
+  for (const s of GROUP_KILL_SIGNALS) process.on(s, onSignal);
+}
+
+/**
+ * Spawn `cmd` as the leader of its own process group (`detached: true`) and resolve with a `SpawnSyncReturns<string>`-
+ * shaped result once the child's `close` event fires (both pipes closed, so every grandchild holding them has exited
+ * too: a killed tree is reaped before the lint continues). Replaces every lint `spawnSync` call (F18).
+ *
+ * @remarks
+ * `opts` are `buildSpawnOpts` options: `cwd` and `env` go to `spawn`; `stdio` stays `["ignore", "pipe", "pipe"]`, so
+ * the child's stdin is `/dev/null` exactly as under spawnSync; `timeout`, `maxBuffer` and `encoding` are applied here
+ * (never passed to `spawn`); never `shell`. At `opts.timeout` ms `error` becomes an `Error` with `code` `"ETIMEDOUT"`
+ * (as spawnSync) and the group gets SIGTERM, then SIGKILL after `KILL_GRACE_MS`; a child trapping SIGTERM exits
+ * normally within the grace (`signal` null, `status` set, `error.code` ETIMEDOUT) or is SIGKILLed (`signal`
+ * `"SIGKILL"`). When one stream's bytes exceed `opts.maxBuffer` (`MAX_BUFFER_BYTES`) further chunks of it are
+ * discarded, `error.code` is `"ENOBUFS"` and the group is killed with the same SIGTERM/SIGKILL sequence (spawnSync
+ * semantics: per stream, child killed). A spawn failure (`error` event before `close`: ENOENT, EACCES) resolves with
+ * that error, `status` and `signal` null and empty output; `spawnBin` reads its `code`. Both timers are cleared only
+ * on resolution (`close` or that pre-spawn `error`), never on `exit`, so a group kill still reaches pipe-holding
+ * grandchildren after the leader exited; the SIGKILL timer is a plain timer (no `unref`) and is always cleared. The
+ * group's pid is held in `liveGroups` from spawn to resolution so `installSignalHandler`'s handler (installed on the
+ * first call) can SIGKILL it when this process is signalled. The promise never rejects: every exceptional outcome is
+ * in `error`. Residuals: a grandchild that called `setsid` leaves the group and, holding a pipe, delays `close` until
+ * the hook backstop (same as spawnSync); the pid-reuse window between the leader's reap and `close` is microseconds
+ * and needs a pid wraparound. Exported for the tests (the timeout argument is the test seam; no env override).
+ *
+ * @param cmd - Command (bare name resolved on `opts.env.PATH` or `process.env.PATH`, or an absolute path).
+ * @param argv - Arguments.
+ * @param opts - `buildSpawnOpts` options (`cwd`, `env`, `timeout`, `maxBuffer`).
+ * @returns The spawnSync-shaped result: `pid`, `output: [null, stdout, stderr]`, `stdout`, `stderr`, `status`,
+ *   `signal`, `error` (undefined when none).
+ */
+export function spawnGroup(cmd: string, argv: readonly string[], opts: SpawnSyncOptionsWithStringEncoding): Promise<SpawnSyncReturns<string>> {
+  installSignalHandler();
+  const maxBuffer = opts.maxBuffer ?? MAX_BUFFER_BYTES;
+  const timeout = opts.timeout ?? SPAWN_TIMEOUT_MS;
+  return new Promise((resolve) => {
+    let error: Error | undefined;
+    let done = false;
+    let killTimer: NodeJS.Timeout | undefined;
+    let child: ChildProcess;
+    try {
+      child = spawn(cmd, [...argv], { cwd: opts.cwd, env: opts.env, stdio: ["ignore", "pipe", "pipe"], detached: true });
+    } catch (e) {
+      error = e instanceof Error ? e : new Error(String(e));
+      resolve({ pid: 0, output: [null, "", ""] as unknown as string[], stdout: "", stderr: "", status: null, signal: null, error });
+      return;
+    }
+    const pid = child.pid; // undefined when the spawn failed: never signalled
+    if (pid !== undefined) liveGroups.add(pid);
+    const kill = (): void => {
+      if (pid === undefined || killTimer) return;
+      killGroup(pid, "SIGTERM");
+      killTimer = setTimeout(() => killGroup(pid, "SIGKILL"), KILL_GRACE_MS);
+    };
+    const fail = (code: string): void => {
+      error ??= Object.assign(new Error(`spawnGroup ${cmd}: ${code}`), { code });
+      kill();
+    };
+    const timer = setTimeout(() => fail("ETIMEDOUT"), timeout);
+    const out: Buffer[] = [];
+    const err: Buffer[] = [];
+    /** Collect one stream's chunks up to `maxBuffer`; past it, ENOBUFS once and discard the rest. */
+    const collect = (chunks: Buffer[]): (chunk: Buffer) => void => {
+      let total = 0;
+      return (chunk) => {
+        if (total > maxBuffer) return;
+        total += chunk.length;
+        if (total > maxBuffer) fail("ENOBUFS");
+        else chunks.push(chunk);
+      };
+    };
+    child.stdout?.on("data", collect(out));
+    child.stderr?.on("data", collect(err));
+    const finish = (status: number | null, signal: NodeJS.Signals | null, stdout: string, stderr: string): void => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      if (killTimer) clearTimeout(killTimer);
+      if (pid !== undefined) liveGroups.delete(pid);
+      resolve({ pid: pid ?? 0, output: [null, stdout, stderr] as unknown as string[], stdout, stderr, status, signal, error });
+    };
+    child.on("error", (e) => {
+      error = e;
+      finish(null, null, "", "");
+    });
+    child.on("close", (status, signal) => finish(status, signal, Buffer.concat(out).toString("utf8"), Buffer.concat(err).toString("utf8")));
+  });
 }
 
 /**
