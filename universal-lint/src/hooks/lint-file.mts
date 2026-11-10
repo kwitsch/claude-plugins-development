@@ -1996,8 +1996,11 @@ function tscNeeded(typeCheckEligible: boolean, oxlintConfig: string | null, chai
  * no oxlint config) the chain and tsc run at once with `Promise.all` (findings order chain then tsc). With an oxlint
  * `typeCheck: true` config the chain runs first and tsc only when oxlint did not run (`!chain.ran`), never
  * speculatively. This is the same predicate as the sequential rule: tsc iff `typeCheckEligible &&
- * !(oxlintConfig && chain.ran && oxlintConfigTypeChecks(oxlintConfig))`. Each child keeps its own timeout, so a
- * rejection (a throw in a sync preamble) lands in the handler's catch (`{}`) as before.
+ * !(oxlintConfig && chain.ran && oxlintConfigTypeChecks(oxlintConfig))`. Neither branch rejects except on a throw in a
+ * sync preamble (`planChainLint`, `resolveTsconfig`, `onPath`), which lands in the handler's catch (`{}`) as before;
+ * `Promise.all` then discards the other side's result and that child runs to its own end or timeout (bounded by its
+ * `*_SPAWN_TIMEOUT_MS` + `KILL_GRACE_MS`) before the event loop drains and the process exits (exit code 0, no output).
+ * `Promise.allSettled` was rejected at spec approval as a fail-open change.
  *
  * @param resolved - Lexical absolute path of the in-scope file.
  * @param cwd - Payload cwd (spawn cwd and config search root).

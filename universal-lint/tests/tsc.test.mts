@@ -17,7 +17,7 @@ function stampStub(e: ReturnType<typeof makeEnv>, name: string, exitCode: number
 }
 
 /**
- * The recorded `start` or `end` stamp of `name`, in ns.
+ * The recorded `start` or `end` stamp of `name`, in µs (bash `EPOCHREALTIME` with the dot removed, see `stampStub`).
  *
  * @param e - The env.
  * @param name - Tool name.
