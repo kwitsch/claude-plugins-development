@@ -39,7 +39,7 @@ Legend: `[x]` finished. `[ ]` not finished; tag = `open` (code change, not start
 - [x] [F20](tasks/F20-config-walk-readdir.md) One `readdirSync` per directory in the upward config walks (9P) `done` priority:low. Shipped in 0.15.17.
 - [x] [F21](tasks/F21-gatefinding-exists-memo.md) Memoize `existsSync` in `gateFinding` `done` priority:low. Shipped in 0.15.18.
 - [x] [F22](tasks/F22-filechanged-skip-without-git.md) FileChanged skip without a `git status` spawn (index blob id) `done` priority:low. Closed docs-only in 0.15.19: the git gate is ~5-9 ms of a ~52 ms skip on ext4 and ~130 ms on 9P (background, no 9P sessions); a safe map needs a lazy rebuild per index rewrite plus the full pitfall list (reopen trigger in the task doc).
-- [ ] [F23](tasks/F23-superseded-and-duplicate-wakes.md) Superseded and duplicate findings re-wake Claude `open` priority:low. Needs a user decision; the naive staleness check loses findings.
+- [x] [F23](tasks/F23-superseded-and-duplicate-wakes.md) Superseded and duplicate findings re-wake Claude `done` priority:low. Closed docs-only in 0.15.20: the only safe drop (newer whole-file lint) still loses findings when that lint times out or skips, and 0 same-file pairs had a newer Write within 1.5 s (7 of the 1934 same-file pairs within 10 s); duplicate re-reports are intended (reopen triggers in the task doc).
 - [ ] [F24](tasks/F24-npm-notice-in-findings.md) Keep "npm notice" lines out of npx-run findings `open` priority:low
 - [ ] [F25](tasks/F25-digest-size-bound.md) Bound digest hashing and FileChanged lint by file size `open` priority:low
 - [ ] [F26](tasks/F26-per-process-floor-and-hook-filter.md) Per-process floor (about 40 ms) for events the hook cannot act on `open` priority:low
