@@ -1,7 +1,7 @@
 ---
 id: F21
 title: Memoize existsSync in gateFinding
-status: open
+status: done
 priority: low
 area: universal-lint/src/hooks/lint-file.mts (gateFinding, lintResolved)
 ---
@@ -10,7 +10,7 @@ area: universal-lint/src/hooks/lint-file.mts (gateFinding, lintResolved)
 
 ## Status
 
-Open. static finding (confirmed, low; 9P case absent from real sessions).
+Shipped in 0.15.18. In `gateFinding`'s classify the pure `resolved.endsWith(path.sep + p)` test now runs before `existsSync(abs)`, so foreign paths never touch the filesystem, and the remaining stats go through a per-call `Map<abs, boolean>` memo (`exists`), fresh for every call, no cross-call cache. Gate semantics unchanged. The `ranges === null` short-circuit was not done: returning the raw finding is not byte-equal (the located path emits `text.split(/\n\s*\n/).join("\n\n")`, which turns a whitespace-only blank line into an empty one), and skipping only `existsSync` under null saves nothing once the reorder is in.
 
 ## Problem
 
