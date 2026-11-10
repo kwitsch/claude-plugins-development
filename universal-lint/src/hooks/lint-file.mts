@@ -54,7 +54,13 @@ function createHash(algorithm: string): Hash {
 /** Inner linter timeout: kills the child's whole process group (SIGTERM, SIGKILL after `KILL_GRACE_MS`); the hook-level timeout (hooks.json timeout: 90 = the lint budget) is the backstop. */
 const SPAWN_TIMEOUT_MS = 30000;
 
-/** Cold npx install can exceed SPAWN_TIMEOUT_MS; stay inside the 90s lint budget (hooks.json timeout 90). A timeout kills the child's whole process group (SIGTERM, SIGKILL after `KILL_GRACE_MS`). */
+/**
+ * Budget of every npx-route spawn: bare `npx --yes` (a cold install can exceed SPAWN_TIMEOUT_MS) and the npx-cached
+ * bin `runNpx` runs directly. One spawn ends within 56 s with `KILL_GRACE_MS`, inside the hooks.json timeout 90, but
+ * it is not in the FileChanged reservation (`FILE_CHANGED_BUDGET_MS`): the sequential oxlint-`typeCheck` fallback
+ * (55 + 45 + 2 s) or a late-slotted npx-route FileChanged lint can pass 90 s and is lost (hook-design.md "Timeout
+ * budget", Accepted). A timeout kills the child's whole process group (SIGTERM, SIGKILL after `KILL_GRACE_MS`).
+ */
 const NPX_SPAWN_TIMEOUT_MS = 55000;
 
 /**
