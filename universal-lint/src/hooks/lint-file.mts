@@ -1884,8 +1884,9 @@ export function editRanges(args: PostToolUseHookInput): Array<[number, number]> 
 /**
  * Location regex A: `<path>.<ext>:<line>` or `<path>.<ext>(<line>` (ruff, ktlint, golangci-lint, go vet, checkstyle,
  * markdownlint, psalm, oxlint `,-[src/a.ts:3:7]`, cargo `--> src/a.rs:12:5`, tsc `a.ts(12,5)` / `a.ts:12:5`).
+ * Anchored at a token start by the lookbehind: the unanchored form was quadratic on a long whitespace-free line (F27).
  */
-const LOC_PATH_RE = /(?<path>[^\s:()[\]'"]+\.[A-Za-z0-9]+)[:(](?<line>\d+)(?:[:,]\d+)?/;
+const LOC_PATH_RE = /(?<![^\s:()[\]'"])(?<path>[^\s:()[\]'"]+\.[A-Za-z0-9]+)[:(](?<line>\d+)(?:[:,]\d+)?/;
 /** Location regex B: path-less `  <line>:<col>  ` rows (eslint/stylelint stylish, yamllint standard). */
 const LOC_ROW_RE = /^\s*(?<line>\d+):\d+\s/;
 /** Location regex C: shellcheck's default tty header `In <file> line <line>:` (path-less: the edited file is its only target). */
