@@ -72,3 +72,14 @@ contract: `jsonlint` (npm) is unmaintained, and its successor
 "crashed/misconfigured" under the same exit code. `universal-format`'s
 bundled prettier already rejects malformed JSON, so format-only
 coverage is the honest answer here.
+
+## Troubleshooting
+
+**Slow lints on WSL.** WSL appends the Windows `PATH` (on the measuring machine 44 of 63 dirs, all under `/mnt/`), and tools that search `PATH` themselves pay for each of those dirs. The lint hook shows no difference beyond run-to-run noise between the full and a `/mnt`-trimmed `PATH`; the remaining cost sits inside child tools such as `go vet`, about 170 ms with the Windows `PATH` vs about 75 ms without it (measured 2026-11-10 on 0.15.25, go 1.22.2, one small package, warm caches; your numbers will differ). To drop the Windows dirs, put this in `/etc/wsl.conf`, then run `wsl --shutdown` from a Windows shell and reopen the distro:
+
+```ini
+[interop]
+appendWindowsPath = false
+```
+
+Windows programs still run by full path, but bare names (`code`, `explorer.exe`, `clip.exe`, a Windows-installed linter) stop resolving in every WSL shell, including Claude's Bash. Alternatively start one Claude Code session with a trimmed `PATH`, which has the same effect for every tool Claude calls in that session, not only linters: `PATH=$(printf %s "$PATH" | tr : '\n' | grep -v '^/mnt/' | paste -sd:) claude`. The plugin never rewrites `PATH`.
