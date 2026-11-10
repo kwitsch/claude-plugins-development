@@ -1276,11 +1276,84 @@ function buildSpawnOpts(cwd: string, timeout: number): SpawnSyncOptionsWithStrin
   };
 }
 
+/** One planned chain-tool run for one file: the tool, how to spawn it, and the argv `buildArgv` built for the file. */
+interface ChainPlan {
+  /** The chain tool `selectLintTool` picked (PATH, else project-local bin, else npx). */
+  tool: LintTool;
+  /** The tool's project-local `node_modules/.bin` path, or null for the PATH and npx routes. */
+  local: string | null;
+  /** `buildArgv` result for the file: file target last for file-scoped tools, package dir for `targetsDir`, none for `manifestPath`. */
+  argv: string[];
+  /** Spawn cwd: the local bin's package root (the dir holding node_modules), else the project cwd. */
+  spawnCwd: string;
+  /** Spawn timeout: `CARGO_SPAWN_TIMEOUT_MS` for `manifestPath` tools, else `SPAWN_TIMEOUT_MS`. */
+  timeout: number;
+  /** Resolved Cargo.toml for `manifestPath` tools, else null. */
+  manifest: string | null;
+}
+
+/**
+ * Plan the chain tool run for one file (the first half of `runChainLint`, shared with `lintFilesHandler`): select the
+ * tool, gate cargo on a resolvable manifest, build the argv and pick the timeout and spawn cwd. Spawns nothing.
+ *
+ * @param lang - Registry entry of the file's language (as returned by `chainEntryFor`).
+ * @param resolved - Absolute path of the file.
+ * @param cwd - Project root.
+ * @returns The plan, or null when no tool is available or a cargo tool has no manifest.
+ */
+function planChainLint(lang: LangEntry, resolved: string, cwd: string): ChainPlan | null {
+  const sel = selectLintTool(lang.chain, path.dirname(resolved), cwd);
+  if (!sel) return null;
+  const { tool } = sel;
+  // Gate cargo runs on a resolvable manifest: a stray .rs outside any Cargo
+  // project is a silent no-op, not a spurious "could not find Cargo.toml"
+  // exit-101 finding. Resolved once here and threaded through buildArgv and
+  // the target computation below -- resolveCargoManifest is a directory walk
+  // doing an existsSync per level, so re-resolving it for the same
+  // file/cwd pair would repeat that walk for no new answer.
+  let manifest: string | null = null;
+  if (tool.manifestPath) {
+    manifest = resolveCargoManifest(path.dirname(resolved), cwd);
+    if (!manifest) return null;
+  }
+
+  const argv = buildArgv(tool, resolved, cwd, manifest);
+  // Compile-heavy cargo tools get their own budget (mirrors TSC_SPAWN_TIMEOUT_MS).
+  const timeout = tool.manifestPath ? CARGO_SPAWN_TIMEOUT_MS : SPAWN_TIMEOUT_MS;
+  // A local bin runs from its package root (the dir holding node_modules): eslint <= 9 resolves its flat config from the spawn cwd.
+  const spawnCwd = sel.local ? path.join(sel.local, "../../..") : cwd;
+  return { tool, local: sel.local, argv, spawnCwd, timeout, manifest };
+}
+
+/**
+ * Classify one chain-tool spawn result (shared by `runChainLint` and `lintFilesHandler`): checkstyle by its stripped
+ * stdout (`classifyCheckstyleOutput`), every other tool by exit code (`classifyExit`) with stdout and stderr joined.
+ *
+ * @param tool - The tool that ran.
+ * @param result - Its spawnSync result, or null when `coalesceProjectCheck` skipped the run.
+ * @returns Verdict and findings text, or null on a skipped run, spawn error or signal (timeout included).
+ */
+function chainOutcome(tool: LintTool, result: SpawnSyncReturns<string> | null): { verdict: "clean" | "issues" | "skip"; text: string } | null {
+  if (!result || result.error || result.signal) return null;
+  let verdict: "clean" | "issues" | "skip";
+  let text: string;
+  if (tool.classify === "output") {
+    const out = classifyCheckstyleOutput(result.stdout);
+    verdict = out.status;
+    text = out.text;
+  } else {
+    verdict = classifyExit(tool.name, result.status);
+    text = `${result.stdout ?? ""}\n${result.stderr ?? ""}`;
+  }
+  return { verdict, text };
+}
+
 /**
  * Run the language's chain-selected tool and return its finding, or null on any
- * guard failure / clean / skip verdict. The tool comes from `selectLintTool`
- * (PATH, else a project-local `node_modules/.bin`, else npx) and runs through
- * `runLintTool`, which is handed the local bin when one was selected. selectLintTool's own null path
+ * guard failure / clean / skip verdict. `planChainLint` selects the tool (`selectLintTool`:
+ * PATH, else a project-local `node_modules/.bin`, else npx) and builds argv, timeout and spawn cwd; the run goes
+ * through `runLintTool`, which is handed the local bin when one was selected, and `chainOutcome` classifies it.
+ * selectLintTool's own null path
  * already covers "nothing on PATH, no local bin and nothing npx-eligible" --
  * no separate pre-check needed (an earlier `isToolAvailable`-based short-circuit here was
  * logically redundant with it and has been removed).
@@ -1297,47 +1370,22 @@ function buildSpawnOpts(cwd: string, timeout: number): SpawnSyncOptionsWithStrin
  */
 function runChainLint(lang: LangEntry, resolved: string, cwd: string, rel: string, coalesce = false): { ran: boolean; finding: Finding | null } {
   const none = { ran: false, finding: null };
-  const sel = selectLintTool(lang.chain, path.dirname(resolved), cwd);
-  if (!sel) return none;
-  const { tool } = sel;
-  // Gate cargo runs on a resolvable manifest: a stray .rs outside any Cargo
-  // project is a silent no-op, not a spurious "could not find Cargo.toml"
-  // exit-101 finding. Resolved once here and threaded through buildArgv and
-  // the target computation below -- resolveCargoManifest is a directory walk
-  // doing an existsSync per level, so re-resolving it for the same
-  // file/cwd pair would repeat that walk for no new answer.
-  let manifest: string | null = null;
-  if (tool.manifestPath) {
-    manifest = resolveCargoManifest(path.dirname(resolved), cwd);
-    if (!manifest) return none;
-  }
-
-  const argv = buildArgv(tool, resolved, cwd, manifest);
-  // Compile-heavy cargo tools get their own budget (mirrors TSC_SPAWN_TIMEOUT_MS).
-  const timeout = tool.manifestPath ? CARGO_SPAWN_TIMEOUT_MS : SPAWN_TIMEOUT_MS;
-  // A local bin runs from its package root (the dir holding node_modules): eslint <= 9 resolves its flat config from the spawn cwd.
-  const spawnCwd = sel.local ? path.join(sel.local, "../../..") : cwd;
+  const plan = planChainLint(lang, resolved, cwd);
+  if (!plan) return none;
+  const { tool, argv, timeout, spawnCwd, manifest } = plan;
   const spawnOpts = buildSpawnOpts(spawnCwd, timeout);
-  const spawnTool = () => runLintTool(tool, argv, spawnOpts, sel.local);
+  const spawnTool = () => runLintTool(tool, argv, spawnOpts, plan.local);
   // Directory- and crate-scoped tools check the whole package/crate: one run per FileChanged burst covers every file.
   const key = coalesce ? (tool.targetsDir ? hashPath(`${tool.name}:${path.dirname(resolved)}`) : manifest ? hashPath(`${tool.name}:${manifest}`) : null) : null;
   const result = key ? coalesceProjectCheck(key, resolved, timeout, spawnTool) : spawnTool();
-  if (!result || result.error || result.signal) return none;
+  const outcome = chainOutcome(tool, result);
+  if (!outcome) return none;
 
   // Cargo entries are neither file-scoped nor targetsDir: the natural target
   // is the crate directory (the dir containing the resolved Cargo.toml). The
   // gate above guarantees `manifest` is non-null here.
   const target = tool.targetsDir ? path.relative(cwd, path.dirname(resolved)) || "." : manifest ? path.relative(cwd, path.dirname(manifest)) || "." : rel;
-  let verdict: "clean" | "issues" | "skip";
-  let text: string;
-  if (tool.classify === "output") {
-    const out = classifyCheckstyleOutput(result.stdout);
-    verdict = out.status;
-    text = out.text;
-  } else {
-    verdict = classifyExit(tool.name, result.status);
-    text = `${result.stdout ?? ""}\n${result.stderr ?? ""}`;
-  }
+  const { verdict, text } = outcome;
   if (verdict === "skip") return none;
   // cargo prints paths relative to the crate (or workspace) root, go tools get the package dir, the rest run in cwd.
   const base = manifest ? path.dirname(manifest) : tool.targetsDir ? path.dirname(resolved) : spawnCwd;
@@ -1740,7 +1788,33 @@ function recordWrittenFor(s: { fp: string; real: string } | null): void {
 }
 
 /**
- * Lint `resolved` (chain tool unless JS/TS or CSS/SCSS has no lint config (see the no-config notes below), + tsc), gate the findings against `ranges` (null = whole file), and build the hook result.
+ * The chain entry for one file (shared by `lintResolved` and `lintFilesHandler`): the language from `EXT_MAP`, the
+ * no-config gates for JS/TS (no oxlint and no eslint config) and CSS/SCSS (no stylelint config), and for JS/TS with an
+ * oxlint config the `REGISTRY.oxlint` chain with `-c <config>` appended.
+ *
+ * @param resolved - Absolute path of the file.
+ * @param cwd - Project root (config search root).
+ * @returns `entry`: the chain to run, null when the file has no language or a no-config gate applies;
+ *   `oxlintConfig`: the selecting oxlint config (JS/TS only), else null.
+ */
+function chainEntryFor(resolved: string, cwd: string): { entry: LangEntry | null; oxlintConfig: string | null } {
+  const ext = path.extname(resolved).toLowerCase();
+  const lang = EXT_MAP[ext];
+  const oxlintConfig = lang === "jsts" ? resolveOxlintConfig(path.dirname(resolved), cwd) : null;
+  // No oxlint config and no eslint name up to / (eslint's own lookup): eslint would only exit 2 (skip), so no chain lint.
+  const noJstsConfig = lang === "jsts" && !oxlintConfig && !walkToRoot(path.dirname(resolved), (d) => ESLINT_CONFIG_FILENAMES.some((n) => existsSync(path.join(d, n))));
+  // No stylelint config (stylelint's own search places, see hasStylelintConfig): stylelint would only exit 78 (skip), so no chain lint.
+  const noCssConfig = lang === "css" && !hasStylelintConfig(path.dirname(resolved), cwd);
+  if (!lang || noJstsConfig || noCssConfig) return { entry: null, oxlintConfig };
+  // -c makes the detected config oxlint's root: oxlint ignores a nested
+  // oxlint.config.ts and rejects options.typeAware in a nested config otherwise.
+  const entry = oxlintConfig ? { chain: REGISTRY.oxlint.chain.map((t) => ({ ...t, args: [...t.args, "-c", oxlintConfig] })) } : REGISTRY[lang];
+  return { entry, oxlintConfig };
+}
+
+/**
+ * Lint `resolved` (chain tool from `chainEntryFor` unless JS/TS or CSS/SCSS has no lint config, run by `runChainLint`,
+ * + tsc), gate the findings against `ranges` (null = whole file), and build the hook result.
  *
  * @param resolved - Lexical absolute path of the in-scope file.
  * @param cwd - Payload cwd (spawn cwd and config search root).
@@ -1754,20 +1828,12 @@ function lintResolved(resolved: string, cwd: string, ranges: Array<[number, numb
   const rel = path.relative(cwd, resolved);
   const coalesce = hookEventName === "FileChanged";
   const ext = path.extname(resolved).toLowerCase();
-  const lang = EXT_MAP[ext];
   const typeCheckEligible = TYPE_CHECK_EXTS.has(ext);
-  const oxlintConfig = lang === "jsts" ? resolveOxlintConfig(path.dirname(resolved), cwd) : null;
-  // No oxlint config and no eslint name up to / (eslint's own lookup): eslint would only exit 2 (skip), so no chain lint.
-  const noJstsConfig = lang === "jsts" && !oxlintConfig && !walkToRoot(path.dirname(resolved), (d) => ESLINT_CONFIG_FILENAMES.some((n) => existsSync(path.join(d, n))));
-  // No stylelint config (stylelint's own search places, see hasStylelintConfig): stylelint would only exit 78 (skip), so no chain lint.
-  const noCssConfig = lang === "css" && !hasStylelintConfig(path.dirname(resolved), cwd);
+  const { entry, oxlintConfig } = chainEntryFor(resolved, cwd);
 
   const findings: Finding[] = [];
   let oxlintRan = false;
-  if (lang && !noJstsConfig && !noCssConfig) {
-    // -c makes the detected config oxlint's root: oxlint ignores a nested
-    // oxlint.config.ts and rejects options.typeAware in a nested config otherwise.
-    const entry = oxlintConfig ? { chain: REGISTRY.oxlint.chain.map((t) => ({ ...t, args: [...t.args, "-c", oxlintConfig] })) } : REGISTRY[lang];
+  if (entry) {
     const chain = runChainLint(entry, resolved, cwd, rel, coalesce);
     if (chain.finding) findings.push(chain.finding);
     oxlintRan = oxlintConfig !== null && chain.ran;
