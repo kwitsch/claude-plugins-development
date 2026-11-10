@@ -1,16 +1,18 @@
 ---
 id: F24
 title: Keep npm notice lines out of npx-run findings
-status: open
+status: done
 priority: low
-area: universal-lint/src/hooks/lint-file.mts (runLintTool npx branch, runChainLint)
+area: universal-lint/src/hooks/lint-file.mts (runNpx npx closure; chainOutcome)
 ---
 
 # F24 Keep npm notice lines out of npx-run findings
 
 ## Status
 
-Open. bench-other-langs finding (confirmed, low; cold cache only, never seen in real sessions).
+Done in 0.15.21. Shipped: the `npx` closure in `runNpx` passes `npm_config_update_notifier`, `npm_config_fund` and `npm_config_audit` = `false` (base `spawnOpts.env ?? process.env`); test `npx env: the bare npx spawn gets the notice-off npm_config vars...` in `tests/npx-fallback.test.mts`, plus a negative test for the cached-bin route. Honoring of `npm_config_update_notifier` verified via `@npmcli/config` `loadEnv` (case-insensitive, last env entry wins). Accepted residual: a user who sets both `NPM_CONFIG_UPDATE_NOTIFIER` and `npm_config_update_notifier`, with the upper-case one later in the environment, keeps their value for that child.
+
+Was: bench-other-langs finding (confirmed, low; cold cache only, never seen in real sessions).
 
 ## Problem
 
@@ -22,7 +24,7 @@ Fresh `npm_config_cache`, stylelint-config fixture: the first hook run (2865 ms)
 
 ## Code locations
 
-`runLintTool` (`spawnSync("npx", …)` inherits `process.env`); `runChainLint` (`text = stdout + "\n" + stderr`).
+The npx spawn is the closure in `runNpx` (a `spawnGroup` since F18), reached from `runLintTool`; the stdout+stderr join is `chainOutcome`.
 
 ## Approach
 
