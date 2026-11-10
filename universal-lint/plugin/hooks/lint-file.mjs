@@ -1,11 +1,12 @@
 #!/usr/bin/env node
-import { execFileSync, spawn, spawnSync } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { accessSync, constants as fsConstants, existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { availableParallelism, homedir, tmpdir } from "node:os";
 import path from "node:path";
 import process from "node:process";
 import { json } from "node:stream/consumers";
+import { setTimeout as sleep } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 const SPAWN_TIMEOUT_MS = 3e4;
 const NPX_SPAWN_TIMEOUT_MS = 55e3;
@@ -317,9 +318,9 @@ export function spawnGroup(cmd, argv, opts) {
 		child.on("close", (status, signal) => finish(status, signal, Buffer.concat(out).toString("utf8"), Buffer.concat(err).toString("utf8")));
 	});
 }
-function spawnBin(bin, argv, spawnOpts) {
+async function spawnBin(bin, argv, spawnOpts) {
 	const PATH = process.env.PATH ? path.dirname(bin) + path.delimiter + process.env.PATH : path.dirname(bin);
-	const result = spawnSync(bin, argv, {
+	const result = await spawnGroup(bin, argv, {
 		...spawnOpts,
 		env: {
 			...process.env,
@@ -329,8 +330,8 @@ function spawnBin(bin, argv, spawnOpts) {
 	const code = result.error && "code" in result.error ? result.error.code : undefined;
 	return code === "ENOENT" || code === "EACCES" ? null : result;
 }
-function runNpx(name, npmSpec, argv, spawnOpts) {
-	const npx = () => spawnSync("npx", [
+async function runNpx(name, npmSpec, argv, spawnOpts) {
+	const npx = () => spawnGroup("npx", [
 		"--yes",
 		npmSpec,
 		...argv
@@ -348,13 +349,13 @@ function runNpx(name, npmSpec, argv, spawnOpts) {
 		fresh = age >= 0 && age < NPX_REFRESH_MS;
 	} catch {}
 	if (fresh && !existsSync(path.join(dir, "concurrency.lock"))) {
-		const cached = spawnBin(path.join(dir, "node_modules", ".bin", name), argv, {
+		const cached = await spawnBin(path.join(dir, "node_modules", ".bin", name), argv, {
 			...spawnOpts,
 			timeout: NPX_SPAWN_TIMEOUT_MS
 		});
 		if (cached) return cached;
 	}
-	const result = npx();
+	const result = await npx();
 	if (!result.error) {
 		try {
 			mkdirSync(path.dirname(stamp), { recursive: true });
@@ -363,13 +364,13 @@ function runNpx(name, npmSpec, argv, spawnOpts) {
 	}
 	return result;
 }
-function runLintTool(tool, argv, spawnOpts, local) {
-	const viaLocal = local ? spawnBin(local, argv, spawnOpts) : null;
+async function runLintTool(tool, argv, spawnOpts, local) {
+	const viaLocal = local ? await spawnBin(local, argv, spawnOpts) : null;
 	if (viaLocal) return viaLocal;
 	if (tool.npmSpec && !onPath(tool.name)) return runNpx(tool.name, tool.npmSpec, argv, spawnOpts);
 	const spawnName = tool.spawnAs?.name ?? tool.name;
 	const spawnArgv = tool.spawnAs ? [...tool.spawnAs.args, ...argv] : argv;
-	return spawnSync(spawnName, spawnArgv, spawnOpts);
+	return spawnGroup(spawnName, spawnArgv, spawnOpts);
 }
 function walkUpToCwd(fileDir, cwd, checkDir) {
 	let dir = fileDir;
@@ -799,7 +800,7 @@ function chainOutcome(tool, result) {
 		text
 	};
 }
-function runChainLint(lang, resolved, cwd, rel, coalesce = false) {
+async function runChainLint(lang, resolved, cwd, rel, coalesce = false) {
 	const none = {
 		ran: false,
 		finding: null
@@ -810,7 +811,7 @@ function runChainLint(lang, resolved, cwd, rel, coalesce = false) {
 	const spawnOpts = buildSpawnOpts(spawnCwd, timeout);
 	const spawnTool = () => runLintTool(tool, argv, spawnOpts, plan.local);
 	const key = coalesce ? tool.targetsDir ? hashPath(`${tool.name}:${path.dirname(resolved)}`) : manifest ? hashPath(`${tool.name}:${manifest}`) : null : null;
-	const result = key ? coalesceProjectCheck(key, resolved, timeout, spawnTool) : spawnTool();
+	const result = key ? await coalesceProjectCheck(key, resolved, timeout, spawnTool) : await spawnTool();
 	const outcome = chainOutcome(tool, result);
 	if (!outcome) return none;
 	const target = chainTarget(tool, manifest, cwd, resolved);
@@ -833,7 +834,7 @@ export function tscOutputHasSourceDiagnostic(text) {
 	const plain = text.replace(ANSI_SGR_RE, "");
 	return TSC_SOURCE_DIAGNOSTIC_RE.test(plain);
 }
-function runTypeCheck(resolved, cwd, coalesce = false) {
+async function runTypeCheck(resolved, cwd, coalesce = false) {
 	const tsconfigPath = resolveTsconfig(path.dirname(resolved), cwd);
 	if (!tsconfigPath) return null;
 	const cachePath = tsBuildInfoPathFor(tsconfigPath);
@@ -845,7 +846,7 @@ function runTypeCheck(resolved, cwd, coalesce = false) {
 	const localTsc = path.join(cwd, "node_modules", ".bin", "tsc");
 	const bin = onPath("tsc") ? "tsc" : existsSync(localTsc) ? localTsc : null;
 	if (!bin) return null;
-	const spawnTsc = () => spawnSync(bin, [
+	const spawnTsc = () => spawnGroup(bin, [
 		"--noEmit",
 		"--incremental",
 		"--tsBuildInfoFile",
@@ -853,7 +854,7 @@ function runTypeCheck(resolved, cwd, coalesce = false) {
 		"-p",
 		tsconfigPath
 	], buildSpawnOpts(cwd, TSC_SPAWN_TIMEOUT_MS));
-	const result = coalesce ? coalesceProjectCheck(hashPath(`tsc:${tsconfigPath}`), resolved, TSC_SPAWN_TIMEOUT_MS, spawnTsc) : spawnTsc();
+	const result = coalesce ? await coalesceProjectCheck(hashPath(`tsc:${tsconfigPath}`), resolved, TSC_SPAWN_TIMEOUT_MS, spawnTsc) : await spawnTsc();
 	if (!result || result.error || result.signal) return null;
 	if (classifyExit("tsc", result.status) !== "issues") return null;
 	const text = `${result.stdout ?? ""}\n${result.stderr ?? ""}`;
@@ -1066,7 +1067,7 @@ function chainEntryFor(resolved, cwd) {
 		oxlintConfig
 	};
 }
-function lintResolved(resolved, cwd, ranges, hookEventName, label) {
+async function lintResolved(resolved, cwd, ranges, hookEventName, label) {
 	const rel = path.relative(cwd, resolved);
 	const coalesce = hookEventName === "FileChanged";
 	const ext = path.extname(resolved).toLowerCase();
@@ -1075,12 +1076,12 @@ function lintResolved(resolved, cwd, ranges, hookEventName, label) {
 	const findings = [];
 	let oxlintRan = false;
 	if (entry) {
-		const chain = runChainLint(entry, resolved, cwd, rel, coalesce);
+		const chain = await runChainLint(entry, resolved, cwd, rel, coalesce);
 		if (chain.finding) findings.push(chain.finding);
 		oxlintRan = oxlintConfig !== null && chain.ran;
 	}
 	if (typeCheckEligible && !(oxlintRan && oxlintConfig && oxlintConfigTypeChecks(oxlintConfig))) {
-		const tsResult = runTypeCheck(resolved, cwd, coalesce);
+		const tsResult = await runTypeCheck(resolved, cwd, coalesce);
 		if (tsResult) findings.push(tsResult);
 	}
 	const kept = findings.flatMap((f) => {
@@ -1094,18 +1095,18 @@ function lintResolved(resolved, cwd, ranges, hookEventName, label) {
 		additionalContext: `${label}: ${truncate(blocks.join("\n\n"))}`
 	} };
 }
-export function lintFileHandler(args, scoped = postToolScope(args)) {
+export async function lintFileHandler(args, scoped = postToolScope(args)) {
 	try {
 		const resolved = scoped?.fp;
 		if (!resolved) return {};
 		const ranges = editRanges(args);
 		if (ranges?.length === 0) return {};
-		return lintResolved(resolved, args.cwd, ranges, "PostToolUse", "universal-lint");
+		return await lintResolved(resolved, args.cwd, ranges, "PostToolUse", "universal-lint");
 	} catch {
 		return {};
 	}
 }
-export function lintFilesHandler(cwd, files) {
+export async function lintFilesHandler(cwd, files) {
 	let roots;
 	try {
 		roots = { cwd: realish(cwd) };
@@ -1145,7 +1146,7 @@ export function lintFilesHandler(cwd, files) {
 	}
 	const ran = new Set();
 	const chainBlocks = [];
-	const spawnPlan = (plan, argv) => chainOutcome(plan.tool, runLintTool(plan.tool, argv, buildSpawnOpts(plan.spawnCwd, plan.timeout), plan.local));
+	const spawnPlan = async (plan, argv) => chainOutcome(plan.tool, await runLintTool(plan.tool, argv, buildSpawnOpts(plan.spawnCwd, plan.timeout), plan.local));
 	const record = (members, out) => {
 		if (!out || out.verdict === "skip") return;
 		for (const m of members) ran.add(m.fp);
@@ -1162,11 +1163,11 @@ export function lintFilesHandler(cwd, files) {
 			const chunk = group.slice(i, i + step);
 			try {
 				const argv = fileScoped ? [...plan.argv.slice(0, -1), ...chunk.map((m) => m.fp)] : plan.argv;
-				const out = spawnPlan(plan, argv);
+				const out = await spawnPlan(plan, argv);
 				if ((!out || out.verdict === "skip") && fileScoped && chunk.length > 1) {
 					for (const m of chunk) {
 						try {
-							record([m], spawnPlan(m.plan, m.plan.argv));
+							record([m], await spawnPlan(m.plan, m.plan.argv));
 						} catch {}
 					}
 				} else {
@@ -1187,7 +1188,7 @@ export function lintFilesHandler(cwd, files) {
 	const tscBlocks = [];
 	for (const fp of tsFirst.values()) {
 		try {
-			const f = runTypeCheck(fp, cwd);
+			const f = await runTypeCheck(fp, cwd);
 			if (f) tscBlocks.push(`universal-lint: ${f.tool} found issues in ${f.target}:\n${truncate(f.text)}`);
 		} catch {}
 	}
@@ -1228,7 +1229,7 @@ export function acquireSlot(untilMs) {
 		sleep100();
 	}
 }
-export function coalesceProjectCheck(key, file, reserveMs, run) {
+export async function coalesceProjectCheck(key, file, reserveMs, run) {
 	const dir = path.resolve(process.env.CLAUDE_PLUGIN_DATA || tmpdir(), "fc-locks");
 	const lock = path.join(dir, `${key}.lock`);
 	const last = path.join(dir, `${key}.last`);
@@ -1236,7 +1237,7 @@ export function coalesceProjectCheck(key, file, reserveMs, run) {
 	try {
 		changed = statSync(file).ctimeMs;
 	} catch {
-		return run();
+		return await run();
 	}
 	const covered = () => {
 		try {
@@ -1252,15 +1253,15 @@ export function coalesceProjectCheck(key, file, reserveMs, run) {
 			mkdirSync(dir, { recursive: true });
 			if (claimFile(lock)) break;
 		} catch {
-			return run();
+			return await run();
 		}
-		if (process.uptime() * 1e3 >= FILE_CHANGED_BUDGET_MS - reserveMs) return run();
-		sleep100();
+		if (process.uptime() * 1e3 >= FILE_CHANGED_BUDGET_MS - reserveMs) return await run();
+		await sleep(100);
 	}
 	try {
 		if (covered()) return null;
 		const start = Date.now();
-		const r = run();
+		const r = await run();
 		if (!r.error && !r.signal) {
 			try {
 				writeFileSync(last, String(start));
@@ -1273,7 +1274,7 @@ export function coalesceProjectCheck(key, file, reserveMs, run) {
 		} catch {}
 	}
 }
-export function fileChangedHandler(args) {
+export async function fileChangedHandler(args) {
 	try {
 		if (args?.event === "unlink") return {};
 		const cwd = args?.cwd;
@@ -1321,7 +1322,7 @@ export function fileChangedHandler(args) {
 			return {};
 		}
 		try {
-			return lintResolved(s.fp, cwd, null, "FileChanged", "universal-lint (changed outside Write/Edit)");
+			return await lintResolved(s.fp, cwd, null, "FileChanged", "universal-lint (changed outside Write/Edit)");
 		} finally {
 			try {
 				if (slot) rmSync(slot, { force: true });
@@ -1407,11 +1408,11 @@ async function main() {
 			return;
 		}
 		let ctx;
-		if (ev === "FileChanged") ctx = fileChangedHandler(input).hookSpecificOutput?.additionalContext;
+		if (ev === "FileChanged") ctx = (await fileChangedHandler(input)).hookSpecificOutput?.additionalContext;
 		else {
 			const scoped = postToolScope(input);
 			recordWrittenFor(scoped);
-			ctx = lintFileHandler(input, scoped).hookSpecificOutput?.additionalContext;
+			ctx = (await lintFileHandler(input, scoped)).hookSpecificOutput?.additionalContext;
 		}
 		if (ctx) {
 			process.stderr.write(ctx + "\n");
