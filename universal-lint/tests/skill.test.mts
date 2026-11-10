@@ -150,6 +150,24 @@ test("lint-files.mjs reruns files singly when the batch run is a skip", () => {
   assert.match(r.stdout, /no findings/);
 });
 
+test("lint-files.mjs reruns files singly when the batch run is killed", () => {
+  const e = makeEnv();
+  e.stub("shellcheck", "printf \"%s %s\\n\" shellcheck \"$*\" >> \"$RECORD\"", "if [ $# -gt 1 ]; then kill -KILL $$; fi", "printf '%s\\n' \"$OUT\"", "exit 1");
+  const files = [e.file("a.sh", "echo hi\n"), e.file("b.sh", "echo hi\n"), e.file("c.sh", "echo hi\n")];
+  const r = driver(e, files, "a.sh:1:6: note: x [SC2086]");
+  assert.equal(r.status, 0);
+  const calls = e.lines();
+  assert.equal(calls.length, 4, calls.join("\n"));
+  for (const f of files) assert.ok(calls[0].includes(f), calls[0]);
+  files.forEach((f, i) => {
+    const line = calls[i + 1];
+    assert.ok(line.includes(f), line);
+    assert.equal(files.filter((g) => line.includes(g)).length, 1, line);
+  });
+  assert.match(r.stdout, /universal-lint: 3 block\(s\) with findings\./);
+  assert.ok(r.stdout.includes("shellcheck found issues in a.sh:"), r.stdout);
+});
+
 test("lint-files.mjs splits a tool's files into one run per argv prefix (markdownlint config vs none)", () => {
   const e = makeEnv();
   e.file("d1/.markdownlint.json", "{}\n");

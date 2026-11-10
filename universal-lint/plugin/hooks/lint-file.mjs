@@ -1050,7 +1050,7 @@ export function lintFilesHandler(cwd, files) {
 			try {
 				const argv = fileScoped ? [...plan.argv.slice(0, -1), ...chunk.map((m) => m.fp)] : plan.argv;
 				const out = spawnPlan(plan, argv);
-				if (out?.verdict === "skip" && fileScoped && chunk.length > 1) {
+				if ((!out || out.verdict === "skip") && fileScoped && chunk.length > 1) {
 					for (const m of chunk) {
 						try {
 							record([m], spawnPlan(m.plan, m.plan.argv));

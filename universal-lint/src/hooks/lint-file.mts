@@ -74,7 +74,7 @@ const CARGO_SPAWN_TIMEOUT_MS = 45000;
  * Most files per chain-tool spawn in `lintFilesHandler` (the skill driver's batch path). Caps the argv length (sized
  * for Linux/macOS ARG_MAX; no length-based chunking) and keeps one batch inside its unchanged per-spawn timeout:
  * 10 .md batched measured 143 ms, so 100 files stay far below `SPAWN_TIMEOUT_MS`. Also bounds the single-file reruns
- * of a chunk whose batch run was a skip.
+ * of a chunk whose batch run was a skip verdict, spawn error, signal or timeout.
  */
 const BATCH_MAX_FILES = 100;
 
@@ -1918,10 +1918,11 @@ export function lintFileHandler(args: PostToolUseHookInput, scoped: { fp: string
  * An `issues` run becomes the block `universal-lint: <tool> found issues in <targets>:\n<truncate(text)>`, where
  * `<targets>` joins the run's unique per-file targets with `", "` (the file, the package dir, or the crate dir,
  * relative to `cwd`) and names every file of the run, including those the tool found clean.
- * Fail-open per file: a multi-file chunk whose run is a skip verdict is rerun one file at a time with each file's own
- * argv (at most `BATCH_MAX_FILES` single spawns per chunk, each under the unchanged per-spawn timeout); a file whose
- * single run is also a skip contributes nothing. A spawn error, signal or timeout drops the whole chunk's findings
- * for this run, without a rerun. tsc runs through `runTypeCheck` once per distinct `resolveTsconfig` result, with
+ * Fail-open per file: a multi-file chunk whose run is a skip verdict, spawn error, signal or timeout is rerun one file at a
+ * time with each file's own argv (at most `BATCH_MAX_FILES` single spawns per chunk, each under the unchanged per-spawn
+ * timeout); a file whose single run is also a skip contributes nothing. A multi-file chunk whose run ends in a spawn
+ * error, signal or timeout is rerun the same way (one batch plus at most BATCH_MAX_FILES single spawns per chunk, so a
+ * pathological file costs its own timeout a second time and is then the only file dropped). tsc runs through `runTypeCheck` once per distinct `resolveTsconfig` result, with
  * the group's first file; a file is left out, as in `lintResolved`, when its oxlint run (its chunk or its single
  * rerun) reached a clean or issues verdict with a config whose `options.typeCheck` is true. The tsc block carries the
  * ungated whole-project output once per tsconfig. Any throw drops only the file, chunk or tsconfig group it happened
@@ -1984,8 +1985,8 @@ export function lintFilesHandler(cwd: string, files: readonly string[]): string[
       try {
         const argv = fileScoped ? [...plan.argv.slice(0, -1), ...chunk.map((m) => m.fp)] : plan.argv;
         const out = spawnPlan(plan, argv);
-        // Per-file fail-open: one unparsable file or tool crash must not drop the other files' findings.
-        if (out?.verdict === "skip" && fileScoped && chunk.length > 1) {
+        // Per-file fail-open: one unparsable or pathological file, a tool crash, kill or timeout must not drop the other files' findings.
+        if ((!out || out.verdict === "skip") && fileScoped && chunk.length > 1) {
           for (const m of chunk) {
             try {
               record([m], spawnPlan(m.plan, m.plan.argv));
