@@ -8,7 +8,8 @@
  * the file (`lintFilesHandler` scopes every file like the hook and silently skips files outside it). Batched: one
  * linter run per group of files sharing tool, local bin, spawn cwd and config-derived argv (one per package dir or
  * crate for go/cargo), at most `BATCH_MAX_FILES` files per run, tsc once per tsconfig; the report has one block per
- * tool run, naming every file of the run. `lintFilesHandler` is synchronous (spawnSync internally).
+ * tool run, naming every file of the run. `lintFilesHandler` is async (one spawn at a time, each a detached process group
+ * killed as a whole on timeout); the driver awaits it (top-level await).
  *
  * @packageDocumentation
  */
@@ -33,10 +34,10 @@ const paths = readFileSync(listFile, "utf8")
   .map((line) => line.trim())
   .filter((line) => line.length > 0);
 
-/** One findings block per tool run; empty on any throw (fail open, matching the hook). */
+/** One findings block per tool run; empty on any throw or rejection (fail open, matching the hook). */
 let blocks: string[];
 try {
-  blocks = lintFilesHandler(cwd, paths.map((p) => resolve(cwd, p)));
+  blocks = await lintFilesHandler(cwd, paths.map((p) => resolve(cwd, p)));
 } catch {
   blocks = [];
 }
