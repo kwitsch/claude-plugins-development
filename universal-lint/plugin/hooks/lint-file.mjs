@@ -15,6 +15,7 @@ const MAX_CONTEXT_CHARS = 4e3;
 const MAX_BUFFER_BYTES = 10 * 1024 * 1024;
 const TSC_SPAWN_TIMEOUT_MS = 45e3;
 const CARGO_SPAWN_TIMEOUT_MS = 45e3;
+const BATCH_MAX_FILES = 100;
 export const WATCH_LIMIT = 5e3;
 const GIT_TIMEOUT_MS = 1e4;
 const HOOK_TIMEOUT_MS = 9e4;
@@ -984,6 +985,94 @@ export function lintFileHandler(args, scoped = postToolScope(args)) {
 	} catch {
 		return {};
 	}
+}
+export function lintFilesHandler(cwd, files) {
+	let roots;
+	try {
+		roots = { cwd: realish(cwd) };
+	} catch {
+		return [];
+	}
+	const scoped = new Set();
+	for (const file of files) {
+		const s = scopedTarget(cwd, file, undefined, roots);
+		if (s) scoped.add(s.fp);
+	}
+	const oxlintConfigs = new Map();
+	const groups = new Map();
+	for (const fp of scoped) {
+		try {
+			const { entry, oxlintConfig } = chainEntryFor(fp, cwd);
+			const plan = entry ? planChainLint(entry, fp, cwd) : null;
+			oxlintConfigs.set(fp, oxlintConfig);
+			if (!plan) continue;
+			const fileScoped = !plan.tool.targetsDir && !plan.tool.manifestPath;
+			const key = [
+				plan.tool.name,
+				plan.local ?? "",
+				plan.spawnCwd,
+				...fileScoped ? plan.argv.slice(0, -1) : plan.argv
+			].join("\0");
+			const group = groups.get(key);
+			if (group) group.push({
+				fp,
+				plan
+			});
+			else groups.set(key, [{
+				fp,
+				plan
+			}]);
+		} catch {}
+	}
+	const ran = new Set();
+	const chainBlocks = [];
+	const spawnPlan = (plan, argv) => chainOutcome(plan.tool, runLintTool(plan.tool, argv, buildSpawnOpts(plan.spawnCwd, plan.timeout), plan.local));
+	const record = (members, out) => {
+		if (!out || out.verdict === "skip") return;
+		for (const m of members) ran.add(m.fp);
+		if (out.verdict !== "issues") return;
+		const { tool, manifest } = members[0].plan;
+		const targets = new Set(members.map(({ fp }) => tool.targetsDir ? path.relative(cwd, path.dirname(fp)) || "." : manifest ? path.relative(cwd, path.dirname(manifest)) || "." : path.relative(cwd, fp)));
+		chainBlocks.push(`universal-lint: ${tool.name} found issues in ${[...targets].join(", ")}:\n${truncate(out.text)}`);
+	};
+	for (const group of groups.values()) {
+		const { plan } = group[0];
+		const fileScoped = !plan.tool.targetsDir && !plan.tool.manifestPath;
+		const step = fileScoped ? BATCH_MAX_FILES : group.length;
+		for (let i = 0; i < group.length; i += step) {
+			const chunk = group.slice(i, i + step);
+			try {
+				const argv = fileScoped ? [...plan.argv.slice(0, -1), ...chunk.map((m) => m.fp)] : plan.argv;
+				const out = spawnPlan(plan, argv);
+				if (out?.verdict === "skip" && fileScoped && chunk.length > 1) {
+					for (const m of chunk) {
+						try {
+							record([m], spawnPlan(m.plan, m.plan.argv));
+						} catch {}
+					}
+				} else {
+					record(chunk, out);
+				}
+			} catch {}
+		}
+	}
+	const tsFirst = new Map();
+	for (const [fp, oxlintConfig] of oxlintConfigs) {
+		try {
+			if (!TYPE_CHECK_EXTS.has(path.extname(fp).toLowerCase())) continue;
+			if (oxlintConfig && ran.has(fp) && oxlintConfigTypeChecks(oxlintConfig)) continue;
+			const tsconfig = resolveTsconfig(path.dirname(fp), cwd);
+			if (tsconfig && !tsFirst.has(tsconfig)) tsFirst.set(tsconfig, fp);
+		} catch {}
+	}
+	const tscBlocks = [];
+	for (const fp of tsFirst.values()) {
+		try {
+			const f = runTypeCheck(fp, cwd);
+			if (f) tscBlocks.push(`universal-lint: ${f.tool} found issues in ${f.target}:\n${truncate(f.text)}`);
+		} catch {}
+	}
+	return [...chainBlocks, ...tscBlocks];
 }
 function slotStale(slot) {
 	try {

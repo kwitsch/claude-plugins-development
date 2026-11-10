@@ -70,6 +70,14 @@ const TSC_SPAWN_TIMEOUT_MS = 45000;
  */
 const CARGO_SPAWN_TIMEOUT_MS = 45000;
 
+/**
+ * Most files per chain-tool spawn in `lintFilesHandler` (the skill driver's batch path). Caps the argv length (sized
+ * for Linux/macOS ARG_MAX; no length-based chunking) and keeps one batch inside its unchanged per-spawn timeout:
+ * 10 .md batched measured 143 ms, so 100 files stay far below `SPAWN_TIMEOUT_MS`. Also bounds the single-file reruns
+ * of a chunk whose batch run was a skip.
+ */
+const BATCH_MAX_FILES = 100;
+
 /** Above this many lintable files the watch list is empty (nothing watched), as dprint's watch-list.mts. */
 export const WATCH_LIMIT = 5000;
 
@@ -1882,6 +1890,131 @@ export function lintFileHandler(args: PostToolUseHookInput, scoped: { fp: string
   } catch {
     return {};
   }
+}
+
+/**
+ * Batch entry of the universal-lint skill driver: lint `files` with the hook's own resolution, one chain-tool run per
+ * group of files and one tsc run per tsconfig, and return one findings block per run.
+ *
+ * @remarks
+ * Read-only and whole-file: no edit-range gate (`gateFinding` is not called), no `coalesceProjectCheck`. Every file is
+ * scoped once with `scopedTarget` against one pre-resolved `realish(cwd)` (no scratchpad exclusion, as the driver
+ * never had one); a path listed twice is linted once. Each in-scope file is planned with `chainEntryFor` and
+ * `planChainLint` and grouped by tool name, local bin, spawn cwd and argv: file-scoped tools by the argv minus its
+ * trailing file target, so files with different config-derived argv (markdownlint/yamllint guards, oxlint `-c`)
+ * never share a run; go (`targetsDir`) and cargo (`manifestPath`) by the full argv, one run per package dir or crate
+ * without extra targets. A file-scoped group spawns once per chunk of at most `BATCH_MAX_FILES` files with all chunk
+ * files appended as targets, through `runLintTool` and the unchanged per-spawn timeout; `chainOutcome` classifies it.
+ * An `issues` run becomes the block `universal-lint: <tool> found issues in <targets>:\n<truncate(text)>`, where
+ * `<targets>` joins the run's unique per-file targets with `", "` (the file, the package dir, or the crate dir,
+ * relative to `cwd`) and names every file of the run, including those the tool found clean.
+ * Fail-open per file: a multi-file chunk whose run is a skip verdict is rerun one file at a time with each file's own
+ * argv (at most `BATCH_MAX_FILES` single spawns per chunk, each under the unchanged per-spawn timeout); a file whose
+ * single run is also a skip contributes nothing. A spawn error, signal or timeout drops the whole chunk's findings
+ * for this run, without a rerun. tsc runs through `runTypeCheck` once per distinct `resolveTsconfig` result, with
+ * the group's first file; a file is left out, as in `lintResolved`, when its oxlint run (its chunk or its single
+ * rerun) reached a clean or issues verdict with a config whose `options.typeCheck` is true. The tsc block carries the
+ * ungated whole-project output once per tsconfig. Any throw drops only the file, chunk or tsconfig group it happened
+ * in.
+ *
+ * @param cwd - Project root: scope root, config search root and default spawn cwd.
+ * @param files - Absolute or cwd-relative paths to lint, in report order.
+ * @returns The findings blocks, chain runs in first-appearance group order followed by tsc runs in tsconfig order;
+ *   `[]` when nothing was found or `cwd` cannot be resolved.
+ */
+export function lintFilesHandler(cwd: string, files: readonly string[]): string[] {
+  let roots: { cwd: string };
+  try {
+    roots = { cwd: realish(cwd) };
+  } catch {
+    return []; // unresolvable cwd: nothing is in scope
+  }
+  const scoped = new Set<string>();
+  for (const file of files) {
+    const s = scopedTarget(cwd, file, undefined, roots);
+    if (s) scoped.add(s.fp);
+  }
+
+  // Plan every file; group key = tool, local bin, spawn cwd and argv (minus the file target for file-scoped tools).
+  const oxlintConfigs = new Map<string, string | null>();
+  const groups = new Map<string, Array<{ fp: string; plan: ChainPlan }>>();
+  for (const fp of scoped) {
+    try {
+      const { entry, oxlintConfig } = chainEntryFor(fp, cwd);
+      const plan = entry ? planChainLint(entry, fp, cwd) : null;
+      oxlintConfigs.set(fp, oxlintConfig);
+      if (!plan) continue;
+      const fileScoped = !plan.tool.targetsDir && !plan.tool.manifestPath;
+      const key = [plan.tool.name, plan.local ?? "", plan.spawnCwd, ...(fileScoped ? plan.argv.slice(0, -1) : plan.argv)].join("\0");
+      const group = groups.get(key);
+      if (group) group.push({ fp, plan });
+      else groups.set(key, [{ fp, plan }]);
+    } catch {
+      // fail open: drop this file only
+    }
+  }
+
+  const ran = new Set<string>();
+  const chainBlocks: string[] = [];
+  const spawnPlan = (plan: ChainPlan, argv: string[]) => chainOutcome(plan.tool, runLintTool(plan.tool, argv, buildSpawnOpts(plan.spawnCwd, plan.timeout), plan.local));
+  const record = (members: Array<{ fp: string; plan: ChainPlan }>, out: ReturnType<typeof chainOutcome>): void => {
+    if (!out || out.verdict === "skip") return;
+    for (const m of members) ran.add(m.fp);
+    if (out.verdict !== "issues") return;
+    const { tool, manifest } = members[0].plan;
+    const targets = new Set(members.map(({ fp }) => (tool.targetsDir ? path.relative(cwd, path.dirname(fp)) || "." : manifest ? path.relative(cwd, path.dirname(manifest)) || "." : path.relative(cwd, fp))));
+    chainBlocks.push(`universal-lint: ${tool.name} found issues in ${[...targets].join(", ")}:\n${truncate(out.text)}`);
+  };
+  for (const group of groups.values()) {
+    const { plan } = group[0];
+    const fileScoped = !plan.tool.targetsDir && !plan.tool.manifestPath;
+    const step = fileScoped ? BATCH_MAX_FILES : group.length;
+    for (let i = 0; i < group.length; i += step) {
+      const chunk = group.slice(i, i + step);
+      try {
+        const argv = fileScoped ? [...plan.argv.slice(0, -1), ...chunk.map((m) => m.fp)] : plan.argv;
+        const out = spawnPlan(plan, argv);
+        // Per-file fail-open: one unparsable file or tool crash must not drop the other files' findings.
+        if (out?.verdict === "skip" && fileScoped && chunk.length > 1) {
+          for (const m of chunk) {
+            try {
+              record([m], spawnPlan(m.plan, m.plan.argv));
+            } catch {
+              // fail open: drop this file only
+            }
+          }
+        } else {
+          record(chunk, out);
+        }
+      } catch {
+        // fail open: drop this chunk only
+      }
+    }
+  }
+
+  // tsc once per tsconfig, with the first listed file it governs.
+  const tsFirst = new Map<string, string>();
+  for (const [fp, oxlintConfig] of oxlintConfigs) {
+    try {
+      if (!TYPE_CHECK_EXTS.has(path.extname(fp).toLowerCase())) continue;
+      // Skip tsc only when oxlint actually ran with a typeCheck config (as in lintResolved).
+      if (oxlintConfig && ran.has(fp) && oxlintConfigTypeChecks(oxlintConfig)) continue;
+      const tsconfig = resolveTsconfig(path.dirname(fp), cwd);
+      if (tsconfig && !tsFirst.has(tsconfig)) tsFirst.set(tsconfig, fp);
+    } catch {
+      // fail open: drop this file only
+    }
+  }
+  const tscBlocks: string[] = [];
+  for (const fp of tsFirst.values()) {
+    try {
+      const f = runTypeCheck(fp, cwd);
+      if (f) tscBlocks.push(`universal-lint: ${f.tool} found issues in ${f.target}:\n${truncate(f.text)}`);
+    } catch {
+      // fail open: drop this tsconfig's block only
+    }
+  }
+  return [...chainBlocks, ...tscBlocks];
 }
 
 /**
