@@ -69,7 +69,7 @@ paths:
 - **Range source:** the Edit `tool_response.structuredPatch` hunks (`editRanges`, inclusive 0-based lines): each run of `+` lines; a run of only `-` lines (pure deletion) gives the two lines around the deletion point, so deletions are linted too. `\ No newline at end of file` is not a line.
 - **Whole file:** `Write`, any non-`Edit` tool, or a missing/malformed `structuredPatch`. An empty patch (nothing changed) returns `{}` without linting.
 - **Location extraction**, per line after stripping `ANSI_SGR_RE`; first match wins:
-  - A `LOC_PATH_RE` `<path>.<ext>[:(]<line>`: ruff, ktlint, golangci-lint, go vet, checkstyle `[WARN] /abs/A.java:3:`, markdownlint `a.md:12`, psalm, oxlint `,-[src/a.ts:3:7]`, cargo `--> src/a.rs:12:5`, tsc `a.ts(12,5)`/`a.ts:12:5`.
+  - A `LOC_PATH_RE` `<path>.<ext>[:(]<line>`: ruff, ktlint, golangci-lint, go vet, checkstyle `[WARN] /abs/A.java:3:`, markdownlint `a.md:12`, psalm, oxlint `,-[src/a.ts:3:7]`, cargo `--> src/a.rs:12:5`, tsc `a.ts(12,5)`/`a.ts:12:5` (match anchored at a token start by a lookbehind; the unanchored form was quadratic on a long line, F27)
   - B `LOC_ROW_RE` `  <line>:<col>  ` rows (path-less, own file): eslint stylish, stylelint stylish, yamllint standard.
   - C `LOC_SHELLCHECK_RE` `In <file> line <n>:` (path-less, own file): shellcheck's default tty format.
 - **Base directory** (`Finding.base`, set in `runChainLint`/`runTypeCheck`): cargo → directory of the `--manifest-path` Cargo.toml; golangci-lint/go vet (`targetsDir`) → the edited file's directory; tsc and every other tool → the spawn cwd: the payload `cwd`, or the directory holding the selected local `node_modules`.
