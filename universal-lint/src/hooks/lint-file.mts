@@ -28,7 +28,7 @@
  */
 import { execFileSync, spawn } from "node:child_process";
 import type { ChildProcess, SpawnSyncOptionsWithStringEncoding, SpawnSyncReturns } from "node:child_process";
-import { createHash } from "node:crypto";
+import type { Hash } from "node:crypto";
 import { accessSync, constants as fsConstants, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { availableParallelism, homedir, tmpdir } from "node:os";
 import path from "node:path";
@@ -36,6 +36,19 @@ import process from "node:process";
 import { json } from "node:stream/consumers";
 import { setTimeout as sleep } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
+
+/**
+ * `node:crypto`'s `createHash`, loading the module on first use (`process.getBuiltinModule`, synchronous) so events that never
+ * hash (out-of-scope Write/Edit, FileChanged `unlink`, SessionStart/CwdChanged) skip its load, about 7 ms per spawn (F26).
+ * Needs Node >= 22.3 / 20.16 for `process.getBuiltinModule` (the floor was 18.14 for `os.availableParallelism`); on older
+ * Node the TypeError lands in `main`'s catch-all: no lint, exit 0.
+ *
+ * @param algorithm - Hash algorithm name (`sha256`, `sha512`).
+ * @returns A fresh hash object.
+ */
+function createHash(algorithm: string): Hash {
+  return process.getBuiltinModule("node:crypto").createHash(algorithm);
+}
 
 /** Inner linter timeout: kills the child's whole process group (SIGTERM, SIGKILL after `KILL_GRACE_MS`); the hook-level timeout (hooks.json timeout: 90 = the lint budget) is the backstop. */
 const SPAWN_TIMEOUT_MS = 30000;

@@ -52,6 +52,10 @@ test("lint-file.mjs is executable and has a node shebang (it is invoked directly
   assert.equal(readFileSync(HOOK, "utf8").split("\n")[0], "#!/usr/bin/env node");
 });
 
+test("lint-file.mjs has no static node:crypto import (loaded lazily on first hash, F26)", () => {
+  assert.doesNotMatch(readFileSync(HOOK, "utf8"), /^import[^;]*from "node:crypto";/m);
+});
+
 test("plugin README first ## heading is Install, with the install command and no ## Hooks section", () => {
   const readme = readFileSync(path.join(PLUGIN, "README.md"), "utf8");
   assert.equal(/^## .*/m.exec(readme)?.[0], "## Install");
