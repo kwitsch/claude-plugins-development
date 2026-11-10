@@ -1,7 +1,7 @@
 ---
 id: F20
 title: One readdirSync per directory in the upward config walks (9P)
-status: open
+status: done
 priority: low
 area: universal-lint/src/hooks/lint-file.mts (walkUpToCwd, walkToRoot, resolveOxlintConfig, hasProjectMarkdownlintConfig, hasStylelintConfig, resolveCheckstyleConfig, hasProjectYamllintConfig, resolveTsconfig, resolveCargoManifest)
 ---
@@ -10,7 +10,13 @@ area: universal-lint/src/hooks/lint-file.mts (walkUpToCwd, walkToRoot, resolveOx
 
 ## Status
 
-Open. Merges static config-walk finding (adjusted: medium → low; 0 of 4986 session Write/Edit targeted /mnt paths) and bench-other-langs markdownlint-walk finding (confirmed, low).
+Shipped in 0.15.17. Every upward config walk (oxlint/eslint, eslint-root, markdownlint, yamllint, stylelint incl. the `package.json` probe, checkstyle, tsconfig, Cargo, `localBin`, `runNpx`) probes through `configExists(dir, name)`. When the walked path lexically starts with `/mnt/` (never realpath) one `readdirSync` per directory and process is memoized as a set of upper-cased names; a name whose first path segment is not listed is skipped, every listed hit is confirmed by `existsSync`, and a `readdirSync` error stores `null` (plain `existsSync` for that directory). Elsewhere `configExists` is today's `existsSync`. A symlinked path from ext4 into `/mnt` keeps today's probes (correct, slow); `/mnt/wsl*`, `/mnt` data disks and non-WSL `/mnt` mounts take the readdir branch (correct, cost differs). The memo lives per process and is never invalidated; the skill driver's batch sees one listing per directory. Nothing the process does writes into the project tree (npx installs into the npm cache; tsc buildinfo and the MD013 config go to `CLAUDE_PLUGIN_DATA`/tmpdir); an external install mid-batch makes at most one lint fall through to the npx-cached bin, the next event sees the bin.
+
+Re-measured 2026-11-10 (WSL2 6.18.33.2, node v24.22.2), microbench over the same ancestor chain: 9P, 9 levels (`/mnt/c/repos/blocky-dev/.git/logs/refs/remotes`), oxlint + eslint-root + markdownlint walks 433-466 ms with `existsSync`, 19.2-19.8 ms with the memoized prefilter, identical hits; ext4, 11 levels: 1.2-4.2 ms vs 0.3-0.8 ms (sub-ms either way). About 2.4 ms per 9P miss today, not the 7-8 ms quoted in Evidence (the ratio reproduced, the absolute numbers did not). `readdirSync` on ext4: `/home/kwitsch` 0.03 ms, `/tmp` (24,130 entries) 16 ms; huge Windows dir (System32) 20.3 ms of probes vs 19.3 ms readdir. Shipped build: `resolveOxlintConfig(deep, root)` + `resolveOxlintConfig(deep, "/")` + `hasProjectMarkdownlintConfig(deep)` median of 5 fresh processes 20.8 ms (base 0.15.16 475.7 ms); identity run over 45 directories of /mnt/c/repos/blocky-dev (`.git` and `node_modules` pruned, batches of 50 per fresh process, resolvers in the hook's order): 0 differences; `scripts/perf.mts 5` on ext4 unchanged within noise.
+
+Gate decision: only `/mnt/` paths take the readdir branch. ext4 gains nothing measurable and an ungated memo would cost about 16 ms per hook under a huge ancestor such as `/tmp`, where every test and perf fixture lives. Tests force the branch on ext4 through `configExists`'s optional `prefilter` argument.
+
+Not taken: the approach below (exact-name set, empty set on readdir error, membership as existence) changes results: 9P is case-insensitive (`existsSync` finds `ESLint.config.js` for `eslint.config.js`, an exact set misses it), a dangling symlink is listed but does not exist (it would select a broken `.oxlintrc.json`), and an x-without-r directory makes `readdirSync` throw while `existsSync` of a child succeeds (an empty set is a false negative). Hence prefilter plus `existsSync` confirm, upper-case folding (NTFS upcase direction) and `null` on error.
 
 ## Problem
 
