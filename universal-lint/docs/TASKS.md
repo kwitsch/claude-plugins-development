@@ -30,7 +30,7 @@ Legend: `[x]` finished. `[ ]` not finished; tag = `open` (code change, not start
 
 - [x] [F13](tasks/F13-dedup-whole-project-checks.md) Run tsc / go vet / cargo once per FileChanged burst, not once per file. Shipped in 0.15.12.
 - [x] [F15](tasks/F15-rearm-watches-after-checkout.md) Re-arm FileChanged watches after `git checkout` (prototype first). Closed docs-only in 0.15.13: on Claude Code 2.1.319 the loss is limited to unlink-reported files (1 and 3 of 50 in two runs) and a re-emitted list cannot re-arm them (measured; upstream report in the task doc).
-- [ ] [F16](tasks/F16-skill-driver-batching.md) Skill driver: one linter call per tool group and one tsc per tsconfig `open` priority:medium. After F03 and F09 (they remove most of today's cost).
+- [x] [F16](tasks/F16-skill-driver-batching.md) Skill driver: one linter call per tool group and one tsc per tsconfig. Shipped in 0.15.14.
 
 ## Stage 3: edge cases and low priority
 
