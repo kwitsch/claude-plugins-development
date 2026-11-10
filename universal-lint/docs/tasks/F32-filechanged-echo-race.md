@@ -19,7 +19,7 @@ Closed docs-only in 0.15.28. Measured on 0.15.27: an instrumented scratch copy o
 
 ## Problem
 
-Claude Code reports Claude's own Write/Edit of a watched file as FileChanged. Normally the digest PostToolUse recorded matches and the echo is skipped (about 40-54 ms). If the echo arrives before `recordWritten` lands (documented race) or no digest was written (F05), a full duplicate lint runs (about 1 s CPU for TS/md, duplicate findings). How often the race happens is unknown; transcripts do not record FileChanged runs.
+Claude Code reports Claude's own Write/Edit of a watched file as FileChanged. Normally the digest PostToolUse recorded matches and the echo is skipped (about 40-54 ms). If the echo arrives before `recordWritten` lands (documented race) or no digest was written (F05), a full duplicate lint runs (about 1 s CPU for TS/md, duplicate findings). How often the race happens was unknown (measured in 0.15.28: see Status); transcripts do not record FileChanged runs.
 
 ## Evidence
 
