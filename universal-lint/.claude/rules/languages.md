@@ -4,7 +4,7 @@ paths:
   - "tests/{php,rust,stylelint,go,checkstyle,core,oxlint}.test.mts"
 ---
 
-# Per-language notes: JS/TS, CSS/SCSS, PHP, Rust, JSON
+# Per-language notes: JS/TS, CSS/SCSS, PHP, Rust, Go, JSON
 
 ## `.scss` limitation (accepted)
 
@@ -36,6 +36,16 @@ paths:
   - A `.rs` file outside any Cargo project is a silent no-op, gated in `runChainLint` before spawning.
 - **Coarse contract:** `classifyExit`'s shared `cargo-clippy`/`cargo` case is `0` clean, any non-zero `issues` (101 on a compile error), as for `go`/`phpstan` — a tool malfunction isn't separable from a finding by exit code (accepted). `status === null` (timeout/signal) skips before the switch.
 - `CARGO_SPAWN_TIMEOUT_MS` (45 s) is a separate, larger budget (they compile the crate). A cold build can exceed it: the first leaf-crate lint after a fresh clone or `cargo clean` took 45,068 ms through the hook (single run, 0.14.0 analysis of 2026-11-07; F29 doc), was killed and skipped silently (fail-open: a timeout is `status === null`, and the selected tool is not retried as `cargo check`), so that edit's clippy finding is lost; the next run took 13,664 ms and reported normally (a cold core crate: 6.8 s). A first-run budget or warmup would be a code follow-up.
+- **Scope: one crate, dependents unchecked.** `--manifest-path` names only the nearest `Cargo.toml` (`resolveCargoManifest`) and `buildArgv` passes no `-p`/`--workspace`, so cargo checks that package and its dependencies, never the crates that depend on it. An edit to a core crate that breaks a dependent is reported only when a file of that dependent is linted.
+- **Warm cost and concurrency** (0.14.0 analysis of 2026-11-07, 8-crate workspace copy, one machine under load, see `docs/TASKS.md`): warm no-change hook run 185-329 ms (`cargo clippy` alone 130-307 ms); leaf-crate edit 770-925 ms; core `lib.rs` edit 630-712 ms median, 4,880 ms max (the first edit that invalidates the dependents); alternating `cargo check` and `cargo clippy` on one target dir rebuilds once (3.9 s, then 0.4 s). Concurrent cargo runs on one target dir block on cargo's own build-directory lock, not on a hook lock: a core and a leaf edit at once took 0.79 s and 2.5-2.7 s (the leaf run waits, then re-checks the dependent chain).
+- **Bursts:** PostToolUse `Write`/`Edit` takes no slot and no lock (no debounce, user decision), so N edits in one crate run N full cargo invocations (burst of 4: 910-985 ms each, same analysis). FileChanged coalesces them: `coalesceProjectCheck` (F13, 0.15.12) serializes per `Cargo.toml` key before cargo's lock and skips a run already covered by a completed one (`hook-design.md` "Project-check lock"); different crates sharing one target dir still serialize only inside cargo.
+
+## Go: golangci-lint/go vet, package scope, and cold GOCACHE
+
+- `.go` routes to `golangci-lint run` (first entry of the go chain) → `go vet` (second entry), both `targetsDir` and PATH-only. `selectLintTool` takes the first one on `PATH`, so with golangci-lint installed `go vet` never runs.
+- **Scope: one package.** `buildArgv` appends the edited file's directory, so each lint checks that whole package and only it: importing and sibling packages are not checked. Same-package edits are one coalescing key under FileChanged (`<tool>:<package dir>`).
+- **Cost** (0.14.0 analysis of 2026-11-07, 14.6k-line module, `go vet` with golangci-lint absent, one machine under load): warm hook run 495-546 ms (`go vet` alone 338-381 ms); cold `GOCACHE` 8.7-9.4 s for `go vet`, inside `SPAWN_TIMEOUT_MS` (30 s, the go chain's budget; only cargo gets `CARGO_SPAWN_TIMEOUT_MS`). A cold `golangci-lint` run is unmeasured and gets the same 30 s; a timeout is `status === null`, skipped silently and not retried as `go vet`. The hook neither sets nor clears `GOCACHE`; the go tool's own cache decides. On WSL about 95 ms of each `go vet` is its gccgo PATH scan (F28, `hook-design.md`).
+- **Bursts:** PostToolUse `Write`/`Edit` runs every edit (no debounce): 4 concurrent same-package edits ran 4 `go vet`s, 690-790 ms each (same analysis). FileChanged coalesces them via `coalesceProjectCheck` (F13: go20 burst, 20 `go vet` spawns down to 1).
 
 ## JS/TS: eslint vs oxlint
 
