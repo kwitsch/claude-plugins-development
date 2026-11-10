@@ -29,7 +29,7 @@
 import { execFileSync, spawn } from "node:child_process";
 import type { ChildProcess, SpawnSyncOptionsWithStringEncoding, SpawnSyncReturns } from "node:child_process";
 import { createHash } from "node:crypto";
-import { accessSync, constants as fsConstants, existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { accessSync, constants as fsConstants, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { availableParallelism, homedir, tmpdir } from "node:os";
 import path from "node:path";
 import process from "node:process";
@@ -686,6 +686,37 @@ async function runLintTool(tool: LintTool, argv: string[], spawnOpts: SpawnSyncO
   const spawnName = tool.spawnAs?.name ?? tool.name;
   const spawnArgv = tool.spawnAs ? [...tool.spawnAs.args, ...argv] : argv;
   return spawnGroup(spawnName, spawnArgv, spawnOpts);
+}
+
+/** Per-process memo for configExists: a prefiltered directory -> its entry names upper-cased, or null when readdirSync failed (each hook event is its own process; never invalidated). */
+const dirEntries = new Map<string, Set<string> | null>();
+
+/**
+ * Whether `name` exists in `dir`, with existsSync's answer exactly. With `prefilter` (by default when the walked path
+ * lexically starts with `/mnt/`, WSL 9P/drvfs, several ms per probe; never realpath) one readdirSync per directory
+ * and process first rules out names whose upper-cased first path segment is not listed; a listed hit is still
+ * confirmed by existsSync (case-insensitive mounts, dangling links), and an unreadable directory falls back to
+ * existsSync. Without it this is plain existsSync (ext4 and every path outside `/mnt/`).
+ *
+ * @param dir - Directory being walked.
+ * @param name - Candidate relative to `dir`: a file name or a `path.join` result such as `node_modules/.bin/eslint` (POSIX only, so `/`-separated).
+ * @param prefilter - Use the readdir prefilter; defaults to the `/mnt/` gate (tests force it on ext4).
+ * @returns True when existsSync(path.join(dir, name)) is true.
+ */
+export function configExists(dir: string, name: string, prefilter: boolean = dir.startsWith("/mnt/")): boolean {
+  if (prefilter) {
+    let names = dirEntries.get(dir);
+    if (names === undefined) {
+      try {
+        names = new Set(readdirSync(dir).map((n) => n.toUpperCase()));
+      } catch {
+        names = null; // x without r, or gone: no prefilter, existsSync per name as before
+      }
+      dirEntries.set(dir, names);
+    }
+    if (names && !names.has(name.split("/", 1)[0].toUpperCase())) return false;
+  }
+  return existsSync(path.join(dir, name));
 }
 
 /**

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { execFileSync, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import { accessSync, constants as fsConstants, existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { accessSync, constants as fsConstants, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { availableParallelism, homedir, tmpdir } from "node:os";
 import path from "node:path";
 import process from "node:process";
@@ -371,6 +371,22 @@ async function runLintTool(tool, argv, spawnOpts, local) {
 	const spawnName = tool.spawnAs?.name ?? tool.name;
 	const spawnArgv = tool.spawnAs ? [...tool.spawnAs.args, ...argv] : argv;
 	return spawnGroup(spawnName, spawnArgv, spawnOpts);
+}
+const dirEntries = new Map();
+export function configExists(dir, name, prefilter = dir.startsWith("/mnt/")) {
+	if (prefilter) {
+		let names = dirEntries.get(dir);
+		if (names === undefined) {
+			try {
+				names = new Set(readdirSync(dir).map((n) => n.toUpperCase()));
+			} catch {
+				names = null;
+			}
+			dirEntries.set(dir, names);
+		}
+		if (names && !names.has(name.split("/", 1)[0].toUpperCase())) return false;
+	}
+	return existsSync(path.join(dir, name));
 }
 function walkUpToCwd(fileDir, cwd, checkDir) {
 	let dir = fileDir;
