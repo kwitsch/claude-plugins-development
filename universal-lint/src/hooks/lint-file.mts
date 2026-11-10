@@ -1881,7 +1881,7 @@ const PARSE_ERROR_RE = /pars(?:e|ing) error|syntax ?error|unexpected (?:token|en
  * are the preamble). Own-file misses are dropped unless the segment or the preamble reads as a parse error
  * (`PARSE_ERROR_RE`); hits and foreign locations (a path not tied to `resolved`) are kept
  * and reportable. A paragraph whose segments are all dropped loses its preamble too; unlocated paragraphs are kept but
- * not reportable.
+ * not reportable. existsSync results are memoized per call.
  *
  * @param finding - One tool's finding.
  * @param ranges - Inclusive 0-based edited line ranges, or null when every line counts as edited.
@@ -1890,6 +1890,16 @@ const PARSE_ERROR_RE = /pars(?:e|ing) error|syntax ?error|unexpected (?:token|en
  *   or null when nothing reportable remains.
  */
 export function gateFinding(finding: Finding, ranges: Array<[number, number]> | null, resolved: string): Finding | null {
+  const seen = new Map<string, boolean>();
+  /** Memoized `existsSync` for this call (the filesystem is stable within one call). */
+  const exists = (abs: string): boolean => {
+    let found = seen.get(abs);
+    if (found === undefined) {
+      found = existsSync(abs);
+      seen.set(abs, found);
+    }
+    return found;
+  };
   const hit = (line: number): "hit" | "miss" => (ranges === null || ranges.some(([s, e]) => s <= line - 1 && line - 1 <= e) ? "hit" : "miss");
   const classify = (raw: string): "hit" | "miss" | "foreign" | null => {
     const plain = raw.replace(ANSI_SGR_RE, "");
@@ -1900,7 +1910,8 @@ export function gateFinding(finding: Finding, ranges: Array<[number, number]> | 
       const p = path.normalize(a.groups.path);
       const abs = path.resolve(finding.base, p);
       // Suffix fallback only when the base-resolved path is not a real file, so a same-named other file stays foreign.
-      const own = abs === resolved || (!path.isAbsolute(p) && !existsSync(abs) && resolved.endsWith(path.sep + p));
+      // The pure endsWith test goes first so foreign paths never stat the filesystem.
+      const own = abs === resolved || (!path.isAbsolute(p) && resolved.endsWith(path.sep + p) && !exists(abs));
       return own ? hit(Number(a.groups.line)) : "foreign";
     }
     const b = LOC_SHELLCHECK_RE.exec(plain);
