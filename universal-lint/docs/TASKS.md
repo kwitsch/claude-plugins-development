@@ -35,7 +35,7 @@ Legend: `[x]` finished. `[ ]` not finished; tag = `open` (code change, not start
 ## Stage 3: edge cases and low priority
 
 - [x] [F18](tasks/F18-overlap-chain-tsc-and-kill-tree.md) Overlap chain lint and tsc; kill the whole process tree on timeout `done` priority:low. Shipped in 0.15.15; timeout budget re-derived in hook-design.md.
-- [ ] [F19](tasks/F19-watchlist-skip-generated.md) Keep `linguist-generated` files out of watchPaths `open` priority:low. Needs a user decision. Mostly moot after F04.
+- [x] [F19](tasks/F19-watchlist-skip-generated.md) Keep `linguist-generated` files out of watchPaths `done` priority:low. Closed docs-only in 0.15.16: after F04/F09 a rewritten generated file costs ~125-235 ms of background lint with no findings (oxlint ignores `**/plugin/**`), and a watch-list-only attribute exclusion would break the shared-scope policy (user decision; reopen trigger in the task doc).
 - [ ] [F20](tasks/F20-config-walk-readdir.md) One `readdirSync` per directory in the upward config walks (9P) `open` priority:low
 - [ ] [F21](tasks/F21-gatefinding-exists-memo.md) Memoize `existsSync` in `gateFinding` `open` priority:low
 - [ ] [F22](tasks/F22-filechanged-skip-without-git.md) FileChanged skip without a `git status` spawn (index blob id) `open` priority:low
@@ -60,7 +60,7 @@ Legend: `[x]` finished. `[ ]` not finished; tag = `open` (code change, not start
 - F02 + F03 together remove all false eslint findings seen in this analysis; F02 alone (the safety net) covers projects that have a config but no reachable binary. F04's walk from the file's directory fixes the sub-package case (91 of 128 historical pnpm findings).
 - F04 before F09: both rework the npx-fallback branch of `runLintTool`; F04 covers locally installed tools, F09 the npx-cache-only ones (markdown).
 - F11's savings and F04's are not additive for JS/TS: measured in F11 (0.15.9 -> 0.15.10, `perf.mts` medians, real PATH), `.mts` Write (local oxlint, F04 route) 387 -> 263 ms and `.ts` Write (tsc on PATH) 151 -> 141 ms, against `.sh`/`.py`/`.yml` (one missing PATH tool each) 142/144/146 -> 48/45/47 ms and `.md` 479 -> 292 ms; F28 documents the rest.
-- F08 (done) shortened the `watchList` loop; F12 (done) cheapened the per-file check inside it; F19 comes after F12 (F15 closed docs-only, no re-emission).
+- F08 (done) shortened the `watchList` loop; F12 (done) cheapened the per-file check inside it; F19 (closed docs-only in 0.15.16) adds nothing to it (F15 closed docs-only, no re-emission).
 - F10 before F13 (the slot cap bounds the peak; F13 removes redundant work inside it).
 - F03 and F09 before F16. F10/F13/F18 changed the timeout budget (re-derived in hook-design.md with F18); F29 keeps only its remaining items.
 - F27: add each test together with the task it guards (F04, F05, F10, F11, F18).
