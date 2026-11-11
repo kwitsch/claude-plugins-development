@@ -3,11 +3,11 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import type { SpawnSyncReturns } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "vitest";
-import { acquireSlot, buildArgv, classifyCheckstyleOutput, classifyExit, coalesceProjectCheck, editRanges, FILE_CHANGED_SLOTS, gateFinding, hashPath, hasProjectMarkdownlintConfig, hasProjectYamllintConfig, isExcludedPath, isToolAvailable, lintFileHandler, lintFilesHandler, looksLikeSolutionStyleTsconfig, oxlintConfigTypeChecks, recordWritten, REGISTRY, resolveCargoManifest, resolveCheckstyleConfig, resolveLintTarget, resolveOxlintConfig, resolveTsconfig, scopedTarget, stripTrailingCommas, truncate, tsBuildInfoPathFor, tscOutputHasSourceDiagnostic, WATCH_LIMIT } from "../plugin/hooks/lint-file.mjs";
+import { acquireSlot, buildArgv, classifyCheckstyleOutput, classifyExit, coalesceProjectCheck, configExists, editRanges, FILE_CHANGED_SLOTS, gateFinding, hashPath, hasProjectMarkdownlintConfig, hasProjectYamllintConfig, isExcludedPath, isToolAvailable, lintFileHandler, lintFilesHandler, looksLikeSolutionStyleTsconfig, oxlintConfigTypeChecks, recordWritten, REGISTRY, resolveCargoManifest, resolveCheckstyleConfig, resolveLintTarget, resolveOxlintConfig, resolveTsconfig, scopedTarget, stripTrailingCommas, truncate, tsBuildInfoPathFor, tscOutputHasSourceDiagnostic, WATCH_LIMIT } from "../plugin/hooks/lint-file.mjs";
 
 const shellcheck = REGISTRY.shell.chain[0];
 const checkstyle = REGISTRY.java.chain[0];
@@ -1115,4 +1115,60 @@ test("recordWritten: stores the SHA-256 base64 of the file bytes at CLAUDE_PLUGI
 
 test("WATCH_LIMIT is 5000", () => {
   assert.equal(WATCH_LIMIT, 5000);
+});
+
+/**
+ * A fresh directory under the OS temp dir, so configExists's per-process memo has no entry for it yet.
+ *
+ * @returns The new directory.
+ */
+const freshCeDir = (): string => mkdtempSync(path.join(tmpdir(), "ul-ce-"));
+
+test("configExists: default (no /mnt/ gate) is plain existsSync", () => {
+  const d = freshCeDir();
+  writeFileSync(path.join(d, "eslint.config.js"), "");
+  assert.equal(configExists(d, "eslint.config.js"), true);
+  assert.equal(configExists(d, "eslint.config.mjs"), false);
+});
+
+test("configExists: forced prefilter matches case-insensitively but confirms with existsSync", () => {
+  const upper = freshCeDir();
+  writeFileSync(path.join(upper, "ESLINT.CONFIG.JS"), "");
+  assert.equal(configExists(upper, "eslint.config.js", true), false); // listed (upper-cased), existsSync says no on ext4
+  const lower = freshCeDir();
+  writeFileSync(path.join(lower, "eslint.config.js"), "");
+  assert.equal(configExists(lower, "eslint.config.js", true), true);
+});
+
+test("configExists: forced prefilter checks the first segment of a nested name", () => {
+  const d = freshCeDir();
+  mkdirSync(path.join(d, ".config"));
+  writeFileSync(path.join(d, ".config", "stylelintrc.json"), "{}");
+  assert.equal(configExists(d, ".config/stylelintrc.json", true), true);
+  assert.equal(configExists(d, ".config/stylelintrc.yaml", true), false);
+});
+
+test("configExists: forced prefilter rejects a dangling symlink", () => {
+  const d = freshCeDir();
+  symlinkSync(path.join(d, "missing-target.json"), path.join(d, ".oxlintrc.json"));
+  assert.equal(configExists(d, ".oxlintrc.json", true), false);
+});
+
+test("configExists: the listing is memoized per process (accepted staleness)", () => {
+  const d = freshCeDir();
+  assert.equal(configExists(d, "Cargo.toml", true), false); // lists d once
+  writeFileSync(path.join(d, "Cargo.toml"), "");
+  assert.equal(configExists(d, "Cargo.toml", true), false); // memoized listing does not see the new file
+  assert.equal(configExists(d, "Cargo.toml", false), true); // existsSync does
+});
+
+test.skipIf(process.getuid?.() === 0)("configExists: unreadable (x-only) directory falls back to existsSync", () => {
+  const d = freshCeDir();
+  writeFileSync(path.join(d, "tsconfig.json"), "{}");
+  chmodSync(d, 0o111);
+  try {
+    assert.equal(configExists(d, "tsconfig.json", true), true);
+  } finally {
+    chmodSync(d, 0o755);
+  }
 });

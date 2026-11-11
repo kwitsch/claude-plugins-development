@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { execFileSync, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import { accessSync, constants as fsConstants, existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { accessSync, constants as fsConstants, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { availableParallelism, homedir, tmpdir } from "node:os";
 import path from "node:path";
 import process from "node:process";
@@ -339,7 +339,8 @@ async function runNpx(name, npmSpec, argv, spawnOpts) {
 		...spawnOpts,
 		timeout: NPX_SPAWN_TIMEOUT_MS
 	});
-	if (walkToRoot(String(spawnOpts.cwd), (d) => existsSync(path.join(d, "node_modules", ".bin", name)))) return npx();
+	const rel = path.join("node_modules", ".bin", name);
+	if (walkToRoot(String(spawnOpts.cwd), (d) => configExists(d, rel))) return npx();
 	const key = createHash("sha512").update(npmSpec).digest("hex").slice(0, 16);
 	const dir = path.join(process.env.npm_config_cache || process.env.NPM_CONFIG_CACHE || path.join(homedir(), ".npm"), "_npx", key);
 	const stamp = path.resolve(process.env.CLAUDE_PLUGIN_DATA || tmpdir(), `npx-refreshed-${key}`);
@@ -349,7 +350,7 @@ async function runNpx(name, npmSpec, argv, spawnOpts) {
 		fresh = age >= 0 && age < NPX_REFRESH_MS;
 	} catch {}
 	if (fresh && !existsSync(path.join(dir, "concurrency.lock"))) {
-		const cached = await spawnBin(path.join(dir, "node_modules", ".bin", name), argv, {
+		const cached = await spawnBin(path.join(dir, rel), argv, {
 			...spawnOpts,
 			timeout: NPX_SPAWN_TIMEOUT_MS
 		});
@@ -372,6 +373,25 @@ async function runLintTool(tool, argv, spawnOpts, local) {
 	const spawnArgv = tool.spawnAs ? [...tool.spawnAs.args, ...argv] : argv;
 	return spawnGroup(spawnName, spawnArgv, spawnOpts);
 }
+const dirEntries = new Map();
+export function configExists(dir, name, prefilter = dir.startsWith("/mnt/")) {
+	if (prefilter) {
+		let names = dirEntries.get(dir);
+		if (names === undefined) {
+			try {
+				names = new Set(readdirSync(dir).map((n) => n.toUpperCase()));
+			} catch {
+				names = null;
+			}
+			dirEntries.set(dir, names);
+		}
+		if (names && !names.has(name.split("/", 1)[0].toUpperCase())) return false;
+	}
+	return existsSync(path.join(dir, name));
+}
+function anyConfigExists(dir, names) {
+	return names.some((n) => configExists(dir, n));
+}
 function walkUpToCwd(fileDir, cwd, checkDir) {
 	let dir = fileDir;
 	for (;;) {
@@ -385,10 +405,8 @@ function walkUpToCwd(fileDir, cwd, checkDir) {
 	return null;
 }
 function localBin(name, fileDir, cwd) {
-	return walkUpToCwd(fileDir, cwd, (dir) => {
-		const bin = path.join(dir, "node_modules", ".bin", name);
-		return !outside(path.relative(cwd, dir)) && existsSync(bin) ? bin : null;
-	});
+	const rel = path.join("node_modules", ".bin", name);
+	return walkUpToCwd(fileDir, cwd, (dir) => !outside(path.relative(cwd, dir)) && configExists(dir, rel) ? path.join(dir, rel) : null);
 }
 export function resolveCheckstyleConfig(fileDir, cwd) {
 	const candidates = [
@@ -398,8 +416,7 @@ export function resolveCheckstyleConfig(fileDir, cwd) {
 	];
 	return walkUpToCwd(fileDir, cwd, (dir) => {
 		for (const rel of candidates) {
-			const p = path.join(dir, rel);
-			if (existsSync(p)) return p;
+			if (configExists(dir, rel)) return path.join(dir, rel);
 		}
 		return null;
 	});
@@ -407,13 +424,13 @@ export function resolveCheckstyleConfig(fileDir, cwd) {
 export function resolveCargoManifest(fileDir, cwd) {
 	return walkUpToCwd(fileDir, cwd, (dir) => {
 		const p = path.join(dir, "Cargo.toml");
-		return existsSync(p) ? p : null;
+		return configExists(dir, "Cargo.toml") ? p : null;
 	});
 }
 export function resolveTsconfig(fileDir, cwd) {
 	return walkUpToCwd(fileDir, cwd, (dir) => {
 		const p = path.join(dir, "tsconfig.json");
-		if (!existsSync(p)) return null;
+		if (!configExists(dir, "tsconfig.json")) return null;
 		let text;
 		try {
 			text = readFileSync(p, "utf8");
@@ -445,8 +462,7 @@ const OXLINT_CONFIG_FILENAMES = [
 export function resolveOxlintConfig(fileDir, cwd) {
 	const hit = walkUpToCwd(fileDir, cwd, (dir) => {
 		for (const n of [...OXLINT_CONFIG_FILENAMES, ...ESLINT_CONFIG_FILENAMES]) {
-			const p = path.join(dir, n);
-			if (existsSync(p)) return p;
+			if (configExists(dir, n)) return path.join(dir, n);
 		}
 		return null;
 	});
@@ -557,7 +573,7 @@ export function hasProjectYamllintConfig(cwd) {
 	let dir = path.resolve(cwd);
 	const home = path.resolve(homedir());
 	for (;;) {
-		if (YAMLLINT_CONFIG_FILENAMES.some((name) => existsSync(path.join(dir, name)))) return true;
+		if (anyConfigExists(dir, YAMLLINT_CONFIG_FILENAMES)) return true;
 		if (dir === home) return false;
 		const parent = path.dirname(dir);
 		if (parent === dir) return false;
@@ -586,7 +602,7 @@ function walkToRoot(dir, checkDir) {
 	}
 }
 export function hasProjectMarkdownlintConfig(fileDir) {
-	return walkToRoot(fileDir, (dir) => MARKDOWNLINT_CONFIG_FILENAMES.some((name) => existsSync(path.join(dir, name))));
+	return walkToRoot(fileDir, (dir) => anyConfigExists(dir, MARKDOWNLINT_CONFIG_FILENAMES));
 }
 const STYLELINT_CONFIG_FILENAMES = [
 	".stylelintrc",
@@ -612,15 +628,15 @@ const STYLELINT_CONFIG_FILENAMES = [
 ];
 function hasStylelintConfig(fileDir, cwd) {
 	const hasKey = (dir) => {
+		if (!configExists(dir, "package.json")) return false;
 		const pkg = path.join(dir, "package.json");
-		if (!existsSync(pkg)) return false;
 		try {
 			return JSON.parse(readFileSync(pkg, "utf8"))?.stylelint != null;
 		} catch {
 			return true;
 		}
 	};
-	const found = (d) => STYLELINT_CONFIG_FILENAMES.some((n) => existsSync(path.join(d, n))) || hasKey(d);
+	const found = (d) => anyConfigExists(d, STYLELINT_CONFIG_FILENAMES) || hasKey(d);
 	if (walkToRoot(fileDir, found) || walkToRoot(cwd, found)) return true;
 	const home = homedir();
 	return [process.env.XDG_CONFIG_HOME || path.join(home, ".config"), path.join(home, "Library", "Preferences")].some((d) => existsSync(path.join(d, "stylelint")));
@@ -1045,7 +1061,7 @@ function chainEntryFor(resolved, cwd) {
 	const ext = path.extname(resolved).toLowerCase();
 	const lang = EXT_MAP[ext];
 	const oxlintConfig = lang === "jsts" ? resolveOxlintConfig(path.dirname(resolved), cwd) : null;
-	const noJstsConfig = lang === "jsts" && !oxlintConfig && !walkToRoot(path.dirname(resolved), (d) => ESLINT_CONFIG_FILENAMES.some((n) => existsSync(path.join(d, n))));
+	const noJstsConfig = lang === "jsts" && !oxlintConfig && !walkToRoot(path.dirname(resolved), (d) => anyConfigExists(d, ESLINT_CONFIG_FILENAMES));
 	const noCssConfig = lang === "css" && !hasStylelintConfig(path.dirname(resolved), cwd);
 	if (!lang || noJstsConfig || noCssConfig) return {
 		entry: null,

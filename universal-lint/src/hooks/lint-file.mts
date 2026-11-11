@@ -29,7 +29,7 @@
 import { execFileSync, spawn } from "node:child_process";
 import type { ChildProcess, SpawnSyncOptionsWithStringEncoding, SpawnSyncReturns } from "node:child_process";
 import { createHash } from "node:crypto";
-import { accessSync, constants as fsConstants, existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { accessSync, constants as fsConstants, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { availableParallelism, homedir, tmpdir } from "node:os";
 import path from "node:path";
 import process from "node:process";
@@ -624,7 +624,8 @@ async function runNpx(name: string, npmSpec: string, argv: string[], spawnOpts: 
    */
   const npx = (): Promise<SpawnSyncReturns<string>> => spawnGroup("npx", ["--yes", npmSpec, ...argv], { ...spawnOpts, timeout: NPX_SPAWN_TIMEOUT_MS });
   // npx runs a node_modules/.bin/<name> from its cwd up to / before its cache (npm 11.19.1 localFileExists): leave that to npx.
-  if (walkToRoot(String(spawnOpts.cwd), (d) => existsSync(path.join(d, "node_modules", ".bin", name)))) return npx();
+  const rel = path.join("node_modules", ".bin", name);
+  if (walkToRoot(String(spawnOpts.cwd), (d) => configExists(d, rel))) return npx();
   // libnpmexec's cache key: sha512 hex of the sorted, newline-joined spec list, first 16 chars (one bare spec hashes as itself).
   const key = createHash("sha512").update(npmSpec).digest("hex").slice(0, 16);
   const dir = path.join(process.env.npm_config_cache || process.env.NPM_CONFIG_CACHE || path.join(homedir(), ".npm"), "_npx", key);
@@ -638,7 +639,7 @@ async function runNpx(name: string, npmSpec: string, argv: string[], spawnOpts: 
   }
   // An npx install in progress holds concurrency.lock; a half-replaced tree could crash with exit 1, a false finding.
   if (fresh && !existsSync(path.join(dir, "concurrency.lock"))) {
-    const cached = await spawnBin(path.join(dir, "node_modules", ".bin", name), argv, { ...spawnOpts, timeout: NPX_SPAWN_TIMEOUT_MS });
+    const cached = await spawnBin(path.join(dir, rel), argv, { ...spawnOpts, timeout: NPX_SPAWN_TIMEOUT_MS });
     if (cached) return cached;
   }
   const result = await npx();
@@ -688,6 +689,48 @@ async function runLintTool(tool: LintTool, argv: string[], spawnOpts: SpawnSyncO
   return spawnGroup(spawnName, spawnArgv, spawnOpts);
 }
 
+/** Per-process memo for configExists: a prefiltered directory -> its entry names upper-cased, or null when readdirSync failed (each hook event is its own process; never invalidated). */
+const dirEntries = new Map<string, Set<string> | null>();
+
+/**
+ * Whether `name` exists in `dir`, with existsSync's answer exactly. With `prefilter` (by default when the walked path
+ * lexically starts with `/mnt/`, WSL 9P/drvfs, several ms per probe; never realpath) one readdirSync per directory
+ * and process first rules out names whose upper-cased first path segment is not listed; a listed hit is still
+ * confirmed by existsSync (case-insensitive mounts, dangling links), and an unreadable directory falls back to
+ * existsSync. Without it this is plain existsSync (ext4 and every path outside `/mnt/`).
+ *
+ * @param dir - Directory being walked.
+ * @param name - Candidate relative to `dir`: a file name or a `path.join` result such as `node_modules/.bin/eslint` (POSIX only, so `/`-separated).
+ * @param prefilter - Use the readdir prefilter; defaults to the `/mnt/` gate (tests force it on ext4).
+ * @returns True when existsSync(path.join(dir, name)) is true.
+ */
+export function configExists(dir: string, name: string, prefilter: boolean = dir.startsWith("/mnt/")): boolean {
+  if (prefilter) {
+    let names = dirEntries.get(dir);
+    if (names === undefined) {
+      try {
+        names = new Set(readdirSync(dir).map((n) => n.toUpperCase()));
+      } catch {
+        names = null; // x without r, or gone: no prefilter, existsSync per name as before
+      }
+      dirEntries.set(dir, names);
+    }
+    if (names && !names.has(name.split("/", 1)[0].toUpperCase())) return false;
+  }
+  return existsSync(path.join(dir, name));
+}
+
+/**
+ * Whether any of `names` exists in `dir`, probed through configExists.
+ *
+ * @param dir - Directory to probe.
+ * @param names - Candidate config file names.
+ * @returns True when at least one name exists.
+ */
+function anyConfigExists(dir: string, names: readonly string[]): boolean {
+  return names.some((n) => configExists(dir, n));
+}
+
 /**
  * Walk from `fileDir` up to `cwd` (inclusive), calling `checkDir(dir)` at each
  * level; returns the first non-null result, or null if none found. Shared
@@ -724,10 +767,8 @@ function walkUpToCwd(fileDir: string, cwd: string, checkDir: (dir: string) => st
  * @returns The bin's absolute path, or null.
  */
 function localBin(name: string, fileDir: string, cwd: string): string | null {
-  return walkUpToCwd(fileDir, cwd, (dir) => {
-    const bin = path.join(dir, "node_modules", ".bin", name);
-    return !outside(path.relative(cwd, dir)) && existsSync(bin) ? bin : null;
-  });
+  const rel = path.join("node_modules", ".bin", name);
+  return walkUpToCwd(fileDir, cwd, (dir) => (!outside(path.relative(cwd, dir)) && configExists(dir, rel) ? path.join(dir, rel) : null));
 }
 
 /**
@@ -744,8 +785,7 @@ export function resolveCheckstyleConfig(fileDir: string, cwd: string): string | 
   const candidates = ["checkstyle.xml", ".checkstyle.xml", path.join("config", "checkstyle", "checkstyle.xml")];
   return walkUpToCwd(fileDir, cwd, (dir) => {
     for (const rel of candidates) {
-      const p = path.join(dir, rel);
-      if (existsSync(p)) return p;
+      if (configExists(dir, rel)) return path.join(dir, rel);
     }
     return null;
   });
@@ -765,7 +805,7 @@ export function resolveCheckstyleConfig(fileDir: string, cwd: string): string | 
 export function resolveCargoManifest(fileDir: string, cwd: string): string | null {
   return walkUpToCwd(fileDir, cwd, (dir) => {
     const p = path.join(dir, "Cargo.toml");
-    return existsSync(p) ? p : null;
+    return configExists(dir, "Cargo.toml") ? p : null;
   });
 }
 
@@ -784,7 +824,7 @@ export function resolveCargoManifest(fileDir: string, cwd: string): string | nul
 export function resolveTsconfig(fileDir: string, cwd: string): string | null {
   return walkUpToCwd(fileDir, cwd, (dir) => {
     const p = path.join(dir, "tsconfig.json");
-    if (!existsSync(p)) return null;
+    if (!configExists(dir, "tsconfig.json")) return null;
     let text: string;
     try {
       text = readFileSync(p, "utf8");
@@ -828,8 +868,7 @@ const OXLINT_CONFIG_FILENAMES = [".oxlintrc.json", ".oxlintrc.jsonc", "oxlint.co
 export function resolveOxlintConfig(fileDir: string, cwd: string): string | null {
   const hit = walkUpToCwd(fileDir, cwd, (dir) => {
     for (const n of [...OXLINT_CONFIG_FILENAMES, ...ESLINT_CONFIG_FILENAMES]) {
-      const p = path.join(dir, n);
-      if (existsSync(p)) return p;
+      if (configExists(dir, n)) return path.join(dir, n);
     }
     return null;
   });
@@ -1029,7 +1068,7 @@ export function hasProjectYamllintConfig(cwd: string): boolean {
   let dir = path.resolve(cwd);
   const home = path.resolve(homedir());
   for (;;) {
-    if (YAMLLINT_CONFIG_FILENAMES.some((name) => existsSync(path.join(dir, name)))) return true;
+    if (anyConfigExists(dir, YAMLLINT_CONFIG_FILENAMES)) return true;
     if (dir === home) return false;
     const parent = path.dirname(dir);
     if (parent === dir) return false; // filesystem root
@@ -1099,7 +1138,7 @@ function walkToRoot(dir: string, checkDir: (dir: string) => boolean): boolean {
  * @returns True when a markdownlint config governs the file.
  */
 export function hasProjectMarkdownlintConfig(fileDir: string): boolean {
-  return walkToRoot(fileDir, (dir) => MARKDOWNLINT_CONFIG_FILENAMES.some((name) => existsSync(path.join(dir, name))));
+  return walkToRoot(fileDir, (dir) => anyConfigExists(dir, MARKDOWNLINT_CONFIG_FILENAMES));
 }
 
 /**
@@ -1151,8 +1190,8 @@ function hasStylelintConfig(fileDir: string, cwd: string): boolean {
    * @returns True with the key, or when the `package.json` is unreadable or invalid (fail open); false without one.
    */
   const hasKey = (dir: string): boolean => {
+    if (!configExists(dir, "package.json")) return false;
     const pkg = path.join(dir, "package.json");
-    if (!existsSync(pkg)) return false;
     try {
       return (JSON.parse(readFileSync(pkg, "utf8")) as { stylelint?: unknown } | null)?.stylelint != null;
     } catch {
@@ -1165,7 +1204,7 @@ function hasStylelintConfig(fileDir: string, cwd: string): boolean {
    * @param d - Directory to probe.
    * @returns True when stylelint would find a config there.
    */
-  const found = (d: string): boolean => STYLELINT_CONFIG_FILENAMES.some((n) => existsSync(path.join(d, n))) || hasKey(d);
+  const found = (d: string): boolean => anyConfigExists(d, STYLELINT_CONFIG_FILENAMES) || hasKey(d);
   if (walkToRoot(fileDir, found) || walkToRoot(cwd, found)) return true;
   const home = homedir();
   return [process.env.XDG_CONFIG_HOME || path.join(home, ".config"), path.join(home, "Library", "Preferences")].some((d) => existsSync(path.join(d, "stylelint")));
@@ -1964,7 +2003,7 @@ function chainEntryFor(resolved: string, cwd: string): { entry: LangEntry | null
   const lang = EXT_MAP[ext];
   const oxlintConfig = lang === "jsts" ? resolveOxlintConfig(path.dirname(resolved), cwd) : null;
   // No oxlint config and no eslint name up to / (eslint's own lookup): eslint would only exit 2 (skip), so no chain lint.
-  const noJstsConfig = lang === "jsts" && !oxlintConfig && !walkToRoot(path.dirname(resolved), (d) => ESLINT_CONFIG_FILENAMES.some((n) => existsSync(path.join(d, n))));
+  const noJstsConfig = lang === "jsts" && !oxlintConfig && !walkToRoot(path.dirname(resolved), (d) => anyConfigExists(d, ESLINT_CONFIG_FILENAMES));
   // No stylelint config (stylelint's own search places, see hasStylelintConfig): stylelint would only exit 78 (skip), so no chain lint.
   const noCssConfig = lang === "css" && !hasStylelintConfig(path.dirname(resolved), cwd);
   if (!lang || noJstsConfig || noCssConfig) return { entry: null, oxlintConfig };
