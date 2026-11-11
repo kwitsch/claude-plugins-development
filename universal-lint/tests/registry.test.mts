@@ -959,6 +959,26 @@ test("scopedTarget: null for cwd itself, an excluded path and an unsupported ext
   assert.equal(scopedTarget(dir, "x.txt"), null);
 });
 
+test("scopedTarget: roots.dirs gives the same result as the plain call", () => {
+  const root = mkdtempSync(path.join(tmpdir(), "ul-st-"));
+  const dir = path.join(root, "proj");
+  mkdirSync(path.join(dir, "s"), { recursive: true });
+  writeFileSync(path.join(dir, "a.sh"), "echo a\n");
+  writeFileSync(path.join(root, "o.sh"), "echo o\n");
+  symlinkSync(path.join(root, "o.sh"), path.join(dir, "link.sh"));
+  symlinkSync(path.join(dir, "missing.sh"), path.join(dir, "dl.sh"));
+  writeFileSync(path.join(dir, "s", "e.sh"), "echo e\n");
+  mkdirSync(path.join(root, "out"));
+  writeFileSync(path.join(root, "out", "a.sh"), "echo d\n");
+  symlinkSync(path.join(root, "out"), path.join(dir, "d"));
+  const dirs = new Map<string, string>();
+  const cases: [string, string | undefined][] = [["a.sh", undefined], ["link.sh", undefined], ["dl.sh", undefined], ["s/e.sh", path.join(dir, "s")], ["nope.sh", undefined], ["d/a.sh", undefined]];
+  for (const [f, s] of cases) {
+    assert.deepEqual(scopedTarget(dir, f, s, { cwd: realpathSync(dir), scratchpad: s && realpathSync(s), dirs }), scopedTarget(dir, f, s));
+  }
+  assert.ok(dirs.size >= 1);
+});
+
 test("resolveLintTarget: null for a file inside the payload scratchpad_dir", () => {
   const dir = mkdtempSync(path.join(tmpdir(), "ul-rlt-"));
   mkdirSync(path.join(dir, "s"));

@@ -52,6 +52,54 @@ test("SessionStart: watchPaths = tracked + untracked lintable in-scope files onl
   assert.deepEqual(new Set(out.hookSpecificOutput.watchPaths), new Set([a, b]));
 });
 
+test("SessionStart: a tracked file under a directory replaced by a symlink pointing outside the cwd is not watched", () => {
+  const e = makeEnv();
+  const a = e.file("a.sh", "echo a\n");
+  e.file("d/a.sh", "echo d\n");
+  gitInit(e);
+  rmSync(path.join(e.cwd, "d"), { recursive: true });
+  const outside = path.join(e.cwd, "..", "outside");
+  mkdirSync(outside);
+  writeFileSync(path.join(outside, "a.sh"), "echo o\n");
+  symlinkSync(outside, path.join(e.cwd, "d"));
+  const r = e.runEvent({ hook_event_name: "SessionStart", source: "startup", cwd: e.cwd });
+  assert.equal(r.status, 0);
+  assert.deepEqual(JSON.parse(r.stdout).hookSpecificOutput.watchPaths, [a]);
+});
+
+test("SessionStart: a tracked file under a directory replaced by a symlink inside the cwd keeps its lexical path", () => {
+  const e = makeEnv();
+  e.file("d/a.sh", "echo d\n");
+  gitInit(e);
+  e.file("sub/a.sh", "echo s\n");
+  rmSync(path.join(e.cwd, "d"), { recursive: true });
+  symlinkSync(path.join(e.cwd, "sub"), path.join(e.cwd, "d"));
+  const r = e.runEvent({ hook_event_name: "SessionStart", source: "startup", cwd: e.cwd });
+  assert.equal(r.status, 0);
+  const paths = JSON.parse(r.stdout).hookSpecificOutput.watchPaths;
+  assert.equal(paths.length, 2);
+  assert.deepEqual(new Set(paths), new Set([path.join(e.cwd, "d", "a.sh"), path.join(e.cwd, "sub", "a.sh")]));
+});
+
+test("SessionStart: escaping and dangling leaf links and a tracked file deleted from disk are not watched, an inside leaf link is", () => {
+  const e = makeEnv();
+  const t = e.file("t.sh", "echo t\n");
+  const x = e.file("x.sh", "echo x\n");
+  e.file("gone.sh", "echo g\n");
+  gitInit(e);
+  rmSync(path.join(e.cwd, "gone.sh"));
+  const outside = path.join(e.cwd, "..", "o.sh");
+  writeFileSync(outside, "echo o\n");
+  symlinkSync(outside, path.join(e.cwd, "link.sh"));
+  symlinkSync(path.join(e.cwd, "missing.sh"), path.join(e.cwd, "dl.sh"));
+  symlinkSync(path.join(e.cwd, "x.sh"), path.join(e.cwd, "in.sh"));
+  const r = e.runEvent({ hook_event_name: "SessionStart", source: "startup", cwd: e.cwd });
+  assert.equal(r.status, 0);
+  const paths = JSON.parse(r.stdout).hookSpecificOutput.watchPaths;
+  assert.equal(paths.length, 3);
+  assert.deepEqual(new Set(paths), new Set([t, x, path.join(e.cwd, "in.sh")]));
+});
+
 test("CwdChanged: the list is built for new_cwd only; a non-git new_cwd prints nothing", () => {
   const e = makeEnv();
   e.file("a.sh", "echo a\n");

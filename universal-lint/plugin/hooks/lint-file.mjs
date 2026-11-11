@@ -749,16 +749,33 @@ function outside(rel) {
 export function scopedTarget(cwd, file, scratchpad, roots) {
 	try {
 		const fp = path.resolve(cwd, file);
-		const real = realish(fp);
+		const ext = path.extname(fp).toLowerCase();
+		if (!EXT_MAP[ext] && !TYPE_CHECK_EXTS.has(ext)) return null;
+		let real;
+		if (roots?.dirs) {
+			const st = lstatSync(fp, { throwIfNoEntry: false });
+			if (!st) return null;
+			if (st.isSymbolicLink()) {
+				real = realish(fp);
+			} else {
+				const dir = path.dirname(fp);
+				let dirReal = roots.dirs.get(dir);
+				if (dirReal === undefined) {
+					dirReal = realish(dir);
+					roots.dirs.set(dir, dirReal);
+				}
+				real = path.join(dirReal, path.basename(fp));
+			}
+		} else {
+			real = realish(fp);
+		}
 		const rel = path.relative(roots?.cwd ?? realish(cwd), real);
 		if (rel === "" || outside(rel) || isExcludedPath(rel)) return null;
 		if (scratchpad) {
 			const rs = roots ? roots.scratchpad ?? realish(scratchpad) : realish(scratchpad);
 			if (real === rs || real.startsWith(rs + path.sep)) return null;
 		}
-		const ext = path.extname(fp).toLowerCase();
-		if (!EXT_MAP[ext] && !TYPE_CHECK_EXTS.has(ext)) return null;
-		if (!existsSync(fp)) return null;
+		if (!roots?.dirs && !existsSync(fp)) return null;
 		return {
 			fp,
 			real
@@ -1043,7 +1060,8 @@ export function watchList(cwd, scratchpad) {
 	try {
 		roots = {
 			cwd: realish(cwd),
-			scratchpad: scratchpad ? realish(scratchpad) : undefined
+			scratchpad: scratchpad ? realish(scratchpad) : undefined,
+			dirs: new Map()
 		};
 	} catch {
 		return [];
