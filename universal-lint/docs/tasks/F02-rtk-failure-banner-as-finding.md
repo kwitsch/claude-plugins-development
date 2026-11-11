@@ -10,7 +10,7 @@ area: universal-lint/src/hooks/lint-file.mts (tryRtk, runLintTool npx-fallback b
 
 Obsolete since universal-lint 0.15.0: rtk support was removed, so this problem no longer exists. The text below is kept as history.
 
-Open. Merges bench-js-ts finding 1 (adjusted, high), the real-sessions eslint finding (adjusted, high: the safety-net part) and two verifier missed items (no-config scope, timeout-dependent self-healing). Top item of the analysis.
+Before closure: Merges bench-js-ts finding 1 (adjusted, high), the real-sessions eslint finding (adjusted, high: the safety-net part) and two verifier missed items (no-config scope, timeout-dependent self-healing). Top item of the analysis.
 
 ## Problem
 

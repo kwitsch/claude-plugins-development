@@ -10,7 +10,7 @@ area: universal-lint/src/hooks/lint-file.mts (gateFinding, LOC_PATH_RE, LOC_ROW_
 
 Obsolete since universal-lint 0.15.0: rtk support was removed, so this problem no longer exists. The text below is kept as history.
 
-Open. real-sessions finding (confirmed, medium) plus the static missed item (same reproduction). hook-design.md documents "rtk-compacted text" as a fail-open residual; its cost was never measured.
+Before closure: real-sessions finding (confirmed, medium) plus the static missed item (same reproduction). hook-design.md documents "rtk-compacted text" as a fail-open residual; its cost was never measured.
 
 ## Problem
 
