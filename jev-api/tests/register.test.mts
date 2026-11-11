@@ -1,7 +1,7 @@
 // Kit tests for the built plugin/hooks/register.mjs of jev-api: the three System One tools noul, choice, score.
 import { createKit } from "claude-engine-vitest";
 import type { On } from "claude-engine-vitest";
-import { expect } from "vitest";
+import { describe, expect } from "vitest";
 
 const { test, mock } = createKit({ module: new URL("../plugin/hooks/register.mjs", import.meta.url), plugin: "jev-api" });
 
@@ -234,4 +234,53 @@ test("an unparsable 200 body is reported with the parse error", async ($, on) =>
   const res = await call($, "noul");
   expect(res.isError).toBe(true);
   expect(res.result).toMatch(/^noul: /);
+});
+
+// Live smoke tests (opt-in): run against the System One server named by JEV_URL in the shell; skipped without it.
+// Nothing is hardcoded: the URL, key and model come only from the environment.
+describe.skipIf(!process.env.JEV_URL)("live JEV System One (JEV_URL)", () => {
+  /** Forwards the module's http.fetch to the real global fetch; the mock clock is never advanced (no 30 s race). */
+  function live(on: On) {
+    const env = Object.fromEntries(
+      Object.entries({ JEV_URL: process.env.JEV_URL, TYPESAFE_API_KEY: process.env.TYPESAFE_API_KEY, TYPESAFE_DEFAULT_MODEL: process.env.TYPESAFE_DEFAULT_MODEL }).filter(([, v]) => v !== undefined && v !== ""),
+    ) as Record<string, string>;
+    mock.env(on, env);
+    mock.clock(on);
+    on("tool.register", async (_$, e) => ({ value: { tool: TOOL(String(e.name)) } }));
+    on("http.fetch", async (_$, e) => {
+      const r = await fetch(String(e.url), e.init as RequestInit);
+      return { value: { status: r.status, ok: r.ok, headers: Object.fromEntries(r.headers), text: await r.text() } };
+    });
+  }
+
+  const answer = async ($: Runner, type: string) => {
+    const res = await call($, type);
+    expect(res.isError).toBeFalsy();
+    const parsed = JSON.parse(String(res.result)) as Record<string, unknown>;
+    expect(parsed.type).toBe(type);
+    return parsed;
+  };
+
+  test("noul answers with a probability", { timeoutMs: 60_000 }, async ($, on) => {
+    live(on);
+    const { noul } = await answer($, "noul");
+    expect(typeof noul).toBe("number");
+    expect(noul as number).toBeGreaterThanOrEqual(0);
+    expect(noul as number).toBeLessThanOrEqual(1);
+  });
+
+  test("choice answers with one of the options", { timeoutMs: 60_000 }, async ($, on) => {
+    live(on);
+    const { choice } = await answer($, "choice");
+    expect(["greeting", "question"]).toContain(choice);
+  });
+
+  test("score answers with a level index", { timeoutMs: 60_000 }, async ($, on) => {
+    live(on);
+    const { score } = await answer($, "score");
+    // The live server returns an expected level (a fraction between the indexes), not a whole index: check the range.
+    expect(typeof score).toBe("number");
+    expect(score as number).toBeGreaterThanOrEqual(0);
+    expect(score as number).toBeLessThanOrEqual(2);
+  });
 });
