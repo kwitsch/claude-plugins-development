@@ -8,7 +8,7 @@ area: universal-lint/src/hooks/lint-file.mts (REGISTRY.markdown), universal-lint
 
 ## Status
 
-Done in 0.15.5. `REGISTRY.markdown.chain[0]` (markdownlint-cli2) carries the static arg `--no-globs`; classic markdownlint, `buildArgv`, `classifyExit`, `runLintTool` and the skill driver are unchanged. Argv and alternatives: Approach; cli2 version floor: Constraints; cost: hook-design.md "Measured cost", Globs fixture bullet.
+Done in 0.15.5. `REGISTRY.markdown.chain[0]` (markdownlint-cli2) carries the static arg `--no-globs`; classic markdownlint, `buildArgv`, `classifyExit`, `runLintTool` and the skill driver are unchanged. Argv and alternatives: Approach; cli2 version floor: Constraints; cost: this doc's "Measured" section.
 
 ## Problem
 
@@ -31,7 +31,7 @@ Shipped: the markdownlint-cli2 entry of `REGISTRY.markdown` has the static args 
 Test: the markdownlint-cli2 stub records `--no-globs` before the file argument. Bench on the globs fixture: header reads `Linting: 1 file`; a foreign issue in another .md no longer surfaces.
 
 - [x] Test: `tests/markdown.test.mts` (project-config and npx tests expect `--no-globs` before the file; classic markdownlint never gets it); `tests/registry.test.mts` pins the exact argv with and without a project config.
-- [x] Bench (manual, 2026-11-07, numbers in hook-design.md "Measured cost", Globs fixture bullet): header `Linting: 1 file`; the foreign `d1.md` finding no longer surfaces on an `a.md` Write (exit 0); `a2.md` still exits 2 with its own MD041.
+- [x] Bench (manual, 2026-11-07, numbers in this doc's "Measured" section): header `Linting: 1 file`; the foreign `d1.md` finding no longer surfaces on an `a.md` Write (exit 0); `a2.md` still exits 2 with its own MD041.
 
 ## Constraints
 
