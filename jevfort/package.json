@@ -1,8 +1,8 @@
 {
   "name": "jevfort",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "private": true,
-  "description": "Lets TypeSafe Jev take routine steps, route effort and check that work is done (port of nim-f/jev-pilot; endpoint from JEV_URL).",
+  "description": "Lets TypeSafe Jev take routine steps, route effort and check that work is done (port of nim-f/jev-pilot; asks Jev through the jev-api plugin's tools).",
   "keywords": [
     "mods",
     "hooks",
@@ -22,6 +22,9 @@
     "claude-engine-vitest": "workspace:*"
   },
   "claudePlugin": {
+    "dependencies": [
+      "jev-api"
+    ],
     "userConfig": {
       "routing": {
         "type": "string",
