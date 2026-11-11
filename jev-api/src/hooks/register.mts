@@ -269,11 +269,12 @@ function parseInput(type: QuestionType, e: ToolCall): { state: string; question:
     return { state, question: { type, instructions, criteria: picked } };
   }
   if (type === "choice") {
-    const msg = "criteria must map 1 to 255 option names to string descriptions";
+    const msg = "criteria must map 1 to 255 non-blank option names to string descriptions";
     if (!isRecord(criteria)) return msg;
     const entries = Object.entries(criteria);
     const options: Record<string, string> = {};
     for (const [name, description] of entries) if (typeof description === "string") options[name] = description;
+    if (entries.some(([name]) => name.trim() === "")) return msg;
     if (entries.length < 1 || entries.length > 255 || Object.keys(options).length !== entries.length) return msg;
     return { state, question: { type, instructions, criteria: options } };
   }
@@ -297,7 +298,7 @@ function endpoint(jevUrlRaw: string | undefined, baseRaw: string | undefined): {
   const base = baseRaw?.trim();
   if (base) {
     const url = base.replace(/\/+$/, "") + "/v1/systemone";
-    return HTTP_URL.test(url) ? { ok: true, url } : { ok: false, error: "TYPESAFE_BASE_URL must be an http(s) URL" };
+    return !/[?#]/.test(base) && HTTP_URL.test(url) ? { ok: true, url } : { ok: false, error: "TYPESAFE_BASE_URL must be an http(s) URL" };
   }
   return { ok: true, url: DEFAULT_JEV_URL };
 }
@@ -346,7 +347,12 @@ async function ask($: Engine, type: QuestionType, state: string, question: Quest
       const why = detail(res.text);
       return fail(`HTTP ${res.status}${why === undefined ? "" : `: ${why}`}`);
     }
-    const body: unknown = JSON.parse(res.text);
+    let body: unknown;
+    try {
+      body = JSON.parse(res.text);
+    } catch {
+      return fail(`HTTP ${res.status} response was not valid JSON`);
+    }
     const answers = isRecord(body) ? body["answers"] : undefined;
     const answer = isRecord(answers) ? answers[QUESTION_ID] : undefined;
     if (!isRecord(answer) || answer["type"] !== type) return fail(`response had no ${type} answer`);

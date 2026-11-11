@@ -96,10 +96,11 @@ test("invalid input is rejected without a request", async ($, on) => {
   await bad("noul", { criteria: { true: 1 } }, "criteria must be an object with optional string fields true and false");
   await bad("noul", { criteria: ["x"] }, "criteria must be an object with optional string fields true and false");
   await bad("noul", { criteria: null }, "criteria must be an object with optional string fields true and false");
-  await bad("choice", { criteria: {} }, "criteria must map 1 to 255 option names to string descriptions");
-  await bad("choice", { criteria: { a: 1 } }, "criteria must map 1 to 255 option names to string descriptions");
-  await bad("choice", { criteria: undefined }, "criteria must map 1 to 255 option names to string descriptions");
-  await bad("choice", { criteria: Object.fromEntries(Array.from({ length: 256 }, (_, i) => [`o${i}`, "d"])) }, "criteria must map 1 to 255 option names to string descriptions");
+  await bad("choice", { criteria: {} }, "criteria must map 1 to 255 non-blank option names to string descriptions");
+  await bad("choice", { criteria: { a: 1 } }, "criteria must map 1 to 255 non-blank option names to string descriptions");
+  await bad("choice", { criteria: { " ": "x" } }, "criteria must map 1 to 255 non-blank option names to string descriptions");
+  await bad("choice", { criteria: undefined }, "criteria must map 1 to 255 non-blank option names to string descriptions");
+  await bad("choice", { criteria: Object.fromEntries(Array.from({ length: 256 }, (_, i) => [`o${i}`, "d"])) }, "criteria must map 1 to 255 non-blank option names to string descriptions");
   await bad("score", { criteria: Array.from({ length: 11 }, (_, i) => `l${i}`) }, "criteria must be an array of 1 to 10 strings");
   await bad("score", { criteria: [] }, "criteria must be an array of 1 to 10 strings");
   await bad("score", { criteria: ["a", 2] }, "criteria must be an array of 1 to 10 strings");
@@ -172,6 +173,17 @@ test("a non-http(s) TYPESAFE_BASE_URL is an error naming the variable and sends 
   const a = setup(on, { env: { TYPESAFE_BASE_URL: "ftp://x" } });
   expect(await call($, "noul")).toEqual({ isError: true, result: "noul: TYPESAFE_BASE_URL must be an http(s) URL" });
   expect(a.fetched).toHaveLength(0);
+});
+
+test("a TYPESAFE_BASE_URL with a query is an error and sends nothing", async ($, on) => {
+  const a = setup(on, { env: { TYPESAFE_BASE_URL: "https://h/api?tenant=x" } });
+  expect(await call($, "noul")).toEqual({ isError: true, result: "noul: TYPESAFE_BASE_URL must be an http(s) URL" });
+  expect(a.fetched).toHaveLength(0);
+});
+
+test("a 2xx non-JSON body is reported as invalid JSON", async ($, on) => {
+  setup(on, { env: { TYPESAFE_API_KEY: "k" }, reply: () => ({ value: { status: 200, ok: true, headers: {}, text: "<html>" } }) });
+  expect(await call($, "noul")).toEqual({ isError: true, result: "noul: HTTP 200 response was not valid JSON" });
 });
 
 // Case 8
