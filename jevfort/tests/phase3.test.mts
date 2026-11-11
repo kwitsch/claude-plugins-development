@@ -4,7 +4,7 @@ import { createKit } from "claude-engine-vitest";
 import type { On } from "claude-engine-vitest";
 import { expect, test as pureTest } from "vitest";
 import { compactInstructions, compactItems } from "../plugin/hooks/compact.mjs";
-import { hints } from "../plugin/hooks/prompt.mjs";
+import { hints, promptQuestions } from "../plugin/hooks/prompt.mjs";
 
 // The manifest defaults (jevfort/package.json claudePlugin.userConfig): the kit does not fill userConfig defaults.
 const DEFAULTS = {
@@ -26,20 +26,34 @@ const { test, mock } = createKit({ module: new URL("../plugin/hooks/register.mjs
 
 const CWD = "/proj";
 
-type Msg = { role: "user" | "assistant"; text: string; toolUses: Record<string, unknown>[] };
+const JEV_PREFIX = "mcp__jev-api__";
+// The jev-api plugin's tools as `$.tool.list()` lists them.
+const JEV_TOOLS = ["noul", "choice", "score"].map((t) => ({ name: JEV_PREFIX + t, description: `Ask Jev a ${t} question`, mcp: true }));
+// The classifier's question ids by their instructions text (the jev-api tools carry no id).
+const PROMPT_IDS = new Map(Object.entries(promptQuestions({ none: "x" })).map(([id, q]) => [q.instructions, id]));
 
-/** Answers every Jev call with `jev`'s answers and stubs the session reads the hooks make. */
-function base(on: On, jev: (q: Record<string, unknown>) => Record<string, unknown>, messages: Msg[] = []) {
-  mock.env(on, { TYPESAFE_API_KEY: "test-key" });
+type Msg = { role: "user" | "assistant"; text: string; toolUses: Record<string, unknown>[] };
+/** One jev-api tool call as the fake saw it; `state` is JSON text. */
+type Asked = { tool: string; instructions: string; state: string; criteria?: unknown };
+
+/** Lists the jev-api tools, answers each of their calls with `jev`'s answer and stubs the session reads the hooks make; returns the calls. */
+function base(on: On, jev: (q: Asked) => Record<string, unknown>, messages: Msg[] = []) {
+  const sent: Asked[] = [];
   mock.store(on, {});
   mock.clock(on);
   on("session.cwd", () => ({ value: CWD }));
   on("session.messages", () => ({ value: messages }));
   on("ui.status", () => ({ value: undefined }));
-  on("http.fetch", (_$, e) => {
-    const body = JSON.parse(String((e.init as { body?: string } | undefined)?.body ?? "{}")) as { questions: Record<string, unknown> };
-    return { value: { status: 200, ok: true, headers: {}, text: JSON.stringify({ answers: jev(body.questions) }) } };
+  on("tool.list", () => ({ value: JEV_TOOLS }));
+  on("tool.call", (_$, e, next) => {
+    const tool = String(e.tool);
+    if (!tool.startsWith(JEV_PREFIX)) return next(e);
+    const q: Asked = { tool, instructions: String(e.instructions), state: String(e.state), criteria: e.criteria };
+    sent.push(q);
+    // A mod's `$.tool.call` resolves to the stub's `value`: the tool result `{ result }`.
+    return { value: { result: JSON.stringify(jev(q)) } };
   });
+  return sent;
 }
 
 pureTest("hints: a mid-confidence skill and a large task get hints; a confident skill is left to step 0", () => {
@@ -49,11 +63,12 @@ pureTest("hints: a mid-confidence skill and a large task get hints; a confident 
 });
 
 test("The prompt classifier adds a hint only Claude reads", async ($, on) => {
-  base(on, () => ({
+  const answers: Record<string, Record<string, unknown>> = {
     kind: { type: "choice", choice: "task", probabilities: { task: 0.9, question: 0.1 }, confidence: 0.8 },
     needs_plan: { type: "noul", noul: 0.93 },
     skill: { type: "choice", choice: "none", probabilities: { none: 0.9 }, confidence: 0.9 },
-  }));
+  };
+  const sent = base(on, (q) => answers[PROMPT_IDS.get(q.instructions) ?? ""]);
   on("command.list", () => ({ value: [{ name: "aws-diagrams", description: "Draw AWS diagrams", source: "plugin" }] }));
   let seen: readonly string[] | undefined;
   on("prompt.submit", (_$, e) => {
@@ -62,10 +77,13 @@ test("The prompt classifier adds a hint only Claude reads", async ($, on) => {
   });
   await $.prompt.submit({ text: "rewrite the storage layer to use IndexedDB and sync across tabs", wait: false, origin: { kind: "composer" } });
   expect(seen?.join("\n") ?? "").toContain("plan");
+  // One jev-api call per question; the skill options are the listed skill plus `none`.
+  expect(sent.map((q) => q.tool)).toEqual(["mcp__jev-api__choice", "mcp__jev-api__noul", "mcp__jev-api__choice"]);
+  expect(Object.keys(sent[2].criteria as object)).toEqual(["none", "aws-diagrams"]);
 });
 
 test("A general-purpose subagent is switched only when Jev is confident; an explicit type is kept", async ($, on) => {
-  base(on, () => ({ agent_type: { type: "choice", choice: "Explore", probabilities: { Explore: 0.92, "general-purpose": 0.08 }, confidence: 0.85 } }));
+  const sent = base(on, () => ({ type: "choice", choice: "Explore", probabilities: { Explore: 0.92, "general-purpose": 0.08 }, confidence: 0.85 }));
   on("agent.offer", () => ({ isOffered: true }));
   const spawned: unknown[] = [];
   on("tool.call", (_$, e) => {
@@ -78,6 +96,9 @@ test("A general-purpose subagent is switched only when Jev is confident; an expl
   await $.tool.call({ tool: "Agent", description: "find usages", prompt: "Find every caller of addTodo", tool_use_id: "a1" });
   await $.tool.call({ tool: "Agent", description: "plan", prompt: "Find every caller of addTodo", subagent_type: "Plan", tool_use_id: "a2" });
   expect(spawned).toEqual(["Explore", "Plan"]);
+  // The offered agent types are the options of one choice call per Agent call.
+  expect(sent.map((q) => q.tool)).toEqual(["mcp__jev-api__choice", "mcp__jev-api__choice"]);
+  expect(sent[0].criteria).toEqual({ "general-purpose": "General tasks", Explore: "Read-only codebase search" });
 });
 
 pureTest("Compaction instructions keep relevant results and mark stale ones", () => {
@@ -109,7 +130,8 @@ test("session.compact passes the ranking to the summarizer", async ($, on) => {
       toolUses: ["a", "b", "c"].map((x, i) => ({ tool_use_id: `t${i}`, tool: "Bash", input: { command: `step ${x}` }, text: x })),
     },
   ];
-  base(on, (q) => Object.fromEntries(Object.keys(q).map((k, i) => [k, { type: "score", score: i === 0 ? 2.8 : 0.3, probabilities: {}, confidence: 0.8 }])));
+  // One score call per tool result: only the first (`step a`) is relevant.
+  const sent = base(on, (q) => ({ type: "score", score: q.instructions.includes("Call: Bash step a.") ? 2.8 : 0.3, probabilities: {}, confidence: 0.8 }));
   let instructions = "";
   on("session.compact", (_$, e) => {
     instructions = typeof e.instructions === "string" ? e.instructions : "";
@@ -117,29 +139,21 @@ test("session.compact passes the ranking to the summarizer", async ($, on) => {
   });
   await $.session.compact({ trigger: "manual", messages });
   expect(instructions).toContain("Keep exact details (paths, errors, decisions, values) from: Bash step a.");
+  expect(sent.map((q) => q.tool)).toEqual(["mcp__jev-api__score", "mcp__jev-api__score", "mcp__jev-api__score"]);
 });
 
 test("A short follow-up is classified with the previous reply as context", async ($, on) => {
-  const sentStates: Record<string, unknown>[] = [];
-  mock.env(on, { TYPESAFE_API_KEY: "test-key" });
-  mock.store(on, {});
-  mock.clock(on);
-  on("session.cwd", () => ({ value: CWD }));
-  on("session.messages", () => ({ value: [{ role: "assistant", text: "The done check could skip while background tasks run. Want me to fix that?", toolUses: [] }] }));
-  on("ui.status", () => ({ value: undefined }));
+  const answers: Record<string, Record<string, unknown>> = {
+    kind: { type: "choice", choice: "task", probabilities: { task: 1 }, confidence: 1 },
+    needs_plan: { type: "noul", noul: 0.1 },
+  };
+  const sent = base(on, (q) => answers[PROMPT_IDS.get(q.instructions) ?? ""], [{ role: "assistant", text: "The done check could skip while background tasks run. Want me to fix that?", toolUses: [] }]);
   on("command.list", () => ({ value: [] }));
-  on("http.fetch", (_$, e) => {
-    sentStates.push((JSON.parse(String((e.init as { body?: string } | undefined)?.body ?? "{}")) as { state: Record<string, unknown> }).state);
-    return {
-      value: {
-        status: 200,
-        ok: true,
-        headers: {},
-        text: JSON.stringify({ answers: { kind: { type: "choice", choice: "task", probabilities: { task: 1 }, confidence: 1 }, needs_plan: { type: "noul", noul: 0.1 } } }),
-      },
-    };
-  });
   on("prompt.submit", (_$, e) => ({ text: e.text }));
   await $.prompt.submit({ text: "fix it", wait: false, origin: { kind: "composer" } });
+  // Both calls (kind, needs_plan) carry the same state as JSON text.
+  const sentStates = sent.map((q) => JSON.parse(q.state) as Record<string, unknown>);
+  expect(sentStates).toHaveLength(2);
   expect(String(sentStates[0]?.previous_reply)).toContain("Want me to fix that?");
+  expect(sentStates[0]?.request).toBe("fix it");
 });

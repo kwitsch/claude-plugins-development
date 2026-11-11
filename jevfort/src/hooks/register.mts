@@ -2,7 +2,8 @@
  * Claude Code function-hooks module of jevfort: every hook and every `$` use. The pure logic lives in the sibling
  * modules, which must never touch `$`. A port of nim-f/jev-pilot 0.5.0 `hooks/register.ts` plus the `$`-using parts
  * of its `jev`, `log`, `context`, `candidates`, `summarize`, `prompt`, `agents`, `compact` and `view`
- * modules, without upstream's modes (disable the plugin to turn it off) and with the endpoint read from `JEV_URL`.
+ * modules, without upstream's modes (disable the plugin to turn it off). Jev is asked only through the jev-api
+ * plugin's tools (`$.tool.call`); this module makes no network request of its own.
  *
  * @remarks
  * EARLY ACCESS API. No engine type import (the engine typings are not in the repo): the used `$` members and
@@ -18,7 +19,7 @@ import type { Candidate } from "./candidates.mjs";
 import { compactInstructions, compactItems, RELEVANCE } from "./compact.mjs";
 import { clip, splitTurn, summarize, toolCalls } from "./context.mjs";
 import type { SessionMessage, ToolUse, TurnContext } from "./context.mjs";
-import { choice, jevUrl, MODEL, noul, score, TIMEOUT_MS } from "./jev.mjs";
+import { choice, JEV_TOOL_PREFIX, noul, score, TIMEOUT_MS } from "./jev.mjs";
 import type { Answer, ChoiceAnswer, JevResult, Question } from "./jev.mjs";
 import { LOG_KEY, MAX_ENTRIES, recentDecisions, remember, statsKey } from "./log.mjs";
 import type { Entry } from "./log.mjs";
@@ -29,8 +30,6 @@ import { buildReport } from "./report.mjs";
 import { SUMMARY_MODEL, SYSTEM } from "./summarize.mjs";
 import type { ModelUsage, Summary } from "./summarize.mjs";
 
-/** A `$.http.fetch` response. */
-type FetchResponse = { status: number; ok: boolean; headers: Record<string, string>; text: string };
 /** One entry of `$.command.list()`. */
 type CommandInfo = { name: string; description: string; source: string };
 /** One entry of `$.tool.list()`. */
@@ -43,8 +42,6 @@ type Engine = {
   clock: { now(): Promise<number>; sleep(ms: number): Promise<unknown> };
   /** Environment of the Claude Code process. */
   env: { get(name: string): Promise<string | undefined> };
-  /** HTTP. */
-  http: { fetch(url: string, init: { method: string; headers: Record<string, string>; body: string }): Promise<FetchResponse> };
   /** This plugin's key-value store. */
   store: { get(key: string): Promise<unknown>; set(key: string, value: unknown): Promise<unknown> };
   /** The session's transcript, directory and id. */
@@ -58,8 +55,12 @@ type Engine = {
   };
   /** Slash commands. */
   command: { register(spec: { name: string; description: string }): Promise<unknown>; list(): Promise<CommandInfo[]> };
-  /** Tools: the listed ones, and registering this plugin's own (`estimate_effort`). */
-  tool: { list(): Promise<ToolInfo[]>; register(spec: typeof ESTIMATE_SPEC): Promise<{ tool?: string }> };
+  /** Tools: the listed ones, registering this plugin's own (`estimate_effort`), and calling one (the jev-api tools). */
+  tool: {
+    list(): Promise<ToolInfo[]>;
+    register(spec: typeof ESTIMATE_SPEC): Promise<{ tool?: string }>;
+    call(input: { tool: string } & Record<string, unknown>): Promise<ToolResult>;
+  };
   /** Model requests. */
   model: { complete(spec: { model: string; system: string; prompt: string; maxTokens: number; timeoutMs: number }): Promise<Completion> };
   /** User interface. */
@@ -153,39 +154,44 @@ const FINISHED = new Set(["completed", "failed", "killed", "idle"]);
 const asText = (v: unknown): string => String(v);
 
 /**
- * Asks Jev; never throws. Any failure is `{ ok: false }` so callers fall back to Claude Code's own behaviour. The
- * endpoint comes from `JEV_URL` on every request (unset or blank: the TypeSafe API); a value that is not an http(s)
- * URL is an error and no request is sent.
+ * Asks Jev through the jev-api plugin's tools; never throws. Every question is one `$.tool.call` to
+ * `mcp__jev-api__<type>`, all raised at once inside the calling hook's frame and raced together against
+ * `TIMEOUT_MS`. All or nothing: any failed call, a timeout or a wrong answer is `{ ok: false }`, so callers fall back
+ * to Claude Code's own behaviour. A call still running when the budget ends is ignored.
  *
  * @param $ - Engine interface.
- * @param state - The facts the questions are about.
+ * @param state - The facts the questions are about; sent as JSON text.
  * @param questions - The questions by id.
- * @returns The answers, or the error, with the request time.
+ * @returns The answers, or the error, with the time taken.
  */
 async function askJev($: Engine, state: unknown, questions: Record<string, Question>): Promise<JevResult> {
   const startedAt = await $.clock.now();
   const done = async (r: { ok: true; answers: Record<string, Answer> } | { ok: false; error: string }): Promise<JevResult> => ({ ...r, ms: (await $.clock.now()) - startedAt });
 
-  const key = await $.env.get("TYPESAFE_API_KEY");
-  if (!key) return done({ ok: false, error: "TYPESAFE_API_KEY is not set" });
-  const target = jevUrl(await $.env.get("JEV_URL"));
-  if (!target.ok) return done({ ok: false, error: target.error });
-
-  const request = $.http.fetch(target.url, {
-    method: "POST",
-    headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ model: MODEL, state, questions }),
-  });
-  request.catch(() => undefined);
+  const text = JSON.stringify(state);
+  const calls = Promise.all(
+    Object.entries(questions).map(async ([id, q]): Promise<[string, Answer]> => {
+      const r = await $.tool.call({ tool: JEV_TOOL_PREFIX + q.type, instructions: q.instructions, state: text, ...(q.criteria === undefined ? {} : { criteria: q.criteria }) });
+      // jev-api's deny text already starts with the type.
+      if (r.deny !== undefined || r.isError === true || typeof r.result !== "string") throw new Error(asText(r.deny ?? r.result ?? `${q.type}: no result`));
+      let answer: Answer | null;
+      try {
+        answer = JSON.parse(r.result) as Answer | null;
+      } catch {
+        throw new Error(`${q.type}: result is not JSON`);
+      }
+      if (answer?.type !== q.type) throw new Error(`${q.type}: no ${q.type} answer`);
+      return [id, answer];
+    }),
+  );
+  // Calls abandoned at the timeout must not raise unhandled rejections.
+  calls.catch(() => undefined);
   const timeout = $.clock.sleep(TIMEOUT_MS).then(() => undefined);
 
   try {
-    const res = await Promise.race([request, timeout]);
-    if (!res) return done({ ok: false, error: `timeout after ${TIMEOUT_MS}ms` });
-    if (!res.ok) return done({ ok: false, error: `HTTP ${res.status}` });
-    const body = JSON.parse(res.text) as { answers?: Record<string, Answer> };
-    if (!body.answers) return done({ ok: false, error: "response had no answers" });
-    return done({ ok: true, answers: body.answers });
+    const entries = await Promise.race([calls, timeout]);
+    if (!entries) return done({ ok: false, error: `timeout after ${TIMEOUT_MS}ms` });
+    return done({ ok: true, answers: Object.fromEntries(entries) });
   } catch (err) {
     return done({ ok: false, error: err instanceof Error ? err.message : String(err) });
   }
@@ -384,7 +390,8 @@ async function buildCandidates($: Engine, request: string, steps: readonly Sessi
       out.push({ key: `skill ${c.name}`, description: `Use the skill or command "${c.name}": ${clipScript(c.description)}`, tool: "Skill", input: { skill: c.name } });
     }
     const loaded = new Set(calls.filter((c) => c.tool === "ToolSearch").map((c) => String(c.input.query)));
-    const tools = (await $.tool.list().catch(() => [])).filter((t) => t.mcp && !AUTH_TOOL.test(t.name) && !loaded.has(`select:${t.name}`));
+    // jev-api's tools are jevfort's own Jev back end, never a tool for Claude to load.
+    const tools = (await $.tool.list().catch(() => [])).filter((t) => t.mcp && !AUTH_TOOL.test(t.name) && !t.name.startsWith(JEV_TOOL_PREFIX) && !loaded.has(`select:${t.name}`));
     for (const t of relevant(request, tools)) {
       out.push({ key: `load ${t.name}`, description: `Load the tool ${t.name}: ${clipScript(t.description)}`, tool: "ToolSearch", input: { query: `select:${t.name}`, max_results: 1 } });
     }

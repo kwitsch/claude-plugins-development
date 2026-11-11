@@ -1,18 +1,15 @@
 /**
- * TypeSafe System One API shapes and answer readers. One request carries every question about one state. Pure: the
- * request itself (`askJev`) lives in `register.mts`, the only module that may use the engine API.
+ * TypeSafe System One question and answer shapes, answer readers and the names of the jev-api plugin's tools. Every
+ * question goes to one jev-api tool (`mcp__jev-api__noul|choice|score`), one call each. Pure: the calls themselves
+ * (`askJev`) live in `register.mts`, the only module that may use the engine API.
  *
  * @packageDocumentation
  */
 
-/** The TypeSafe System One endpoint, used when JEV_URL is unset or blank. */
-export const DEFAULT_JEV_URL = "https://api.typesafe.ai/v1/systemone";
-/** The Jev model named in every request. */
-export const MODEL = "jev-latest";
-/** How long one Jev request may take before Claude Code's own behaviour wins, in ms. */
+/** The local budget of one `askJev` (all its tool calls together) before Claude Code's own behaviour wins, in ms. */
 export const TIMEOUT_MS = 4000;
 
-/** A question Jev answers about the request's `state`: a yes/no probability, a choice among options, or a score along levels. */
+/** A question Jev answers about a `state`, in the input shape of the jev-api tools: a yes/no probability, a choice among options, or a score along levels. */
 export type Question =
   | { type: "noul"; instructions: string; criteria?: { true?: string; false?: string } }
   | { type: "choice"; instructions: string; criteria: Record<string, string> }
@@ -27,22 +24,8 @@ export type ScoreAnswer = { type: "score"; score: number; probabilities: Record<
 /** Any answer. */
 export type Answer = NoulAnswer | ChoiceAnswer | ScoreAnswer;
 
-/** What one Jev request came back with, and how long it took. */
+/** What one `askJev` came back with, and how long it took. */
 export type JevResult = { ok: true; answers: Record<string, Answer>; ms: number } | { ok: false; error: string; ms: number };
-
-/**
- * The Jev endpoint: JEV_URL when set (trimmed, non-empty), else the TypeSafe API. Accepts `http:` and `https:` for
- * any host; any other scheme, a missing host or whitespace inside the URL is an error.
- *
- * @param raw - The raw `JEV_URL` value, `undefined` when unset.
- * @returns The URL to call, or the error to log.
- */
-export function jevUrl(raw: string | undefined): { ok: true; url: string } | { ok: false; error: string } {
-  const value = raw?.trim();
-  if (!value) return { ok: true, url: DEFAULT_JEV_URL };
-  if (!/^https?:\/\/[^/?#\s]+(?:[/?#]\S*)?$/i.test(value)) return { ok: false, error: "JEV_URL must be an http(s) URL" };
-  return { ok: true, url: value };
-}
 
 /** Prefix of the jev-api plugin's tools; the question type completes the name. */
 export const JEV_TOOL_PREFIX = "mcp__jev-api__";
