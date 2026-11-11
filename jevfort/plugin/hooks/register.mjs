@@ -2,7 +2,7 @@ import { GENERAL, SWITCH_AT } from "./agents.mjs";
 import { absolute, AUTH_TOOL, bash, BUILTIN_COMMANDS, clipScript, coversStep, dedupeSkills, isSafeToOffer, MAX_READS, mentionedPaths, quotedTerms, relevant, SAFE_MAKE, SAFE_SCRIPT, sameCall, SKILL_BLOCKLIST_KEY } from "./candidates.mjs";
 import { compactInstructions, compactItems, RELEVANCE } from "./compact.mjs";
 import { clip, splitTurn, summarize, toolCalls } from "./context.mjs";
-import { choice, JEV_TOOL_PREFIX, noul, score, TIMEOUT_MS } from "./jev.mjs";
+import { choice, JEV_TOOL_PREFIX, JEV_TOOLS, missingJevTools, noul, score, TIMEOUT_MS } from "./jev.mjs";
 import { LOG_KEY, MAX_ENTRIES, recentDecisions, remember, statsKey } from "./log.mjs";
 import { bestAction, bounds, difficultyQuestion, doneQuestion, EFFORT_ORDER, effortQuestion, ESTIMATE_SPEC, ESTIMATE_TOOL, estimateEffort, EVERY_TURN_MODELS, inScratchpad, isEffort, lowerModel, mechanicalQuestion, modelFamily, nextActionQuestion, parseEstimateInput, pickCandidate, route, shouldContinue, singleActionQuestion } from "./policy.mjs";
 import { hints, NONE, promptQuestions } from "./prompt.mjs";
@@ -66,6 +66,10 @@ async function askJev($, state, questions) {
 			error: err instanceof Error ? err.message : String(err)
 		});
 	}
+}
+let jevTools;
+function jevMissing($) {
+	return jevTools ??= $.tool.list().then((t) => missingJevTools(t.map((x) => x.name)), () => [...JEV_TOOLS]);
 }
 async function readLog($) {
 	return await $.store.get(LOG_KEY) ?? [];
@@ -360,6 +364,7 @@ export const register = (on, options) => {
 	let donePending = false;
 	let lostFollowUp;
 	on("prompt.submit", async function onPromptSubmit($, e, next) {
+		if ((await jevMissing($)).length) return next(e);
 		if (e.origin?.kind === "plugin" && e.origin.name === PLUGIN_NAME) {
 			donePending = true;
 			return next(e);
@@ -404,11 +409,13 @@ export const register = (on, options) => {
 	});
 	if (options.agentTypes !== false) {
 		const offered = new Map();
-		on("agent.offer", function onAgentOffer($, e, next) {
+		on("agent.offer", async function onAgentOffer($, e, next) {
+			if ((await jevMissing($)).length) return next(e);
 			offered.set(e.agent, e.description);
 			return next(e);
 		});
 		on("tool.call", { tool: "Agent" }, async function onAgentCall($, e, next) {
+			if ((await jevMissing($)).length) return next(e);
 			const claudeType = e.subagent_type ?? "";
 			if (offered.size < 2 || claudeType === "fork") return next(e);
 			const criteria = {};
@@ -447,6 +454,7 @@ export const register = (on, options) => {
 	}
 	if (options.compaction !== false) {
 		on("session.compact", async function onCompact($, e, next) {
+			if ((await jevMissing($)).length) return next(e);
 			if (e.agentId || e.trigger !== "manual" && e.trigger !== "auto") return next(e);
 			const items = compactItems(e.messages);
 			if (items.length < 3) return next(e);
@@ -491,6 +499,7 @@ export const register = (on, options) => {
 	const firstTurns = new Map();
 	const ownCalls = new Set();
 	on("session.start", async function onSessionStart($, e, next) {
+		jevTools = undefined;
 		firstTurns.clear();
 		if (badRange) await record($, {
 			kind: "error",
@@ -501,6 +510,15 @@ export const register = (on, options) => {
 			name: "jev",
 			description: "Jev pilot: status, /jev report, /jev candidates, /jev export, /jev clear"
 		});
+		const missing = await jevMissing($);
+		if (missing.length) {
+			await record($, {
+				kind: "error",
+				applied: false,
+				text: `inactive: jev-api tools missing (${missing.join(", ")})`
+			}).catch(() => undefined);
+			return next(e);
+		}
 		try {
 			await $.tool.register(ESTIMATE_SPEC);
 		} catch (err) {
@@ -545,9 +563,11 @@ export const register = (on, options) => {
 				return { text: `Jev pilot: could not write ${path}: ${err instanceof Error ? err.message : String(err)}` };
 			}
 		}
+		const missing = await jevMissing($);
 		const counts = Object.entries(await stats($)).map(([k, v]) => `${k}=${v}`).join(", ") || "none yet";
 		const lines = recentDecisions().slice(-10).map((d) => `- ${d.kind}${d.applied ? "" : " (pass)"}: ${d.text}${d.ms !== undefined ? ` [${Math.round(d.ms)}ms]` : ""}`);
 		return { text: [
+			...missing.length ? [`Jev pilot: inactive, the jev-api tools are missing (${missing.join(", ")}). Install and enable the jev-api plugin.`] : [],
 			`Jev pilot: routing ${routing}, take steps ${takeSteps} (p ≥ ${takeThreshold}), done check ${doneCheck}, subagents ${subagents}`,
 			`Decisions (all sessions): ${counts}`,
 			lines.length ? `Recent:\n${lines.join("\n")}` : "No decisions this session yet.",
@@ -555,6 +575,7 @@ export const register = (on, options) => {
 		].join("\n") };
 	});
 	on("turn.complete", async function onTurnComplete($, e, next) {
+		if ((await jevMissing($)).length) return next(e);
 		turns.delete(e.turnId);
 		if (e.reason === "aborted" || e.reason === "error") {
 			await record($, {
@@ -596,6 +617,7 @@ export const register = (on, options) => {
 		return next(e);
 	});
 	on("tool.call", async function onToolCall($, e, next) {
+		if ((await jevMissing($)).length) return next(e);
 		if (e.tool === ESTIMATE_TOOL) {
 			const input = parseEstimateInput(e);
 			if (typeof input === "string") return {
@@ -640,6 +662,7 @@ export const register = (on, options) => {
 		return result;
 	});
 	on("turn.step", async function* onTurnStep($, e, next) {
+		if ((await jevMissing($)).length) return yield* next(e);
 		if (e.agentId && !subagents) return yield* next(e);
 		const turn = turns.get(e.turnId) ?? { taken: 0 };
 		turns.set(e.turnId, turn);
@@ -878,6 +901,7 @@ export const register = (on, options) => {
 	});
 	let scratchpad;
 	on("tool.check", async function onToolCheck($, e, next) {
+		if ((await jevMissing($)).length) return next(e);
 		const base = await next(e);
 		if (e.tool === ESTIMATE_TOOL && base.decision !== "deny") return {
 			...base,

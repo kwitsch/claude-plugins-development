@@ -19,7 +19,7 @@ import type { Candidate } from "./candidates.mjs";
 import { compactInstructions, compactItems, RELEVANCE } from "./compact.mjs";
 import { clip, splitTurn, summarize, toolCalls } from "./context.mjs";
 import type { SessionMessage, ToolUse, TurnContext } from "./context.mjs";
-import { choice, JEV_TOOL_PREFIX, noul, score, TIMEOUT_MS } from "./jev.mjs";
+import { choice, JEV_TOOL_PREFIX, JEV_TOOLS, missingJevTools, noul, score, TIMEOUT_MS } from "./jev.mjs";
 import type { Answer, ChoiceAnswer, JevResult, Question } from "./jev.mjs";
 import { LOG_KEY, MAX_ENTRIES, recentDecisions, remember, statsKey } from "./log.mjs";
 import type { Entry } from "./log.mjs";
@@ -195,6 +195,23 @@ async function askJev($: Engine, state: unknown, questions: Record<string, Quest
   } catch (err) {
     return done({ ok: false, error: err instanceof Error ? err.message : String(err) });
   }
+}
+
+/** The needed jev-api tools missing from this session's tool listing: looked up once per session, reset at `session.start`. */
+let jevTools: Promise<string[]> | undefined;
+
+/**
+ * The needed jev-api tools that are not listed; a non-empty answer turns jevfort off (every hook but `/jev` passes
+ * through). A failed listing counts as all missing.
+ *
+ * @remarks
+ * Module level, with its cache, because the engine accepts `$` passed only to top-level functions.
+ *
+ * @param $ - Engine interface.
+ * @returns The missing full tool names, empty when jevfort can ask Jev.
+ */
+function jevMissing($: Engine): Promise<string[]> {
+  return (jevTools ??= $.tool.list().then((t) => missingJevTools(t.map((x) => x.name)), () => [...JEV_TOOLS]));
 }
 
 /**
@@ -601,6 +618,7 @@ export const register = (on: On, options: Options): void => {
   // Phase 3: classify each prompt as it is sent and, when Jev is confident, add a short hint only Claude reads.
   // This one hook also notes Jev's own done follow-up passing through, which arms the exemption.
   on("prompt.submit", async function onPromptSubmit($: Engine, e: PromptEvent, next: Next<PromptEvent, unknown>): Promise<unknown> {
+    if ((await jevMissing($)).length) return next(e);
     if (e.origin?.kind === "plugin" && e.origin.name === PLUGIN_NAME) {
       donePending = true;
       return next(e);
@@ -634,12 +652,14 @@ export const register = (on: On, options: Options): void => {
     // Agent types as the engine offers them to the model, with their descriptions.
     const offered = new Map<string, string>();
 
-    on("agent.offer", function onAgentOffer($: Engine, e: OfferEvent, next: Next<OfferEvent, unknown>): Promise<unknown> {
+    on("agent.offer", async function onAgentOffer($: Engine, e: OfferEvent, next: Next<OfferEvent, unknown>): Promise<unknown> {
+      if ((await jevMissing($)).length) return next(e);
       offered.set(e.agent, e.description);
       return next(e);
     });
 
     on("tool.call", { tool: "Agent" }, async function onAgentCall($: Engine, e: AgentCall, next: Next<AgentCall, ToolResult>): Promise<ToolResult> {
+      if ((await jevMissing($)).length) return next(e);
       const claudeType = e.subagent_type ?? "";
       if (offered.size < 2 || claudeType === "fork") return next(e);
 
@@ -669,6 +689,7 @@ export const register = (on: On, options: Options): void => {
   // Phase 3: before a compaction, Jev scores how relevant each recent tool result is; the summarizer is told what to keep.
   if (options.compaction !== false) {
     on("session.compact", async function onCompact($: Engine, e: CompactEvent, next: Next<CompactEvent, unknown>): Promise<unknown> {
+      if ((await jevMissing($)).length) return next(e);
       if (e.agentId || (e.trigger !== "manual" && e.trigger !== "auto")) return next(e);
       const items = compactItems(e.messages);
       if (items.length < 3) return next(e);
@@ -708,6 +729,8 @@ export const register = (on: On, options: Options): void => {
   // Calls Jev made itself: `tool.check` approves them, their commands come from a vetted list.
   const ownCalls = new Set<string>();
   on("session.start", async function onSessionStart($: Engine, e: unknown, next: Next<unknown, unknown>): Promise<unknown> {
+    // A new session looks the jev-api tools up again.
+    jevTools = undefined;
     // A new conversation (also after /clear) gets its own first-turn estimate.
     firstTurns.clear();
     if (badRange) await record($, { kind: "error", applied: false, text: `invalid effort bounds (${badRange}): using low..xhigh` }).catch(() => undefined);
@@ -715,6 +738,12 @@ export const register = (on: On, options: Options): void => {
       name: "jev",
       description: "Jev pilot: status, /jev report, /jev candidates, /jev export, /jev clear",
     });
+    // Before `next(e)`: a jev-api loaded beneath jevfort is not reachable by `$.tool.call` either, so it counts as missing.
+    const missing = await jevMissing($);
+    if (missing.length) {
+      await record($, { kind: "error", applied: false, text: `inactive: jev-api tools missing (${missing.join(", ")})` }).catch(() => undefined);
+      return next(e);
+    }
     // Registered whatever `routing` says: Skills and subagents call it too. Turn start does not depend on it.
     try {
       await $.tool.register(ESTIMATE_SPEC);
@@ -764,12 +793,14 @@ export const register = (on: On, options: Options): void => {
         return { text: `Jev pilot: could not write ${path}: ${err instanceof Error ? err.message : String(err)}` };
       }
     }
+    const missing = await jevMissing($);
     const counts = Object.entries(await stats($)).map(([k, v]) => `${k}=${v}`).join(", ") || "none yet";
     const lines = recentDecisions()
       .slice(-10)
       .map((d) => `- ${d.kind}${d.applied ? "" : " (pass)"}: ${d.text}${d.ms !== undefined ? ` [${Math.round(d.ms)}ms]` : ""}`);
     return {
       text: [
+        ...(missing.length ? [`Jev pilot: inactive, the jev-api tools are missing (${missing.join(", ")}). Install and enable the jev-api plugin.`] : []),
         `Jev pilot: routing ${routing}, take steps ${takeSteps} (p ≥ ${takeThreshold}), done check ${doneCheck}, subagents ${subagents}`,
         `Decisions (all sessions): ${counts}`,
         lines.length ? `Recent:\n${lines.join("\n")}` : "No decisions this session yet.",
@@ -779,6 +810,7 @@ export const register = (on: On, options: Options): void => {
   });
 
   on("turn.complete", async function onTurnComplete($: Engine, e: TurnEnd, next: Next<TurnEnd, unknown>): Promise<unknown> {
+    if ((await jevMissing($)).length) return next(e);
     turns.delete(e.turnId);
     if (e.reason === "aborted" || e.reason === "error") {
       await record($, { kind: "turn", applied: false, text: `turn ${e.reason}`, turnId: e.turnId, data: { reason: e.reason } });
@@ -812,6 +844,7 @@ export const register = (on: On, options: Options): void => {
   // Answers the estimate_effort tool itself (never `next(e)`: a registered tool no hook answers fails), and logs the
   // outcome of each call Jev made itself, for the report.
   on("tool.call", async function onToolCall($: Engine, e: ToolCall, next: Next<ToolCall, ToolResult>): Promise<ToolResult> {
+    if ((await jevMissing($)).length) return next(e);
     if (e.tool === ESTIMATE_TOOL) {
       const input = parseEstimateInput(e);
       if (typeof input === "string") return { isError: true, result: `estimate_effort: ${input}` };
@@ -843,6 +876,7 @@ export const register = (on: On, options: Options): void => {
   // model. One Jev request carries all of it. Every answer is logged; when Claude takes the step, its call is compared
   // with Jev's top action so the take threshold can be calibrated.
   on("turn.step", async function* onTurnStep($: Engine, e: Step, next: (e: Step) => StepRun): StepRun {
+    if ((await jevMissing($)).length) return yield* next(e);
     if (e.agentId && !subagents) return yield* next(e);
 
     const turn = turns.get(e.turnId) ?? { taken: 0 };
@@ -1026,6 +1060,7 @@ export const register = (on: On, options: Options): void => {
   let scratchpad: { roots: string[]; sid: string } | undefined;
   // Permission check: approves Jev's own vetted calls and writes into this session's scratchpad; every other verdict stays Claude Code's.
   on("tool.check", async function onToolCheck($: Engine, e: Check, next: Next<Check, Verdict>): Promise<Verdict> {
+    if ((await jevMissing($)).length) return next(e);
     const base = await next(e);
     // Jev's own calls come from the vetted candidate list: approve them so auto mode's classifier doesn't refuse
     // them. This and the scratchpad branch are the only places jevfort loosens Claude Code's verdict. A settings deny rule still wins.
