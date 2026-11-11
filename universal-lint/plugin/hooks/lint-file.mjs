@@ -2,7 +2,7 @@
 import { execFileSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { accessSync, constants as fsConstants, existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
-import { homedir, tmpdir } from "node:os";
+import { availableParallelism, homedir, tmpdir } from "node:os";
 import path from "node:path";
 import process from "node:process";
 import { json } from "node:stream/consumers";
@@ -16,6 +16,9 @@ const TSC_SPAWN_TIMEOUT_MS = 45e3;
 const CARGO_SPAWN_TIMEOUT_MS = 45e3;
 export const WATCH_LIMIT = 5e3;
 const GIT_TIMEOUT_MS = 1e4;
+const HOOK_TIMEOUT_MS = 9e4;
+const FILE_CHANGED_BUDGET_MS = HOOK_TIMEOUT_MS - 5e3;
+export const FILE_CHANGED_SLOTS = Math.max(2, Math.floor(availableParallelism() / 4));
 const TYPE_CHECK_EXTS = new Set([
 	".ts",
 	".tsx",
@@ -877,6 +880,35 @@ export function lintFileHandler(args, scoped = postToolScope(args)) {
 		return {};
 	}
 }
+function slotStale(slot) {
+	try {
+		if (Math.abs(Date.now() - lstatSync(slot).mtimeMs) >= HOOK_TIMEOUT_MS) return true;
+		const pid = Number(readFileSync(slot, "utf8"));
+		if (Number.isInteger(pid) && pid > 0) process.kill(pid, 0);
+		return false;
+	} catch (e) {
+		return e.code === "ESRCH";
+	}
+}
+export function acquireSlot(untilMs) {
+	const dir = path.resolve(process.env.CLAUDE_PLUGIN_DATA || tmpdir(), "fc-slots");
+	mkdirSync(dir, { recursive: true });
+	const tick = new Int32Array(new SharedArrayBuffer(4));
+	for (;;) {
+		for (let i = 0; i < FILE_CHANGED_SLOTS; i++) {
+			const slot = path.join(dir, String(i));
+			if (slotStale(slot)) rmSync(slot, { force: true });
+			try {
+				writeFileSync(slot, String(process.pid), { flag: "wx" });
+				return slot;
+			} catch (e) {
+				if (e.code !== "EEXIST") throw e;
+			}
+		}
+		if (process.uptime() * 1e3 >= untilMs) return null;
+		Atomics.wait(tick, 0, 0, 100);
+	}
+}
 export function fileChangedHandler(args) {
 	try {
 		if (args?.event === "unlink") return {};
@@ -914,7 +946,23 @@ export function fileChangedHandler(args) {
 			});
 			if (status === "" || status.startsWith("!!")) return {};
 		} catch {}
-		return lintResolved(s.fp, cwd, null, "FileChanged", "universal-lint (changed outside Write/Edit)");
+		const ext = path.extname(s.fp).toLowerCase();
+		const lintMs = (EXT_MAP[ext] === "rust" ? CARGO_SPAWN_TIMEOUT_MS : SPAWN_TIMEOUT_MS) + (TYPE_CHECK_EXTS.has(ext) ? TSC_SPAWN_TIMEOUT_MS : 0);
+		let slot;
+		try {
+			slot = acquireSlot(FILE_CHANGED_BUDGET_MS - lintMs);
+		} catch {}
+		if (slot === null) {
+			process.stderr.write(`universal-lint: FileChanged: no lint slot free in time, ${s.fp} not linted\n`);
+			return {};
+		}
+		try {
+			return lintResolved(s.fp, cwd, null, "FileChanged", "universal-lint (changed outside Write/Edit)");
+		} finally {
+			try {
+				if (slot) rmSync(slot, { force: true });
+			} catch {}
+		}
 	} catch {
 		return {};
 	}

@@ -1,10 +1,11 @@
 // File detection: SessionStart/CwdChanged watch list and FileChanged linting, against the built hook in a real git repo.
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
-import { mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { spawn, spawnSync } from "node:child_process";
+import { mkdirSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "vitest";
-import { makeEnv } from "./support/lint-hook.mts";
+import { FILE_CHANGED_SLOTS } from "../plugin/hooks/lint-file.mjs";
+import { HOOK, makeEnv } from "./support/lint-hook.mts";
 import type { LintEnv } from "./support/lint-hook.mts";
 
 /**
@@ -117,6 +118,23 @@ const OUT = "a.sh:1:6: note: marker [SC2086]";
  */
 const changed = (e: LintEnv, file: string, extra: Record<string, unknown> = {}) => e.runEvent({ hook_event_name: "FileChanged", cwd: e.cwd, file_path: file, event: "change", ...extra }, { out: OUT });
 
+/**
+ * Pipe one FileChanged payload for `file` into the hook without blocking (spawn, not spawnSync), so several overlap.
+ *
+ * @param e - Test environment.
+ * @param file - Changed file (absolute).
+ * @returns The hook's exit status once it closes.
+ */
+function changedAsync(e: LintEnv, file: string): Promise<number | null> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, [HOOK], { env: e.childEnv({ out: OUT }), stdio: ["pipe", "ignore", "ignore"] });
+    child.on("error", reject);
+    child.on("close", resolve);
+    child.stdin.on("error", () => {}); // EPIPE when a broken hook exits before the write: let the assertions report it
+    child.stdin.end(JSON.stringify({ hook_event_name: "FileChanged", cwd: e.cwd, file_path: file, event: "change" }));
+  });
+}
+
 test("FileChanged: a tracked, modified file is linted whole and labelled", () => {
   const e = makeEnv();
   e.recStub("shellcheck", 1);
@@ -181,4 +199,65 @@ test("FileChanged: outside a git repo the file is linted (git failure means lint
   const a = e.file("a.sh", "echo $1\n");
   assert.equal(changed(e, a).status, 2);
   assert.equal(e.lines().length, 1);
+});
+
+test("FileChanged: 20 concurrent events lint at most FILE_CHANGED_SLOTS at a time, all 20 linted, slots released (F10)", async () => {
+  const e = makeEnv();
+  // Appends a sub-ms wall-clock start/end around a 300 ms sleep (date and sleep are not on the hermetic PATH).
+  e.stub(
+    "shellcheck",
+    `node -e 'const fs = require("fs"), t = () => (performance.timeOrigin + performance.now()).toFixed(3); fs.appendFileSync(process.env.RECORD, "start " + t() + "\\n"); Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 300); fs.appendFileSync(process.env.RECORD, "end " + t() + "\\n");'`,
+    "printf '%s\\n' \"$OUT\"",
+    "exit 1",
+  );
+  const files = Array.from({ length: 20 }, (_, i) => e.file(`f${i}.sh`, "echo a\n"));
+  gitInit(e);
+  for (const f of files) writeFileSync(f, "echo $1\n");
+  const statuses = await Promise.all(files.map((f) => changedAsync(e, f)));
+  assert.deepEqual(statuses, files.map(() => 2));
+  const events = e.lines()
+    .filter((l) => l.startsWith("start ") || l.startsWith("end "))
+    .map((l) => ({ t: Number(l.split(" ")[1]), d: l.startsWith("start ") ? 1 : -1 }));
+  assert.equal(events.filter((x) => x.d === 1).length, 20);
+  assert.equal(events.filter((x) => x.d === -1).length, 20);
+  events.sort((a, b) => a.t - b.t || a.d - b.d); // ends before starts on ties
+  let cur = 0;
+  let max = 0;
+  for (const x of events) {
+    cur += x.d;
+    max = Math.max(max, cur);
+  }
+  assert.ok(max <= FILE_CHANGED_SLOTS, `max overlap ${max} > FILE_CHANGED_SLOTS ${FILE_CHANGED_SLOTS}`);
+  assert.deepEqual(readdirSync(path.join(e.data, "fc-slots")), []);
+});
+
+test("FileChanged: an unusable slot dir lints without a slot (fail open, F10)", () => {
+  const e = makeEnv();
+  e.recStub("shellcheck", 1);
+  const a = e.file("a.sh", "echo a\n");
+  gitInit(e);
+  writeFileSync(a, "echo $1\n");
+  writeFileSync(e.data, ""); // a regular file: mkdirSync(<data>/fc-slots) throws ENOTDIR
+  assert.equal(changed(e, a).status, 2);
+  assert.equal(e.lines().filter((l) => l.startsWith("shellcheck ")).length, 1);
+});
+
+test("FileChanged: with every slot held a .ts file gives up at uptime 10 s with a stderr note, exit 0, slots untouched (F10)", () => {
+  // Costs about 10 s on purpose: the deadline is process-uptime based and has no test seam (do not add one).
+  const e = makeEnv();
+  const a = e.file("a.ts", "export const a = 1;\n");
+  gitInit(e);
+  writeFileSync(a, "export const a = 2;\n");
+  const dir = path.join(e.data, "fc-slots");
+  mkdirSync(dir, { recursive: true });
+  // The vitest worker pid is alive, so slotStale keeps every slot held.
+  for (let i = 0; i < FILE_CHANGED_SLOTS; i++) writeFileSync(path.join(dir, String(i)), String(process.pid));
+  const t0 = Date.now();
+  const r = changed(e, a);
+  assert.equal(r.status, 0);
+  assert.equal(r.stdout, "");
+  assert.match(r.stderr, /^universal-lint: FileChanged: no lint slot free in time, .*a\.ts not linted\n$/);
+  assert.ok(Date.now() - t0 >= 9500, `gave up after ${Date.now() - t0} ms, expected about 10 s`);
+  assert.equal(readdirSync(dir).length, FILE_CHANGED_SLOTS);
+  for (let i = 0; i < FILE_CHANGED_SLOTS; i++) assert.equal(readFileSync(path.join(dir, String(i)), "utf8"), String(process.pid));
 });
