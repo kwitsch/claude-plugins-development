@@ -17,6 +17,33 @@ const TYPES = ["noul", "choice", "score"] as const;
 /** One of {@link TYPES}. */
 type QuestionType = (typeof TYPES)[number];
 
+/** One System One question as sent in the request body. */
+type Question =
+  | {
+      /** The question type. */
+      type: "noul";
+      /** The yes/no question to answer. */
+      instructions: string;
+      /** Optional wording of true and false. */
+      criteria?: { true?: string; false?: string };
+    }
+  | {
+      /** The question type. */
+      type: "choice";
+      /** What to choose. */
+      instructions: string;
+      /** Option name to description. */
+      criteria: Record<string, string>;
+    }
+  | {
+      /** The question type. */
+      type: "score";
+      /** What to rate. */
+      instructions: string;
+      /** The levels, lowest first. */
+      criteria: string[];
+    };
+
 /** A tool registration passed to `$.tool.register`. */
 type ToolSpec = {
   /** The bare tool name (the engine prefixes it with `mcp__jev-api__`). */
@@ -36,6 +63,11 @@ type ToolSpec = {
 
 /** The part of the engine interface `$` this module uses. */
 type Engine = {
+  /** Environment variables. */
+  env: {
+    /** Reads a variable; undefined when unset. */
+    get(name: string): Promise<string | undefined>;
+  };
   /** Tool registry. */
   tool: {
     /** Registers a tool; resolves the full tool name the engine gave it. */
@@ -88,6 +120,9 @@ const NEEDS = " Needs TYPESAFE_API_KEY, TYPESAFE_BASE_URL or JEV_URL to be set."
 
 /** The `state` input property shared by the three tools. */
 const STATE = { type: "string", description: "The text the question is about." };
+
+/** The engine names a registered tool `mcp__<plugin>__<name>`. */
+const TOOL_PREFIX = "mcp__jev-api__";
 
 /** The three tool registrations, keyed by question type. */
 const SPECS: Record<QuestionType, ToolSpec> = {
@@ -153,6 +188,66 @@ const SPECS: Record<QuestionType, ToolSpec> = {
 };
 
 /**
+ * Whether a value is a plain object (not an array, not null).
+ *
+ * @param v - The value to test.
+ * @returns True for a plain object.
+ */
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return typeof v === "object" && v !== null && !Array.isArray(v);
+}
+
+/**
+ * Whether a value is a string with content after trimming.
+ *
+ * @param v - The value to test.
+ * @returns True for a non-blank string.
+ */
+function isText(v: unknown): v is string {
+  return typeof v === "string" && v.trim() !== "";
+}
+
+/**
+ * Validates the model-supplied tool input and builds the System One question. Values pass through unchanged.
+ *
+ * @param type - The question type (the tool called).
+ * @param e - The `tool.call` event carrying the input fields.
+ * @returns The state and question, or the error message (no request is sent).
+ */
+function parseInput(type: QuestionType, e: ToolCall): { state: string; question: Question } | string {
+  const { instructions, state, criteria } = e;
+  if (!isText(instructions)) return "instructions must be a non-empty string";
+  if (!isText(state)) return "state must be a non-empty string";
+  if (type === "noul") {
+    const msg = "criteria must be an object with optional string fields true and false";
+    if (criteria === undefined) return { state, question: { type, instructions } };
+    if (!isRecord(criteria)) return msg;
+    const { true: yes, false: no, ...rest } = criteria;
+    if (Object.keys(rest).length > 0) return msg;
+    const picked: { true?: string; false?: string } = {};
+    if (typeof yes === "string") picked.true = yes;
+    else if (yes !== undefined) return msg;
+    if (typeof no === "string") picked.false = no;
+    else if (no !== undefined) return msg;
+    return { state, question: { type, instructions, criteria: picked } };
+  }
+  if (type === "choice") {
+    const msg = "criteria must map 1 to 255 option names to string descriptions";
+    if (!isRecord(criteria)) return msg;
+    const entries = Object.entries(criteria);
+    const options: Record<string, string> = {};
+    for (const [name, description] of entries) if (typeof description === "string") options[name] = description;
+    if (entries.length < 1 || entries.length > 255 || Object.keys(options).length !== entries.length) return msg;
+    return { state, question: { type, instructions, criteria: options } };
+  }
+  const msg = "criteria must be an array of 1 to 10 strings";
+  if (!Array.isArray(criteria)) return msg;
+  const levels = criteria.filter((v): v is string => typeof v === "string");
+  if (levels.length !== criteria.length || levels.length < 1 || levels.length > 10) return msg;
+  return { state, question: { type, instructions, criteria: levels } };
+}
+
+/**
  * Registers the module's hooks.
  *
  * @param on - The engine's hook registrar.
@@ -168,8 +263,15 @@ export function register(on: On): void {
     }
     return next(e);
   });
-  // Answered in Task 3; until then every tool call passes through.
-  on("tool.call", function onToolCall(_$, e, next) {
-    return next(e);
+  on("tool.call", async function onToolCall($, e, next) {
+    const type = TYPES.find((t) => e.tool === TOOL_PREFIX + t);
+    if (type === undefined) return next(e);
+    // Literal names: the engine's static check only accepts a literal first argument to $.env.get.
+    const configured = [await $.env.get("TYPESAFE_API_KEY"), await $.env.get("TYPESAFE_BASE_URL"), await $.env.get("JEV_URL")];
+    if (!configured.some(isText)) return { isError: true, result: `${type}: none of TYPESAFE_API_KEY, TYPESAFE_BASE_URL, JEV_URL is set` };
+    const input = parseInput(type, e);
+    if (typeof input === "string") return { isError: true, result: `${type}: ${input}` };
+    // Transitional: Task 4 replaces this line with the System One request.
+    return { isError: true, result: `${type}: not implemented` };
   });
 }

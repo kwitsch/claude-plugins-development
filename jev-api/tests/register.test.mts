@@ -50,3 +50,65 @@ test("session.start registers noul, choice and score without any env var", async
   expect(specs[1]).toMatchObject({ inputSchema: { required: ["instructions", "state", "criteria"] } });
   expect(specs[2]).toMatchObject({ inputSchema: { required: ["instructions", "state", "criteria"] } });
 });
+
+/** The test's `$` (the kit does not export its type). */
+type Runner = Parameters<Parameters<typeof test>[2]>[0];
+
+// Valid default input per tool.
+const BASE: Record<string, Record<string, unknown>> = {
+  noul: { instructions: "Is this text a greeting?", state: "Hello there!", criteria: { true: "a greeting", false: "anything else" } },
+  choice: { instructions: "What is this text?", state: "Hello there!", criteria: { greeting: "says hello", question: "asks something" } },
+  score: { instructions: "Rate the sentiment", state: "Hello there!", criteria: ["negative", "neutral", "positive"] },
+};
+
+const call = ($: Runner, type: string, input: Record<string, unknown> = {}) => $.tool.call({ tool: TOOL(type), ...BASE[type], ...input }) as Promise<{ result?: string; isError?: boolean }>;
+
+const NO_CONFIG = (type: string) => ({ isError: true, result: `${type}: none of TYPESAFE_API_KEY, TYPESAFE_BASE_URL, JEV_URL is set` });
+
+// Cases 2, 3: the env gate runs on every call, sends no request, and blank counts as unset.
+for (const type of ["noul", "choice", "score"]) {
+  test(`${type} without any env var fails locally`, async ($, on) => {
+    const { fetched } = setup(on, { env: {} });
+    expect(await call($, type)).toEqual(NO_CONFIG(type));
+    expect(fetched).toHaveLength(0);
+  });
+
+  test(`${type} with blank env vars fails locally`, async ($, on) => {
+    const { fetched } = setup(on, { env: { TYPESAFE_API_KEY: "  ", TYPESAFE_BASE_URL: " ", JEV_URL: "\t" } });
+    expect(await call($, type)).toEqual(NO_CONFIG(type));
+    expect(fetched).toHaveLength(0);
+  });
+}
+
+test("the env gate runs before input validation", async ($, on) => {
+  setup(on, { env: {} });
+  expect(await call($, "noul", { instructions: undefined })).toEqual(NO_CONFIG("noul"));
+});
+
+// Case 10: invalid input, exact messages, no request.
+test("invalid input is rejected without a request", async ($, on) => {
+  const { fetched } = setup(on, { env: { JEV_URL: "https://jev.example/v1/systemone" } });
+  const bad = (type: string, input: Record<string, unknown>, message: string) => call($, type, input).then((r) => expect(r).toEqual({ isError: true, result: `${type}: ${message}` }));
+  await bad("noul", { instructions: undefined }, "instructions must be a non-empty string");
+  await bad("noul", { instructions: "   " }, "instructions must be a non-empty string");
+  await bad("noul", { state: "  " }, "state must be a non-empty string");
+  await bad("noul", { criteria: { maybe: "x" } }, "criteria must be an object with optional string fields true and false");
+  await bad("noul", { criteria: { true: 1 } }, "criteria must be an object with optional string fields true and false");
+  await bad("noul", { criteria: ["x"] }, "criteria must be an object with optional string fields true and false");
+  await bad("noul", { criteria: null }, "criteria must be an object with optional string fields true and false");
+  await bad("choice", { criteria: {} }, "criteria must map 1 to 255 option names to string descriptions");
+  await bad("choice", { criteria: { a: 1 } }, "criteria must map 1 to 255 option names to string descriptions");
+  await bad("choice", { criteria: undefined }, "criteria must map 1 to 255 option names to string descriptions");
+  await bad("choice", { criteria: Object.fromEntries(Array.from({ length: 256 }, (_, i) => [`o${i}`, "d"])) }, "criteria must map 1 to 255 option names to string descriptions");
+  await bad("score", { criteria: Array.from({ length: 11 }, (_, i) => `l${i}`) }, "criteria must be an array of 1 to 10 strings");
+  await bad("score", { criteria: [] }, "criteria must be an array of 1 to 10 strings");
+  await bad("score", { criteria: ["a", 2] }, "criteria must be an array of 1 to 10 strings");
+  expect(fetched).toHaveLength(0);
+});
+
+// Case 14: other tools pass through to the next hook untouched.
+test("a call to another tool reaches the next hook", async ($, on) => {
+  setup(on, { env: {} });
+  on("tool.call", async () => ({ result: "from-next" }));
+  expect(await $.tool.call({ tool: "Read", file_path: "/x" })).toEqual({ result: "from-next" });
+});

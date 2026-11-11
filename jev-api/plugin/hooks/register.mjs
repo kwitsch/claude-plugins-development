@@ -8,6 +8,7 @@ const STATE = {
 	type: "string",
 	description: "The text the question is about."
 };
+const TOOL_PREFIX = "mcp__jev-api__";
 const SPECS = {
 	noul: {
 		name: "noul",
@@ -92,6 +93,71 @@ const SPECS = {
 		}
 	}
 };
+function isRecord(v) {
+	return typeof v === "object" && v !== null && !Array.isArray(v);
+}
+function isText(v) {
+	return typeof v === "string" && v.trim() !== "";
+}
+function parseInput(type, e) {
+	const { instructions, state, criteria } = e;
+	if (!isText(instructions)) return "instructions must be a non-empty string";
+	if (!isText(state)) return "state must be a non-empty string";
+	if (type === "noul") {
+		const msg = "criteria must be an object with optional string fields true and false";
+		if (criteria === undefined) return {
+			state,
+			question: {
+				type,
+				instructions
+			}
+		};
+		if (!isRecord(criteria)) return msg;
+		const { true: yes, false: no, ...rest } = criteria;
+		if (Object.keys(rest).length > 0) return msg;
+		const picked = {};
+		if (typeof yes === "string") picked.true = yes;
+		else if (yes !== undefined) return msg;
+		if (typeof no === "string") picked.false = no;
+		else if (no !== undefined) return msg;
+		return {
+			state,
+			question: {
+				type,
+				instructions,
+				criteria: picked
+			}
+		};
+	}
+	if (type === "choice") {
+		const msg = "criteria must map 1 to 255 option names to string descriptions";
+		if (!isRecord(criteria)) return msg;
+		const entries = Object.entries(criteria);
+		const options = {};
+		for (const [name, description] of entries) if (typeof description === "string") options[name] = description;
+		if (entries.length < 1 || entries.length > 255 || Object.keys(options).length !== entries.length) return msg;
+		return {
+			state,
+			question: {
+				type,
+				instructions,
+				criteria: options
+			}
+		};
+	}
+	const msg = "criteria must be an array of 1 to 10 strings";
+	if (!Array.isArray(criteria)) return msg;
+	const levels = criteria.filter((v) => typeof v === "string");
+	if (levels.length !== criteria.length || levels.length < 1 || levels.length > 10) return msg;
+	return {
+		state,
+		question: {
+			type,
+			instructions,
+			criteria: levels
+		}
+	};
+}
 export function register(on) {
 	on("session.start", async function onSessionStart($, e, next) {
 		for (const type of TYPES) {
@@ -101,7 +167,26 @@ export function register(on) {
 		}
 		return next(e);
 	});
-	on("tool.call", function onToolCall(_$, e, next) {
-		return next(e);
+	on("tool.call", async function onToolCall($, e, next) {
+		const type = TYPES.find((t) => e.tool === TOOL_PREFIX + t);
+		if (type === undefined) return next(e);
+		const configured = [
+			await $.env.get("TYPESAFE_API_KEY"),
+			await $.env.get("TYPESAFE_BASE_URL"),
+			await $.env.get("JEV_URL")
+		];
+		if (!configured.some(isText)) return {
+			isError: true,
+			result: `${type}: none of TYPESAFE_API_KEY, TYPESAFE_BASE_URL, JEV_URL is set`
+		};
+		const input = parseInput(type, e);
+		if (typeof input === "string") return {
+			isError: true,
+			result: `${type}: ${input}`
+		};
+		return {
+			isError: true,
+			result: `${type}: not implemented`
+		};
 	});
 }
