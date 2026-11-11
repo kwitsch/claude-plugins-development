@@ -50,8 +50,6 @@ type FetchResponse = {
   status: number;
   /** Whether the status is 2xx. */
   ok: boolean;
-  /** The response headers. */
-  headers: Record<string, string>;
   /** The raw response body. */
   text: string;
 };
@@ -124,6 +122,18 @@ type ToolCall = { tool: string } & Record<string, unknown>;
 /** What a `tool.call` hook resolves: the tool result for the model. */
 type ToolResult = { result?: unknown; isError?: boolean } & Record<string, unknown>;
 
+/** The env values a call uses, trimmed; undefined when unset or blank. */
+type Env = {
+  /** TYPESAFE_API_KEY. */
+  key: string | undefined;
+  /** TYPESAFE_BASE_URL. */
+  base: string | undefined;
+  /** JEV_URL. */
+  jevUrl: string | undefined;
+  /** TYPESAFE_DEFAULT_MODEL. */
+  model: string | undefined;
+};
+
 /** The `on` registrar of the module: one overload per hooked event. */
 type On = {
   /**
@@ -166,10 +176,9 @@ const HTTP_URL = /^https?:\/\/[^/?#\s]+(?:[/?#]\S*)?$/i;
 /** The engine names a registered tool `mcp__<plugin>__<name>`. */
 const TOOL_PREFIX = "mcp__jev-api__";
 
-/** The three tool registrations, keyed by question type. */
-const SPECS: Record<QuestionType, ToolSpec> = {
+/** The three tool registrations without their name, keyed by question type (the key is the name). */
+const SPECS: Record<QuestionType, Omit<ToolSpec, "name">> = {
   noul: {
-    name: "noul",
     description: "Ask TypeSafe Jev a yes/no question about a text; returns the probability (0..1) that the answer is true." + NEEDS,
     inputSchema: {
       type: "object",
@@ -190,7 +199,6 @@ const SPECS: Record<QuestionType, ToolSpec> = {
     },
   },
   choice: {
-    name: "choice",
     description: "Ask TypeSafe Jev to pick one of named options for a text; returns the choice, its confidence and every option's probability." + NEEDS,
     inputSchema: {
       type: "object",
@@ -209,7 +217,6 @@ const SPECS: Record<QuestionType, ToolSpec> = {
     },
   },
   score: {
-    name: "score",
     description: "Ask TypeSafe Jev to rate a text along ordered levels; returns the score (level index from 0), confidence, probabilities and legend." + NEEDS,
     inputSchema: {
       type: "object",
@@ -240,6 +247,41 @@ function isRecord(v: unknown): v is Record<string, unknown> {
 }
 
 /**
+ * Whether a value is a string or undefined.
+ *
+ * @param v - The value to test.
+ * @returns True for a string or undefined.
+ */
+function isOptionalString(v: unknown): v is string | undefined {
+  return v === undefined || typeof v === "string";
+}
+
+/**
+ * Parses JSON without throwing.
+ *
+ * @param text - The raw text.
+ * @returns The parsed value, or undefined when the text is not JSON (valid JSON never parses to undefined).
+ */
+function json(text: string): unknown {
+  try {
+    return JSON.parse(text) as unknown;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Builds a tool error result.
+ *
+ * @param type - The question type (the tool called), prefixed to the message.
+ * @param reason - What went wrong.
+ * @returns The error result for the model.
+ */
+function fail(type: QuestionType, reason: string): ToolResult {
+  return { isError: true, result: `${type}: ${reason}` };
+}
+
+/**
  * Whether a value is a string with content after trimming.
  *
  * @param v - The value to test.
@@ -265,42 +307,31 @@ function parseInput(type: QuestionType, e: ToolCall): { state: string; question:
     if (criteria === undefined) return { state, question: { type, instructions } };
     if (!isRecord(criteria)) return msg;
     const { true: yes, false: no, ...rest } = criteria;
-    if (Object.keys(rest).length > 0) return msg;
-    const picked: { true?: string; false?: string } = {};
-    if (typeof yes === "string") picked.true = yes;
-    else if (yes !== undefined) return msg;
-    if (typeof no === "string") picked.false = no;
-    else if (no !== undefined) return msg;
-    return { state, question: { type, instructions, criteria: picked } };
+    if (Object.keys(rest).length > 0 || !isOptionalString(yes) || !isOptionalString(no)) return msg;
+    return { state, question: { type, instructions, criteria: { true: yes, false: no } } }; // JSON drops undefined fields
   }
   if (type === "choice") {
     const msg = "criteria must map 1 to 255 non-blank option names to string descriptions";
     if (!isRecord(criteria)) return msg;
     const entries = Object.entries(criteria);
-    const options: Record<string, string> = {};
-    for (const [name, description] of entries) if (typeof description === "string") options[name] = description;
-    if (entries.some(([name]) => name.trim() === "")) return msg;
-    if (entries.length < 1 || entries.length > 255 || Object.keys(options).length !== entries.length) return msg;
-    return { state, question: { type, instructions, criteria: options } };
+    const valid = entries.filter((p): p is [string, string] => p[0].trim() !== "" && typeof p[1] === "string");
+    if (entries.length < 1 || entries.length > 255 || valid.length !== entries.length) return msg;
+    return { state, question: { type, instructions, criteria: Object.fromEntries(valid) } };
   }
   const msg = "criteria must be an array of 1 to 10 strings";
-  if (!Array.isArray(criteria)) return msg;
-  const levels = criteria.filter((v): v is string => typeof v === "string");
-  if (levels.length !== criteria.length || levels.length < 1 || levels.length > 10) return msg;
-  return { state, question: { type, instructions, criteria: levels } };
+  if (!Array.isArray(criteria) || criteria.length < 1 || criteria.length > 10 || !criteria.every((v): v is string => typeof v === "string")) return msg;
+  return { state, question: { type, instructions, criteria } };
 }
 
 /**
  * Resolves the System One endpoint: JEV_URL, else TYPESAFE_BASE_URL plus `/v1/systemone`, else the default.
  *
- * @param jevUrlRaw - The JEV_URL value (full route).
- * @param baseRaw - The TYPESAFE_BASE_URL value (API root).
+ * @param jev - The trimmed JEV_URL value (full route), undefined when unset or blank.
+ * @param base - The trimmed TYPESAFE_BASE_URL value (API root), undefined when unset or blank.
  * @returns The URL, or the error naming the invalid variable (an invalid set value never falls back).
  */
-function endpoint(jevUrlRaw: string | undefined, baseRaw: string | undefined): { ok: true; url: string } | { ok: false; error: string } {
-  const jev = jevUrlRaw?.trim();
+function endpoint(jev: string | undefined, base: string | undefined): { ok: true; url: string } | { ok: false; error: string } {
   if (jev) return HTTP_URL.test(jev) ? { ok: true, url: jev } : { ok: false, error: "JEV_URL must be an http(s) URL" };
-  const base = baseRaw?.trim();
   if (base) {
     const url = base.replace(/\/+$/, "") + "/v1/systemone";
     return !/[?#]/.test(base) && HTTP_URL.test(url) ? { ok: true, url } : { ok: false, error: "TYPESAFE_BASE_URL must be an http(s) URL" };
@@ -315,12 +346,7 @@ function endpoint(jevUrlRaw: string | undefined, baseRaw: string | undefined): {
  * @returns The detail (a string as is, anything else JSON-stringified), or undefined when there is none.
  */
 function detail(text: string): string | undefined {
-  let body: unknown;
-  try {
-    body = JSON.parse(text);
-  } catch {
-    return undefined;
-  }
+  const body = json(text);
   if (!isRecord(body) || body["detail"] === undefined) return undefined;
   return typeof body["detail"] === "string" ? body["detail"] : JSON.stringify(body["detail"]);
 }
@@ -329,24 +355,17 @@ function detail(text: string): string | undefined {
  * Sends one System One question and maps every outcome to a tool result.
  *
  * @param $ - The engine.
- * @param type - The question type (the tool called).
  * @param state - The text the question is about.
- * @param question - The question.
- * @param cfg - The already read TYPESAFE_API_KEY (`key`), TYPESAFE_BASE_URL (`base`) and JEV_URL (`jevUrl`) values.
+ * @param question - The question; its type is the tool called.
+ * @param env - The env values, trimmed, undefined when unset or blank.
  * @returns The answer object as JSON, or an error result prefixed with the type.
  */
-async function ask(
-  $: Engine,
-  type: QuestionType,
-  state: string,
-  question: Question,
-  cfg: { key: string | undefined; base: string | undefined; jevUrl: string | undefined },
-): Promise<ToolResult> {
-  const fail = (reason: string): ToolResult => ({ isError: true, result: `${type}: ${reason}` });
-  const target = endpoint(cfg.jevUrl, cfg.base);
-  if (!target.ok) return fail(target.error);
-  const key = cfg.key?.trim();
-  const model = (await $.env.get("TYPESAFE_DEFAULT_MODEL"))?.trim() || DEFAULT_MODEL;
+async function ask($: Engine, state: string, question: Question, env: Env): Promise<ToolResult> {
+  const { type } = question;
+  const target = endpoint(env.jevUrl, env.base);
+  if (!target.ok) return fail(type, target.error);
+  const { key } = env;
+  const model = env.model ?? DEFAULT_MODEL;
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   // The key never travels in cleartext: over plain http the request goes out without it.
   if (key && /^https:/i.test(target.url)) headers["Authorization"] = `Bearer ${key}`;
@@ -356,23 +375,19 @@ async function ask(
     request.catch(() => undefined); // a late rejection after the timeout won must not go unhandled
     const timeout = new Promise<undefined>((resolve) => (timer = $.clock.after(TIMEOUT_MS, () => resolve(undefined))));
     const res = await Promise.race([request, timeout]);
-    if (res === undefined) return fail(`timeout after ${TIMEOUT_MS}ms`);
+    if (res === undefined) return fail(type, `timeout after ${TIMEOUT_MS}ms`);
     if (!res.ok) {
       const why = detail(res.text);
-      return fail(`HTTP ${res.status}${why === undefined ? "" : `: ${why}`}`);
+      return fail(type, `HTTP ${res.status}${why === undefined ? "" : `: ${why}`}`);
     }
-    let body: unknown;
-    try {
-      body = JSON.parse(res.text);
-    } catch {
-      return fail(`HTTP ${res.status} response was not valid JSON`);
-    }
+    const body = json(res.text);
+    if (body === undefined) return fail(type, `HTTP ${res.status} response was not valid JSON`);
     const answers = isRecord(body) ? body["answers"] : undefined;
     const answer = isRecord(answers) ? answers[QUESTION_ID] : undefined;
-    if (!isRecord(answer) || answer["type"] !== type) return fail(`response had no ${type} answer`);
+    if (!isRecord(answer) || answer["type"] !== type) return fail(type, `response had no ${type} answer`);
     return { result: JSON.stringify(answer) };
   } catch (err) {
-    return fail(err instanceof Error ? err.message : String(err));
+    return fail(type, err instanceof Error ? err.message : String(err));
   } finally {
     timer?.cancel();
   }
@@ -384,28 +399,28 @@ async function ask(
  * @param on - The engine's hook registrar.
  */
 export function register(on: On): void {
-  // Full tool name -> question type, as the engine named each registration (TOOL_PREFIX when it names none).
-  const names = new Map<string, QuestionType>();
+  // Full tool name -> question type: the default names (a call can reach an instance that saw no session.start), plus what the engine returned.
+  const names = new Map<string, QuestionType>(TYPES.map((t) => [TOOL_PREFIX + t, t]));
   on("session.start", async function onSessionStart($, e, next) {
     // One failing registration must not drop the others.
-    const results = await Promise.allSettled(TYPES.map((type) => $.tool.register(SPECS[type])));
+    const results = await Promise.allSettled(TYPES.map((type) => $.tool.register({ name: type, ...SPECS[type] })));
     for (const [i, r] of results.entries()) {
       const type = TYPES[i];
-      if (r.status === "fulfilled") names.set(r.value.tool ?? TOOL_PREFIX + type, type);
+      if (r.status === "fulfilled") {
+        if (r.value.tool) names.set(r.value.tool, type);
+      }
       else await Promise.resolve($.ui.log(`jev-api: registering ${type} failed: ${r.reason instanceof Error ? r.reason.message : String(r.reason)}`)).catch(() => undefined); // logging is best effort
     }
     return next(e);
   });
   on("tool.call", async function onToolCall($, e, next) {
-    const type = names.get(e.tool) ?? TYPES.find((t) => e.tool === TOOL_PREFIX + t); // prefix fallback: a call can reach a module instance that saw no session.start
+    const type = names.get(e.tool);
     if (type === undefined) return next(e);
     // Literal names: the engine's static check only accepts a literal first argument to $.env.get.
-    const key = await $.env.get("TYPESAFE_API_KEY");
-    const base = await $.env.get("TYPESAFE_BASE_URL");
-    const jevUrl = await $.env.get("JEV_URL");
-    if (![key, base, jevUrl].some(isText)) return { isError: true, result: `${type}: none of TYPESAFE_API_KEY, TYPESAFE_BASE_URL, JEV_URL is set` };
+    const [key, base, jevUrl, model] = (await Promise.all([$.env.get("TYPESAFE_API_KEY"), $.env.get("TYPESAFE_BASE_URL"), $.env.get("JEV_URL"), $.env.get("TYPESAFE_DEFAULT_MODEL")])).map((v) => v?.trim() || undefined);
+    if (!key && !base && !jevUrl) return fail(type, "none of TYPESAFE_API_KEY, TYPESAFE_BASE_URL, JEV_URL is set");
     const input = parseInput(type, e);
-    if (typeof input === "string") return { isError: true, result: `${type}: ${input}` };
-    return ask($, type, input.state, input.question, { key, base, jevUrl });
+    if (typeof input === "string") return fail(type, input);
+    return ask($, input.state, input.question, { key, base, jevUrl, model });
   });
 }

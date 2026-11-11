@@ -17,9 +17,10 @@ const ANSWERS: Record<string, unknown> = {
   score: { type: "score", score: 2, confidence: 0.7, legend: ["negative", "neutral", "positive"], probabilities: [0.1, 0.2, 0.7] },
 };
 
-const answerReply = (type: string): Reply => ({
-  value: { status: 200, ok: true, headers: {}, text: JSON.stringify({ model: "jev-1", answers: { answer: ANSWERS[type] }, usage: {} }) },
-});
+// A stubbed http.fetch answer with this status and body.
+const httpReply = (status: number, text: string) => (): Reply => ({ value: { status, ok: status < 300, headers: {}, text } });
+
+const answerReply = (type: string): Reply => httpReply(200, JSON.stringify({ model: "jev-1", answers: { answer: ANSWERS[type] }, usage: {} }))();
 
 // Stubs every `$` op the module uses. `env` is explicit (unlisted names are unset); `reply` answers http.fetch.
 function setup(on: On, opts: { env: Record<string, string>; reply?: (type: string) => Reply }) {
@@ -218,7 +219,7 @@ test("a TYPESAFE_BASE_URL with a query is an error and sends nothing", async ($,
 });
 
 test("a 2xx non-JSON body is reported as invalid JSON", async ($, on) => {
-  setup(on, { env: { TYPESAFE_API_KEY: "k" }, reply: () => ({ value: { status: 200, ok: true, headers: {}, text: "<html>" } }) });
+  setup(on, { env: { TYPESAFE_API_KEY: "k" }, reply: httpReply(200, "<html>") });
   expect(await call($, "noul")).toEqual({ isError: true, result: "noul: HTTP 200 response was not valid JSON" });
 });
 
@@ -237,8 +238,6 @@ test("no TYPESAFE_API_KEY means no Authorization header", async ($, on) => {
 });
 
 // Case 11: HTTP errors with the API's detail.
-const httpReply = (status: number, text: string) => (): Reply => ({ value: { status, ok: false, headers: {}, text } });
-
 test("HTTP 400 returns the detail string", async ($, on) => {
   setup(on, { env: { TYPESAFE_API_KEY: "k" }, reply: httpReply(400, JSON.stringify({ detail: "bad" })) });
   expect(await call($, "noul")).toEqual({ isError: true, result: "noul: HTTP 400: bad" });
@@ -265,23 +264,15 @@ test("a hung request times out after 30000ms", async ($, on) => {
   expect(await pending).toEqual({ isError: true, result: "noul: timeout after 30000ms" });
 });
 
-// Case 13: missing or wrong-type answer, unparsable body.
+// Case 13: missing or wrong-type answer.
 test("a wrong-type or missing answer is an error", async ($, on) => {
-  const text = (body: unknown) => (): Reply => ({ value: { status: 200, ok: true, headers: {}, text: JSON.stringify(body) } });
-  setup(on, { env: { TYPESAFE_API_KEY: "k" }, reply: text({ answers: { answer: ANSWERS.score } }) });
+  setup(on, { env: { TYPESAFE_API_KEY: "k" }, reply: httpReply(200, JSON.stringify({ answers: { answer: ANSWERS.score } })) });
   expect(await call($, "noul")).toEqual({ isError: true, result: "noul: response had no noul answer" });
 });
 
 test("a response without answers is an error", async ($, on) => {
-  setup(on, { env: { TYPESAFE_API_KEY: "k" }, reply: () => ({ value: { status: 200, ok: true, headers: {}, text: "{}" } }) });
+  setup(on, { env: { TYPESAFE_API_KEY: "k" }, reply: httpReply(200, "{}") });
   expect(await call($, "choice")).toEqual({ isError: true, result: "choice: response had no choice answer" });
-});
-
-test("an unparsable 200 body is reported with the parse error", async ($, on) => {
-  setup(on, { env: { TYPESAFE_API_KEY: "k" }, reply: () => ({ value: { status: 200, ok: true, headers: {}, text: "not json" } }) });
-  const res = await call($, "noul");
-  expect(res.isError).toBe(true);
-  expect(res.result).toMatch(/^noul: /);
 });
 
 // Live smoke tests (opt-in): run against the System One server named by JEV_URL in the shell; skipped without it.
@@ -289,10 +280,7 @@ test("an unparsable 200 body is reported with the parse error", async ($, on) =>
 describe.skipIf(!process.env.JEV_URL)("live JEV System One (JEV_URL)", () => {
   /** Forwards the module's http.fetch to the real global fetch; the mock clock is never advanced (no 30 s race). */
   function live(on: On) {
-    const env = Object.fromEntries(
-      Object.entries({ JEV_URL: process.env.JEV_URL, TYPESAFE_API_KEY: process.env.TYPESAFE_API_KEY, TYPESAFE_DEFAULT_MODEL: process.env.TYPESAFE_DEFAULT_MODEL }).filter(([, v]) => v !== undefined && v !== ""),
-    ) as Record<string, string>;
-    mock.env(on, env);
+    mock.env(on, { JEV_URL: process.env.JEV_URL, TYPESAFE_API_KEY: process.env.TYPESAFE_API_KEY, TYPESAFE_DEFAULT_MODEL: process.env.TYPESAFE_DEFAULT_MODEL });
     mock.clock(on);
     on("tool.register", async (_$, e) => ({ value: { tool: TOOL(String(e.name)) } }));
     on("http.fetch", async (_$, e) => {
