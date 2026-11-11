@@ -139,6 +139,42 @@ test("noul posts to the default endpoint with the bearer key", async ($, on) => 
   expect(res).toEqual({ result: JSON.stringify({ type: "noul", noul: 0.9 }) });
 });
 
+// The key never goes out over plain http: same request, no Authorization header.
+test("an http JEV_URL gets the request without the bearer key", async ($, on) => {
+  const { fetched } = setup(on, { env: { TYPESAFE_API_KEY: "test-key", JEV_URL: "http://jev.test/v1/systemone" } });
+  expect(await call($, "noul")).toEqual({ result: JSON.stringify(ANSWERS.noul) });
+  expect(fetched.map((f) => f.headers)).toEqual([{ "Content-Type": "application/json" }]);
+});
+
+// tool.call follows the name the engine gave each registration, not only the default prefix.
+test("tool.call answers the tool name the engine returned", async ($, on) => {
+  const fetched: string[] = [];
+  mock.env(on, { JEV_URL: "https://jev.test/v1/systemone" });
+  mock.clock(on);
+  on("tool.register", async (_$, e) => ({ value: { tool: `mcp__other__${String(e.name)}` } }));
+  on("http.fetch", (_$, e) => (fetched.push(String(e.url)), answerReply("noul")));
+  on("session.start", async () => ({}));
+  await $.session.start({ cwd: "/proj", surface: "terminal", isInteractive: true });
+  expect(await $.tool.call({ tool: "mcp__other__noul", ...BASE.noul })).toEqual({ result: JSON.stringify(ANSWERS.noul) });
+  expect(fetched).toEqual(["https://jev.test/v1/systemone"]);
+});
+
+// A failed registration is logged, the others still register.
+test("a failing tool.register is logged and does not stop the others", async ($, on) => {
+  const registered: string[] = [];
+  const logs: string[] = [];
+  on("tool.register", async (_$, e) => {
+    if (e.name === "choice") throw new Error("boom");
+    registered.push(String(e.name));
+    return { value: { tool: TOOL(String(e.name)) } };
+  });
+  on("ui.log", async (_$, e) => (logs.push(String(e.text)), { value: undefined }));
+  on("session.start", async () => ({}));
+  await $.session.start({ cwd: "/proj", surface: "terminal", isInteractive: true });
+  expect(registered).toEqual(["noul", "score"]);
+  expect(logs).toEqual([expect.stringMatching(/^jev-api: registering choice failed: /)]);
+});
+
 // Case 6
 for (const type of ["choice", "score"]) {
   test(`${type} sends its criteria and returns the answer object`, async ($, on) => {

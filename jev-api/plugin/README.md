@@ -6,7 +6,7 @@ Gives Claude three tools that ask TypeSafe's **Jev System One** API one question
 
 | Variable                 | Required | Meaning                                                                                                |
 | ------------------------ | -------- | ------------------------------------------------------------------------------------------------------ |
-| `TYPESAFE_API_KEY`       | no       | Bearer token for the TypeSafe API; sent as `Authorization: Bearer ...` when set.                       |
+| `TYPESAFE_API_KEY`       | no       | Bearer token for the TypeSafe API; sent as `Authorization: Bearer ...` only to an https endpoint.      |
 | `TYPESAFE_BASE_URL`      | no       | API root, default `https://api.typesafe.ai`; `/v1/systemone` is appended and trailing slashes dropped. |
 | `JEV_URL`                | no       | The full System One route; wins over `TYPESAFE_BASE_URL`. A jevfort convention, not an SDK variable.   |
 | `TYPESAFE_DEFAULT_MODEL` | no       | Model sent with each request, default `jev-latest`.                                                    |

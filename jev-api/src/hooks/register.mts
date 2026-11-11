@@ -77,8 +77,13 @@ type ToolSpec = {
 type Engine = {
   /** Timers. */
   clock: {
-    /** Resolves after `ms` milliseconds. */
-    sleep(ms: number): Promise<unknown>;
+    /** Runs `fn` once after `ms` milliseconds; the handle cancels the pending run. */
+    after(ms: number, fn: () => unknown): { cancel(): void };
+  };
+  /** User-visible output. */
+  ui: {
+    /** Writes a line to the plugin log. */
+    log(text: string): unknown;
   };
   /** Environment variables. */
   env: {
@@ -343,11 +348,13 @@ async function ask(
   const key = cfg.key?.trim();
   const model = (await $.env.get("TYPESAFE_DEFAULT_MODEL"))?.trim() || DEFAULT_MODEL;
   const headers: Record<string, string> = { "Content-Type": "application/json" };
-  if (key) headers["Authorization"] = `Bearer ${key}`;
+  // The key never travels in cleartext: over plain http the request goes out without it.
+  if (key && /^https:/i.test(target.url)) headers["Authorization"] = `Bearer ${key}`;
+  let timer: { cancel(): void } | undefined;
   try {
     const request = $.http.fetch(target.url, { method: "POST", headers, body: JSON.stringify({ model, state, questions: { [QUESTION_ID]: question } }) });
     request.catch(() => undefined); // a late rejection after the timeout won must not go unhandled
-    const timeout = $.clock.sleep(TIMEOUT_MS).then(() => undefined);
+    const timeout = new Promise<undefined>((resolve) => (timer = $.clock.after(TIMEOUT_MS, () => resolve(undefined))));
     const res = await Promise.race([request, timeout]);
     if (res === undefined) return fail(`timeout after ${TIMEOUT_MS}ms`);
     if (!res.ok) {
@@ -366,6 +373,8 @@ async function ask(
     return { result: JSON.stringify(answer) };
   } catch (err) {
     return fail(err instanceof Error ? err.message : String(err));
+  } finally {
+    timer?.cancel();
   }
 }
 
@@ -375,13 +384,20 @@ async function ask(
  * @param on - The engine's hook registrar.
  */
 export function register(on: On): void {
+  // Full tool name -> question type, as the engine named each registration (TOOL_PREFIX when it names none).
+  const names = new Map<string, QuestionType>();
   on("session.start", async function onSessionStart($, e, next) {
-    // One failing registration must not drop the others; there is no log channel.
-    await Promise.allSettled(TYPES.map((type) => $.tool.register(SPECS[type])));
+    // One failing registration must not drop the others.
+    const results = await Promise.allSettled(TYPES.map((type) => $.tool.register(SPECS[type])));
+    for (const [i, r] of results.entries()) {
+      const type = TYPES[i];
+      if (r.status === "fulfilled") names.set(r.value.tool ?? TOOL_PREFIX + type, type);
+      else await Promise.resolve($.ui.log(`jev-api: registering ${type} failed: ${r.reason instanceof Error ? r.reason.message : String(r.reason)}`)).catch(() => undefined); // logging is best effort
+    }
     return next(e);
   });
   on("tool.call", async function onToolCall($, e, next) {
-    const type = TYPES.find((t) => e.tool === TOOL_PREFIX + t);
+    const type = names.get(e.tool) ?? TYPES.find((t) => e.tool === TOOL_PREFIX + t); // prefix fallback: a call can reach a module instance that saw no session.start
     if (type === undefined) return next(e);
     // Literal names: the engine's static check only accepts a literal first argument to $.env.get.
     const key = await $.env.get("TYPESAFE_API_KEY");

@@ -209,7 +209,8 @@ async function ask($, type, state, question, cfg) {
 	const key = cfg.key?.trim();
 	const model = (await $.env.get("TYPESAFE_DEFAULT_MODEL"))?.trim() || DEFAULT_MODEL;
 	const headers = { "Content-Type": "application/json" };
-	if (key) headers["Authorization"] = `Bearer ${key}`;
+	if (key && /^https:/i.test(target.url)) headers["Authorization"] = `Bearer ${key}`;
+	let timer;
 	try {
 		const request = $.http.fetch(target.url, {
 			method: "POST",
@@ -221,7 +222,7 @@ async function ask($, type, state, question, cfg) {
 			})
 		});
 		request.catch(() => undefined);
-		const timeout = $.clock.sleep(TIMEOUT_MS).then(() => undefined);
+		const timeout = new Promise((resolve) => timer = $.clock.after(TIMEOUT_MS, () => resolve(undefined)));
 		const res = await Promise.race([request, timeout]);
 		if (res === undefined) return fail(`timeout after ${TIMEOUT_MS}ms`);
 		if (!res.ok) {
@@ -240,15 +241,23 @@ async function ask($, type, state, question, cfg) {
 		return { result: JSON.stringify(answer) };
 	} catch (err) {
 		return fail(err instanceof Error ? err.message : String(err));
+	} finally {
+		timer?.cancel();
 	}
 }
 export function register(on) {
+	const names = new Map();
 	on("session.start", async function onSessionStart($, e, next) {
-		await Promise.allSettled(TYPES.map((type) => $.tool.register(SPECS[type])));
+		const results = await Promise.allSettled(TYPES.map((type) => $.tool.register(SPECS[type])));
+		for (const [i, r] of results.entries()) {
+			const type = TYPES[i];
+			if (r.status === "fulfilled") names.set(r.value.tool ?? TOOL_PREFIX + type, type);
+			else await Promise.resolve($.ui.log(`jev-api: registering ${type} failed: ${r.reason instanceof Error ? r.reason.message : String(r.reason)}`)).catch(() => undefined);
+		}
 		return next(e);
 	});
 	on("tool.call", async function onToolCall($, e, next) {
-		const type = TYPES.find((t) => e.tool === TOOL_PREFIX + t);
+		const type = names.get(e.tool) ?? TYPES.find((t) => e.tool === TOOL_PREFIX + t);
 		if (type === undefined) return next(e);
 		const key = await $.env.get("TYPESAFE_API_KEY");
 		const base = await $.env.get("TYPESAFE_BASE_URL");
