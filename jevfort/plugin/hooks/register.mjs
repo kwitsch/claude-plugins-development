@@ -2,7 +2,7 @@ import { GENERAL, SWITCH_AT } from "./agents.mjs";
 import { absolute, AUTH_TOOL, bash, BUILTIN_COMMANDS, clipScript, coversStep, dedupeSkills, isSafeToOffer, MAX_READS, mentionedPaths, quotedTerms, relevant, SAFE_MAKE, SAFE_SCRIPT, sameCall, SKILL_BLOCKLIST_KEY } from "./candidates.mjs";
 import { compactInstructions, compactItems, RELEVANCE } from "./compact.mjs";
 import { clip, splitTurn, summarize, toolCalls } from "./context.mjs";
-import { choice, jevUrl, MODEL, noul, score, TIMEOUT_MS } from "./jev.mjs";
+import { choice, JEV_TOOL_PREFIX, noul, score, TIMEOUT_MS } from "./jev.mjs";
 import { LOG_KEY, MAX_ENTRIES, recentDecisions, remember, statsKey } from "./log.mjs";
 import { bestAction, bounds, difficultyQuestion, doneQuestion, EFFORT_ORDER, effortQuestion, ESTIMATE_SPEC, ESTIMATE_TOOL, estimateEffort, EVERY_TURN_MODELS, inScratchpad, isEffort, lowerModel, mechanicalQuestion, modelFamily, nextActionQuestion, parseEstimateInput, pickCandidate, route, shouldContinue, singleActionQuestion } from "./policy.mjs";
 import { hints, NONE, promptQuestions } from "./prompt.mjs";
@@ -30,48 +30,35 @@ async function askJev($, state, questions) {
 		...r,
 		ms: await $.clock.now() - startedAt
 	});
-	const key = await $.env.get("TYPESAFE_API_KEY");
-	if (!key) return done({
-		ok: false,
-		error: "TYPESAFE_API_KEY is not set"
-	});
-	const target = jevUrl(await $.env.get("JEV_URL"));
-	if (!target.ok) return done({
-		ok: false,
-		error: target.error
-	});
-	const request = $.http.fetch(target.url, {
-		method: "POST",
-		headers: {
-			Authorization: `Bearer ${key}`,
-			"Content-Type": "application/json"
-		},
-		body: JSON.stringify({
-			model: MODEL,
-			state,
-			questions
-		})
-	});
-	request.catch(() => undefined);
+	const text = JSON.stringify(state);
+	const calls = Promise.all(Object.entries(questions).map(async ([id, q]) => {
+		const r = await $.tool.call({
+			tool: JEV_TOOL_PREFIX + q.type,
+			instructions: q.instructions,
+			state: text,
+			...q.criteria === undefined ? {} : { criteria: q.criteria }
+		});
+		if (r.deny !== undefined || r.isError === true || typeof r.result !== "string") throw new Error(asText(r.deny ?? r.result ?? `${q.type}: no result`));
+		let answer;
+		try {
+			answer = JSON.parse(r.result);
+		} catch {
+			throw new Error(`${q.type}: result is not JSON`);
+		}
+		if (answer?.type !== q.type) throw new Error(`${q.type}: no ${q.type} answer`);
+		return [id, answer];
+	}));
+	calls.catch(() => undefined);
 	const timeout = $.clock.sleep(TIMEOUT_MS).then(() => undefined);
 	try {
-		const res = await Promise.race([request, timeout]);
-		if (!res) return done({
+		const entries = await Promise.race([calls, timeout]);
+		if (!entries) return done({
 			ok: false,
 			error: `timeout after ${TIMEOUT_MS}ms`
 		});
-		if (!res.ok) return done({
-			ok: false,
-			error: `HTTP ${res.status}`
-		});
-		const body = JSON.parse(res.text);
-		if (!body.answers) return done({
-			ok: false,
-			error: "response had no answers"
-		});
 		return done({
 			ok: true,
-			answers: body.answers
+			answers: Object.fromEntries(entries)
 		});
 	} catch (err) {
 		return done({
@@ -214,7 +201,7 @@ async function buildCandidates($, request, steps, calls, stepIndex) {
 			});
 		}
 		const loaded = new Set(calls.filter((c) => c.tool === "ToolSearch").map((c) => String(c.input.query)));
-		const tools = (await $.tool.list().catch(() => [])).filter((t) => t.mcp && !AUTH_TOOL.test(t.name) && !loaded.has(`select:${t.name}`));
+		const tools = (await $.tool.list().catch(() => [])).filter((t) => t.mcp && !AUTH_TOOL.test(t.name) && !t.name.startsWith(JEV_TOOL_PREFIX) && !loaded.has(`select:${t.name}`));
 		for (const t of relevant(request, tools)) {
 			out.push({
 				key: `load ${t.name}`,
