@@ -1,16 +1,16 @@
 #!/usr/bin/env node
 // Usage: node universal-lint/scripts/perf.mts [runs=5]   (from any directory; run `pnpm --filter universal-lint build` first)
 // Per-event cost of the built hook plugin/hooks/lint-file.mjs (dev only, never shipped): spawns it directly through
-// its shebang (as hooks.json does) with a payload file as stdin for 15 cases, once with the real PATH and once with
+// its shebang (as hooks.json does) with a payload file as stdin for 16 cases, once with the real PATH and once with
 // the /mnt/ dirs removed, and prints a Markdown table of median (min-max) ms over `runs` timed rounds after one
 // warm-up round. Fixtures live in an os.tmpdir() directory removed at the end; nothing is written into the repo.
 // Needs the real linters on PATH to reproduce real costs; the header lists which of them were found per PATH variant.
 // Exit 0 = every run passed its check, 1 = a case failed, 2 = usage error, missing build or a setup/spawn error.
 import { execFileSync, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import { closeSync, existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
-import { availableParallelism, loadavg, release, tmpdir, totalmem } from "node:os";
-import { join, resolve } from "node:path";
+import { closeSync, existsSync, mkdirSync, mkdtempSync, openSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { availableParallelism, homedir, loadavg, release, tmpdir, totalmem } from "node:os";
+import { dirname, join, resolve } from "node:path";
 
 /** The universal-lint plugin directory (parent of scripts/). */
 const ROOT = resolve(import.meta.dirname, "..");
@@ -20,8 +20,8 @@ const HOOK = join(ROOT, "plugin/hooks/lint-file.mjs");
 const VERSION = String((JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8")) as Record<string, unknown>).version);
 /** Per-run kill timeout: above the hook's 90 s budget, so a hook-side kill shows as its own status. */
 const RUN_TIMEOUT_MS = 120_000;
-/** Linters the cases invoke (`.sh`, `.py`, `.yml`, `.md`, `.ts`, `.mts`); the header says which were found on PATH. */
-const TOOLS = ["shellcheck", "ruff", "yamllint", "markdownlint-cli2", "eslint", "oxlint"];
+/** Linters the cases invoke (`.sh`, `.py`, `.yml`, `.md`, `.css`, `.ts`, `.mts`); the header says which were found on PATH. */
+const TOOLS = ["shellcheck", "ruff", "yamllint", "markdownlint-cli2", "eslint", "oxlint", "stylelint"];
 /** Printed to stderr on a bad argument. */
 const USAGE = "usage: node universal-lint/scripts/perf.mts [runs=5]";
 
@@ -66,7 +66,7 @@ function git(cwd: string, ...args: string[]): void {
  * Write the fixture repo into `dir` (one commit of every tracked file) and build the case list.
  *
  * @param dir - Empty fixture directory.
- * @returns The 15 cases in run order.
+ * @returns The 16 cases in run order (a `.css` row is dropped by `main` when a stylelint config is visible).
  */
 function makeFixtures(dir: string): Case[] {
   const sh = "#!/bin/sh\necho ok\n";
@@ -78,6 +78,7 @@ function makeFixtures(dir: string): Case[] {
     "a.py": "x = 1\n",
     "a.yml": "a: 1\n",
     "a.md": "# T\n\nText.\n",
+    "a.css": ".a{color:red;}\n",
     "a.ts": ["export const x: number = 1;", "export const y: string = \"2\";", ...fns, ""].join("\n"),
     "tsconfig.json": "{\"compilerOptions\":{\"strict\":true,\"noEmit\":true},\"include\":[\"a.ts\"]}\n",
     ".gitignore": "ign.sh\ndata/\n",
@@ -105,6 +106,7 @@ function makeFixtures(dir: string): Case[] {
     { name: ".py Write", cwd: dir, payload: post("Write", "a.py"), expect: 0 },
     { name: ".yml Write", cwd: dir, payload: post("Write", "a.yml"), expect: 0 },
     { name: ".md Write", cwd: dir, payload: post("Write", "a.md"), expect: 0 },
+    { name: ".css Write (no stylelint config)", cwd: dir, payload: post("Write", "a.css"), expect: 0 },
     { name: ".ts Write (no eslint config)", cwd: dir, payload: post("Write", "a.ts"), expect: 0 },
     { name: ".ts Edit (no eslint config)", cwd: dir, payload: post("Edit", "a.ts", edit), expect: 0 },
     // A real repo file through the root .oxlintrc.json and node_modules/.bin/oxlint (F04's local-bin route); the digest lands in CLAUDE_PLUGIN_DATA.
@@ -115,6 +117,32 @@ function makeFixtures(dir: string): Case[] {
     { name: "SessionStart fixture", cwd: dir, payload: start(dir), expect: 0, observable: "watchPaths" },
     { name: "SessionStart this repo", cwd: repo, payload: start(repo), expect: 0, observable: "watchPaths" },
   ];
+}
+
+/**
+ * A stylelint config the hook could find for a file in `dir`: a config file name in `dir`, `dir/.config` or an ancestor
+ * (loose name pattern: a false hit only drops the `.css` row), a `package.json` with a `stylelint` key, or an existing
+ * user config dir. The `.css` row measures the no-config skip, so a visible config would time stylelint instead.
+ *
+ * @param dir - Fixture directory.
+ * @returns Path of the first config found, or null.
+ */
+function stylelintConfigVisible(dir: string): string | null {
+  const home = homedir();
+  const user = [process.env.XDG_CONFIG_HOME || join(home, ".config"), join(home, "Library", "Preferences")].map((d) => join(d, "stylelint")).find((p) => existsSync(p));
+  if (user) return user;
+  for (let d = dir;; d = dirname(d)) {
+    for (const x of [d, join(d, ".config")]) {
+      try {
+        const hit = readdirSync(x).find((n) => /^\.?stylelint(rc|\.config)(\.\w+)?$/.test(n));
+        if (hit) return join(x, hit);
+      } catch { /* unreadable or absent: no config there */ }
+    }
+    try {
+      if ((JSON.parse(readFileSync(join(d, "package.json"), "utf8")) as { stylelint?: unknown } | null)?.stylelint != null) return join(d, "package.json");
+    } catch { /* no package.json or invalid: no key */ }
+    if (dirname(d) === d) return null;
+  }
 }
 
 /**
@@ -215,7 +243,9 @@ async function main(): Promise<void> {
   const paths = mnt > 0 ? [realPath, dirs.filter((d) => !d.startsWith("/mnt/")).join(":")] : [realPath];
   const dir = mkdtempSync(join(tmpdir(), "ul-perf-"));
   try {
-    const cases = makeFixtures(dir);
+    const seen = stylelintConfigVisible(dir);
+    if (seen) console.error(`skipping the .css row: a stylelint config is visible from the fixture dir (${seen}), so it would not measure the no-config skip`);
+    const cases = makeFixtures(dir).filter((c) => !(seen && c.name.startsWith(".css Write")));
     const tsc = tscLabel(dir);
     const data = join(dir, "data");
     cases.forEach((c, i) => writeFileSync(join(data, `p${i}.json`), JSON.stringify(c.payload ?? {})));

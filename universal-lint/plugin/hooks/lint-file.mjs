@@ -392,6 +392,43 @@ function walkToRoot(dir, checkDir) {
 export function hasProjectMarkdownlintConfig(fileDir) {
 	return walkToRoot(fileDir, (dir) => MARKDOWNLINT_CONFIG_FILENAMES.some((name) => existsSync(path.join(dir, name))));
 }
+const STYLELINT_CONFIG_FILENAMES = [
+	".stylelintrc",
+	".stylelintrc.json",
+	".stylelintrc.yaml",
+	".stylelintrc.yml",
+	".stylelintrc.js",
+	".stylelintrc.ts",
+	".stylelintrc.cjs",
+	".stylelintrc.mjs",
+	".config/stylelintrc",
+	".config/stylelintrc.json",
+	".config/stylelintrc.yaml",
+	".config/stylelintrc.yml",
+	".config/stylelintrc.js",
+	".config/stylelintrc.ts",
+	".config/stylelintrc.cjs",
+	".config/stylelintrc.mjs",
+	"stylelint.config.js",
+	"stylelint.config.ts",
+	"stylelint.config.cjs",
+	"stylelint.config.mjs"
+];
+function hasStylelintConfig(fileDir, cwd) {
+	const hasKey = (dir) => {
+		const pkg = path.join(dir, "package.json");
+		if (!existsSync(pkg)) return false;
+		try {
+			return JSON.parse(readFileSync(pkg, "utf8"))?.stylelint != null;
+		} catch {
+			return true;
+		}
+	};
+	const found = (d) => STYLELINT_CONFIG_FILENAMES.some((n) => existsSync(path.join(d, n))) || hasKey(d);
+	if (walkToRoot(fileDir, found) || walkToRoot(cwd, found)) return true;
+	const home = homedir();
+	return [process.env.XDG_CONFIG_HOME || path.join(home, ".config"), path.join(home, "Library", "Preferences")].some((d) => existsSync(path.join(d, "stylelint")));
+}
 const MARKDOWNLINT_NO_LINE_LENGTH_CONFIG_NAME = "markdownlint-no-line-length.json";
 const MARKDOWNLINT_NO_LINE_LENGTH_CONFIG = "{\n  \"MD013\": false\n}\n";
 function markdownlintNoLineLengthConfigPath() {
@@ -770,9 +807,10 @@ function lintResolved(resolved, cwd, ranges, hookEventName, label) {
 	const typeCheckEligible = TYPE_CHECK_EXTS.has(ext);
 	const oxlintConfig = lang === "jsts" ? resolveOxlintConfig(path.dirname(resolved), cwd) : null;
 	const noJstsConfig = lang === "jsts" && !oxlintConfig && !walkToRoot(path.dirname(resolved), (d) => ESLINT_CONFIG_FILENAMES.some((n) => existsSync(path.join(d, n))));
+	const noCssConfig = lang === "css" && !hasStylelintConfig(path.dirname(resolved), cwd);
 	const findings = [];
 	let oxlintRan = false;
-	if (lang && !noJstsConfig) {
+	if (lang && !noJstsConfig && !noCssConfig) {
 		const entry = oxlintConfig ? { chain: REGISTRY.oxlint.chain.map((t) => ({
 			...t,
 			args: [
