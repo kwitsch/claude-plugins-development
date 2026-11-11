@@ -20,21 +20,21 @@ type QuestionType = (typeof TYPES)[number];
 /** One System One question as sent in the request body. */
 type Question =
   | {
-      /** The question type. */
-      type: "noul";
-      /** The yes/no question to answer. */
-      instructions: string;
-      /** Optional wording of true and false. */
-      criteria?: { true?: string; false?: string };
-    }
+    /** The question type. */
+    type: "noul";
+    /** The yes/no question to answer. */
+    instructions: string;
+    /** Optional wording of true and false. */
+    criteria?: { true?: string; false?: string };
+  }
   | {
-      /** The question type. */
-      type: "choice";
-      /** What to choose. */
-      instructions: string;
-      /** Option name to description. */
-      criteria: Record<string, string>;
-    }
+    /** The question type. */
+    type: "choice";
+    /** What to choose. */
+    instructions: string;
+    /** Option name to description. */
+    criteria: Record<string, string>;
+  }
   | {
     /** The question type. */
     type: "score";
@@ -95,8 +95,8 @@ type Engine = {
   };
   /** Tool registry. */
   tool: {
-    /** Registers a tool; resolves the full tool name the engine gave it. */
-    register(spec: ToolSpec): Promise<{ tool?: string }>;
+    /** Registers a tool; resolves the full tool name the engine gave it (a hook above may answer anything). */
+    register(spec: ToolSpec): Promise<{ tool?: string } | undefined>;
   };
 };
 
@@ -106,7 +106,10 @@ type Engine = {
  * @typeParam E - The event's input.
  * @typeParam R - What the chain resolves.
  */
-type Next<E, R> = (e: E) => Promise<R>;
+type Next<E, R> = ((e: E) => Promise<R>) & {
+  /** Aborts when the dispatch is abandoned (the user interrupted, a hook above settled first). */
+  readonly signal: AbortSignal;
+};
 
 /**
  * A hook: the engine, the event, the rest of the chain.
@@ -119,8 +122,13 @@ type Hook<E, R> = ($: Engine, e: E, next: Next<E, R>) => Promise<R>;
 /** A `tool.call` event: the full tool name plus the tool input fields. */
 type ToolCall = { tool: string } & Record<string, unknown>;
 
-/** What a `tool.call` hook resolves: the tool result for the model. */
-type ToolResult = { result?: unknown; isError?: boolean } & Record<string, unknown>;
+/** What a `tool.call` hook resolves: the tool result for the model, or a refusal it reads as an error. */
+type ToolResult = {
+  /** The tool's output. */
+  result?: unknown;
+  /** The error text; the model reads it as an error result (core drops a hook's own `isError`). */
+  deny?: string;
+} & Record<string, unknown>;
 
 /** The env values a call uses, trimmed; undefined when unset or blank. */
 type Env = {
@@ -179,6 +187,9 @@ const HTTP_BASE = /^https?:\/\/[^/?#\s]+(?:\/[^?#\s]*)?$/i;
 /** The most options a `choice` question may have. */
 const MAX_OPTIONS = 255;
 
+/** The fewest levels a `score` question may have (the API refuses one). */
+const MIN_LEVELS = 2;
+
 /** The most levels a `score` question may have. */
 const MAX_LEVELS = 10;
 
@@ -226,7 +237,8 @@ const SPECS: Record<QuestionType, Omit<ToolSpec, "name">> = {
     },
   },
   score: {
-    description: "Ask TypeSafe Jev to rate a text along ordered levels; returns the score (level index from 0), confidence, probabilities and legend." + NEEDS,
+    description: "Ask TypeSafe Jev to rate a text along ordered levels; returns the score (the expected level: 0 is the first, values between levels are fractional), its confidence, each level's probability and the legend."
+      + NEEDS,
     inputSchema: {
       type: "object",
       properties: {
@@ -236,7 +248,7 @@ const SPECS: Record<QuestionType, Omit<ToolSpec, "name">> = {
           type: "array",
           description: "The levels, lowest first; scores start at 0.",
           items: { type: "string" },
-          minItems: 1,
+          minItems: MIN_LEVELS,
           maxItems: MAX_LEVELS,
         },
       },
@@ -280,14 +292,42 @@ function json(text: string): unknown {
 }
 
 /**
- * Builds a tool error result.
+ * Builds a tool error: a `deny`, which the model reads as an error result (core drops a hook's own `isError`).
  *
  * @param type - The question type (the tool called), prefixed to the message.
  * @param reason - What went wrong.
- * @returns The error result for the model.
+ * @returns The error answer for the model.
  */
 function fail(type: QuestionType, reason: string): ToolResult {
-  return { isError: true, result: `${type}: ${reason}` };
+  return { deny: `${type}: ${reason}` };
+}
+
+/**
+ * The message of a thrown value.
+ *
+ * @param err - What was thrown or rejected.
+ * @returns Its message, or the value as text.
+ */
+function message(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
+
+/**
+ * Replaces a URL in an error text, as the URL parser spells it and as given, with a placeholder.
+ *
+ * @param text - The error text.
+ * @param url - The URL to hide.
+ * @param placeholder - What stands in its place.
+ * @returns The text without the URL.
+ */
+function hide(text: string, url: string, placeholder: string): string {
+  let href = url;
+  try {
+    href = new URL(url).href;
+  } catch {
+    // The engine quotes a URL it cannot parse as given.
+  }
+  return text.replaceAll(href, placeholder).replaceAll(url, placeholder);
 }
 
 /**
@@ -327,8 +367,8 @@ function parseInput(type: QuestionType, e: ToolCall): { state: string; question:
     if (entries.length < 1 || entries.length > MAX_OPTIONS || valid.length !== entries.length) return msg;
     return { state, question: { type, instructions, criteria: Object.fromEntries(valid) } };
   }
-  const msg = `criteria must be an array of 1 to ${MAX_LEVELS} strings`;
-  if (!Array.isArray(criteria) || criteria.length < 1 || criteria.length > MAX_LEVELS || !criteria.every((v): v is string => typeof v === "string")) return msg;
+  const msg = `criteria must be an array of ${MIN_LEVELS} to ${MAX_LEVELS} strings`;
+  if (!Array.isArray(criteria) || criteria.length < MIN_LEVELS || criteria.length > MAX_LEVELS || !criteria.every((v): v is string => typeof v === "string")) return msg;
   return { state, question: { type, instructions, criteria } };
 }
 
@@ -342,21 +382,24 @@ function parseInput(type: QuestionType, e: ToolCall): { state: string; question:
 function endpoint(jev: string | undefined, base: string | undefined): { ok: true; url: string } | { ok: false; error: string } {
   if (jev) return HTTP_URL.test(jev) ? { ok: true, url: jev } : { ok: false, error: "JEV_URL must be an http(s) URL" };
   if (base) {
-    return HTTP_BASE.test(base) ? { ok: true, url: base.replace(/\/+$/, "") + "/v1/systemone" } : { ok: false, error: "TYPESAFE_BASE_URL must be an http(s) URL" };
+    return HTTP_BASE.test(base) ? { ok: true, url: base.replace(/\/+$/, "") + "/v1/systemone" } : { ok: false, error: "TYPESAFE_BASE_URL must be an http(s) URL without query or fragment" };
   }
   return { ok: true, url: DEFAULT_JEV_URL };
 }
 
 /**
- * Extracts the API's `detail` from an error body.
+ * Extracts the API's reason from an error body: its `detail`, else the `message` of its `error` object.
  *
  * @param text - The raw response body.
- * @returns The detail (a string as is, anything else JSON-stringified), or undefined when there is none.
+ * @returns The reason (a string as is, anything else JSON-stringified), or undefined when there is none.
  */
 function detail(text: string): string | undefined {
   const body = json(text);
-  if (!isRecord(body) || body["detail"] === undefined) return undefined;
-  return typeof body["detail"] === "string" ? body["detail"] : JSON.stringify(body["detail"]);
+  if (!isRecord(body)) return undefined;
+  const error = body["error"];
+  const why = body["detail"] ?? (isRecord(error) ? error["message"] : undefined);
+  if (why === undefined) return undefined;
+  return typeof why === "string" ? why : JSON.stringify(why);
 }
 
 /**
@@ -366,9 +409,10 @@ function detail(text: string): string | undefined {
  * @param state - The text the question is about.
  * @param question - The question; its type is the tool called.
  * @param env - The env values, trimmed, undefined when unset or blank.
- * @returns The answer object as JSON, or an error result prefixed with the type.
+ * @param signal - Aborts when the call is abandoned; the hook then answers at once.
+ * @returns The answer object as JSON, or an error answer prefixed with the type.
  */
-async function ask($: Engine, state: string, question: Question, env: Env): Promise<ToolResult> {
+async function ask($: Engine, state: string, question: Question, env: Env, signal: AbortSignal): Promise<ToolResult> {
   const { type } = question;
   const target = endpoint(env.jevUrl, env.base);
   if (!target.ok) return fail(type, target.error);
@@ -380,10 +424,16 @@ async function ask($: Engine, state: string, question: Question, env: Env): Prom
   let timer: { cancel(): void } | undefined;
   try {
     const request = $.http.fetch(target.url, { method: "POST", headers, body: JSON.stringify({ model, state, questions: { [QUESTION_ID]: question } }) });
-    request.catch(() => undefined); // a late rejection after the timeout won must not go unhandled
-    const timeout = new Promise<undefined>((resolve) => (timer = $.clock.after(TIMEOUT_MS, () => resolve(undefined))));
-    const res = await Promise.race([request, timeout]);
-    if (res === undefined) return fail(type, `timeout after ${TIMEOUT_MS}ms`);
+    request.catch(() => undefined); // a late rejection after the timeout or an abort won must not go unhandled
+    // The engine does not stop a hook's request when its dispatch is abandoned: answer at once instead of lingering.
+    const stop = new Promise<"timeout" | "aborted">((resolve) => {
+      timer = $.clock.after(TIMEOUT_MS, () => resolve("timeout"));
+      if (signal.aborted) resolve("aborted");
+      else signal.addEventListener("abort", () => resolve("aborted"), { once: true });
+    });
+    const res = await Promise.race([request, stop]);
+    if (res === "timeout") return fail(type, `timeout after ${TIMEOUT_MS}ms`);
+    if (res === "aborted") return fail(type, "the call was abandoned");
     if (!res.ok) {
       const why = detail(res.text);
       return fail(type, `HTTP ${res.status}${why === undefined ? "" : `: ${why}`}`);
@@ -395,7 +445,9 @@ async function ask($: Engine, state: string, question: Question, env: Env): Prom
     if (!isRecord(answer) || answer["type"] !== type) return fail(type, `response had no ${type} answer`);
     return { result: JSON.stringify(answer) };
   } catch (err) {
-    return fail(type, err instanceof Error ? err.message : String(err));
+    // The engine's fetch errors quote the URL, whose host, path or query may be private: name the variable instead.
+    const why = message(err);
+    return fail(type, env.jevUrl ? hide(why, target.url, "<JEV_URL>") : env.base ? hide(why, target.url, "<TYPESAFE_BASE_URL>/v1/systemone") : why);
   } finally {
     timer?.cancel();
   }
@@ -414,21 +466,29 @@ export function register(on: On): void {
     const results = await Promise.allSettled(TYPES.map((type) => $.tool.register({ name: type, ...SPECS[type] })));
     for (const [i, r] of results.entries()) {
       const type = TYPES[i];
-      if (r.status === "fulfilled") {
-        if (r.value.tool) names.set(r.value.tool, type);
+      // The engine starts a log line with the plugin's name; logging is best effort.
+      if (r.status === "rejected") await Promise.resolve($.ui.log(`registering ${type} failed: ${message(r.reason)}`)).catch(() => undefined);
+      else {
+        // Only a mcp__<plugin>__<type> name: a hook above answering anything else must not make this hook claim another tool.
+        const tool = r.value?.tool;
+        if (tool?.startsWith("mcp__") && tool.endsWith(`__${type}`)) names.set(tool, type);
       }
-      else await Promise.resolve($.ui.log(`jev-api: registering ${type} failed: ${r.reason instanceof Error ? r.reason.message : String(r.reason)}`)).catch(() => undefined); // logging is best effort
     }
     return next(e);
   });
   on("tool.call", async function onToolCall($, e, next) {
     const type = names.get(e.tool);
     if (type === undefined) return next(e);
-    // Literal names: the engine's static check only accepts a literal first argument to $.env.get.
-    const [key, base, jevUrl, model] = (await Promise.all([$.env.get("TYPESAFE_API_KEY"), $.env.get("TYPESAFE_BASE_URL"), $.env.get("JEV_URL"), $.env.get("TYPESAFE_DEFAULT_MODEL")])).map((v) => v?.trim() || undefined);
-    if (!key && !base && !jevUrl) return fail(type, "none of TYPESAFE_API_KEY, TYPESAFE_BASE_URL, JEV_URL is set");
-    const input = parseInput(type, e);
-    if (typeof input === "string") return fail(type, input);
-    return ask($, input.state, input.question, { key, base, jevUrl, model });
+    // Answered on every path, a throw too (a hook above refusing $.env.get): a registered tool that no hook answers fails.
+    try {
+      // Literal names: the engine's static check only accepts a literal first argument to $.env.get.
+      const [key, base, jevUrl, model] = (await Promise.all([$.env.get("TYPESAFE_API_KEY"), $.env.get("TYPESAFE_BASE_URL"), $.env.get("JEV_URL"), $.env.get("TYPESAFE_DEFAULT_MODEL")])).map((v) => v?.trim() || undefined);
+      if (!key && !base && !jevUrl) return fail(type, "none of TYPESAFE_API_KEY, TYPESAFE_BASE_URL, JEV_URL is set");
+      const input = parseInput(type, e);
+      if (typeof input === "string") return fail(type, input);
+      return await ask($, input.state, input.question, { key, base, jevUrl, model }, next.signal);
+    } catch (err) {
+      return fail(type, message(err));
+    }
   });
 }

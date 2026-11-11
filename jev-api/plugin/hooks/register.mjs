@@ -15,6 +15,7 @@ const QUESTION_ID = "answer";
 const HTTP_URL = /^https?:\/\/[^/?#\s]+(?:[/?#]\S*)?$/i;
 const HTTP_BASE = /^https?:\/\/[^/?#\s]+(?:\/[^?#\s]*)?$/i;
 const MAX_OPTIONS = 255;
+const MIN_LEVELS = 2;
 const MAX_LEVELS = 10;
 const TOOL_PREFIX = "mcp__jev-api__";
 const SPECS = {
@@ -73,7 +74,7 @@ const SPECS = {
 		}
 	},
 	score: {
-		description: "Ask TypeSafe Jev to rate a text along ordered levels; returns the score (level index from 0), confidence, probabilities and legend." + NEEDS,
+		description: "Ask TypeSafe Jev to rate a text along ordered levels; returns the score (the expected level: 0 is the first, values between levels are fractional), its confidence, each level's probability and the legend." + NEEDS,
 		inputSchema: {
 			type: "object",
 			properties: {
@@ -86,7 +87,7 @@ const SPECS = {
 					type: "array",
 					description: "The levels, lowest first; scores start at 0.",
 					items: { type: "string" },
-					minItems: 1,
+					minItems: MIN_LEVELS,
 					maxItems: MAX_LEVELS
 				}
 			},
@@ -112,10 +113,17 @@ function json(text) {
 	}
 }
 function fail(type, reason) {
-	return {
-		isError: true,
-		result: `${type}: ${reason}`
-	};
+	return { deny: `${type}: ${reason}` };
+}
+function message(err) {
+	return err instanceof Error ? err.message : String(err);
+}
+function hide(text, url, placeholder) {
+	let href = url;
+	try {
+		href = new URL(url).href;
+	} catch {}
+	return text.replaceAll(href, placeholder).replaceAll(url, placeholder);
 }
 function isText(v) {
 	return typeof v === "string" && v.trim() !== "";
@@ -163,8 +171,8 @@ function parseInput(type, e) {
 			}
 		};
 	}
-	const msg = `criteria must be an array of 1 to ${MAX_LEVELS} strings`;
-	if (!Array.isArray(criteria) || criteria.length < 1 || criteria.length > MAX_LEVELS || !criteria.every((v) => typeof v === "string")) return msg;
+	const msg = `criteria must be an array of ${MIN_LEVELS} to ${MAX_LEVELS} strings`;
+	if (!Array.isArray(criteria) || criteria.length < MIN_LEVELS || criteria.length > MAX_LEVELS || !criteria.every((v) => typeof v === "string")) return msg;
 	return {
 		state,
 		question: {
@@ -188,7 +196,7 @@ function endpoint(jev, base) {
 			url: base.replace(/\/+$/, "") + "/v1/systemone"
 		} : {
 			ok: false,
-			error: "TYPESAFE_BASE_URL must be an http(s) URL"
+			error: "TYPESAFE_BASE_URL must be an http(s) URL without query or fragment"
 		};
 	}
 	return {
@@ -198,10 +206,13 @@ function endpoint(jev, base) {
 }
 function detail(text) {
 	const body = json(text);
-	if (!isRecord(body) || body["detail"] === undefined) return undefined;
-	return typeof body["detail"] === "string" ? body["detail"] : JSON.stringify(body["detail"]);
+	if (!isRecord(body)) return undefined;
+	const error = body["error"];
+	const why = body["detail"] ?? (isRecord(error) ? error["message"] : undefined);
+	if (why === undefined) return undefined;
+	return typeof why === "string" ? why : JSON.stringify(why);
 }
-async function ask($, state, question, env) {
+async function ask($, state, question, env, signal) {
 	const { type } = question;
 	const target = endpoint(env.jevUrl, env.base);
 	if (!target.ok) return fail(type, target.error);
@@ -221,9 +232,14 @@ async function ask($, state, question, env) {
 			})
 		});
 		request.catch(() => undefined);
-		const timeout = new Promise((resolve) => timer = $.clock.after(TIMEOUT_MS, () => resolve(undefined)));
-		const res = await Promise.race([request, timeout]);
-		if (res === undefined) return fail(type, `timeout after ${TIMEOUT_MS}ms`);
+		const stop = new Promise((resolve) => {
+			timer = $.clock.after(TIMEOUT_MS, () => resolve("timeout"));
+			if (signal.aborted) resolve("aborted");
+			else signal.addEventListener("abort", () => resolve("aborted"), { once: true });
+		});
+		const res = await Promise.race([request, stop]);
+		if (res === "timeout") return fail(type, `timeout after ${TIMEOUT_MS}ms`);
+		if (res === "aborted") return fail(type, "the call was abandoned");
 		if (!res.ok) {
 			const why = detail(res.text);
 			return fail(type, `HTTP ${res.status}${why === undefined ? "" : `: ${why}`}`);
@@ -235,7 +251,8 @@ async function ask($, state, question, env) {
 		if (!isRecord(answer) || answer["type"] !== type) return fail(type, `response had no ${type} answer`);
 		return { result: JSON.stringify(answer) };
 	} catch (err) {
-		return fail(type, err instanceof Error ? err.message : String(err));
+		const why = message(err);
+		return fail(type, env.jevUrl ? hide(why, target.url, "<JEV_URL>") : env.base ? hide(why, target.url, "<TYPESAFE_BASE_URL>/v1/systemone") : why);
 	} finally {
 		timer?.cancel();
 	}
@@ -249,29 +266,35 @@ export function register(on) {
 		})));
 		for (const [i, r] of results.entries()) {
 			const type = TYPES[i];
-			if (r.status === "fulfilled") {
-				if (r.value.tool) names.set(r.value.tool, type);
-			} else await Promise.resolve($.ui.log(`jev-api: registering ${type} failed: ${r.reason instanceof Error ? r.reason.message : String(r.reason)}`)).catch(() => undefined);
+			if (r.status === "rejected") await Promise.resolve($.ui.log(`registering ${type} failed: ${message(r.reason)}`)).catch(() => undefined);
+			else {
+				const tool = r.value?.tool;
+				if (tool?.startsWith("mcp__") && tool.endsWith(`__${type}`)) names.set(tool, type);
+			}
 		}
 		return next(e);
 	});
 	on("tool.call", async function onToolCall($, e, next) {
 		const type = names.get(e.tool);
 		if (type === undefined) return next(e);
-		const [key, base, jevUrl, model] = (await Promise.all([
-			$.env.get("TYPESAFE_API_KEY"),
-			$.env.get("TYPESAFE_BASE_URL"),
-			$.env.get("JEV_URL"),
-			$.env.get("TYPESAFE_DEFAULT_MODEL")
-		])).map((v) => v?.trim() || undefined);
-		if (!key && !base && !jevUrl) return fail(type, "none of TYPESAFE_API_KEY, TYPESAFE_BASE_URL, JEV_URL is set");
-		const input = parseInput(type, e);
-		if (typeof input === "string") return fail(type, input);
-		return ask($, input.state, input.question, {
-			key,
-			base,
-			jevUrl,
-			model
-		});
+		try {
+			const [key, base, jevUrl, model] = (await Promise.all([
+				$.env.get("TYPESAFE_API_KEY"),
+				$.env.get("TYPESAFE_BASE_URL"),
+				$.env.get("JEV_URL"),
+				$.env.get("TYPESAFE_DEFAULT_MODEL")
+			])).map((v) => v?.trim() || undefined);
+			if (!key && !base && !jevUrl) return fail(type, "none of TYPESAFE_API_KEY, TYPESAFE_BASE_URL, JEV_URL is set");
+			const input = parseInput(type, e);
+			if (typeof input === "string") return fail(type, input);
+			return await ask($, input.state, input.question, {
+				key,
+				base,
+				jevUrl,
+				model
+			}, next.signal);
+		} catch (err) {
+			return fail(type, message(err));
+		}
 	});
 }
