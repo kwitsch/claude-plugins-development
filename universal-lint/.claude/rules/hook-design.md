@@ -99,31 +99,12 @@ paths:
 
 ## Measured cost
 
-- **Label:** universal-lint 0.15.8, 2026-11-07, WSL2 6.18.33.2-microsoft-standard-WSL2, 12 cores, 9.5 GB, node v24.22.2, tsc 7.0.2, linters found (of shellcheck/ruff/yamllint/markdownlint-cli2/eslint/oxlint/stylelint): none on either PATH variant, local oxlint yes, PATH 63 dirs / 44 on /mnt/c (load 1.31 -> 2.32 during the run). Medians in ms from `node universal-lint/scripts/perf.mts 5`. Numbers are machine- and load-dependent; re-measure before judging a change.
+- **Baseline:** 0.15.29 medians and machine label in the F01 doc (`docs/tasks/F01-measurement-baseline.md`, "Measured"); numbers are machine- and load-dependent, re-measure before judging a change.
 - **Harness:** `node universal-lint/scripts/perf.mts [runs]` after `pnpm --filter universal-lint build` (dev only, measures `plugin/`): spawns the built hook through its shebang with a payload file as stdin, fixtures in `os.tmpdir()`, one warm-up round plus `runs` timed rounds (default 5), real PATH and PATH minus `/mnt/` dirs; exits 1 when a run misses its expected exit status or observable, 2 on a usage, missing-build or setup/spawn error. The header lists which linters were found on PATH (the `.sh`/`.py`/`.yml` rows time the missing-tool scan when they are absent, so installing one changes those rows). The `.mts Write (this repo)` row lints this checkout's `universal-lint/scripts/perf.mts` with `cwd` = the checkout root (the digest goes to the fixture's `CLAUDE_PLUGIN_DATA`, nothing is written into the repo); it times the local-bin route only when the checkout has its own `node_modules` (`pnpm install`) and `oxlint` is not on `PATH`.
 - **Live per-hook durations:** `claude -p --debug-file <f> ...`, then `grep 'lint-file.mjs.*finished with status' <f>`; findings appear in transcripts as `hook_blocking_error` attachments carrying `toolUseID`.
 - **Globs fixture (F06):** numbers in the F06 doc (`docs/tasks/F06-markdownlint-cli2-no-globs.md`, "Measured").
 - **Large-repo watch list (F08):** numbers in the F08 doc (`docs/tasks/F08-watchlist-early-stop.md`, Status).
 - **npx cache (F09):** numbers in the F09 doc (`docs/tasks/F09-bypass-npx-cached-bin.md`).
 - **FileChanged burst (F10):** fixture and numbers in the F10 doc (`docs/tasks/F10-filechanged-concurrency-cap.md`, Status); F13's wrapper counting in the F13 doc.
-- **PATH probe cache (F11):** numbers in the F11 doc (`docs/tasks/F11-persist-path-probes.md`, "Measured"). The table below stays the 0.15.8 label.
+- **PATH probe cache (F11):** numbers in the F11 doc (`docs/tasks/F11-persist-path-probes.md`, "Measured").
 - **Watch-list scope fast path (F12):** numbers in the F12 doc (`docs/tasks/F12-watchlist-scope-fast-path.md`).
-
-| Case                               | real PATH | no /mnt | What runs                                                                                               |
-| ---------------------------------- | --------: | ------: | ------------------------------------------------------------------------------------------------------- |
-| floor `node -e 0`                  |        26 |      25 | no hook: Node startup + PATH lookup                                                                     |
-| empty payload `{}`                 |        46 |      45 | hook floor, nothing to lint                                                                             |
-| out-of-scope `.json` Write         |        45 |      45 | scope guard only                                                                                        |
-| `.sh` Write                        |       147 |      47 | shellcheck: missing tool                                                                                |
-| `.py` Write                        |       145 |      45 | ruff: missing tool                                                                                      |
-| `.yml` Write                       |       145 |      45 | yamllint: missing tool                                                                                  |
-| `.md` Write                        |       476 |     287 | markdownlint-cli2: npx-cached bin, direct                                                               |
-| `.css` Write (no stylelint config) |        47 |      44 | scope guard + stylelint config walk only (no config: no chain lint)                                     |
-| `.ts` Write (no eslint config)     |       148 |     144 | tsc 7.0.2 warm incremental only (no lint config: no chain lint), 30-line fixture                        |
-| `.ts` Edit (no eslint config)      |       147 |     146 | same as `.ts` Write: tsc only                                                                           |
-| `.mts` Write (this repo)           |       395 |     292 | oxlint 1.91.0 via the root `node_modules/.bin` (typeCheck config: no tsc), real file `scripts/perf.mts` |
-| FileChanged tracked unchanged      |        51 |      50 | `git status` skip, ext4                                                                                 |
-| FileChanged ignored                |        51 |      50 | `git status` `!!` skip, ext4                                                                            |
-| FileChanged unlink                 |        43 |      43 | early return before any lint                                                                            |
-| SessionStart fixture               |        55 |      50 | watch list, 7 lintable files                                                                            |
-| SessionStart this repo             |        68 |      67 | watch list of the repo checkout                                                                         |
