@@ -78,7 +78,30 @@ test("SessionStart: above WATCH_LIMIT lintable files nothing is watched (stderr 
   const r = e.runEvent({ hook_event_name: "SessionStart", source: "startup", cwd: e.cwd });
   assert.equal(r.status, 0);
   assert.equal(r.stdout, "");
-  assert.match(r.stderr, /above 5000/);
+  assert.match(r.stderr, /more than 5000/);
+});
+
+test("SessionStart: a real repo with 5002 lintable files watches nothing (stderr note)", () => {
+  const e = makeEnv();
+  for (let i = 1; i <= 5002; i++) e.file(`f${i}.sh`);
+  gitInit(e);
+  const r = e.runEvent({ hook_event_name: "SessionStart", source: "startup", cwd: e.cwd });
+  assert.equal(r.status, 0);
+  assert.equal(r.stdout, "");
+  assert.match(r.stderr, /more than 5000/);
+});
+
+test("SessionStart: exactly WATCH_LIMIT distinct lintable files are still watched, duplicate index stages counted once", () => {
+  const e = makeEnv();
+  for (let i = 1; i <= 5000; i++) e.file(`f${i}.sh`);
+  // Remove the git symlink first: writing the stub through it would overwrite the real git binary.
+  rmSync(path.join(e.bin, "git"));
+  // Every name twice, as git lists unmerged index entries once per stage: 10000 raw lines, 5000 distinct files.
+  e.stub("git", "for ((i=1; i<=5000; i++)); do printf 'f%d.sh\\0f%d.sh\\0' \"$i\" \"$i\"; done");
+  const r = e.runEvent({ hook_event_name: "SessionStart", source: "startup", cwd: e.cwd });
+  assert.equal(r.status, 0);
+  assert.equal(JSON.parse(r.stdout).hookSpecificOutput.watchPaths.length, 5000);
+  assert.doesNotMatch(r.stderr, /watch list/);
 });
 
 /** shellcheck output carrying one finding (the stub prints it and exits 1). */

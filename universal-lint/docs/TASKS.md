@@ -20,10 +20,7 @@ Legend: `[x]` finished. `[ ]` not finished; tag = `open` (code change, not start
 - [x] [F05](tasks/F05-stdin-eagain-large-payload.md) Read hook stdin robustly: payloads over about 190 KB, or from a late writer, were silently not linted. Shipped in 0.15.4.
 - [x] [F06](tasks/F06-markdownlint-cli2-no-globs.md) Pass `--no-globs` to markdownlint-cli2 so a project config's top-level `globs` no longer makes every single-file lint lint the whole repo. Shipped in 0.15.5.
 - [x] [F07](tasks/F07-stylelint-without-config.md) Skip stylelint when the project has no stylelint config. Shipped in 0.15.6.
-
-## Stage 1: quick wins (high impact, low risk, small diffs)
-
-- [ ] [F08](tasks/F08-watchlist-early-stop.md) Stop the watch-list filter once `WATCH_LIMIT` is exceeded `open` priority:medium. Combine with F12.
+- [x] [F08](tasks/F08-watchlist-early-stop.md) Stop the watch-list filter once `WATCH_LIMIT` is exceeded. Shipped in 0.15.7.
 
 ## Stage 2: structural changes
 
@@ -63,7 +60,7 @@ Legend: `[x]` finished. `[ ]` not finished; tag = `open` (code change, not start
 - F02 + F03 together remove all false eslint findings seen in this analysis; F02 alone (the safety net) covers projects that have a config but no reachable binary. F04's walk from the file's directory fixes the sub-package case (91 of 128 historical pnpm findings).
 - F04 before F09: both rework the npx-fallback branch of `runLintTool`; F04 covers locally installed tools, F09 the npx-cache-only ones (markdown).
 - F11's savings and F04's are not additive for JS/TS (0.14.x estimate from the rtk era; rtk is gone since 0.15.0, re-measure in F11); F28 documents the rest.
-- F08 and F12 touch the same loop in `watchList`; F15 and F19 come after them.
+- F08 (done) shortened the `watchList` loop; F12 still changes the per-file check inside it; F15 and F19 come after F12.
 - F10 before F13 (the slot cap bounds the peak; F13 removes redundant work inside it).
 - F03 and F09 before F16. F18 and F10/F13 change the timeout budget: update F29's text.
 - F27: add each test together with the task it guards (F04, F05, F10, F11, F18).
