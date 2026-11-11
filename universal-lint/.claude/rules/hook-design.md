@@ -9,11 +9,12 @@ paths:
 
 # Hook design (do not "fix" without reading this)
 
-- **Four `command` hooks, one entry:** every event runs `"${CLAUDE_PLUGIN_ROOT}/hooks/lint-file.mjs"` (the placeholder is quoted so a plugin path with a space survives; `claude plugin validate` warns otherwise); `main()` dispatches on `hook_event_name`. No `async`, no `statusMessage` (silent), no matcher on the three non-tool events.
+- **Four `command` hooks, one entry:** every event runs `"${CLAUDE_PLUGIN_ROOT}/hooks/lint-file.mjs"` (the placeholder is quoted so a plugin path with a space survives; `claude plugin validate` warns otherwise); `main()` dispatches on `hook_event_name`. No hooks.json `async` flag (the hook itself has an async `main` since 0.15.4, see the stdin sub-bullet), no `statusMessage` (silent), no matcher on the three non-tool events.
   - PostToolUse `Write|Edit` (`PostToolUse[0]`, index pinned by `tests/manifest.test.mts`): `timeout: 90`, `asyncRewake: true`. Records the content digest (see "File detection"), then lints. A payload without `hook_event_name` is treated as PostToolUse.
   - SessionStart and CwdChanged: `timeout: 30`. Print the watch list on stdout as `{"hookSpecificOutput":{"hookEventName":<event>,"watchPaths":[…]}}`, only when it is non-empty; always exit `0`. CwdChanged builds the list for `new_cwd`; empty output leaves Claude Code with an empty watch list.
   - FileChanged: `timeout: 90`, `asyncRewake: true`. Lints a watched file changed outside Write/Edit with the same findings contract; the text is prefixed `universal-lint (changed outside Write/Edit): ` and `hookEventName` is `FileChanged`.
   - `asyncRewake` runs the hook in the background like `async`, but exit `2` wakes Claude with stderr as soon as the lint finishes, instead of the findings waiting for the next turn. Contract: findings = the `universal-lint…: …` text on stderr + exit `2`; nothing to report = no output, exit `0`.
+  - stdin: `main` reads the payload with `await json(process.stdin)` (`node:stream/consumers`), never a synchronous `readFileSync` on fd 0. The `node:process` import (and any `process.stdin` access) opens fd 0 as a non-blocking pipe handle, so a sync read throws EAGAIN whenever the writer is late or the payload exceeds the pipe buffer (about 128-192 KB; Edit payloads carry the whole `tool_response.originalFile`, Write payloads the whole `tool_input.content`), and the fail-open catch made that a silent skip: no lint, no digest (F05, fixed in 0.15.4). A read error or invalid JSON still fails open (no output, exit 0).
   - Invoked directly, no `node` prefix: the built file has a node shebang and the exec bit the build sets. One process per event, no persistent process.
   - No debounce: every Write/Edit lints right away in its own process (user decision 2026-11-06, removed together with the edit coalescing it required).
 - **Command hooks, no MCP server (user decision 2026-11-06)** (kwitsch/claude-plugins prefers a persistent MCP stdio server for hooks, as `dprint` does here):
@@ -32,6 +33,7 @@ paths:
 - Overlapping lints of quick successive edits share the `--tsBuildInfoFile` (accepted, see `typescript-check.md`).
 - **Accepted:** when combined wall time exceeds the 90 s lint budget (cold npx 55 s + `tsc` 45 s = 100 s) the hook is killed and that turn's async findings are silently lost. Fail-open, never a wrong result; the next edit's `tsc` hits a warm cache.
 - **git:** each git call (`git ls-files` for the watch list, `git status` for the FileChanged gate) is capped at `GIT_TIMEOUT_MS` (10 s). FileChanged nominal worst case: git 10 s + chain 30 s + `tsc` 45 s = 85 s < 90 s; the cold-npx overrun above applies unchanged (a kill loses that lint silently). SessionStart/CwdChanged: git 10 s plus one realpath per listed file, inside the 30 s hook timeout.
+- **stdin:** read to EOF with no own cap: a writer that never closes stdin holds the process until the hook `timeout` kills it (fail open; before 0.15.4 it got an instant EAGAIN skip). Claude Code closes stdin after the payload (stdin delay at most 9 ms over 50 live events, F05).
 
 ## Runtime behavior (`lint_file`)
 
@@ -88,24 +90,24 @@ paths:
 
 ## Measured cost
 
-- **Label:** universal-lint 0.15.3, 2026-11-07, WSL2 6.18.33.2-microsoft-standard-WSL2, 12 cores, 9.5 GB, node v24.22.2, tsc 7.0.2, linters found (of shellcheck/ruff/yamllint/markdownlint-cli2/eslint): none on either PATH variant, PATH 63 dirs / 44 on /mnt/c (load 1.29 -> 1.70 during the run). Medians in ms from `node universal-lint/scripts/perf.mts 5`. Numbers are machine- and load-dependent; re-measure before judging a change.
+- **Label:** universal-lint 0.15.4, 2026-11-07, WSL2 6.18.33.2-microsoft-standard-WSL2, 12 cores, 9.5 GB, node v24.22.2, tsc 7.0.2, linters found (of shellcheck/ruff/yamllint/markdownlint-cli2/eslint/oxlint): none on either PATH variant, local oxlint yes, PATH 63 dirs / 44 on /mnt/c (load 4.73 -> 3.73 during the run). Medians in ms from `node universal-lint/scripts/perf.mts 5`. Numbers are machine- and load-dependent; re-measure before judging a change.
 - **Harness:** `node universal-lint/scripts/perf.mts [runs]` after `pnpm --filter universal-lint build` (dev only, measures `plugin/`): spawns the built hook through its shebang with a payload file as stdin, fixtures in `os.tmpdir()`, one warm-up round plus `runs` timed rounds (default 5), real PATH and PATH minus `/mnt/` dirs; exits 1 when a run misses its expected exit status or observable, 2 on a usage, missing-build or setup/spawn error. The header lists which linters were found on PATH (the `.sh`/`.py`/`.yml` rows time the missing-tool scan when they are absent, so installing one changes those rows). The `.mts Write (this repo)` row lints this checkout's `universal-lint/scripts/perf.mts` with `cwd` = the checkout root (the digest goes to the fixture's `CLAUDE_PLUGIN_DATA`, nothing is written into the repo); it times the local-bin route only when the checkout has its own `node_modules` (`pnpm install`) and `oxlint` is not on `PATH`.
 - **Live per-hook durations:** `claude -p --debug-file <f> ...`, then `grep 'lint-file.mjs.*finished with status' <f>`; findings appear in transcripts as `hook_blocking_error` attachments carrying `toolUseID`.
 
 | Case                           | real PATH | no /mnt | What runs                                                                                               |
 | ------------------------------ | --------: | ------: | ------------------------------------------------------------------------------------------------------- |
-| floor `node -e 0`              |        24 |      25 | no hook: Node startup + PATH lookup                                                                     |
-| empty payload `{}`             |        38 |      39 | hook floor, nothing to lint                                                                             |
-| out-of-scope `.json` Write     |        41 |      41 | scope guard only                                                                                        |
-| `.sh` Write                    |       134 |      43 | shellcheck: missing tool                                                                                |
-| `.py` Write                    |       132 |      40 | ruff: missing tool                                                                                      |
-| `.yml` Write                   |       133 |      39 | yamllint: missing tool                                                                                  |
-| `.md` Write                    |       987 |     832 | markdownlint-cli2: npx fallback, warm cache                                                             |
-| `.ts` Write (no eslint config) |       138 |     136 | tsc 7.0.2 warm incremental only (no lint config: no chain lint), 30-line fixture                        |
-| `.ts` Edit (no eslint config)  |       133 |     137 | same as `.ts` Write: tsc only                                                                           |
-| `.mts` Write (this repo)       |       338 |     244 | oxlint 1.91.0 via the root `node_modules/.bin` (typeCheck config: no tsc), real file `scripts/perf.mts` |
-| FileChanged tracked unchanged  |        43 |      43 | `git status` skip, ext4                                                                                 |
-| FileChanged ignored            |        44 |      43 | `git status` `!!` skip, ext4                                                                            |
-| FileChanged unlink             |        38 |      38 | early return before any lint                                                                            |
-| SessionStart fixture           |        45 |      46 | watch list, 6 lintable files                                                                            |
-| SessionStart this repo         |        61 |      62 | watch list of the repo checkout                                                                         |
+| floor `node -e 0`              |        26 |      26 | no hook: Node startup + PATH lookup                                                                     |
+| empty payload `{}`             |        48 |      44 | hook floor, nothing to lint                                                                             |
+| out-of-scope `.json` Write     |        46 |      48 | scope guard only                                                                                        |
+| `.sh` Write                    |       148 |      49 | shellcheck: missing tool                                                                                |
+| `.py` Write                    |       150 |      50 | ruff: missing tool                                                                                      |
+| `.yml` Write                   |       150 |      48 | yamllint: missing tool                                                                                  |
+| `.md` Write                    |      1102 |     906 | markdownlint-cli2: npx fallback, warm cache                                                             |
+| `.ts` Write (no eslint config) |       152 |     153 | tsc 7.0.2 warm incremental only (no lint config: no chain lint), 30-line fixture                        |
+| `.ts` Edit (no eslint config)  |       149 |     151 | same as `.ts` Write: tsc only                                                                           |
+| `.mts` Write (this repo)       |       393 |     307 | oxlint 1.91.0 via the root `node_modules/.bin` (typeCheck config: no tsc), real file `scripts/perf.mts` |
+| FileChanged tracked unchanged  |        51 |      51 | `git status` skip, ext4                                                                                 |
+| FileChanged ignored            |        53 |      51 | `git status` `!!` skip, ext4                                                                            |
+| FileChanged unlink             |        44 |      47 | early return before any lint                                                                            |
+| SessionStart fixture           |        52 |      54 | watch list, 6 lintable files                                                                            |
+| SessionStart this repo         |        67 |      69 | watch list of the repo checkout                                                                         |

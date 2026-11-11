@@ -31,6 +31,7 @@ import { accessSync, constants as fsConstants, existsSync, lstatSync, mkdirSync,
 import { homedir, tmpdir } from "node:os";
 import path from "node:path";
 import process from "node:process";
+import { json } from "node:stream/consumers";
 import { fileURLToPath } from "node:url";
 
 /** Inner linter timeout; the hook-level timeout (hooks.json timeout: 90 = the lint budget) is the backstop. */
@@ -1646,10 +1647,13 @@ function isMainModule(): boolean {
  * stdout (exit 0); FileChanged runs fileChangedHandler; anything else (PostToolUse, or a payload without the field)
  * records the Write/Edit digest and runs lintFileHandler. Findings: their text on stderr and exit 2 (asyncRewake wakes
  * Claude with it). Fails open on any error — no output, exit 0.
+ *
+ * @remarks
+ * Reads stdin asynchronously to EOF, never `readFileSync(0)`: fd 0 is non-blocking, so a sync read throws EAGAIN on a late writer or a payload above the pipe buffer (hook-design.md "stdin", F05). Never rejects (the whole body is in the try/catch), so the bottom `void main()` is safe. Never calls `process.exit`: the process ends when the event loop drains after stdin EOF, carrying `process.exitCode` 2 for findings, so the exit-code contract is unchanged.
  */
-function main(): void {
+async function main(): Promise<void> {
   try {
-    const input = JSON.parse(readFileSync(0, "utf8")) as PostToolUseHookInput;
+    const input = (await json(process.stdin)) as PostToolUseHookInput;
     const ev = input?.hook_event_name;
     if (ev === "SessionStart" || ev === "CwdChanged") {
       const r = watchPathsHandler(input);
@@ -1672,4 +1676,4 @@ function main(): void {
   }
 }
 
-if (isMainModule()) main();
+if (isMainModule()) void main();

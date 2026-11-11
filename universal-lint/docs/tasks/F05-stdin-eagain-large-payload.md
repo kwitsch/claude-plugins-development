@@ -1,20 +1,20 @@
 ---
 id: F05
 title: Read hook stdin robustly; payloads over about 190 KB are silently not linted
-status: open
+status: done
 priority: medium
-area: universal-lint/src/hooks/lint-file.mts (main, recordWrittenFor, recordWritten, fileChangedHandler)
+area: universal-lint/src/hooks/lint-file.mts (main, recordWrittenFor, recordWritten, fileChangedHandler), universal-lint/tests/core.test.mts, universal-lint/.claude/rules/hook-design.md, universal-lint/.claude/rules/tests.md, universal-lint/scripts/perf.mts
 ---
 
 # F05 Read hook stdin robustly
 
 ## Status
 
-Open. watch-filechanged finding (confirmed, medium) plus a verifier missed item (Write is affected too, and plain shell pipes).
+Done in 0.15.4. `main` is `async` and reads the payload with `await json(process.stdin)` to EOF; fail-open, the findings contract, the dispatch and `hooks.json` are unchanged (details: `.claude/rules/hook-design.md` "stdin"). Root cause: the `node:process` import makes fd 0 a non-blocking pipe handle, so the sync read threw EAGAIN for a late or larger-than-pipe-buffer writer (even `cat p512.json | lint-file.mjs` failed; a file redirect worked). Tests: `tests/core.test.mts` test.each over a 512 KB Edit and Write payload written 100 ms late through a spawn pipe, both failing against 0.15.3. Cost: see hook-design.md "Measured cost" (0.15.4 table); the live `claude -p` big.md check was not re-run.
 
 ## Problem
 
-`main` parses `JSON.parse(readFileSync(0, "utf8"))`. When stdin is non-blocking and the writer has not delivered everything yet, Node throws EAGAIN: payloads above the pipe/socket buffer (about 128-192 KB) or a late writer. The fail-open catch swallows it silently: no lint, no digest. Edit payloads carry the whole original file (`tool_response.originalFile`), Write payloads the whole content (`tool_input.content`), so any Write/Edit of a file over about 190 KB loses its PostToolUse lint. With no digest recorded, the FileChanged echo then lints the whole file (no edit-range gate), defeating the self-write dedupe.
+`main` parsed (0.15.3) `JSON.parse(readFileSync(0, "utf8"))`. When stdin is non-blocking and the writer has not delivered everything yet, Node throws EAGAIN: payloads above the pipe/socket buffer (about 128-192 KB) or a late writer. The fail-open catch swallows it silently: no lint, no digest. Edit payloads carry the whole original file (`tool_response.originalFile`), Write payloads the whole content (`tool_input.content`), so any Write/Edit of a file over about 190 KB loses its PostToolUse lint. With no digest recorded, the FileChanged echo then lints the whole file (no edit-range gate), defeating the self-write dedupe.
 
 ## Evidence
 
@@ -25,12 +25,12 @@ Open. watch-filechanged finding (confirmed, medium) plus a verifier missed item 
 
 ## Code locations
 
-- `main` (`readFileSync(0, "utf8")` inside the fail-open try; dispatch on `hook_event_name`)
+- `main` (was `readFileSync(0, "utf8")`, now `await json(process.stdin)`, inside the fail-open try; dispatch on `hook_event_name`)
 - `recordWrittenFor` / `recordWritten` (never reached on EAGAIN), `fileChangedHandler` (digest miss → whole-file lint)
 
 ## Approach
 
-Replace the read with one that tolerates EAGAIN. Simplest: make `main` async and read `for await (const c of process.stdin) s += c;` (the top-level `if (isMainModule()) main()` stays). Synchronous alternative: a `readSync` loop on fd 0 that waits about 5 ms with `Atomics.wait` on EAGAIN and stops at EOF. Keep fail-open on JSON parse errors and the exit-code contract. Add the harness note to tests.md: drive concurrent hook runs with stdin from a file or a blocking pipe.
+Shipped: `main` is `async` and reads `(await json(process.stdin)) as PostToolUseHookInput`; the bottom call is `if (isMainModule()) void main();` (no top-level await, so importers never see an async module, and `main` cannot reject because its whole body is in the fail-open `try/catch`). `json()` was taken over the sketched `for await (const c of process.stdin) s += c;` because it decodes UTF-8 across chunk boundaries and parses in one stdlib call. Not taken: the synchronous `readSync` loop on fd 0 with `Atomics.wait` on EAGAIN: it works and keeps `main` synchronous, but is about 10-12 lines of hand-written I/O (buffer growth, EAGAIN versus other error codes, EOF, decode) plus up to 5 ms of polling per wait, replacing one stdlib call. Not taken: dropping the `node:process` import so fd 0 stays blocking: a one-line deletion that rests on an invisible invariant (any later `node:process` import or `process.stdin` access brings the bug back) and still fails when the parent hands over an already non-blocking file description; the async read is immune to both. The tests.md note was reworded to the post-fix truth: any pipe or a file works as stdin; drive concurrent hook runs with async `spawn`.
 
 ## Verification
 

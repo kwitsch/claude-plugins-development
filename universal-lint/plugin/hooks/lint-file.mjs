@@ -5,6 +5,7 @@ import { accessSync, constants as fsConstants, existsSync, lstatSync, mkdirSync,
 import { homedir, tmpdir } from "node:os";
 import path from "node:path";
 import process from "node:process";
+import { json } from "node:stream/consumers";
 import { fileURLToPath } from "node:url";
 const SPAWN_TIMEOUT_MS = 3e4;
 const NPX_SPAWN_TIMEOUT_MS = 55e3;
@@ -915,9 +916,9 @@ function isMainModule() {
 		return false;
 	}
 }
-function main() {
+async function main() {
 	try {
-		const input = JSON.parse(readFileSync(0, "utf8"));
+		const input = await json(process.stdin);
 		const ev = input?.hook_event_name;
 		if (ev === "SessionStart" || ev === "CwdChanged") {
 			const r = watchPathsHandler(input);
@@ -937,4 +938,4 @@ function main() {
 		}
 	} catch {}
 }
-if (isMainModule()) main();
+if (isMainModule()) void main();
