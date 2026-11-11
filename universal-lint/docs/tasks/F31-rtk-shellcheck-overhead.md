@@ -6,8 +6,6 @@ priority: low
 area: universal-lint/src/hooks/lint-file.mts (runLintTool on-PATH branch, tryRtk)
 ---
 
-# F31 Measure rtk's overhead for shellcheck/ruff with the real tools
-
 ## Status
 
 Obsolete since universal-lint 0.15.0: rtk support was removed, so this problem no longer exists. The text below is kept as history.

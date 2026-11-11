@@ -6,8 +6,6 @@ priority: medium
 area: universal-lint/plugin/README.md (troubleshooting), universal-lint/.claude/rules/hook-design.md
 ---
 
-# F28 Document the WSL Windows-PATH penalty
-
 ## Status
 
 Closed docs-only in 0.15.25, no code change. Shipped: a "Troubleshooting" section ("Slow lints on WSL") at the end of `plugin/README.md` (cause, the `go vet` example, the two user options `appendWindowsPath = false` in `/etc/wsl.conf` or a `/mnt`-trimmed PATH for Claude Code, and the statement that the plugin never rewrites PATH), and one sentence on the "Selection (`selectLintTool`)" bullet of `.claude/rules/hook-design.md`. The re-measurement on 0.15.25 (Evidence) refutes this task's original premise that a trimmed PATH speeds up every lint by 0.1-0.6 s: after rtk's removal (0.15.0), the direct local and npx-cached bins (F04, F09) and the persisted `onPath` probes (F11), the hook itself shows no real-vs-/mnt gap in the direction a /mnt penalty would cause (largest median difference 15 ms, and there the real PATH is the faster one). The remaining WSL cost is inside child processes that search PATH themselves; `go vet` is the one measured example.

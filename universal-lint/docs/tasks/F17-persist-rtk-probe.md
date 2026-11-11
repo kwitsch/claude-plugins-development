@@ -6,8 +6,6 @@ priority: low
 area: universal-lint/src/hooks/lint-file.mts (getRtkPrefix, rtkPrefixCache, parseRtkPrefix, runLintTool, RTK_PROBE_TIMEOUT_MS), universal-lint/.claude/rules/hook-design.md
 ---
 
-# F17 Persist rtk rewrite probe results across hook processes
-
 ## Status
 
 Obsolete since universal-lint 0.15.0: rtk support was removed, so this problem no longer exists. The text below is kept as history.

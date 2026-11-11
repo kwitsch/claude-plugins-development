@@ -6,8 +6,6 @@ priority: high
 area: universal-lint/src/hooks/lint-file.mts (selectLintTool, localBin, runLintTool, runChainLint, walkUpToCwd, scopedTarget/outside), universal-lint/scripts/perf.mts, universal-lint/.claude/rules/hook-design.md, universal-lint/.claude/rules/languages.md, universal-lint/plugin/README.md
 ---
 
-# F04 Run project-local node_modules/.bin/<tool> directly
-
 ## Status
 
 Done in 0.15.3. User decision (q1): "all five npm chain tools; tsc keeps its cwd-only lookup": `oxlint`, `eslint`, `stylelint`, `markdownlint-cli2` and `markdownlint` (the chain entries with `npmSpec`), when absent from `PATH`, run the nearest `node_modules/.bin/<name>` from the file's directory up to cwd before falling back to `npx --yes`; `tsc` keeps `PATH`, then `<cwd>/node_modules/.bin/tsc` (no walk). User decision (q2): the npx fallback stays as in 0.15.2. Tests (`tests/npx-fallback.test.mts`, six): a local oxlint at cwd runs with its directory first on the child's `PATH` and no npx; the nearest `node_modules/.bin` wins; lookup by bin name (a local `markdownlint` beats npx `markdownlint-cli2`); a local bin that cannot spawn falls back to npx; a file reached through a symlinked directory outside cwd never runs an above-cwd bin; a chain tool on `PATH` still wins. Measured with `node universal-lint/scripts/perf.mts 5`, `.mts Write (this repo)` medians in ms, before (0.15.2) -> after (0.15.3): real PATH 578 -> 338, no /mnt 473 -> 244. The rtk parts of the original task (the rtk-prepend variant, skipping the doomed rtk attempt) are obsolete: rtk support was removed in 0.15.0.

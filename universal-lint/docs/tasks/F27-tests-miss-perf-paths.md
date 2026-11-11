@@ -6,8 +6,6 @@ priority: low
 area: universal-lint/tests/*.test.mts, universal-lint/tests/support/lint-hook.mts
 ---
 
-# F27 Test the performance-relevant hook paths
-
 ## Status
 
 Done in 0.15.24. Audit of the eight proposed tests plus the perf paths added since: six were already covered by the tests added with their tasks, item 1 (rtk banner) and the rtk half of item 5 are obsolete (rtk removed in 0.15.0), only item 7 (2 MB output) was missing and is added. A quadratic `LOC_PATH_RE` hazard found while designing it is fixed in the same release.

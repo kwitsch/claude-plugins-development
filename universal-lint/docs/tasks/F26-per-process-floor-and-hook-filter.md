@@ -6,8 +6,6 @@ priority: low
 area: universal-lint/src/hooks/lint-file.mts (`createHash` wrapper), universal-lint/tests/manifest.test.mts, universal-lint/docs/tasks/F26-per-process-floor-and-hook-filter.md, universal-lint/docs/TASKS.md, universal-lint/.claude/rules/hook-design.md
 ---
 
-# F26 Per-process floor for events the hook cannot act on
-
 ## Status
 
 Done in 0.15.23. Merges bench-js-ts floor finding (confirmed, low), static node-startup finding (confirmed, low) and real-sessions FileChanged-spawn finding (confirmed, low).

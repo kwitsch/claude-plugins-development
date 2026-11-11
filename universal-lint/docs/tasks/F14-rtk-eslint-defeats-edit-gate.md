@@ -6,8 +6,6 @@ priority: medium
 area: universal-lint/src/hooks/lint-file.mts (gateFinding, LOC_PATH_RE, LOC_ROW_RE, LOC_SHELLCHECK_RE, runLintTool, getRtkPrefix, tryRtk), universal-lint/.claude/rules/hook-design.md
 ---
 
-# F14 Bypass rtk lint on Edit so the edit-range gate works
-
 ## Status
 
 Obsolete since universal-lint 0.15.0: rtk support was removed, so this problem no longer exists. The text below is kept as history.

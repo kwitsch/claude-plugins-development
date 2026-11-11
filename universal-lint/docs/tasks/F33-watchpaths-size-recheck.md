@@ -6,8 +6,6 @@ priority: low
 area: universal-lint/src/hooks/lint-file.mts (watchPathsHandler, watchList, WATCH_LIMIT)
 ---
 
-# F33 watchPaths JSON size and watch count: re-check on upgrades
-
 ## Status
 
 Closed docs-only in 0.15.29. watch-filechanged finding (confirmed, low): re-checked on Claude Code 2.1.321, no cap appeared, no code change. The re-check recipe in Approach stays for future upgrades.
