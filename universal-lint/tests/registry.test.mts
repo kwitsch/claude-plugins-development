@@ -1195,3 +1195,11 @@ test.skipIf(process.getuid?.() === 0)("configExists: unreadable (x-only) directo
     chmodSync(d, 0o755);
   }
 });
+
+test("gateFinding: a long whitespace-free line (minified) stays linear and keeps the located hit", () => {
+  const resolved = path.join(GATE_DIR, "a.js");
+  const text = `a.js:1:5: error: no-eval\n${"ab.c".repeat(256 * 1024)}`; // 1 MiB single token, the dotty worst case
+  assert.ok(gateFinding(gf(text), null, resolved)?.text.startsWith("a.js:1:5")); // Write path
+  assert.ok(gateFinding(gf(text), [[0, 0]], resolved)?.text.startsWith("a.js:1:5")); // Edit path, hit
+  assert.equal(gateFinding(gf(text), [[7, 7]], resolved), null); // Edit path, miss gated
+});
