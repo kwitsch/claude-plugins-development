@@ -6,8 +6,6 @@ priority: low
 area: universal-lint/docs/tasks/F25-digest-size-bound.md, universal-lint/docs/TASKS.md
 ---
 
-# F25 Bound digest hashing and FileChanged lint by file size
-
 ## Status
 
 Closed docs-only in 0.15.22. Hashing a 10 MB file costs about 11 ms against a 30-55 s lint budget, and the real digest store holds 6 files / 28 KB. A size skip is not a hashing saving: with no digest written, FileChanged lints the file (a new duplicate lint), and skipping the lint itself drops findings that F19 (generated files stay linted) decided to keep. No code shipped. 0.15.22 because the root CLAUDE.md version rule applies to any change under `universal-lint/`.

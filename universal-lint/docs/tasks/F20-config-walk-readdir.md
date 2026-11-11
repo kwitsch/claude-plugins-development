@@ -6,8 +6,6 @@ priority: low
 area: universal-lint/src/hooks/lint-file.mts (walkUpToCwd, walkToRoot, resolveOxlintConfig, hasProjectMarkdownlintConfig, hasStylelintConfig, resolveCheckstyleConfig, hasProjectYamllintConfig, resolveTsconfig, resolveCargoManifest)
 ---
 
-# F20 One readdirSync per directory in the upward config walks
-
 ## Status
 
 Shipped in 0.15.17. Every upward config walk (oxlint/eslint, eslint-root, markdownlint, yamllint, stylelint incl. the `package.json` probe, checkstyle, tsconfig, Cargo, `localBin`, `runNpx`) probes through `configExists(dir, name)`. When the walked path lexically starts with `/mnt/` (never realpath) one `readdirSync` per directory and process is memoized as a set of upper-cased names; a name whose first path segment is not listed is skipped, every listed hit is confirmed by `existsSync`, and a `readdirSync` error stores `null` (plain `existsSync` for that directory). Elsewhere `configExists` is today's `existsSync`. A symlinked path from ext4 into `/mnt` keeps today's probes (correct, slow); `/mnt/wsl*`, `/mnt` data disks and non-WSL `/mnt` mounts take the readdir branch (correct, cost differs). The memo lives per process and is never invalidated; the skill driver's batch sees one listing per directory. Nothing the process does writes into the project tree (npx installs into the npm cache; tsc buildinfo and the MD013 config go to `CLAUDE_PLUGIN_DATA`/tmpdir); an external install mid-batch makes at most one lint fall through to the npx-cached bin, the next event sees the bin.

@@ -6,8 +6,6 @@ priority: high
 area: universal-lint/src/hooks/lint-file.mts (runLintTool npx-fallback branch, runNpx, spawnBin, NPX_REFRESH_MS, REGISTRY npmSpec entries, NPX_SPAWN_TIMEOUT_MS)
 ---
 
-# F09 Spawn the cached npx bin directly instead of npx --yes
-
 ## Status
 
 Done in 0.15.8. Shipped: option 1 (computed `_npx` path) plus two "would npx run this?" guards and a 24 h refresh stamp. `runLintTool`'s npx branch delegates to `runNpx`, which spawns `${npm_config_cache || NPM_CONFIG_CACHE || ~/.npm}/_npx/<sha512(npmSpec) hex[0:16]>/node_modules/.bin/<name>` directly through `spawnBin` (F04's local-bin spawn moved into a helper: bin dir first on PATH, npx's cwd, `NPX_SPAWN_TIMEOUT_MS`), so local bin -> npx-cache bin -> npx is one fall-through chain ending in the single npx spawn; only ENOENT/EACCES falls through, a timeout is returned as is. Plain `npx --yes`, exactly as in 0.15.7, runs instead when a `node_modules/.bin/<name>` exists from the spawn cwd up to `/` (npx's own lookup runs that one before its cache; F04 user decision), when npx holds the cache dir's `concurrency.lock` (install in progress), or when the refresh stamp `${CLAUDE_PLUGIN_DATA || os.tmpdir()}/npx-refreshed-<key>` is missing or older than `NPX_REFRESH_MS` (24 h); every npx run that spawned renews the stamp (errors swallowed), except the above-cwd one, which never touches the cache. The hook only reads the npm cache, never writes it. Measured (same machine and session, label in hook-design.md "Measured cost"), 0.15.7 -> 0.15.8: `.md Write` (`perf.mts 5`) real PATH 1066 -> 476 ms, no /mnt 874 -> 287 ms; `.css` Write with a stylelint config (manual, 1 warm-up + 5 runs) 951 -> 359 ms. The skill driver takes the same route through `lintFileHandler`.

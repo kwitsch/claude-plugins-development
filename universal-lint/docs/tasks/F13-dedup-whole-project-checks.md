@@ -6,8 +6,6 @@ priority: medium
 area: universal-lint/src/hooks/lint-file.mts (coalesceProjectCheck, runTypeCheck, runChainLint, lintResolved, slotStale, FILE_CHANGED_BUDGET_MS), universal-lint/.claude/rules/hook-design.md
 ---
 
-# F13 Run whole-project checks once per FileChanged burst
-
 ## Status
 
 Done in 0.15.12. Shipped: `coalesceProjectCheck` wraps the whole-project spawn (`tsc -p` in `runTypeCheck`; `go vet`/`golangci-lint run <dir>` and `cargo check`/`cargo clippy --manifest-path` in `runChainLint`) for FileChanged only (`lintResolved` passes `coalesce = hookEventName === "FileChanged"`). State under `${CLAUDE_PLUGIN_DATA || os.tmpdir()}/fc-locks/`: `<key>.lock` (F10's `wx` + pid claim, `slotStale` reclaim) and `<key>.last` (`Date.now()` taken before the spawn of the last run that completed without error or signal), key = `hashPath` of `<tool name>:<tsconfig path | package dir | Cargo.toml path>`. See hook-design.md "Project-check lock".

@@ -6,8 +6,6 @@ priority: low
 area: universal-lint/.claude/rules/hook-design.md (Timeout budget), universal-lint/.claude/rules/languages.md (Rust), universal-lint/src/hooks/lint-file.mts (NPX_SPAWN_TIMEOUT_MS TSDoc)
 ---
 
-# F29 Timeout budget doc corrections
-
 ## Status
 
 Closed docs-only in 0.15.26. Each of the four original claims was checked against the 0.15.25 code and rules:

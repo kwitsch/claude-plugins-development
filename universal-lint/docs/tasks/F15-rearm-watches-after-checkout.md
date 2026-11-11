@@ -6,8 +6,6 @@ priority: medium
 area: universal-lint/.claude/rules/hook-design.md, universal-lint/docs/TASKS.md
 ---
 
-# F15 Re-arm FileChanged watches after git checkout
-
 ## Status
 
 Done in 0.15.13, docs-only. Prototype on Claude Code 2.1.319 (2026-11-08) showed approach 1 (re-emit the list) is a no-op and the loss is limited to files Claude Code reported as `unlink`; no code shipped. Upstream report text below. 0.15.13 because F13 (0.15.12) merges and is tagged first; the root CLAUDE.md rule applies to any change under `universal-lint/`, and all four deliverables live there.

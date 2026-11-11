@@ -6,8 +6,6 @@ priority: medium
 area: universal-lint/scripts/perf.mts (harness), universal-lint/plugin/hooks/lint-file.mjs (built hook, measured from outside), universal-lint/.claude/rules/hook-design.md, universal-lint/.claude/rules/tests.md
 ---
 
-# F01 Per-event cost baseline and re-measurement harness
-
 ## Status
 
 Done in 0.15.1. Shipped: the harness `universal-lint/scripts/perf.mts` (`node universal-lint/scripts/perf.mts [runs]`, default 5 runs, after `pnpm --filter universal-lint build`; 14 cases, each with the real PATH and with the `/mnt/` dirs removed, one warm-up round, every run checked against its expected exit status and observable, exit 1 on any failure; fixtures in `os.tmpdir()`, nothing written into the repo) and the "Measured cost" note at the end of `.claude/rules/hook-design.md` (0.15.1 medians, machine label, harness command, debug-file recipe). The harness is the flat `scripts/perf.mts`, not `scripts/perf/`, because the root `tsconfig.src.json` type-checks only `*/scripts/*.mts`. Cut, left as follow-ups: a burst case (N concurrent hook processes), a case-name filter, the `--import` preload for per-subprocess breakdowns (Approach step 2), live `claude -p --debug-file` runs (recipe documented only), and the repo-explorer-mcp 0.10.3 pin check (still unverified). No change to `src/`.

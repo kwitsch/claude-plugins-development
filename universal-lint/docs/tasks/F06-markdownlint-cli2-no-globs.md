@@ -6,8 +6,6 @@ priority: medium
 area: universal-lint/src/hooks/lint-file.mts (REGISTRY.markdown), universal-lint/tests/markdown.test.mts, universal-lint/tests/registry.test.mts, universal-lint/.claude/rules/line-length-guard.md, universal-lint/.claude/rules/hook-design.md
 ---
 
-# F06 Pass --no-globs to markdownlint-cli2
-
 ## Status
 
 Done in 0.15.5. `REGISTRY.markdown.chain[0]` (markdownlint-cli2) carries the static arg `--no-globs`; classic markdownlint, `buildArgv`, `classifyExit`, `runLintTool` and the skill driver are unchanged. Argv and alternatives: Approach; cli2 version floor: Constraints; cost: hook-design.md "Measured cost", Globs fixture bullet.

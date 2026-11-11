@@ -6,8 +6,6 @@ priority: low
 area: universal-lint/.claude/rules/languages.md (Rust, Go), universal-lint/src/hooks/lint-file.mts (CARGO_SPAWN_TIMEOUT_MS, resolveCargoManifest, REGISTRY.go)
 ---
 
-# F30 Document the Go/Rust cost model
-
 ## Status
 
 Closed docs-only in 0.15.27. bench-other-langs finding (adjusted, low); the verifier corrected the cold-leaf statement (exceeded, not "just under") and did not reproduce the burst-gap percentages. languages.md now has the Rust scope, warm cost, concurrency and burst bullets and a new Go section. Claims reconciled against the 0.15.26 code:
