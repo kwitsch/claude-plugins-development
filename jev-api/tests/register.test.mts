@@ -200,23 +200,14 @@ test("TYPESAFE_BASE_URL gets /v1/systemone appended and trailing slashes dropped
   expect(fetched[0]?.url).toBe("https://proxy.example/v1/systemone");
 });
 
-test("a non-http(s) URL is an error naming the variable and sends nothing", async ($, on) => {
-  const a = setup(on, { env: { JEV_URL: "ftp://x" } });
-  expect(await call($, "noul")).toEqual({ isError: true, result: "noul: JEV_URL must be an http(s) URL" });
-  expect(a.fetched).toHaveLength(0);
-});
-
-test("a non-http(s) TYPESAFE_BASE_URL is an error naming the variable and sends nothing", async ($, on) => {
-  const a = setup(on, { env: { TYPESAFE_BASE_URL: "ftp://x" } });
-  expect(await call($, "noul")).toEqual({ isError: true, result: "noul: TYPESAFE_BASE_URL must be an http(s) URL" });
-  expect(a.fetched).toHaveLength(0);
-});
-
-test("a TYPESAFE_BASE_URL with a query is an error and sends nothing", async ($, on) => {
-  const a = setup(on, { env: { TYPESAFE_BASE_URL: "https://h/api?tenant=x" } });
-  expect(await call($, "noul")).toEqual({ isError: true, result: "noul: TYPESAFE_BASE_URL must be an http(s) URL" });
-  expect(a.fetched).toHaveLength(0);
-});
+// An invalid set URL is an error naming the variable and sends nothing.
+for (const [name, value] of [["JEV_URL", "ftp://x"], ["TYPESAFE_BASE_URL", "ftp://x"], ["TYPESAFE_BASE_URL", "https://h/api?tenant=x"], ["TYPESAFE_BASE_URL", "https://h/api#frag"]]) {
+  test(`${name}=${value} is an error and sends nothing`, async ($, on) => {
+    const a = setup(on, { env: { [name]: value } });
+    expect(await call($, "noul")).toEqual({ isError: true, result: `noul: ${name} must be an http(s) URL` });
+    expect(a.fetched).toHaveLength(0);
+  });
+}
 
 test("a 2xx non-JSON body is reported as invalid JSON", async ($, on) => {
   setup(on, { env: { TYPESAFE_API_KEY: "k" }, reply: httpReply(200, "<html>") });

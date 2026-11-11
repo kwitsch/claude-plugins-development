@@ -173,6 +173,15 @@ const QUESTION_ID = "answer";
 /** An http(s) URL (jevfort's `JEV_URL` check). */
 const HTTP_URL = /^https?:\/\/[^/?#\s]+(?:[/?#]\S*)?$/i;
 
+/** An http(s) API root: like {@link HTTP_URL} but without query or fragment, since a path gets appended. */
+const HTTP_BASE = /^https?:\/\/[^/?#\s]+(?:\/[^?#\s]*)?$/i;
+
+/** The most options a `choice` question may have. */
+const MAX_OPTIONS = 255;
+
+/** The most levels a `score` question may have. */
+const MAX_LEVELS = 10;
+
 /** The engine names a registered tool `mcp__<plugin>__<name>`. */
 const TOOL_PREFIX = "mcp__jev-api__";
 
@@ -210,7 +219,7 @@ const SPECS: Record<QuestionType, Omit<ToolSpec, "name">> = {
           description: "The options: option name -> description of when to pick it.",
           additionalProperties: { type: "string" },
           minProperties: 1,
-          maxProperties: 255,
+          maxProperties: MAX_OPTIONS,
         },
       },
       required: ["instructions", "state", "criteria"],
@@ -228,7 +237,7 @@ const SPECS: Record<QuestionType, Omit<ToolSpec, "name">> = {
           description: "The levels, lowest first; scores start at 0.",
           items: { type: "string" },
           minItems: 1,
-          maxItems: 10,
+          maxItems: MAX_LEVELS,
         },
       },
       required: ["instructions", "state", "criteria"],
@@ -311,15 +320,15 @@ function parseInput(type: QuestionType, e: ToolCall): { state: string; question:
     return { state, question: { type, instructions, criteria: { true: yes, false: no } } }; // JSON drops undefined fields
   }
   if (type === "choice") {
-    const msg = "criteria must map 1 to 255 non-blank option names to string descriptions";
+    const msg = `criteria must map 1 to ${MAX_OPTIONS} non-blank option names to string descriptions`;
     if (!isRecord(criteria)) return msg;
     const entries = Object.entries(criteria);
     const valid = entries.filter((p): p is [string, string] => p[0].trim() !== "" && typeof p[1] === "string");
-    if (entries.length < 1 || entries.length > 255 || valid.length !== entries.length) return msg;
+    if (entries.length < 1 || entries.length > MAX_OPTIONS || valid.length !== entries.length) return msg;
     return { state, question: { type, instructions, criteria: Object.fromEntries(valid) } };
   }
-  const msg = "criteria must be an array of 1 to 10 strings";
-  if (!Array.isArray(criteria) || criteria.length < 1 || criteria.length > 10 || !criteria.every((v): v is string => typeof v === "string")) return msg;
+  const msg = `criteria must be an array of 1 to ${MAX_LEVELS} strings`;
+  if (!Array.isArray(criteria) || criteria.length < 1 || criteria.length > MAX_LEVELS || !criteria.every((v): v is string => typeof v === "string")) return msg;
   return { state, question: { type, instructions, criteria } };
 }
 
@@ -333,8 +342,7 @@ function parseInput(type: QuestionType, e: ToolCall): { state: string; question:
 function endpoint(jev: string | undefined, base: string | undefined): { ok: true; url: string } | { ok: false; error: string } {
   if (jev) return HTTP_URL.test(jev) ? { ok: true, url: jev } : { ok: false, error: "JEV_URL must be an http(s) URL" };
   if (base) {
-    const url = base.replace(/\/+$/, "") + "/v1/systemone";
-    return !/[?#]/.test(base) && HTTP_URL.test(url) ? { ok: true, url } : { ok: false, error: "TYPESAFE_BASE_URL must be an http(s) URL" };
+    return HTTP_BASE.test(base) ? { ok: true, url: base.replace(/\/+$/, "") + "/v1/systemone" } : { ok: false, error: "TYPESAFE_BASE_URL must be an http(s) URL" };
   }
   return { ok: true, url: DEFAULT_JEV_URL };
 }
