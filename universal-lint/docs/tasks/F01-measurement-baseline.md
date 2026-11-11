@@ -10,6 +10,31 @@ area: universal-lint/scripts/perf.mts (harness), universal-lint/plugin/hooks/lin
 
 Done in 0.15.1. Shipped: the harness `universal-lint/scripts/perf.mts` (`node universal-lint/scripts/perf.mts [runs]`, default 5 runs, after `pnpm --filter universal-lint build`; 14 cases, each with the real PATH and with the `/mnt/` dirs removed, one warm-up round, every run checked against its expected exit status and observable, exit 1 on any failure; fixtures in `os.tmpdir()`, nothing written into the repo) and the "Measured cost" note at the end of `.claude/rules/hook-design.md` (0.15.1 medians, machine label, harness command, debug-file recipe). The harness is the flat `scripts/perf.mts`, not `scripts/perf/`, because the root `tsconfig.src.json` type-checks only `*/scripts/*.mts`. Cut, left as follow-ups: a burst case (N concurrent hook processes), a case-name filter, the `--import` preload for per-subprocess breakdowns (Approach step 2), live `claude -p --debug-file` runs (recipe documented only), and the repo-explorer-mcp 0.10.3 pin check (still unverified). No change to `src/`.
 
+## Measured
+
+**Label:** universal-lint 0.15.29, 2026-11-11, WSL2 6.18.33.2-microsoft-standard-WSL2, 12 cores, 9.5 GB, node v24.22.2, tsc 7.0.2, linters found (of shellcheck/ruff/yamllint/markdownlint-cli2/eslint/oxlint/stylelint): none on either PATH variant, local oxlint yes, PATH 63 dirs / 44 on /mnt/c (load 1.62 -> 2.29 during the run).
+
+Medians in ms from `node universal-lint/scripts/perf.mts 5`; machine- and load-dependent, re-measure before judging a change. The run was on a loaded host (load average rose from 1.62 to 2.29), so treat the numbers as a reference, not a gate.
+
+| Case                               | real PATH | no /mnt | What runs                                                                                        |
+| ---------------------------------- | --------: | ------: | ------------------------------------------------------------------------------------------------ |
+| floor `node -e 0`                  |        24 |      26 | no hook: Node startup + PATH lookup                                                              |
+| empty payload `{}`                 |        38 |      39 | hook floor, nothing to lint                                                                      |
+| out-of-scope `.json` Write         |        38 |      38 | scope guard only                                                                                 |
+| `.sh` Write                        |        47 |      48 | shellcheck: missing tool                                                                         |
+| `.py` Write                        |        47 |      44 | ruff: missing tool                                                                               |
+| `.yml` Write                       |        46 |      47 | yamllint: missing tool                                                                           |
+| `.md` Write                        |       276 |     283 | markdownlint-cli2: npx-cached bin, direct                                                        |
+| `.css` Write (no stylelint config) |        46 |      45 | scope guard + stylelint config walk only (no config: no chain lint)                              |
+| `.ts` Write (no eslint config)     |       150 |     146 | tsc 7.0.2 warm incremental only (no lint config: no chain lint), 30-line fixture                 |
+| `.ts` Edit (no eslint config)      |       148 |     141 | same as `.ts` Write: tsc only                                                                    |
+| `.mts` Write (this repo)           |       299 |     332 | oxlint via the root `node_modules/.bin` (typeCheck config: no tsc), real file `scripts/perf.mts` |
+| FileChanged tracked unchanged      |        49 |      51 | `git status` skip, ext4                                                                          |
+| FileChanged ignored                |        48 |      49 | `git status` `!!` skip, ext4                                                                     |
+| FileChanged unlink                 |        38 |      40 | early return before any lint                                                                     |
+| SessionStart fixture               |        44 |      44 | watch list, 7 lintable files                                                                     |
+| SessionStart this repo             |        53 |      56 | watch list of the repo checkout                                                                  |
+
 ## Problem
 
 There is no written baseline of what one hook event costs, and the analysis harness lived in a temporary scratchpad. Hook durations, hook kills at the 90 s timeout and clean lints leave no trace in transcripts: only `--debug-file` logs `PostToolUse:Edit [... lint-file.mjs] finished with status N (ms)`. 0.14.0 findings appear as `hook_blocking_error` attachments carrying `toolUseID` (0.10.x used `async_hook_response` without it).
