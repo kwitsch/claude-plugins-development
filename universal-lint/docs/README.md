@@ -35,7 +35,7 @@ All of F01-F33 shipped or were closed docs-only in universal-lint 0.15.1-0.15.29
 - Before/after numbers of a change: that task's Status or "Measured" section.
 - Current baseline: `tasks/F01-measurement-baseline.md`, "Measured" (0.15.29 medians, machine label).
 - Harness and live-hook recipe: `../.claude/rules/hook-design.md`, "Measured cost".
-- Final verification of 0.15.30: 321 tests pass (from the Task 1 run), `pnpm lint` exit 0, `claude plugin validate` passes (non-blocking ICON_MISSING warning, pre-existing), all 16 `perf.mts` cases ok; the table is the F01 "Measured" section.
+- Final verification of 0.15.30: 321 tests pass, `pnpm lint` exit 0, `claude plugin validate` passes (non-blocking ICON_MISSING warning, pre-existing), all 16 `perf.mts` cases ok; the table is the F01 "Measured" section.
 
 ## Re-check recipes (Claude Code or toolchain upgrades)
 
