@@ -1,16 +1,16 @@
 ---
 id: F06
 title: Pass --no-globs to markdownlint-cli2
-status: open
+status: done
 priority: medium
-area: universal-lint/src/hooks/lint-file.mts (REGISTRY.markdown, buildArgv)
+area: universal-lint/src/hooks/lint-file.mts (REGISTRY.markdown), universal-lint/tests/markdown.test.mts, universal-lint/tests/registry.test.mts, universal-lint/.claude/rules/line-length-guard.md, universal-lint/.claude/rules/hook-design.md
 ---
 
 # F06 Pass --no-globs to markdownlint-cli2
 
 ## Status
 
-Open. bench-other-langs finding (adjusted: high → medium; specific setup). One-line change.
+Done in 0.15.5. `REGISTRY.markdown.chain[0]` (markdownlint-cli2) carries the static arg `--no-globs`; classic markdownlint, `buildArgv`, `classifyExit`, `runLintTool` and the skill driver are unchanged. Argv and alternatives: Approach; cli2 version floor: Constraints; cost: hook-design.md "Measured cost", Globs fixture bullet.
 
 ## Problem
 
@@ -26,15 +26,18 @@ Fixture with 400 .md files and `{"globs":["**/*.md"]}`: cli2 v0.24.0 header `Fin
 
 ## Approach
 
-Set the markdownlint-cli2 entry's static args to `["--no-globs"]` (classic markdownlint has no globs option). The project's own config and ignores still apply. markdownlint-cli2 has no rtk verb, so the rtk path is unaffected; the static args become part of the rtk probe key, which is harmless.
+Shipped: the markdownlint-cli2 entry of `REGISTRY.markdown` has the static args `["--no-globs"]` with a one-line why-comment. `buildArgv` already starts from `tool.args.slice()`, so the argv is `--no-globs`, then `--config <MD013-off file>` only without a project markdownlint config, then the file; the PATH, local `node_modules/.bin` and `npx --yes markdownlint-cli2` routes share it (npx passes args after the package name to the bin). The flag drops only the config's top-level `globs`; the project's rules, `ignores`, `gitignore` and `config` still apply. Classic markdownlint (`markdownlint-cli` 0.x) has no globs option and keeps `args: []`: an unknown flag could make it fail, which `classifyExit` buckets as skip and would silently disable the fallback. No cache is keyed on `args` (`probeCache` is keyed by tool name). Not taken: a `noGlobs` field on `LintTool` or a tool-name branch in `buildArgv` (more code, same behaviour, against the registry-driven design); an own `--config` without `globs` (it replaces the project config for the run, breaking "a project's own config always wins"); a `markdownlint-cli2 --version` probe gating the flag (a spawn per event, more than the saving on small repos, for a harmless degradation on cli2 < 0.12.0); a temp cwd or environment override (cli2 resolves the config by walking up from the file, so it would still apply).
 
 ## Verification
 
 Test: the markdownlint-cli2 stub records `--no-globs` before the file argument. Bench on the globs fixture: header reads `Linting: 1 file`; a foreign issue in another .md no longer surfaces.
 
+- [x] Test: `tests/markdown.test.mts` (project-config and npx tests expect `--no-globs` before the file; classic markdownlint never gets it); `tests/registry.test.mts` pins the exact argv with and without a project config.
+- [x] Bench (manual, 2026-11-07, numbers in hook-design.md "Measured cost", Globs fixture bullet): header `Linting: 1 file`; the foreign `d1.md` finding no longer surfaces on an `a.md` Write (exit 0); `a2.md` still exits 2 with its own MD041.
+
 ## Constraints
 
-Very old cli2 versions on PATH may not know `--no-globs` (npx resolves the current one); check the oldest version that supports it and note it in languages.md if it matters. Version bump.
+Very old cli2 versions on PATH may not know `--no-globs` (npx resolves the current one). Resolved: the flag exists since markdownlint-cli2 0.12.0 (`npm pack` + grep of `markdownlint-cli2.js`: 0.10.0 and 0.11.0 lack it; 0.12.0, 0.12.1 and 0.14.0 have the `--help` line and the `arg === "--no-globs"` handler; npx resolves v0.24.0 with markdownlint v0.42.0, whose `--help` lists it). Probed on 0.11.0 (`npx --yes markdownlint-cli2@0.11.0 --no-globs a.md`): output `Finding: --no-globs a.md`, `Linting: 1 file(s)`, the file's own findings, exit 1, so the flag is read as a glob matching nothing; the file still lints and only the globs suppression is lost. No version gate; noted in `.claude/rules/line-length-guard.md` (the rule that documents the markdownlint argv), not in `languages.md` (no Markdown section, and its `paths` do not load for markdown files or tests). Version bump: 0.15.5.
 
 ## Related
 

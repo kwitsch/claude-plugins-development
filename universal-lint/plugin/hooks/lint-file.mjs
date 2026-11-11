@@ -91,7 +91,7 @@ export const REGISTRY = {
 	}] },
 	markdown: { chain: [{
 		name: "markdownlint-cli2",
-		args: [],
+		args: ["--no-globs"],
 		npmSpec: "markdownlint-cli2",
 		guardMarkdownLineLength: true
 	}, {
