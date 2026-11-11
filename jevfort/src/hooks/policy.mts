@@ -17,7 +17,7 @@ export const CLAUDE = "claude";
  * @returns The question.
  */
 export function nextActionQuestion(candidates: readonly Candidate[]): Question {
-  const criteria: Record<string, string | null> = {
+  const criteria: Record<string, string> = {
     [CLAUDE]: "Something not listed: writing or editing code, composing a different command, answering or explaining to the user, planning, or any step that needs judgment.",
   };
   for (const c of candidates) criteria[c.key] = c.description;
@@ -27,7 +27,7 @@ export function nextActionQuestion(candidates: readonly Candidate[]): Question {
       "An AI coding assistant is working on the user request in `request`; `recent` lists its latest steps and their results.",
       "Pick the assistant's single best next action.",
       "Pick a listed action (read, run, skill, load) only when that exact action is clearly the right next step now. Pick a skill only when the request is squarely what that skill is for, and load a tool only when the request needs that tool. If the needed information is already in `recent`, or the assistant should now write code or reply, pick claude.",
-    ],
+    ].join(" "),
     criteria,
   };
 }
