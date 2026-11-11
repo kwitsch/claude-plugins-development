@@ -48,7 +48,7 @@ Legend: `[x]` finished. `[ ]` not finished; tag = `open` (code change, not start
 ## Measurement and docs-only
 
 - [x] [F28](tasks/F28-wsl-windows-path-docs.md) Document the WSL Windows-PATH penalty (mostly inside child processes) `done` priority:medium. Closed docs-only in 0.15.25: the hook itself shows no real-vs-/mnt gap (largest median difference 15 ms) and the remaining cost is inside child processes (`go vet`'s gccgo PATH scan, about 95 ms per run), GCCGO env not pursued (reopen trigger in the task doc).
-- [ ] [F29](tasks/F29-timeout-budget-docs.md) Timeout budget doc: cold Rust leaf crate, SessionStart on 9P `docs-only` priority:low. Budget re-derived in hook-design.md with F18 (0.15.15); the cold Rust leaf crate and SessionStart-on-9P items remain.
+- [x] [F29](tasks/F29-timeout-budget-docs.md) Timeout budget doc: cold Rust leaf crate, SessionStart on 9P `done` priority:low. Closed docs-only in 0.15.26: rtk term obsolete (removed in 0.15.0); SessionStart on 9P about 2 ms per watched file (blocky-dev 861 ms), inside 30 s up to WATCH_LIMIT, hook-design.md unchanged; cold Rust leaf-crate loss documented in languages.md; NPX_SPAWN_TIMEOUT_MS TSDoc corrected.
 - [ ] [F30](tasks/F30-go-rust-cost-model-docs.md) Document the Go/Rust cost model (scope, cold caches, bursts, gccgo PATH scan) `docs-only` priority:low
 - [ ] [F01](tasks/F01-measurement-baseline.md) F01 follow-ups (the harness itself is done, see Done): check whether the repo-explorer-mcp 0.10.3 project pin shadows the user-scope plugin, a burst case (N concurrent hook processes), live `claude -p --debug-file` runs, the `--import` preload for per-subprocess breakdowns `measurement-only` priority:low
 - [ ] [F32](tasks/F32-filechanged-echo-race.md) Measure how often the FileChanged echo of Claude's own write beats the digest `measurement-only` priority:low
@@ -62,7 +62,7 @@ Legend: `[x]` finished. `[ ]` not finished; tag = `open` (code change, not start
 - F11's savings and F04's are not additive for JS/TS: measured in F11 (0.15.9 -> 0.15.10, `perf.mts` medians, real PATH), `.mts` Write (local oxlint, F04 route) 387 -> 263 ms and `.ts` Write (tsc on PATH) 151 -> 141 ms, against `.sh`/`.py`/`.yml` (one missing PATH tool each) 142/144/146 -> 48/45/47 ms and `.md` 479 -> 292 ms; F28 documents the rest.
 - F08 (done) shortened the `watchList` loop; F12 (done) cheapened the per-file check inside it; F19 (closed docs-only in 0.15.16) adds nothing to it (F15 closed docs-only, no re-emission).
 - F10 before F13 (the slot cap bounds the peak; F13 removes redundant work inside it).
-- F03 and F09 before F16. F10/F13/F18 changed the timeout budget (re-derived in hook-design.md with F18); F29 keeps only its remaining items.
+- F03 and F09 before F16. F10/F13/F18 changed the timeout budget (re-derived in hook-design.md with F18); F29 closed in 0.15.26.
 - F27 (done, 0.15.24): the per-task tests were added with F04, F05, F10, F11, F18; the audit table in the F27 doc maps each item to its test.
 
 ## Notes

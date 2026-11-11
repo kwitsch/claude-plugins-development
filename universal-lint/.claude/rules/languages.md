@@ -35,7 +35,7 @@ paths:
   - `manifestPath` emits `--manifest-path <nearest Cargo.toml>` (found walking up to `cwd`, existence-only) inserted **before** any `--` so it stays a cargo option, not a rustc arg; it targets the right crate in a multi-crate workspace.
   - A `.rs` file outside any Cargo project is a silent no-op, gated in `runChainLint` before spawning.
 - **Coarse contract:** `classifyExit`'s shared `cargo-clippy`/`cargo` case is `0` clean, any non-zero `issues` (101 on a compile error), as for `go`/`phpstan` — a tool malfunction isn't separable from a finding by exit code (accepted). `status === null` (timeout/signal) skips before the switch.
-- `CARGO_SPAWN_TIMEOUT_MS` is a separate, larger budget (they compile the crate). A cold first build may exceed it and skip silently (fail-open); warm/incremental runs are fast.
+- `CARGO_SPAWN_TIMEOUT_MS` (45 s) is a separate, larger budget (they compile the crate). A cold build can exceed it: the first leaf-crate lint after a fresh clone or `cargo clean` took 45,068 ms through the hook (single run, 0.14.0 analysis of 2026-11-07; F29 doc), was killed and skipped silently (fail-open: a timeout is `status === null`, and the selected tool is not retried as `cargo check`), so that edit's clippy finding is lost; the next run took 13,664 ms and reported normally (a cold core crate: 6.8 s). A first-run budget or warmup would be a code follow-up.
 
 ## JS/TS: eslint vs oxlint
 
