@@ -423,10 +423,10 @@ async function summarizeResult($: Engine, request: string, action: string, outpu
  * @param $ - Engine interface.
  * @returns The options, or `undefined` when no skill is listed.
  */
-async function skillOptions($: Engine): Promise<Record<string, string | null> | undefined> {
+async function skillOptions($: Engine): Promise<Record<string, string> | undefined> {
   const commands = await $.command.list().catch(() => []);
   const blocked = new Set(((await $.store.get(SKILL_BLOCKLIST_KEY).catch(() => undefined)) as string[] | undefined) ?? []);
-  const criteria: Record<string, string | null> = { [NONE]: "No listed skill is meant for this request" };
+  const criteria: Record<string, string> = { [NONE]: "No listed skill is meant for this request" };
   for (const c of commands) {
     if ((c.source === "plugin" || c.source === "user") && c.name !== "jev" && !BUILTIN_COMMANDS.has(c.name) && !blocked.has(c.name)) criteria[c.name] = clip(c.description, 160);
   }
@@ -636,7 +636,7 @@ export const register = (on: On, options: Options): void => {
       const claudeType = e.subagent_type ?? "";
       if (offered.size < 2 || claudeType === "fork") return next(e);
 
-      const criteria: Record<string, string | null> = {};
+      const criteria: Record<string, string> = {};
       for (const [name, description] of offered) criteria[name] = clip(description, 200);
       const r = await askJev(
         $,

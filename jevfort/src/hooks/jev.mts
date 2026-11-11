@@ -14,9 +14,9 @@ export const TIMEOUT_MS = 4000;
 
 /** A question Jev answers about the request's `state`: a yes/no probability, a choice among options, or a score along levels. */
 export type Question =
-  | { type: "noul"; instructions: unknown; criteria?: { true?: string; false?: string } }
-  | { type: "choice"; instructions: unknown; criteria: Record<string, string | null> }
-  | { type: "score"; instructions: unknown; criteria: string[] };
+  | { type: "noul"; instructions: string; criteria?: { true?: string; false?: string } }
+  | { type: "choice"; instructions: string; criteria: Record<string, string> }
+  | { type: "score"; instructions: string; criteria: string[] };
 
 /** A yes/no answer: the probability of `true`. */
 export type NoulAnswer = { type: "noul"; noul: number };
@@ -42,6 +42,21 @@ export function jevUrl(raw: string | undefined): { ok: true; url: string } | { o
   if (!value) return { ok: true, url: DEFAULT_JEV_URL };
   if (!/^https?:\/\/[^/?#\s]+(?:[/?#]\S*)?$/i.test(value)) return { ok: false, error: "JEV_URL must be an http(s) URL" };
   return { ok: true, url: value };
+}
+
+/** Prefix of the jev-api plugin's tools; the question type completes the name. */
+export const JEV_TOOL_PREFIX = "mcp__jev-api__";
+/** The jev-api tools jevfort needs, by full name. */
+export const JEV_TOOLS = ["noul", "choice", "score"].map((t) => JEV_TOOL_PREFIX + t);
+
+/**
+ * The needed jev-api tools missing from a tool listing.
+ *
+ * @param names - Full names of the listed tools.
+ * @returns The missing full names, empty when all are there.
+ */
+export function missingJevTools(names: readonly string[]): string[] {
+  return JEV_TOOLS.filter((t) => !names.includes(t));
 }
 
 /**

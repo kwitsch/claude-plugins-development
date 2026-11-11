@@ -1,7 +1,7 @@
 // Pure tests of the built plugin/hooks/policy.mjs.
 import assert from "node:assert/strict";
 import { test } from "vitest";
-import { bounds, estimateEffort, inScratchpad, isEffort, modelFamily, parseEstimateInput } from "../plugin/hooks/policy.mjs";
+import { bounds, estimateEffort, inScratchpad, isEffort, modelFamily, nextActionQuestion, parseEstimateInput } from "../plugin/hooks/policy.mjs";
 
 const ROOTS = ["/tmp"];
 const SP = "/tmp/claude-1000/-proj/sid-1/scratchpad";
@@ -93,4 +93,14 @@ test("bounds, modelFamily and isEffort", () => {
   assert.equal(isEffort("xhigh"), true);
   assert.equal(isEffort("extra"), false);
   assert.equal(isEffort(undefined), false);
+});
+
+// The jev-api tools take `instructions` as one string and choice criteria as option -> description strings.
+test("nextActionQuestion has string instructions and one string criterion per option", () => {
+  const q = nextActionQuestion([{ key: "read a.ts", description: "Read the file a.ts", tool: "Read", input: { file_path: "/proj/a.ts" } }]);
+  assert.equal(q.type, "choice");
+  assert.equal(typeof q.instructions, "string");
+  assert.match(q.instructions, /^An AI coding assistant is working on the user request in `request`; .* pick claude\.$/);
+  assert.deepEqual(Object.keys(q.criteria), ["claude", "read a.ts"]);
+  assert.equal(q.criteria["read a.ts"], "Read the file a.ts");
 });
