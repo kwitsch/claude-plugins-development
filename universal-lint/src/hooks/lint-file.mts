@@ -70,6 +70,14 @@ const TSC_SPAWN_TIMEOUT_MS = 45000;
  */
 const CARGO_SPAWN_TIMEOUT_MS = 45000;
 
+/**
+ * Most files per chain-tool spawn in `lintFilesHandler` (the skill driver's batch path). Caps the argv length (sized
+ * for Linux/macOS ARG_MAX; no length-based chunking) and keeps one batch inside its unchanged per-spawn timeout:
+ * 10 .md batched measured 143 ms, so 100 files stay far below `SPAWN_TIMEOUT_MS`. Also bounds the single-file reruns
+ * of a chunk whose batch run was a skip verdict, spawn error, signal or timeout.
+ */
+const BATCH_MAX_FILES = 100;
+
 /** Above this many lintable files the watch list is empty (nothing watched), as dprint's watch-list.mts. */
 export const WATCH_LIMIT = 5000;
 
@@ -1215,15 +1223,16 @@ export function classifyCheckstyleOutput(stdout: string): { status: "clean" | "i
 }
 
 /**
- * Trim, collapse runs of 3+ blank lines to one, and cap at MAX_CONTEXT_CHARS.
+ * Trim, collapse runs of 3+ blank lines to one, and cap at `max` (default MAX_CONTEXT_CHARS).
  *
  * @param text - Findings text.
+ * @param max - Character cap; the skill driver passes MAX_CONTEXT_CHARS times the files of a batched run.
  * @returns The text trimmed, collapsed and capped.
  */
-export function truncate(text: string): string {
+export function truncate(text: string, max = MAX_CONTEXT_CHARS): string {
   const collapsed = text.replace(/\n{3,}/g, "\n\n").trim();
-  if (collapsed.length <= MAX_CONTEXT_CHARS) return collapsed;
-  return collapsed.slice(0, MAX_CONTEXT_CHARS) + "\n… (truncated)";
+  if (collapsed.length <= max) return collapsed;
+  return collapsed.slice(0, max) + "\n… (truncated)";
 }
 
 /**
@@ -1276,11 +1285,94 @@ function buildSpawnOpts(cwd: string, timeout: number): SpawnSyncOptionsWithStrin
   };
 }
 
+/** One planned chain-tool run for one file: the tool, how to spawn it, and the argv `buildArgv` built for the file. */
+interface ChainPlan {
+  /** The chain tool `selectLintTool` picked (PATH, else project-local bin, else npx). */
+  tool: LintTool;
+  /** The tool's project-local `node_modules/.bin` path, or null for the PATH and npx routes. */
+  local: string | null;
+  /** `buildArgv` result for the file: file target last for file-scoped tools, package dir for `targetsDir`, none for `manifestPath`. */
+  argv: string[];
+  /** Spawn cwd: the local bin's package root (the dir holding node_modules), else the project cwd. */
+  spawnCwd: string;
+  /** Spawn timeout: `CARGO_SPAWN_TIMEOUT_MS` for `manifestPath` tools, else `SPAWN_TIMEOUT_MS`. */
+  timeout: number;
+  /** Resolved Cargo.toml for `manifestPath` tools, else null. */
+  manifest: string | null;
+}
+
+/** Whether the tool takes the file path as its target (neither a directory- nor a crate-scoped tool), so a batch may swap the target. */
+function isFileScoped(tool: ChainPlan["tool"]): boolean {
+  return !tool.targetsDir && !tool.manifestPath;
+}
+
+/** Report-header target of a chain run: the package dir, the crate dir, or the file itself. */
+function chainTarget(tool: ChainPlan["tool"], manifest: string | null | undefined, cwd: string, fp: string): string {
+  return tool.targetsDir ? path.relative(cwd, path.dirname(fp)) || "." : manifest ? path.relative(cwd, path.dirname(manifest)) || "." : path.relative(cwd, fp);
+}
+
+/**
+ * Plan the chain tool run for one file (the first half of `runChainLint`, shared with `lintFilesHandler`): select the
+ * tool, gate cargo on a resolvable manifest, build the argv and pick the timeout and spawn cwd. Spawns nothing.
+ *
+ * @param lang - Registry entry of the file's language (as returned by `chainEntryFor`).
+ * @param resolved - Absolute path of the file.
+ * @param cwd - Project root.
+ * @returns The plan, or null when no tool is available or a cargo tool has no manifest.
+ */
+function planChainLint(lang: LangEntry, resolved: string, cwd: string): ChainPlan | null {
+  const sel = selectLintTool(lang.chain, path.dirname(resolved), cwd);
+  if (!sel) return null;
+  const { tool } = sel;
+  // Gate cargo runs on a resolvable manifest: a stray .rs outside any Cargo
+  // project is a silent no-op, not a spurious "could not find Cargo.toml"
+  // exit-101 finding. Resolved once here and threaded through buildArgv and
+  // the target computation below -- resolveCargoManifest is a directory walk
+  // doing an existsSync per level, so re-resolving it for the same
+  // file/cwd pair would repeat that walk for no new answer.
+  let manifest: string | null = null;
+  if (tool.manifestPath) {
+    manifest = resolveCargoManifest(path.dirname(resolved), cwd);
+    if (!manifest) return null;
+  }
+
+  const argv = buildArgv(tool, resolved, cwd, manifest);
+  // Compile-heavy cargo tools get their own budget (mirrors TSC_SPAWN_TIMEOUT_MS).
+  const timeout = tool.manifestPath ? CARGO_SPAWN_TIMEOUT_MS : SPAWN_TIMEOUT_MS;
+  // A local bin runs from its package root (the dir holding node_modules): eslint <= 9 resolves its flat config from the spawn cwd.
+  const spawnCwd = sel.local ? path.join(sel.local, "../../..") : cwd;
+  return { tool, local: sel.local, argv, spawnCwd, timeout, manifest };
+}
+
+/**
+ * Classify one chain-tool spawn result (shared by `runChainLint` and `lintFilesHandler`): checkstyle by its stripped
+ * stdout (`classifyCheckstyleOutput`), every other tool by exit code (`classifyExit`) with stdout and stderr joined.
+ *
+ * @param tool - The tool that ran.
+ * @param result - Its spawnSync result, or null when `coalesceProjectCheck` skipped the run.
+ * @returns Verdict and findings text, or null on a skipped run, spawn error or signal (timeout included).
+ */
+function chainOutcome(tool: LintTool, result: SpawnSyncReturns<string> | null): { verdict: "clean" | "issues" | "skip"; text: string } | null {
+  if (!result || result.error || result.signal) return null;
+  let verdict: "clean" | "issues" | "skip";
+  let text: string;
+  if (tool.classify === "output") {
+    const out = classifyCheckstyleOutput(result.stdout);
+    verdict = out.status;
+    text = out.text;
+  } else {
+    verdict = classifyExit(tool.name, result.status);
+    text = `${result.stdout ?? ""}\n${result.stderr ?? ""}`;
+  }
+  return { verdict, text };
+}
+
 /**
  * Run the language's chain-selected tool and return its finding, or null on any
- * guard failure / clean / skip verdict. The tool comes from `selectLintTool`
- * (PATH, else a project-local `node_modules/.bin`, else npx) and runs through
- * `runLintTool`, which is handed the local bin when one was selected. selectLintTool's own null path
+ * guard failure / clean / skip verdict. `planChainLint` selects the tool (`selectLintTool`:
+ * PATH, else a project-local `node_modules/.bin`, else npx) and builds argv, timeout and spawn cwd; the run goes
+ * through `runLintTool`, which is handed the local bin when one was selected, and `chainOutcome` classifies it.
+ * selectLintTool's own null path
  * already covers "nothing on PATH, no local bin and nothing npx-eligible" --
  * no separate pre-check needed (an earlier `isToolAvailable`-based short-circuit here was
  * logically redundant with it and has been removed).
@@ -1297,47 +1389,22 @@ function buildSpawnOpts(cwd: string, timeout: number): SpawnSyncOptionsWithStrin
  */
 function runChainLint(lang: LangEntry, resolved: string, cwd: string, rel: string, coalesce = false): { ran: boolean; finding: Finding | null } {
   const none = { ran: false, finding: null };
-  const sel = selectLintTool(lang.chain, path.dirname(resolved), cwd);
-  if (!sel) return none;
-  const { tool } = sel;
-  // Gate cargo runs on a resolvable manifest: a stray .rs outside any Cargo
-  // project is a silent no-op, not a spurious "could not find Cargo.toml"
-  // exit-101 finding. Resolved once here and threaded through buildArgv and
-  // the target computation below -- resolveCargoManifest is a directory walk
-  // doing an existsSync per level, so re-resolving it for the same
-  // file/cwd pair would repeat that walk for no new answer.
-  let manifest: string | null = null;
-  if (tool.manifestPath) {
-    manifest = resolveCargoManifest(path.dirname(resolved), cwd);
-    if (!manifest) return none;
-  }
-
-  const argv = buildArgv(tool, resolved, cwd, manifest);
-  // Compile-heavy cargo tools get their own budget (mirrors TSC_SPAWN_TIMEOUT_MS).
-  const timeout = tool.manifestPath ? CARGO_SPAWN_TIMEOUT_MS : SPAWN_TIMEOUT_MS;
-  // A local bin runs from its package root (the dir holding node_modules): eslint <= 9 resolves its flat config from the spawn cwd.
-  const spawnCwd = sel.local ? path.join(sel.local, "../../..") : cwd;
+  const plan = planChainLint(lang, resolved, cwd);
+  if (!plan) return none;
+  const { tool, argv, timeout, spawnCwd, manifest } = plan;
   const spawnOpts = buildSpawnOpts(spawnCwd, timeout);
-  const spawnTool = () => runLintTool(tool, argv, spawnOpts, sel.local);
+  const spawnTool = () => runLintTool(tool, argv, spawnOpts, plan.local);
   // Directory- and crate-scoped tools check the whole package/crate: one run per FileChanged burst covers every file.
   const key = coalesce ? (tool.targetsDir ? hashPath(`${tool.name}:${path.dirname(resolved)}`) : manifest ? hashPath(`${tool.name}:${manifest}`) : null) : null;
   const result = key ? coalesceProjectCheck(key, resolved, timeout, spawnTool) : spawnTool();
-  if (!result || result.error || result.signal) return none;
+  const outcome = chainOutcome(tool, result);
+  if (!outcome) return none;
 
   // Cargo entries are neither file-scoped nor targetsDir: the natural target
   // is the crate directory (the dir containing the resolved Cargo.toml). The
   // gate above guarantees `manifest` is non-null here.
-  const target = tool.targetsDir ? path.relative(cwd, path.dirname(resolved)) || "." : manifest ? path.relative(cwd, path.dirname(manifest)) || "." : rel;
-  let verdict: "clean" | "issues" | "skip";
-  let text: string;
-  if (tool.classify === "output") {
-    const out = classifyCheckstyleOutput(result.stdout);
-    verdict = out.status;
-    text = out.text;
-  } else {
-    verdict = classifyExit(tool.name, result.status);
-    text = `${result.stdout ?? ""}\n${result.stderr ?? ""}`;
-  }
+  const target = chainTarget(tool, manifest, cwd, resolved);
+  const { verdict, text } = outcome;
   if (verdict === "skip") return none;
   // cargo prints paths relative to the crate (or workspace) root, go tools get the package dir, the rest run in cwd.
   const base = manifest ? path.dirname(manifest) : tool.targetsDir ? path.dirname(resolved) : spawnCwd;
@@ -1560,8 +1627,8 @@ function postToolScope(args: PostToolUseHookInput): { fp: string; real: string }
 /**
  * Run every cheap entry guard and return the resolved absolute lint target, or null when any guard rejects
  * (success===false, missing cwd/file_path, or `scopedTarget` rejects: outside the real cwd, excluded, inside
- * `scratchpad_dir`, dangling link, unsupported extension, file absent). Used by lintFileHandler (and through it by the
- * skill driver). Fails closed to null on any unexpected error, matching lintFileHandler's fail-open-to-{} philosophy.
+ * `scratchpad_dir`, dangling link, unsupported extension, file absent). Used by lintFileHandler; the skill driver's lintFilesHandler
+ * scopes through `scopedTarget` directly and must be kept in step. Fails closed to null on any unexpected error, matching lintFileHandler's fail-open-to-{} philosophy.
  *
  * @param args - The PostToolUse hook payload.
  * @returns The lexical absolute path to lint, or null when a guard rejects.
@@ -1740,7 +1807,33 @@ function recordWrittenFor(s: { fp: string; real: string } | null): void {
 }
 
 /**
- * Lint `resolved` (chain tool unless JS/TS or CSS/SCSS has no lint config (see the no-config notes below), + tsc), gate the findings against `ranges` (null = whole file), and build the hook result.
+ * The chain entry for one file (shared by `lintResolved` and `lintFilesHandler`): the language from `EXT_MAP`, the
+ * no-config gates for JS/TS (no oxlint and no eslint config) and CSS/SCSS (no stylelint config), and for JS/TS with an
+ * oxlint config the `REGISTRY.oxlint` chain with `-c <config>` appended.
+ *
+ * @param resolved - Absolute path of the file.
+ * @param cwd - Project root (config search root).
+ * @returns `entry`: the chain to run, null when the file has no language or a no-config gate applies;
+ *   `oxlintConfig`: the selecting oxlint config (JS/TS only), else null.
+ */
+function chainEntryFor(resolved: string, cwd: string): { entry: LangEntry | null; oxlintConfig: string | null } {
+  const ext = path.extname(resolved).toLowerCase();
+  const lang = EXT_MAP[ext];
+  const oxlintConfig = lang === "jsts" ? resolveOxlintConfig(path.dirname(resolved), cwd) : null;
+  // No oxlint config and no eslint name up to / (eslint's own lookup): eslint would only exit 2 (skip), so no chain lint.
+  const noJstsConfig = lang === "jsts" && !oxlintConfig && !walkToRoot(path.dirname(resolved), (d) => ESLINT_CONFIG_FILENAMES.some((n) => existsSync(path.join(d, n))));
+  // No stylelint config (stylelint's own search places, see hasStylelintConfig): stylelint would only exit 78 (skip), so no chain lint.
+  const noCssConfig = lang === "css" && !hasStylelintConfig(path.dirname(resolved), cwd);
+  if (!lang || noJstsConfig || noCssConfig) return { entry: null, oxlintConfig };
+  // -c makes the detected config oxlint's root: oxlint ignores a nested
+  // oxlint.config.ts and rejects options.typeAware in a nested config otherwise.
+  const entry = oxlintConfig ? { chain: REGISTRY.oxlint.chain.map((t) => ({ ...t, args: [...t.args, "-c", oxlintConfig] })) } : REGISTRY[lang];
+  return { entry, oxlintConfig };
+}
+
+/**
+ * Lint `resolved` (chain tool from `chainEntryFor` unless JS/TS or CSS/SCSS has no lint config, run by `runChainLint`,
+ * + tsc), gate the findings against `ranges` (null = whole file), and build the hook result.
  *
  * @param resolved - Lexical absolute path of the in-scope file.
  * @param cwd - Payload cwd (spawn cwd and config search root).
@@ -1754,20 +1847,12 @@ function lintResolved(resolved: string, cwd: string, ranges: Array<[number, numb
   const rel = path.relative(cwd, resolved);
   const coalesce = hookEventName === "FileChanged";
   const ext = path.extname(resolved).toLowerCase();
-  const lang = EXT_MAP[ext];
   const typeCheckEligible = TYPE_CHECK_EXTS.has(ext);
-  const oxlintConfig = lang === "jsts" ? resolveOxlintConfig(path.dirname(resolved), cwd) : null;
-  // No oxlint config and no eslint name up to / (eslint's own lookup): eslint would only exit 2 (skip), so no chain lint.
-  const noJstsConfig = lang === "jsts" && !oxlintConfig && !walkToRoot(path.dirname(resolved), (d) => ESLINT_CONFIG_FILENAMES.some((n) => existsSync(path.join(d, n))));
-  // No stylelint config (stylelint's own search places, see hasStylelintConfig): stylelint would only exit 78 (skip), so no chain lint.
-  const noCssConfig = lang === "css" && !hasStylelintConfig(path.dirname(resolved), cwd);
+  const { entry, oxlintConfig } = chainEntryFor(resolved, cwd);
 
   const findings: Finding[] = [];
   let oxlintRan = false;
-  if (lang && !noJstsConfig && !noCssConfig) {
-    // -c makes the detected config oxlint's root: oxlint ignores a nested
-    // oxlint.config.ts and rejects options.typeAware in a nested config otherwise.
-    const entry = oxlintConfig ? { chain: REGISTRY.oxlint.chain.map((t) => ({ ...t, args: [...t.args, "-c", oxlintConfig] })) } : REGISTRY[lang];
+  if (entry) {
     const chain = runChainLint(entry, resolved, cwd, rel, coalesce);
     if (chain.finding) findings.push(chain.finding);
     oxlintRan = oxlintConfig !== null && chain.ran;
@@ -1816,6 +1901,133 @@ export function lintFileHandler(args: PostToolUseHookInput, scoped: { fp: string
   } catch {
     return {};
   }
+}
+
+/**
+ * Batch entry of the universal-lint skill driver: lint `files` with the hook's own resolution, one chain-tool run per
+ * group of files and one tsc run per tsconfig, and return one findings block per run.
+ *
+ * @remarks
+ * Read-only and whole-file: no edit-range gate (`gateFinding` is not called), no `coalesceProjectCheck`. Every file is
+ * scoped once with `scopedTarget` against one pre-resolved `realish(cwd)` (no scratchpad exclusion, as the driver
+ * never had one); a path listed twice is linted once. Each in-scope file is planned with `chainEntryFor` and
+ * `planChainLint` and grouped by tool name, local bin, spawn cwd and argv: file-scoped tools by the argv minus its
+ * trailing file target, so files with different config-derived argv (markdownlint/yamllint guards, oxlint `-c`)
+ * never share a run; go (`targetsDir`) and cargo (`manifestPath`) by the full argv, one run per package dir or crate
+ * without extra targets. A file-scoped group spawns once per chunk of at most `BATCH_MAX_FILES` files with all chunk
+ * files appended as targets, through `runLintTool` and the unchanged per-spawn timeout; `chainOutcome` classifies it.
+ * An `issues` run becomes the block `universal-lint: <tool> found issues in <targets>:\n<truncate(text)>` (cap MAX_CONTEXT_CHARS times the files of the run; the tsc block keeps MAX_CONTEXT_CHARS), where
+ * `<targets>` joins the run's unique per-file targets with `", "` (the file, the package dir, or the crate dir,
+ * relative to `cwd`) and names every file of the run, including those the tool found clean.
+ * Fail-open per file: a multi-file chunk whose run is a skip verdict, spawn error, signal or timeout is rerun one file at a
+ * time with each file's own argv (at most `BATCH_MAX_FILES` single spawns per chunk, each under the unchanged per-spawn
+ * timeout); a file whose single run is also a skip contributes nothing. A multi-file chunk whose run ends in a spawn
+ * error, signal or timeout is rerun the same way (one batch plus at most BATCH_MAX_FILES single spawns per chunk, so a
+ * pathological file costs its own timeout a second time and is then the only file dropped). tsc runs through `runTypeCheck` once per distinct `resolveTsconfig` result, with
+ * the group's first file; a file is left out, as in `lintResolved`, when its oxlint run (its chunk or its single
+ * rerun) reached a clean or issues verdict with a config whose `options.typeCheck` is true. The tsc block carries the
+ * ungated whole-project output once per tsconfig. Any throw drops only the file, chunk or tsconfig group it happened
+ * in.
+ *
+ * @param cwd - Project root: scope root, config search root and default spawn cwd.
+ * @param files - Absolute or cwd-relative paths to lint, in report order.
+ * @returns The findings blocks, chain runs in first-appearance group order followed by tsc runs in tsconfig order;
+ *   `[]` when nothing was found or `cwd` cannot be resolved.
+ */
+export function lintFilesHandler(cwd: string, files: readonly string[]): string[] {
+  let roots: { cwd: string };
+  try {
+    roots = { cwd: realish(cwd) };
+  } catch {
+    return []; // unresolvable cwd: nothing is in scope
+  }
+  const scoped = new Set<string>();
+  for (const file of files) {
+    const s = scopedTarget(cwd, file, undefined, roots);
+    if (s) scoped.add(s.fp);
+  }
+
+  // Plan every file; group key = tool, local bin, spawn cwd and argv (minus the file target for file-scoped tools).
+  const oxlintConfigs = new Map<string, string | null>();
+  const groups = new Map<string, Array<{ fp: string; plan: ChainPlan }>>();
+  for (const fp of scoped) {
+    try {
+      const { entry, oxlintConfig } = chainEntryFor(fp, cwd);
+      const plan = entry ? planChainLint(entry, fp, cwd) : null;
+      oxlintConfigs.set(fp, oxlintConfig);
+      if (!plan) continue;
+      const fileScoped = isFileScoped(plan.tool);
+      const key = [plan.tool.name, plan.local ?? "", plan.spawnCwd, ...(fileScoped ? plan.argv.slice(0, -1) : plan.argv)].join("\0");
+      const group = groups.get(key);
+      if (group) group.push({ fp, plan });
+      else groups.set(key, [{ fp, plan }]);
+    } catch {
+      // fail open: drop this file only
+    }
+  }
+
+  const ran = new Set<string>();
+  const chainBlocks: string[] = [];
+  const spawnPlan = (plan: ChainPlan, argv: string[]) => chainOutcome(plan.tool, runLintTool(plan.tool, argv, buildSpawnOpts(plan.spawnCwd, plan.timeout), plan.local));
+  const record = (members: Array<{ fp: string; plan: ChainPlan }>, out: ReturnType<typeof chainOutcome>): void => {
+    if (!out || out.verdict === "skip") return;
+    for (const m of members) ran.add(m.fp);
+    if (out.verdict !== "issues") return;
+    const { tool, manifest } = members[0].plan;
+    const targets = new Set(members.map(({ fp }) => chainTarget(tool, manifest, cwd, fp)));
+    // One block now carries up to BATCH_MAX_FILES files: keep the old per-file budget so later files' findings are not cut.
+    chainBlocks.push(`universal-lint: ${tool.name} found issues in ${[...targets].join(", ")}:\n${truncate(out.text, MAX_CONTEXT_CHARS * members.length)}`);
+  };
+  for (const group of groups.values()) {
+    const { plan } = group[0];
+    const fileScoped = isFileScoped(plan.tool);
+    const step = fileScoped ? BATCH_MAX_FILES : group.length;
+    for (let i = 0; i < group.length; i += step) {
+      const chunk = group.slice(i, i + step);
+      try {
+        const argv = fileScoped ? [...plan.argv.slice(0, -1), ...chunk.map((m) => m.fp)] : plan.argv;
+        const out = spawnPlan(plan, argv);
+        // Per-file fail-open: one unparsable or pathological file, a tool crash, kill or timeout must not drop the other files' findings.
+        if ((!out || out.verdict === "skip") && fileScoped && chunk.length > 1) {
+          for (const m of chunk) {
+            try {
+              record([m], spawnPlan(m.plan, m.plan.argv));
+            } catch {
+              // fail open: drop this file only
+            }
+          }
+        } else {
+          record(chunk, out);
+        }
+      } catch {
+        // fail open: drop this chunk only
+      }
+    }
+  }
+
+  // tsc once per tsconfig, with the first listed file it governs.
+  const tsFirst = new Map<string, string>();
+  for (const [fp, oxlintConfig] of oxlintConfigs) {
+    try {
+      if (!TYPE_CHECK_EXTS.has(path.extname(fp).toLowerCase())) continue;
+      // Skip tsc only when oxlint actually ran with a typeCheck config (as in lintResolved).
+      if (oxlintConfig && ran.has(fp) && oxlintConfigTypeChecks(oxlintConfig)) continue;
+      const tsconfig = resolveTsconfig(path.dirname(fp), cwd);
+      if (tsconfig && !tsFirst.has(tsconfig)) tsFirst.set(tsconfig, fp);
+    } catch {
+      // fail open: drop this file only
+    }
+  }
+  const tscBlocks: string[] = [];
+  for (const fp of tsFirst.values()) {
+    try {
+      const f = runTypeCheck(fp, cwd);
+      if (f) tscBlocks.push(`universal-lint: ${f.tool} found issues in ${f.target}:\n${truncate(f.text)}`);
+    } catch {
+      // fail open: drop this tsconfig's block only
+    }
+  }
+  return [...chainBlocks, ...tscBlocks];
 }
 
 /**

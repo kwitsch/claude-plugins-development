@@ -88,3 +88,110 @@ test("lint-files.mjs exits 2 with no listfile argument", () => {
   const r = spawnSync(process.execPath, [DRIVER], { env: e.childEnv(), encoding: "utf8" });
   assert.equal(r.status, 2);
 });
+
+test("lint-files.mjs runs one linter call for three files", () => {
+  const e = makeEnv();
+  e.recStub("shellcheck", 1);
+  const a = e.file("a.sh", "echo $1\n");
+  const b = e.file("b.sh", "echo $1\n");
+  const c = e.file("c.sh", "echo $1\n");
+  const json = e.file("d.json", "{\"a\":1}\n");
+  const outsider = path.join(path.dirname(e.cwd), "outside.sh");
+  writeFileSync(outsider, "echo $1\n");
+  const r = driver(e, [a, b, json, c, outsider], "a.sh:1:6: note: Double quote to prevent globbing. [SC2086]");
+  assert.equal(r.status, 0);
+  const calls = e.lines();
+  assert.equal(calls.length, 1);
+  assert.ok(calls[0].startsWith("shellcheck "), calls[0]);
+  for (const f of [a, b, c]) assert.ok(calls[0].includes(f), calls[0]);
+  assert.ok(!calls[0].includes(json), calls[0]);
+  assert.ok(!calls[0].includes(outsider), calls[0]);
+  assert.ok(r.stdout.includes("shellcheck found issues in a.sh, b.sh, c.sh:"), r.stdout);
+  assert.equal(r.stdout.split("found issues in").length - 1, 1, r.stdout);
+  assert.match(r.stdout, /universal-lint: 1 block\(s\) with findings\./);
+});
+
+test("lint-files.mjs runs tsc once per tsconfig", () => {
+  const e = makeEnv();
+  const TSCONFIG = "{\"compilerOptions\":{\"noEmit\":true},\"include\":[\"*.ts\"]}";
+  e.file("p1/tsconfig.json", TSCONFIG);
+  e.file("p2/tsconfig.json", TSCONFIG);
+  const a = e.file("p1/a.ts", "const x: number = 1;\n");
+  const b = e.file("p1/b.ts", "const y: number = 1;\n");
+  const c = e.file("p2/c.ts", "const z: number = 1;\n");
+  // p1's project has one diagnostic (exit 2 = issues), p2's is clean.
+  e.stub("tsc", "printf \"%s %s\\n\" tsc \"$*\" >> \"$RECORD\"", "case \"$*\" in *p1/tsconfig.json*) echo 'p1/a.ts(1,1): error TS2322: x'; exit 2;; esac", "exit 0");
+  const r = driver(e, [a, b, c]);
+  assert.equal(r.status, 0);
+  const calls = e.lines().filter((l) => l.startsWith("tsc "));
+  assert.equal(calls.length, 2, calls.join("\n"));
+  assert.equal(calls.filter((l) => /-p \S*\/p1\/tsconfig\.json$/.test(l)).length, 1, calls.join("\n"));
+  assert.equal(calls.filter((l) => /-p \S*\/p2\/tsconfig\.json$/.test(l)).length, 1, calls.join("\n"));
+  assert.equal(r.stdout.split("tsc found issues in p1:").length - 1, 1, r.stdout);
+  assert.equal(r.stdout.split("p1/a.ts(1,1): error TS2322: x").length - 1, 1, r.stdout);
+  assert.ok(!r.stdout.includes("found issues in p2"), r.stdout);
+  assert.match(r.stdout, /universal-lint: 1 block\(s\) with findings\./);
+});
+
+test("lint-files.mjs reruns files singly when the batch run is a skip", () => {
+  const e = makeEnv();
+  e.recStub("shellcheck", 2);
+  const files = [e.file("a.sh", "echo hi\n"), e.file("b.sh", "echo hi\n"), e.file("c.sh", "echo hi\n")];
+  const r = driver(e, files, "bad invocation");
+  assert.equal(r.status, 0);
+  const calls = e.lines();
+  assert.equal(calls.length, 4, calls.join("\n"));
+  for (const f of files) assert.ok(calls[0].includes(f), calls[0]);
+  files.forEach((f, i) => {
+    const line = calls[i + 1];
+    assert.ok(line.includes(f), line);
+    assert.equal(files.filter((g) => line.includes(g)).length, 1, line);
+  });
+  assert.match(r.stdout, /no findings/);
+});
+
+test("lint-files.mjs reruns files singly when the batch run is killed", () => {
+  const e = makeEnv();
+  e.stub("shellcheck", "printf \"%s %s\\n\" shellcheck \"$*\" >> \"$RECORD\"", "if [ $# -gt 1 ]; then kill -KILL $$; fi", "printf '%s\\n' \"$OUT\"", "exit 1");
+  const files = [e.file("a.sh", "echo hi\n"), e.file("b.sh", "echo hi\n"), e.file("c.sh", "echo hi\n")];
+  const r = driver(e, files, "a.sh:1:6: note: x [SC2086]");
+  assert.equal(r.status, 0);
+  const calls = e.lines();
+  assert.equal(calls.length, 4, calls.join("\n"));
+  for (const f of files) assert.ok(calls[0].includes(f), calls[0]);
+  files.forEach((f, i) => {
+    const line = calls[i + 1];
+    assert.ok(line.includes(f), line);
+    assert.equal(files.filter((g) => line.includes(g)).length, 1, line);
+  });
+  assert.match(r.stdout, /universal-lint: 3 block\(s\) with findings\./);
+  assert.ok(r.stdout.includes("shellcheck found issues in a.sh:"), r.stdout);
+});
+
+test("lint-files.mjs caps a batched block per file, not per run", () => {
+  const e = makeEnv();
+  e.recStub("shellcheck", 1);
+  const files = [e.file("a.sh", "echo hi\n"), e.file("b.sh", "echo hi\n"), e.file("c.sh", "echo hi\n")];
+  const out = Array.from({ length: 200 }, (_, i) => `a.sh:${i + 1}:1: note: x [SC2086]`).join("\n");
+  const r = driver(e, files, out);
+  assert.equal(r.status, 0);
+  assert.ok(r.stdout.includes("a.sh:200:1:"), r.stdout);
+  assert.ok(!r.stdout.includes("(truncated)"), r.stdout);
+  const single = driver(e, [files[0]], out);
+  assert.ok(single.stdout.includes("… (truncated)"), single.stdout);
+});
+
+test("lint-files.mjs splits a tool's files into one run per argv prefix (markdownlint config vs none)", () => {
+  const e = makeEnv();
+  e.file("d1/.markdownlint.json", "{}\n");
+  const withConfig = e.file("d1/x.md", "# x\n");
+  const without = e.file("a.md", "# a\n");
+  e.recStub("markdownlint-cli2", 0);
+  const r = driver(e, [withConfig, without]);
+  assert.equal(r.status, 0);
+  const calls = e.lines().filter((l) => l.startsWith("markdownlint-cli2 "));
+  assert.equal(calls.length, 2, calls.join("\n"));
+  assert.equal(calls.filter((l) => l.includes(withConfig) && !l.includes(without) && !l.includes("--config")).length, 1, calls.join("\n"));
+  assert.equal(calls.filter((l) => l.includes(without) && !l.includes(withConfig) && l.includes("--config")).length, 1, calls.join("\n"));
+  assert.match(r.stdout, /no findings/);
+});
