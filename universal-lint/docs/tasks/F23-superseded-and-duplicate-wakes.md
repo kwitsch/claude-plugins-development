@@ -6,8 +6,6 @@ priority: low
 area: universal-lint/docs/tasks/F23-superseded-and-duplicate-wakes.md, universal-lint/docs/TASKS.md
 ---
 
-# F23 Superseded and duplicate findings re-wake Claude
-
 ## Status
 
 Closed docs-only in 0.15.20. The only safe superseded-lint drop (a newer whole-file lint that reaches a verdict covers an older lint of the same file) still loses findings when that newer lint times out, is killed or skips. A 2026-11-10 local re-mining found 0 same-file pairs with a newer Write within 1.5 s or 3 s, and 7 of the 1934 same-file pairs within 10 s. Duplicate suppression was rejected by the user. No code shipped. 0.15.20 because the root CLAUDE.md version rule applies to any change under `universal-lint/`.

@@ -6,8 +6,6 @@ priority: low
 area: universal-lint/docs/tasks/F19-watchlist-skip-generated.md, universal-lint/docs/TASKS.md
 ---
 
-# F19 Keep linguist-generated files out of watchPaths
-
 ## Status
 
 Closed docs-only in 0.15.16 (user decision, 2026-11-10). Re-measured after F04/F09: not worth a new exclusion policy; no code shipped. 0.15.16 because the root CLAUDE.md version rule applies to any change under `universal-lint/` (F15 precedent).

@@ -6,8 +6,6 @@ priority: high
 area: universal-lint/src/hooks/lint-file.mts (selectLintTool, localBin, runLintTool, runChainLint, walkUpToCwd, scopedTarget/outside), universal-lint/scripts/perf.mts, universal-lint/.claude/rules/hook-design.md, universal-lint/.claude/rules/languages.md, universal-lint/plugin/README.md
 ---
 
-# F04 Run project-local node_modules/.bin/<tool> directly
-
 ## Status
 
 Done in 0.15.3. User decision (q1): "all five npm chain tools; tsc keeps its cwd-only lookup": `oxlint`, `eslint`, `stylelint`, `markdownlint-cli2` and `markdownlint` (the chain entries with `npmSpec`), when absent from `PATH`, run the nearest `node_modules/.bin/<name>` from the file's directory up to cwd before falling back to `npx --yes`; `tsc` keeps `PATH`, then `<cwd>/node_modules/.bin/tsc` (no walk). User decision (q2): the npx fallback stays as in 0.15.2. Tests (`tests/npx-fallback.test.mts`, six): a local oxlint at cwd runs with its directory first on the child's `PATH` and no npx; the nearest `node_modules/.bin` wins; lookup by bin name (a local `markdownlint` beats npx `markdownlint-cli2`); a local bin that cannot spawn falls back to npx; a file reached through a symlinked directory outside cwd never runs an above-cwd bin; a chain tool on `PATH` still wins. Measured with `node universal-lint/scripts/perf.mts 5`, `.mts Write (this repo)` medians in ms, before (0.15.2) -> after (0.15.3): real PATH 578 -> 338, no /mnt 473 -> 244. The rtk parts of the original task (the rtk-prepend variant, skipping the doomed rtk attempt) are obsolete: rtk support was removed in 0.15.0.
@@ -25,7 +23,7 @@ History (0.14.x, rtk era): for an npm linter absent from PATH (oxlint in this re
 - Sessions: JS/TS family about 1564 of 3154 lintable edits; 258/300 TS-family edits in surviving project dirs have a local oxlint or eslint.
 - In-session (live) FileChanged lint of lint-file.mts during a build: about 4.1 s.
 - 0.15.2 (before F04), `node universal-lint/scripts/perf.mts 5`, `.mts Write (this repo)` medians: real PATH 578 ms, no /mnt 473 ms (npx route: `npx --yes oxlint` resolving the root `node_modules/.bin/oxlint`).
-- 0.15.3 (after F04), same harness, machine and day, `.mts Write (this repo)` medians: real PATH 338 ms, no /mnt 244 ms (local route: the root `node_modules/.bin/oxlint` spawned directly; full run in `.claude/rules/hook-design.md` "Measured cost").
+- 0.15.3 (after F04), same harness, machine and day, `.mts Write (this repo)` medians: real PATH 338 ms, no /mnt 244 ms (local route: the root `node_modules/.bin/oxlint` spawned directly; the later baseline is in [F01](F01-measurement-baseline.md) "Measured").
 
 ## Code locations
 
@@ -42,7 +40,7 @@ Trust: (1) a bin in `<cwd>/node_modules/.bin` is the one `npx` runs today (npm's
 
 ## Verification
 
-Run: `pnpm --filter universal-lint build && pnpm --filter universal-lint test && pnpm lint`: the six tests in `tests/npx-fallback.test.mts` (see Status; the symlink test fails without the `outside` guard in `localBin`) plus the unchanged npx-fallback, oxlint, markdown, stylelint, tsc, registry and manifest tests. Bench: `node universal-lint/scripts/perf.mts 5` once on the 0.15.2 build (with the new case committed first) and once on the 0.15.3 build; `.mts Write (this repo)` real PATH 578 -> 338 ms, no /mnt 473 -> 244 ms; the after run is the "Measured cost" table in `.claude/rules/hook-design.md`. The original target "about 900-1100 ms to about 300-550 ms" came from the 0.14.x rtk-era trace; the comparison of record is the harness before/after.
+Run: `pnpm --filter universal-lint build && pnpm --filter universal-lint test && pnpm lint`: the six tests in `tests/npx-fallback.test.mts` (see Status; the symlink test fails without the `outside` guard in `localBin`) plus the unchanged npx-fallback, oxlint, markdown, stylelint, tsc, registry and manifest tests. Bench: `node universal-lint/scripts/perf.mts 5` once on the 0.15.2 build (with the new case committed first) and once on the 0.15.3 build; `.mts Write (this repo)` real PATH 578 -> 338 ms, no /mnt 473 -> 244 ms; the after-run numbers are in Status above. The original target "about 900-1100 ms to about 300-550 ms" came from the 0.14.x rtk-era trace; the comparison of record is the harness before/after.
 
 ## Constraints
 

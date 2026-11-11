@@ -6,8 +6,6 @@ priority: low
 area: universal-lint/docs/tasks/F22-filechanged-skip-without-git.md, universal-lint/docs/TASKS.md
 ---
 
-# F22 FileChanged skip without a git status spawn
-
 ## Status
 
 Closed docs-only in 0.15.19. Measured during exploration on 2dfc11d against the committed plugin/ 0.15.18 (perf.mts, 3 runs + warm-up), spot-checked at spec approval (ext4 2 runs: 55/46-50/27 ms; 9P 1 run: 145-182/172-175/48 ms): the git gate costs about 5-9 ms (derived) of a ~52 ms skip on ext4 and ~130 ms of ~182 ms on 9P, background only (asyncRewake). A skip that fails toward linting needs a map that is rebuilt after every index rewrite, plus a long pitfall list. No code shipped. 0.15.19 because the root CLAUDE.md version rule applies to any change under `universal-lint/`.

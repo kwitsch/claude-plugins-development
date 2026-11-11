@@ -6,13 +6,11 @@ priority: high
 area: universal-lint/src/hooks/lint-file.mts (tryRtk, runLintTool npx-fallback branch, getRtkPrefix, classifyExit 'eslint', gateFinding)
 ---
 
-# F02 rtk failure banners are reported as eslint findings
-
 ## Status
 
 Obsolete since universal-lint 0.15.0: rtk support was removed, so this problem no longer exists. The text below is kept as history.
 
-Open. Merges bench-js-ts finding 1 (adjusted, high), the real-sessions eslint finding (adjusted, high: the safety-net part) and two verifier missed items (no-config scope, timeout-dependent self-healing). Top item of the analysis.
+Before closure: Merges bench-js-ts finding 1 (adjusted, high), the real-sessions eslint finding (adjusted, high: the safety-net part) and two verifier missed items (no-config scope, timeout-dependent self-healing). Top item of the analysis.
 
 ## Problem
 

@@ -6,13 +6,11 @@ priority: low
 area: universal-lint/src/hooks/lint-file.mts (getRtkPrefix, rtkPrefixCache, parseRtkPrefix, runLintTool, RTK_PROBE_TIMEOUT_MS), universal-lint/.claude/rules/hook-design.md
 ---
 
-# F17 Persist rtk rewrite probe results across hook processes
-
 ## Status
 
 Obsolete since universal-lint 0.15.0: rtk support was removed, so this problem no longer exists. The text below is kept as history.
 
-Open. Merges the rtk-probe findings of four dimensions (bench-js-ts adjusted medium; bench-other-langs, watch-filechanged, static: low). Priority low: 40-100 ms in a background hook of 0.8-1.6 s, only with rtk on PATH; it rises to about 25% of a TS edit once F03 removes the eslint waste.
+Before closure: Merges the rtk-probe findings of four dimensions (bench-js-ts adjusted medium; bench-other-langs, watch-filechanged, static: low). Priority low: 40-100 ms in a background hook of 0.8-1.6 s, only with rtk on PATH; it rises to about 25% of a TS edit once F03 removes the eslint waste.
 
 ## Problem
 

@@ -6,8 +6,6 @@ priority: low
 area: universal-lint/src/hooks/lint-file.mts (fileChangedHandler, recordWritten, recordWrittenFor, main)
 ---
 
-# F32 Measure the FileChanged echo race
-
 ## Status
 
 Closed docs-only in 0.15.28. Measured on 0.15.27: an instrumented scratch copy of the built hook (`plugin/` copied, renamed `universal-lint-f32`, log statements only, never shipped; JSONL event log in the session scratchpad under `f32/logs/`, ephemeral, not committed), 3 headless `claude -p` sessions, Claude Code 2.1.321, one machine (WSL2), 61 Write/Edit calls (2 with a stdin payload over 200 KB, max 305100 bytes). Isolation: every installed plugin disabled through `--settings` (`enabledPlugins` all `false`), the copy was the only plugin loaded; the user-settings hooks (`graphmind-search.sh`, `graphmind-prompt.sh`, `graphmind-session.sh`, `context-mode-cache-heal.mjs`) stayed active, none writing to the scratch repo or a digest dir; the installed plugin's `written/` dir was unchanged in every session.

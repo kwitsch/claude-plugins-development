@@ -6,8 +6,6 @@ priority: medium
 area: universal-lint/src/skills/universal-lint/lint-files.mts (top-level loop, mkArgs), universal-lint/src/hooks/lint-file.mts (lintFileHandler, lintResolved, runChainLint, buildArgv, runTypeCheck, scopedTarget roots), universal-lint/.claude/rules/skill-driver.md
 ---
 
-# F16 Skill driver: batch per tool group, tsc once per tsconfig
-
 ## Status
 
 Done in 0.15.14. `lintFilesHandler` (`src/hooks/lint-file.mts`) is the driver's batch entry: it scopes every listed file once against one `realish(cwd)`, plans each with the hook's own resolution (`chainEntryFor`, `planChainLint`, extracted verbatim from `lintResolved`/`runChainLint` in a separate commit), runs each chain tool once per group of files sharing tool, local bin, spawn cwd and argv prefix (go/cargo once per package dir / crate; at most `BATCH_MAX_FILES` = 100 files per spawn), classifies with `chainOutcome`, and runs tsc once per resolved tsconfig through the unchanged `runTypeCheck`. The report is one block per tool run (`universal-lint: <tool> found issues in <targets>:`), summary `universal-lint: N block(s) with findings.`; no edit-range gate, no `coalesceProjectCheck`. A multi-file chunk with a skip verdict, spawn error, signal or timeout reruns its files singly (at most 100 single spawns per chunk); only a file whose single run also fails is dropped. Hook PostToolUse and FileChanged paths unchanged.
