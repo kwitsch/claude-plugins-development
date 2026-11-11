@@ -12,7 +12,7 @@ area: universal-lint/.claude/rules/hook-design.md (Timeout budget), universal-li
 
 The rtk terms are gone since 0.15.0 (rtk removed, budget re-derived in hook-design.md). The cold Rust leaf crate and SessionStart-on-9P items remain.
 
-Docs-only, open. Merges static timeout-budget finding (adjusted, low), the watch-filechanged missed item (SessionStart budget line wrong on 9P) and the cold-leaf part of the bench-other-langs missed items. Re-derive again after F10, F13, F17 or F18 change the budget.
+Docs-only, open. Merges static timeout-budget finding (adjusted, low), the watch-filechanged missed item (SessionStart budget line wrong on 9P) and the cold-leaf part of the bench-other-langs missed items. F18 (0.15.15) re-derived the budget in hook-design.md: max of the overlapped phases plus 1 s kill grace, the sum only on the oxlint-`typeCheck` fallback; FileChanged worst ends 86-87 s.
 
 ## Problem
 

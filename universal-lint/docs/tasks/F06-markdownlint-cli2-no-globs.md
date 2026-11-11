@@ -42,3 +42,9 @@ Very old cli2 versions on PATH may not know `--no-globs` (npx resolves the curre
 ## Related
 
 F09 (npx cost of the same tool), line-length-guard.md (config handling for markdownlint).
+
+## Measured
+
+Moved verbatim from `.claude/rules/hook-design.md` "Measured cost" (F18, 0.15.15):
+
+- **Globs fixture (F06, manual; `perf.mts` has no such case):** project with `.markdownlint-cli2.jsonc` = `{"globs":["**/*.md"]}`, `docs/d1.md`..`docs/d400.md` (`d1.md` has an MD012 double blank line, the foreign finding), a clean `a.md` and an `a2.md` with its own MD041; markdownlint-cli2 not on PATH, so the hook takes the npx route (warm cache). Label: universal-lint 0.15.4 hook (baseline, built output of `b40176a`) vs 0.15.5, 2026-11-07, WSL2 6.18.33.2-microsoft-standard-WSL2, 12 cores, 9.5 GB, node v24.22.2, markdownlint-cli2 v0.24.0 (markdownlint v0.42.0), PATH 63 dirs / 44 on /mnt/c (load 1.41 -> 1.72 during the run). Medians in ms of 1 warm-up + 5 timed runs. Direct `npx --yes markdownlint-cli2 a.md`: 1121 ms, `Linting: 402 files`; with `--no-globs`: 847 ms, `Linting: 1 file`. Hook, `a.md` Write: 0.15.4 1370 ms (exit 2, foreign `d1.md` finding reported) vs 0.15.5 1090 ms (exit 0, no output); `a2.md` Write: 0.15.4 1352 ms (exit 2) vs 0.15.5 1129 ms (exit 2, own MD041 reported).

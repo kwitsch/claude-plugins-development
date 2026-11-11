@@ -42,3 +42,9 @@ First-on-PATH-wins semantics unchanged. No `userConfig`. Writes only under CLAUD
 ## Related
 
 F17 (rtk probe; share the file), F09 option 2 (cached npx bin path in the same file; not taken: F09 shipped option 1 in 0.15.8), F28 (the larger WSL cost outside the plugin), F04 (not additive), F27.
+
+## Measured
+
+Moved verbatim from `.claude/rules/hook-design.md` "Measured cost" (F18, 0.15.15):
+
+- **PATH probe cache (F11, measured; `perf.mts`):** universal-lint 0.15.9 (committed build output of `33cb1a6`, measured before the source change, load 2.25 -> 2.88) vs 0.15.10 (2026-11-08, load 1.16 -> 2.94), same machine and session, `node universal-lint/scripts/perf.mts` (5 runs + 1 warm-up; the shared `CLAUDE_PLUGIN_DATA` lets the warm-up seed the probe file, so the timed rounds are "second and later runs"), PATH 63 dirs / 44 on /mnt/c, none of shellcheck/ruff/yamllint/markdownlint-cli2/markdownlint on PATH. Medians in ms, real PATH / no /mnt: `.sh` Write 142 / 48 -> 48 / 45; `.py` Write 144 / 46 -> 45 / 43; `.yml` Write 146 / 46 -> 47 / 43; `.md` Write 479 / 299 -> 292 / 276 (187 ms faster on the real PATH); `.ts` Write 151 / 150 -> 141 / 144; `.mts` Write (this repo) 387 / 300 -> 263 / 264. Acceptance: `.sh`/`.py`/`.yml` real PATH within 15 ms of no /mnt: met; `.md` Write at least 150 ms faster: met. The table below stays the 0.15.8 label.

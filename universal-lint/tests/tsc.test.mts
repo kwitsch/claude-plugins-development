@@ -4,6 +4,52 @@ import { chmodSync } from "node:fs";
 import { test } from "vitest";
 import { makeEnv } from "./support/lint-hook.mts";
 
+/**
+ * Stub `name` that appends `<name> start <us>` and `<name> end <us>` (bash `EPOCHREALTIME`, microseconds) around a 1 s
+ * wait. The hook's PATH holds only bash/node/git, so the timing uses node and the stamp a bash builtin.
+ *
+ * @param e - The env.
+ * @param name - Tool name.
+ * @param exitCode - Exit status.
+ */
+function stampStub(e: ReturnType<typeof makeEnv>, name: string, exitCode: number): void {
+  e.stub(name, `echo "${name} start \${EPOCHREALTIME//[!0-9]/}" >> "$RECORD"`, `node -e "setTimeout(() => {}, 1000)"`, `echo "${name} end \${EPOCHREALTIME//[!0-9]/}" >> "$RECORD"`, `exit ${exitCode}`);
+}
+
+/**
+ * The recorded `start` or `end` stamp of `name`, in µs (bash `EPOCHREALTIME` with the dot removed, see `stampStub`).
+ *
+ * @param e - The env.
+ * @param name - Tool name.
+ * @param which - `start` or `end`.
+ * @returns The stamp.
+ */
+function stamp(e: ReturnType<typeof makeEnv>, name: string, which: "start" | "end"): bigint {
+  const line = e.lines().find((l) => l.startsWith(`${name} ${which} `));
+  assert.ok(line, `no ${which} stamp of ${name} in ${JSON.stringify(e.lines())}`);
+  return BigInt(line.split(" ")[2]);
+}
+
+test("tsc: chain and tsc start together without an oxlint typeCheck config (F18)", () => {
+  const { e, a } = proj();
+  e.file("eslint.config.mjs", "export default [];\n");
+  stampStub(e, "eslint", 0);
+  stampStub(e, "tsc", 0);
+  const r = e.run(a);
+  assert.equal(r.status, 0);
+  assert.ok(stamp(e, "tsc", "start") < stamp(e, "eslint", "end"), "tsc started only after eslint ended");
+});
+
+test("tsc: with an oxlint typeCheck config tsc starts only after oxlint ends (F18)", () => {
+  const { e, a } = proj();
+  e.file(".oxlintrc.json", "{\"options\":{\"typeAware\":true,\"typeCheck\":true}}");
+  stampStub(e, "oxlint", 2); // skip verdict: oxlint did not run, so tsc is the only type check
+  stampStub(e, "tsc", 0);
+  const r = e.run(a);
+  assert.equal(r.status, 0);
+  assert.ok(stamp(e, "tsc", "start") >= stamp(e, "oxlint", "end"), "tsc started before oxlint ended");
+});
+
 /** Project with src/** tsconfig and a 2-line src/a.ts, for the Edit-range tests. */
 /** Edit tool_response replacing line 1 of src/a.ts. */
 const EDIT_L1 = { structuredPatch: [{ oldStart: 1, oldLines: 2, newStart: 1, newLines: 2, lines: ["-const x = 1;", "+const x: number = 1;", " const y: string = 2;"] }] };

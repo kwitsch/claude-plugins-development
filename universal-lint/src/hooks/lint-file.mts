@@ -14,31 +14,33 @@
  * lint flow (every failure path returns `{}` silently, fail open): guard `tool_response.success !== false`, then
  * `scopedTarget` (real path strictly inside the real cwd, not excluded: node_modules/vendor/.git, .claude/worktrees,
  * .claude/agent-memory, *.local.*, see `isExcludedPath`; not inside `scratchpad_dir`; no dangling link; lintable
- * extension; file exists). Then up to two INDEPENDENT checks run and their findings combine: (1) the language's chain
+ * extension; file exists). Then up to two INDEPENDENT checks run, at once unless an oxlint `typeCheck` config makes
+ * tsc depend on the chain outcome (see `lintResolved`), and their findings combine: the language's chain
  * tool (first on PATH wins, else a project-local `node_modules/.bin`, else npx, see `selectLintTool`; no per-file skip, since no style mapping exists for linters; JS/TS runs one only when an
- * eslint or oxlint config exists, and CSS/SCSS only when a stylelint config exists, see `lintResolved`) through spawnSync (cwd =
- * project cwd, 30s timeout, stdout+stderr captured), classified by exit code for most tools (checkstyle by stripped
+ * eslint or oxlint config exists, and CSS/SCSS only when a stylelint config exists, see `lintResolved`) through `spawnGroup` (own
+ * process group, 30 s timeout, group killed on timeout, stdout+stderr captured), classified by exit code for most tools (checkstyle by stripped
  * output, since its exit code counts only ERROR-severity violations and the bundled default ruleset runs at
- * `warning`); (2) for .ts/.tsx/.mts/.cts only, a whole-project `tsc --noEmit` via the nearest tsconfig.json (see
- * `runTypeCheck`). Any issues found: truncated, joined text (stderr, exit 2); no finding from either check: nothing
+ * `warning`); and, for .ts/.tsx/.mts/.cts only, a whole-project `tsc --noEmit` via the nearest tsconfig.json (see
+ * `runTypeCheck`). Any issues found: truncated, joined text (stderr, exit 2, chain finding first); no finding from either check: nothing
  * printed.
  *
  * @packageDocumentation
  */
-import { execFileSync, spawnSync } from "node:child_process";
-import type { SpawnSyncOptionsWithStringEncoding, SpawnSyncReturns } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
+import type { ChildProcess, SpawnSyncOptionsWithStringEncoding, SpawnSyncReturns } from "node:child_process";
 import { createHash } from "node:crypto";
 import { accessSync, constants as fsConstants, existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { availableParallelism, homedir, tmpdir } from "node:os";
 import path from "node:path";
 import process from "node:process";
 import { json } from "node:stream/consumers";
+import { setTimeout as sleep } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 
-/** Inner linter timeout; the hook-level timeout (hooks.json timeout: 90 = the lint budget) is the backstop. */
+/** Inner linter timeout: kills the child's whole process group (SIGTERM, SIGKILL after `KILL_GRACE_MS`); the hook-level timeout (hooks.json timeout: 90 = the lint budget) is the backstop. */
 const SPAWN_TIMEOUT_MS = 30000;
 
-/** Cold npx install can exceed SPAWN_TIMEOUT_MS; stay inside the 90s lint budget (hooks.json timeout 90). */
+/** Cold npx install can exceed SPAWN_TIMEOUT_MS; stay inside the 90s lint budget (hooks.json timeout 90). A timeout kills the child's whole process group (SIGTERM, SIGKILL after `KILL_GRACE_MS`). */
 const NPX_SPAWN_TIMEOUT_MS = 55000;
 
 /**
@@ -54,21 +56,26 @@ const PROBE_MISS_TTL_MS = 10 * 60 * 1000;
 /** Cap on the additionalContext findings text. */
 const MAX_CONTEXT_CHARS = 4000;
 
-/** spawnSync's 1MB default truncates a noisy linter's output as ENOBUFS. */
+/** Per-stream output cap of `spawnGroup` (spawnSync's 1MB default truncated a noisy linter's output as ENOBUFS). */
 const MAX_BUFFER_BYTES = 10 * 1024 * 1024;
 
 /**
  * Full-project incremental type-check: slower than a single-file/dir tool (SPAWN_TIMEOUT_MS) but not a cold registry
  * install (NPX_SPAWN_TIMEOUT_MS); kept its own, smaller budget so a stale async finding (this hook is async:true)
- * doesn't arrive too late to be useful.
+ * doesn't arrive too late to be useful. A timeout kills the child's whole process group (SIGTERM, SIGKILL after
+ * `KILL_GRACE_MS`). Runs at once with the chain unless an oxlint `typeCheck` config exists (`lintResolved`).
  */
 const TSC_SPAWN_TIMEOUT_MS = 45000;
 
 /**
  * cargo check/clippy compile the crate; slower than a single-file/dir tool (SPAWN_TIMEOUT_MS), same budget rationale
- * as TSC_SPAWN_TIMEOUT_MS; stays under the hook-level timeout backstop.
+ * as TSC_SPAWN_TIMEOUT_MS; stays under the hook-level timeout backstop. A timeout kills the child's whole process
+ * group (SIGTERM, SIGKILL after `KILL_GRACE_MS`): rustc/clippy-driver grandchildren die with cargo.
  */
 const CARGO_SPAWN_TIMEOUT_MS = 45000;
+
+/** SIGKILL follows the timeout's SIGTERM to the process group after this long (a child trapping SIGTERM must still die). */
+const KILL_GRACE_MS = 1000;
 
 /**
  * Most files per chain-tool spawn in `lintFilesHandler` (the skill driver's batch path). Caps the argv length (sized
@@ -97,8 +104,12 @@ const HOOK_TIMEOUT_MS = 90000;
  * `fileChangedHandler` reserves before waiting mirrors `runChainLint`'s one spawn timeout per tool
  * (`CARGO_SPAWN_TIMEOUT_MS` for a `manifestPath` tool, else `SPAWN_TIMEOUT_MS`) and `runTypeCheck`'s
  * `TSC_SPAWN_TIMEOUT_MS`; update it together with them (a chain that runs a second tool per file needs a larger
- * reservation). `coalesceProjectCheck` (F13) stops waiting for a project-check lock at uptime `FILE_CHANGED_BUDGET_MS`
- * minus the check's spawn timeout and then runs unlocked, so the lock wait stays inside this budget.
+ * reservation). The reservation stays the sum chain + tsc although the phases overlap since F18, because the
+ * oxlint-`typeCheck` fallback path runs them in sequence. `coalesceProjectCheck` (F13) stops waiting for a project-check
+ * lock at uptime `FILE_CHANGED_BUDGET_MS` minus the check's spawn timeout and then runs unlocked, so the lock wait
+ * stays inside this budget. Worst end = max(slot deadline + sequential phases, lock-wait deadline + check timeout)
+ * + `KILL_GRACE_MS` per phase: 40 + 45 + 1 = 86 s (`.ts` concurrent, `.rs`), 55 + 30 + 1 = 86 s (`.go`), 10 + 30 + 1
+ * + 45 + 1 = 87 s (`.ts` fallback), all inside the 5 s margin under `HOOK_TIMEOUT_MS`.
  */
 const FILE_CHANGED_BUDGET_MS = HOOK_TIMEOUT_MS - 5000;
 
@@ -433,6 +444,135 @@ export function isToolAvailable(tool: LintTool, toolOnPath: boolean, npxOnPath: 
   return toolOnPath || (!!tool.npmSpec && npxOnPath);
 }
 
+/** Signals on which the hook or driver kills its live linter groups before exiting (`installSignalHandler`). */
+const GROUP_KILL_SIGNALS: NodeJS.Signals[] = ["SIGTERM", "SIGINT", "SIGHUP"];
+
+/** Process-group ids (the leader's pid) of every `spawnGroup` child still running: added after spawn, removed on resolution. */
+const liveGroups = new Set<number>();
+
+/** Whether `installSignalHandler` already ran (one handler per process). */
+let groupSignalHandlerInstalled = false;
+
+/**
+ * Send `sig` to the process group led by `pgid` (`process.kill(-pgid)`); ESRCH (the group is already gone) and any
+ * other error are swallowed. POSIX only (the plugin's hook runs through a shebang `.mjs`, so Windows is unsupported).
+ *
+ * @param pgid - The group leader's pid.
+ * @param sig - The signal to send.
+ */
+function killGroup(pgid: number, sig: NodeJS.Signals): void {
+  try {
+    process.kill(-pgid, sig);
+  } catch {
+    // ESRCH: already gone
+  }
+}
+
+/**
+ * Install, once per process, one handler for SIGTERM, SIGINT and SIGHUP that SIGKILLs every live `spawnGroup` group
+ * (the children are detached, so the signal that kills the hook or driver would not reach them), removes itself and
+ * re-raises the signal on this process so the default exit still happens. Normal exit is unchanged. A SIGKILL of the
+ * hook cannot be handled: its children die on EPIPE at their next write (tsc runs to its natural end).
+ */
+function installSignalHandler(): void {
+  if (groupSignalHandlerInstalled) return;
+  groupSignalHandlerInstalled = true;
+  const onSignal = (sig: NodeJS.Signals): void => {
+    for (const pgid of liveGroups) killGroup(pgid, "SIGKILL");
+    liveGroups.clear();
+    for (const s of GROUP_KILL_SIGNALS) process.removeListener(s, onSignal);
+    process.kill(process.pid, sig);
+  };
+  for (const s of GROUP_KILL_SIGNALS) process.on(s, onSignal);
+}
+
+/**
+ * Spawn `cmd` as the leader of its own process group (`detached: true`) and resolve with a `SpawnSyncReturns<string>`-
+ * shaped result once the child's `close` event fires (both pipes closed, so every grandchild holding them has exited
+ * too: a killed tree is reaped before the lint continues). Replaces every lint `spawnSync` call (F18).
+ *
+ * @remarks
+ * `opts` are `buildSpawnOpts` options: `cwd` and `env` go to `spawn`; `stdio` stays `["ignore", "pipe", "pipe"]`, so
+ * the child's stdin is `/dev/null` exactly as under spawnSync; `timeout`, `maxBuffer` and `encoding` are applied here
+ * (never passed to `spawn`); never `shell`. At `opts.timeout` ms `error` becomes an `Error` with `code` `"ETIMEDOUT"`
+ * (as spawnSync) and the group gets SIGTERM, then SIGKILL after `KILL_GRACE_MS`; a child trapping SIGTERM exits
+ * normally within the grace (`signal` null, `status` set, `error.code` ETIMEDOUT) or is SIGKILLed (`signal`
+ * `"SIGKILL"`). When one stream's bytes exceed `opts.maxBuffer` (`MAX_BUFFER_BYTES`) further chunks of it are
+ * discarded, `error.code` is `"ENOBUFS"` and the group is killed with the same SIGTERM/SIGKILL sequence (spawnSync
+ * semantics: per stream, child killed). A spawn failure (`error` event before `close`: ENOENT, EACCES) resolves with
+ * that error, `status` and `signal` null and empty output; `spawnBin` reads its `code`. Both timers are cleared only
+ * on resolution (`close` or that pre-spawn `error`), never on `exit`, so a group kill still reaches pipe-holding
+ * grandchildren after the leader exited; the SIGKILL timer is a plain timer (no `unref`) and is always cleared. The
+ * group's pid is held in `liveGroups` from spawn to resolution so `installSignalHandler`'s handler (installed on the
+ * first call) can SIGKILL it when this process is signalled. The promise never rejects: every exceptional outcome is
+ * in `error`. Residuals: a grandchild that called `setsid` leaves the group and, holding a pipe, delays `close` until
+ * the hook backstop (same as spawnSync); the pid-reuse window between the leader's reap and `close` is microseconds
+ * and needs a pid wraparound. Exported for the tests (the timeout argument is the test seam; no env override).
+ *
+ * @param cmd - Command (bare name resolved on `opts.env.PATH` or `process.env.PATH`, or an absolute path).
+ * @param argv - Arguments.
+ * @param opts - `buildSpawnOpts` options (`cwd`, `env`, `timeout`, `maxBuffer`).
+ * @returns The spawnSync-shaped result: `pid`, `output: [null, stdout, stderr]`, `stdout`, `stderr`, `status`,
+ *   `signal`, `error` (undefined when none).
+ */
+export function spawnGroup(cmd: string, argv: readonly string[], opts: SpawnSyncOptionsWithStringEncoding): Promise<SpawnSyncReturns<string>> {
+  installSignalHandler();
+  const maxBuffer = opts.maxBuffer ?? MAX_BUFFER_BYTES;
+  const timeout = opts.timeout ?? SPAWN_TIMEOUT_MS;
+  return new Promise((resolve) => {
+    let error: Error | undefined;
+    let done = false;
+    let killTimer: NodeJS.Timeout | undefined;
+    let child: ChildProcess;
+    try {
+      child = spawn(cmd, [...argv], { cwd: opts.cwd, env: opts.env, stdio: ["ignore", "pipe", "pipe"], detached: true });
+    } catch (e) {
+      error = e instanceof Error ? e : new Error(String(e));
+      resolve({ pid: 0, output: [null, "", ""] as unknown as string[], stdout: "", stderr: "", status: null, signal: null, error });
+      return;
+    }
+    const pid = child.pid; // undefined when the spawn failed: never signalled
+    if (pid !== undefined) liveGroups.add(pid);
+    const kill = (): void => {
+      if (pid === undefined || killTimer) return;
+      killGroup(pid, "SIGTERM");
+      killTimer = setTimeout(() => killGroup(pid, "SIGKILL"), KILL_GRACE_MS);
+    };
+    const fail = (code: string): void => {
+      error ??= Object.assign(new Error(`spawnGroup ${cmd}: ${code}`), { code });
+      kill();
+    };
+    const timer = setTimeout(() => fail("ETIMEDOUT"), timeout);
+    const out: Buffer[] = [];
+    const err: Buffer[] = [];
+    /** Collect one stream's chunks up to `maxBuffer`; past it, ENOBUFS once and discard the rest. */
+    const collect = (chunks: Buffer[]): (chunk: Buffer) => void => {
+      let total = 0;
+      return (chunk) => {
+        if (total > maxBuffer) return;
+        total += chunk.length;
+        if (total > maxBuffer) fail("ENOBUFS");
+        else chunks.push(chunk);
+      };
+    };
+    child.stdout?.on("data", collect(out));
+    child.stderr?.on("data", collect(err));
+    const finish = (status: number | null, signal: NodeJS.Signals | null, stdout: string, stderr: string): void => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      if (killTimer) clearTimeout(killTimer);
+      if (pid !== undefined) liveGroups.delete(pid);
+      resolve({ pid: pid ?? 0, output: [null, stdout, stderr] as unknown as string[], stdout, stderr, status, signal, error });
+    };
+    child.on("error", (e) => {
+      error = e;
+      finish(null, null, "", "");
+    });
+    child.on("close", (status, signal) => finish(status, signal, Buffer.concat(out).toString("utf8"), Buffer.concat(err).toString("utf8")));
+  });
+}
+
 /**
  * Spawn a bin by absolute path with its directory first on the child's PATH, as npx does: oxlint finds tsgolint only
  * on PATH or in the spawn cwd's `node_modules/.bin`. Shared by the project-local route (`runLintTool`) and the
@@ -440,14 +580,14 @@ export function isToolAvailable(tool: LintTool, toolOnPath: boolean, npxOnPath: 
  *
  * @param bin - Absolute path of the bin to spawn.
  * @param argv - Full argv from buildArgv.
- * @param spawnOpts - Options for spawnSync (cwd and timeout kept as given; env gets the bin's directory first on PATH).
- * @returns The spawnSync result, or null when the bin could not spawn (error code ENOENT/EACCES: missing, dangling or
+ * @param spawnOpts - Options for spawnGroup (cwd and timeout kept as given; env gets the bin's directory first on PATH).
+ * @returns The spawn result, or null when the bin could not spawn (error code ENOENT/EACCES: missing, dangling or
  *   not executable), so the caller falls through to its next route; any other outcome, a timeout too, is returned.
  */
-function spawnBin(bin: string, argv: string[], spawnOpts: SpawnSyncOptionsWithStringEncoding): SpawnSyncReturns<string> | null {
+async function spawnBin(bin: string, argv: string[], spawnOpts: SpawnSyncOptionsWithStringEncoding): Promise<SpawnSyncReturns<string> | null> {
   // Bin dir first on PATH, as npx does: oxlint finds tsgolint only on PATH or in the spawn cwd's node_modules/.bin.
   const PATH = process.env.PATH ? path.dirname(bin) + path.delimiter + process.env.PATH : path.dirname(bin);
-  const result = spawnSync(bin, argv, { ...spawnOpts, env: { ...process.env, PATH } });
+  const result = await spawnGroup(bin, argv, { ...spawnOpts, env: { ...process.env, PATH } });
   // Spawn failure (ENOENT/EACCES) lets the caller fall back; a timeout keeps its result (no second budget). The code is
   // checked, not `signal`: a child that traps SIGTERM exits normally, so ETIMEDOUT arrives with signal null.
   const code = result.error && "code" in result.error ? result.error.code : undefined;
@@ -473,16 +613,16 @@ function spawnBin(bin: string, argv: string[], spawnOpts: SpawnSyncOptionsWithSt
  * @param name - Bin name of the chain entry (`LintTool.name`).
  * @param npmSpec - npm package of the chain entry (`LintTool.npmSpec`); also the cache key's input.
  * @param argv - Full argv from buildArgv.
- * @param spawnOpts - Options for spawnSync; its cwd is npx's cwd and the cached bin's.
- * @returns The spawnSync result of the cached bin or of npx.
+ * @param spawnOpts - Options for spawnGroup; its cwd is npx's cwd and the cached bin's.
+ * @returns The spawn result of the cached bin or of npx.
  */
-function runNpx(name: string, npmSpec: string, argv: string[], spawnOpts: SpawnSyncOptionsWithStringEncoding): SpawnSyncReturns<string> {
+async function runNpx(name: string, npmSpec: string, argv: string[], spawnOpts: SpawnSyncOptionsWithStringEncoding): Promise<SpawnSyncReturns<string>> {
   /**
    * Run `npx --yes <npmSpec> ...argv` with `spawnOpts` and the longer `NPX_SPAWN_TIMEOUT_MS` budget.
    *
-   * @returns The spawnSync result of npx.
+   * @returns The spawn result of npx.
    */
-  const npx = (): SpawnSyncReturns<string> => spawnSync("npx", ["--yes", npmSpec, ...argv], { ...spawnOpts, timeout: NPX_SPAWN_TIMEOUT_MS });
+  const npx = (): Promise<SpawnSyncReturns<string>> => spawnGroup("npx", ["--yes", npmSpec, ...argv], { ...spawnOpts, timeout: NPX_SPAWN_TIMEOUT_MS });
   // npx runs a node_modules/.bin/<name> from its cwd up to / before its cache (npm 11.19.1 localFileExists): leave that to npx.
   if (walkToRoot(String(spawnOpts.cwd), (d) => existsSync(path.join(d, "node_modules", ".bin", name)))) return npx();
   // libnpmexec's cache key: sha512 hex of the sorted, newline-joined spec list, first 16 chars (one bare spec hashes as itself).
@@ -498,10 +638,10 @@ function runNpx(name: string, npmSpec: string, argv: string[], spawnOpts: SpawnS
   }
   // An npx install in progress holds concurrency.lock; a half-replaced tree could crash with exit 1, a false finding.
   if (fresh && !existsSync(path.join(dir, "concurrency.lock"))) {
-    const cached = spawnBin(path.join(dir, "node_modules", ".bin", name), argv, { ...spawnOpts, timeout: NPX_SPAWN_TIMEOUT_MS });
+    const cached = await spawnBin(path.join(dir, "node_modules", ".bin", name), argv, { ...spawnOpts, timeout: NPX_SPAWN_TIMEOUT_MS });
     if (cached) return cached;
   }
-  const result = npx();
+  const result = await npx();
   if (!result.error) {
     try {
       mkdirSync(path.dirname(stamp), { recursive: true });
@@ -528,12 +668,12 @@ function runNpx(name: string, npmSpec: string, argv: string[], spawnOpts: SpawnS
  *
  * @param tool - The selected chain entry.
  * @param argv - Full argv from buildArgv.
- * @param spawnOpts - Options for spawnSync.
+ * @param spawnOpts - Options for spawnGroup.
  * @param local - Project-local bin from selectLintTool, or null.
- * @returns The spawnSync result of whichever route ran.
+ * @returns The spawn result of whichever route ran.
  */
-function runLintTool(tool: LintTool, argv: string[], spawnOpts: SpawnSyncOptionsWithStringEncoding, local: string | null): SpawnSyncReturns<string> {
-  const viaLocal = local ? spawnBin(local, argv, spawnOpts) : null;
+async function runLintTool(tool: LintTool, argv: string[], spawnOpts: SpawnSyncOptionsWithStringEncoding, local: string | null): Promise<SpawnSyncReturns<string>> {
+  const viaLocal = local ? await spawnBin(local, argv, spawnOpts) : null;
   if (viaLocal) return viaLocal;
   if (tool.npmSpec && !onPath(tool.name)) return runNpx(tool.name, tool.npmSpec, argv, spawnOpts);
   // spawnAs decouples "which binary name gates PATH-availability /
@@ -545,7 +685,7 @@ function runLintTool(tool: LintTool, argv: string[], spawnOpts: SpawnSyncOptions
   // driver binary rejects buildArgv's --manifest-path.
   const spawnName = tool.spawnAs?.name ?? tool.name;
   const spawnArgv = tool.spawnAs ? [...tool.spawnAs.args, ...argv] : argv;
-  return spawnSync(spawnName, spawnArgv, spawnOpts);
+  return spawnGroup(spawnName, spawnArgv, spawnOpts);
 }
 
 /**
@@ -1268,12 +1408,12 @@ function selectLintTool(chain: LintTool[], fileDir: string, cwd: string): { tool
 }
 
 /**
- * Shared spawnSync options builder -- only `timeout` differs between the
- * chain-tool run (SPAWN_TIMEOUT_MS) and the tsc run (TSC_SPAWN_TIMEOUT_MS).
+ * Shared options builder for `spawnGroup` (which applies `timeout` and `maxBuffer` itself) -- only `timeout` differs
+ * between the chain-tool run (SPAWN_TIMEOUT_MS) and the tsc run (TSC_SPAWN_TIMEOUT_MS).
  *
  * @param cwd - Working directory of the child.
  * @param timeout - Timeout in milliseconds.
- * @returns The spawnSync options.
+ * @returns The options (spawnSync's shape, reused as `spawnGroup`'s input).
  */
 function buildSpawnOpts(cwd: string, timeout: number): SpawnSyncOptionsWithStringEncoding {
   return {
@@ -1349,7 +1489,7 @@ function planChainLint(lang: LangEntry, resolved: string, cwd: string): ChainPla
  * stdout (`classifyCheckstyleOutput`), every other tool by exit code (`classifyExit`) with stdout and stderr joined.
  *
  * @param tool - The tool that ran.
- * @param result - Its spawnSync result, or null when `coalesceProjectCheck` skipped the run.
+ * @param result - Its spawn result, or null when `coalesceProjectCheck` skipped the run.
  * @returns Verdict and findings text, or null on a skipped run, spawn error or signal (timeout included).
  */
 function chainOutcome(tool: LintTool, result: SpawnSyncReturns<string> | null): { verdict: "clean" | "issues" | "skip"; text: string } | null {
@@ -1383,20 +1523,21 @@ function chainOutcome(tool: LintTool, result: SpawnSyncReturns<string> | null): 
  * @param rel - Path of the file relative to cwd.
  * @param coalesce - FileChanged: run a directory- or crate-scoped tool (`go vet`, `golangci-lint`, `cargo`) through
  *   `coalesceProjectCheck`, once per burst and package/crate; file-scoped tools always run.
+ *   Async since F18: the spawn goes through `spawnGroup` (group killed on timeout).
  * @returns `ran`: a tool ran to a clean or issues verdict (false on no tool, guard
  *   failure, spawn error/signal or skip verdict); `finding`: the issues, else null. `{ ran: false, finding: null }`
  *   also when `coalesceProjectCheck` skipped the run (a completed run already covers the file).
  */
-function runChainLint(lang: LangEntry, resolved: string, cwd: string, rel: string, coalesce = false): { ran: boolean; finding: Finding | null } {
-  const none = { ran: false, finding: null };
+async function runChainLint(lang: LangEntry, resolved: string, cwd: string, rel: string, coalesce = false): Promise<ChainResult> {
+  const none = NO_CHAIN;
   const plan = planChainLint(lang, resolved, cwd);
   if (!plan) return none;
   const { tool, argv, timeout, spawnCwd, manifest } = plan;
   const spawnOpts = buildSpawnOpts(spawnCwd, timeout);
-  const spawnTool = () => runLintTool(tool, argv, spawnOpts, plan.local);
+  const spawnTool = (): Promise<SpawnSyncReturns<string>> => runLintTool(tool, argv, spawnOpts, plan.local);
   // Directory- and crate-scoped tools check the whole package/crate: one run per FileChanged burst covers every file.
   const key = coalesce ? (tool.targetsDir ? hashPath(`${tool.name}:${path.dirname(resolved)}`) : manifest ? hashPath(`${tool.name}:${manifest}`) : null) : null;
-  const result = key ? coalesceProjectCheck(key, resolved, timeout, spawnTool) : spawnTool();
+  const result = key ? await coalesceProjectCheck(key, resolved, timeout, spawnTool) : await spawnTool();
   const outcome = chainOutcome(tool, result);
   if (!outcome) return none;
 
@@ -1448,6 +1589,8 @@ export function tscOutputHasSourceDiagnostic(text: string): boolean {
  * verdict; every other outcome (no tsconfig, no tsc binary, clean,
  * crashed/invalid-project run) returns null -- same silent-skip philosophy
  * as the rest of this file.
+ * Async since F18: the sync preparation (`resolveTsconfig`, the cache dir, `onPath("tsc")`, the local bin) runs before
+ * the spawn and is the only work done while a concurrent chain child already runs (a few ms, no spawn).
  *
  * @param resolved - Absolute path of the edited file.
  * @param cwd - Project root.
@@ -1455,7 +1598,7 @@ export function tscOutputHasSourceDiagnostic(text: string): boolean {
  * @returns The finding, or null (also when `coalesceProjectCheck` skipped the run because a completed run covers the
  *   file).
  */
-function runTypeCheck(resolved: string, cwd: string, coalesce = false): Finding | null {
+async function runTypeCheck(resolved: string, cwd: string, coalesce = false): Promise<Finding | null> {
   const tsconfigPath = resolveTsconfig(path.dirname(resolved), cwd);
   if (!tsconfigPath) return null;
 
@@ -1473,8 +1616,8 @@ function runTypeCheck(resolved: string, cwd: string, coalesce = false): Finding 
   const localTsc = path.join(cwd, "node_modules", ".bin", "tsc");
   const bin = onPath("tsc") ? "tsc" : existsSync(localTsc) ? localTsc : null;
   if (!bin) return null;
-  const spawnTsc = () => spawnSync(bin, ["--noEmit", "--incremental", "--tsBuildInfoFile", cachePath, "-p", tsconfigPath], buildSpawnOpts(cwd, TSC_SPAWN_TIMEOUT_MS));
-  const result = coalesce ? coalesceProjectCheck(hashPath(`tsc:${tsconfigPath}`), resolved, TSC_SPAWN_TIMEOUT_MS, spawnTsc) : spawnTsc();
+  const spawnTsc = (): Promise<SpawnSyncReturns<string>> => spawnGroup(bin, ["--noEmit", "--incremental", "--tsBuildInfoFile", cachePath, "-p", tsconfigPath], buildSpawnOpts(cwd, TSC_SPAWN_TIMEOUT_MS));
+  const result = coalesce ? await coalesceProjectCheck(hashPath(`tsc:${tsconfigPath}`), resolved, TSC_SPAWN_TIMEOUT_MS, spawnTsc) : await spawnTsc();
   if (!result || result.error || result.signal) return null;
   if (classifyExit("tsc", result.status) !== "issues") return null;
 
@@ -1831,9 +1974,33 @@ function chainEntryFor(resolved: string, cwd: string): { entry: LangEntry | null
   return { entry, oxlintConfig };
 }
 
+/** Outcome of `runChainLint`; see there. */
+type ChainResult = { ran: boolean; finding: Finding | null };
+const NO_CHAIN: ChainResult = { ran: false, finding: null };
+
+/**
+ * Whether tsc must run for a file: it is type-check eligible and no oxlint run with a `typeCheck: true` config
+ * covered it (`chainRan`: the chain tool reached a clean or issues verdict). The one skip rule, shared by `lintResolved`
+ * and `lintFilesHandler`.
+ */
+function tscNeeded(typeCheckEligible: boolean, oxlintConfig: string | null, chainRan: boolean): boolean {
+  return typeCheckEligible && !(oxlintConfig !== null && chainRan && oxlintConfigTypeChecks(oxlintConfig));
+}
+
 /**
  * Lint `resolved` (chain tool from `chainEntryFor` unless JS/TS or CSS/SCSS has no lint config, run by `runChainLint`,
  * + tsc), gate the findings against `ranges` (null = whole file), and build the hook result.
+ *
+ * @remarks
+ * tsc is decided up front (F18): for a type-check-eligible file whose oxlint config does not type-check (or that has
+ * no oxlint config) the chain and tsc run at once with `Promise.all` (findings order chain then tsc). With an oxlint
+ * `typeCheck: true` config the chain runs first and tsc only when oxlint did not run (`!chain.ran`), never
+ * speculatively. This is the same predicate as the sequential rule: tsc iff `typeCheckEligible &&
+ * !(oxlintConfig && chain.ran && oxlintConfigTypeChecks(oxlintConfig))`. Neither branch rejects except on a throw in a
+ * sync preamble (`planChainLint`, `resolveTsconfig`, `onPath`), which lands in the handler's catch (`{}`) as before;
+ * `Promise.all` then discards the other side's result and that child runs to its own end or timeout (bounded by its
+ * `*_SPAWN_TIMEOUT_MS` + `KILL_GRACE_MS`) before the event loop drains and the process exits (exit code 0, no output).
+ * `Promise.allSettled` was rejected at spec approval as a fail-open change.
  *
  * @param resolved - Lexical absolute path of the in-scope file.
  * @param cwd - Payload cwd (spawn cwd and config search root).
@@ -1843,25 +2010,27 @@ function chainEntryFor(resolved: string, cwd: string): { entry: LangEntry | null
  * @param label - Prefix of the findings text (`<label>: <findings>`).
  * @returns The hook result: findings as additionalContext, or an empty object.
  */
-function lintResolved(resolved: string, cwd: string, ranges: Array<[number, number]> | null, hookEventName: string, label: string): HookResult {
+async function lintResolved(resolved: string, cwd: string, ranges: Array<[number, number]> | null, hookEventName: string, label: string): Promise<HookResult> {
   const rel = path.relative(cwd, resolved);
   const coalesce = hookEventName === "FileChanged";
   const ext = path.extname(resolved).toLowerCase();
   const typeCheckEligible = TYPE_CHECK_EXTS.has(ext);
   const { entry, oxlintConfig } = chainEntryFor(resolved, cwd);
 
+  const chainP: Promise<ChainResult> = entry ? runChainLint(entry, resolved, cwd, rel, coalesce) : Promise.resolve(NO_CHAIN);
+  let chain: ChainResult;
+  let tsResult: Finding | null = null;
+  // tsc needed even when the chain runs fine (no oxlint typeCheck config): start it at once.
+  if (tscNeeded(typeCheckEligible, oxlintConfig, true)) {
+    // tsc does not depend on the chain outcome: run both at once (each keeps its own timeout).
+    [chain, tsResult] = await Promise.all([chainP, runTypeCheck(resolved, cwd, coalesce)]);
+  } else {
+    chain = await chainP;
+    if (tscNeeded(typeCheckEligible, oxlintConfig, chain.ran)) tsResult = await runTypeCheck(resolved, cwd, coalesce);
+  }
   const findings: Finding[] = [];
-  let oxlintRan = false;
-  if (entry) {
-    const chain = runChainLint(entry, resolved, cwd, rel, coalesce);
-    if (chain.finding) findings.push(chain.finding);
-    oxlintRan = oxlintConfig !== null && chain.ran;
-  }
-  // Skip tsc only when oxlint actually ran with a typeCheck config; otherwise tsc is the only type check.
-  if (typeCheckEligible && !(oxlintRan && oxlintConfig && oxlintConfigTypeChecks(oxlintConfig))) {
-    const tsResult = runTypeCheck(resolved, cwd, coalesce);
-    if (tsResult) findings.push(tsResult);
-  }
+  if (chain.finding) findings.push(chain.finding);
+  if (tsResult) findings.push(tsResult);
   // Gate before truncate() so the context budget is spent on in-range text.
   const kept = findings.flatMap((f) => {
     const g = gateFinding(f, ranges, resolved);
@@ -1886,18 +2055,19 @@ function lintResolved(resolved: string, cwd: string, ranges: Array<[number, numb
 }
 
 /**
- * The lint_file tool handler (PostToolUse Write|Edit). Returns {} on every guard failure / clean / skip (fail open).
+ * The lint_file tool handler (PostToolUse Write|Edit). Resolves to {} on every guard failure / clean / skip or rejection (fail open); async since F18.
  *
  * @param args - The PostToolUse hook payload.
  * @returns The hook result: findings as additionalContext, or an empty object.
  */
-export function lintFileHandler(args: PostToolUseHookInput, scoped: { fp: string; real: string } | null = postToolScope(args)): HookResult {
+export async function lintFileHandler(args: PostToolUseHookInput, scoped: { fp: string; real: string } | null = postToolScope(args)): Promise<HookResult> {
   try {
     const resolved = scoped?.fp;
     if (!resolved) return {};
     const ranges = editRanges(args);
     if (ranges?.length === 0) return {}; // the Edit changed nothing
-    return lintResolved(resolved, args.cwd, ranges, "PostToolUse", "universal-lint");
+    // `await` inside the try is load-bearing: a rejected promise must land in the catch (fail open).
+    return await lintResolved(resolved, args.cwd, ranges, "PostToolUse", "universal-lint");
   } catch {
     return {};
   }
@@ -1927,14 +2097,14 @@ export function lintFileHandler(args: PostToolUseHookInput, scoped: { fp: string
  * the group's first file; a file is left out, as in `lintResolved`, when its oxlint run (its chunk or its single
  * rerun) reached a clean or issues verdict with a config whose `options.typeCheck` is true. The tsc block carries the
  * ungated whole-project output once per tsconfig. Any throw drops only the file, chunk or tsconfig group it happened
- * in.
+ * in. Async since F18 (the driver awaits it): still one spawn at a time, each a detached process group killed as a whole on timeout.
  *
  * @param cwd - Project root: scope root, config search root and default spawn cwd.
  * @param files - Absolute or cwd-relative paths to lint, in report order.
  * @returns The findings blocks, chain runs in first-appearance group order followed by tsc runs in tsconfig order;
  *   `[]` when nothing was found or `cwd` cannot be resolved.
  */
-export function lintFilesHandler(cwd: string, files: readonly string[]): string[] {
+export async function lintFilesHandler(cwd: string, files: readonly string[]): Promise<string[]> {
   let roots: { cwd: string };
   try {
     roots = { cwd: realish(cwd) };
@@ -1968,7 +2138,7 @@ export function lintFilesHandler(cwd: string, files: readonly string[]): string[
 
   const ran = new Set<string>();
   const chainBlocks: string[] = [];
-  const spawnPlan = (plan: ChainPlan, argv: string[]) => chainOutcome(plan.tool, runLintTool(plan.tool, argv, buildSpawnOpts(plan.spawnCwd, plan.timeout), plan.local));
+  const spawnPlan = async (plan: ChainPlan, argv: string[]): Promise<ReturnType<typeof chainOutcome>> => chainOutcome(plan.tool, await runLintTool(plan.tool, argv, buildSpawnOpts(plan.spawnCwd, plan.timeout), plan.local));
   const record = (members: Array<{ fp: string; plan: ChainPlan }>, out: ReturnType<typeof chainOutcome>): void => {
     if (!out || out.verdict === "skip") return;
     for (const m of members) ran.add(m.fp);
@@ -1986,12 +2156,12 @@ export function lintFilesHandler(cwd: string, files: readonly string[]): string[
       const chunk = group.slice(i, i + step);
       try {
         const argv = fileScoped ? [...plan.argv.slice(0, -1), ...chunk.map((m) => m.fp)] : plan.argv;
-        const out = spawnPlan(plan, argv);
+        const out = await spawnPlan(plan, argv);
         // Per-file fail-open: one unparsable or pathological file, a tool crash, kill or timeout must not drop the other files' findings.
         if ((!out || out.verdict === "skip") && fileScoped && chunk.length > 1) {
           for (const m of chunk) {
             try {
-              record([m], spawnPlan(m.plan, m.plan.argv));
+              record([m], await spawnPlan(m.plan, m.plan.argv));
             } catch {
               // fail open: drop this file only
             }
@@ -2009,9 +2179,7 @@ export function lintFilesHandler(cwd: string, files: readonly string[]): string[
   const tsFirst = new Map<string, string>();
   for (const [fp, oxlintConfig] of oxlintConfigs) {
     try {
-      if (!TYPE_CHECK_EXTS.has(path.extname(fp).toLowerCase())) continue;
-      // Skip tsc only when oxlint actually ran with a typeCheck config (as in lintResolved).
-      if (oxlintConfig && ran.has(fp) && oxlintConfigTypeChecks(oxlintConfig)) continue;
+      if (!tscNeeded(TYPE_CHECK_EXTS.has(path.extname(fp).toLowerCase()), oxlintConfig, ran.has(fp))) continue;
       const tsconfig = resolveTsconfig(path.dirname(fp), cwd);
       if (tsconfig && !tsFirst.has(tsconfig)) tsFirst.set(tsconfig, fp);
     } catch {
@@ -2021,7 +2189,7 @@ export function lintFilesHandler(cwd: string, files: readonly string[]): string[
   const tscBlocks: string[] = [];
   for (const fp of tsFirst.values()) {
     try {
-      const f = runTypeCheck(fp, cwd);
+      const f = await runTypeCheck(fp, cwd);
       if (f) tscBlocks.push(`universal-lint: ${f.tool} found issues in ${f.target}:\n${truncate(f.text)}`);
     } catch {
       // fail open: drop this tsconfig's block only
@@ -2106,18 +2274,19 @@ export function acquireSlot(untilMs: number): string | null {
  * this pid, reclaimed per `slotStale`) and `<key>.last` (`Date.now()` taken before the spawn of the last run that
  * completed without error or signal). Skips (returns null) when `.last` is newer than `file`'s ctime and not in the
  * future: a completed run started after the file's last change, so its process reported this file's findings.
- * Otherwise claims the lock, re-checking `.last` every 100 ms (`Atomics.wait`) while a live holder runs, until process
+ * Otherwise claims the lock, re-checking `.last` every 100 ms (async `setTimeout` from `node:timers/promises`, so a
+ * concurrent chain child keeps being read; under `lintResolved`'s concurrent branch this wait overlaps that child) while a live holder runs, until process
  * uptime reaches `FILE_CHANGED_BUDGET_MS - reserveMs`, after which it runs unlocked; after a claim it re-checks `.last`
- * once more, then runs, writes `.last` on completion and releases in `finally`. Any stat, mkdir, claim or `.last`
+ * once more, then awaits `run` inside the `try/finally`, so the lock release follows the child's `close`; writes `.last` on completion. Any stat, mkdir, claim or `.last`
  * error runs unlocked (fail open, as before F13). FileChanged only: `lintResolved` enables it from `hookEventName`.
  *
  * @param key - Project key (`hashPath` of `<tool name>:<tsconfig path | package dir | Cargo.toml path>`).
  * @param file - The changed file (its ctime decides whether the last completed run covers it).
  * @param reserveMs - The check's spawn timeout; the lock wait stops this long before `FILE_CHANGED_BUDGET_MS`.
- * @param run - Spawns the check.
+ * @param run - Spawns the check (async, a `spawnGroup` result).
  * @returns `run`'s result, or null when a completed run already covers `file`.
  */
-export function coalesceProjectCheck(key: string, file: string, reserveMs: number, run: () => SpawnSyncReturns<string>): SpawnSyncReturns<string> | null {
+export async function coalesceProjectCheck(key: string, file: string, reserveMs: number, run: () => Promise<SpawnSyncReturns<string>>): Promise<SpawnSyncReturns<string> | null> {
   const dir = path.resolve(process.env.CLAUDE_PLUGIN_DATA || tmpdir(), "fc-locks");
   const lock = path.join(dir, `${key}.lock`);
   const last = path.join(dir, `${key}.last`);
@@ -2126,7 +2295,7 @@ export function coalesceProjectCheck(key: string, file: string, reserveMs: numbe
     // statSync: a symlinked file's target is what the check reads; ctime: copies can preserve an old mtime.
     changed = statSync(file).ctimeMs;
   } catch {
-    return run();
+    return await run();
   }
   // A missing, empty or partial stamp gives NaN or a smaller number (not covered); a future-dated stamp never covers.
   const covered = (): boolean => {
@@ -2143,16 +2312,16 @@ export function coalesceProjectCheck(key: string, file: string, reserveMs: numbe
       mkdirSync(dir, { recursive: true }); // only once the cheap `.last` check did not cover the file
       if (claimFile(lock)) break;
     } catch {
-      return run();
+      return await run();
     }
-    if (process.uptime() * 1000 >= FILE_CHANGED_BUDGET_MS - reserveMs) return run();
-    sleep100();
+    if (process.uptime() * 1000 >= FILE_CHANGED_BUDGET_MS - reserveMs) return await run();
+    await sleep(100);
   }
   try {
     // The previous holder may have finished between the last check and this claim.
     if (covered()) return null;
     const start = Date.now();
-    const r = run();
+    const r = await run();
     if (!r.error && !r.signal) {
       try {
         writeFileSync(last, String(start));
@@ -2178,11 +2347,12 @@ export function coalesceProjectCheck(key: string, file: string, reserveMs: numbe
  * budget; no slot in time skips with a stderr note; a slot error lints without a slot. Inside `lintResolved` the
  * whole-project check (tsc, go vet/golangci-lint, cargo) runs through `coalesceProjectCheck`: once per burst and project
  * (F13). Returns {} for every skip and on any error (fail open).
+ * Async since F18 (the git call and `acquireSlot` stay sync: no child of this process exists yet).
  *
  * @param args - The FileChanged hook payload.
  * @returns The hook result: findings as additionalContext, or an empty object.
  */
-export function fileChangedHandler(args: PostToolUseHookInput): HookResult {
+export async function fileChangedHandler(args: PostToolUseHookInput): Promise<HookResult> {
   try {
     if (args?.event === "unlink") return {};
     const cwd = args?.cwd;
@@ -2212,7 +2382,7 @@ export function fileChangedHandler(args: PostToolUseHookInput): HookResult {
       // no git, not a repo, timeout or non-zero exit: lint
     }
     const ext = path.extname(s.fp).toLowerCase();
-    // The wait gets what git left of FILE_CHANGED_BUDGET_MS once this file's nominal lint budget (chain + tsc) is reserved.
+    // The wait gets what git left of FILE_CHANGED_BUDGET_MS once this file's nominal lint budget is reserved: chain + tsc, kept as the sum for the sequential oxlint-typeCheck fallback (see FILE_CHANGED_BUDGET_MS).
     const lintMs = (EXT_MAP[ext] === "rust" ? CARGO_SPAWN_TIMEOUT_MS : SPAWN_TIMEOUT_MS) + (TYPE_CHECK_EXTS.has(ext) ? TSC_SPAWN_TIMEOUT_MS : 0);
     let slot: string | null | undefined; // undefined: slot error, lint without a slot (fail open, as before F10)
     try {
@@ -2225,7 +2395,7 @@ export function fileChangedHandler(args: PostToolUseHookInput): HookResult {
       return {};
     }
     try {
-      return lintResolved(s.fp, cwd, null, "FileChanged", "universal-lint (changed outside Write/Edit)");
+      return await lintResolved(s.fp, cwd, null, "FileChanged", "universal-lint (changed outside Write/Edit)");
     } finally {
       try {
         if (slot) rmSync(slot, { force: true });
@@ -2321,7 +2491,7 @@ function isMainModule(): boolean {
  * Claude with it). Fails open on any error — no output, exit 0.
  *
  * @remarks
- * Reads stdin asynchronously to EOF, never `readFileSync(0)`: fd 0 is non-blocking, so a sync read throws EAGAIN on a late writer or a payload above the pipe buffer (hook-design.md "stdin", F05). Never rejects (the whole body is in the try/catch), so the bottom `void main()` is safe. Never calls `process.exit`: the process ends when the event loop drains after stdin EOF, carrying `process.exitCode` 2 for findings, so the exit-code contract is unchanged.
+ * Reads stdin asynchronously to EOF, never `readFileSync(0)`: fd 0 is non-blocking, so a sync read throws EAGAIN on a late writer or a payload above the pipe buffer (hook-design.md "stdin", F05). Never rejects (the whole body is in the try/catch), so the bottom `void main()` is safe. Never calls `process.exit`: the process ends when the event loop drains after stdin EOF and every child's `close`, carrying `process.exitCode` 2 for findings, so the exit-code contract is unchanged.
  */
 async function main(): Promise<void> {
   try {
@@ -2333,11 +2503,11 @@ async function main(): Promise<void> {
       return;
     }
     let ctx: string | undefined;
-    if (ev === "FileChanged") ctx = fileChangedHandler(input).hookSpecificOutput?.additionalContext;
+    if (ev === "FileChanged") ctx = (await fileChangedHandler(input)).hookSpecificOutput?.additionalContext;
     else {
       const scoped = postToolScope(input);
       recordWrittenFor(scoped);
-      ctx = lintFileHandler(input, scoped).hookSpecificOutput?.additionalContext;
+      ctx = (await lintFileHandler(input, scoped)).hookSpecificOutput?.additionalContext;
     }
     if (ctx) {
       process.stderr.write(ctx + "\n");
