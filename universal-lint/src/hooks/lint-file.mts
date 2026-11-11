@@ -48,6 +48,9 @@ const NPX_SPAWN_TIMEOUT_MS = 55000;
  */
 const NPX_REFRESH_MS = 24 * 60 * 60 * 1000;
 
+/** How long a negative onPath answer persisted in the probe file stays valid: a linter installed later is found within this window. */
+const PROBE_MISS_TTL_MS = 10 * 60 * 1000;
+
 /** Cap on the additionalContext findings text. */
 const MAX_CONTEXT_CHARS = 4000;
 
@@ -283,30 +286,119 @@ export const REGISTRY: Record<string, LangEntry> = {
   },
 };
 
-/**
- * PATH probe cache (server-lifetime): tool name -> boolean on PATH.
- */
+/** onPath answers persisted per PATH string: tool name -> directory it was found in, or -> Date.now() of the miss. */
+type ProbeStore = { hits: Record<string, string>; misses: Record<string, number> };
+
+/** Per-process memo of onPath answers (each hook event is its own process; the cross-process copy is the probe file). */
 const probeCache = new Map<string, boolean>();
+
+/** Probe store for the current PATH, loaded by the first onPath call of the process; null until then. */
+let probeStore: ProbeStore | null = null;
+
 /**
- * Whether a tool is executable on PATH (cached per tool name).
+ * Absolute path of the probe file for the current PATH: `${CLAUDE_PLUGIN_DATA || os.tmpdir()}/probe-<hashPath(PATH)>.json`.
+ * Never inside the project tree; both env values are constant within a hook process.
+ *
+ * @returns Absolute path of the probe file.
+ */
+function probeFilePath(): string {
+  return path.resolve(process.env.CLAUDE_PLUGIN_DATA || tmpdir(), `probe-${hashPath(process.env.PATH || "")}.json`);
+}
+
+/**
+ * Read and shape-check the probe file; any read, parse or shape failure returns an empty store (probe again).
+ * Single entries are type-checked at lookup in onPath, so a bad entry costs one probe and is overwritten.
+ *
+ * @param file - Probe file path (`probeFilePath()`).
+ * @returns The stored answers, or an empty store.
+ */
+function loadProbeStore(file: string): ProbeStore {
+  const isObject = (v: unknown): boolean => typeof v === "object" && v !== null && !Array.isArray(v);
+  try {
+    const s = JSON.parse(readFileSync(file, "utf8")) as { hits?: unknown; misses?: unknown } | null;
+    if (isObject(s) && isObject(s?.hits) && isObject(s?.misses)) return s as ProbeStore;
+  } catch {
+    // unreadable or not JSON: probe again
+  }
+  return { hits: {}, misses: {} };
+}
+
+/**
+ * Write the store atomically (temp file + renameSync); errors are swallowed (cost: the next process probes again).
+ * No locking: the last writer wins.
+ *
+ * @param file - Probe file path (`probeFilePath()`).
+ * @param store - Store to persist.
+ */
+function saveProbeStore(file: string, store: ProbeStore): void {
+  try {
+    mkdirSync(path.dirname(file), { recursive: true });
+    const tmp = `${file}.${process.pid}.tmp`;
+    writeFileSync(tmp, JSON.stringify(store));
+    renameSync(tmp, file);
+  } catch {
+    // fail open: an unwritable data dir means the next process probes again
+  }
+}
+
+/**
+ * Whether a tool is executable on PATH (memoized per process, persisted across processes in the probe file).
  *
  * @param tool - Binary name to look for.
  * @returns True when an executable of that name sits in a PATH directory.
+ * @remarks A stored hit is re-validated with one `accessSync` on its directory; a stored miss is trusted while
+ * `0 <= Date.now() - at < PROBE_MISS_TTL_MS` (a future-dated miss is expired); otherwise PATH is scanned and the
+ * result written back. Residuals: (1) a newly installed tool is not seen for up to 10 min after a persisted miss,
+ * also an earlier chain tool (a later chain tool, a local bin or npx runs meanwhile); (2) a copy added to an
+ * earlier PATH dir is not noticed (presence only: the spawn is by bare name, so PATH's first binary runs); (3) a
+ * tool reachable only through a relative PATH entry is cwd-dependent: never cached as a hit, and its miss is per
+ * PATH string, not per cwd; (4) in the shared `os.tmpdir()` fallback another user with the same PATH string can
+ * plant entries (a hit only for a tool executable in that dir, a miss suppresses that tool's lint for the TTL).
  */
 function onPath(tool: string): boolean {
   const cached = probeCache.get(tool);
   if (cached !== undefined) return cached;
-  let found = false;
+  const file = probeFilePath();
+  probeStore ??= loadProbeStore(file);
+  const known = probeStore.hits[tool];
+  if (typeof known === "string" && path.isAbsolute(known)) {
+    try {
+      accessSync(path.join(known, tool), fsConstants.X_OK);
+      probeCache.set(tool, true);
+      return true;
+    } catch {
+      /* gone or no longer executable: probe PATH again */
+    }
+  }
+  const at = probeStore.misses[tool];
+  if (typeof at === "number") {
+    const age = Date.now() - at;
+    if (age >= 0 && age < PROBE_MISS_TTL_MS) {
+      // a future-dated miss (clock jump, synced data dir) counts as expired
+      probeCache.set(tool, false);
+      return false;
+    }
+  }
+  let foundDir: string | null = null;
   for (const dir of (process.env.PATH || "").split(path.delimiter)) {
     if (!dir) continue;
     try {
       accessSync(path.join(dir, tool), fsConstants.X_OK);
-      found = true;
+      foundDir = dir;
       break;
     } catch {
       /* keep looking */
     }
   }
+  // a hit through a relative PATH entry depends on the cwd: memoize it for this process only
+  if (foundDir === null || path.isAbsolute(foundDir)) {
+    Reflect.deleteProperty(probeStore.hits, tool);
+    Reflect.deleteProperty(probeStore.misses, tool);
+    if (foundDir === null) probeStore.misses[tool] = Date.now();
+    else probeStore.hits[tool] = foundDir;
+    saveProbeStore(file, probeStore);
+  }
+  const found = foundDir !== null;
   probeCache.set(tool, found);
   return found;
 }
