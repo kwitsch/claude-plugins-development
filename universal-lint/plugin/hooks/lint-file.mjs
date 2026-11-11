@@ -992,6 +992,15 @@ const LOC_ROW_RE = /^\s*(?<line>\d+):\d+\s/;
 const LOC_SHELLCHECK_RE = /^In .+ line (?<line>\d+):/;
 const PARSE_ERROR_RE = /pars(?:e|ing) error|syntax ?error|unexpected (?:token|end|eof|character|indent)|unterminated|unclosed|end of (?:file|input)|\bexpected [`'"]|\b(?:TS1|SC1)\d{3}\b/i;
 export function gateFinding(finding, ranges, resolved) {
+	const seen = new Map();
+	const exists = (abs) => {
+		let found = seen.get(abs);
+		if (found === undefined) {
+			found = existsSync(abs);
+			seen.set(abs, found);
+		}
+		return found;
+	};
 	const hit = (line) => ranges === null || ranges.some(([s, e]) => s <= line - 1 && line - 1 <= e) ? "hit" : "miss";
 	const classify = (raw) => {
 		const plain = raw.replace(ANSI_SGR_RE, "");
@@ -1001,7 +1010,7 @@ export function gateFinding(finding, ranges, resolved) {
 		if (a?.groups) {
 			const p = path.normalize(a.groups.path);
 			const abs = path.resolve(finding.base, p);
-			const own = abs === resolved || !path.isAbsolute(p) && !existsSync(abs) && resolved.endsWith(path.sep + p);
+			const own = abs === resolved || !path.isAbsolute(p) && resolved.endsWith(path.sep + p) && !exists(abs);
 			return own ? hit(Number(a.groups.line)) : "foreign";
 		}
 		const b = LOC_SHELLCHECK_RE.exec(plain);

@@ -37,7 +37,7 @@ Legend: `[x]` finished. `[ ]` not finished; tag = `open` (code change, not start
 - [x] [F18](tasks/F18-overlap-chain-tsc-and-kill-tree.md) Overlap chain lint and tsc; kill the whole process tree on timeout `done` priority:low. Shipped in 0.15.15; timeout budget re-derived in hook-design.md.
 - [x] [F19](tasks/F19-watchlist-skip-generated.md) Keep `linguist-generated` files out of watchPaths `done` priority:low. Closed docs-only in 0.15.16: after F04/F09 a rewritten generated file costs ~125-235 ms of background lint with no findings (oxlint ignores `**/plugin/**`), and a watch-list-only attribute exclusion would break the shared-scope policy (user decision; reopen trigger in the task doc).
 - [x] [F20](tasks/F20-config-walk-readdir.md) One `readdirSync` per directory in the upward config walks (9P) `done` priority:low. Shipped in 0.15.17.
-- [ ] [F21](tasks/F21-gatefinding-exists-memo.md) Memoize `existsSync` in `gateFinding` `open` priority:low
+- [x] [F21](tasks/F21-gatefinding-exists-memo.md) Memoize `existsSync` in `gateFinding` `done` priority:low. Shipped in 0.15.18.
 - [ ] [F22](tasks/F22-filechanged-skip-without-git.md) FileChanged skip without a `git status` spawn (index blob id) `open` priority:low
 - [ ] [F23](tasks/F23-superseded-and-duplicate-wakes.md) Superseded and duplicate findings re-wake Claude `open` priority:low. Needs a user decision; the naive staleness check loses findings.
 - [ ] [F24](tasks/F24-npm-notice-in-findings.md) Keep "npm notice" lines out of npx-run findings `open` priority:low

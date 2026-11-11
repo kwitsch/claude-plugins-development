@@ -1029,6 +1029,29 @@ test("gateFinding: only own-file misses and no foreign location gives null", () 
   assert.equal(gateFinding(gf("a.sh:2:1: note: x [SC1]\na.sh:4:1: note: y [SC2]\n"), [[0, 0]], resolved), null);
 });
 
+test("gateFinding: repeated lines of one path classify identically (suffix-fallback own path and real foreign x/b.ts, interleaved)", () => {
+  // resolved = dir/sub/x/b.ts. `b.ts` resolves to the absent dir/b.ts and is a suffix of resolved: own (cached false).
+  // `x/b.ts` resolves to the real dir/x/b.ts: foreign (cached true). Ranges cover only some own lines.
+  const dir = mkdtempSync(path.join(tmpdir(), "ul-f21-"));
+  mkdirSync(path.join(dir, "x"));
+  writeFileSync(path.join(dir, "x", "b.ts"), "");
+  const resolved = path.join(dir, "sub", "x", "b.ts");
+  const lines: string[] = [];
+  for (let i = 1; i <= 20; i++) {
+    lines.push(`b.ts(${i},1): error TS2322: own-${i};`);
+    lines.push(`x/b.ts(${i},1): error TS2322: foreign-${i};`);
+  }
+  const text = `${lines.join("\n")}\n`;
+  const g = gateFinding(gf(text, dir), [[0, 4]], resolved);
+  assert.ok(g);
+  const out = g.text.split("\n");
+  for (let i = 1; i <= 20; i++) {
+    assert.equal(out.some((l) => l.includes(`own-${i};`)), i <= 5, `own-${i}`);
+    assert.ok(out.some((l) => l.includes(`foreign-${i};`)), `foreign-${i}`);
+  }
+  assert.deepEqual(gateFinding(gf(text, dir), [[0, 4]], resolved), g);
+});
+
 test("scopedTarget: lexical and real path of an in-cwd eligible file", () => {
   const dir = mkdtempSync(path.join(tmpdir(), "ul-st-"));
   writeFileSync(path.join(dir, "a.sh"), "echo hi\n");
