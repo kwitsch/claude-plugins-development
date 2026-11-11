@@ -327,13 +327,20 @@ function detail(text: string): string | undefined {
  * @param type - The question type (the tool called).
  * @param state - The text the question is about.
  * @param question - The question.
+ * @param cfg - The already read TYPESAFE_API_KEY (`key`), TYPESAFE_BASE_URL (`base`) and JEV_URL (`jevUrl`) values.
  * @returns The answer object as JSON, or an error result prefixed with the type.
  */
-async function ask($: Engine, type: QuestionType, state: string, question: Question): Promise<ToolResult> {
+async function ask(
+  $: Engine,
+  type: QuestionType,
+  state: string,
+  question: Question,
+  cfg: { key: string | undefined; base: string | undefined; jevUrl: string | undefined },
+): Promise<ToolResult> {
   const fail = (reason: string): ToolResult => ({ isError: true, result: `${type}: ${reason}` });
-  const target = endpoint(await $.env.get("JEV_URL"), await $.env.get("TYPESAFE_BASE_URL"));
+  const target = endpoint(cfg.jevUrl, cfg.base);
   if (!target.ok) return fail(target.error);
-  const key = (await $.env.get("TYPESAFE_API_KEY"))?.trim();
+  const key = cfg.key?.trim();
   const model = (await $.env.get("TYPESAFE_DEFAULT_MODEL"))?.trim() || DEFAULT_MODEL;
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   if (key) headers["Authorization"] = `Bearer ${key}`;
@@ -369,23 +376,20 @@ async function ask($: Engine, type: QuestionType, state: string, question: Quest
  */
 export function register(on: On): void {
   on("session.start", async function onSessionStart($, e, next) {
-    for (const type of TYPES) {
-      try {
-        await $.tool.register(SPECS[type]);
-      } catch {
-        // One failing registration must not drop the others; there is no log channel.
-      }
-    }
+    // One failing registration must not drop the others; there is no log channel.
+    await Promise.allSettled(TYPES.map((type) => $.tool.register(SPECS[type])));
     return next(e);
   });
   on("tool.call", async function onToolCall($, e, next) {
     const type = TYPES.find((t) => e.tool === TOOL_PREFIX + t);
     if (type === undefined) return next(e);
     // Literal names: the engine's static check only accepts a literal first argument to $.env.get.
-    const configured = [await $.env.get("TYPESAFE_API_KEY"), await $.env.get("TYPESAFE_BASE_URL"), await $.env.get("JEV_URL")];
-    if (!configured.some(isText)) return { isError: true, result: `${type}: none of TYPESAFE_API_KEY, TYPESAFE_BASE_URL, JEV_URL is set` };
+    const key = await $.env.get("TYPESAFE_API_KEY");
+    const base = await $.env.get("TYPESAFE_BASE_URL");
+    const jevUrl = await $.env.get("JEV_URL");
+    if (![key, base, jevUrl].some(isText)) return { isError: true, result: `${type}: none of TYPESAFE_API_KEY, TYPESAFE_BASE_URL, JEV_URL is set` };
     const input = parseInput(type, e);
     if (typeof input === "string") return { isError: true, result: `${type}: ${input}` };
-    return ask($, type, input.state, input.question);
+    return ask($, type, input.state, input.question, { key, base, jevUrl });
   });
 }
