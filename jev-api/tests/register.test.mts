@@ -112,3 +112,126 @@ test("a call to another tool reaches the next hook", async ($, on) => {
   on("tool.call", async () => ({ result: "from-next" }));
   expect(await $.tool.call({ tool: "Read", file_path: "/x" })).toEqual({ result: "from-next" });
 });
+
+const SYSTEMONE = "https://api.typesafe.ai/v1/systemone";
+
+// Case 4: any one of the three variables opens the gate.
+for (const env of [{ TYPESAFE_API_KEY: "k" }, { TYPESAFE_BASE_URL: "https://proxy.example" }, { JEV_URL: "https://jev.example/x" }] as Record<string, string>[]) {
+  test(`noul sends one request with only ${Object.keys(env)[0]} set`, async ($, on) => {
+    const { fetched } = setup(on, { env });
+    expect(await call($, "noul")).toEqual({ result: JSON.stringify(ANSWERS.noul) });
+    expect(fetched).toHaveLength(1);
+  });
+}
+
+// Case 5
+test("noul posts to the default endpoint with the bearer key", async ($, on) => {
+  const { fetched } = setup(on, { env: { TYPESAFE_API_KEY: "test-key" } });
+  const res = await call($, "noul");
+  expect(fetched).toEqual([
+    {
+      url: SYSTEMONE,
+      headers: { "Content-Type": "application/json", Authorization: "Bearer test-key" },
+      body: { model: "jev-latest", state: "Hello there!", questions: { answer: { type: "noul", instructions: "Is this text a greeting?", criteria: { true: "a greeting", false: "anything else" } } } },
+    },
+  ]);
+  expect(res).toEqual({ result: JSON.stringify({ type: "noul", noul: 0.9 }) });
+});
+
+// Case 6
+for (const type of ["choice", "score"]) {
+  test(`${type} sends its criteria and returns the answer object`, async ($, on) => {
+    const { fetched } = setup(on, { env: { TYPESAFE_API_KEY: "k" } });
+    const res = await call($, type);
+    expect(fetched[0]?.body.questions.answer).toEqual({ type, instructions: BASE[type]?.instructions, criteria: BASE[type]?.criteria });
+    expect(res).toEqual({ result: JSON.stringify(ANSWERS[type]) });
+    expect(JSON.parse(String(res.result))).toHaveProperty("probabilities");
+  });
+}
+
+// Case 7: endpoint precedence and validation.
+test("JEV_URL wins over TYPESAFE_BASE_URL", async ($, on) => {
+  const { fetched } = setup(on, { env: { JEV_URL: " https://jev.example/route ", TYPESAFE_BASE_URL: "https://proxy.example" } });
+  await call($, "noul");
+  expect(fetched[0]?.url).toBe("https://jev.example/route");
+});
+
+test("TYPESAFE_BASE_URL gets /v1/systemone appended and trailing slashes dropped", async ($, on) => {
+  const { fetched } = setup(on, { env: { TYPESAFE_BASE_URL: "https://proxy.example//" } });
+  await call($, "noul");
+  expect(fetched[0]?.url).toBe("https://proxy.example/v1/systemone");
+});
+
+test("a non-http(s) URL is an error naming the variable and sends nothing", async ($, on) => {
+  const a = setup(on, { env: { JEV_URL: "ftp://x" } });
+  expect(await call($, "noul")).toEqual({ isError: true, result: "noul: JEV_URL must be an http(s) URL" });
+  expect(a.fetched).toHaveLength(0);
+});
+
+test("a non-http(s) TYPESAFE_BASE_URL is an error naming the variable and sends nothing", async ($, on) => {
+  const a = setup(on, { env: { TYPESAFE_BASE_URL: "ftp://x" } });
+  expect(await call($, "noul")).toEqual({ isError: true, result: "noul: TYPESAFE_BASE_URL must be an http(s) URL" });
+  expect(a.fetched).toHaveLength(0);
+});
+
+// Case 8
+test("TYPESAFE_DEFAULT_MODEL overrides the model", async ($, on) => {
+  const { fetched } = setup(on, { env: { TYPESAFE_API_KEY: "k", TYPESAFE_DEFAULT_MODEL: " jev-test " } });
+  await call($, "noul");
+  expect(fetched[0]?.body.model).toBe("jev-test");
+});
+
+// Case 9
+test("no TYPESAFE_API_KEY means no Authorization header", async ($, on) => {
+  const { fetched } = setup(on, { env: { JEV_URL: "https://jev.example/x" } });
+  await call($, "noul");
+  expect(fetched[0]?.headers).toEqual({ "Content-Type": "application/json" });
+});
+
+// Case 11: HTTP errors with the API's detail.
+const httpReply = (status: number, text: string) => (): Reply => ({ value: { status, ok: false, headers: {}, text } });
+
+test("HTTP 400 returns the detail string", async ($, on) => {
+  setup(on, { env: { TYPESAFE_API_KEY: "k" }, reply: httpReply(400, JSON.stringify({ detail: "bad" })) });
+  expect(await call($, "noul")).toEqual({ isError: true, result: "noul: HTTP 400: bad" });
+});
+
+test("HTTP 422 returns the stringified detail array", async ($, on) => {
+  const detail = [{ loc: ["body", "state"], msg: "field required" }];
+  setup(on, { env: { TYPESAFE_API_KEY: "k" }, reply: httpReply(422, JSON.stringify({ detail })) });
+  expect(await call($, "noul")).toEqual({ isError: true, result: `noul: HTTP 422: ${JSON.stringify(detail)}` });
+});
+
+test("HTTP 500 with a non-JSON body returns only the status", async ($, on) => {
+  setup(on, { env: { TYPESAFE_API_KEY: "k" }, reply: httpReply(500, "oops") });
+  expect(await call($, "noul")).toEqual({ isError: true, result: "noul: HTTP 500" });
+});
+
+// Case 12: timeout after 30 s.
+test("a hung request times out after 30000ms", async ($, on) => {
+  const { clock, fetched } = setup(on, { env: { TYPESAFE_API_KEY: "k" }, reply: () => new Promise<never>(() => {}) });
+  const pending = call($, "noul");
+  // The module loads by dynamic import (file I/O), which one settle does not wait for: flush until the request is out.
+  while (fetched.length === 0) await clock.advance(0);
+  await clock.advance(30_000);
+  expect(await pending).toEqual({ isError: true, result: "noul: timeout after 30000ms" });
+});
+
+// Case 13: missing or wrong-type answer, unparsable body.
+test("a wrong-type or missing answer is an error", async ($, on) => {
+  const text = (body: unknown) => (): Reply => ({ value: { status: 200, ok: true, headers: {}, text: JSON.stringify(body) } });
+  setup(on, { env: { TYPESAFE_API_KEY: "k" }, reply: text({ answers: { answer: ANSWERS.score } }) });
+  expect(await call($, "noul")).toEqual({ isError: true, result: "noul: response had no noul answer" });
+});
+
+test("a response without answers is an error", async ($, on) => {
+  setup(on, { env: { TYPESAFE_API_KEY: "k" }, reply: () => ({ value: { status: 200, ok: true, headers: {}, text: "{}" } }) });
+  expect(await call($, "choice")).toEqual({ isError: true, result: "choice: response had no choice answer" });
+});
+
+test("an unparsable 200 body is reported with the parse error", async ($, on) => {
+  setup(on, { env: { TYPESAFE_API_KEY: "k" }, reply: () => ({ value: { status: 200, ok: true, headers: {}, text: "not json" } }) });
+  const res = await call($, "noul");
+  expect(res.isError).toBe(true);
+  expect(res.result).toMatch(/^noul: /);
+});

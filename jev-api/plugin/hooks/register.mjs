@@ -8,6 +8,11 @@ const STATE = {
 	type: "string",
 	description: "The text the question is about."
 };
+const DEFAULT_JEV_URL = "https://api.typesafe.ai/v1/systemone";
+const DEFAULT_MODEL = "jev-latest";
+const TIMEOUT_MS = 3e4;
+const QUESTION_ID = "answer";
+const HTTP_URL = /^https?:\/\/[^/?#\s]+(?:[/?#]\S*)?$/i;
 const TOOL_PREFIX = "mcp__jev-api__";
 const SPECS = {
 	noul: {
@@ -158,6 +163,79 @@ function parseInput(type, e) {
 		}
 	};
 }
+function endpoint(jevUrlRaw, baseRaw) {
+	const jev = jevUrlRaw?.trim();
+	if (jev) return HTTP_URL.test(jev) ? {
+		ok: true,
+		url: jev
+	} : {
+		ok: false,
+		error: "JEV_URL must be an http(s) URL"
+	};
+	const base = baseRaw?.trim();
+	if (base) {
+		const url = base.replace(/\/+$/, "") + "/v1/systemone";
+		return HTTP_URL.test(url) ? {
+			ok: true,
+			url
+		} : {
+			ok: false,
+			error: "TYPESAFE_BASE_URL must be an http(s) URL"
+		};
+	}
+	return {
+		ok: true,
+		url: DEFAULT_JEV_URL
+	};
+}
+function detail(text) {
+	let body;
+	try {
+		body = JSON.parse(text);
+	} catch {
+		return undefined;
+	}
+	if (!isRecord(body) || body["detail"] === undefined) return undefined;
+	return typeof body["detail"] === "string" ? body["detail"] : JSON.stringify(body["detail"]);
+}
+async function ask($, type, state, question) {
+	const fail = (reason) => ({
+		isError: true,
+		result: `${type}: ${reason}`
+	});
+	const target = endpoint(await $.env.get("JEV_URL"), await $.env.get("TYPESAFE_BASE_URL"));
+	if (!target.ok) return fail(target.error);
+	const key = (await $.env.get("TYPESAFE_API_KEY"))?.trim();
+	const model = (await $.env.get("TYPESAFE_DEFAULT_MODEL"))?.trim() || DEFAULT_MODEL;
+	const headers = { "Content-Type": "application/json" };
+	if (key) headers["Authorization"] = `Bearer ${key}`;
+	try {
+		const request = $.http.fetch(target.url, {
+			method: "POST",
+			headers,
+			body: JSON.stringify({
+				model,
+				state,
+				questions: { [QUESTION_ID]: question }
+			})
+		});
+		request.catch(() => undefined);
+		const timeout = $.clock.sleep(TIMEOUT_MS).then(() => undefined);
+		const res = await Promise.race([request, timeout]);
+		if (res === undefined) return fail(`timeout after ${TIMEOUT_MS}ms`);
+		if (!res.ok) {
+			const why = detail(res.text);
+			return fail(`HTTP ${res.status}${why === undefined ? "" : `: ${why}`}`);
+		}
+		const body = JSON.parse(res.text);
+		const answers = isRecord(body) ? body["answers"] : undefined;
+		const answer = isRecord(answers) ? answers[QUESTION_ID] : undefined;
+		if (!isRecord(answer) || answer["type"] !== type) return fail(`response had no ${type} answer`);
+		return { result: JSON.stringify(answer) };
+	} catch (err) {
+		return fail(err instanceof Error ? err.message : String(err));
+	}
+}
 export function register(on) {
 	on("session.start", async function onSessionStart($, e, next) {
 		for (const type of TYPES) {
@@ -184,9 +262,6 @@ export function register(on) {
 			isError: true,
 			result: `${type}: ${input}`
 		};
-		return {
-			isError: true,
-			result: `${type}: not implemented`
-		};
+		return ask($, type, input.state, input.question);
 	});
 }
