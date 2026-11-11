@@ -45,7 +45,7 @@ Constants `SPAWN_TIMEOUT_MS`, `NPX_SPAWN_TIMEOUT_MS`, `TSC_SPAWN_TIMEOUT_MS`, `C
 
 ## Approach
 
-Done: languages.md "Rust" last bullet names the cold leaf-crate loss and the fail-open mechanism; the `NPX_SPAWN_TIMEOUT_MS` TSDoc now covers the npx-cached bin and the npx-route combinations past 90 s (hook-design.md "Timeout budget", Accepted). hook-design.md is not edited and stays 39,305 bytes by `wc -c` (the 0.15.8 "Measured cost" table stays; refreshing it is F01's business). A first-run budget or warmup for cargo, and a watchList time budget, are possible code follow-ups (not part of this task).
+Done: languages.md "Rust" last bullet names the cold leaf-crate loss and the fail-open mechanism; the `NPX_SPAWN_TIMEOUT_MS` TSDoc now covers the npx-cached bin and the npx-route combinations past 90 s (hook-design.md "Timeout budget", Accepted). hook-design.md is not edited and stays 39,305 bytes by `wc -c` (it holds no measurement table; the baseline is in F01 "Measured"). A first-run budget or warmup for cargo, and a watchList time budget, are possible code follow-ups (not part of this task).
 
 ## Verification
 

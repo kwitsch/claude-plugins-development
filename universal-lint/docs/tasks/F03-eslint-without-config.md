@@ -33,7 +33,7 @@ Shipped without the tri-state return: `resolveOxlintConfig` already separates "t
 
 ## Verification
 
-Run: `pnpm --filter universal-lint build && pnpm --filter universal-lint test && pnpm lint` (the new and updated hook tests named in Status; the `resolveOxlintConfig` registry tests unchanged and green), and `node universal-lint/scripts/perf.mts 5` once on the 0.15.1 build before the change and once on the 0.15.2 build after it (numbers in Status; the after-run is the "Measured cost" table in `.claude/rules/hook-design.md`). The original target "ts300 Edit from about 1200 ms to about 350 ms" was measured on the ts300 fixture (rtk era), not on the harness fixture (a 30-line `a.ts`); the comparison of record is the harness before/after.
+Run: `pnpm --filter universal-lint build && pnpm --filter universal-lint test && pnpm lint` (the new and updated hook tests named in Status; the `resolveOxlintConfig` registry tests unchanged and green), and `node universal-lint/scripts/perf.mts 5` once on the 0.15.1 build before the change and once on the 0.15.2 build after it (numbers in Status; the after-run numbers are in Status; the current baseline is in [F01](F01-measurement-baseline.md) "Measured"). The original target "ts300 Edit from about 1200 ms to about 350 ms" was measured on the ts300 fixture (rtk era), not on the harness fixture (a 30-line `a.ts`); the comparison of record is the harness before/after.
 
 ## Constraints
 

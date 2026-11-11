@@ -23,7 +23,7 @@ History (0.14.x, rtk era): for an npm linter absent from PATH (oxlint in this re
 - Sessions: JS/TS family about 1564 of 3154 lintable edits; 258/300 TS-family edits in surviving project dirs have a local oxlint or eslint.
 - In-session (live) FileChanged lint of lint-file.mts during a build: about 4.1 s.
 - 0.15.2 (before F04), `node universal-lint/scripts/perf.mts 5`, `.mts Write (this repo)` medians: real PATH 578 ms, no /mnt 473 ms (npx route: `npx --yes oxlint` resolving the root `node_modules/.bin/oxlint`).
-- 0.15.3 (after F04), same harness, machine and day, `.mts Write (this repo)` medians: real PATH 338 ms, no /mnt 244 ms (local route: the root `node_modules/.bin/oxlint` spawned directly; full run in `.claude/rules/hook-design.md` "Measured cost").
+- 0.15.3 (after F04), same harness, machine and day, `.mts Write (this repo)` medians: real PATH 338 ms, no /mnt 244 ms (local route: the root `node_modules/.bin/oxlint` spawned directly; the later baseline is in [F01](F01-measurement-baseline.md) "Measured").
 
 ## Code locations
 
@@ -40,7 +40,7 @@ Trust: (1) a bin in `<cwd>/node_modules/.bin` is the one `npx` runs today (npm's
 
 ## Verification
 
-Run: `pnpm --filter universal-lint build && pnpm --filter universal-lint test && pnpm lint`: the six tests in `tests/npx-fallback.test.mts` (see Status; the symlink test fails without the `outside` guard in `localBin`) plus the unchanged npx-fallback, oxlint, markdown, stylelint, tsc, registry and manifest tests. Bench: `node universal-lint/scripts/perf.mts 5` once on the 0.15.2 build (with the new case committed first) and once on the 0.15.3 build; `.mts Write (this repo)` real PATH 578 -> 338 ms, no /mnt 473 -> 244 ms; the after run is the "Measured cost" table in `.claude/rules/hook-design.md`. The original target "about 900-1100 ms to about 300-550 ms" came from the 0.14.x rtk-era trace; the comparison of record is the harness before/after.
+Run: `pnpm --filter universal-lint build && pnpm --filter universal-lint test && pnpm lint`: the six tests in `tests/npx-fallback.test.mts` (see Status; the symlink test fails without the `outside` guard in `localBin`) plus the unchanged npx-fallback, oxlint, markdown, stylelint, tsc, registry and manifest tests. Bench: `node universal-lint/scripts/perf.mts 5` once on the 0.15.2 build (with the new case committed first) and once on the 0.15.3 build; `.mts Write (this repo)` real PATH 578 -> 338 ms, no /mnt 473 -> 244 ms; the after-run numbers are in Status above. The original target "about 900-1100 ms to about 300-550 ms" came from the 0.14.x rtk-era trace; the comparison of record is the harness before/after.
 
 ## Constraints
 

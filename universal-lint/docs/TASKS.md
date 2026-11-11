@@ -12,7 +12,7 @@ Legend: `[x]` finished. `[ ]` not finished; tag = `open` (code change, not start
 
 ## Done
 
-- [x] [F01](tasks/F01-measurement-baseline.md) Per-event cost baseline and re-measurement harness: `node universal-lint/scripts/perf.mts`, numbers in hook-design.md "Measured cost".
+- [x] [F01](tasks/F01-measurement-baseline.md) Per-event cost baseline and re-measurement harness: `node universal-lint/scripts/perf.mts`, numbers in its "Measured" section.
 - [x] [F02](tasks/F02-rtk-failure-banner-as-finding.md) rtk failure banners are reported as eslint findings (false rewake on every JS/TS edit, pnpm install in the repo). Obsolete: rtk support removed in 0.15.0.
 - [x] [F14](tasks/F14-rtk-eslint-defeats-edit-gate.md) Bypass `rtk lint` on Edit: its compacted output has no line locations, so the edit-range gate passes everything. Obsolete: rtk support removed in 0.15.0.
 - [x] [F17](tasks/F17-persist-rtk-probe.md) Persist `rtk rewrite` probe results across hook processes. Obsolete: rtk support removed in 0.15.0.
