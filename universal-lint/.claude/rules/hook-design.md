@@ -82,23 +82,23 @@ paths:
 
 ## Measured cost
 
-- **Label:** universal-lint 0.15.1, 2026-11-07, WSL2 6.18.33.2-microsoft-standard-WSL2, 12 cores, 9.5 GB, node v24.22.2, tsc 7.0.2, linters found (of shellcheck/ruff/yamllint/markdownlint-cli2/eslint): none on either PATH variant, PATH 63 dirs / 44 on /mnt/c (load 1.42 -> 1.80 during the run). Medians in ms from `node universal-lint/scripts/perf.mts 5`. Numbers are machine- and load-dependent; re-measure before judging a change.
+- **Label:** universal-lint 0.15.2, 2026-11-07, WSL2 6.18.33.2-microsoft-standard-WSL2, 12 cores, 9.5 GB, node v24.22.2, tsc 7.0.2, linters found (of shellcheck/ruff/yamllint/markdownlint-cli2/eslint): none on either PATH variant, PATH 63 dirs / 44 on /mnt/c (load 1.42 -> 1.74 during the run). Medians in ms from `node universal-lint/scripts/perf.mts 5`. Numbers are machine- and load-dependent; re-measure before judging a change.
 - **Harness:** `node universal-lint/scripts/perf.mts [runs]` after `pnpm --filter universal-lint build` (dev only, measures `plugin/`): spawns the built hook through its shebang with a payload file as stdin, fixtures in `os.tmpdir()`, one warm-up round plus `runs` timed rounds (default 5), real PATH and PATH minus `/mnt/` dirs; exits 1 when a run misses its expected exit status or observable, 2 on a usage, missing-build or setup/spawn error. The header lists which linters were found on PATH (the `.sh`/`.py`/`.yml` rows time the missing-tool scan when they are absent, so installing one changes those rows).
 - **Live per-hook durations:** `claude -p --debug-file <f> ...`, then `grep 'lint-file.mjs.*finished with status' <f>`; findings appear in transcripts as `hook_blocking_error` attachments carrying `toolUseID`.
 
-| Case                           | real PATH | no /mnt | What runs                                                                                           |
-| ------------------------------ | --------: | ------: | --------------------------------------------------------------------------------------------------- |
-| floor `node -e 0`              |        24 |      24 | no hook: Node startup + PATH lookup                                                                 |
-| empty payload `{}`             |        41 |      40 | hook floor, nothing to lint                                                                         |
-| out-of-scope `.json` Write     |        38 |      42 | scope guard only                                                                                    |
-| `.sh` Write                    |       132 |      41 | shellcheck: missing tool                                                                            |
-| `.py` Write                    |       138 |      44 | ruff: missing tool                                                                                  |
-| `.yml` Write                   |       134 |      43 | yamllint: missing tool                                                                              |
-| `.md` Write                    |       976 |     798 | markdownlint-cli2: npx fallback, warm cache                                                         |
-| `.ts` Write (no eslint config) |       861 |     786 | eslint via npx (no eslint config: skip) + tsc 7.0.2 warm incremental, 30-line fixture: tsc included |
-| `.ts` Edit (no eslint config)  |       855 |     811 | same as `.ts` Write: tsc included                                                                   |
-| FileChanged tracked unchanged  |        44 |      46 | `git status` skip, ext4                                                                             |
-| FileChanged ignored            |        43 |      43 | `git status` `!!` skip, ext4                                                                        |
-| FileChanged unlink             |        41 |      39 | early return before any lint                                                                        |
-| SessionStart fixture           |        45 |      46 | watch list, 6 lintable files                                                                        |
-| SessionStart this repo         |        59 |      60 | watch list of the repo checkout                                                                     |
+| Case                           | real PATH | no /mnt | What runs                                                                        |
+| ------------------------------ | --------: | ------: | -------------------------------------------------------------------------------- |
+| floor `node -e 0`              |        24 |      25 | no hook: Node startup + PATH lookup                                              |
+| empty payload `{}`             |        38 |      39 | hook floor, nothing to lint                                                      |
+| out-of-scope `.json` Write     |        42 |      39 | scope guard only                                                                 |
+| `.sh` Write                    |       137 |      41 | shellcheck: missing tool                                                         |
+| `.py` Write                    |       131 |      44 | ruff: missing tool                                                               |
+| `.yml` Write                   |       135 |      43 | yamllint: missing tool                                                           |
+| `.md` Write                    |       987 |     829 | markdownlint-cli2: npx fallback, warm cache                                      |
+| `.ts` Write (no eslint config) |       128 |     136 | tsc 7.0.2 warm incremental only (no lint config: no chain lint), 30-line fixture |
+| `.ts` Edit (no eslint config)  |       136 |     132 | same as `.ts` Write: tsc only                                                    |
+| FileChanged tracked unchanged  |        46 |      45 | `git status` skip, ext4                                                          |
+| FileChanged ignored            |        46 |      44 | `git status` `!!` skip, ext4                                                     |
+| FileChanged unlink             |        39 |      38 | early return before any lint                                                     |
+| SessionStart fixture           |        45 |      47 | watch list, 6 lintable files                                                     |
+| SessionStart this repo         |        60 |      61 | watch list of the repo checkout                                                  |

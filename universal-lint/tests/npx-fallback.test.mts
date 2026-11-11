@@ -5,6 +5,7 @@ import { makeEnv } from "./support/lint-hook.mts";
 
 test("eslint absent but npx present -> npx --yes eslint fallback runs, issues surfaced", () => {
   const e = makeEnv();
+  e.file("eslint.config.mjs", "export default [];\n");
   e.recStub("npx", 1);
   const f = e.file("a.js", "let x = 1\n");
   const r = e.run(f, { out: "a.js: 1:1  error  x is assigned a value but never used  no-unused-vars" });
@@ -14,6 +15,7 @@ test("eslint absent but npx present -> npx --yes eslint fallback runs, issues su
 
 test("eslint present on PATH -> npx never invoked even if present", () => {
   const e = makeEnv();
+  e.file("eslint.config.mjs", "export default [];\n");
   e.recStub("eslint", 0);
   e.recStub("npx", 0); // present but must not be used
   assert.deepEqual(e.run(e.file("a.js", "let x = 1\n"), { out: "clean" }).result, {});

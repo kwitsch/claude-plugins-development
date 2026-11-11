@@ -15,10 +15,10 @@ Legend: `[x]` finished. `[ ]` not finished; tag = `open` (code change, not start
 - [x] [F14](tasks/F14-rtk-eslint-defeats-edit-gate.md) Bypass `rtk lint` on Edit: its compacted output has no line locations, so the edit-range gate passes everything. Obsolete: rtk support removed in 0.15.0.
 - [x] [F17](tasks/F17-persist-rtk-probe.md) Persist `rtk rewrite` probe results across hook processes. Obsolete: rtk support removed in 0.15.0.
 - [x] [F31](tasks/F31-rtk-shellcheck-overhead.md) Measure rtk's overhead for shellcheck/ruff with the real tools. Obsolete: rtk support removed in 0.15.0.
+- [x] [F03](tasks/F03-eslint-without-config.md) Skip the eslint chain when no eslint/oxlint config exists. Shipped in 0.15.2.
 
 ## Stage 1: quick wins (high impact, low risk, small diffs)
 
-- [ ] [F03](tasks/F03-eslint-without-config.md) Skip the eslint chain when no eslint/oxlint config exists (about 0.85 s wasted per TS edit) `open` priority:high. Pairs with F02 (removes its no-config half).
 - [ ] [F04](tasks/F04-local-node-modules-bin.md) Run project-local `node_modules/.bin/<tool>` directly instead of npx `open` priority:high. Needs a user decision (languages.md "not generalized").
 - [ ] [F05](tasks/F05-stdin-eagain-large-payload.md) Read hook stdin robustly: payloads over about 190 KB are silently not linted `open` priority:medium
 - [ ] [F06](tasks/F06-markdownlint-cli2-no-globs.md) Pass `--no-globs` to markdownlint-cli2 `open` priority:medium

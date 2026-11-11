@@ -142,6 +142,7 @@ test("tsc: absent from PATH and no node_modules/.bin/tsc -> {}, no candidate", (
 
 test("combined: eslint (jsts chain) and tsc both report issues on the same .ts edit -> one additionalContext with both", () => {
   const { e, a } = proj();
+  e.file("eslint.config.mjs", "export default [];\n");
   e.stub("eslint", "echo \"eslint-finding-marker\"", "exit 1");
   e.stub("tsc", "echo \"tsc-finding-marker\"", "exit 2");
   const r = e.run(a);
@@ -151,6 +152,7 @@ test("combined: eslint (jsts chain) and tsc both report issues on the same .ts e
 
 test("combined: outer truncate re-caps the WHOLE joined message even when both per-finding blocks are individually under MAX_CONTEXT_CHARS", () => {
   const { e, a } = proj();
+  e.file("eslint.config.mjs", "export default [];\n");
   const big = "x".repeat(3000);
   e.stub("eslint", `echo "${big}"`, "exit 1");
   e.stub("tsc", `echo "${big}"`, "exit 2");
