@@ -39,7 +39,9 @@ These hooks are always active once the plugin is installed — there is no toggl
 
 `eslint`, `oxlint`, `markdownlint-cli2`, `markdownlint`, and `stylelint`, when not on
 `PATH`, run from the project's own `node_modules/.bin` (the nearest one from the
-file's directory up to the project root), else via `npx` (all official npm packages);
+file's directory up to the project root), else via `npx` (all official npm packages;
+a package npx has already installed runs from npx's cache directly; once a day the
+hook goes through `npx` again so a new release is picked up);
 `yamllint` has no npm distribution and is `PATH`-only, and Rust's `cargo`/
 `cargo clippy` are rustup-only and likewise `PATH`-only (no npx fallback).
 

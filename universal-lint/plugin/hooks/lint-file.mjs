@@ -9,6 +9,7 @@ import { json } from "node:stream/consumers";
 import { fileURLToPath } from "node:url";
 const SPAWN_TIMEOUT_MS = 3e4;
 const NPX_SPAWN_TIMEOUT_MS = 55e3;
+const NPX_REFRESH_MS = 24 * 60 * 60 * 1e3;
 const MAX_CONTEXT_CHARS = 4e3;
 const MAX_BUFFER_BYTES = 10 * 1024 * 1024;
 const TSC_SPAWN_TIMEOUT_MS = 45e3;
@@ -149,29 +150,56 @@ function onPath(tool) {
 export function isToolAvailable(tool, toolOnPath, npxOnPath) {
 	return toolOnPath || !!tool.npmSpec && npxOnPath;
 }
-function runLintTool(tool, argv, spawnOpts, local) {
-	if (local) {
-		const PATH = process.env.PATH ? path.dirname(local) + path.delimiter + process.env.PATH : path.dirname(local);
-		const result = spawnSync(local, argv, {
-			...spawnOpts,
-			env: {
-				...process.env,
-				PATH
-			}
-		});
-		const code = result.error && "code" in result.error ? result.error.code : undefined;
-		if (code !== "ENOENT" && code !== "EACCES") return result;
-	}
-	if (tool.npmSpec && !onPath(tool.name)) {
-		return spawnSync("npx", [
-			"--yes",
-			tool.npmSpec,
-			...argv
-		], {
+function spawnBin(bin, argv, spawnOpts) {
+	const PATH = process.env.PATH ? path.dirname(bin) + path.delimiter + process.env.PATH : path.dirname(bin);
+	const result = spawnSync(bin, argv, {
+		...spawnOpts,
+		env: {
+			...process.env,
+			PATH
+		}
+	});
+	const code = result.error && "code" in result.error ? result.error.code : undefined;
+	return code === "ENOENT" || code === "EACCES" ? null : result;
+}
+function runNpx(name, npmSpec, argv, spawnOpts) {
+	const npx = () => spawnSync("npx", [
+		"--yes",
+		npmSpec,
+		...argv
+	], {
+		...spawnOpts,
+		timeout: NPX_SPAWN_TIMEOUT_MS
+	});
+	if (walkToRoot(String(spawnOpts.cwd), (d) => existsSync(path.join(d, "node_modules", ".bin", name)))) return npx();
+	const key = createHash("sha512").update(npmSpec).digest("hex").slice(0, 16);
+	const dir = path.join(process.env.npm_config_cache || process.env.NPM_CONFIG_CACHE || path.join(homedir(), ".npm"), "_npx", key);
+	const stamp = path.resolve(process.env.CLAUDE_PLUGIN_DATA || tmpdir(), `npx-refreshed-${key}`);
+	let fresh = false;
+	try {
+		const age = Date.now() - lstatSync(stamp).mtimeMs;
+		fresh = age >= 0 && age < NPX_REFRESH_MS;
+	} catch {}
+	if (fresh && !existsSync(path.join(dir, "concurrency.lock"))) {
+		const cached = spawnBin(path.join(dir, "node_modules", ".bin", name), argv, {
 			...spawnOpts,
 			timeout: NPX_SPAWN_TIMEOUT_MS
 		});
+		if (cached) return cached;
 	}
+	const result = npx();
+	if (!result.error) {
+		try {
+			mkdirSync(path.dirname(stamp), { recursive: true });
+			writeFileSync(stamp, "");
+		} catch {}
+	}
+	return result;
+}
+function runLintTool(tool, argv, spawnOpts, local) {
+	const viaLocal = local ? spawnBin(local, argv, spawnOpts) : null;
+	if (viaLocal) return viaLocal;
+	if (tool.npmSpec && !onPath(tool.name)) return runNpx(tool.name, tool.npmSpec, argv, spawnOpts);
 	const spawnName = tool.spawnAs?.name ?? tool.name;
 	const spawnArgv = tool.spawnAs ? [...tool.spawnAs.args, ...argv] : argv;
 	return spawnSync(spawnName, spawnArgv, spawnOpts);
