@@ -68,7 +68,8 @@ the shapes below: `inline-headroom/docs/claude-code-verification.md`.
 - Cache countdown / auto-compact / Haiku compaction (see `CLAUDE.md`): `turn.step` wraps `next` in `cacheWatch`
   (passes chunks, reads the result's `usage` in a try/catch), `turn.complete` clears `turnRunning` before its readiness
   guard, the `session.compact` hook is registered whatever `compaction` says (only the Jev ranking honours it: a
-  closure const) and none of these three has a guard. The `AbovePrompt` hook shows the countdown even without the
+  closure const) and has no guard of its own (only `withJevRanking` checks readiness). The cache work in `turn.step`
+  and `turn.complete` comes before their readiness guard, which stays: do not remove it. The `AbovePrompt` hook shows the countdown even without the
   effort row. `$.clock.every` is started in `session.start` (the engine does not wait for the callback: ticks
   overlap); `session.end` (raised for /clear and /resume, where `session.start` is not) resets the conversation state.
   `cacheTick` calls `$.ui.invalidate` through `showMinutes` in try/catch, `$.command.run` for `/compact` (rejects are

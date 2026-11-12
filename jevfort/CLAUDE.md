@@ -45,7 +45,8 @@ subagents load it via ToolSearch), no skills, agents, command hooks or MCP serve
   `(effort auto off)`. Not ported from effortless: settings, handoff and the other bar features; subagent turns do not
   update the band.
 - Cache countdown, Haiku compaction and auto-compact (0.7.0, ported from HeyCubit/effortless `hooks/register.tsx`,
-  none needs jev-api, so their hooks have no readiness guard): `cache.mts` (pure: TTL detection, minutes, label,
+  none needs jev-api, so their work runs before the readiness guard of `turn.step`/`turn.complete`, and `session.compact`
+  has none except around the Jev ranking): `cache.mts` (pure: TTL detection, minutes, label,
   colour) and the Haiku transcript/prompt in `compact.mts`. `register.mts` wraps `next` in
   `turn.step` with `cacheWatch`: a main-loop response with `usage` on the session's own model (`request.model ===
   e.model`) sets `cacheExpires = now + TTL` (in a try/catch: a cosmetic feature never fails the step). The lifetime is

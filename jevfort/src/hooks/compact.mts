@@ -66,9 +66,9 @@ export function compactInstructions(items: readonly Item[], scores: readonly (nu
 
 /** The summarizer model of a Haiku compaction. */
 export const COMPACT_MODEL = "claude-haiku-5-5";
-/** The transcript's most text sent to Haiku: about 600k tokens, inside its window with room for the summary. */
 /** The most tokens Haiku may write for a summary; a reply that uses all of them was cut off. */
 export const COMPACT_MAX_TOKENS = 16_000;
+/** The transcript's most text sent to Haiku: about 600k tokens, inside its window with room for the summary. */
 const COMPACT_MAX_CHARS = 2_400_000;
 /** The last messages go to Haiku nearly whole: the work in progress lives in their tool calls and results. */
 const COMPACT_TAIL = 6;

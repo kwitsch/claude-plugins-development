@@ -5,9 +5,12 @@ import { expect, test as pureTest } from "vitest";
 import { CACHE_TTL, cacheColor, cacheLabel, cacheTtlOf, minutesLeft, nextTtl } from "../plugin/hooks/cache.mjs";
 import { COMPACT_MAX_TOKENS, compactTranscript, haikuTranscript } from "../plugin/hooks/compact.mjs";
 
+/** Options passed to the kit: effort routing, compaction and Haiku compaction on, auto-compact at 60%. */
 const DEFAULTS = { routing: "effort", compaction: true, haikuCompact: true, autoCompactPercent: 60 };
+/** Test kit bound to the built `plugin/hooks/register.mjs`. */
 const { test, mock } = createKit({ module: new URL("../plugin/hooks/register.mjs", import.meta.url), plugin: "jevfort", options: DEFAULTS });
 
+/** Usage of one main-loop step that writes 900 tokens to the one-hour cache. */
 const usage1h = { input_tokens: 5, output_tokens: 5, cache_read_input_tokens: 0, cache_creation_input_tokens: 900, cache_creation: { ephemeral_1h_input_tokens: 900 } };
 /** What `$.session.start` gets. */
 const START = { cwd: "/proj", surface: "terminal", isInteractive: true };
@@ -101,6 +104,7 @@ function haikuSetup(on: Parameters<typeof mock.clock>[0], text: string | undefin
   return asked;
 }
 
+/** Two-message transcript used as compaction input. */
 const MESSAGES = [{ role: "user", text: "fix the date bug", toolUses: [] }, { role: "assistant", text: "on it", toolUses: [] }];
 
 test("session.compact is written by Haiku, with the user's note, without jev-api", async ($, on) => {

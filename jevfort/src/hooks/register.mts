@@ -304,8 +304,11 @@ async function cacheTick($: Engine, autoCompactPercent: number): Promise<void> {
   const minutes = minutesLeft(cacheExpires, await $.clock.now());
   showMinutes($, minutes);
   if (turnRunning || autoCompactPercent <= 0 || minutes !== 0 || coldCompacted) return;
-  // Ticks overlap when one outlasts the 15 s period, so the flag is read again after the await.
-  if (((await $.session.usage()).context.percent ?? 0) < autoCompactPercent || coldCompacted) return;
+  const expires = cacheExpires;
+  const percent = (await $.session.usage()).context.percent ?? 0;
+  // The await yields: a tick that overlapped, a turn that started, a response that refreshed the cache (`cacheExpires`
+  // moved) or a session reset (zeroed it) makes this decision stale, so the state is read again.
+  if (percent < autoCompactPercent || coldCompacted || turnRunning || cacheExpires !== expires) return;
   coldCompacted = true;
   // The app's own /compact, run as if typed: queued until the session is idle, resolved once it ran. A compaction that
   // stands zeroes `cacheExpires` itself (the session.compact hook). A refusal (a Stop, DISABLE_COMPACT) is said in the
@@ -966,9 +969,11 @@ export const register = (on: On, options: Options): void => {
     });
   }
 
-  // Compaction: Jev ranks the recent tool results (the summarizer is told what to keep), then Haiku 5.5 writes the
-  // summary (a fraction of the chat model's price); any failure falls through to Claude Code's own compaction. Works
-  // without jev-api: only the ranking needs Jev.
+  /**
+   * Compaction: Jev ranks the recent tool results (the summarizer is told what to keep), then Haiku 5.5 writes the
+   * summary (a fraction of the chat model's price); any failure falls through to Claude Code's own compaction. Works
+   * without jev-api: only the ranking needs Jev.
+   */
   on("session.compact", async function onCompact($: Engine, e: CompactEvent, next: Next<CompactEvent, unknown>): Promise<unknown> {
     if (e.agentId) return next(e);
     const ranked = jevRanking ? await withJevRanking($, e) : e;
@@ -1052,8 +1057,10 @@ export const register = (on: On, options: Options): void => {
     return result;
   });
 
-  // /clear and an in-process /resume end a conversation without a session.start for the next one: its countdown,
-  // first-turn estimates, band and Auto switch end here.
+  /**
+   * /clear and an in-process /resume end a conversation without a session.start for the next one: its countdown,
+   * first-turn estimates, band and Auto switch end here.
+   */
   on("session.end", async function onSessionEnd($: Engine, e: unknown, next: Next<unknown, unknown>): Promise<unknown> {
     forgetConversation();
     resetCache($);
