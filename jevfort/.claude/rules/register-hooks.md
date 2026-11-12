@@ -25,15 +25,16 @@ the shapes below: `inline-headroom/docs/claude-code-verification.md`.
   blocklist) plus one with the matcher `{ tool: "Agent" }`; `turn.step`, `tool.check`, `turn.complete`,
   `session.start`, `prompt.submit`, `agent.offer` and `session.compact` have one each; `command.run` and `ui.render`
   carry matchers.
-- Jev is asked only through the jev-api plugin's tools `mcp__jev-api__noul`, `mcp__jev-api__choice` and `mcp__jev-api__score`: `askJev` raises one
-  `$.tool.call({ tool: "mcp__jev-api__<type>", instructions, state, criteria? })` per question (`state` is
-  `JSON.stringify` text), all at once, raced against `TIMEOUT_MS`; a `{ deny }`, `isError`, a rejection, a result that is
-  not the question's answer JSON or the timeout fails the whole `askJev` (`{ ok: false }`, never a throw). The engine
+- Jev is asked only through the jev-api plugin's tool `mcp__jev-api__batch`: `askJev` raises one
+  `$.tool.call({ tool: "mcp__jev-api__batch", state, questions })` (`state` is `JSON.stringify` text, `questions` the
+  `Question` objects in id order), raced against `TIMEOUT_MS`; a `{ deny }`, `isError`, a rejection, a result that is not
+  a JSON array with one answer of the asked type per question, or the timeout fails the whole `askJev` (`{ ok: false }`,
+  never a throw). The engine
   member is typed `tool.call(input): Promise<ToolResult>`; there is no `$.http` use.
 - Readiness guard: every hook except the `/jev` `command.run` and `ui.render` hooks starts with
   `if ((await jevMissing($)).length) return next(e);` (`return yield* next(e)` in `turn.step`). `jevMissing` and its
   cache `jevTools` are module level (`$` may only be passed to top-level functions): one `$.tool.list()` per session,
-  reset at `session.start`, a rejected or malformed listing counts as all three tools missing. A new hook needs the guard too.
+  reset at `session.start`, a rejected or malformed listing counts as the tool missing. A new hook needs the guard too.
 - `session.start` registers the `estimate_effort` tool with `$.tool.register(ESTIMATE_SPEC)` whatever `routing`
   says (a throw is logged as `kind: "error"`), but only when the jev-api tools are listed: it checks `jevMissing($)`
   after `next(e)` (jev-api registers its tools in its own `session.start`) and otherwise logs `inactive: jev-api tools missing (...)` and registers nothing. A registered tool that no hook answers fails, so the unmatched
@@ -53,13 +54,14 @@ Every mod-side storage (`$.mcp.call`) call must be awaited by a running hook of 
 core routes `$.mcp.call` through `$.tool.call` and its permission check, although the typings promise no prompt. A
 plugin's own hooks see a call it raises only while one of its hooks runs; a call raised after the hook returned (an
 unawaited chain, a `$.clock.every` callback) skips them, so in `default` mode the user gets a permission dialog per
-call and a headless session denies it. jevfort uses `$.store`, `$.tool.call` (the jev-api tools) and `$.fs`, and every
+call and a headless session denies it. jevfort uses `$.store`, `$.tool.call` (jev-api's batch tool) and `$.fs`, and every
 `askJev` is awaited in-frame (also the `measure` promise of `turn.step`, awaited before the hook returns). Every
 `record(...)` is awaited inside its hook for the same reason.
 
 ## Tests: the jev-api fake
 
-`tests/register.test.mts` and `tests/phase3.test.mts` stub `tool.list` (the three jev-api tools) and `tool.call`. The
-kit resolves a mod's `$.tool.call` to the stub's `value` and rejects with its `deny`, so the fake answers a jev-api
-call with `{ value: { result: "<answer JSON>" } }` or `{ deny: "<type>: <reason>" }` and passes every other tool on
-with `next(e)`. The tools carry no question id: the fake finds it by the `instructions` text.
+`tests/register.test.mts` and `tests/phase3.test.mts` stub `tool.list` (jev-api's batch tool) and `tool.call`. The
+kit resolves a mod's `$.tool.call` to the stub's `value` and rejects with its `deny`, so the fake answers a batch
+call with `{ value: { result: "<JSON array of answers>" } }` or `{ deny: "batch: <reason>" }` and passes every other
+tool on with `next(e)`. It records each batch question on its own, as `mcp__jev-api__<type>`, so assertions read per
+question. Batch questions carry no id: the fake finds it by the `instructions` text.

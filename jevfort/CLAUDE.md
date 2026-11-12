@@ -13,20 +13,21 @@ subagents load it via ToolSearch), no skills, agents, command hooks or MCP serve
   "acted" vs "pass" (status suffix ` (pass)`). A `mode` key left in `$.store` by an older version is never read.
 - No permission gate: upstream's Bash and edit gate (risk and in-scope questions, `gate` option, thresholds, report
   rows) is gone. `tool.check` only approves Jev's own vetted calls and writes into the session scratchpad.
-- Jev is asked only through the jev-api plugin's tools `mcp__jev-api__noul`, `mcp__jev-api__choice` and
-  `mcp__jev-api__score` (upstream sends its own HTTP request): `askJev` raises one `$.tool.call` per question, all at
-  once, with a 4 s budget per `askJev` (`TIMEOUT_MS`), all or nothing. jevfort makes no network request and reads no
+- Jev is asked only through the jev-api plugin's tool `mcp__jev-api__batch` (upstream sends its own HTTP request):
+  `askJev` raises one `$.tool.call` with all questions of the decision (one System One request, needs jev-api >= 0.2.0),
+  with a 4 s budget per `askJev` (`TIMEOUT_MS`), all or nothing. jevfort makes no network request and reads no
   endpoint or key: those are jev-api's environment (`TYPESAFE_API_KEY`, `TYPESAFE_BASE_URL`, `JEV_URL`,
   `TYPESAFE_DEFAULT_MODEL`). No `userConfig` entry for any of it.
 - jev-api is a declared plugin dependency (`claudePlugin.dependencies: ["jev-api"]` in `package.json`, copied into
   `plugin.json`; bare name, no version range): Claude Code keeps jevfort disabled while jev-api is missing or disabled.
-  At runtime `jevMissing($)` looks the three tool names up in `$.tool.list()` once per session (cached, reset at
-  `session.start`, a failed or malformed listing counts as all missing). While one is missing jevfort is inactive: every hook except
+  At runtime `jevMissing($)` looks the batch tool up in `$.tool.list()` once per session (cached, reset at
+  `session.start`, a failed or malformed listing counts as all missing). While it is missing (also with jev-api 0.1, which has only `noul`/`choice`/`score`) jevfort is inactive: every hook except
   the `/jev` command and its render passes through untouched (also the scratchpad-write allow), `estimate_effort` is
   not registered, one `inactive: jev-api tools missing (...)` error is logged per session start and `/jev` says why.
-- Coupling: jevfort relies on jev-api's tool names, input fields (`instructions` and `state` as strings, `criteria` per
-  type) and answer JSON (`type` plus the System One fields); no code is imported. Renaming jev-api's tools or changing
-  their input or answer shape breaks jevfort: the runtime check catches renamed tools, changed shapes surface as
+- Coupling: jevfort relies on jev-api's `batch` name, input (`state` string, `questions` array of
+  `{ type, instructions, criteria? }`) and answer (a JSON array of answers, `type` plus the System One fields, in
+  question order); no code is imported. Renaming the tool or changing its input or answer shape breaks jevfort: the
+  runtime check catches a renamed tool, changed shapes surface as
   `askJev` errors and the fallback to Claude Code's own behaviour.
 - Every `$` use and every `on(...)` call lives in `src/hooks/register.mts` (engine rule, see
   `.claude/rules/register-hooks.md`); upstream's `askJev`, `record`, `readLog`, `clearLog`, `stats`, `readTurn`,
@@ -41,7 +42,7 @@ subagents load it via ToolSearch), no skills, agents, command hooks or MCP serve
   recognised by `origin: { kind: "plugin", name: "jevfort" }` in `prompt.submit`, not by its text; a user's own prompt (`origin.kind` `composer`, not meta) clears the
   exemption of the next turn, meta prompts keep it. A rejected follow-up is logged by the next `turn.complete`.
 - Effort routing: the turn's effort comes from the effort estimate (`estimateEffort` in `policy.mts`, shared with the
-  `estimate_effort` tool; its two questions go out with the other step-0 questions, as parallel jev-api tool calls), not from upstream's difficulty->effort
+  `estimate_effort` tool; its two questions go out with the other step-0 questions in the same batch call), not from upstream's difficulty->effort
   mapping, which is gone; the difficulty question is asked only with `routing: "model"` and only lowers the model.
   Opus/Sonnet sessions are estimated every turn; Haiku/Fable sessions only on each loop's first turn, whose estimate is
   then held while the session effort is unchanged. A model switch starts a new first turn. Bounds: options

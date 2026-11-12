@@ -27,16 +27,16 @@ const { test, mock } = createKit({ module: new URL("../plugin/hooks/register.mjs
 const CWD = "/proj";
 
 const JEV_PREFIX = "mcp__jev-api__";
-// The jev-api plugin's tools as `$.tool.list()` lists them.
-const JEV_TOOLS = ["noul", "choice", "score"].map((t) => ({ name: JEV_PREFIX + t, description: `Ask Jev a ${t} question`, mcp: true }));
-// The classifier's question ids by their instructions text (the jev-api tools carry no id).
+// The jev-api tool jevfort needs as `$.tool.list()` lists it.
+const JEV_TOOLS = [{ name: JEV_PREFIX + "batch", description: "Ask Jev several questions", mcp: true }];
+// The classifier's question ids by their instructions text (batch questions carry no id).
 const PROMPT_IDS = new Map(Object.entries(promptQuestions({ none: "x" })).map(([id, q]) => [q.instructions, id]));
 
 type Msg = { role: "user" | "assistant"; text: string; toolUses: Record<string, unknown>[] };
-/** One jev-api tool call as the fake saw it; `state` is JSON text. */
+/** One question of a batch call as the fake saw it: `mcp__jev-api__<type>` as `tool`; `state` is the call's JSON text. */
 type Asked = { tool: string; instructions: string; state: string; criteria?: unknown };
 
-/** Lists the jev-api tools, answers each of their calls with `jev`'s answer and stubs the session reads the hooks make; returns the calls. */
+/** Lists the batch tool, answers each batch question with `jev`'s answer and stubs the session reads the hooks make; returns the questions. */
 function base(on: On, jev: (q: Asked) => Record<string, unknown>, messages: Msg[] = []) {
   const sent: Asked[] = [];
   mock.store(on, {});
@@ -46,12 +46,11 @@ function base(on: On, jev: (q: Asked) => Record<string, unknown>, messages: Msg[
   on("ui.status", () => ({ value: undefined }));
   on("tool.list", () => ({ value: JEV_TOOLS }));
   on("tool.call", (_$, e, next) => {
-    const tool = String(e.tool);
-    if (!tool.startsWith(JEV_PREFIX)) return next(e);
-    const q: Asked = { tool, instructions: String(e.instructions), state: String(e.state), criteria: e.criteria };
-    sent.push(q);
-    // A mod's `$.tool.call` resolves to the stub's `value`: the tool result `{ result }`.
-    return { value: { result: JSON.stringify(jev(q)) } };
+    if (e.tool !== JEV_PREFIX + "batch") return next(e);
+    const asked = (e.questions as { type: string; instructions: string; criteria?: unknown }[]).map((b): Asked => ({ tool: JEV_PREFIX + b.type, instructions: b.instructions, state: String(e.state), criteria: b.criteria }));
+    sent.push(...asked);
+    // A mod's `$.tool.call` resolves to the stub's `value`: the tool result `{ result }`, the answers in question order.
+    return { value: { result: JSON.stringify(asked.map((q) => jev(q))) } };
   });
   return sent;
 }

@@ -1,10 +1,7 @@
 export const TIMEOUT_MS = 4e3;
 export const JEV_TOOL_PREFIX = "mcp__jev-api__";
-export const JEV_TOOLS = [
-	"noul",
-	"choice",
-	"score"
-].map((t) => JEV_TOOL_PREFIX + t);
+export const JEV_BATCH = JEV_TOOL_PREFIX + "batch";
+export const JEV_TOOLS = [JEV_BATCH];
 export function missingJevTools(names) {
 	return JEV_TOOLS.filter((t) => !names.includes(t));
 }

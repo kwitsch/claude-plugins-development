@@ -1,15 +1,15 @@
 /**
- * TypeSafe System One question and answer shapes, answer readers and the names of the jev-api plugin's tools. Every
- * question goes to one jev-api tool (`mcp__jev-api__noul|choice|score`), one call each. Pure: the calls themselves
- * (`askJev`) live in `register.mts`, the only module that may use the engine API.
+ * TypeSafe System One question and answer shapes, answer readers and the name of the jev-api tool jevfort needs. All
+ * questions of one decision go to jev-api's `batch` tool in one call (one System One request). Pure: the call itself
+ * (`askJev`) lives in `register.mts`, the only module that may use the engine API.
  *
  * @packageDocumentation
  */
 
-/** The local budget of one `askJev` (all its tool calls together) before Claude Code's own behaviour wins, in ms. */
+/** The local budget of one `askJev` (its one batch call) before Claude Code's own behaviour wins, in ms. */
 export const TIMEOUT_MS = 4000;
 
-/** A question Jev answers about a `state`, in the input shape of the jev-api tools: a yes/no probability, a choice among options, or a score along levels. */
+/** A question Jev answers about a `state`, in the shape of one entry of jev-api's `batch` input: a yes/no probability, a choice among options, or a score along levels. */
 export type Question =
   | { type: "noul"; instructions: string; criteria?: { true?: string; false?: string } }
   | { type: "choice"; instructions: string; criteria: Record<string, string> }
@@ -27,10 +27,12 @@ export type Answer = NoulAnswer | ChoiceAnswer | ScoreAnswer;
 /** What one `askJev` came back with, and how long it took. */
 export type JevResult = { ok: true; answers: Record<string, Answer>; ms: number } | { ok: false; error: string; ms: number };
 
-/** Prefix of the jev-api plugin's tools; the question type completes the name. */
+/** Prefix of the jev-api plugin's tools. */
 export const JEV_TOOL_PREFIX = "mcp__jev-api__";
+/** jev-api's tool for several questions about one `state` in one request; its result is the answers in question order. */
+export const JEV_BATCH = JEV_TOOL_PREFIX + "batch";
 /** The jev-api tools jevfort needs, by full name. */
-export const JEV_TOOLS = ["noul", "choice", "score"].map((t) => JEV_TOOL_PREFIX + t);
+export const JEV_TOOLS = [JEV_BATCH];
 
 /**
  * The needed jev-api tools missing from a tool listing.

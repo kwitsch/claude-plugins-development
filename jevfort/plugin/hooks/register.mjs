@@ -2,7 +2,7 @@ import { GENERAL, SWITCH_AT } from "./agents.mjs";
 import { absolute, AUTH_TOOL, bash, BUILTIN_COMMANDS, clipScript, coversStep, dedupeSkills, isSafeToOffer, MAX_READS, mentionedPaths, quotedTerms, relevant, SAFE_MAKE, SAFE_SCRIPT, sameCall, SKILL_BLOCKLIST_KEY } from "./candidates.mjs";
 import { compactInstructions, compactItems, RELEVANCE } from "./compact.mjs";
 import { clip, splitTurn, summarize, toolCalls } from "./context.mjs";
-import { choice, JEV_TOOL_PREFIX, JEV_TOOLS, missingJevTools, noul, score, TIMEOUT_MS } from "./jev.mjs";
+import { choice, JEV_BATCH, JEV_TOOL_PREFIX, JEV_TOOLS, missingJevTools, noul, score, TIMEOUT_MS } from "./jev.mjs";
 import { LOG_KEY, MAX_ENTRIES, recentDecisions, remember, statsKey } from "./log.mjs";
 import { bestAction, bounds, difficultyQuestion, doneQuestion, EFFORT_ORDER, effortQuestion, ESTIMATE_SPEC, ESTIMATE_TOOL, estimateEffort, EVERY_TURN_MODELS, inScratchpad, isEffort, lowerModel, mechanicalQuestion, modelFamily, nextActionQuestion, parseEstimateInput, pickCandidate, route, shouldContinue, singleActionQuestion } from "./policy.mjs";
 import { hints, NONE, promptQuestions } from "./prompt.mjs";
@@ -30,38 +30,41 @@ async function askJev($, state, questions) {
 		...r,
 		ms: await $.clock.now() - startedAt
 	});
-	const text = JSON.stringify(state);
-	const calls = Promise.all(Object.entries(questions).map(async ([id, q]) => {
+	const entries = Object.entries(questions);
+	const call = (async () => {
 		const r = await $.tool.call({
-			tool: JEV_TOOL_PREFIX + q.type,
-			instructions: q.instructions,
-			state: text,
-			...q.criteria === undefined ? {} : { criteria: q.criteria }
+			tool: JEV_BATCH,
+			state: JSON.stringify(state),
+			questions: entries.map(([, q]) => q)
 		});
 		if (r.deny !== undefined || r.isError === true || typeof r.result !== "string") {
 			const detail = typeof r.result === "string" ? r.result : r.result === undefined ? undefined : JSON.stringify(r.result);
-			throw new Error(r.deny !== undefined ? asText(r.deny) : detail ?? `${q.type}: no result`);
+			throw new Error(r.deny !== undefined ? asText(r.deny) : detail ?? "batch: no result");
 		}
-		let answer;
+		let list;
 		try {
-			answer = JSON.parse(r.result);
+			list = JSON.parse(r.result);
 		} catch {
-			throw new Error(`${q.type}: result is not JSON`);
+			throw new Error("batch: result is not JSON");
 		}
-		if (answer?.type !== q.type) throw new Error(`${q.type}: no ${q.type} answer`);
-		return [id, answer];
-	}));
-	calls.catch(() => undefined);
+		if (!Array.isArray(list) || list.length !== entries.length) throw new Error(`batch: expected ${entries.length} answers`);
+		return Object.fromEntries(entries.map(([id, q], i) => {
+			const answer = list[i];
+			if (answer?.type !== q.type) throw new Error(`${q.type}: no ${q.type} answer`);
+			return [id, answer];
+		}));
+	})();
+	call.catch(() => undefined);
 	const timeout = $.clock.sleep(TIMEOUT_MS).then(() => undefined);
 	try {
-		const entries = await Promise.race([calls, timeout]);
-		if (!entries) return done({
+		const answers = await Promise.race([call, timeout]);
+		if (!answers) return done({
 			ok: false,
 			error: `timeout after ${TIMEOUT_MS}ms`
 		});
 		return done({
 			ok: true,
-			answers: Object.fromEntries(entries)
+			answers
 		});
 	} catch (err) {
 		return done({

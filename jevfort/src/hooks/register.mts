@@ -19,7 +19,7 @@ import type { Candidate } from "./candidates.mjs";
 import { compactInstructions, compactItems, RELEVANCE } from "./compact.mjs";
 import { clip, splitTurn, summarize, toolCalls } from "./context.mjs";
 import type { SessionMessage, ToolUse, TurnContext } from "./context.mjs";
-import { choice, JEV_TOOL_PREFIX, JEV_TOOLS, missingJevTools, noul, score, TIMEOUT_MS } from "./jev.mjs";
+import { choice, JEV_BATCH, JEV_TOOL_PREFIX, JEV_TOOLS, missingJevTools, noul, score, TIMEOUT_MS } from "./jev.mjs";
 import type { Answer, ChoiceAnswer, JevResult, Question } from "./jev.mjs";
 import { LOG_KEY, MAX_ENTRIES, recentDecisions, remember, statsKey } from "./log.mjs";
 import type { Entry } from "./log.mjs";
@@ -154,10 +154,10 @@ const FINISHED = new Set(["completed", "failed", "killed", "idle"]);
 const asText = (v: unknown): string => String(v);
 
 /**
- * Asks Jev through the jev-api plugin's tools; never throws. Every question is one `$.tool.call` to
- * `mcp__jev-api__<type>`, all raised at once inside the calling hook's frame and raced together against
- * `TIMEOUT_MS`. All or nothing: any failed call, a timeout or a wrong answer is `{ ok: false }`, so callers fall back
- * to Claude Code's own behaviour. A call still running when the budget ends is ignored.
+ * Asks Jev through the jev-api plugin's `batch` tool; never throws. All questions go out in one `$.tool.call` (one
+ * System One request) inside the calling hook's frame, raced against `TIMEOUT_MS`. All or nothing: a failed call, a
+ * timeout or a wrong answer is `{ ok: false }`, so callers fall back to Claude Code's own behaviour. A call still
+ * running when the budget ends is ignored.
  *
  * @param $ - Engine interface.
  * @param state - The facts the questions are about; sent as JSON text.
@@ -168,34 +168,37 @@ async function askJev($: Engine, state: unknown, questions: Record<string, Quest
   const startedAt = await $.clock.now();
   const done = async (r: { ok: true; answers: Record<string, Answer> } | { ok: false; error: string }): Promise<JevResult> => ({ ...r, ms: (await $.clock.now()) - startedAt });
 
-  const text = JSON.stringify(state);
-  const calls = Promise.all(
-    Object.entries(questions).map(async ([id, q]): Promise<[string, Answer]> => {
-      const r = await $.tool.call({ tool: JEV_TOOL_PREFIX + q.type, instructions: q.instructions, state: text, ...(q.criteria === undefined ? {} : { criteria: q.criteria }) });
-      // jev-api's deny text already starts with the type.
-      if (r.deny !== undefined || r.isError === true || typeof r.result !== "string") {
-        // A structured error result is serialized, not printed as `[object Object]`.
-        const detail = typeof r.result === "string" ? r.result : r.result === undefined ? undefined : JSON.stringify(r.result);
-        throw new Error(r.deny !== undefined ? asText(r.deny) : (detail ?? `${q.type}: no result`));
-      }
-      let answer: Answer | null;
-      try {
-        answer = JSON.parse(r.result) as Answer | null;
-      } catch {
-        throw new Error(`${q.type}: result is not JSON`);
-      }
+  const entries = Object.entries(questions);
+  const call = (async (): Promise<Record<string, Answer>> => {
+    const r = await $.tool.call({ tool: JEV_BATCH, state: JSON.stringify(state), questions: entries.map(([, q]) => q) });
+    // jev-api's deny text already starts with `batch:`.
+    if (r.deny !== undefined || r.isError === true || typeof r.result !== "string") {
+      // A structured error result is serialized, not printed as `[object Object]`.
+      const detail = typeof r.result === "string" ? r.result : r.result === undefined ? undefined : JSON.stringify(r.result);
+      throw new Error(r.deny !== undefined ? asText(r.deny) : (detail ?? "batch: no result"));
+    }
+    let list: unknown;
+    try {
+      list = JSON.parse(r.result);
+    } catch {
+      throw new Error("batch: result is not JSON");
+    }
+    if (!Array.isArray(list) || list.length !== entries.length) throw new Error(`batch: expected ${entries.length} answers`);
+    // The answers come in question order.
+    return Object.fromEntries(entries.map(([id, q], i) => {
+      const answer = list[i] as Answer | null;
       if (answer?.type !== q.type) throw new Error(`${q.type}: no ${q.type} answer`);
       return [id, answer];
-    }),
-  );
-  // Calls abandoned at the timeout must not raise unhandled rejections.
-  calls.catch(() => undefined);
+    }));
+  })();
+  // A call abandoned at the timeout must not raise an unhandled rejection.
+  call.catch(() => undefined);
   const timeout = $.clock.sleep(TIMEOUT_MS).then(() => undefined);
 
   try {
-    const entries = await Promise.race([calls, timeout]);
-    if (!entries) return done({ ok: false, error: `timeout after ${TIMEOUT_MS}ms` });
-    return done({ ok: true, answers: Object.fromEntries(entries) });
+    const answers = await Promise.race([call, timeout]);
+    if (!answers) return done({ ok: false, error: `timeout after ${TIMEOUT_MS}ms` });
+    return done({ ok: true, answers });
   } catch (err) {
     return done({ ok: false, error: err instanceof Error ? err.message : String(err) });
   }
