@@ -396,6 +396,28 @@ export const register = (on, options) => {
 		const { Markdown } = $.ui.resolve(e);
 		return Markdown({ text: e.props.text });
 	});
+	let band = {};
+	let autoOff = false;
+	on("ui.render", { component: "AbovePrompt" }, function onRenderBand($, e, next) {
+		if (routing === "off" || jevState !== "" || e.props.hasSurvey) return next(e);
+		const { Box, Text, Button } = $.ui.resolve(e);
+		return Box({
+			flexDirection: "row",
+			children: [...EFFORT_ORDER.map((level) => Text({
+				...level === band.configured ? { bold: true } : {},
+				...level === band.chosen ? { color: "blue" } : {},
+				...level !== band.configured && level !== band.chosen ? { dimColor: true } : {},
+				children: [`${level} `]
+			})), Button({
+				key: "auto",
+				label: `Jev auto: ${autoOff ? "off" : "on"}`,
+				onPress: () => {
+					autoOff = !autoOff;
+					$.ui.invalidate("ui.render");
+				}
+			})]
+		});
+	});
 	let donePending = false;
 	let lostFollowUp;
 	on("prompt.submit", async function onPromptSubmit($, e, next) {
@@ -535,6 +557,8 @@ export const register = (on, options) => {
 	const ownCalls = new Set();
 	on("session.start", async function onSessionStart($, e, next) {
 		firstTurns.clear();
+		band = {};
+		autoOff = false;
 		jevState = undefined;
 		if (badRange) await record($, {
 			kind: "error",
@@ -588,7 +612,7 @@ export const register = (on, options) => {
 		const lines = recentDecisions().slice(-10).map((d) => `- ${d.kind}${d.applied ? "" : " (pass)"}: ${d.text}${d.ms !== undefined ? ` [${Math.round(d.ms)}ms]` : ""}`);
 		return { text: [
 			...missing.length ? [`Jev pilot: inactive, the jev-api tools are missing (${missing.join(", ")}). jevfort needs jev-api 0.2.0 or later and no permissions.deny rule matching its tools; it looks again at the next turn.`] : [],
-			`Jev pilot: routing ${routing}, take steps ${takeSteps} (p ≥ ${takeThreshold}), done check ${doneCheck}, subagents ${subagents}`,
+			`Jev pilot: routing ${routing}${autoOff ? " (effort auto off)" : ""}, take steps ${takeSteps} (p ≥ ${takeThreshold}), done check ${doneCheck}, subagents ${subagents}`,
 			`Decisions (all sessions): ${counts}`,
 			lines.length ? `Recent:\n${lines.join("\n")}` : "No decisions this session yet.",
 			"Full analysis: /jev report"
@@ -749,29 +773,39 @@ export const register = (on, options) => {
 		let firstTurn;
 		if (routing !== "off" && e.index === 0) {
 			if (routing === "model") questions.difficulty = difficultyQuestion;
-			const loop = e.agentId ?? "";
-			const first = firstTurns.get(loop);
-			const family = modelFamily(e.model);
-			const fresh = !first || first.family !== family;
-			if (fresh) {
-				firstTurn = {
-					family,
-					from: e.effort
-				};
-				firstTurns.set(loop, firstTurn);
-			}
 			const sessionEffort = isEffort(e.effort) ? e.effort : undefined;
-			estimate = family && sessionEffort && (fresh || EVERY_TURN_MODELS.includes(family)) ? {
-				model: family,
-				defaultEffort: sessionEffort,
-				...effortRange
-			} : undefined;
-			if (estimate) {
-				questions.effort = effortQuestion;
-				questions.mechanical = mechanicalQuestion;
+			if (!e.agentId) {
+				band = sessionEffort ? { configured: sessionEffort } : {};
+				$.ui.invalidate("ui.render");
 			}
-			held = !estimate && first?.effort && first.family === family && first.from === e.effort ? first.effort : undefined;
-			if (held && held !== e.effort) turn.effort = held;
+			if (!autoOff) {
+				const loop = e.agentId ?? "";
+				const first = firstTurns.get(loop);
+				const family = modelFamily(e.model);
+				const fresh = !first || first.family !== family;
+				if (fresh) {
+					firstTurn = {
+						family,
+						from: e.effort
+					};
+					firstTurns.set(loop, firstTurn);
+				}
+				estimate = family && sessionEffort && (fresh || EVERY_TURN_MODELS.includes(family)) ? {
+					model: family,
+					defaultEffort: sessionEffort,
+					...effortRange
+				} : undefined;
+				if (estimate) {
+					questions.effort = effortQuestion;
+					questions.mechanical = mechanicalQuestion;
+				}
+				held = !estimate && first?.effort && first.family === family && first.from === e.effort ? first.effort : undefined;
+				if (held && held !== e.effort) turn.effort = held;
+				if (held && !e.agentId) {
+					band.chosen = held;
+					$.ui.invalidate("ui.render");
+				}
+			}
 		}
 		if (bypass && e.index === 0 && questions.next_action && !e.agentId) questions.single_action = singleActionQuestion;
 		const routed = (step) => {
@@ -833,6 +867,10 @@ export const register = (on, options) => {
 			if (est) {
 				turn.effort = est.effort !== e.effort ? est.effort : undefined;
 				if (firstTurn) firstTurn.effort = est.effort;
+				if (!e.agentId) {
+					band.chosen = est.effort;
+					$.ui.invalidate("ui.render");
+				}
 			}
 			const effort = turn.effort;
 			const raised = effort !== undefined && EFFORT_ORDER.indexOf(effort) > (isEffort(e.effort) ? EFFORT_ORDER.indexOf(e.effort) : -1);

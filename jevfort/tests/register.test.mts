@@ -197,6 +197,28 @@ function sessionStubs(on: On) {
   return registered;
 }
 
+/** The band above the prompt as the terminal raises it (`ui.render`, component `AbovePrompt`). */
+const BAND = { plugin: "jevfort", component: "AbovePrompt", props: { hasSurvey: false, isCollapsed: false, isWorking: false, maxRows: 10, bodyColumns: 80 }, surface: "terminal" };
+/** What a hook beneath jevfort draws in the band: seen when jevfort passes. */
+const BENEATH = { type: "Text", props: {}, children: ["beneath"] };
+/** The part of a mounted site the band helpers read. */
+type Site = { find(q: { type?: string; text?: string | RegExp; key?: string }): Promise<{ props: Record<string, unknown> } | undefined> };
+/**
+ * The props of the band's Text for one effort level.
+ *
+ * @param ui - The mounted band.
+ * @param level - The effort level.
+ * @returns Its props (`bold`, `color`, `dimColor`), or `undefined` when not drawn.
+ */
+const levelProps = async (ui: Site, level: string) => (await ui.find({ type: "Text", text: new RegExp(`^${level} $`) }))?.props;
+/**
+ * The label of the band's Auto button.
+ *
+ * @param ui - The mounted band.
+ * @returns The label, or `undefined` when not drawn.
+ */
+const autoLabel = async (ui: Site) => (await ui.find({ type: "Button", key: "auto" }))?.props.label;
+
 test("Jev takes a confident Read step without asking Claude", { options: { takeOnlyForBypass: false } }, async ($, on) => {
   const seen: unknown[] = [];
   setup(on, {
@@ -1008,4 +1030,99 @@ test("The jev-api lookup is repeated after each turn", { options: { doneCheck: f
   expect((await runJev($, "")).split("\n")[0]).toBe(INACTIVE);
   // Two inactive errors: one at session start, one at the change.
   expect(await runJev($, "report")).toContain("· 2 errors |");
+});
+
+test("The band shows the session effort bold and Jev's choice blue", async ($, on) => {
+  const { clock } = setup(on, { messages: [user("what does this project do?")], jev: byId({ effort: easy }) });
+  claudeBeneath(on, []);
+  sessionStubs(on);
+  await $.session.start(START);
+  const ui = await $.ui.mount(BAND);
+  // Before the first turn every level is dim and only the button is live.
+  for (const level of ["low", "medium", "high", "xhigh", "max"]) expect(await levelProps(ui, level)).toEqual({ dimColor: true });
+  expect(await autoLabel(ui)).toBe("Jev auto: on");
+
+  await drain($.turn.step(step));
+  await clock.settle();
+  expect(await levelProps(ui, "high")).toEqual({ bold: true });
+  expect(await levelProps(ui, "low")).toEqual({ color: "blue" });
+  for (const level of ["medium", "xhigh", "max"]) expect(await levelProps(ui, level)).toEqual({ dimColor: true });
+  await ui.unmount();
+});
+
+test("The Auto button turns the effort choice off until pressed again", async ($, on) => {
+  const seen: { effort?: string }[] = [];
+  const { sent, clock } = setup(on, { messages: [user("what does this project do?")], jev: byId({ effort: easy }) });
+  claudeBeneath(on, seen);
+  sessionStubs(on);
+  await $.session.start(START);
+  const ui = await $.ui.mount(BAND);
+
+  await ui.press({ key: "auto" });
+  await clock.settle();
+  expect(await autoLabel(ui)).toBe("Jev auto: off");
+  await drain($.turn.step(turnStep("t1", "claude-opus-5-5", "high")));
+  await clock.settle();
+  // No estimate: the turn runs at the session effort, shown bold with no blue choice.
+  expect(sent).toHaveLength(0);
+  expect(seen.map((s) => s.effort)).toEqual(["high"]);
+  expect(await levelProps(ui, "high")).toEqual({ bold: true });
+  expect(await levelProps(ui, "low")).toEqual({ dimColor: true });
+  expect(await runJev($, "")).toContain("Jev pilot: routing effort (effort auto off), take steps");
+
+  await ui.press({ key: "auto" });
+  await clock.settle();
+  expect(await autoLabel(ui)).toBe("Jev auto: on");
+  await drain($.turn.step(turnStep("t2", "claude-opus-5-5", "high")));
+  expect(ids(sent)).toEqual(["effort", "mechanical"]);
+  expect(seen.map((s) => s.effort)).toEqual(["high", "low"]);
+  expect(await runJev($, "")).not.toContain("(effort auto off)");
+
+  // A new session turns Auto back on.
+  await ui.press({ key: "auto" });
+  await clock.settle();
+  expect(await autoLabel(ui)).toBe("Jev auto: off");
+  await $.session.start(START);
+  await clock.settle();
+  expect(await autoLabel(ui)).toBe("Jev auto: on");
+  await ui.unmount();
+});
+
+test("The band passes before the session baseline and while jevfort is inactive", async ($, on) => {
+  const { clock } = setup(on, { messages: [], tools: SINGLE_TOOLS, jev: () => undefined });
+  sessionStubs(on);
+  on("ui.render", () => BENEATH);
+  const ui = await $.ui.mount(BAND);
+  expect(await ui.find({ type: "Text", text: "beneath" })).toBeDefined();
+  expect(await autoLabel(ui)).toBeUndefined();
+  await $.session.start(START);
+  await clock.settle();
+  expect(await ui.find({ type: "Text", text: "beneath" })).toBeDefined();
+  expect(await autoLabel(ui)).toBeUndefined();
+  await ui.unmount();
+});
+
+test("The band passes while a survey holds it", async ($, on) => {
+  setup(on, { messages: [], jev: () => undefined });
+  sessionStubs(on);
+  on("ui.render", () => BENEATH);
+  await $.session.start(START);
+  const survey = await $.ui.mount({ ...BAND, props: { ...BAND.props, hasSurvey: true } });
+  expect(await survey.find({ type: "Text", text: "beneath" })).toBeDefined();
+  expect(await autoLabel(survey)).toBeUndefined();
+  await survey.unmount();
+  const ui = await $.ui.mount(BAND);
+  expect(await autoLabel(ui)).toBe("Jev auto: on");
+  await ui.unmount();
+});
+
+test("With routing off the band passes", { options: { routing: "off" } }, async ($, on) => {
+  setup(on, { messages: [], jev: () => undefined });
+  sessionStubs(on);
+  on("ui.render", () => BENEATH);
+  await $.session.start(START);
+  const ui = await $.ui.mount(BAND);
+  expect(await ui.find({ type: "Text", text: "beneath" })).toBeDefined();
+  expect(await autoLabel(ui)).toBeUndefined();
+  await ui.unmount();
 });

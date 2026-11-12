@@ -70,7 +70,12 @@ type Engine = {
     /** Redraws the render sites of an event (the effort band, an open `/jev` output). */
     invalidate(event: "ui.render"): void;
     // The element factories are plain functions, called detached from the object (`const { Markdown } = …`).
-    resolve(e: unknown): { Markdown: (props: { text: string }) => unknown };
+    resolve(e: unknown): {
+      Markdown: (props: { text: string }) => unknown;
+      Box: (props: Record<string, unknown>) => unknown;
+      Text: (props: Record<string, unknown>) => unknown;
+      Button: (props: Record<string, unknown>) => unknown;
+    };
   };
   /** Prompts sent as this plugin. */
   prompt: { submit(input: { text: string }): Promise<unknown> };
@@ -113,6 +118,8 @@ type OfferEvent = { agent: string; description: string } & Record<string, unknow
 type CompactEvent = { agentId?: string; trigger: string; messages: readonly SessionMessage[]; instructions?: string } & Record<string, unknown>;
 /** A `ui.render` event of the `/jev` command output. */
 type RenderEvent = { props: { isErrored?: boolean; text: string } } & Record<string, unknown>;
+/** A `ui.render` event of the band above the prompt. */
+type BandEvent = { props: { hasSurvey: boolean } } & Record<string, unknown>;
 /** A `turn.complete` event. */
 type TurnEnd = { turnId: string; reason?: string; agentId?: string; answer?: string } & Record<string, unknown>;
 /** A `command.run` event. */
@@ -130,6 +137,7 @@ type On = {
   (event: "agent.offer", hook: Hook<OfferEvent, unknown>): void;
   (event: "session.compact", hook: Hook<CompactEvent, unknown>): void;
   (event: "ui.render", matcher: { component: "CommandOutput"; props: { command: "jev" } }, hook: ($: Engine, e: RenderEvent, next: (e: RenderEvent) => unknown) => unknown): void;
+  (event: "ui.render", matcher: { component: "AbovePrompt" }, hook: ($: Engine, e: BandEvent, next: (e: BandEvent) => unknown) => unknown): void;
 };
 /** The plugin options the engine passes to `register` (the manifest's `userConfig` values). */
 type Options = Partial<Record<string, unknown>>;
@@ -661,6 +669,39 @@ export const register = (on: On, options: Options): void => {
     return Markdown({ text: e.props.text });
   });
 
+  /** The effort band: the session effort and Jev's chosen effort seen at the last main-loop turn's step 0. */
+  let band: { configured?: Effort; chosen?: Effort } = {};
+  /** Temporary off switch of the automatic effort choice, pressed in the band; reset at session.start. */
+  let autoOff = false;
+
+  // The effort band above the prompt: the five levels, the session effort bold, Jev's choice for the turn blue, and the
+  // Auto button. Passes while jevfort is inactive (also before the session baseline) or a survey holds the band.
+  on("ui.render", { component: "AbovePrompt" }, function onRenderBand($: Engine, e: BandEvent, next: (e: BandEvent) => unknown): unknown {
+    if (routing === "off" || jevState !== "" || e.props.hasSurvey) return next(e);
+    const { Box, Text, Button } = $.ui.resolve(e);
+    return Box({
+      flexDirection: "row",
+      children: [
+        ...EFFORT_ORDER.map((level) =>
+          Text({
+            ...(level === band.configured ? { bold: true } : {}),
+            ...(level === band.chosen ? { color: "blue" } : {}),
+            ...(level !== band.configured && level !== band.chosen ? { dimColor: true } : {}),
+            children: [`${level} `],
+          })
+        ),
+        Button({
+          key: "auto",
+          label: `Jev auto: ${autoOff ? "off" : "on"}`,
+          onPress: () => {
+            autoOff = !autoOff;
+            $.ui.invalidate("ui.render");
+          },
+        }),
+      ],
+    });
+  });
+
   // The next main-loop turn after a done follow-up is exempt, so Jev sends Claude back at most once per request.
   // Armed only by a prompt this plugin submitted itself (`origin`), cleared by a user's own prompt (`composer`, not meta), so a
   // user turn neither consumes nor inherits it, a user pasting the follow-up text triggers nothing, and a meta prompt in
@@ -783,8 +824,10 @@ export const register = (on: On, options: Options): void => {
   // Calls Jev made itself: `tool.check` approves them, their commands come from a vetted list.
   const ownCalls = new Set<string>();
   on("session.start", async function onSessionStart($: Engine, e: unknown, next: Next<unknown, unknown>): Promise<unknown> {
-    // A new conversation (also after /clear) gets its own first-turn estimate.
+    // A new conversation (also after /clear) gets its own first-turn estimate, an empty band and Auto on.
     firstTurns.clear();
+    band = {};
+    autoOff = false;
     // Until the baseline below, a listing raised beneath `next(e)` (before jev-api registered) applies nothing.
     jevState = undefined;
     if (badRange) await record($, { kind: "error", applied: false, text: `invalid effort bounds (${badRange}): using low..xhigh` }).catch(() => undefined);
@@ -849,7 +892,7 @@ export const register = (on: On, options: Options): void => {
     return {
       text: [
         ...(missing.length ? [`Jev pilot: inactive, the jev-api tools are missing (${missing.join(", ")}). jevfort needs jev-api 0.2.0 or later and no permissions.deny rule matching its tools; it looks again at the next turn.`] : []),
-        `Jev pilot: routing ${routing}, take steps ${takeSteps} (p ≥ ${takeThreshold}), done check ${doneCheck}, subagents ${subagents}`,
+        `Jev pilot: routing ${routing}${autoOff ? " (effort auto off)" : ""}, take steps ${takeSteps} (p ≥ ${takeThreshold}), done check ${doneCheck}, subagents ${subagents}`,
         `Decisions (all sessions): ${counts}`,
         lines.length ? `Recent:\n${lines.join("\n")}` : "No decisions this session yet.",
         "Full analysis: /jev report",
@@ -976,25 +1019,37 @@ export const register = (on: On, options: Options): void => {
     let firstTurn: { family?: EstimateModel; from: unknown; effort?: Effort } | undefined;
     if (routing !== "off" && e.index === 0) {
       if (routing === "model") questions.difficulty = difficultyQuestion;
-      const loop = e.agentId ?? "";
-      const first = firstTurns.get(loop);
-      const family = modelFamily(e.model);
-      // A model switch starts a new first turn, so a switch to Haiku/Fable gets its own estimate.
-      const fresh = !first || first.family !== family;
-      // Written before asking Jev: a failed first turn still counts, so later Haiku/Fable turns never re-ask.
-      if (fresh) {
-        firstTurn = { family, from: e.effort };
-        firstTurns.set(loop, firstTurn);
-      }
       const sessionEffort = isEffort(e.effort) ? e.effort : undefined;
-      estimate = family && sessionEffort && (fresh || EVERY_TURN_MODELS.includes(family)) ? { model: family, defaultEffort: sessionEffort, ...effortRange } : undefined;
-      if (estimate) {
-        questions.effort = effortQuestion;
-        questions.mechanical = mechanicalQuestion;
+      if (!e.agentId) {
+        // A new main-loop turn: the session effort bold, the last turn's choice cleared.
+        band = sessionEffort ? { configured: sessionEffort } : {};
+        $.ui.invalidate("ui.render");
       }
-      // Haiku/Fable after the first turn: hold the first turn's estimate while model and session effort are unchanged.
-      held = !estimate && first?.effort && first.family === family && first.from === e.effort ? first.effort : undefined;
-      if (held && held !== e.effort) turn.effort = held;
+      // Auto off (the band's button): no first-turn record, no estimate, no hold; the turn runs at the session effort.
+      if (!autoOff) {
+        const loop = e.agentId ?? "";
+        const first = firstTurns.get(loop);
+        const family = modelFamily(e.model);
+        // A model switch starts a new first turn, so a switch to Haiku/Fable gets its own estimate.
+        const fresh = !first || first.family !== family;
+        // Written before asking Jev: a failed first turn still counts, so later Haiku/Fable turns never re-ask.
+        if (fresh) {
+          firstTurn = { family, from: e.effort };
+          firstTurns.set(loop, firstTurn);
+        }
+        estimate = family && sessionEffort && (fresh || EVERY_TURN_MODELS.includes(family)) ? { model: family, defaultEffort: sessionEffort, ...effortRange } : undefined;
+        if (estimate) {
+          questions.effort = effortQuestion;
+          questions.mechanical = mechanicalQuestion;
+        }
+        // Haiku/Fable after the first turn: hold the first turn's estimate while model and session effort are unchanged.
+        held = !estimate && first?.effort && first.family === family && first.from === e.effort ? first.effort : undefined;
+        if (held && held !== e.effort) turn.effort = held;
+        if (held && !e.agentId) {
+          band.chosen = held;
+          $.ui.invalidate("ui.render");
+        }
+      }
     }
     if (bypass && e.index === 0 && questions.next_action && !e.agentId) questions.single_action = singleActionQuestion;
     // The turn's effort, set at step 0, holds for every step of the turn whatever model the step runs on.
@@ -1047,6 +1102,10 @@ export const register = (on: On, options: Options): void => {
       if (est) {
         turn.effort = est.effort !== e.effort ? est.effort : undefined;
         if (firstTurn) firstTurn.effort = est.effort;
+        if (!e.agentId) {
+          band.chosen = est.effort;
+          $.ui.invalidate("ui.render");
+        }
       }
       const effort = turn.effort;
       const raised = effort !== undefined && EFFORT_ORDER.indexOf(effort) > (isEffort(e.effort) ? EFFORT_ORDER.indexOf(e.effort) : -1);
