@@ -22,10 +22,27 @@ subagents load it via ToolSearch), no skills, agents, command hooks or MCP serve
   `TYPESAFE_DEFAULT_MODEL`). No `userConfig` entry for any of it.
 - jev-api is a declared plugin dependency (`claudePlugin.dependencies: ["jev-api"]` in `package.json`, copied into
   `plugin.json`; bare name, no version range): Claude Code keeps jevfort disabled while jev-api is missing or disabled.
-  At runtime `jevMissing($)` looks the batch tool up in `$.tool.list()` once per session (cached, reset in
-  `session.start` after `next(e)`, a failed or malformed listing counts as all missing). While it is missing (also with jev-api 0.1, which has only `noul`/`choice`/`score`) jevfort is inactive: every hook except
-  the `/jev` command and its render passes through untouched (also the scratchpad-write allow), `estimate_effort` is
-  not registered, one `inactive: jev-api tools missing (...)` error is logged per session start and `/jev` says why.
+  At runtime `jevMissing($)` looks the batch tool up in `$.tool.list()` once per turn: the listing (`jevTools`) is
+  shared by the turn's hooks and dropped at every main-loop `turn.complete` (subagent completions keep it; Claude Code 2.1.322 has no tool-list-changed
+  event), so jev-api appearing or going away takes effect from the next turn; `session.start` lists again after
+  `next(e)` as the session's baseline; a failed or malformed listing counts as all missing. `jevApply` applies a
+  changed listing once (`jevState` holds the last applied one and stays unset until the baseline, so a listing beneath
+  `session.start`'s `next(e)` applies nothing): going inactive logs `inactive: jev-api tools missing (...)`, becoming
+  ready registers `estimate_effort`, both redraw the effort band. While the tool is missing (also with jev-api 0.1,
+  which has only `noul`/`choice`/`score`) jevfort is inactive: every hook except the `/jev` command, the render hooks
+  and the `estimate_effort` handling passes through untouched (also the scratchpad-write allow) and `/jev` says why.
+  `estimate_effort` is never registered in a session that was never ready; a failed registration is retried by the next
+  listing, a registered one is not registered again until the next `session.start` (there is no unregister), so `tool.call` answers and `tool.check` approves it before the readiness guard (while inactive it
+  answers its `defaultEffort`, source `fallback`).
+- Effort band: a `ui.render` hook on `AbovePrompt` (terminal and desktop only) draws `low medium high xhigh max` in one
+  row: the main loop's session effort (step-0 `e.effort`) bold, the effort jevfort chose for the current main-loop
+  turn (estimate of any source, or the held Haiku/Fable estimate) blue, the rest dim, then a `Jev auto: on/off`
+  Button. Hidden with `routing: "off"`, while inactive or before the session baseline, and while a survey holds the
+  band. The button flips the closure flag `autoOff` (reset at `session.start` and by a reload, never stored): while
+  off, step 0 skips the effort estimate and the Haiku/Fable hold, so the turn runs at the session effort; take-steps,
+  bypass, `routing: "model"` difficulty and the `estimate_effort` tool are unaffected. `/jev` status shows
+  `(effort auto off)`. Not ported from effortless: settings, handoff and the other bar features; subagent turns do not
+  update the band.
 - Coupling: jevfort relies on jev-api's `batch` name, input (`state` string, `questions` array of
   `{ type, instructions, criteria? }`) and answer (a JSON array of answers, `type` plus the System One fields, in
   question order); no code is imported. Renaming the tool or changing its input or answer shape breaks jevfort: the

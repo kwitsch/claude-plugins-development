@@ -67,8 +67,18 @@ type Engine = {
   /** User interface. */
   ui: {
     status(text: string): Promise<unknown>;
+    /** Redraws the render sites of an event (the effort band, an open `/jev` output). */
+    invalidate(event: "ui.render"): void;
     // The element factories are plain functions, called detached from the object (`const { Markdown } = …`).
-    resolve(e: unknown): { Markdown: (props: { text: string }) => unknown };
+    resolve(e: unknown): {
+      Markdown: (props: { text: string }) => unknown;
+      /** Layout container. */
+      Box: (props: Record<string, unknown>) => unknown;
+      /** Styled text run. */
+      Text: (props: Record<string, unknown>) => unknown;
+      /** Pressable button. */
+      Button: (props: Record<string, unknown>) => unknown;
+    };
   };
   /** Prompts sent as this plugin. */
   prompt: { submit(input: { text: string }): Promise<unknown> };
@@ -111,6 +121,8 @@ type OfferEvent = { agent: string; description: string } & Record<string, unknow
 type CompactEvent = { agentId?: string; trigger: string; messages: readonly SessionMessage[]; instructions?: string } & Record<string, unknown>;
 /** A `ui.render` event of the `/jev` command output. */
 type RenderEvent = { props: { isErrored?: boolean; text: string } } & Record<string, unknown>;
+/** A `ui.render` event of the band above the prompt. */
+type BandEvent = { props: { hasSurvey: boolean } } & Record<string, unknown>;
 /** A `turn.complete` event. */
 type TurnEnd = { turnId: string; reason?: string; agentId?: string; answer?: string } & Record<string, unknown>;
 /** A `command.run` event. */
@@ -128,6 +140,8 @@ type On = {
   (event: "agent.offer", hook: Hook<OfferEvent, unknown>): void;
   (event: "session.compact", hook: Hook<CompactEvent, unknown>): void;
   (event: "ui.render", matcher: { component: "CommandOutput"; props: { command: "jev" } }, hook: ($: Engine, e: RenderEvent, next: (e: RenderEvent) => unknown) => unknown): void;
+  /** Registers the effort band render hook for the `AbovePrompt` site. */
+  (event: "ui.render", matcher: { component: "AbovePrompt" }, hook: ($: Engine, e: BandEvent, next: (e: BandEvent) => unknown) => unknown): void;
 };
 /** The plugin options the engine passes to `register` (the manifest's `userConfig` values). */
 type Options = Partial<Record<string, unknown>>;
@@ -203,12 +217,20 @@ async function askJev($: Engine, state: unknown, questions: Record<string, Quest
   }
 }
 
-/** The needed jev-api tools missing from this session's tool listing: looked up once per session, reset at `session.start`. */
+/** This turn's jev-api listing, shared by concurrent hooks; dropped at every main-loop `turn.complete` and at `session.start`. */
 let jevTools: Promise<string[]> | undefined;
+/** The missing tools of the last applied listing joined by ", " ("" = ready); undefined until `session.start` set the session's baseline. */
+let jevState: string | undefined;
+/** Whether `estimate_effort` is registered in this session; a failed registration is retried by the next listing. */
+let estimateRegistered = false;
+/** Set when the band's button could not redraw out of frame; the next applied listing redraws it. */
+let bandStale = false;
 
 /**
- * The needed jev-api tools that are not listed; a non-empty answer turns jevfort off (every hook but `/jev` passes
- * through). A failed or malformed listing counts as all missing, so the cached promise never rejects.
+ * The needed jev-api tools that are not listed; a non-empty answer turns jevfort off (every hook but `/jev`, the
+ * render hooks and `estimate_effort` passes through). Listed once per turn (`jevTools`); a listing that differs from
+ * the last applied one is applied by {@link jevApply}. A failed or malformed listing counts as all missing, so the
+ * shared promise never rejects.
  *
  * @remarks
  * Module level, with its cache, because the engine accepts `$` passed only to top-level functions.
@@ -217,7 +239,47 @@ let jevTools: Promise<string[]> | undefined;
  * @returns The missing full tool names, empty when jevfort can ask Jev.
  */
 function jevMissing($: Engine): Promise<string[]> {
-  return (jevTools ??= $.tool.list().then((t) => missingJevTools(t.map((x) => x.name))).catch(() => [...JEV_TOOLS]));
+  return (jevTools ??= $.tool.list()
+    .then((t) => missingJevTools(t.map((x) => x.name)))
+    .catch(() => [...JEV_TOOLS])
+    .then(async (missing) => {
+      // Beneath session.start (jevState undefined) jev-api may not have registered yet: such a listing changes nothing.
+      if (jevState !== undefined) await jevApply($, missing);
+      return missing;
+    }));
+}
+
+/**
+ * Applies a jev-api listing once when it differs from the last applied one: going inactive logs why, becoming ready
+ * registers `estimate_effort` (whatever `routing` says: Skills and subagents call it too); both redraw the effort band.
+ * Never throws: a failed log or registration is caught.
+ *
+ * @remarks
+ * Module level because the engine accepts `$` passed only to top-level functions; runs inside the awaited listing
+ * promise of {@link jevMissing} (or `session.start`), so its `record` and `$.tool.register` stay in-frame.
+ *
+ * @param $ - Engine interface.
+ * @param missing - The missing full tool names of the listing.
+ */
+async function jevApply($: Engine, missing: string[]): Promise<void> {
+  const key = missing.join(", ");
+  const changed = key !== jevState;
+  if (!changed && !bandStale && (key || estimateRegistered)) return;
+  jevState = key;
+  bandStale = false;
+  try {
+    $.ui.invalidate("ui.render");
+  } catch { /* no mounted render site (headless): the band just is not redrawn */ }
+  if (key) {
+    await record($, { kind: "error", applied: false, text: `inactive: jev-api tools missing (${key})` }).catch(() => undefined);
+    return;
+  }
+  try {
+    if (!estimateRegistered) await $.tool.register(ESTIMATE_SPEC);
+    estimateRegistered = true;
+  } catch (err) {
+    await record($, { kind: "error", applied: false, text: `estimate_effort not registered: ${String(err)}` }).catch(() => undefined);
+  }
 }
 
 /**
@@ -620,6 +682,44 @@ export const register = (on: On, options: Options): void => {
     return Markdown({ text: e.props.text });
   });
 
+  /** The effort band: the session effort and Jev's chosen effort seen at the last main-loop turn's step 0. */
+  let band: { configured?: Effort; chosen?: Effort } = {};
+  /** Temporary off switch of the automatic effort choice, pressed in the band; reset at session.start. */
+  let autoOff = false;
+
+  // The effort band above the prompt: the five levels, the session effort bold, Jev's choice for the turn blue, and the
+  // Auto button. Passes while jevfort is inactive (also before the session baseline) or a survey holds the band.
+  on("ui.render", { component: "AbovePrompt" }, function onRenderBand($: Engine, e: BandEvent, next: (e: BandEvent) => unknown): unknown {
+    if (routing === "off" || jevState !== "" || e.props.hasSurvey) return next(e);
+    const { Box, Text, Button } = $.ui.resolve(e);
+    return Box({
+      flexDirection: "row",
+      children: [
+        ...EFFORT_ORDER.map((level) =>
+          Text({
+            ...(level === band.configured ? { bold: true } : {}),
+            ...(level === band.chosen ? { color: "blue" } : {}),
+            ...(level !== band.configured && level !== band.chosen ? { dimColor: true } : {}),
+            children: [`${level} `],
+          })
+        ),
+        Button({
+          key: "auto",
+          label: `Jev auto: ${autoOff ? "off" : "on"}`,
+          onPress: () => {
+            autoOff = !autoOff;
+            // Raised after the hook frame ended: if the engine refuses, the next applied listing redraws.
+            try {
+              $.ui.invalidate("ui.render");
+            } catch {
+              bandStale = true;
+            }
+          },
+        }),
+      ],
+    });
+  });
+
   // The next main-loop turn after a done follow-up is exempt, so Jev sends Claude back at most once per request.
   // Armed only by a prompt this plugin submitted itself (`origin`), cleared by a user's own prompt (`composer`, not meta), so a
   // user turn neither consumes nor inherits it, a user pasting the follow-up text triggers nothing, and a meta prompt in
@@ -742,8 +842,14 @@ export const register = (on: On, options: Options): void => {
   // Calls Jev made itself: `tool.check` approves them, their commands come from a vetted list.
   const ownCalls = new Set<string>();
   on("session.start", async function onSessionStart($: Engine, e: unknown, next: Next<unknown, unknown>): Promise<unknown> {
-    // A new conversation (also after /clear) gets its own first-turn estimate.
+    // A new conversation (also after /clear) gets its own first-turn estimate, an empty band and Auto on.
     firstTurns.clear();
+    band = {};
+    autoOff = false;
+    // Until the baseline below, a listing raised beneath `next(e)` (before jev-api registered) applies nothing.
+    jevState = undefined;
+    estimateRegistered = false;
+    bandStale = false;
     if (badRange) await record($, { kind: "error", applied: false, text: `invalid effort bounds (${badRange}): using low..xhigh` }).catch(() => undefined);
     await $.command.register({
       name: "jev",
@@ -751,20 +857,10 @@ export const register = (on: On, options: Options): void => {
     });
     // After `next(e)`: jev-api registers its tools in its own session.start, which may run beneath this hook.
     const result = await next(e);
-    // A new session looks the jev-api tools up again, and only now: a jevfort hook raised inside `next(e)` (another
-    // plugin's session.start making a tool call) may have cached a listing from before jev-api registered.
+    // The session's baseline, listed only now: a jevfort hook raised inside `next(e)` (another plugin's session.start
+    // making a tool call) may have cached a listing from before jev-api registered. Logs inactive or registers estimate_effort.
     jevTools = undefined;
-    const missing = await jevMissing($);
-    if (missing.length) {
-      await record($, { kind: "error", applied: false, text: `inactive: jev-api tools missing (${missing.join(", ")})` }).catch(() => undefined);
-      return result;
-    }
-    // Registered whatever `routing` says: Skills and subagents call it too. Turn start does not depend on it.
-    try {
-      await $.tool.register(ESTIMATE_SPEC);
-    } catch (err) {
-      await record($, { kind: "error", applied: false, text: `estimate_effort not registered: ${String(err)}` }).catch(() => undefined);
-    }
+    await jevApply($, await jevMissing($));
     return result;
   });
 
@@ -815,8 +911,8 @@ export const register = (on: On, options: Options): void => {
       .map((d) => `- ${d.kind}${d.applied ? "" : " (pass)"}: ${d.text}${d.ms !== undefined ? ` [${Math.round(d.ms)}ms]` : ""}`);
     return {
       text: [
-        ...(missing.length ? [`Jev pilot: inactive, the jev-api tools are missing (${missing.join(", ")}). jevfort needs jev-api 0.2.0 or later and no permissions.deny rule matching its tools; then restart Claude Code.`] : []),
-        `Jev pilot: routing ${routing}, take steps ${takeSteps} (p ≥ ${takeThreshold}), done check ${doneCheck}, subagents ${subagents}`,
+        ...(missing.length ? [`Jev pilot: inactive, the jev-api tools are missing (${missing.join(", ")}). jevfort needs jev-api 0.2.0 or later and no permissions.deny rule matching its tools; it looks again at the next turn.`] : []),
+        `Jev pilot: routing ${routing}${autoOff ? " (effort auto off)" : ""}, take steps ${takeSteps} (p ≥ ${takeThreshold}), done check ${doneCheck}, subagents ${subagents}`,
         `Decisions (all sessions): ${counts}`,
         lines.length ? `Recent:\n${lines.join("\n")}` : "No decisions this session yet.",
         "Full analysis: /jev report",
@@ -825,7 +921,11 @@ export const register = (on: On, options: Options): void => {
   });
 
   on("turn.complete", async function onTurnComplete($: Engine, e: TurnEnd, next: Next<TurnEnd, unknown>): Promise<unknown> {
-    if ((await jevMissing($)).length) return next(e);
+    const missing = await jevMissing($);
+    // No engine event reports a changed tool list: the next main-loop turn's first hook lists the jev-api tools again
+    // (a subagent's completion does not drop it, so a mid-turn listing glitch cannot flap the band).
+    if (e.agentId === undefined) jevTools = undefined;
+    if (missing.length) return next(e);
     turns.delete(e.turnId);
     if (e.reason === "aborted" || e.reason === "error") {
       await record($, { kind: "turn", applied: false, text: `turn ${e.reason}`, turnId: e.turnId, data: { reason: e.reason } });
@@ -856,10 +956,10 @@ export const register = (on: On, options: Options): void => {
     return next(e);
   });
 
-  // Answers the estimate_effort tool itself (never `next(e)`: a registered tool no hook answers fails), and logs the
-  // outcome of each call Jev made itself, for the report.
+  // Answers the estimate_effort tool itself, before the readiness guard (never `next(e)`: a registered tool no hook
+  // answers fails, and the tool stays registered after jev-api goes away), and logs the outcome of each call Jev made
+  // itself, for the report.
   on("tool.call", async function onToolCall($: Engine, e: ToolCall, next: Next<ToolCall, ToolResult>): Promise<ToolResult> {
-    if ((await jevMissing($)).length) return next(e);
     if (e.tool === ESTIMATE_TOOL) {
       const input = parseEstimateInput(e);
       if (typeof input === "string") return { isError: true, result: `estimate_effort: ${input}` };
@@ -874,6 +974,7 @@ export const register = (on: On, options: Options): void => {
       });
       return { result: JSON.stringify(est) };
     }
+    if ((await jevMissing($)).length) return next(e);
     const result = await next(e);
     if (e.tool_use_id && ownCalls.has(e.tool_use_id)) {
       const isError = result.deny !== undefined || result.isError === true;
@@ -939,25 +1040,37 @@ export const register = (on: On, options: Options): void => {
     let firstTurn: { family?: EstimateModel; from: unknown; effort?: Effort } | undefined;
     if (routing !== "off" && e.index === 0) {
       if (routing === "model") questions.difficulty = difficultyQuestion;
-      const loop = e.agentId ?? "";
-      const first = firstTurns.get(loop);
-      const family = modelFamily(e.model);
-      // A model switch starts a new first turn, so a switch to Haiku/Fable gets its own estimate.
-      const fresh = !first || first.family !== family;
-      // Written before asking Jev: a failed first turn still counts, so later Haiku/Fable turns never re-ask.
-      if (fresh) {
-        firstTurn = { family, from: e.effort };
-        firstTurns.set(loop, firstTurn);
-      }
       const sessionEffort = isEffort(e.effort) ? e.effort : undefined;
-      estimate = family && sessionEffort && (fresh || EVERY_TURN_MODELS.includes(family)) ? { model: family, defaultEffort: sessionEffort, ...effortRange } : undefined;
-      if (estimate) {
-        questions.effort = effortQuestion;
-        questions.mechanical = mechanicalQuestion;
+      if (!e.agentId) {
+        // A new main-loop turn: the session effort bold, the last turn's choice cleared.
+        band = sessionEffort ? { configured: sessionEffort } : {};
+        $.ui.invalidate("ui.render");
       }
-      // Haiku/Fable after the first turn: hold the first turn's estimate while model and session effort are unchanged.
-      held = !estimate && first?.effort && first.family === family && first.from === e.effort ? first.effort : undefined;
-      if (held && held !== e.effort) turn.effort = held;
+      // Auto off (the band's button): no first-turn record, no estimate, no hold; the turn runs at the session effort.
+      if (!autoOff) {
+        const loop = e.agentId ?? "";
+        const first = firstTurns.get(loop);
+        const family = modelFamily(e.model);
+        // A model switch starts a new first turn, so a switch to Haiku/Fable gets its own estimate.
+        const fresh = !first || first.family !== family;
+        // Written before asking Jev: a failed first turn still counts, so later Haiku/Fable turns never re-ask.
+        if (fresh) {
+          firstTurn = { family, from: e.effort };
+          firstTurns.set(loop, firstTurn);
+        }
+        estimate = family && sessionEffort && (fresh || EVERY_TURN_MODELS.includes(family)) ? { model: family, defaultEffort: sessionEffort, ...effortRange } : undefined;
+        if (estimate) {
+          questions.effort = effortQuestion;
+          questions.mechanical = mechanicalQuestion;
+        }
+        // Haiku/Fable after the first turn: hold the first turn's estimate while model and session effort are unchanged.
+        held = !estimate && first?.effort && first.family === family && first.from === e.effort ? first.effort : undefined;
+        if (held && held !== e.effort) turn.effort = held;
+        if (held && !e.agentId) {
+          band.chosen = held;
+          $.ui.invalidate("ui.render");
+        }
+      }
     }
     if (bypass && e.index === 0 && questions.next_action && !e.agentId) questions.single_action = singleActionQuestion;
     // The turn's effort, set at step 0, holds for every step of the turn whatever model the step runs on.
@@ -1010,6 +1123,10 @@ export const register = (on: On, options: Options): void => {
       if (est) {
         turn.effort = est.effort !== e.effort ? est.effort : undefined;
         if (firstTurn) firstTurn.effort = est.effort;
+        if (!e.agentId) {
+          band.chosen = est.effort;
+          $.ui.invalidate("ui.render");
+        }
       }
       const effort = turn.effort;
       const raised = effort !== undefined && EFFORT_ORDER.indexOf(effort) > (isEffort(e.effort) ? EFFORT_ORDER.indexOf(e.effort) : -1);
@@ -1075,12 +1192,15 @@ export const register = (on: On, options: Options): void => {
   let scratchpad: { roots: string[]; sid: string } | undefined;
   // Permission check: approves Jev's own vetted calls and writes into this session's scratchpad; every other verdict stays Claude Code's.
   on("tool.check", async function onToolCheck($: Engine, e: Check, next: Next<Check, Verdict>): Promise<Verdict> {
+    // The estimate tool is answered by the tool.call hook, also while inactive, so there is nothing to prompt for. A settings deny rule still wins.
+    if (e.tool === ESTIMATE_TOOL) {
+      const base = await next(e);
+      return base.decision !== "deny" ? { ...base, decision: "allow", reason: "jevfort: estimate_effort is answered locally" } : base;
+    }
     if ((await jevMissing($)).length) return next(e);
     const base = await next(e);
     // Jev's own calls come from the vetted candidate list: approve them so auto mode's classifier doesn't refuse
     // them. This and the scratchpad branch are the only places jevfort loosens Claude Code's verdict. A settings deny rule still wins.
-    // The estimate tool is answered by this hook, so there is nothing to prompt for.
-    if (e.tool === ESTIMATE_TOOL && base.decision !== "deny") return { ...base, decision: "allow", reason: "jevfort: estimate_effort is answered locally" };
     if (e.tool_use_id && ownCalls.has(e.tool_use_id)) {
       if (base.decision === "deny") return base;
       return { ...base, decision: "allow", reason: "Jev pilot: vetted action from its read-only/project-script list" };
