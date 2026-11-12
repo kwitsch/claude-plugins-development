@@ -27,9 +27,9 @@ const { test, mock } = createKit({ module: new URL("../plugin/hooks/register.mjs
 
 const CWD = "/proj";
 
-// The jev-api tool jevfort needs as `$.tool.list()` lists it.
+/** The jev-api tool jevfort needs, as `$.tool.list()` lists it. */
 const JEV_TOOLS = [{ name: JEV_BATCH, description: "Ask Jev several questions", mcp: true }];
-// The classifier's question ids by their instructions text (batch questions carry no id).
+/** The classifier's question ids by their instructions text (batch questions carry no id). */
 const PROMPT_IDS = new Map(Object.entries(promptQuestions({ none: "x" })).map(([id, q]) => [q.instructions, id]));
 
 type Msg = { role: "user" | "assistant"; text: string; toolUses: Record<string, unknown>[] };

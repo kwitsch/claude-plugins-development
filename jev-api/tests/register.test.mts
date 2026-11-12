@@ -293,6 +293,15 @@ for (
 }
 
 // Case 12: the timeout is the call's `timeout` in seconds, else the `timeout` option, else 20 s; invalid values fall through.
+/**
+ * Calls a tool against a request that never answers and checks that the call times out after exactly `ms`.
+ *
+ * @param $ - The test's engine.
+ * @param on - The test's hook registrar.
+ * @param ms - The expected timeout in milliseconds.
+ * @param input - Input fields merged over the tool's default input.
+ * @param type - The tool to call.
+ */
 async function timesOutAfter($: Runner, on: On, ms: number, input: Record<string, unknown> = {}, type = "noul") {
   const { clock, fetched } = setup(on, { env: { TYPESAFE_API_KEY: "k" }, reply: () => new Promise<never>(() => {}) });
   let settled = false;
@@ -367,12 +376,26 @@ test("a response without answers is an error", async ($, on) => {
 });
 
 // batch: several questions in one request, keyed q0, q1, ... by index; the answers come back as an array in question order.
+/** The default batch questions: the valid default input of noul, choice and score, without `state`. */
 const QUESTIONS = (["noul", "choice", "score"] as const).map((type) => {
   const { instructions, criteria } = BASE[type];
   return { type, instructions, criteria };
 });
 BASE.batch = { state: "Hello there!", questions: QUESTIONS };
+/**
+ * Calls the batch tool with the default questions.
+ *
+ * @param $ - The test's engine.
+ * @param input - Input fields merged over the default batch input.
+ * @returns The tool result.
+ */
 const batch = ($: Runner, input: Record<string, unknown> = {}) => call($, "batch", input);
+/**
+ * A stubbed 200 http.fetch answer carrying these answers.
+ *
+ * @param answers - The answers by question key (`q0`, `q1`, ...).
+ * @returns The reply function for `setup`.
+ */
 const batchReply = (answers: Record<string, unknown>) => httpReply(200, JSON.stringify({ model: "jev-1", answers, usage: {} }));
 
 test("batch sends every question in one request and returns the answers in question order", async ($, on) => {

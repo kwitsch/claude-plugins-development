@@ -30,12 +30,13 @@ const { test, mock } = createKit({ module: new URL("../plugin/hooks/register.mjs
 
 const CWD = "/proj";
 const SID = "sid-1";
-// The jev-api tool jevfort needs as `$.tool.list()` lists it, and jev-api 0.1's tools, which lack it.
+/** The jev-api tool jevfort needs, as `$.tool.list()` lists it. */
 const JEV_TOOLS = [{ name: JEV_BATCH, description: "Ask Jev several questions", mcp: true }];
+/** jev-api 0.1's tools, which lack the batch tool. */
 const SINGLE_TOOLS = ["noul", "choice", "score"].map((t) => ({ name: JEV_TOOL_PREFIX + t, description: `Ask Jev a ${t} question`, mcp: true }));
-// The first line of /jev while the batch tool is missing.
+/** The first line of /jev while the batch tool is missing. */
 const INACTIVE = "Jev pilot: inactive, the jev-api tools are missing (mcp__jev-api__batch). jevfort needs jev-api 0.2.0 or later and no permissions.deny rule matching its tools; then restart Claude Code.";
-// The question id each instructions text belongs to (batch questions carry no id; the fake finds it by the text).
+/** The question id each instructions text belongs to (batch questions carry no id; the fake finds it by the text). */
 const QUESTION_IDS = new Map<string, string>([
   [nextActionQuestion([]).instructions, "next_action"],
   [singleActionQuestion.instructions, "single_action"],
@@ -44,7 +45,7 @@ const QUESTION_IDS = new Map<string, string>([
   [mechanicalQuestion.instructions, "mechanical"],
   [doneQuestion.instructions, "done"],
 ]);
-// What the fake answers a question the test's `jev` leaves open: not true, leave it to Claude, an unconfident score.
+/** What the fake answers a question the test's `jev` leaves open, by type: not true, leave it to Claude, an unconfident score. */
 const NEUTRAL: Record<string, Record<string, unknown>> = {
   noul: { type: "noul", noul: 0 },
   choice: { type: "choice", choice: "claude", probabilities: { claude: 1 }, confidence: 1 },
@@ -116,13 +117,35 @@ const easy = { type: "score", score: 0.2, probabilities: { "0": 0.85, "1": 0.1, 
 // A Jev score answer; a mechanical (noul) answer.
 const scored = (score: number, confidence = 0.9) => ({ type: "score", score, probabilities: {}, confidence });
 const mech = (p: number) => ({ type: "noul", noul: p });
-// A fake Jev answering by question id; a question not listed gets the neutral answer.
+/**
+ * A fake Jev answering by question id; a question not listed gets the neutral answer.
+ *
+ * @param answers - The answers by question id.
+ * @returns The fake.
+ */
 const byId = (answers: Record<string, Record<string, unknown>>): Jev => (q) => answers[q.id];
-// The question ids of the jev-api calls so far, in call order; the parsed `state` of the i-th call.
+/**
+ * The ids of the questions asked so far, in call order.
+ *
+ * @param sent - The questions the fake saw.
+ * @returns Their ids.
+ */
 const ids = (sent: Asked[]) => sent.map((q) => q.id);
+/**
+ * The parsed `state` of the i-th question asked.
+ *
+ * @param sent - The questions the fake saw.
+ * @param i - The question's index in `sent`.
+ * @returns The state object.
+ */
 const stateOf = (sent: Asked[], i: number) => JSON.parse(sent[i].state) as { request: string; previous_reply?: string };
-// A fake Jev answering by question id, one answer set per batch call (one `askJev`) in call order (the last repeats,
-// a number is an HTTP error status for that whole call).
+/**
+ * A fake Jev answering by question id, one answer set per batch call (one `askJev`) in call order.
+ *
+ * @param rounds - One answer set per call, by question id; the last repeats, and a number is an HTTP error status for
+ * that whole call.
+ * @returns The fake.
+ */
 const inOrder = (...rounds: (Record<string, Record<string, unknown>> | number)[]): Jev => (q) => {
   const round = rounds[Math.min(q.call, rounds.length - 1)];
   return typeof round === "number" ? round : round[q.id];
