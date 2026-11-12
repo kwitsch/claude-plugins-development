@@ -1032,6 +1032,46 @@ test("The jev-api lookup is repeated after each turn", { options: { doneCheck: f
   expect(await runJev($, "report")).toContain("· 2 errors |");
 });
 
+test("A failed estimate_effort registration is retried by the next turn's listing, then not repeated", { options: { doneCheck: false } }, async ($, on) => {
+  setup(on, { messages: [user("what does this project do?")], jev: byId({ effort: easy }) });
+  claudeBeneath(on, []);
+  followUps(on);
+  const attempts: unknown[] = [];
+  on("command.register", async () => ({ value: undefined }));
+  on("tool.register", async (_$, e) => {
+    attempts.push(e.name);
+    if (attempts.length === 1) throw new Error("transient");
+    return { value: { tool: "mcp__jevfort__estimate_effort" } };
+  });
+  on("session.start", async () => ({}));
+
+  await $.session.start(START);
+  expect(attempts).toHaveLength(1);
+  await $.turn.complete(answered("t1", "It is a todo app."));
+  await drain($.turn.step({ ...step, turnId: "t2" }));
+  expect(attempts).toHaveLength(2);
+  await $.turn.complete(answered("t2", "It is a todo app."));
+  await drain($.turn.step({ ...step, turnId: "t3" }));
+  expect(attempts).toHaveLength(2);
+});
+
+test("A subagent's turn.complete does not drop the jev-api listing", { options: { doneCheck: false } }, async ($, on) => {
+  const tools: typeof JEV_TOOLS = [];
+  const { sent } = setup(on, { messages: [user("what does this project do?")], tools, jev: byId({ effort: easy }) });
+  claudeBeneath(on, []);
+  followUps(on);
+  sessionStubs(on);
+
+  await $.session.start(START);
+  tools.push(...JEV_TOOLS);
+  await $.turn.complete(answered("s1", "Found it.", { agentId: "a1" }));
+  await drain($.turn.step({ ...step, turnId: "t2" }));
+  expect(sent).toHaveLength(0);
+  await $.turn.complete(answered("t2", "It is a todo app."));
+  await drain($.turn.step({ ...step, turnId: "t3" }));
+  expect(ids(sent)).toEqual(["effort", "mechanical"]);
+});
+
 test("The band shows the session effort bold and Jev's choice blue", async ($, on) => {
   const { clock } = setup(on, { messages: [user("what does this project do?")], jev: byId({ effort: easy }) });
   claudeBeneath(on, []);

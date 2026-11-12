@@ -23,7 +23,7 @@ subagents load it via ToolSearch), no skills, agents, command hooks or MCP serve
 - jev-api is a declared plugin dependency (`claudePlugin.dependencies: ["jev-api"]` in `package.json`, copied into
   `plugin.json`; bare name, no version range): Claude Code keeps jevfort disabled while jev-api is missing or disabled.
   At runtime `jevMissing($)` looks the batch tool up in `$.tool.list()` once per turn: the listing (`jevTools`) is
-  shared by the turn's hooks and dropped at every `turn.complete` (Claude Code 2.1.322 has no tool-list-changed
+  shared by the turn's hooks and dropped at every main-loop `turn.complete` (subagent completions keep it; Claude Code 2.1.322 has no tool-list-changed
   event), so jev-api appearing or going away takes effect from the next turn; `session.start` lists again after
   `next(e)` as the session's baseline; a failed or malformed listing counts as all missing. `jevApply` applies a
   changed listing once (`jevState` holds the last applied one and stays unset until the baseline, so a listing beneath
@@ -31,8 +31,8 @@ subagents load it via ToolSearch), no skills, agents, command hooks or MCP serve
   ready registers `estimate_effort`, both redraw the effort band. While the tool is missing (also with jev-api 0.1,
   which has only `noul`/`choice`/`score`) jevfort is inactive: every hook except the `/jev` command, the render hooks
   and the `estimate_effort` handling passes through untouched (also the scratchpad-write allow) and `/jev` says why.
-  `estimate_effort` is never registered in a session that was never ready; once registered it stays (there is no
-  unregister), so `tool.call` answers and `tool.check` approves it before the readiness guard (while inactive it
+  `estimate_effort` is never registered in a session that was never ready; a failed registration is retried by the next
+  listing, a registered one is not registered again until the next `session.start` (there is no unregister), so `tool.call` answers and `tool.check` approves it before the readiness guard (while inactive it
   answers its `defaultEffort`, source `fallback`).
 - Effort band: a `ui.render` hook on `AbovePrompt` (terminal and desktop only) draws `low medium high xhigh max` in one
   row: the main loop's session effort (step-0 `e.effort`) bold, the effort jevfort chose for the current main-loop

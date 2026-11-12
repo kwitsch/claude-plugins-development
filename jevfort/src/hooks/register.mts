@@ -217,10 +217,14 @@ async function askJev($: Engine, state: unknown, questions: Record<string, Quest
   }
 }
 
-/** This turn's jev-api listing, shared by concurrent hooks; dropped at every `turn.complete` and at `session.start`. */
+/** This turn's jev-api listing, shared by concurrent hooks; dropped at every main-loop `turn.complete` and at `session.start`. */
 let jevTools: Promise<string[]> | undefined;
 /** The missing tools of the last applied listing joined by ", " ("" = ready); undefined until `session.start` set the session's baseline. */
 let jevState: string | undefined;
+/** Whether `estimate_effort` is registered in this session; a failed registration is retried by the next listing. */
+let estimateRegistered = false;
+/** Set when the band's button could not redraw out of frame; the next applied listing redraws it. */
+let bandStale = false;
 
 /**
  * The needed jev-api tools that are not listed; a non-empty answer turns jevfort off (every hook but `/jev`, the
@@ -259,8 +263,10 @@ function jevMissing($: Engine): Promise<string[]> {
  */
 async function jevApply($: Engine, missing: string[]): Promise<void> {
   const key = missing.join(", ");
-  if (key === jevState) return;
+  const changed = key !== jevState;
+  if (!changed && !bandStale && (key || estimateRegistered)) return;
   jevState = key;
+  bandStale = false;
   try {
     $.ui.invalidate("ui.render");
   } catch { /* no mounted render site (headless): the band just is not redrawn */ }
@@ -269,7 +275,8 @@ async function jevApply($: Engine, missing: string[]): Promise<void> {
     return;
   }
   try {
-    await $.tool.register(ESTIMATE_SPEC);
+    if (!estimateRegistered) await $.tool.register(ESTIMATE_SPEC);
+    estimateRegistered = true;
   } catch (err) {
     await record($, { kind: "error", applied: false, text: `estimate_effort not registered: ${String(err)}` }).catch(() => undefined);
   }
@@ -701,7 +708,12 @@ export const register = (on: On, options: Options): void => {
           label: `Jev auto: ${autoOff ? "off" : "on"}`,
           onPress: () => {
             autoOff = !autoOff;
-            $.ui.invalidate("ui.render");
+            // Raised after the hook frame ended: if the engine refuses, the next applied listing redraws.
+            try {
+              $.ui.invalidate("ui.render");
+            } catch {
+              bandStale = true;
+            }
           },
         }),
       ],
@@ -836,6 +848,8 @@ export const register = (on: On, options: Options): void => {
     autoOff = false;
     // Until the baseline below, a listing raised beneath `next(e)` (before jev-api registered) applies nothing.
     jevState = undefined;
+    estimateRegistered = false;
+    bandStale = false;
     if (badRange) await record($, { kind: "error", applied: false, text: `invalid effort bounds (${badRange}): using low..xhigh` }).catch(() => undefined);
     await $.command.register({
       name: "jev",
@@ -908,8 +922,9 @@ export const register = (on: On, options: Options): void => {
 
   on("turn.complete", async function onTurnComplete($: Engine, e: TurnEnd, next: Next<TurnEnd, unknown>): Promise<unknown> {
     const missing = await jevMissing($);
-    // No engine event reports a changed tool list: the next turn's first hook lists the jev-api tools again.
-    jevTools = undefined;
+    // No engine event reports a changed tool list: the next main-loop turn's first hook lists the jev-api tools again
+    // (a subagent's completion does not drop it, so a mid-turn listing glitch cannot flap the band).
+    if (e.agentId === undefined) jevTools = undefined;
     if (missing.length) return next(e);
     turns.delete(e.turnId);
     if (e.reason === "aborted" || e.reason === "error") {

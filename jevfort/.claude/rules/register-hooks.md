@@ -37,14 +37,15 @@ the shapes below: `inline-headroom/docs/claude-code-verification.md`.
   `if ((await jevMissing($)).length) return next(e);` (`return yield* next(e)` in `turn.step`); `tool.call` and
   `tool.check` handle `ESTIMATE_TOOL` before it. `jevMissing`, `jevApply` and their state `jevTools`/`jevState` are
   module level (`$` may only be passed to top-level functions). `jevTools` is one `$.tool.list()` per turn, shared by
-  concurrent hooks: `turn.complete` drops it after its own guard listing (no engine event reports a changed tool
+  concurrent hooks: a main-loop `turn.complete` (no `agentId`) drops it after its own guard listing (no engine event reports a changed tool
   list), `session.start` drops it right after `next(e)` and lists the session's baseline (a jevfort hook raised inside
   `next(e)` may have cached a listing from before jev-api registered). A rejected or malformed listing counts as the
   tool missing. `jevApply` applies a listing whose missing set differs from `jevState` once: going inactive logs
-  `inactive: jev-api tools missing (...)`, becoming ready registers `estimate_effort`, both call
+  `inactive: jev-api tools missing (...)`, becoming ready registers `estimate_effort` (`estimateRegistered`: a failed registration is retried by the next
+  listing, a registered one never again; reset at `session.start`), both call
   `$.ui.invalidate("ui.render")`. `jevState` is unset from the start of `session.start` until its baseline, so a
   listing raised beneath `next(e)` applies nothing. A new hook needs the guard too; `session.start` must not start with
-  it (beneath it, jev-api has not registered batch yet). The render hooks read `jevState` instead (no `$` call while
+  it (beneath it, jev-api has not registered batch yet). The render hooks read `jevState` instead (no `$.tool`, `$.store`, `record` or `jevMissing` call while
   drawing).
 - `jevApply` registers the `estimate_effort` tool with `$.tool.register(ESTIMATE_SPEC)` whatever `routing` says (a
   throw is logged as `kind: "error"`) when the jev-api tools become listed: at `session.start`'s baseline after
@@ -58,7 +59,7 @@ the shapes below: `inline-headroom/docs/claude-code-verification.md`.
   `$.ui.resolve(e)` (detached factories) out of the closure state `band` (written at main-loop step 0 in `turn.step`:
   `configured` = step-0 `e.effort`, `chosen` = the estimate or held effort) and `autoOff` (flipped by the Button
   `key: "auto"`, reset at `session.start`). It passes with `routing: "off"`, while `jevState !== ""` and while
-  `e.props.hasSurvey`. `onPress` only flips the flag and calls `$.ui.invalidate` (no storage call). While `autoOff`,
+  `e.props.hasSurvey`. `onPress` only flips the flag and calls `$.ui.invalidate` (no storage call; it runs after the frame, so a throw sets `bandStale` and the next applied listing redraws). While `autoOff`,
   the step-0 effort block (first-turn record, estimate, hold) is skipped.
 - `tool.call` failure is `isError: true` or `deny: string`; there is no `exitCode`.
 - `turn.step` `usage` may be `null`; `command.run` returning `{}` prints no row and records no model context.

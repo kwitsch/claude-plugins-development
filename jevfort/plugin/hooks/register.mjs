@@ -74,6 +74,8 @@ async function askJev($, state, questions) {
 }
 let jevTools;
 let jevState;
+let estimateRegistered = false;
+let bandStale = false;
 function jevMissing($) {
 	return jevTools ??= $.tool.list().then((t) => missingJevTools(t.map((x) => x.name))).catch(() => [...JEV_TOOLS]).then(async (missing) => {
 		if (jevState !== undefined) await jevApply($, missing);
@@ -82,8 +84,10 @@ function jevMissing($) {
 }
 async function jevApply($, missing) {
 	const key = missing.join(", ");
-	if (key === jevState) return;
+	const changed = key !== jevState;
+	if (!changed && !bandStale && (key || estimateRegistered)) return;
 	jevState = key;
+	bandStale = false;
 	try {
 		$.ui.invalidate("ui.render");
 	} catch {}
@@ -96,7 +100,8 @@ async function jevApply($, missing) {
 		return;
 	}
 	try {
-		await $.tool.register(ESTIMATE_SPEC);
+		if (!estimateRegistered) await $.tool.register(ESTIMATE_SPEC);
+		estimateRegistered = true;
 	} catch (err) {
 		await record($, {
 			kind: "error",
@@ -415,7 +420,11 @@ export const register = (on, options) => {
 				label: `Jev auto: ${autoOff ? "off" : "on"}`,
 				onPress: () => {
 					autoOff = !autoOff;
-					$.ui.invalidate("ui.render");
+					try {
+						$.ui.invalidate("ui.render");
+					} catch {
+						bandStale = true;
+					}
 				}
 			})]
 		});
@@ -562,6 +571,8 @@ export const register = (on, options) => {
 		band = {};
 		autoOff = false;
 		jevState = undefined;
+		estimateRegistered = false;
+		bandStale = false;
 		if (badRange) await record($, {
 			kind: "error",
 			applied: false,
@@ -622,7 +633,7 @@ export const register = (on, options) => {
 	});
 	on("turn.complete", async function onTurnComplete($, e, next) {
 		const missing = await jevMissing($);
-		jevTools = undefined;
+		if (e.agentId === undefined) jevTools = undefined;
 		if (missing.length) return next(e);
 		turns.delete(e.turnId);
 		if (e.reason === "aborted" || e.reason === "error") {
