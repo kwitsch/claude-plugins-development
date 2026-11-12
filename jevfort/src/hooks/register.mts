@@ -19,7 +19,7 @@ import type { Candidate } from "./candidates.mjs";
 import { compactInstructions, compactItems, RELEVANCE } from "./compact.mjs";
 import { clip, splitTurn, summarize, toolCalls } from "./context.mjs";
 import type { SessionMessage, ToolUse, TurnContext } from "./context.mjs";
-import { choice, JEV_API_TIMEOUT_S, JEV_BATCH, JEV_TOOL_PREFIX, JEV_TOOLS, missingJevTools, noul, score, TIMEOUT_MS } from "./jev.mjs";
+import { choice, JEV_API_TIMEOUT_S, JEV_BATCH, JEV_TOOL_PREFIX, JEV_TOOLS, MAX_CHOICE_OPTIONS, missingJevTools, noul, score, TIMEOUT_MS } from "./jev.mjs";
 import type { Answer, ChoiceAnswer, JevResult, Question } from "./jev.mjs";
 import { LOG_KEY, MAX_ENTRIES, recentDecisions, remember, statsKey } from "./log.mjs";
 import type { Entry } from "./log.mjs";
@@ -185,7 +185,7 @@ async function askJev($: Engine, state: unknown, questions: Record<string, Quest
     // The answers come in question order.
     return Object.fromEntries(entries.map(([id, q], i) => {
       const answer = list[i] as Answer | null;
-      if (answer?.type !== q.type) throw new Error(`${q.type}: no ${q.type} answer`);
+      if (answer?.type !== q.type) throw new Error(`batch: no ${q.type} answer for questions[${i}]`);
       return [id, answer];
     }));
   })();
@@ -330,7 +330,7 @@ async function packageRunner($: Engine, cwd: string): Promise<string> {
  * @param steps - The turn's steps so far.
  * @param calls - The turn's tool calls so far.
  * @param stepIndex - The step within the turn.
- * @returns At most 254 candidates (Jev's choice API takes 255 options, one of them `claude`).
+ * @returns At most `MAX_CHOICE_OPTIONS - 1` candidates (one of jev-api's choice options is `claude`).
  */
 async function buildCandidates($: Engine, request: string, steps: readonly SessionMessage[], calls: readonly ToolUse[], stepIndex: number): Promise<Candidate[]> {
   const cwd = await $.session.cwd();
@@ -419,8 +419,8 @@ async function buildCandidates($: Engine, request: string, steps: readonly Sessi
     }
   }
 
-  // Jev's choice API takes at most 255 options, one of them "claude".
-  return out.slice(0, 254);
+  // One of jev-api's choice options is "claude".
+  return out.slice(0, MAX_CHOICE_OPTIONS - 1);
 }
 
 /**
@@ -458,8 +458,8 @@ async function skillOptions($: Engine): Promise<Record<string, string> | undefin
   const criteria: Record<string, string> = { [NONE]: "No listed skill is meant for this request" };
   let options = 1;
   for (const c of commands) {
-    // shortcut: jev-api's choice takes at most 255 options, later skills are left out; rank them if users hit it.
-    if (options >= 255) break;
+    // shortcut: past jev-api's choice limit later skills are left out; rank them if users hit it.
+    if (options >= MAX_CHOICE_OPTIONS) break;
     if ((c.source === "plugin" || c.source === "user") && c.name !== "jev" && !BUILTIN_COMMANDS.has(c.name) && !blocked.has(c.name) && !(c.name in criteria)) {
       criteria[c.name] = clip(c.description, 160);
       options++;

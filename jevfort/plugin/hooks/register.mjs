@@ -2,7 +2,7 @@ import { GENERAL, SWITCH_AT } from "./agents.mjs";
 import { absolute, AUTH_TOOL, bash, BUILTIN_COMMANDS, clipScript, coversStep, dedupeSkills, isSafeToOffer, MAX_READS, mentionedPaths, quotedTerms, relevant, SAFE_MAKE, SAFE_SCRIPT, sameCall, SKILL_BLOCKLIST_KEY } from "./candidates.mjs";
 import { compactInstructions, compactItems, RELEVANCE } from "./compact.mjs";
 import { clip, splitTurn, summarize, toolCalls } from "./context.mjs";
-import { choice, JEV_API_TIMEOUT_S, JEV_BATCH, JEV_TOOL_PREFIX, JEV_TOOLS, missingJevTools, noul, score, TIMEOUT_MS } from "./jev.mjs";
+import { choice, JEV_API_TIMEOUT_S, JEV_BATCH, JEV_TOOL_PREFIX, JEV_TOOLS, MAX_CHOICE_OPTIONS, missingJevTools, noul, score, TIMEOUT_MS } from "./jev.mjs";
 import { LOG_KEY, MAX_ENTRIES, recentDecisions, remember, statsKey } from "./log.mjs";
 import { bestAction, bounds, difficultyQuestion, doneQuestion, EFFORT_ORDER, effortQuestion, ESTIMATE_SPEC, ESTIMATE_TOOL, estimateEffort, EVERY_TURN_MODELS, inScratchpad, isEffort, lowerModel, mechanicalQuestion, modelFamily, nextActionQuestion, parseEstimateInput, pickCandidate, route, shouldContinue, singleActionQuestion } from "./policy.mjs";
 import { hints, NONE, promptQuestions } from "./prompt.mjs";
@@ -49,7 +49,7 @@ async function askJev($, state, questions) {
 		if (!Array.isArray(list) || list.length !== entries.length) throw new Error(`batch: expected ${entries.length} answers`);
 		return Object.fromEntries(entries.map(([id, q], i) => {
 			const answer = list[i];
-			if (answer?.type !== q.type) throw new Error(`${q.type}: no ${q.type} answer`);
+			if (answer?.type !== q.type) throw new Error(`batch: no ${q.type} answer for questions[${i}]`);
 			return [id, answer];
 		}));
 	})();
@@ -223,7 +223,7 @@ async function buildCandidates($, request, steps, calls, stepIndex) {
 			});
 		}
 	}
-	return out.slice(0, 254);
+	return out.slice(0, MAX_CHOICE_OPTIONS - 1);
 }
 async function summarizeResult($, request, action, output) {
 	const r = await $.model.complete({
@@ -253,7 +253,7 @@ async function skillOptions($) {
 	const criteria = { [NONE]: "No listed skill is meant for this request" };
 	let options = 1;
 	for (const c of commands) {
-		if (options >= 255) break;
+		if (options >= MAX_CHOICE_OPTIONS) break;
 		if ((c.source === "plugin" || c.source === "user") && c.name !== "jev" && !BUILTIN_COMMANDS.has(c.name) && !blocked.has(c.name) && !(c.name in criteria)) {
 			criteria[c.name] = clip(c.description, 160);
 			options++;

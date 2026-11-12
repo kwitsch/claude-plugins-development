@@ -8,7 +8,7 @@ Gives Claude three tools that ask TypeSafe's **Jev System One** API one question
 | ------------------------ | -------- | -------------------------------------------------------------------------------------------------------------------------------- |
 | `TYPESAFE_API_KEY`       | no       | Bearer token for the TypeSafe API; sent as `Authorization: Bearer ...` only to an https endpoint.                                |
 | `TYPESAFE_BASE_URL`      | no       | API root without query or fragment, default `https://api.typesafe.ai`; `/v1/systemone` is appended and trailing slashes dropped. |
-| `JEV_URL`                | no       | The full System One route; wins over `TYPESAFE_BASE_URL`. A jevfort convention, not an SDK variable.                             |
+| `JEV_URL`                | no       | The full System One route; wins over `TYPESAFE_BASE_URL`. A jev-api variable, not an SDK one.                                    |
 | `TYPESAFE_DEFAULT_MODEL` | no       | Model sent with each request, default `jev-latest`.                                                                              |
 
 The four tools are always registered. A call fails locally, without any request, until at least one of `TYPESAFE_API_KEY`, `TYPESAFE_BASE_URL` or `JEV_URL` is non-blank. The variables are read from Claude Code's own environment on every call, so set them before Claude Code starts (in the shell or in the settings' `env`): a variable exported in another shell later does not reach it. With only `TYPESAFE_API_KEY` set, the default endpoint `https://api.typesafe.ai/v1/systemone` is used.

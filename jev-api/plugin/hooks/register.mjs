@@ -9,14 +9,14 @@ const STATE = {
 	type: "string",
 	description: "The text the question is about."
 };
+const DEFAULT_TIMEOUT_S = 20;
 const TIMEOUT = {
 	type: "number",
 	exclusiveMinimum: 0,
-	description: "Optional: the HTTP timeout of the request in seconds. Default: the plugin's timeout option, else 20."
+	description: `Optional: the HTTP timeout of the request in seconds. Default: the plugin's timeout option, else ${DEFAULT_TIMEOUT_S}.`
 };
 const DEFAULT_JEV_URL = "https://api.typesafe.ai/v1/systemone";
 const DEFAULT_MODEL = "jev-latest";
-const DEFAULT_TIMEOUT_S = 20;
 const QUESTION_ID = "answer";
 const HTTP_URL = /^https?:\/\/[^/?#\s]+(?:[/?#]\S*)?$/i;
 const HTTP_BASE = /^https?:\/\/[^/?#\s]+(?:\/[^?#\s]*)?$/i;

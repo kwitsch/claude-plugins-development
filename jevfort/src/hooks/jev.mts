@@ -27,6 +27,8 @@ export type Answer = NoulAnswer | ChoiceAnswer | ScoreAnswer;
 /** What one `askJev` came back with, and how long it took. */
 export type JevResult = { ok: true; answers: Record<string, Answer>; ms: number } | { ok: false; error: string; ms: number };
 
+/** The most options jev-api accepts in one `choice` question. */
+export const MAX_CHOICE_OPTIONS = 255;
 /** The HTTP timeout jevfort gives every jev-api call, in seconds (jev-api's `timeout` input). */
 export const JEV_API_TIMEOUT_S = 5;
 /** Prefix of the jev-api plugin's tools. */

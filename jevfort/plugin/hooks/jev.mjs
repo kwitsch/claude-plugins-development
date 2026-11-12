@@ -1,4 +1,5 @@
 export const TIMEOUT_MS = 4e3;
+export const MAX_CHOICE_OPTIONS = 255;
 export const JEV_API_TIMEOUT_S = 5;
 export const JEV_TOOL_PREFIX = "mcp__jev-api__";
 export const JEV_BATCH = JEV_TOOL_PREFIX + "batch";

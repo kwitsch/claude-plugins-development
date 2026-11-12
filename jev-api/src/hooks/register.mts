@@ -170,14 +170,17 @@ type On = {
   (event: "tool.call", hook: Hook<ToolCall, ToolResult>): void;
 };
 
-/** Description tail shared by the three tools. */
+/** Description tail shared by the tools. */
 const NEEDS = " Needs TYPESAFE_API_KEY, TYPESAFE_BASE_URL or JEV_URL to be set.";
 
 /** The `state` input property shared by the tools. */
 const STATE = { type: "string", description: "The text the question is about." };
 
+/** How long one request may take, in seconds, when neither the call's `timeout` nor the `timeout` option is valid. */
+const DEFAULT_TIMEOUT_S = 20;
+
 /** The optional `timeout` input property shared by the tools. */
-const TIMEOUT = { type: "number", exclusiveMinimum: 0, description: "Optional: the HTTP timeout of the request in seconds. Default: the plugin's timeout option, else 20." };
+const TIMEOUT = { type: "number", exclusiveMinimum: 0, description: `Optional: the HTTP timeout of the request in seconds. Default: the plugin's timeout option, else ${DEFAULT_TIMEOUT_S}.` };
 
 /** The System One endpoint used when neither JEV_URL nor TYPESAFE_BASE_URL is set. */
 const DEFAULT_JEV_URL = "https://api.typesafe.ai/v1/systemone";
@@ -185,13 +188,10 @@ const DEFAULT_JEV_URL = "https://api.typesafe.ai/v1/systemone";
 /** The model sent when TYPESAFE_DEFAULT_MODEL is unset or blank. */
 const DEFAULT_MODEL = "jev-latest";
 
-/** How long one request may take, in seconds, when neither the call's `timeout` nor the `timeout` option is valid. */
-const DEFAULT_TIMEOUT_S = 20;
-
 /** The key of a single-question tool's question in `questions` and of its answer in `answers` (`batch` keys them `q0`, `q1`, ... by index). */
 const QUESTION_ID = "answer";
 
-/** An http(s) URL (jevfort's `JEV_URL` check). */
+/** An http(s) URL: the `JEV_URL` check. */
 const HTTP_URL = /^https?:\/\/[^/?#\s]+(?:[/?#]\S*)?$/i;
 
 /** An http(s) API root: like {@link HTTP_URL} but without query or fragment, since a path gets appended. */

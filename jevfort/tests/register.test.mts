@@ -255,7 +255,7 @@ test("One failing question discards the other answers of the same decision", asy
   expect(await runJev($, "")).toContain("unavailable: batch: HTTP 500");
 });
 
-for (const [name, answer, error] of [["of another type", mech(0.5), "score: no score answer"], ["that is not JSON", "<html>", "batch: result is not JSON"]] as const) {
+for (const [name, answer, error] of [["of another type", mech(0.5), "batch: no score answer for questions[0]"], ["that is not JSON", "<html>", "batch: result is not JSON"]] as const) {
   test(`A jev-api result ${name} fails the decision`, async ($, on) => {
     const seen: unknown[] = [];
     setup(on, { messages: [user("what does this project do?")], jev: (q) => (q.id === "effort" ? answer : undefined) });
