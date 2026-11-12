@@ -36,7 +36,7 @@ the shapes below: `inline-headroom/docs/claude-code-verification.md`.
   reset at `session.start`, a rejected or malformed listing counts as all three tools missing. A new hook needs the guard too.
 - `session.start` registers the `estimate_effort` tool with `$.tool.register(ESTIMATE_SPEC)` whatever `routing`
   says (a throw is logged as `kind: "error"`), but only when the jev-api tools are listed: it checks `jevMissing($)`
-  before `next(e)` and otherwise logs `inactive: jev-api tools missing (...)` and registers nothing. A registered tool that no hook answers fails, so the unmatched
+  after `next(e)` (jev-api registers its tools in its own `session.start`) and otherwise logs `inactive: jev-api tools missing (...)` and registers nothing. A registered tool that no hook answers fails, so the unmatched
   `tool.call` hook answers `mcp__jevfort__estimate_effort` itself and never calls `next(e)`: `{ result }` (the JSON
   estimate) or, on invalid input, `{ isError: true, result }` without a Jev request. Calls are logged as kind `estimate`.
 - `tool.call` failure is `isError: true` or `deny: string`; there is no `exitCode`.

@@ -173,7 +173,11 @@ async function askJev($: Engine, state: unknown, questions: Record<string, Quest
     Object.entries(questions).map(async ([id, q]): Promise<[string, Answer]> => {
       const r = await $.tool.call({ tool: JEV_TOOL_PREFIX + q.type, instructions: q.instructions, state: text, ...(q.criteria === undefined ? {} : { criteria: q.criteria }) });
       // jev-api's deny text already starts with the type.
-      if (r.deny !== undefined || r.isError === true || typeof r.result !== "string") throw new Error(asText(r.deny ?? r.result ?? `${q.type}: no result`));
+      if (r.deny !== undefined || r.isError === true || typeof r.result !== "string") {
+        // A structured error result is serialized, not printed as `[object Object]`.
+        const detail = typeof r.result === "string" ? r.result : r.result === undefined ? undefined : JSON.stringify(r.result);
+        throw new Error(r.deny !== undefined ? asText(r.deny) : (detail ?? `${q.type}: no result`));
+      }
       let answer: Answer | null;
       try {
         answer = JSON.parse(r.result) as Answer | null;
@@ -452,6 +456,8 @@ async function skillOptions($: Engine): Promise<Record<string, string> | undefin
   const blocked = new Set(((await $.store.get(SKILL_BLOCKLIST_KEY).catch(() => undefined)) as string[] | undefined) ?? []);
   const criteria: Record<string, string> = { [NONE]: "No listed skill is meant for this request" };
   for (const c of commands) {
+    // shortcut: jev-api's choice takes at most 255 options, later skills are left out; rank them if users hit it.
+    if (Object.keys(criteria).length >= 255) break;
     if ((c.source === "plugin" || c.source === "user") && c.name !== "jev" && !BUILTIN_COMMANDS.has(c.name) && !blocked.has(c.name)) criteria[c.name] = clip(c.description, 160);
   }
   return Object.keys(criteria).length > 1 ? criteria : undefined;
@@ -738,11 +744,12 @@ export const register = (on: On, options: Options): void => {
       name: "jev",
       description: "Jev pilot: status, /jev report, /jev candidates, /jev export, /jev clear",
     });
-    // Before `next(e)`: a jev-api loaded beneath jevfort is not reachable by `$.tool.call` either, so it counts as missing.
+    // After `next(e)`: jev-api registers its tools in its own session.start, which may run beneath this hook.
+    const result = await next(e);
     const missing = await jevMissing($);
     if (missing.length) {
       await record($, { kind: "error", applied: false, text: `inactive: jev-api tools missing (${missing.join(", ")})` }).catch(() => undefined);
-      return next(e);
+      return result;
     }
     // Registered whatever `routing` says: Skills and subagents call it too. Turn start does not depend on it.
     try {
@@ -750,7 +757,7 @@ export const register = (on: On, options: Options): void => {
     } catch (err) {
       await record($, { kind: "error", applied: false, text: `estimate_effort not registered: ${String(err)}` }).catch(() => undefined);
     }
-    return next(e);
+    return result;
   });
 
   on("command.run", { command: "jev" }, async function onJevCommand($: Engine, e: CommandEvent): Promise<{ text: string }> {

@@ -38,7 +38,10 @@ async function askJev($, state, questions) {
 			state: text,
 			...q.criteria === undefined ? {} : { criteria: q.criteria }
 		});
-		if (r.deny !== undefined || r.isError === true || typeof r.result !== "string") throw new Error(asText(r.deny ?? r.result ?? `${q.type}: no result`));
+		if (r.deny !== undefined || r.isError === true || typeof r.result !== "string") {
+			const detail = typeof r.result === "string" ? r.result : r.result === undefined ? undefined : JSON.stringify(r.result);
+			throw new Error(r.deny !== undefined ? asText(r.deny) : detail ?? `${q.type}: no result`);
+		}
 		let answer;
 		try {
 			answer = JSON.parse(r.result);
@@ -247,6 +250,7 @@ async function skillOptions($) {
 	const blocked = new Set(await $.store.get(SKILL_BLOCKLIST_KEY).catch(() => undefined) ?? []);
 	const criteria = { [NONE]: "No listed skill is meant for this request" };
 	for (const c of commands) {
+		if (Object.keys(criteria).length >= 255) break;
 		if ((c.source === "plugin" || c.source === "user") && c.name !== "jev" && !BUILTIN_COMMANDS.has(c.name) && !blocked.has(c.name)) criteria[c.name] = clip(c.description, 160);
 	}
 	return Object.keys(criteria).length > 1 ? criteria : undefined;
@@ -510,6 +514,7 @@ export const register = (on, options) => {
 			name: "jev",
 			description: "Jev pilot: status, /jev report, /jev candidates, /jev export, /jev clear"
 		});
+		const result = await next(e);
 		const missing = await jevMissing($);
 		if (missing.length) {
 			await record($, {
@@ -517,7 +522,7 @@ export const register = (on, options) => {
 				applied: false,
 				text: `inactive: jev-api tools missing (${missing.join(", ")})`
 			}).catch(() => undefined);
-			return next(e);
+			return result;
 		}
 		try {
 			await $.tool.register(ESTIMATE_SPEC);
@@ -528,7 +533,7 @@ export const register = (on, options) => {
 				text: `estimate_effort not registered: ${String(err)}`
 			}).catch(() => undefined);
 		}
-		return next(e);
+		return result;
 	});
 	on("command.run", { command: "jev" }, async function onJevCommand($, e) {
 		const arg = e.args.trim();
