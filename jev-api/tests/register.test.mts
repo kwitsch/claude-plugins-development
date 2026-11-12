@@ -316,7 +316,8 @@ const QUESTIONS = (["noul", "choice", "score"] as const).map((type) => {
   const { instructions, criteria } = BASE[type];
   return { type, instructions, criteria };
 });
-const batch = ($: Runner, input: Record<string, unknown> = {}) => $.tool.call({ tool: TOOL("batch"), state: "Hello there!", questions: QUESTIONS, ...input }) as Promise<{ result?: string; deny?: string }>;
+BASE.batch = { state: "Hello there!", questions: QUESTIONS };
+const batch = ($: Runner, input: Record<string, unknown> = {}) => call($, "batch", input);
 const batchReply = (answers: Record<string, unknown>) => httpReply(200, JSON.stringify({ model: "jev-1", answers, usage: {} }));
 
 test("batch sends every question in one request and returns the answers in question order", async ($, on) => {

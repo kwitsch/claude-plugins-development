@@ -4,6 +4,7 @@ import { createKit } from "claude-engine-vitest";
 import type { On } from "claude-engine-vitest";
 import { expect, test as pureTest } from "vitest";
 import { compactInstructions, compactItems } from "../plugin/hooks/compact.mjs";
+import { JEV_BATCH } from "../plugin/hooks/jev.mjs";
 import { hints, promptQuestions } from "../plugin/hooks/prompt.mjs";
 
 // The manifest defaults (jevfort/package.json claudePlugin.userConfig): the kit does not fill userConfig defaults.
@@ -26,15 +27,14 @@ const { test, mock } = createKit({ module: new URL("../plugin/hooks/register.mjs
 
 const CWD = "/proj";
 
-const JEV_PREFIX = "mcp__jev-api__";
 // The jev-api tool jevfort needs as `$.tool.list()` lists it.
-const JEV_TOOLS = [{ name: JEV_PREFIX + "batch", description: "Ask Jev several questions", mcp: true }];
+const JEV_TOOLS = [{ name: JEV_BATCH, description: "Ask Jev several questions", mcp: true }];
 // The classifier's question ids by their instructions text (batch questions carry no id).
 const PROMPT_IDS = new Map(Object.entries(promptQuestions({ none: "x" })).map(([id, q]) => [q.instructions, id]));
 
 type Msg = { role: "user" | "assistant"; text: string; toolUses: Record<string, unknown>[] };
-/** One question of a batch call as the fake saw it: `mcp__jev-api__<type>` as `tool`; `state` is the call's JSON text. */
-type Asked = { tool: string; instructions: string; state: string; criteria?: unknown };
+/** One question of a batch call as the fake saw it; `state` is the call's JSON text. */
+type Asked = { type: string; instructions: string; state: string; criteria?: unknown };
 
 /** Lists the batch tool, answers each batch question with `jev`'s answer and stubs the session reads the hooks make; returns the questions. */
 function base(on: On, jev: (q: Asked) => Record<string, unknown>, messages: Msg[] = []) {
@@ -46,8 +46,8 @@ function base(on: On, jev: (q: Asked) => Record<string, unknown>, messages: Msg[
   on("ui.status", () => ({ value: undefined }));
   on("tool.list", () => ({ value: JEV_TOOLS }));
   on("tool.call", (_$, e, next) => {
-    if (e.tool !== JEV_PREFIX + "batch") return next(e);
-    const asked = (e.questions as { type: string; instructions: string; criteria?: unknown }[]).map((b): Asked => ({ tool: JEV_PREFIX + b.type, instructions: b.instructions, state: String(e.state), criteria: b.criteria }));
+    if (e.tool !== JEV_BATCH) return next(e);
+    const asked = (e.questions as { type: string; instructions: string; criteria?: unknown }[]).map((b): Asked => ({ ...b, state: String(e.state) }));
     sent.push(...asked);
     // A mod's `$.tool.call` resolves to the stub's `value`: the tool result `{ result }`, the answers in question order.
     return { value: { result: JSON.stringify(asked.map((q) => jev(q))) } };
@@ -76,8 +76,8 @@ test("The prompt classifier adds a hint only Claude reads", async ($, on) => {
   });
   await $.prompt.submit({ text: "rewrite the storage layer to use IndexedDB and sync across tabs", wait: false, origin: { kind: "composer" } });
   expect(seen?.join("\n") ?? "").toContain("plan");
-  // One jev-api call per question; the skill options are the listed skill plus `none`.
-  expect(sent.map((q) => q.tool)).toEqual(["mcp__jev-api__choice", "mcp__jev-api__noul", "mcp__jev-api__choice"]);
+  // The batch's question types in order; the skill options are the listed skill plus `none`.
+  expect(sent.map((q) => q.type)).toEqual(["choice", "noul", "choice"]);
   expect(Object.keys(sent[2].criteria as object)).toEqual(["none", "aws-diagrams"]);
 });
 
@@ -96,7 +96,7 @@ test("A general-purpose subagent is switched only when Jev is confident; an expl
   await $.tool.call({ tool: "Agent", description: "plan", prompt: "Find every caller of addTodo", subagent_type: "Plan", tool_use_id: "a2" });
   expect(spawned).toEqual(["Explore", "Plan"]);
   // The offered agent types are the options of one choice call per Agent call.
-  expect(sent.map((q) => q.tool)).toEqual(["mcp__jev-api__choice", "mcp__jev-api__choice"]);
+  expect(sent.map((q) => q.type)).toEqual(["choice", "choice"]);
   expect(sent[0].criteria).toEqual({ "general-purpose": "General tasks", Explore: "Read-only codebase search" });
 });
 
@@ -138,7 +138,7 @@ test("session.compact passes the ranking to the summarizer", async ($, on) => {
   });
   await $.session.compact({ trigger: "manual", messages });
   expect(instructions).toContain("Keep exact details (paths, errors, decisions, values) from: Bash step a.");
-  expect(sent.map((q) => q.tool)).toEqual(["mcp__jev-api__score", "mcp__jev-api__score", "mcp__jev-api__score"]);
+  expect(sent.map((q) => q.type)).toEqual(["score", "score", "score"]);
 });
 
 test("A short follow-up is classified with the previous reply as context", async ($, on) => {

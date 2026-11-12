@@ -63,5 +63,5 @@ call and a headless session denies it. jevfort uses `$.store`, `$.tool.call` (je
 `tests/register.test.mts` and `tests/phase3.test.mts` stub `tool.list` (jev-api's batch tool) and `tool.call`. The
 kit resolves a mod's `$.tool.call` to the stub's `value` and rejects with its `deny`, so the fake answers a batch
 call with `{ value: { result: "<JSON array of answers>" } }` or `{ deny: "batch: <reason>" }` and passes every other
-tool on with `next(e)`. It records each batch question on its own, as `mcp__jev-api__<type>`, so assertions read per
+tool on with `next(e)`. It records each batch question on its own (with its `type`), so assertions read per
 question. Batch questions carry no id: the fake finds it by the `instructions` text.

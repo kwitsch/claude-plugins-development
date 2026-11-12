@@ -5,6 +5,7 @@
 import { createKit } from "claude-engine-vitest";
 import type { On } from "claude-engine-vitest";
 import { expect } from "vitest";
+import { JEV_BATCH, JEV_TOOL_PREFIX } from "../plugin/hooks/jev.mjs";
 import { difficultyQuestion, doneQuestion, effortQuestion, mechanicalQuestion, nextActionQuestion, singleActionQuestion } from "../plugin/hooks/policy.mjs";
 
 // The manifest defaults (jevfort/package.json claudePlugin.userConfig): the kit does not fill userConfig defaults.
@@ -29,10 +30,9 @@ const { test, mock } = createKit({ module: new URL("../plugin/hooks/register.mjs
 
 const CWD = "/proj";
 const SID = "sid-1";
-const JEV_PREFIX = "mcp__jev-api__";
 // The jev-api tool jevfort needs as `$.tool.list()` lists it, and jev-api 0.1's tools, which lack it.
-const JEV_TOOLS = [{ name: JEV_PREFIX + "batch", description: "Ask Jev several questions", mcp: true }];
-const SINGLE_TOOLS = ["noul", "choice", "score"].map((t) => ({ name: JEV_PREFIX + t, description: `Ask Jev a ${t} question`, mcp: true }));
+const JEV_TOOLS = [{ name: JEV_BATCH, description: "Ask Jev several questions", mcp: true }];
+const SINGLE_TOOLS = ["noul", "choice", "score"].map((t) => ({ name: JEV_TOOL_PREFIX + t, description: `Ask Jev a ${t} question`, mcp: true }));
 // The question id each instructions text belongs to (batch questions carry no id; the fake finds it by the text).
 const QUESTION_IDS = new Map<string, string>([
   [nextActionQuestion([]).instructions, "next_action"],
@@ -49,8 +49,8 @@ const NEUTRAL: Record<string, Record<string, unknown>> = {
   score: { type: "score", score: 0, probabilities: {}, confidence: 0 },
 };
 
-/** One question of a batch call as the fake saw it: its id (its instructions when unknown), `mcp__jev-api__<type>` as `tool`, its input and the call's `state` (JSON text). */
-type Asked = { id: string; tool: string; instructions: string; state: string; criteria?: unknown };
+/** One question of a batch call as the fake saw it: its id (its instructions when unknown), its input and the call's `state` (JSON text). */
+type Asked = { id: string; type: string; instructions: string; state: string; criteria?: unknown };
 /** The fake Jev, called once per batch question: the answer object, a raw result string (the whole batch result), a number (an HTTP error status: the batch denies), `undefined` (a neutral answer), or a Promise that never settles (no answer). */
 type Jev = (q: Asked) => Record<string, unknown> | string | number | undefined | Promise<never>;
 type Msg = { role: "user" | "assistant"; text: string; toolUses: Record<string, unknown>[]; toolResults?: Record<string, unknown>[] };
@@ -63,6 +63,7 @@ type Runner = Parameters<Parameters<typeof test>[2]>[0];
 // test's own `tool.call` stub.
 function setup(on: On, opts: { messages: Msg[]; jev: Jev; files?: string[]; packageJson?: object; env?: Record<string, string>; agents?: { status: string }[]; store?: Record<string, unknown>; tools?: { name: string; description: string; mcp: boolean }[] | null }) {
   const sent: Asked[] = [];
+  let batchCalls = 0;
   mock.env(on, opts.env ?? {});
   mock.store(on, opts.store ?? {});
   const clock = mock.clock(on);
@@ -77,16 +78,17 @@ function setup(on: On, opts: { messages: Msg[]; jev: Jev; files?: string[]; pack
   // `tools: null` makes the listing fail.
   on("tool.list", () => (opts.tools === null ? { deny: "tool.list failed" } : { value: opts.tools ?? JEV_TOOLS }));
   on("tool.call", async (_$, e, next) => {
-    if (e.tool !== JEV_PREFIX + "batch") return next(e);
-    const asked = (e.questions as { type: string; instructions: string; criteria?: unknown }[]).map((b): Asked => ({ id: QUESTION_IDS.get(b.instructions) ?? b.instructions, tool: JEV_PREFIX + b.type, instructions: b.instructions, state: String(e.state), criteria: b.criteria }));
+    if (e.tool !== JEV_BATCH) return next(e);
+    batchCalls++;
+    const asked = (e.questions as { type: string; instructions: string; criteria?: unknown }[]).map((b): Asked => ({ ...b, id: QUESTION_IDS.get(b.instructions) ?? b.instructions, state: String(e.state) }));
     sent.push(...asked);
     const answers = await Promise.all(asked.map(async (q) => opts.jev(q)));
     const status = answers.find((a) => typeof a === "number");
     if (status !== undefined) return { deny: `batch: HTTP ${status}` };
     const raw = answers.find((a) => typeof a === "string");
-    return { value: { result: raw ?? JSON.stringify(answers.map((a, i) => a ?? NEUTRAL[asked[i].tool.slice(JEV_PREFIX.length)])) } };
+    return { value: { result: raw ?? JSON.stringify(answers.map((a, i) => a ?? NEUTRAL[asked[i].type])) } };
   });
-  return { sent, clock };
+  return { sent, clock, calls: () => batchCalls };
 }
 
 // Stubs beneath the done check: the turn's end, and the follow-up messages the mod submits (their texts).
@@ -212,17 +214,18 @@ test("When Jev is unreachable the step goes to Claude unchanged", async ($, on) 
   expect(chunks).toContainEqual({ kind: "text", index: 0, text: "from claude" });
 });
 
-// askJev: every question is one call to the jev-api tool of its type; `state` travels as JSON text.
-test("A turn-start decision sends one jev-api tool call per question", async ($, on) => {
-  const { sent } = setup(on, { messages: [user("what does src/app.ts export?")], files: [`${CWD}/src/app.ts`], jev: () => undefined });
+// askJev: all questions of a decision go out in one jev-api batch call; `state` travels as JSON text.
+test("A turn-start decision sends its questions in one jev-api batch call", async ($, on) => {
+  const { sent, calls } = setup(on, { messages: [user("what does src/app.ts export?")], files: [`${CWD}/src/app.ts`], jev: () => undefined });
   claudeBeneath(on, []);
 
   await drain($.turn.step(step));
-  expect(sent.map((q) => [q.id, q.tool])).toEqual([
-    ["next_action", "mcp__jev-api__choice"],
-    ["effort", "mcp__jev-api__score"],
-    ["mechanical", "mcp__jev-api__noul"],
-    ["single_action", "mcp__jev-api__noul"],
+  expect(calls()).toBe(1);
+  expect(sent.map((q) => [q.id, q.type])).toEqual([
+    ["next_action", "choice"],
+    ["effort", "score"],
+    ["mechanical", "noul"],
+    ["single_action", "noul"],
   ]);
   for (let i = 0; i < sent.length; i++) expect(stateOf(sent, i).request).toBe("what does src/app.ts export?");
   expect(sent[0].instructions).toBe(nextActionQuestion([]).instructions);
@@ -230,7 +233,7 @@ test("A turn-start decision sends one jev-api tool call per question", async ($,
   expect(sent[1].criteria).toEqual(effortQuestion.criteria);
 });
 
-test("A jev-api deny leaves the step to Claude and is logged with the question type", async ($, on) => {
+test("A jev-api deny leaves the step to Claude and is logged with its text", async ($, on) => {
   const seen: unknown[] = [];
   setup(on, { messages: [user("what does this project do?")], jev: () => 503 });
   claudeBeneath(on, seen);
@@ -293,7 +296,7 @@ test("The done check sends Claude back once when work is unfinished", { options:
   await $.turn.complete(answered("t1", "I renamed it in one file. Want me to do the rest?"));
   await expect.poll(() => submitted.length).toBe(1);
   expect(submitted[0]).toContain("doesn't look finished yet");
-  expect(sent.map((q) => [q.id, q.tool])).toEqual([["done", "mcp__jev-api__noul"]]);
+  expect(sent.map((q) => [q.id, q.type])).toEqual([["done", "noul"]]);
 
   // The follow-up turn is exempt: no second Jev call, no second follow-up.
   await ownSubmit($);
@@ -707,7 +710,7 @@ const estimateCall = async ($: Runner, input: Record<string, unknown> = {}) => (
 test("estimate_effort returns Jev's estimate with the model bias", async ($, on) => {
   const { sent } = setup(on, { messages: [], jev: byId({ effort: scored(1.6), mechanical: mech(0.1) }) });
   expect(await estimateCall($)).toEqual({ result: JSON.stringify({ effort: "medium", source: "jev" }) });
-  expect(sent.map((q) => [q.id, q.tool])).toEqual([["effort", "mcp__jev-api__score"], ["mechanical", "mcp__jev-api__noul"]]);
+  expect(sent.map((q) => [q.id, q.type])).toEqual([["effort", "score"], ["mechanical", "noul"]]);
   expect(stateOf(sent, 0).request).toBe(ESTIMATE.prompt);
 });
 
@@ -839,7 +842,7 @@ test("Without a jev-api tool jevfort is inactive: every hook passes through and 
     messages: [user("what does src/app.ts export?")],
     files: [`${CWD}/src/app.ts`],
     tools: SINGLE_TOOLS,
-    jev: byId({ done: { type: "noul", noul: 0.04 } }),
+    jev: unfinished,
   });
   claudeBeneath(on, seen);
   const submitted = followUps(on);

@@ -172,11 +172,9 @@ async function askJev($: Engine, state: unknown, questions: Record<string, Quest
   const call = (async (): Promise<Record<string, Answer>> => {
     const r = await $.tool.call({ tool: JEV_BATCH, state: JSON.stringify(state), questions: entries.map(([, q]) => q) });
     // jev-api's deny text already starts with `batch:`.
-    if (r.deny !== undefined || r.isError === true || typeof r.result !== "string") {
-      // A structured error result is serialized, not printed as `[object Object]`.
-      const detail = typeof r.result === "string" ? r.result : r.result === undefined ? undefined : JSON.stringify(r.result);
-      throw new Error(r.deny !== undefined ? asText(r.deny) : (detail ?? "batch: no result"));
-    }
+    if (r.deny !== undefined) throw new Error(asText(r.deny));
+    // A structured error result is serialized, not printed as `[object Object]`.
+    if (r.isError === true || typeof r.result !== "string") throw new Error(r.result === undefined ? "batch: no result" : typeof r.result === "string" ? r.result : JSON.stringify(r.result));
     let list: unknown;
     try {
       list = JSON.parse(r.result);
@@ -458,10 +456,14 @@ async function skillOptions($: Engine): Promise<Record<string, string> | undefin
   const commands = await $.command.list().catch(() => []);
   const blocked = new Set(((await $.store.get(SKILL_BLOCKLIST_KEY).catch(() => undefined)) as string[] | undefined) ?? []);
   const criteria: Record<string, string> = { [NONE]: "No listed skill is meant for this request" };
+  let options = 1;
   for (const c of commands) {
     // shortcut: jev-api's choice takes at most 255 options, later skills are left out; rank them if users hit it.
-    if (Object.keys(criteria).length >= 255) break;
-    if ((c.source === "plugin" || c.source === "user") && c.name !== "jev" && !BUILTIN_COMMANDS.has(c.name) && !blocked.has(c.name)) criteria[c.name] = clip(c.description, 160);
+    if (options >= 255) break;
+    if ((c.source === "plugin" || c.source === "user") && c.name !== "jev" && !BUILTIN_COMMANDS.has(c.name) && !blocked.has(c.name) && !(c.name in criteria)) {
+      criteria[c.name] = clip(c.description, 160);
+      options++;
+    }
   }
   return Object.keys(criteria).length > 1 ? criteria : undefined;
 }
