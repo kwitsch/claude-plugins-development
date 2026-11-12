@@ -31,8 +31,8 @@ export function compactInstructions(items, scores) {
 	return lines.join("\n");
 }
 export const COMPACT_MODEL = "claude-haiku-5-5";
-export const COMPACT_MAX_CHARS = 24e5;
-export const COMPACT_TAIL = 6;
+const COMPACT_MAX_CHARS = 24e5;
+const COMPACT_TAIL = 6;
 export const COMPACT_SYSTEM = `You compact a conversation between a user and Claude Code, an AI coding agent, so the work can continue
 in a fresh context that holds only your summary. Whoever reads it next knows nothing else about the conversation.
 
@@ -51,18 +51,16 @@ messages come nearly uncut: carry the code and errors from them over in full, si
 Be precise: keep names, paths, numbers, commands and error messages exact. Leave out pleasantries.
 Reply with the summary only.`;
 export function compactTranscript(messages, toolChars = 2e3, tailChars = 2e4) {
-	const cut = (s, n) => s.length > n ? `${s.slice(0, n)} …[${s.length - n} more characters]` : s;
 	const tailFrom = messages.length - COMPACT_TAIL;
 	return messages.map((m, i) => {
 		const tail = i >= tailFrom;
+		const resultChars = tail ? tailChars : toolChars;
 		const lines = [`${m.role === "user" ? "USER" : "CLAUDE"}: ${m.text}`.trimEnd()];
 		for (const t of m.toolUses) {
-			lines.push(`  [${t.tool} ${cut(JSON.stringify(t.input), tail ? tailChars : 400)}]`);
-			if (t.text) lines.push(`  → ${cut(t.text, tail ? tailChars : toolChars)}`);
+			lines.push(`  [${t.tool} ${clip(JSON.stringify(t.input), tail ? tailChars : 400)}]`);
+			if (t.text) lines.push(`  → ${clip(t.text, resultChars)}`);
 		}
-		if (!m.toolUses.length) {
-			for (const r of m.toolResults ?? []) if (r.text) lines.push(`  → ${cut(r.text, tail ? tailChars : toolChars)}`);
-		}
+		for (const r of m.toolUses.length ? [] : m.toolResults ?? []) if (r.text) lines.push(`  → ${clip(r.text, resultChars)}`);
 		return lines.join("\n");
 	}).join("\n\n");
 }

@@ -2,8 +2,8 @@ export const CACHE_TTL = {
 	"5m": 5 * 6e4,
 	"1h": 60 * 6e4
 };
-export const CACHE_YELLOW_MIN = 20;
-export const CACHE_RED_MIN = 5;
+const CACHE_YELLOW_MIN = 20;
+const CACHE_RED_MIN = 5;
 export function cacheTtlOf(usage) {
 	const c = usage?.cache_creation;
 	if ((c?.ephemeral_1h_input_tokens ?? 0) > 0) return "1h";
@@ -32,7 +32,4 @@ export function cacheColor(minutes) {
 	if (minutes <= 0) return "cyan";
 	const shown = minutes - 1;
 	return shown > CACHE_YELLOW_MIN ? undefined : shown <= CACHE_RED_MIN ? "red" : "yellow";
-}
-export function shouldAutoCompact(minutes, percent, threshold, done) {
-	return threshold > 0 && minutes === 0 && !done && percent >= threshold;
 }

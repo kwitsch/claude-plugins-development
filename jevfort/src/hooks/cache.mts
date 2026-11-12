@@ -1,5 +1,5 @@
 /**
- * Prompt-cache countdown and the auto-compact decision (ported from HeyCubit/effortless). Pure: the timer, the
+ * Prompt-cache countdown (ported from HeyCubit/effortless). Pure: the timer, the
  * usage read and the `/compact` run live in `register.mts`.
  *
  * @packageDocumentation
@@ -10,9 +10,9 @@ export const CACHE_TTL = { "5m": 5 * 60_000, "1h": 60 * 60_000 } as const;
 /** A cache write lifetime. */
 export type CacheTtl = keyof typeof CACHE_TTL;
 /** The countdown turns yellow at this many minutes shown or fewer. */
-export const CACHE_YELLOW_MIN = 20;
+const CACHE_YELLOW_MIN = 20;
 /** The countdown turns red at this many minutes shown or fewer. */
-export const CACHE_RED_MIN = 5;
+const CACHE_RED_MIN = 5;
 
 /** The usage fields of a response this module reads. */
 type CacheUsage = {
@@ -96,18 +96,4 @@ export function cacheColor(minutes: number): string | undefined {
   if (minutes <= 0) return "cyan";
   const shown = minutes - 1;
   return shown > CACHE_YELLOW_MIN ? undefined : shown <= CACHE_RED_MIN ? "red" : "yellow";
-}
-
-/**
- * Whether the idle chat should be compacted now: auto-compact is on, the cache is cold (a compaction then rewrites
- * the cache anyway), the context is full enough, and it was not done for this cold period yet.
- *
- * @param minutes - From {@link minutesLeft}.
- * @param percent - The context fill in percent.
- * @param threshold - The `autoCompactPercent` option; 0 disables.
- * @param done - Whether this cold period was already compacted.
- * @returns True to run `/compact`.
- */
-export function shouldAutoCompact(minutes: number | null, percent: number, threshold: number, done: boolean): boolean {
-  return threshold > 0 && minutes === 0 && !done && percent >= threshold;
 }

@@ -16,7 +16,7 @@
 import { GENERAL, SWITCH_AT } from "./agents.mjs";
 import { absolute, AUTH_TOOL, bash, BUILTIN_COMMANDS, clipScript, coversStep, dedupeSkills, isSafeToOffer, MAX_READS, mentionedPaths, quotedTerms, relevant, SAFE_MAKE, SAFE_SCRIPT, sameCall, SKILL_BLOCKLIST_KEY } from "./candidates.mjs";
 import type { Candidate } from "./candidates.mjs";
-import { CACHE_TTL, cacheColor, cacheLabel, minutesLeft, nextTtl, shouldAutoCompact } from "./cache.mjs";
+import { CACHE_TTL, cacheColor, cacheLabel, minutesLeft, nextTtl } from "./cache.mjs";
 import type { CacheTtl } from "./cache.mjs";
 import { COMPACT_MODEL, COMPACT_SYSTEM, compactInstructions, compactItems, haikuTranscript, RELEVANCE } from "./compact.mjs";
 import { clip, splitTurn, summarize, toolCalls } from "./context.mjs";
@@ -256,22 +256,32 @@ let coldCompacted = false;
 let cacheTimer: { cancel(): void } | undefined;
 
 /**
+ * Remembers the minutes the band shows and redraws it when they changed.
+ *
+ * @param $ - Engine interface.
+ * @param minutes - From `minutesLeft`.
+ */
+function showMinutes($: Engine, minutes: number | null): void {
+  if (minutes === shownMinutes) return;
+  shownMinutes = minutes;
+  try {
+    $.ui.invalidate("ui.render");
+  } catch { /* no mounted render site */ }
+}
+
+/**
  * Redraws the band when the countdown's minute changed and, once the cache is cold and the chat full enough,
  * compacts it. Run by the session's 15 s timer.
  *
  * @param $ - Engine interface.
  */
 async function cacheTick($: Engine): Promise<void> {
+  // No response seen and nothing drawn: no engine call.
+  if (cacheExpires <= 0 && shownMinutes === null) return;
   const minutes = minutesLeft(cacheExpires, await $.clock.now());
-  if (minutes !== shownMinutes) {
-    shownMinutes = minutes;
-    try {
-      $.ui.invalidate("ui.render");
-    } catch { /* no mounted render site */ }
-  }
+  showMinutes($, minutes);
   if (turnRunning || autoCompactPercent <= 0 || minutes !== 0 || coldCompacted) return;
-  const percent = (await $.session.usage()).context.percent ?? 0;
-  if (!shouldAutoCompact(minutes, percent, autoCompactPercent, coldCompacted)) return;
+  if (((await $.session.usage()).context.percent ?? 0) < autoCompactPercent) return;
   coldCompacted = true;
   // The app's own /compact, run as if typed; it waits for an idle session.
   await $.command.run({ command: "compact", args: "" });
@@ -296,7 +306,7 @@ async function* cacheWatch($: Engine, original: Step, request: Step, run: StepRu
     lastResponseAt = now;
     cacheExpires = now + CACHE_TTL[cacheTtl];
     coldCompacted = false;
-    await cacheTick($);
+    showMinutes($, minutesLeft(cacheExpires, now));
   }
   return result;
 }

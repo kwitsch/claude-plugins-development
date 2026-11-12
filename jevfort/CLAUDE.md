@@ -45,7 +45,7 @@ subagents load it via ToolSearch), no skills, agents, command hooks or MCP serve
   update the band.
 - Cache countdown, Haiku compaction and auto-compact (0.7.0, ported from HeyCubit/effortless `hooks/register.tsx`,
   none needs jev-api, so their hooks have no readiness guard): `cache.mts` (pure: TTL detection, minutes, label,
-  colour, `shouldAutoCompact`) and the Haiku transcript/prompt in `compact.mts`. `register.mts` wraps `next` in
+  colour) and the Haiku transcript/prompt in `compact.mts`. `register.mts` wraps `next` in
   `turn.step` with `cacheWatch`: a main-loop response with `usage` on the session's own model (`request.model ===
   e.model`) sets `cacheExpires = now + TTL`. A 15 s `$.clock.every` started in `session.start` (cancelled and
   restarted per session) runs `cacheTick`: redraws the band when the minute changed and, with `autoCompactPercent > 0`,

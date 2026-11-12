@@ -1,6 +1,6 @@
 import { GENERAL, SWITCH_AT } from "./agents.mjs";
 import { absolute, AUTH_TOOL, bash, BUILTIN_COMMANDS, clipScript, coversStep, dedupeSkills, isSafeToOffer, MAX_READS, mentionedPaths, quotedTerms, relevant, SAFE_MAKE, SAFE_SCRIPT, sameCall, SKILL_BLOCKLIST_KEY } from "./candidates.mjs";
-import { CACHE_TTL, cacheColor, cacheLabel, minutesLeft, nextTtl, shouldAutoCompact } from "./cache.mjs";
+import { CACHE_TTL, cacheColor, cacheLabel, minutesLeft, nextTtl } from "./cache.mjs";
 import { COMPACT_MODEL, COMPACT_SYSTEM, compactInstructions, compactItems, haikuTranscript, RELEVANCE } from "./compact.mjs";
 import { clip, splitTurn, summarize, toolCalls } from "./context.mjs";
 import { choice, JEV_API_TIMEOUT_S, JEV_BATCH, JEV_TOOL_PREFIX, JEV_TOOLS, MAX_CHOICE_OPTIONS, missingJevTools, noul, score, TIMEOUT_MS } from "./jev.mjs";
@@ -87,17 +87,19 @@ let shownMinutes = null;
 let turnRunning = false;
 let coldCompacted = false;
 let cacheTimer;
+function showMinutes($, minutes) {
+	if (minutes === shownMinutes) return;
+	shownMinutes = minutes;
+	try {
+		$.ui.invalidate("ui.render");
+	} catch {}
+}
 async function cacheTick($) {
+	if (cacheExpires <= 0 && shownMinutes === null) return;
 	const minutes = minutesLeft(cacheExpires, await $.clock.now());
-	if (minutes !== shownMinutes) {
-		shownMinutes = minutes;
-		try {
-			$.ui.invalidate("ui.render");
-		} catch {}
-	}
+	showMinutes($, minutes);
 	if (turnRunning || autoCompactPercent <= 0 || minutes !== 0 || coldCompacted) return;
-	const percent = (await $.session.usage()).context.percent ?? 0;
-	if (!shouldAutoCompact(minutes, percent, autoCompactPercent, coldCompacted)) return;
+	if (((await $.session.usage()).context.percent ?? 0) < autoCompactPercent) return;
 	coldCompacted = true;
 	await $.command.run({
 		command: "compact",
@@ -113,7 +115,7 @@ async function* cacheWatch($, original, request, run) {
 		lastResponseAt = now;
 		cacheExpires = now + CACHE_TTL[cacheTtl];
 		coldCompacted = false;
-		await cacheTick($);
+		showMinutes($, minutesLeft(cacheExpires, now));
 	}
 	return result;
 }

@@ -66,9 +66,9 @@ export function compactInstructions(items: readonly Item[], scores: readonly (nu
 /** The summarizer model of a Haiku compaction. */
 export const COMPACT_MODEL = "claude-haiku-5-5";
 /** The transcript's most text sent to Haiku: about 600k tokens, inside its window with room for the summary. */
-export const COMPACT_MAX_CHARS = 2_400_000;
+const COMPACT_MAX_CHARS = 2_400_000;
 /** The last messages go to Haiku nearly whole: the work in progress lives in their tool calls and results. */
-export const COMPACT_TAIL = 6;
+const COMPACT_TAIL = 6;
 /** The system prompt of a Haiku compaction. */
 export const COMPACT_SYSTEM = `You compact a conversation between a user and Claude Code, an AI coding agent, so the work can continue
 in a fresh context that holds only your summary. Whoever reads it next knows nothing else about the conversation.
@@ -97,17 +97,17 @@ Reply with the summary only.`;
  * @returns The text.
  */
 export function compactTranscript(messages: readonly SessionMessage[], toolChars = 2000, tailChars = 20_000): string {
-  const cut = (s: string, n: number): string => (s.length > n ? `${s.slice(0, n)} …[${s.length - n} more characters]` : s);
   const tailFrom = messages.length - COMPACT_TAIL;
   return messages
     .map((m, i) => {
       const tail = i >= tailFrom;
+      const resultChars = tail ? tailChars : toolChars;
       const lines = [`${m.role === "user" ? "USER" : "CLAUDE"}: ${m.text}`.trimEnd()];
       for (const t of m.toolUses) {
-        lines.push(`  [${t.tool} ${cut(JSON.stringify(t.input), tail ? tailChars : 400)}]`);
-        if (t.text) lines.push(`  → ${cut(t.text, tail ? tailChars : toolChars)}`);
+        lines.push(`  [${t.tool} ${clip(JSON.stringify(t.input), tail ? tailChars : 400)}]`);
+        if (t.text) lines.push(`  → ${clip(t.text, resultChars)}`);
       }
-      if (!m.toolUses.length) { for (const r of m.toolResults ?? []) if (r.text) lines.push(`  → ${cut(r.text, tail ? tailChars : toolChars)}`); }
+      for (const r of m.toolUses.length ? [] : (m.toolResults ?? [])) if (r.text) lines.push(`  → ${clip(r.text, resultChars)}`);
       return lines.join("\n");
     })
     .join("\n\n");

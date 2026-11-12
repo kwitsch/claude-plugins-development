@@ -2,7 +2,7 @@
 // None of it needs jev-api: the kit tests list no tools.
 import { createKit } from "claude-engine-vitest";
 import { expect, test as pureTest } from "vitest";
-import { CACHE_TTL, cacheColor, cacheLabel, cacheTtlOf, minutesLeft, nextTtl, shouldAutoCompact } from "../plugin/hooks/cache.mjs";
+import { CACHE_TTL, cacheColor, cacheLabel, cacheTtlOf, minutesLeft, nextTtl } from "../plugin/hooks/cache.mjs";
 import { compactTranscript, haikuTranscript } from "../plugin/hooks/compact.mjs";
 
 const DEFAULTS = { routing: "effort", compaction: true, haikuCompact: true, autoCompactPercent: 60 };
@@ -34,15 +34,6 @@ pureTest("countdown: minutes, label and colour", () => {
   expect(cacheColor(0)).toBe("cyan");
 });
 
-pureTest("auto-compact needs a cold cache, enough fill, a threshold above 0 and no earlier run this period", () => {
-  expect(shouldAutoCompact(0, 60, 60, false)).toBe(true);
-  expect(shouldAutoCompact(0, 59, 60, false)).toBe(false);
-  expect(shouldAutoCompact(3, 90, 60, false)).toBe(false);
-  expect(shouldAutoCompact(null, 90, 60, false)).toBe(false);
-  expect(shouldAutoCompact(0, 90, 0, false)).toBe(false);
-  expect(shouldAutoCompact(0, 90, 60, true)).toBe(false);
-});
-
 pureTest("the Haiku transcript keeps the tail whole and cuts old tool results", () => {
   const long = "x".repeat(5000);
   const messages = [
@@ -52,7 +43,7 @@ pureTest("the Haiku transcript keeps the tail whole and cuts old tool results", 
   ];
   const t = compactTranscript(messages);
   expect(t).toContain("[Bash");
-  expect(t).toContain("3000 more characters");
+  expect(t).toContain("3000 more chars");
   expect(haikuTranscript(messages)).toBeDefined();
 });
 
