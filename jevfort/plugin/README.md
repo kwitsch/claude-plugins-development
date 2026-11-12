@@ -31,6 +31,14 @@ Without jev-api's batch tool in a session (for example denied by a permission ru
 
 In the terminal and the desktop app jevfort draws one row above the prompt: `low medium high xhigh max` and a `Jev auto: on` button. From each turn's start, the effort Claude Code is set to (the session effort) is bold and the effort Jev chose for the current turn is blue; the other levels are dim. Pressing `Jev auto` pauses Jev's automatic effort choice: turns run at the session effort until you press it again or a new session starts (a reload of jevfort also turns it back on). Taking steps, model routing and the `estimate_effort` tool keep working. The row shows the main conversation only, not subagents, and is hidden with `routing: off` and while jevfort is inactive. `/jev` shows `(effort auto off)` while the choice is paused.
 
+## Cache countdown, Haiku compaction and auto-compact
+
+Ported from [HeyCubit/effortless](https://github.com/HeyCubit/effortless). None of it needs jev-api.
+
+- **Cache countdown:** the band shows `cache 58m` (dim; yellow at 20 minutes or fewer, red at 5 or fewer, `cache cold` once the prompt cache has lapsed). Every main-loop response on the chat's own model restarts it; the lifetime (1 hour, or 5 minutes) is read from the response's cache writes. It shows from the first response of a session, also when the effort row is hidden.
+- **Haiku compaction (`haikuCompact`):** the summary of every compaction is written by `claude-haiku-5-5` from the transcript (the last six messages nearly uncut), with Jev's keep/drop ranking and your `/compact` note as instructions. Subagent compactions and any Haiku failure fall through to Claude Code's own compaction; a compaction computed ahead of time is skipped.
+- **Auto-compact (`autoCompactPercent`):** a 15 s timer runs `/compact` once per cold period when no turn is running, the cache is cold and the context fill is at least the set percent. `0` turns it off.
+
 ## Tool
 
 `estimate_effort` (model-visible name `mcp__jevfort__estimate_effort`, deferred: load it with ToolSearch `select:mcp__jevfort__estimate_effort`) estimates the reasoning effort a prompt most likely needs; Skills and subagents can call it.
@@ -47,21 +55,23 @@ The result is JSON `{"effort": "<level>", "source": "jev" | "mechanical" | "fall
 
 ## Options
 
-| Option              | Default  | Meaning                                                                                                                                                                        |
-| ------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `routing`           | `effort` | Per-turn routing: `effort` (effort from Jev's estimate: every turn on Opus/Sonnet, first turn then held on Haiku/Fable), `model` (also a cheaper model by difficulty) or `off` |
-| `takeSteps`         | `true`   | Let Jev make routine tool calls (Read, git, project scripts) itself                                                                                                            |
-| `doneCheck`         | `true`   | After an answer that looks unfinished, send Claude one follow-up message to continue                                                                                           |
-| `takeThreshold`     | `0.85`   | Minimum probability for Jev to take a step                                                                                                                                     |
-| `subagents`         | `true`   | Also take steps and route effort inside subagent loops                                                                                                                         |
-| `doneThreshold`     | `0.15`   | Send Claude back below this finished probability                                                                                                                               |
-| `bypass`            | `true`   | Answer a one-action prompt with Jev's action plus a small-model summary                                                                                                        |
-| `classify`          | `true`   | Classify each prompt and add a skill or plan hint                                                                                                                              |
-| `agentTypes`        | `true`   | Switch a general-purpose subagent to a specialised type when confident                                                                                                         |
-| `compaction`        | `true`   | Tell the summarizer which tool results to keep in detail                                                                                                                       |
-| `takeOnlyForBypass` | `true`   | Take a step only when the whole prompt is one read-only action                                                                                                                 |
-| `measureSteps`      | `true`   | Inside longer turns, ask Jev in parallel which action it would take and log the match                                                                                          |
-| `minEffort`         | `low`    | Lowest effort the effort estimate may pick; also the effort of a purely mechanical turn                                                                                        |
-| `maxEffort`         | `xhigh`  | Highest effort the effort estimate may pick                                                                                                                                    |
+| Option               | Default  | Meaning                                                                                                                                                                        |
+| -------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `routing`            | `effort` | Per-turn routing: `effort` (effort from Jev's estimate: every turn on Opus/Sonnet, first turn then held on Haiku/Fable), `model` (also a cheaper model by difficulty) or `off` |
+| `takeSteps`          | `true`   | Let Jev make routine tool calls (Read, git, project scripts) itself                                                                                                            |
+| `doneCheck`          | `true`   | After an answer that looks unfinished, send Claude one follow-up message to continue                                                                                           |
+| `takeThreshold`      | `0.85`   | Minimum probability for Jev to take a step                                                                                                                                     |
+| `subagents`          | `true`   | Also take steps and route effort inside subagent loops                                                                                                                         |
+| `doneThreshold`      | `0.15`   | Send Claude back below this finished probability                                                                                                                               |
+| `bypass`             | `true`   | Answer a one-action prompt with Jev's action plus a small-model summary                                                                                                        |
+| `classify`           | `true`   | Classify each prompt and add a skill or plan hint                                                                                                                              |
+| `agentTypes`         | `true`   | Switch a general-purpose subagent to a specialised type when confident                                                                                                         |
+| `compaction`         | `true`   | Tell the summarizer which tool results to keep in detail                                                                                                                       |
+| `haikuCompact`       | `true`   | Haiku 5.5 writes every compaction summary (also `/compact` and the automatic one); on failure Claude Code compacts as usual                                                    |
+| `autoCompactPercent` | `60`     | Compact an idle chat by itself once the prompt cache is cold and the context is at least this full (percent); `0` turns it off                                                 |
+| `takeOnlyForBypass`  | `true`   | Take a step only when the whole prompt is one read-only action                                                                                                                 |
+| `measureSteps`       | `true`   | Inside longer turns, ask Jev in parallel which action it would take and log the match                                                                                          |
+| `minEffort`          | `low`    | Lowest effort the effort estimate may pick; also the effort of a purely mechanical turn                                                                                        |
+| `maxEffort`          | `xhigh`  | Highest effort the effort estimate may pick                                                                                                                                    |
 
 Write, Edit and NotebookEdit calls into this session's scratchpad directory are allowed in every permission mode; a settings deny or ask rule still wins (only a mode's own ask becomes allow). Paths containing `..` are never allowed. Bash commands that write there are not covered. Every other permission verdict is Claude Code's own.

@@ -16,7 +16,9 @@
 import { GENERAL, SWITCH_AT } from "./agents.mjs";
 import { absolute, AUTH_TOOL, bash, BUILTIN_COMMANDS, clipScript, coversStep, dedupeSkills, isSafeToOffer, MAX_READS, mentionedPaths, quotedTerms, relevant, SAFE_MAKE, SAFE_SCRIPT, sameCall, SKILL_BLOCKLIST_KEY } from "./candidates.mjs";
 import type { Candidate } from "./candidates.mjs";
-import { compactInstructions, compactItems, RELEVANCE } from "./compact.mjs";
+import { CACHE_TTL, cacheColor, cacheLabel, minutesLeft, nextTtl, shouldAutoCompact } from "./cache.mjs";
+import type { CacheTtl } from "./cache.mjs";
+import { COMPACT_MODEL, COMPACT_SYSTEM, compactInstructions, compactItems, haikuTranscript, RELEVANCE } from "./compact.mjs";
 import { clip, splitTurn, summarize, toolCalls } from "./context.mjs";
 import type { SessionMessage, ToolUse, TurnContext } from "./context.mjs";
 import { choice, JEV_API_TIMEOUT_S, JEV_BATCH, JEV_TOOL_PREFIX, JEV_TOOLS, MAX_CHOICE_OPTIONS, missingJevTools, noul, score, TIMEOUT_MS } from "./jev.mjs";
@@ -39,13 +41,19 @@ type Completion = { isAnswered: true; text: string; usage: ModelUsage } | { isAn
 /** The part of the engine interface `$` this module uses. */
 type Engine = {
   /** Time. */
-  clock: { now(): Promise<number>; sleep(ms: number): Promise<unknown> };
+  clock: { now(): Promise<number>; sleep(ms: number): Promise<unknown>; every(ms: number, fn: () => void): { cancel(): void } };
   /** Environment of the Claude Code process. */
   env: { get(name: string): Promise<string | undefined> };
   /** This plugin's key-value store. */
   store: { get(key: string): Promise<unknown>; set(key: string, value: unknown): Promise<unknown> };
   /** The session's transcript, directory and id. */
-  session: { messages(opts: { agentId?: string }): Promise<SessionMessage[]>; cwd(): Promise<string>; id(): Promise<string> };
+  session: {
+    messages(opts: { agentId?: string }): Promise<SessionMessage[]>;
+    cwd(): Promise<string>;
+    id(): Promise<string>;
+    /** The context fill (`percent`, 0–100) and token counts. */
+    usage(): Promise<{ context: { tokens?: number; window?: number; percent?: number } }>;
+  };
   /** Filesystem. */
   fs: {
     exists(path: string): Promise<boolean>;
@@ -54,7 +62,7 @@ type Engine = {
     write(path: string, text: string): Promise<unknown>;
   };
   /** Slash commands. */
-  command: { register(spec: { name: string; description: string }): Promise<unknown>; list(): Promise<CommandInfo[]> };
+  command: { register(spec: { name: string; description: string }): Promise<unknown>; list(): Promise<CommandInfo[]>; run(spec: { command: string; args: string }): Promise<unknown> };
   /** Tools: the listed ones, registering this plugin's own (`estimate_effort`), and calling one (the jev-api tools). */
   tool: {
     list(): Promise<ToolInfo[]>;
@@ -146,6 +154,8 @@ type On = {
 /** The plugin options the engine passes to `register` (the manifest's `userConfig` values). */
 type Options = Partial<Record<string, unknown>>;
 
+/** How often the cache countdown and the auto-compact check run. */
+const CACHE_TICK_MS = 15_000;
 /** How many steps Jev may take in one turn. */
 const MAX_TAKES_PER_TURN = 3;
 /** The file tools whose writes into the session scratchpad are always allowed. */
@@ -225,6 +235,111 @@ let jevState: string | undefined;
 let estimateRegistered = false;
 /** Set when the band's button could not redraw out of frame; the next applied listing redraws it. */
 let bandStale = false;
+
+/** The `autoCompactPercent` option: context fill from which an idle chat with a cold cache is compacted; 0 is off. */
+let autoCompactPercent = 60;
+/** The `compaction` option: Jev ranks the tool results before a compaction (needs jev-api). */
+let jevRanking = true;
+/** When the main loop's prompt cache goes cold (`0`: no response seen yet), and its write lifetime. */
+let cacheExpires = 0;
+/** The cache write lifetime in force. */
+let cacheTtl: CacheTtl = "1h";
+/** When the last main-loop response came back. */
+let lastResponseAt: number | undefined;
+/** The minutes left the band was last drawn for (`null`: no countdown). */
+let shownMinutes: number | null = null;
+/** A main-loop turn is running: no auto-compact then. */
+let turnRunning = false;
+/** This cold period was already compacted (reset by the next response). */
+let coldCompacted = false;
+/** The session's cache tick, cancelled and started again by each `session.start`. */
+let cacheTimer: { cancel(): void } | undefined;
+
+/**
+ * Redraws the band when the countdown's minute changed and, once the cache is cold and the chat full enough,
+ * compacts it. Run by the session's 15 s timer.
+ *
+ * @param $ - Engine interface.
+ */
+async function cacheTick($: Engine): Promise<void> {
+  const minutes = minutesLeft(cacheExpires, await $.clock.now());
+  if (minutes !== shownMinutes) {
+    shownMinutes = minutes;
+    try {
+      $.ui.invalidate("ui.render");
+    } catch { /* no mounted render site */ }
+  }
+  if (turnRunning || autoCompactPercent <= 0 || minutes !== 0 || coldCompacted) return;
+  const percent = (await $.session.usage()).context.percent ?? 0;
+  if (!shouldAutoCompact(minutes, percent, autoCompactPercent, coldCompacted)) return;
+  coldCompacted = true;
+  // The app's own /compact, run as if typed; it waits for an idle session.
+  await $.command.run({ command: "compact", args: "" });
+  cacheExpires = 0;
+}
+
+/**
+ * Passes a step's chunks through and, when a main-loop response on the chat's own model reports usage, restarts the
+ * cache countdown. A request on another model (routing) leaves the chat's own cache as it was.
+ *
+ * @param $ - Engine interface.
+ * @param original - The step event as the engine raised it.
+ * @param request - The step event as sent (model possibly lowered).
+ * @param run - The step run to watch.
+ * @returns The same run.
+ */
+async function* cacheWatch($: Engine, original: Step, request: Step, run: StepRun): StepRun {
+  const result = yield* run;
+  if (original.agentId === undefined && result.usage && request.model === original.model) {
+    const now = await $.clock.now();
+    cacheTtl = nextTtl(result.usage, cacheTtl, lastResponseAt === undefined ? undefined : now - lastResponseAt);
+    lastResponseAt = now;
+    cacheExpires = now + CACHE_TTL[cacheTtl];
+    coldCompacted = false;
+    await cacheTick($);
+  }
+  return result;
+}
+
+/**
+ * Phase 3: before a compaction, Jev scores how relevant each recent tool result is; the summarizer is told what to
+ * keep. Returns the event with the ranking added to its instructions; unchanged when Jev is missing, fails or nothing
+ * stands out.
+ *
+ * @param $ - Engine interface.
+ * @param e - The compaction event.
+ * @returns The event to continue with.
+ */
+async function withJevRanking($: Engine, e: CompactEvent): Promise<CompactEvent> {
+  if (!jevRanking || (await jevMissing($)).length) return e;
+  if (e.trigger !== "manual" && e.trigger !== "auto") return e;
+  const items = compactItems(e.messages);
+  if (items.length < 3) return e;
+
+  const request = splitTurn(e.messages)?.request ?? "";
+  const questions: Record<string, Question> = {};
+  items.forEach((it, i) => {
+    questions[`item_${i}`] = {
+      type: "score",
+      instructions: `How relevant is this earlier tool call and its result to continuing the work on \`request\`? Call: ${it.label}. Result: ${it.result || "(no output)"}`,
+      criteria: RELEVANCE,
+    };
+  });
+  const r = await askJev($, { request: clip(request, 2000), item_count: items.length }, questions);
+  if (!r.ok) return e;
+  const scores = items.map((_, i) => score(r.answers, `item_${i}`)?.score);
+  const added = compactInstructions(items, scores);
+  const keep = scores.filter((s) => (s ?? 0) >= 2.2).length;
+  const drop = scores.filter((s) => s !== undefined && s < 0.8).length;
+  await record($, {
+    kind: "compact",
+    applied: added !== undefined,
+    text: `${e.trigger} compaction: ${items.length} results scored, keep ${keep}, drop ${drop}`,
+    ms: r.ms,
+    data: { trigger: e.trigger, items: items.length, keep, drop },
+  });
+  return added ? { ...e, instructions: e.instructions ? `${e.instructions}\n\n${added}` : added } : e;
+}
 
 /**
  * The needed jev-api tools that are not listed; a non-empty answer turns jevfort off (every hook but `/jev`, the
@@ -675,6 +790,9 @@ export const register = (on: On, options: Options): void => {
   /** Set when the user configured `minEffort`/`maxEffort` but they are invalid or inverted; logged at session start. */
   const badRange = !configuredRange && (options.minEffort !== undefined || options.maxEffort !== undefined) ? `minEffort ${String(options.minEffort)}, maxEffort ${String(options.maxEffort)}` : undefined;
 
+  const haikuCompact = options.haikuCompact !== false;
+  autoCompactPercent = threshold("autoCompactPercent", 60);
+
   // Draws `/jev` output as Markdown, so the report's tables render as tables.
   on("ui.render", { component: "CommandOutput", props: { command: "jev" } }, function onRenderJev($: Engine, e: RenderEvent, next: (e: RenderEvent) => unknown): unknown {
     if (e.props.isErrored) return next(e);
@@ -688,10 +806,16 @@ export const register = (on: On, options: Options): void => {
   let autoOff = false;
 
   // The effort band above the prompt: the five levels, the session effort bold, Jev's choice for the turn blue, and the
-  // Auto button. Passes while jevfort is inactive (also before the session baseline) or a survey holds the band.
+  // Auto button, then the cache countdown. Without the effort row (jevfort inactive, also before the session
+  // baseline, or `routing: "off"`) only the countdown shows; a survey holds the band.
   on("ui.render", { component: "AbovePrompt" }, function onRenderBand($: Engine, e: BandEvent, next: (e: BandEvent) => unknown): unknown {
-    if (routing === "off" || jevState !== "" || e.props.hasSurvey) return next(e);
+    // The cache countdown needs no Jev: it shows also while the effort row is hidden.
+    const effortRow = routing !== "off" && jevState === "";
+    if (e.props.hasSurvey || (!effortRow && shownMinutes === null)) return next(e);
     const { Box, Text, Button } = $.ui.resolve(e);
+    const color = shownMinutes === null ? undefined : cacheColor(shownMinutes);
+    const cache = shownMinutes === null ? [] : [Text({ ...(color ? { color } : { dimColor: true }), children: [` ${cacheLabel(shownMinutes)}`] })];
+    if (!effortRow) return Box({ flexDirection: "row", children: cache });
     return Box({
       flexDirection: "row",
       children: [
@@ -716,6 +840,7 @@ export const register = (on: On, options: Options): void => {
             }
           },
         }),
+        ...cache,
       ],
     });
   });
@@ -799,40 +924,44 @@ export const register = (on: On, options: Options): void => {
     });
   }
 
-  // Phase 3: before a compaction, Jev scores how relevant each recent tool result is; the summarizer is told what to keep.
-  if (options.compaction !== false) {
-    on("session.compact", async function onCompact($: Engine, e: CompactEvent, next: Next<CompactEvent, unknown>): Promise<unknown> {
-      if ((await jevMissing($)).length) return next(e);
-      if (e.agentId || (e.trigger !== "manual" && e.trigger !== "auto")) return next(e);
-      const items = compactItems(e.messages);
-      if (items.length < 3) return next(e);
+  jevRanking = options.compaction !== false;
 
-      const request = splitTurn(e.messages)?.request ?? "";
-      const questions: Record<string, Question> = {};
-      items.forEach((it, i) => {
-        questions[`item_${i}`] = {
-          type: "score",
-          instructions: `How relevant is this earlier tool call and its result to continuing the work on \`request\`? Call: ${it.label}. Result: ${it.result || "(no output)"}`,
-          criteria: RELEVANCE,
-        };
-      });
-      const r = await askJev($, { request: clip(request, 2000), item_count: items.length }, questions);
-      if (!r.ok) return next(e);
-      const scores = items.map((_, i) => score(r.answers, `item_${i}`)?.score);
-      const added = compactInstructions(items, scores);
-      const keep = scores.filter((s) => (s ?? 0) >= 2.2).length;
-      const drop = scores.filter((s) => s !== undefined && s < 0.8).length;
-      await record($, {
-        kind: "compact",
-        applied: added !== undefined,
-        text: `${e.trigger} compaction: ${items.length} results scored, keep ${keep}, drop ${drop}`,
-        ms: r.ms,
-        data: { trigger: e.trigger, items: items.length, keep, drop },
-      });
-      if (!added) return next(e);
-      return next({ ...e, instructions: e.instructions ? `${e.instructions}\n\n${added}` : added });
+  // Compaction: Jev ranks the recent tool results (the summarizer is told what to keep), then Haiku 5.5 writes the
+  // summary (a fraction of the chat model's price); any failure falls through to Claude Code's own compaction. Works
+  // without jev-api: only the ranking needs Jev.
+  on("session.compact", async function onCompact($: Engine, e: CompactEvent, next: Next<CompactEvent, unknown>): Promise<unknown> {
+    if (e.agentId) return next(e);
+    const ranked = await withJevRanking($, e);
+    // Whoever writes the summary, the next request rewrites the whole cache: the countdown restarts at the next response.
+    cacheExpires = 0;
+    if (!haikuCompact) return next(ranked);
+    // A summary computed ahead of time would be written by the chat's model and then not used.
+    if (e.trigger === "precompute") return { skip: "jevfort compacts with Haiku when it is time" };
+    const transcript = haikuTranscript(ranked.messages);
+    if (transcript === undefined) return next(ranked);
+    const note = ranked.instructions?.trim();
+    const r = await $.model.complete({
+      model: COMPACT_MODEL,
+      system: COMPACT_SYSTEM,
+      prompt: `${transcript}\n\n---\nWrite the summary now.${note ? `\nThe user asked the summary to keep or stress: ${note}` : ""}`,
+      maxTokens: 16_000,
+      timeoutMs: 240_000,
+    }).catch((): Completion => ({ isAnswered: false, reason: "request failed" }));
+    const text = r.isAnswered ? r.text.trim() : "";
+    await record($, {
+      kind: "compact",
+      applied: text.length > 200,
+      text: text.length > 200 ? `${e.trigger} compaction written by ${COMPACT_MODEL}` : `${COMPACT_MODEL} could not compact (${r.isAnswered ? "empty summary" : r.reason}), Claude Code does it`,
     });
-  }
+    if (text.length <= 200) return next(ranked);
+    return {
+      messages: [{
+        role: "user" as const,
+        text: `This session is being continued from a previous conversation that ran out of context. The summary below covers the earlier portion of the conversation, written by Haiku 5.5 for jevfort.\n\n${text}\n\nContinue the conversation from where it left off without asking the user any further questions.`,
+        toolUses: [],
+      }],
+    };
+  });
 
   // Per-turn state: the difficulty route, the effort sent on every step of the turn, Jev's takes and the bypass.
   const turns = new Map<string, { route?: Route; effort?: Effort; taken: number; bypassId?: string; bypassAction?: string }>();
@@ -850,6 +979,14 @@ export const register = (on: On, options: Options): void => {
     jevState = undefined;
     estimateRegistered = false;
     bandStale = false;
+    // The cache countdown starts over with the conversation; the timer lives here: one started inside a request ends with it.
+    cacheExpires = 0;
+    cacheTtl = "1h";
+    lastResponseAt = undefined;
+    shownMinutes = null;
+    coldCompacted = false;
+    cacheTimer?.cancel();
+    cacheTimer = $.clock.every(CACHE_TICK_MS, () => void cacheTick($).catch(() => undefined));
     if (badRange) await record($, { kind: "error", applied: false, text: `invalid effort bounds (${badRange}): using low..xhigh` }).catch(() => undefined);
     await $.command.register({
       name: "jev",
@@ -921,6 +1058,7 @@ export const register = (on: On, options: Options): void => {
   });
 
   on("turn.complete", async function onTurnComplete($: Engine, e: TurnEnd, next: Next<TurnEnd, unknown>): Promise<unknown> {
+    if (e.agentId === undefined) turnRunning = false;
     const missing = await jevMissing($);
     // No engine event reports a changed tool list: the next main-loop turn's first hook lists the jev-api tools again
     // (a subagent's completion does not drop it, so a mid-turn listing glitch cannot flap the band).
@@ -991,7 +1129,10 @@ export const register = (on: On, options: Options): void => {
   // Opus/Sonnet, the loop's first turn only on Haiku/Fable, which then hold it) and rates its difficulty to lower the
   // model. One Jev request carries all of it. Every answer is logged; when Claude takes the step, its call is compared
   // with Jev's top action so the take threshold can be calibrated.
-  on("turn.step", async function* onTurnStep($: Engine, e: Step, next: (e: Step) => StepRun): StepRun {
+  on("turn.step", async function* onTurnStep($: Engine, e: Step, rawNext: (e: Step) => StepRun): StepRun {
+    // Every main-loop response on the chat's own model restarts the cache countdown (the work is jev-api independent).
+    if (e.agentId === undefined) turnRunning = true;
+    const next = (request: Step): StepRun => cacheWatch($, e, request, rawNext(request));
     if ((await jevMissing($)).length) return yield* next(e);
     if (e.agentId && !subagents) return yield* next(e);
 

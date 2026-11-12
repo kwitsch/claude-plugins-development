@@ -43,6 +43,20 @@ subagents load it via ToolSearch), no skills, agents, command hooks or MCP serve
   bypass, `routing: "model"` difficulty and the `estimate_effort` tool are unaffected. `/jev` status shows
   `(effort auto off)`. Not ported from effortless: settings, handoff and the other bar features; subagent turns do not
   update the band.
+- Cache countdown, Haiku compaction and auto-compact (0.7.0, ported from HeyCubit/effortless `hooks/register.tsx`,
+  none needs jev-api, so their hooks have no readiness guard): `cache.mts` (pure: TTL detection, minutes, label,
+  colour, `shouldAutoCompact`) and the Haiku transcript/prompt in `compact.mts`. `register.mts` wraps `next` in
+  `turn.step` with `cacheWatch`: a main-loop response with `usage` on the session's own model (`request.model ===
+  e.model`) sets `cacheExpires = now + TTL`. A 15 s `$.clock.every` started in `session.start` (cancelled and
+  restarted per session) runs `cacheTick`: redraws the band when the minute changed and, with `autoCompactPercent > 0`,
+  cache cold, no main-loop turn running (`turnRunning`: set in `turn.step`, cleared in `turn.complete`), context
+  `$.session.usage().context.percent` at or above it and `coldCompacted` unset, runs `$.command.run({ command:
+  "compact" })` once; the next response resets `coldCompacted`. `session.compact` (always registered, subagents pass):
+  Jev ranking (`withJevRanking`, only with jev-api and `compaction`), `cacheExpires = 0`, then with `haikuCompact`
+  Haiku's summary as the returned `messages` (`precompute` is skipped; failure or a summary under 200 characters goes
+  `next(...)`). The band also draws the countdown when the effort row is hidden. Not verified live: `$.command.run`
+  from a timer callback (effortless runs it from a button) and `$.session.usage` shape; only the kit tests cover it.
+  Not ported: effortless's cold band, Handoff, settings panel and the swamp/limit alerts.
 - Coupling: jevfort relies on jev-api's `batch` name, input (`state` string, `questions` array of
   `{ type, instructions, criteria? }`) and answer (a JSON array of answers, `type` plus the System One fields, in
   question order); no code is imported. Renaming the tool or changing its input or answer shape breaks jevfort: the
@@ -69,7 +83,7 @@ subagents load it via ToolSearch), no skills, agents, command hooks or MCP serve
 
 ## Layout
 
-`package.json` is the only manifest source (`claudePlugin.userConfig`, 14 options). `pnpm build` compiles
+`package.json` is the only manifest source (`claudePlugin.userConfig`, 16 options). `pnpm build` compiles
 `src/**/*.mts` to `plugin/**/*.mjs` (`plugin/hooks/` unmangled and uncompressed) and generates
 `plugin/.claude-plugin/plugin.json`. Tests (`tests/*.test.mts`, vitest + `claude-engine-vitest`) run against `plugin/`.
 

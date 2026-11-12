@@ -10,7 +10,7 @@ paths:
 
 `plugin/hooks/hooks.json` (hand-written) is exactly `{"modules": ["./register.mjs"]}`. `src/hooks/register.mts` holds
 every hook and every `$` use and imports the pure modules `./jev.mjs`, `./policy.mjs`, `./candidates.mjs`,
-`./context.mjs`, `./log.mjs`, `./report.mjs`, `./prompt.mjs`, `./agents.mjs`, `./compact.mjs`, `./summarize.mjs`.
+`./context.mjs`, `./cache.mjs`, `./log.mjs`, `./report.mjs`, `./prompt.mjs`, `./agents.mjs`, `./compact.mjs`, `./summarize.mjs`.
 Tested by `tests/register.test.mts` (kit-style tests on the workspace package `claude-engine-vitest`). Evidence for
 the shapes below: `inline-headroom/docs/claude-code-verification.md`.
 
@@ -61,6 +61,11 @@ the shapes below: `inline-headroom/docs/claude-code-verification.md`.
   `key: "auto"`, reset at `session.start`). It passes with `routing: "off"`, while `jevState !== ""` and while
   `e.props.hasSurvey`. `onPress` only flips the flag and calls `$.ui.invalidate` (no storage call; it runs after the frame, so a throw sets `bandStale` and the next applied listing redraws). While `autoOff`,
   the step-0 effort block (first-turn record, estimate, hold) is skipped.
+- Cache countdown / auto-compact / Haiku compaction (see `CLAUDE.md`): `turn.step` wraps `next` in `cacheWatch`
+  (passes chunks, reads the result's `usage`), `turn.complete` clears `turnRunning` before its readiness guard, the
+  `session.compact` hook is registered whatever `compaction` says (only the Jev ranking honours it) and none of these
+  three has a guard. The `AbovePrompt` hook shows the countdown even without the effort row. `$.clock.every` is started
+  in `session.start`; `cacheTick` calls `$.ui.invalidate` in try/catch and `$.command.run` for `/compact`.
 - `tool.call` failure is `isError: true` or `deny: string`; there is no `exitCode`.
 - `turn.step` `usage` may be `null`; `command.run` returning `{}` prints no row and records no model context.
 - `cc-plugin-sec-default` skips every user-tier `prompt.compose`/`prompt.section`/`prompt.context` hook, so the mod

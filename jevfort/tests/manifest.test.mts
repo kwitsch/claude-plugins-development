@@ -7,9 +7,9 @@ import { test } from "vitest";
 const json = (rel: string) => JSON.parse(readFileSync(new URL(`../plugin/${rel}`, import.meta.url), "utf8"));
 const manifest = json(".claude-plugin/plugin.json");
 
-test("the manifest has name jevfort, version 0.6.0, author Kwitsch, a description and keywords", () => {
+test("the manifest has name jevfort, version 0.7.0, author Kwitsch, a description and keywords", () => {
   assert.equal(manifest.name, "jevfort");
-  assert.equal(manifest.version, "0.6.0");
+  assert.equal(manifest.version, "0.7.0");
   assert.equal(manifest.author.name, "Kwitsch");
   assert.ok(manifest.description.length > 0);
   assert.ok(Array.isArray(manifest.keywords) && manifest.keywords.length > 0);
@@ -23,14 +23,16 @@ test("the manifest declares the jev-api plugin as its only dependency, and packa
   assert.match(manifest.description, /jev-api/);
 });
 
-test("userConfig declares exactly 14 options: no mode selector, no gate", () => {
+test("userConfig declares exactly 16 options: no mode selector, no gate", () => {
   assert.deepEqual(Object.keys(manifest.userConfig).sort(), [
     "agentTypes",
+    "autoCompactPercent",
     "bypass",
     "classify",
     "compaction",
     "doneCheck",
     "doneThreshold",
+    "haikuCompact",
     "maxEffort",
     "measureSteps",
     "minEffort",
@@ -57,7 +59,7 @@ test("hooks.json is exactly the mods module list", () => {
 });
 
 test("the built hooks modules exist", () => {
-  for (const f of ["register", "jev", "policy", "candidates", "context", "log", "report", "prompt", "agents", "compact", "summarize"]) {
+  for (const f of ["register", "jev", "policy", "candidates", "context", "log", "report", "prompt", "agents", "compact", "summarize", "cache"]) {
     assert.ok(existsSync(new URL(`../plugin/hooks/${f}.mjs`, import.meta.url)), f);
   }
 });
