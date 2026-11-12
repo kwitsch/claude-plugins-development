@@ -67,6 +67,8 @@ type Engine = {
   /** User interface. */
   ui: {
     status(text: string): Promise<unknown>;
+    /** Redraws the render sites of an event (the effort band, an open `/jev` output). */
+    invalidate(event: "ui.render"): void;
     // The element factories are plain functions, called detached from the object (`const { Markdown } = …`).
     resolve(e: unknown): { Markdown: (props: { text: string }) => unknown };
   };
@@ -203,12 +205,16 @@ async function askJev($: Engine, state: unknown, questions: Record<string, Quest
   }
 }
 
-/** The needed jev-api tools missing from this session's tool listing: looked up once per session, reset at `session.start`. */
+/** This turn's jev-api listing, shared by concurrent hooks; dropped at every `turn.complete` and at `session.start`. */
 let jevTools: Promise<string[]> | undefined;
+/** The missing tools of the last applied listing joined by ", " ("" = ready); undefined until `session.start` set the session's baseline. */
+let jevState: string | undefined;
 
 /**
- * The needed jev-api tools that are not listed; a non-empty answer turns jevfort off (every hook but `/jev` passes
- * through). A failed or malformed listing counts as all missing, so the cached promise never rejects.
+ * The needed jev-api tools that are not listed; a non-empty answer turns jevfort off (every hook but `/jev`, the
+ * render hooks and `estimate_effort` passes through). Listed once per turn (`jevTools`); a listing that differs from
+ * the last applied one is applied by {@link jevApply}. A failed or malformed listing counts as all missing, so the
+ * shared promise never rejects.
  *
  * @remarks
  * Module level, with its cache, because the engine accepts `$` passed only to top-level functions.
@@ -217,7 +223,42 @@ let jevTools: Promise<string[]> | undefined;
  * @returns The missing full tool names, empty when jevfort can ask Jev.
  */
 function jevMissing($: Engine): Promise<string[]> {
-  return (jevTools ??= $.tool.list().then((t) => missingJevTools(t.map((x) => x.name))).catch(() => [...JEV_TOOLS]));
+  return (jevTools ??= $.tool.list()
+    .then((t) => missingJevTools(t.map((x) => x.name)))
+    .catch(() => [...JEV_TOOLS])
+    .then(async (missing) => {
+      // Beneath session.start (jevState undefined) jev-api may not have registered yet: such a listing changes nothing.
+      if (jevState !== undefined) await jevApply($, missing);
+      return missing;
+    }));
+}
+
+/**
+ * Applies a jev-api listing once when it differs from the last applied one: going inactive logs why, becoming ready
+ * registers `estimate_effort` (whatever `routing` says: Skills and subagents call it too); both redraw the effort band.
+ * Never throws: a failed log or registration is caught.
+ *
+ * @remarks
+ * Module level because the engine accepts `$` passed only to top-level functions; runs inside the awaited listing
+ * promise of {@link jevMissing} (or `session.start`), so its `record` and `$.tool.register` stay in-frame.
+ *
+ * @param $ - Engine interface.
+ * @param missing - The missing full tool names of the listing.
+ */
+async function jevApply($: Engine, missing: string[]): Promise<void> {
+  const key = missing.join(", ");
+  if (key === jevState) return;
+  jevState = key;
+  $.ui.invalidate("ui.render");
+  if (key) {
+    await record($, { kind: "error", applied: false, text: `inactive: jev-api tools missing (${key})` }).catch(() => undefined);
+    return;
+  }
+  try {
+    await $.tool.register(ESTIMATE_SPEC);
+  } catch (err) {
+    await record($, { kind: "error", applied: false, text: `estimate_effort not registered: ${String(err)}` }).catch(() => undefined);
+  }
 }
 
 /**
@@ -744,6 +785,8 @@ export const register = (on: On, options: Options): void => {
   on("session.start", async function onSessionStart($: Engine, e: unknown, next: Next<unknown, unknown>): Promise<unknown> {
     // A new conversation (also after /clear) gets its own first-turn estimate.
     firstTurns.clear();
+    // Until the baseline below, a listing raised beneath `next(e)` (before jev-api registered) applies nothing.
+    jevState = undefined;
     if (badRange) await record($, { kind: "error", applied: false, text: `invalid effort bounds (${badRange}): using low..xhigh` }).catch(() => undefined);
     await $.command.register({
       name: "jev",
@@ -751,20 +794,10 @@ export const register = (on: On, options: Options): void => {
     });
     // After `next(e)`: jev-api registers its tools in its own session.start, which may run beneath this hook.
     const result = await next(e);
-    // A new session looks the jev-api tools up again, and only now: a jevfort hook raised inside `next(e)` (another
-    // plugin's session.start making a tool call) may have cached a listing from before jev-api registered.
+    // The session's baseline, listed only now: a jevfort hook raised inside `next(e)` (another plugin's session.start
+    // making a tool call) may have cached a listing from before jev-api registered. Logs inactive or registers estimate_effort.
     jevTools = undefined;
-    const missing = await jevMissing($);
-    if (missing.length) {
-      await record($, { kind: "error", applied: false, text: `inactive: jev-api tools missing (${missing.join(", ")})` }).catch(() => undefined);
-      return result;
-    }
-    // Registered whatever `routing` says: Skills and subagents call it too. Turn start does not depend on it.
-    try {
-      await $.tool.register(ESTIMATE_SPEC);
-    } catch (err) {
-      await record($, { kind: "error", applied: false, text: `estimate_effort not registered: ${String(err)}` }).catch(() => undefined);
-    }
+    await jevApply($, await jevMissing($));
     return result;
   });
 
@@ -815,7 +848,7 @@ export const register = (on: On, options: Options): void => {
       .map((d) => `- ${d.kind}${d.applied ? "" : " (pass)"}: ${d.text}${d.ms !== undefined ? ` [${Math.round(d.ms)}ms]` : ""}`);
     return {
       text: [
-        ...(missing.length ? [`Jev pilot: inactive, the jev-api tools are missing (${missing.join(", ")}). jevfort needs jev-api 0.2.0 or later and no permissions.deny rule matching its tools; then restart Claude Code.`] : []),
+        ...(missing.length ? [`Jev pilot: inactive, the jev-api tools are missing (${missing.join(", ")}). jevfort needs jev-api 0.2.0 or later and no permissions.deny rule matching its tools; it looks again at the next turn.`] : []),
         `Jev pilot: routing ${routing}, take steps ${takeSteps} (p ≥ ${takeThreshold}), done check ${doneCheck}, subagents ${subagents}`,
         `Decisions (all sessions): ${counts}`,
         lines.length ? `Recent:\n${lines.join("\n")}` : "No decisions this session yet.",
@@ -825,7 +858,10 @@ export const register = (on: On, options: Options): void => {
   });
 
   on("turn.complete", async function onTurnComplete($: Engine, e: TurnEnd, next: Next<TurnEnd, unknown>): Promise<unknown> {
-    if ((await jevMissing($)).length) return next(e);
+    const missing = await jevMissing($);
+    // No engine event reports a changed tool list: the next turn's first hook lists the jev-api tools again.
+    jevTools = undefined;
+    if (missing.length) return next(e);
     turns.delete(e.turnId);
     if (e.reason === "aborted" || e.reason === "error") {
       await record($, { kind: "turn", applied: false, text: `turn ${e.reason}`, turnId: e.turnId, data: { reason: e.reason } });
@@ -856,10 +892,10 @@ export const register = (on: On, options: Options): void => {
     return next(e);
   });
 
-  // Answers the estimate_effort tool itself (never `next(e)`: a registered tool no hook answers fails), and logs the
-  // outcome of each call Jev made itself, for the report.
+  // Answers the estimate_effort tool itself, before the readiness guard (never `next(e)`: a registered tool no hook
+  // answers fails, and the tool stays registered after jev-api goes away), and logs the outcome of each call Jev made
+  // itself, for the report.
   on("tool.call", async function onToolCall($: Engine, e: ToolCall, next: Next<ToolCall, ToolResult>): Promise<ToolResult> {
-    if ((await jevMissing($)).length) return next(e);
     if (e.tool === ESTIMATE_TOOL) {
       const input = parseEstimateInput(e);
       if (typeof input === "string") return { isError: true, result: `estimate_effort: ${input}` };
@@ -874,6 +910,7 @@ export const register = (on: On, options: Options): void => {
       });
       return { result: JSON.stringify(est) };
     }
+    if ((await jevMissing($)).length) return next(e);
     const result = await next(e);
     if (e.tool_use_id && ownCalls.has(e.tool_use_id)) {
       const isError = result.deny !== undefined || result.isError === true;
@@ -1075,12 +1112,15 @@ export const register = (on: On, options: Options): void => {
   let scratchpad: { roots: string[]; sid: string } | undefined;
   // Permission check: approves Jev's own vetted calls and writes into this session's scratchpad; every other verdict stays Claude Code's.
   on("tool.check", async function onToolCheck($: Engine, e: Check, next: Next<Check, Verdict>): Promise<Verdict> {
+    // The estimate tool is answered by the tool.call hook, also while inactive, so there is nothing to prompt for. A settings deny rule still wins.
+    if (e.tool === ESTIMATE_TOOL) {
+      const base = await next(e);
+      return base.decision !== "deny" ? { ...base, decision: "allow", reason: "jevfort: estimate_effort is answered locally" } : base;
+    }
     if ((await jevMissing($)).length) return next(e);
     const base = await next(e);
     // Jev's own calls come from the vetted candidate list: approve them so auto mode's classifier doesn't refuse
     // them. This and the scratchpad branch are the only places jevfort loosens Claude Code's verdict. A settings deny rule still wins.
-    // The estimate tool is answered by this hook, so there is nothing to prompt for.
-    if (e.tool === ESTIMATE_TOOL && base.decision !== "deny") return { ...base, decision: "allow", reason: "jevfort: estimate_effort is answered locally" };
     if (e.tool_use_id && ownCalls.has(e.tool_use_id)) {
       if (base.decision === "deny") return base;
       return { ...base, decision: "allow", reason: "Jev pilot: vetted action from its read-only/project-script list" };
