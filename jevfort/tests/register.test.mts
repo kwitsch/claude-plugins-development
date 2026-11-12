@@ -35,7 +35,7 @@ const JEV_TOOLS = [{ name: JEV_BATCH, description: "Ask Jev several questions", 
 /** jev-api 0.1's tools, which lack the batch tool. */
 const SINGLE_TOOLS = ["noul", "choice", "score"].map((t) => ({ name: JEV_TOOL_PREFIX + t, description: `Ask Jev a ${t} question`, mcp: true }));
 /** The first line of /jev while the batch tool is missing. */
-const INACTIVE = "Jev pilot: inactive, the jev-api tools are missing (mcp__jev-api__batch). jevfort needs jev-api 0.2.0 or later and no permissions.deny rule matching its tools; then restart Claude Code.";
+const INACTIVE = "Jev pilot: inactive, the jev-api tools are missing (mcp__jev-api__batch). jevfort needs jev-api 0.2.0 or later and no permissions.deny rule matching its tools; it looks again at the next turn.";
 /** The question id each instructions text belongs to (batch questions carry no id; the fake finds it by the text). */
 const QUESTION_IDS = new Map<string, string>([
   [nextActionQuestion([]).instructions, "next_action"],
@@ -82,6 +82,8 @@ function setup(on: On, opts: { messages: Msg[]; jev: Jev; files?: string[]; pack
   on("tool.list", () => (opts.tools === null ? { deny: "tool.list failed" } : { value: opts.tools ?? JEV_TOOLS }));
   on("tool.call", async (_$, e, next) => {
     if (e.tool !== JEV_BATCH) return next(e);
+    // As the engine: a tool that is not listed is unknown, so the mod's call rejects (a bare `{ deny }`).
+    if (opts.tools === null || (opts.tools !== undefined && !opts.tools.some((t) => t.name === JEV_BATCH))) return { deny: `unknown tool ${JEV_BATCH}` };
     const call = batchCalls++;
     const asked = (e.questions as { type: string; instructions: string; criteria?: unknown }[]).map((b): Asked => ({ ...b, id: QUESTION_IDS.get(b.instructions) ?? b.instructions, state: String(e.state), timeout: e.timeout, call }));
     sent.push(...asked);
@@ -174,6 +176,26 @@ const toolId = (chunks: Chunk[]) => (chunks.find((c) => c.kind === "tool")?.id a
 const runJev = async ($: Runner, args: string) => String(((await $.command.run({ command: "jev", args, origin: { kind: "composer" }, presentation: { isFullscreen: false, columns: 80 } })) as { text?: string }).text ?? "");
 
 const decision = async ($: Runner, input: Record<string, unknown>) => ((await $.tool.check(input)) as { decision?: string }).decision;
+
+/** The `session.start` input of every test that starts a session. */
+const START = { cwd: CWD, surface: "terminal", isInteractive: true };
+
+/**
+ * The stubs `session.start` needs beneath jevfort: `/jev` registration, `estimate_effort` registration, the event's end.
+ *
+ * @param on - The test's `on`.
+ * @returns The names passed to `$.tool.register`, in call order.
+ */
+function sessionStubs(on: On) {
+  const registered: unknown[] = [];
+  on("command.register", async () => ({ value: undefined }));
+  on("tool.register", async (_$, e) => {
+    registered.push(e.name);
+    return { value: { tool: "mcp__jevfort__estimate_effort" } };
+  });
+  on("session.start", async () => ({}));
+  return registered;
+}
 
 test("Jev takes a confident Read step without asking Claude", { options: { takeOnlyForBypass: false } }, async ($, on) => {
   const seen: unknown[] = [];
@@ -894,14 +916,15 @@ test("Without a jev-api tool jevfort is inactive: every hook passes through and 
   await $.session.start({ cwd: CWD, surface: "terminal", isInteractive: true });
   expect(registered).toHaveLength(0);
 
-  // The step goes to Claude unchanged, the scratchpad write keeps Claude Code's verdict, the turn's end is not checked,
-  // a prompt is not classified and an estimate_effort call is not answered by jevfort.
+  // The step goes to Claude unchanged, the scratchpad write keeps Claude Code's verdict, the turn's end is not checked
+  // and a prompt is not classified. An estimate_effort call is still answered (its defaultEffort: Jev is unreachable) and approved.
   await drain($.turn.step(step));
   expect(seen).toEqual([step]);
   expect(await decision($, { tool: "Write", input: { file_path: `${SP}/notes.md` }, tool_use_id: "toolu_sp" })).toBe("ask");
   await $.turn.complete(answered("t1", "I renamed it in one file. Want me to do the rest?"));
   await userSubmit($, "rewrite the storage layer to use IndexedDB");
-  expect(await estimateCall($)).toEqual({ result: "beneath" });
+  expect(await estimateCall($)).toEqual({ result: JSON.stringify({ effort: "high", source: "fallback" }) });
+  expect(await decision($, { tool: "mcp__jevfort__estimate_effort", tool_use_id: "toolu_est" })).toBe("allow");
   expect(submitted).toEqual(["rewrite the storage layer to use IndexedDB"]);
   // Offered agent types are not collected, an Agent call is not routed and a compaction gets no ranking.
   await $.agent.offer({ agent: "general-purpose", description: "General tasks", source: "built-in" });
@@ -949,26 +972,40 @@ test("jev-api registering batch inside session.start's next(e) makes jevfort act
   expect(registered).toEqual(["estimate_effort"]);
   await drain($.turn.step(step));
   expect(ids(sent)).toEqual(["effort", "mechanical"]);
+  // The listing raised beneath next(e) (before jev-api registered) applied nothing: no inactive error was logged.
+  expect(await runJev($, "report")).toContain("· 0 errors |");
 });
 
-test("The jev-api lookup is cached per session and repeated at session.start", async ($, on) => {
-  const seen: unknown[] = [];
+test("The jev-api lookup is repeated after each turn", { options: { doneCheck: false } }, async ($, on) => {
+  const seen: { effort?: string }[] = [];
   const tools: typeof JEV_TOOLS = [];
   const { sent } = setup(on, { messages: [user("what does this project do?")], tools, jev: byId({ effort: easy }) });
   claudeBeneath(on, seen);
-  on("command.register", async () => ({ value: undefined }));
-  on("tool.register", async () => ({ value: { tool: "mcp__jevfort__estimate_effort" } }));
-  on("session.start", async () => ({}));
+  followUps(on);
+  const registered = sessionStubs(on);
 
+  await $.session.start(START);
   await drain($.turn.step(step));
-  // The tools appear mid-session: the cached answer stands until the next session.start.
+  // jev-api appears inside a turn: the turn's listing stands until the turn ends.
   tools.push(...JEV_TOOLS);
-  await drain($.turn.step({ ...step, turnId: "t2" }));
+  await drain($.turn.step({ ...step, index: 1 }));
   expect(sent).toHaveLength(0);
+  expect(registered).toHaveLength(0);
 
-  await $.session.start({ cwd: CWD, surface: "terminal", isInteractive: true });
-  await drain($.turn.step({ ...step, turnId: "t3" }));
+  // From the next turn on jevfort is active and estimate_effort is registered, once.
+  await $.turn.complete(answered("t1", "It is a todo app."));
+  await drain($.turn.step({ ...step, turnId: "t2" }));
   expect(ids(sent)).toEqual(["effort", "mechanical"]);
-  expect(seen.map((s) => (s as { effort: string }).effort)).toEqual(["high", "high", "low"]);
-  expect((await runJev($, "")).split("\n")[0]).toContain("Jev pilot: routing");
+  expect(registered).toEqual(["estimate_effort"]);
+
+  // jev-api goes away: from the next turn jevfort is inactive again and logs it once more.
+  tools.length = 0;
+  await $.turn.complete(answered("t2", "It is a todo app."));
+  await drain($.turn.step({ ...step, turnId: "t3" }));
+  expect(sent).toHaveLength(2);
+  expect(registered).toEqual(["estimate_effort"]);
+  expect(seen.map((s) => s.effort)).toEqual(["high", "high", "low", "high"]);
+  expect((await runJev($, "")).split("\n")[0]).toBe(INACTIVE);
+  // Two inactive errors: one at session start, one at the change.
+  expect(await runJev($, "report")).toContain("· 2 errors |");
 });

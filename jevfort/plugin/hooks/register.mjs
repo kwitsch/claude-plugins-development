@@ -73,8 +73,35 @@ async function askJev($, state, questions) {
 	}
 }
 let jevTools;
+let jevState;
 function jevMissing($) {
-	return jevTools ??= $.tool.list().then((t) => missingJevTools(t.map((x) => x.name))).catch(() => [...JEV_TOOLS]);
+	return jevTools ??= $.tool.list().then((t) => missingJevTools(t.map((x) => x.name))).catch(() => [...JEV_TOOLS]).then(async (missing) => {
+		if (jevState !== undefined) await jevApply($, missing);
+		return missing;
+	});
+}
+async function jevApply($, missing) {
+	const key = missing.join(", ");
+	if (key === jevState) return;
+	jevState = key;
+	$.ui.invalidate("ui.render");
+	if (key) {
+		await record($, {
+			kind: "error",
+			applied: false,
+			text: `inactive: jev-api tools missing (${key})`
+		}).catch(() => undefined);
+		return;
+	}
+	try {
+		await $.tool.register(ESTIMATE_SPEC);
+	} catch (err) {
+		await record($, {
+			kind: "error",
+			applied: false,
+			text: `estimate_effort not registered: ${String(err)}`
+		}).catch(() => undefined);
+	}
 }
 async function readLog($) {
 	return await $.store.get(LOG_KEY) ?? [];
@@ -508,6 +535,7 @@ export const register = (on, options) => {
 	const ownCalls = new Set();
 	on("session.start", async function onSessionStart($, e, next) {
 		firstTurns.clear();
+		jevState = undefined;
 		if (badRange) await record($, {
 			kind: "error",
 			applied: false,
@@ -519,24 +547,7 @@ export const register = (on, options) => {
 		});
 		const result = await next(e);
 		jevTools = undefined;
-		const missing = await jevMissing($);
-		if (missing.length) {
-			await record($, {
-				kind: "error",
-				applied: false,
-				text: `inactive: jev-api tools missing (${missing.join(", ")})`
-			}).catch(() => undefined);
-			return result;
-		}
-		try {
-			await $.tool.register(ESTIMATE_SPEC);
-		} catch (err) {
-			await record($, {
-				kind: "error",
-				applied: false,
-				text: `estimate_effort not registered: ${String(err)}`
-			}).catch(() => undefined);
-		}
+		await jevApply($, await jevMissing($));
 		return result;
 	});
 	on("command.run", { command: "jev" }, async function onJevCommand($, e) {
@@ -576,7 +587,7 @@ export const register = (on, options) => {
 		const counts = Object.entries(await stats($)).map(([k, v]) => `${k}=${v}`).join(", ") || "none yet";
 		const lines = recentDecisions().slice(-10).map((d) => `- ${d.kind}${d.applied ? "" : " (pass)"}: ${d.text}${d.ms !== undefined ? ` [${Math.round(d.ms)}ms]` : ""}`);
 		return { text: [
-			...missing.length ? [`Jev pilot: inactive, the jev-api tools are missing (${missing.join(", ")}). jevfort needs jev-api 0.2.0 or later and no permissions.deny rule matching its tools; then restart Claude Code.`] : [],
+			...missing.length ? [`Jev pilot: inactive, the jev-api tools are missing (${missing.join(", ")}). jevfort needs jev-api 0.2.0 or later and no permissions.deny rule matching its tools; it looks again at the next turn.`] : [],
 			`Jev pilot: routing ${routing}, take steps ${takeSteps} (p ≥ ${takeThreshold}), done check ${doneCheck}, subagents ${subagents}`,
 			`Decisions (all sessions): ${counts}`,
 			lines.length ? `Recent:\n${lines.join("\n")}` : "No decisions this session yet.",
@@ -584,7 +595,9 @@ export const register = (on, options) => {
 		].join("\n") };
 	});
 	on("turn.complete", async function onTurnComplete($, e, next) {
-		if ((await jevMissing($)).length) return next(e);
+		const missing = await jevMissing($);
+		jevTools = undefined;
+		if (missing.length) return next(e);
 		turns.delete(e.turnId);
 		if (e.reason === "aborted" || e.reason === "error") {
 			await record($, {
@@ -626,7 +639,6 @@ export const register = (on, options) => {
 		return next(e);
 	});
 	on("tool.call", async function onToolCall($, e, next) {
-		if ((await jevMissing($)).length) return next(e);
 		if (e.tool === ESTIMATE_TOOL) {
 			const input = parseEstimateInput(e);
 			if (typeof input === "string") return {
@@ -652,6 +664,7 @@ export const register = (on, options) => {
 			});
 			return { result: JSON.stringify(est) };
 		}
+		if ((await jevMissing($)).length) return next(e);
 		const result = await next(e);
 		if (e.tool_use_id && ownCalls.has(e.tool_use_id)) {
 			const isError = result.deny !== undefined || result.isError === true;
@@ -910,13 +923,16 @@ export const register = (on, options) => {
 	});
 	let scratchpad;
 	on("tool.check", async function onToolCheck($, e, next) {
+		if (e.tool === ESTIMATE_TOOL) {
+			const base = await next(e);
+			return base.decision !== "deny" ? {
+				...base,
+				decision: "allow",
+				reason: "jevfort: estimate_effort is answered locally"
+			} : base;
+		}
 		if ((await jevMissing($)).length) return next(e);
 		const base = await next(e);
-		if (e.tool === ESTIMATE_TOOL && base.decision !== "deny") return {
-			...base,
-			decision: "allow",
-			reason: "jevfort: estimate_effort is answered locally"
-		};
 		if (e.tool_use_id && ownCalls.has(e.tool_use_id)) {
 			if (base.decision === "deny") return base;
 			return {
