@@ -1,7 +1,7 @@
 import { GENERAL, SWITCH_AT } from "./agents.mjs";
-import { absolute, AUTH_TOOL, bash, BUILTIN_COMMANDS, clipScript, coversStep, dedupeSkills, isSafeToOffer, MAX_READS, mentionedPaths, quotedTerms, relevant, SAFE_MAKE, SAFE_SCRIPT, sameCall, SKILL_BLOCKLIST_KEY } from "./candidates.mjs";
 import { CACHE_TTL, cacheColor, cacheLabel, minutesLeft, nextTtl } from "./cache.mjs";
-import { COMPACT_MODEL, COMPACT_SYSTEM, compactInstructions, compactItems, haikuTranscript, RELEVANCE } from "./compact.mjs";
+import { absolute, AUTH_TOOL, bash, BUILTIN_COMMANDS, clipScript, coversStep, dedupeSkills, isSafeToOffer, MAX_READS, mentionedPaths, quotedTerms, relevant, SAFE_MAKE, SAFE_SCRIPT, sameCall, SKILL_BLOCKLIST_KEY } from "./candidates.mjs";
+import { COMPACT_MAX_TOKENS, COMPACT_MODEL, COMPACT_SYSTEM, compactInstructions, compactItems, haikuTranscript, RELEVANCE } from "./compact.mjs";
 import { clip, splitTurn, summarize, toolCalls } from "./context.mjs";
 import { choice, JEV_API_TIMEOUT_S, JEV_BATCH, JEV_TOOL_PREFIX, JEV_TOOLS, MAX_CHOICE_OPTIONS, missingJevTools, noul, score, TIMEOUT_MS } from "./jev.mjs";
 import { LOG_KEY, MAX_ENTRIES, recentDecisions, remember, statsKey } from "./log.mjs";
@@ -78,8 +78,6 @@ let jevTools;
 let jevState;
 let estimateRegistered = false;
 let bandStale = false;
-let autoCompactPercent = 60;
-let jevRanking = true;
 let cacheExpires = 0;
 let cacheTtl = "1h";
 let lastResponseAt;
@@ -94,33 +92,41 @@ function showMinutes($, minutes) {
 		$.ui.invalidate("ui.render");
 	} catch {}
 }
-async function cacheTick($) {
+function resetCache($) {
+	cacheExpires = 0;
+	cacheTtl = "1h";
+	lastResponseAt = undefined;
+	coldCompacted = false;
+	showMinutes($, null);
+}
+async function cacheTick($, autoCompactPercent) {
 	if (cacheExpires <= 0 && shownMinutes === null) return;
 	const minutes = minutesLeft(cacheExpires, await $.clock.now());
 	showMinutes($, minutes);
 	if (turnRunning || autoCompactPercent <= 0 || minutes !== 0 || coldCompacted) return;
-	if (((await $.session.usage()).context.percent ?? 0) < autoCompactPercent) return;
+	if (((await $.session.usage()).context.percent ?? 0) < autoCompactPercent || coldCompacted) return;
 	coldCompacted = true;
 	await $.command.run({
 		command: "compact",
 		args: ""
-	});
-	cacheExpires = 0;
+	}).catch((err) => $.ui.status(`jev: auto-compact failed: ${String(err)}`.slice(0, 80)));
 }
 async function* cacheWatch($, original, request, run) {
 	const result = yield* run;
 	if (original.agentId === undefined && result.usage && request.model === original.model) {
-		const now = await $.clock.now();
-		cacheTtl = nextTtl(result.usage, cacheTtl, lastResponseAt === undefined ? undefined : now - lastResponseAt);
-		lastResponseAt = now;
-		cacheExpires = now + CACHE_TTL[cacheTtl];
-		coldCompacted = false;
-		showMinutes($, minutesLeft(cacheExpires, now));
+		try {
+			const now = await $.clock.now();
+			cacheTtl = nextTtl(result.usage, cacheTtl, lastResponseAt === undefined ? undefined : now - lastResponseAt);
+			lastResponseAt = now;
+			cacheExpires = now + CACHE_TTL[cacheTtl];
+			coldCompacted = false;
+			showMinutes($, minutesLeft(cacheExpires, now));
+		} catch {}
 	}
 	return result;
 }
 async function withJevRanking($, e) {
-	if (!jevRanking || (await jevMissing($)).length) return e;
+	if ((await jevMissing($)).length) return e;
 	if (e.trigger !== "manual" && e.trigger !== "auto") return e;
 	const items = compactItems(e.messages);
 	if (items.length < 3) return e;
@@ -153,7 +159,7 @@ async function withJevRanking($, e) {
 			keep,
 			drop
 		}
-	});
+	}).catch(() => undefined);
 	return added ? {
 		...e,
 		instructions: e.instructions ? `${e.instructions}\n\n${added}` : added
@@ -478,8 +484,9 @@ export const register = (on, options) => {
 		maxEffort: "xhigh"
 	};
 	const badRange = !configuredRange && (options.minEffort !== undefined || options.maxEffort !== undefined) ? `minEffort ${String(options.minEffort)}, maxEffort ${String(options.maxEffort)}` : undefined;
+	const jevRanking = options.compaction !== false;
 	const haikuCompact = options.haikuCompact !== false;
-	autoCompactPercent = threshold("autoCompactPercent", 60);
+	const autoCompactPercent = threshold("autoCompactPercent", 60);
 	on("ui.render", {
 		component: "CommandOutput",
 		props: { command: "jev" }
@@ -490,7 +497,7 @@ export const register = (on, options) => {
 	});
 	let band = {};
 	let autoOff = false;
-	on("ui.render", { component: "AbovePrompt" }, function onRenderBand($, e, next) {
+	on("ui.render", { component: "AbovePrompt" }, async function onRenderBand($, e, next) {
 		const effortRow = routing !== "off" && jevState === "";
 		if (e.props.hasSurvey || !effortRow && shownMinutes === null) return next(e);
 		const { Box, Text, Button } = $.ui.resolve(e);
@@ -500,8 +507,11 @@ export const register = (on, options) => {
 			children: [` ${cacheLabel(shownMinutes)}`]
 		})];
 		if (!effortRow) return Box({
-			flexDirection: "row",
-			children: cache
+			flexDirection: "column",
+			children: [Box({
+				flexDirection: "row",
+				children: cache
+			}), await next(e)]
 		});
 		return Box({
 			flexDirection: "row",
@@ -619,33 +629,38 @@ export const register = (on, options) => {
 			}) : next(e);
 		});
 	}
-	jevRanking = options.compaction !== false;
 	on("session.compact", async function onCompact($, e, next) {
 		if (e.agentId) return next(e);
-		const ranked = await withJevRanking($, e);
-		cacheExpires = 0;
-		if (!haikuCompact) return next(ranked);
+		const ranked = jevRanking ? await withJevRanking($, e) : e;
+		const passOn = async () => {
+			const r = await next(ranked);
+			if (e.trigger !== "precompute" && r?.skip === undefined) cacheExpires = 0;
+			return r;
+		};
+		if (!haikuCompact) return passOn();
 		if (e.trigger === "precompute") return { skip: "jevfort compacts with Haiku when it is time" };
 		const transcript = haikuTranscript(ranked.messages);
-		if (transcript === undefined) return next(ranked);
+		if (transcript === undefined) return passOn();
 		const note = ranked.instructions?.trim();
 		const r = await $.model.complete({
 			model: COMPACT_MODEL,
 			system: COMPACT_SYSTEM,
-			prompt: `${transcript}\n\n---\nWrite the summary now.${note ? `\nThe user asked the summary to keep or stress: ${note}` : ""}`,
-			maxTokens: 16e3,
+			prompt: `${transcript}\n\n---\nWrite the summary now.${note ? `\nThe summary should keep or stress: ${note}` : ""}`,
+			maxTokens: COMPACT_MAX_TOKENS,
 			timeoutMs: 24e4
-		}).catch(() => ({
+		}).catch((err) => ({
 			isAnswered: false,
-			reason: "request failed"
+			reason: String(err).slice(0, 80)
 		}));
 		const text = r.isAnswered ? r.text.trim() : "";
+		const written = text.length > 200 && r.isAnswered && r.usage.output_tokens < COMPACT_MAX_TOKENS;
 		await record($, {
-			kind: "compact",
-			applied: text.length > 200,
-			text: text.length > 200 ? `${e.trigger} compaction written by ${COMPACT_MODEL}` : `${COMPACT_MODEL} could not compact (${r.isAnswered ? "empty summary" : r.reason}), Claude Code does it`
-		});
-		if (text.length <= 200) return next(ranked);
+			kind: "summary",
+			applied: written,
+			text: written ? `${e.trigger} compaction written by ${COMPACT_MODEL}` : `${COMPACT_MODEL} could not compact (${r.isAnswered ? "empty or cut-off summary" : r.reason}), Claude Code does it`
+		}).catch(() => undefined);
+		if (!written) return passOn();
+		cacheExpires = 0;
 		return { messages: [{
 			role: "user",
 			text: `This session is being continued from a previous conversation that ran out of context. The summary below covers the earlier portion of the conversation, written by Haiku 5.5 for jevfort.\n\n${text}\n\nContinue the conversation from where it left off without asking the user any further questions.`,
@@ -655,20 +670,19 @@ export const register = (on, options) => {
 	const turns = new Map();
 	const firstTurns = new Map();
 	const ownCalls = new Set();
-	on("session.start", async function onSessionStart($, e, next) {
+	const forgetConversation = () => {
 		firstTurns.clear();
 		band = {};
 		autoOff = false;
+	};
+	on("session.start", async function onSessionStart($, e, next) {
+		forgetConversation();
+		resetCache($);
 		jevState = undefined;
 		estimateRegistered = false;
 		bandStale = false;
-		cacheExpires = 0;
-		cacheTtl = "1h";
-		lastResponseAt = undefined;
-		shownMinutes = null;
-		coldCompacted = false;
 		cacheTimer?.cancel();
-		cacheTimer = $.clock.every(CACHE_TICK_MS, () => void cacheTick($).catch(() => undefined));
+		cacheTimer = $.clock.every(CACHE_TICK_MS, () => void cacheTick($, autoCompactPercent).catch(() => undefined));
 		if (badRange) await record($, {
 			kind: "error",
 			applied: false,
@@ -682,6 +696,11 @@ export const register = (on, options) => {
 		jevTools = undefined;
 		await jevApply($, await jevMissing($));
 		return result;
+	});
+	on("session.end", async function onSessionEnd($, e, next) {
+		forgetConversation();
+		resetCache($);
+		return next(e);
 	});
 	on("command.run", { command: "jev" }, async function onJevCommand($, e) {
 		const arg = e.args.trim();

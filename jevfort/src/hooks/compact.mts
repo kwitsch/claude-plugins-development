@@ -1,7 +1,8 @@
 /**
- * Phase 3: before a compaction, Jev scores how relevant each recent tool result is to the current work. No message
- * is dropped (that could break tool call/result pairs); the summarizer is told what to keep in detail. Pure: the
- * `session.compact` hook lives in `register.mts`.
+ * Phase 3: before a compaction, Jev scores how relevant each recent tool result is to the current work. The ranking
+ * drops no message (that could break tool call/result pairs); the summarizer is told what to keep in detail. Also the
+ * transcript text and system prompt of a Haiku-written compaction (`haikuTranscript`), whose one summary message
+ * replaces the whole conversation. Pure: the `session.compact` hook lives in `register.mts`.
  *
  * @packageDocumentation
  */
@@ -66,6 +67,8 @@ export function compactInstructions(items: readonly Item[], scores: readonly (nu
 /** The summarizer model of a Haiku compaction. */
 export const COMPACT_MODEL = "claude-haiku-5-5";
 /** The transcript's most text sent to Haiku: about 600k tokens, inside its window with room for the summary. */
+/** The most tokens Haiku may write for a summary; a reply that uses all of them was cut off. */
+export const COMPACT_MAX_TOKENS = 16_000;
 const COMPACT_MAX_CHARS = 2_400_000;
 /** The last messages go to Haiku nearly whole: the work in progress lives in their tool calls and results. */
 const COMPACT_TAIL = 6;
@@ -91,6 +94,11 @@ Reply with the summary only.`;
 /**
  * The transcript as plain text for the summarizer: each message, its tool calls and their results, the long ones cut.
  *
+ * @remarks
+ * The engine lists a result twice: on the assistant row's call (`toolUses[].text`) and on the user row that carries it
+ * (`toolResults[]`). It is printed once, from the user row, so it gets the cut of the row it arrived in; the call's
+ * own text is used only when no user row carries the result yet.
+ *
  * @param messages - The transcript.
  * @param toolChars - Characters kept of an older tool result.
  * @param tailChars - Characters kept of a tool input or result in the last {@link COMPACT_TAIL} messages.
@@ -98,6 +106,7 @@ Reply with the summary only.`;
  */
 export function compactTranscript(messages: readonly SessionMessage[], toolChars = 2000, tailChars = 20_000): string {
   const tailFrom = messages.length - COMPACT_TAIL;
+  const carried = new Set(messages.flatMap((m) => (m.toolResults ?? []).map((r) => r.tool_use_id)));
   return messages
     .map((m, i) => {
       const tail = i >= tailFrom;
@@ -105,9 +114,9 @@ export function compactTranscript(messages: readonly SessionMessage[], toolChars
       const lines = [`${m.role === "user" ? "USER" : "CLAUDE"}: ${m.text}`.trimEnd()];
       for (const t of m.toolUses) {
         lines.push(`  [${t.tool} ${clip(JSON.stringify(t.input), tail ? tailChars : 400)}]`);
-        if (t.text) lines.push(`  → ${clip(t.text, resultChars)}`);
+        if (t.text && !carried.has(t.tool_use_id)) lines.push(`  → ${clip(t.text, resultChars)}`);
       }
-      for (const r of m.toolUses.length ? [] : (m.toolResults ?? [])) if (r.text) lines.push(`  → ${clip(r.text, resultChars)}`);
+      for (const r of m.toolResults ?? []) if (r.text) lines.push(`  → ${clip(r.text, resultChars)}`);
       return lines.join("\n");
     })
     .join("\n\n");

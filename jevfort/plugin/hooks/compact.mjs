@@ -31,6 +31,7 @@ export function compactInstructions(items, scores) {
 	return lines.join("\n");
 }
 export const COMPACT_MODEL = "claude-haiku-5-5";
+export const COMPACT_MAX_TOKENS = 16e3;
 const COMPACT_MAX_CHARS = 24e5;
 const COMPACT_TAIL = 6;
 export const COMPACT_SYSTEM = `You compact a conversation between a user and Claude Code, an AI coding agent, so the work can continue
@@ -52,15 +53,16 @@ Be precise: keep names, paths, numbers, commands and error messages exact. Leave
 Reply with the summary only.`;
 export function compactTranscript(messages, toolChars = 2e3, tailChars = 2e4) {
 	const tailFrom = messages.length - COMPACT_TAIL;
+	const carried = new Set(messages.flatMap((m) => (m.toolResults ?? []).map((r) => r.tool_use_id)));
 	return messages.map((m, i) => {
 		const tail = i >= tailFrom;
 		const resultChars = tail ? tailChars : toolChars;
 		const lines = [`${m.role === "user" ? "USER" : "CLAUDE"}: ${m.text}`.trimEnd()];
 		for (const t of m.toolUses) {
 			lines.push(`  [${t.tool} ${clip(JSON.stringify(t.input), tail ? tailChars : 400)}]`);
-			if (t.text) lines.push(`  → ${clip(t.text, resultChars)}`);
+			if (t.text && !carried.has(t.tool_use_id)) lines.push(`  → ${clip(t.text, resultChars)}`);
 		}
-		for (const r of m.toolUses.length ? [] : m.toolResults ?? []) if (r.text) lines.push(`  → ${clip(r.text, resultChars)}`);
+		for (const r of m.toolResults ?? []) if (r.text) lines.push(`  → ${clip(r.text, resultChars)}`);
 		return lines.join("\n");
 	}).join("\n\n");
 }

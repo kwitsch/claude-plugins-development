@@ -29,8 +29,9 @@ subagents load it via ToolSearch), no skills, agents, command hooks or MCP serve
   changed listing once (`jevState` holds the last applied one and stays unset until the baseline, so a listing beneath
   `session.start`'s `next(e)` applies nothing): going inactive logs `inactive: jev-api tools missing (...)`, becoming
   ready registers `estimate_effort`, both redraw the effort band. While the tool is missing (also with jev-api 0.1,
-  which has only `noul`/`choice`/`score`) jevfort is inactive: every hook except the `/jev` command, the render hooks
-  and the `estimate_effort` handling passes through untouched (also the scratchpad-write allow) and `/jev` says why.
+  which has only `noul`/`choice`/`score`) jevfort is inactive: every hook except the `/jev` command, the render hooks,
+  the `estimate_effort` handling and the Jev-free cache countdown, Haiku compaction and auto-compact (next bullet)
+  passes through untouched (also the scratchpad-write allow) and `/jev` says why.
   `estimate_effort` is never registered in a session that was never ready; a failed registration is retried by the next
   listing, a registered one is not registered again until the next `session.start` (there is no unregister), so `tool.call` answers and `tool.check` approves it before the readiness guard (while inactive it
   answers its `defaultEffort`, source `fallback`).
@@ -38,7 +39,7 @@ subagents load it via ToolSearch), no skills, agents, command hooks or MCP serve
   row: the main loop's session effort (step-0 `e.effort`) bold, the effort jevfort chose for the current main-loop
   turn (estimate of any source, or the held Haiku/Fable estimate) blue, the rest dim, then a `Jev auto: on/off`
   Button. Hidden with `routing: "off"`, while inactive or before the session baseline, and while a survey holds the
-  band. The button flips the closure flag `autoOff` (reset at `session.start` and by a reload, never stored): while
+  band. The button flips the closure flag `autoOff` (reset at `session.start`, at `session.end` and by a reload, never stored): while
   off, step 0 skips the effort estimate and the Haiku/Fable hold, so the turn runs at the session effort; take-steps,
   bypass, `routing: "model"` difficulty and the `estimate_effort` tool are unaffected. `/jev` status shows
   `(effort auto off)`. Not ported from effortless: settings, handoff and the other bar features; subagent turns do not
@@ -47,15 +48,32 @@ subagents load it via ToolSearch), no skills, agents, command hooks or MCP serve
   none needs jev-api, so their hooks have no readiness guard): `cache.mts` (pure: TTL detection, minutes, label,
   colour) and the Haiku transcript/prompt in `compact.mts`. `register.mts` wraps `next` in
   `turn.step` with `cacheWatch`: a main-loop response with `usage` on the session's own model (`request.model ===
-  e.model`) sets `cacheExpires = now + TTL`. A 15 s `$.clock.every` started in `session.start` (cancelled and
-  restarted per session) runs `cacheTick`: redraws the band when the minute changed and, with `autoCompactPercent > 0`,
-  cache cold, no main-loop turn running (`turnRunning`: set in `turn.step`, cleared in `turn.complete`), context
-  `$.session.usage().context.percent` at or above it and `coldCompacted` unset, runs `$.command.run({ command:
-  "compact" })` once; the next response resets `coldCompacted`. `session.compact` (always registered, subagents pass):
-  Jev ranking (`withJevRanking`, only with jev-api and `compaction`), `cacheExpires = 0`, then with `haikuCompact`
-  Haiku's summary as the returned `messages` (`precompute` is skipped; failure or a summary under 200 characters goes
-  `next(...)`). The band also draws the countdown when the effort row is hidden. Not verified live: `$.command.run`
-  from a timer callback (effortless runs it from a button) and `$.session.usage` shape; only the kit tests cover it.
+  e.model`) sets `cacheExpires = now + TTL` (in a try/catch: a cosmetic feature never fails the step). The lifetime is
+  the assumed 1 hour: Claude Code 2.1.322 reports a step's usage as the four token counts plus `model`, without
+  `cache_creation`, so `cacheTtlOf` stays dormant and a 5-minute cache (API key, Bedrock/Vertex/Foundry, a subscription
+  past its limit) is not detected: its countdown and auto-compact wait run 55 minutes long (not fixed: inferring 5m
+  from a cold re-write could misread a prefix change on a 1-hour account and compact a warm chat). A 15 s
+  `$.clock.every` started in `session.start` (cancelled and restarted there; a reload re-raises `session.start`)
+  runs `cacheTick`: redraws the band when the minute changed and, with `autoCompactPercent > 0`,
+  cache cold, no main-loop turn running (`turnRunning`: set at the first `turn.step`, cleared in `turn.complete`; the
+  prompt-submit phase before it is not covered, so a cold tick there queues `/compact` behind the user's prompt),
+  context `$.session.usage().context.percent` at or above it and `coldCompacted` unset (read again after the await,
+  ticks overlap), runs `$.command.run({ command: "compact" })` once (the engine queues it until the session is idle and
+  keeps the promise pending until it ran; a refusal goes to `$.ui.status`, not retried); the next response resets
+  `coldCompacted`. The countdown state is reset by `resetCache` from `session.start` and `session.end` (the engine
+  raises `session.end`, not `session.start`, for /clear and an in-process /resume; `session.end` also resets the
+  first-turn estimates, the band and `autoOff`). `session.compact` (always registered, subagents pass): Jev ranking
+  (`withJevRanking`, only with jev-api and the `compaction` option), then with `haikuCompact` Haiku's summary as the
+  returned `messages` (`precompute` is skipped with `{ skip }`; a failure or a summary of 200 characters or fewer goes
+  `next(...)`); `cacheExpires = 0` only once a compaction stands (the Haiku return or a `next(...)` result without
+  `skip`, never for `precompute`). The Haiku outcome is logged as kind `summary` (the ranking is kind `compact`).
+  Trade-off of the Haiku path (read from the 2.1.322 binary): answering `{ messages }` without `next` skips core's
+  compaction step, so classic PreCompact hooks do not run (a blocking one is ignored), PostCompact gets an empty
+  summary, recently read files, the plan file and invoked skills are not re-attached, and a lower plugin's
+  `session.compact` hook (inline-headroom's dedup reset) sees nothing when jevfort is the outer plugin. The band draws
+  the countdown also when the effort row is hidden, above (column Box) whatever another plugin's `AbovePrompt` hook
+  beneath draws. Not verified live: `$.command.run` from a timer callback (read from the 2.1.322 binary: queued as a
+  plugin-origin prompt entry); the kit tests cover it.
   Not ported: effortless's cold band, Handoff, settings panel and the swamp/limit alerts.
 - Coupling: jevfort relies on jev-api's `batch` name, input (`state` string, `questions` array of
   `{ type, instructions, criteria? }`) and answer (a JSON array of answers, `type` plus the System One fields, in

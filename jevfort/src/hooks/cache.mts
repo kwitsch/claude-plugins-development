@@ -16,14 +16,28 @@ const CACHE_RED_MIN = 5;
 
 /** The usage fields of a response this module reads. */
 type CacheUsage = {
+  /** Prompt tokens that were neither read from nor written to the cache. */
   input_tokens?: number;
+  /** Prompt tokens read from the cache. */
   cache_read_input_tokens?: number | null;
+  /** Prompt tokens written to the cache. */
   cache_creation_input_tokens?: number | null;
-  cache_creation?: { ephemeral_1h_input_tokens?: number; ephemeral_5m_input_tokens?: number };
+  /** The writes by lifetime; the API's own usage has it, the engine's `turn.step` usage (2.1.322) does not. */
+  cache_creation?: {
+    /** Tokens written with the 1-hour lifetime. */
+    ephemeral_1h_input_tokens?: number;
+    /** Tokens written with the 5-minute lifetime. */
+    ephemeral_5m_input_tokens?: number;
+  };
 };
 
 /**
  * The cache lifetime a response's writes got, when it says.
+ *
+ * @remarks
+ * Claude Code 2.1.322 reports a step's usage as the four token counts and the model, without `cache_creation`, so
+ * there this is always `undefined` and {@link nextTtl} keeps the assumed 1 hour: a 5-minute cache (an API key,
+ * Bedrock, Vertex, Foundry, a subscription past its limit) is not detected.
  *
  * @param usage - The response usage.
  * @returns `"1h"`, `"5m"`, or `undefined` when it wrote nothing or does not say.
@@ -41,7 +55,7 @@ export function cacheTtlOf(usage: unknown): CacheTtl | undefined {
  * @param usage - The response usage.
  * @returns True when more than half the prompt was read from the cache.
  */
-export function mostlyCached(usage: unknown): boolean {
+function mostlyCached(usage: unknown): boolean {
   const u = (usage ?? {}) as CacheUsage;
   const read = u.cache_read_input_tokens ?? 0;
   const all = read + (u.input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0);

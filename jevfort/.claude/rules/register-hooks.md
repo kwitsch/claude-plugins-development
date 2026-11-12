@@ -24,7 +24,7 @@ the shapes below: `inline-headroom/docs/claude-code-verification.md`.
 - One hook per event without a matcher (`registered twice without a matcher` fails validate and test). Hence:
   `tool.call` has one unmatched hook (answers the `estimate_effort` tool, outcome of Jev's own calls, skill
   blocklist) plus one with the matcher `{ tool: "Agent" }`; `turn.step`, `tool.check`, `turn.complete`,
-  `session.start`, `prompt.submit`, `agent.offer` and `session.compact` have one each; `command.run` carries a
+  `session.start`, `session.end`, `prompt.submit`, `agent.offer` and `session.compact` have one each; `command.run` carries a
   matcher; `ui.render` has two matcher hooks (`{ component: "CommandOutput", props: { command: "jev" } }` for the
   `/jev` output, `{ component: "AbovePrompt" }` for the effort band).
 - Jev is asked only through the jev-api plugin's tool `mcp__jev-api__batch`: `askJev` raises one
@@ -33,9 +33,11 @@ the shapes below: `inline-headroom/docs/claude-code-verification.md`.
   a JSON array with one answer of the asked type per question, or the timeout fails the whole `askJev` (`{ ok: false }`,
   never a throw). The engine
   member is typed `tool.call(input): Promise<ToolResult>`; there is no `$.http` use.
-- Readiness guard: every hook except `session.start`, the `/jev` `command.run` and both `ui.render` hooks starts with
-  `if ((await jevMissing($)).length) return next(e);` (`return yield* next(e)` in `turn.step`); `tool.call` and
-  `tool.check` handle `ESTIMATE_TOOL` before it. `jevMissing`, `jevApply` and their state `jevTools`/`jevState` are
+- Readiness guard: every hook except `session.start`, `session.end`, `session.compact`, the `/jev` `command.run` and
+  both `ui.render` hooks starts with `if ((await jevMissing($)).length) return next(e);` (`return yield* next(e)` in
+  `turn.step`, whose `cacheWatch` and `turnRunning` work comes before it; `turn.complete` clears `turnRunning` before
+  it; `session.compact` guards only the Jev ranking inside `withJevRanking`); `tool.call` and `tool.check` handle
+  `ESTIMATE_TOOL` before it. `jevMissing`, `jevApply` and their state `jevTools`/`jevState` are
   module level (`$` may only be passed to top-level functions). `jevTools` is one `$.tool.list()` per turn, shared by
   concurrent hooks: a main-loop `turn.complete` (no `agentId`) drops it after its own guard listing (no engine event reports a changed tool
   list), `session.start` drops it right after `next(e)` and lists the session's baseline (a jevfort hook raised inside
@@ -58,14 +60,19 @@ the shapes below: `inline-headroom/docs/claude-code-verification.md`.
 - Effort band: the `ui.render` hook with matcher `{ component: "AbovePrompt" }` draws `Box`/`Text`/`Button` from
   `$.ui.resolve(e)` (detached factories) out of the closure state `band` (written at main-loop step 0 in `turn.step`:
   `configured` = step-0 `e.effort`, `chosen` = the estimate or held effort) and `autoOff` (flipped by the Button
-  `key: "auto"`, reset at `session.start`). It passes with `routing: "off"`, while `jevState !== ""` and while
-  `e.props.hasSurvey`. `onPress` only flips the flag and calls `$.ui.invalidate` (no storage call; it runs after the frame, so a throw sets `bandStale` and the next applied listing redraws). While `autoOff`,
+  `key: "auto"`, reset at `session.start` and `session.end`). The effort row is hidden with `routing: "off"` and while
+  `jevState !== ""`; then the hook draws only the cache countdown (above `await next(e)`, in a column Box, so another
+  plugin's band beneath survives) or, without a countdown, passes; it always passes while `e.props.hasSurvey`.
+  `onPress` only flips the flag and calls `$.ui.invalidate` (no storage call; it runs after the frame, so a throw sets `bandStale` and the next applied listing redraws). While `autoOff`,
   the step-0 effort block (first-turn record, estimate, hold) is skipped.
 - Cache countdown / auto-compact / Haiku compaction (see `CLAUDE.md`): `turn.step` wraps `next` in `cacheWatch`
-  (passes chunks, reads the result's `usage`), `turn.complete` clears `turnRunning` before its readiness guard, the
-  `session.compact` hook is registered whatever `compaction` says (only the Jev ranking honours it) and none of these
-  three has a guard. The `AbovePrompt` hook shows the countdown even without the effort row. `$.clock.every` is started
-  in `session.start`; `cacheTick` calls `$.ui.invalidate` in try/catch and `$.command.run` for `/compact`.
+  (passes chunks, reads the result's `usage` in a try/catch), `turn.complete` clears `turnRunning` before its readiness
+  guard, the `session.compact` hook is registered whatever `compaction` says (only the Jev ranking honours it: a
+  closure const) and none of these three has a guard. The `AbovePrompt` hook shows the countdown even without the
+  effort row. `$.clock.every` is started in `session.start` (the engine does not wait for the callback: ticks
+  overlap); `session.end` (raised for /clear and /resume, where `session.start` is not) resets the conversation state.
+  `cacheTick` calls `$.ui.invalidate` through `showMinutes` in try/catch, `$.command.run` for `/compact` (rejects are
+  said with `$.ui.status`) and reads `$.session.usage()`; none of these runs in a hook frame.
 - `tool.call` failure is `isError: true` or `deny: string`; there is no `exitCode`.
 - `turn.step` `usage` may be `null`; `command.run` returning `{}` prints no row and records no model context.
 - `cc-plugin-sec-default` skips every user-tier `prompt.compose`/`prompt.section`/`prompt.context` hook, so the mod

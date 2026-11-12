@@ -10,7 +10,7 @@ export function cacheTtlOf(usage) {
 	if ((c?.ephemeral_5m_input_tokens ?? 0) > 0) return "5m";
 	return undefined;
 }
-export function mostlyCached(usage) {
+function mostlyCached(usage) {
 	const u = usage ?? {};
 	const read = u.cache_read_input_tokens ?? 0;
 	const all = read + (u.input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0);

@@ -84,13 +84,15 @@
     "haikuCompact": {
       "type": "boolean",
       "title": "Compact with Haiku",
-      "description": "Haiku 5.5 writes every compaction summary (also /compact and the automatic one) at a fraction of the chat model's price; if it fails, Claude Code compacts as usual.",
+      "description": "Haiku 5.5 writes every compaction summary (also /compact and the automatic one) at a fraction of the chat model's price; if it fails, Claude Code compacts as usual. It replaces Claude Code's own compaction step: PreCompact hooks do not run and recently read files are not re-attached.",
       "default": true
     },
     "autoCompactPercent": {
       "type": "number",
       "title": "Auto-compact from context fill (%)",
       "description": "When the prompt cache has gone cold and the context is at least this full, the idle chat is compacted by itself. 0 turns it off.",
+      "min": 0,
+      "max": 100,
       "default": 60
     },
     "takeOnlyForBypass": {
