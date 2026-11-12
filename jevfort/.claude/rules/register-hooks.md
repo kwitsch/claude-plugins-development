@@ -2,6 +2,7 @@
 paths:
   - "src/hooks/register.mts"
   - "tests/register.test.mts"
+  - "tests/phase3.test.mts"
   - "plugin/hooks/hooks.json"
 ---
 
@@ -31,13 +32,15 @@ the shapes below: `inline-headroom/docs/claude-code-verification.md`.
   a JSON array with one answer of the asked type per question, or the timeout fails the whole `askJev` (`{ ok: false }`,
   never a throw). The engine
   member is typed `tool.call(input): Promise<ToolResult>`; there is no `$.http` use.
-- Readiness guard: every hook except the `/jev` `command.run` and `ui.render` hooks starts with
+- Readiness guard: every hook except `session.start` and the `/jev` `command.run` and `ui.render` hooks starts with
   `if ((await jevMissing($)).length) return next(e);` (`return yield* next(e)` in `turn.step`). `jevMissing` and its
   cache `jevTools` are module level (`$` may only be passed to top-level functions): one `$.tool.list()` per session,
-  reset at `session.start`, a rejected or malformed listing counts as the tool missing. A new hook needs the guard too.
+  reset in `session.start` right after `next(e)` (a jevfort hook raised inside `next(e)` may have cached a listing from
+  before jev-api registered), a rejected or malformed listing counts as the tool missing. A new hook needs the guard
+  too; `session.start` must not start with it (beneath it, jev-api has not registered batch yet).
 - `session.start` registers the `estimate_effort` tool with `$.tool.register(ESTIMATE_SPEC)` whatever `routing`
   says (a throw is logged as `kind: "error"`), but only when the jev-api tools are listed: it checks `jevMissing($)`
-  after `next(e)` (jev-api registers its tools in its own `session.start`) and otherwise logs `inactive: jev-api tools missing (...)` and registers nothing. A registered tool that no hook answers fails, so the unmatched
+  after `next(e)` (jev-api registers its tools in its own `session.start`) and otherwise logs `inactive: jev-api tools missing (...)` and registers no tool. A registered tool that no hook answers fails, so the unmatched
   `tool.call` hook answers `mcp__jevfort__estimate_effort` itself and never calls `next(e)`: `{ result }` (the JSON
   estimate) or, on invalid input, `{ isError: true, result }` without a Jev request. Calls are logged as kind `estimate`.
 - `tool.call` failure is `isError: true` or `deny: string`; there is no `exitCode`.
@@ -61,7 +64,7 @@ call and a headless session denies it. jevfort uses `$.store`, `$.tool.call` (je
 ## Tests: the jev-api fake
 
 `tests/register.test.mts` and `tests/phase3.test.mts` stub `tool.list` (jev-api's batch tool) and `tool.call`. The
-kit resolves a mod's `$.tool.call` to the stub's `value` and rejects with its `deny`, so the fake answers a batch
-call with `{ value: { result: "<JSON array of answers>" } }` or `{ deny: "batch: <reason>" }` and passes every other
-tool on with `next(e)`. It records each batch question on its own (with its `type`), so assertions read per
+kit resolves a mod's `$.tool.call` to the stub's `value` and rejects with a bare `{ deny }`, while the real engine
+resolves `{ deny }` (typings), so the fake answers a batch call with `{ value: { result: "<JSON array of answers>" } }`
+or `{ value: { deny: "batch: <reason>" } }` and passes every other tool on with `next(e)`. It records each batch question on its own (with its `type`), so assertions read per
 question. Batch questions carry no id: the fake finds it by the `instructions` text.

@@ -13,9 +13,9 @@ layout. jevfort makes no network request of its own: it asks Jev through the too
 
 The **jev-api** plugin, installed and enabled together with jevfort. jevfort declares it as a plugin dependency, so Claude Code keeps jevfort disabled while jev-api is missing or disabled. jevfort asks Jev only through jev-api's tool `mcp__jev-api__batch` (jev-api 0.2.0 or later): one call, and one request, per decision.
 
-The endpoint and the key are configured for jev-api, not for jevfort: its environment variables `TYPESAFE_API_KEY`, `TYPESAFE_BASE_URL`, `JEV_URL` and `TYPESAFE_DEFAULT_MODEL` are described in the jev-api README.
+The endpoint and the key are configured for jev-api, not for jevfort: its environment variables `TYPESAFE_API_KEY`, `TYPESAFE_BASE_URL`, `JEV_URL` and `TYPESAFE_DEFAULT_MODEL` are described in the jev-api README. Coming from jevfort 0.4, which sent its own request: jev-api sends the key only to an `https://` endpoint (an `http://` `JEV_URL` now gets no `Authorization` header), and it also reads `TYPESAFE_BASE_URL` and `TYPESAFE_DEFAULT_MODEL`, which jevfort 0.4 ignored.
 
-Without jev-api's batch tool in a session (for example denied by a permission rule), jevfort does nothing: it changes no event, does not register `estimate_effort`, and `/jev` says so. When jev-api is not configured, fails, or does not answer a decision within 4 seconds, the decision is logged as `unavailable` and Claude Code behaves as usual.
+Without jev-api's batch tool in a session (for example denied by a permission rule), jevfort does nothing: it changes no event, does not register `estimate_effort`, and `/jev` says so. jevfort looks the tool up once when Claude Code starts, so a permission rule added later reaches jevfort only after a restart (or a reload of jevfort). When jev-api is not configured, fails, or does not answer a decision within 4 seconds, jevfort leaves that decision to Claude Code's own behaviour: a turn step logs it as `unavailable`, an `estimate_effort` call answers its default effort.
 
 ## Commands
 

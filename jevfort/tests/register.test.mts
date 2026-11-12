@@ -33,6 +33,8 @@ const SID = "sid-1";
 // The jev-api tool jevfort needs as `$.tool.list()` lists it, and jev-api 0.1's tools, which lack it.
 const JEV_TOOLS = [{ name: JEV_BATCH, description: "Ask Jev several questions", mcp: true }];
 const SINGLE_TOOLS = ["noul", "choice", "score"].map((t) => ({ name: JEV_TOOL_PREFIX + t, description: `Ask Jev a ${t} question`, mcp: true }));
+// The first line of /jev while the batch tool is missing.
+const INACTIVE = "Jev pilot: inactive, the jev-api tools are missing (mcp__jev-api__batch). jevfort needs jev-api 0.2.0 or later and no permissions.deny rule matching its tools; then restart Claude Code.";
 // The question id each instructions text belongs to (batch questions carry no id; the fake finds it by the text).
 const QUESTION_IDS = new Map<string, string>([
   [nextActionQuestion([]).instructions, "next_action"],
@@ -49,8 +51,8 @@ const NEUTRAL: Record<string, Record<string, unknown>> = {
   score: { type: "score", score: 0, probabilities: {}, confidence: 0 },
 };
 
-/** One question of a batch call as the fake saw it: its id (its instructions when unknown), its input and the call's `state` (JSON text). */
-type Asked = { id: string; type: string; instructions: string; state: string; criteria?: unknown; timeout?: unknown };
+/** One question of a batch call as the fake saw it: its id (its instructions when unknown), its input, the call's `state` (JSON text) and the call's index (0 for the first batch call). */
+type Asked = { id: string; type: string; instructions: string; state: string; criteria?: unknown; timeout?: unknown; call: number };
 /** The fake Jev, called once per batch question: the answer object, a raw result string (the whole batch result), a number (an HTTP error status: the batch denies), `undefined` (a neutral answer), or a Promise that never settles (no answer). */
 type Jev = (q: Asked) => Record<string, unknown> | string | number | undefined | Promise<never>;
 type Msg = { role: "user" | "assistant"; text: string; toolUses: Record<string, unknown>[]; toolResults?: Record<string, unknown>[] };
@@ -59,8 +61,8 @@ type Chunk = { kind: string; [k: string]: unknown };
 type Runner = Parameters<Parameters<typeof test>[2]>[0];
 
 // Answers every call the mod makes on `$`. The batch tool is listed and answered from `jev`; a mod's `$.tool.call`
-// resolves to the stub's `value` (the tool result `{ result }`) and rejects with its `deny`. Other tools go on to the
-// test's own `tool.call` stub.
+// resolves to the stub's `value`: the tool result `{ result }`, or `{ deny }` as the real engine resolves a deny (a bare
+// `{ deny }` stub answer would make the kit reject instead). Other tools go on to the test's own `tool.call` stub.
 function setup(on: On, opts: { messages: Msg[]; jev: Jev; files?: string[]; packageJson?: object; env?: Record<string, string>; agents?: { status: string }[]; store?: Record<string, unknown>; tools?: { name: string; description: string; mcp: boolean }[] | null }) {
   const sent: Asked[] = [];
   let batchCalls = 0;
@@ -79,12 +81,12 @@ function setup(on: On, opts: { messages: Msg[]; jev: Jev; files?: string[]; pack
   on("tool.list", () => (opts.tools === null ? { deny: "tool.list failed" } : { value: opts.tools ?? JEV_TOOLS }));
   on("tool.call", async (_$, e, next) => {
     if (e.tool !== JEV_BATCH) return next(e);
-    batchCalls++;
-    const asked = (e.questions as { type: string; instructions: string; criteria?: unknown }[]).map((b): Asked => ({ ...b, id: QUESTION_IDS.get(b.instructions) ?? b.instructions, state: String(e.state), timeout: e.timeout }));
+    const call = batchCalls++;
+    const asked = (e.questions as { type: string; instructions: string; criteria?: unknown }[]).map((b): Asked => ({ ...b, id: QUESTION_IDS.get(b.instructions) ?? b.instructions, state: String(e.state), timeout: e.timeout, call }));
     sent.push(...asked);
     const answers = await Promise.all(asked.map(async (q) => opts.jev(q)));
     const status = answers.find((a) => typeof a === "number");
-    if (status !== undefined) return { deny: `batch: HTTP ${status}` };
+    if (status !== undefined) return { value: { deny: `batch: HTTP ${status}` } };
     const raw = answers.find((a) => typeof a === "string");
     return { value: { result: raw ?? JSON.stringify(answers.map((a, i) => a ?? NEUTRAL[asked[i].type])) } };
   });
@@ -119,20 +121,11 @@ const byId = (answers: Record<string, Record<string, unknown>>): Jev => (q) => a
 // The question ids of the jev-api calls so far, in call order; the parsed `state` of the i-th call.
 const ids = (sent: Asked[]) => sent.map((q) => q.id);
 const stateOf = (sent: Asked[], i: number) => JSON.parse(sent[i].state) as { request: string; previous_reply?: string };
-// A fake Jev answering by question id, one answer set per `askJev` in order (the last repeats, a number is an HTTP
-// error status for every call of that round). A question id seen again starts the next round.
-const inOrder = (...rounds: (Record<string, Record<string, unknown>> | number)[]): Jev => {
-  let n = 0;
-  const seen = new Set<string>();
-  return (q) => {
-    if (seen.has(q.id)) {
-      seen.clear();
-      n++;
-    }
-    seen.add(q.id);
-    const round = rounds[Math.min(n, rounds.length - 1)];
-    return typeof round === "number" ? round : round[q.id];
-  };
+// A fake Jev answering by question id, one answer set per batch call (one `askJev`) in call order (the last repeats,
+// a number is an HTTP error status for that whole call).
+const inOrder = (...rounds: (Record<string, Record<string, unknown>> | number)[]): Jev => (q) => {
+  const round = rounds[Math.min(q.call, rounds.length - 1)];
+  return typeof round === "number" ? round : round[q.id];
 };
 
 async function drain(stream: AsyncGenerator<unknown, unknown>) {
@@ -245,17 +238,31 @@ test("A jev-api deny leaves the step to Claude and is logged with its text", asy
   expect(await runJev($, "")).toContain("error (pass): unavailable: batch: HTTP 503");
 });
 
-test("One failing question discards the other answers of the same decision", async ($, on) => {
+test("One wrong answer discards the other answers of the same decision", async ($, on) => {
   const seen: unknown[] = [];
-  setup(on, { messages: [user("what does this project do?")], jev: (q) => (q.id === "mechanical" ? 500 : easy) });
+  // The easy effort score alone would lower the turn to low; the score answered for `mechanical` voids it.
+  setup(on, { messages: [user("what does this project do?")], jev: (q) => (q.id === "mechanical" ? easy : scored(0.2)) });
   claudeBeneath(on, seen);
 
   await drain($.turn.step(step));
   expect(seen[0]).toMatchObject({ effort: "high" });
-  expect(await runJev($, "")).toContain("unavailable: batch: HTTP 500");
+  expect(await runJev($, "")).toContain("unavailable: batch: no noul answer for questions[1]");
 });
 
-for (const [name, answer, error] of [["of another type", mech(0.5), "batch: no score answer for questions[0]"], ["that is not JSON", "<html>", "batch: result is not JSON"]] as const) {
+test("Core's error result for the batch call fails the decision with a batch: prefix", async ($, on) => {
+  const seen: unknown[] = [];
+  // Ahead of setup's fake: what core answers when jev-api's hook was skipped and no hook answered its tool.
+  const error = "Error: jev-api registered the tool batch but no tool.call hook answered this call";
+  on("tool.call", (_$, e, next) => (e.tool === JEV_BATCH ? { value: { isError: true, result: error, text: error } } : next(e)));
+  setup(on, { messages: [user("what does this project do?")], jev: () => undefined });
+  claudeBeneath(on, seen);
+
+  await drain($.turn.step(step));
+  expect(seen[0]).toMatchObject({ effort: "high" });
+  expect(await runJev($, "")).toContain(`unavailable: batch: ${error}`);
+});
+
+for (const [name, answer, error] of [["of another type", mech(0.5), "batch: no score answer for questions[0]"], ["that is not JSON", "<html>", "batch: result is not JSON"], ["with too few answers", "[]", "batch: expected 2 answers"]] as const) {
   test(`A jev-api result ${name} fails the decision`, async ($, on) => {
     const seen: unknown[] = [];
     setup(on, { messages: [user("what does this project do?")], jev: (q) => (q.id === "effort" ? answer : undefined) });
@@ -273,7 +280,7 @@ test("Jev calls that do not answer within 4000 ms time out and Claude takes the 
   claudeBeneath(on, seen);
 
   const run = drain($.turn.step(step));
-  // The module loads by dynamic import (file I/O), which one settle does not wait for: flush until both calls are out.
+  // The module loads by dynamic import (file I/O), which one settle does not wait for: flush until both questions are out.
   while (sent.length < 2) await clock.advance(0);
   await clock.advance(3999);
   expect(seen).toHaveLength(0);
@@ -837,7 +844,7 @@ test("A switch from Opus to Haiku starts a new first turn with its own estimate"
   expect(seen.map((s) => s.effort)).toEqual(["low", "medium", "medium"]);
 });
 
-// Self-disable: without all three jev-api tools in the listing, every hook but /jev passes through untouched.
+// Self-disable: without jev-api's batch tool in the listing (here jev-api 0.1's three tools), every hook but /jev passes through untouched.
 test("Without a jev-api tool jevfort is inactive: every hook passes through and /jev says why", async ($, on) => {
   const seen: unknown[] = [];
   const { sent } = setup(on, {
@@ -857,6 +864,8 @@ test("Without a jev-api tool jevfort is inactive: every hook passes through and 
   on("session.start", async () => ({}));
   on("tool.check", () => ({ decision: "ask" }));
   on("tool.call", () => ({ result: "beneath" }));
+  on("agent.offer", () => ({ isOffered: true }));
+  on("session.compact", () => ({ skip: "test" }));
 
   // session.start registers no estimate_effort and logs why.
   await $.session.start({ cwd: CWD, surface: "terminal", isInteractive: true });
@@ -871,10 +880,15 @@ test("Without a jev-api tool jevfort is inactive: every hook passes through and 
   await userSubmit($, "rewrite the storage layer to use IndexedDB");
   expect(await estimateCall($)).toEqual({ result: "beneath" });
   expect(submitted).toEqual(["rewrite the storage layer to use IndexedDB"]);
+  // Offered agent types are not collected, an Agent call is not routed and a compaction gets no ranking.
+  await $.agent.offer({ agent: "general-purpose", description: "General tasks", source: "built-in" });
+  await $.agent.offer({ agent: "Explore", description: "Read-only codebase search", source: "built-in" });
+  expect(await $.tool.call({ tool: "Agent", description: "find usages", prompt: "Find every caller of addTodo", tool_use_id: "a1" })).toEqual({ result: "beneath" });
+  await $.session.compact({ trigger: "manual", messages: [user("fix the failing date test"), { role: "assistant", text: "", toolUses: ["a", "b", "c"].map((x, i) => ({ tool_use_id: `t${i}`, tool: "Bash", input: { command: `step ${x}` }, text: x })) }] });
   expect(sent).toHaveLength(0);
 
   const status = await runJev($, "");
-  expect(status.startsWith("Jev pilot: inactive, the jev-api tools are missing (mcp__jev-api__batch). Install and enable the jev-api plugin.\nJev pilot: routing effort")).toBe(true);
+  expect(status.startsWith(`${INACTIVE}\nJev pilot: routing effort`)).toBe(true);
   expect(status).toContain("error (pass): inactive: jev-api tools missing (mcp__jev-api__batch)");
 });
 
@@ -886,7 +900,32 @@ test("A tool listing that fails counts as all jev-api tools missing", async ($, 
   await drain($.turn.step(step));
   expect(seen).toEqual([step]);
   expect(sent).toHaveLength(0);
-  expect((await runJev($, "")).split("\n")[0]).toBe("Jev pilot: inactive, the jev-api tools are missing (mcp__jev-api__batch). Install and enable the jev-api plugin.");
+  expect((await runJev($, "")).split("\n")[0]).toBe(INACTIVE);
+});
+
+test("jev-api registering batch inside session.start's next(e) makes jevfort active, also after a lookup in between", async ($, on) => {
+  const tools: typeof JEV_TOOLS = [];
+  const { sent } = setup(on, { messages: [user("what does this project do?")], tools, jev: byId({ effort: easy }) });
+  claudeBeneath(on, []);
+  const registered: unknown[] = [];
+  on("command.register", async () => ({ value: undefined }));
+  on("tool.register", async (_$, e) => {
+    registered.push(e.name);
+    return { value: { tool: "mcp__jevfort__estimate_effort" } };
+  });
+  on("tool.call", (_$, e, next) => (e.tool === "Read" ? { deny: "not here" } : next(e)));
+  // Beneath jevfort, as in the engine's dependency order: another plugin's session.start makes a tool call, which
+  // jevfort's tool.call hook sees while batch is not listed yet; then jev-api registers batch.
+  on("session.start", async ($2) => {
+    await $2.tool.call({ tool: "Read", file_path: `${CWD}/README.md` }).catch(() => undefined);
+    tools.push(...JEV_TOOLS);
+    return {};
+  });
+
+  await $.session.start({ cwd: CWD, surface: "terminal", isInteractive: true });
+  expect(registered).toEqual(["estimate_effort"]);
+  await drain($.turn.step(step));
+  expect(ids(sent)).toEqual(["effort", "mechanical"]);
 });
 
 test("The jev-api lookup is cached per session and repeated at session.start", async ($, on) => {

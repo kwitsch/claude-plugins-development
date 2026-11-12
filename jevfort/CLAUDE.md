@@ -16,13 +16,14 @@ subagents load it via ToolSearch), no skills, agents, command hooks or MCP serve
 - Jev is asked only through the jev-api plugin's tool `mcp__jev-api__batch` (upstream sends its own HTTP request):
   `askJev` raises one `$.tool.call` with all questions of the decision (one System One request, needs jev-api >= 0.2.0),
   with a 4 s budget per `askJev` (`TIMEOUT_MS`), all or nothing. Every call gives jev-api `timeout: 5` (seconds,
-  `JEV_API_TIMEOUT_S`), so jev-api ends a request jevfort has given up on after 5 s, not its default 20 s. jevfort makes no network request and reads no
+  `JEV_API_TIMEOUT_S`), so jev-api stops waiting for a request jevfort has given up on after 5 s, not its default 20 s
+  (the HTTP request itself cannot be aborted and runs on until it settles or the engine's 30 s cap). jevfort makes no network request and reads no
   endpoint or key: those are jev-api's environment (`TYPESAFE_API_KEY`, `TYPESAFE_BASE_URL`, `JEV_URL`,
   `TYPESAFE_DEFAULT_MODEL`). No `userConfig` entry for any of it.
 - jev-api is a declared plugin dependency (`claudePlugin.dependencies: ["jev-api"]` in `package.json`, copied into
   `plugin.json`; bare name, no version range): Claude Code keeps jevfort disabled while jev-api is missing or disabled.
-  At runtime `jevMissing($)` looks the batch tool up in `$.tool.list()` once per session (cached, reset at
-  `session.start`, a failed or malformed listing counts as all missing). While it is missing (also with jev-api 0.1, which has only `noul`/`choice`/`score`) jevfort is inactive: every hook except
+  At runtime `jevMissing($)` looks the batch tool up in `$.tool.list()` once per session (cached, reset in
+  `session.start` after `next(e)`, a failed or malformed listing counts as all missing). While it is missing (also with jev-api 0.1, which has only `noul`/`choice`/`score`) jevfort is inactive: every hook except
   the `/jev` command and its render passes through untouched (also the scratchpad-write allow), `estimate_effort` is
   not registered, one `inactive: jev-api tools missing (...)` error is logged per session start and `/jev` says why.
 - Coupling: jevfort relies on jev-api's `batch` name, input (`state` string, `questions` array of

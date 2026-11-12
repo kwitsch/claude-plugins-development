@@ -69,8 +69,8 @@ const call = ($: Runner, type: string, input: Record<string, unknown> = {}) => $
 // Errors are a `deny`: the model reads it as an error result (core drops a hook's own isError).
 const NO_CONFIG = (type: string) => ({ deny: `${type}: none of TYPESAFE_API_KEY, TYPESAFE_BASE_URL, JEV_URL is set` });
 
-// Cases 2, 3: the env gate runs on every call, sends no request, and blank counts as unset.
-for (const type of ["noul", "choice", "score"]) {
+// Cases 2, 3: the env gate runs on every call, sends no request, and blank counts as unset (BASE.batch is set below, before any test runs).
+for (const type of ["noul", "choice", "score", "batch"]) {
   test(`${type} without any env var fails locally`, async ($, on) => {
     const { fetched } = setup(on, { env: {} });
     expect(await call($, type)).toEqual(NO_CONFIG(type));
@@ -216,7 +216,18 @@ test("TYPESAFE_BASE_URL gets /v1/systemone appended and trailing slashes dropped
 
 // An invalid set URL is an error naming the variable and sends nothing.
 const URL_RULE: Record<string, string> = { JEV_URL: "an http(s) URL", TYPESAFE_BASE_URL: "an http(s) URL without query or fragment" };
-for (const [name, value] of [["JEV_URL", "ftp://x"], ["TYPESAFE_BASE_URL", "ftp://x"], ["TYPESAFE_BASE_URL", "https://h/api?tenant=x"], ["TYPESAFE_BASE_URL", "https://h/api#frag"]]) {
+for (
+  const [name, value] of [
+    ["JEV_URL", "ftp://x"],
+    ["JEV_URL", "not a url"],
+    ["JEV_URL", "file:///etc/passwd"],
+    ["JEV_URL", "https://"],
+    ["JEV_URL", "https://a b/x"],
+    ["TYPESAFE_BASE_URL", "ftp://x"],
+    ["TYPESAFE_BASE_URL", "https://h/api?tenant=x"],
+    ["TYPESAFE_BASE_URL", "https://h/api#frag"],
+  ]
+) {
   test(`${name}=${value} is an error and sends nothing`, async ($, on) => {
     const a = setup(on, { env: { [name]: value } });
     expect(await call($, "noul")).toEqual({ deny: `noul: ${name} must be ${URL_RULE[name]}` });
@@ -326,6 +337,15 @@ for (const timeout of ["10", 0, -1]) {
   });
 }
 
+// Above 30 s (the engine's own fetch cap) a timeout counts as 30 s: in ms past 2^31-1 a setTimeout would fire at once.
+test("a call's timeout above 30 s counts as 30 s", async ($, on) => {
+  await timesOutAfter($, on, 30_000, { timeout: 3_600_000 });
+});
+
+test("a timeout option above 30 s counts as 30 s", { options: { timeout: 9_999_999 } }, async ($, on) => {
+  await timesOutAfter($, on, 30_000);
+});
+
 test("a settled request cancels its timeout timer", async ($, on) => {
   const signals: AbortSignal[] = [];
   // Registered before setup's mock.clock, which it passes the wait on to; cancel() aborts the wait's dispatch.
@@ -384,12 +404,6 @@ test("batch: invalid input names the question and sends nothing", async ($, on) 
   expect(fetched).toHaveLength(0);
 });
 
-test("batch without any env var fails locally", async ($, on) => {
-  const { fetched } = setup(on, { env: {} });
-  expect(await batch($)).toEqual(NO_CONFIG("batch"));
-  expect(fetched).toHaveLength(0);
-});
-
 // A registered tool that no hook answers fails, so a throw before the answer must still answer.
 test("a refused env read still answers the tool", async ($, on) => {
   on("env.get", async () => ({ deny: "env reads blocked" }));
@@ -419,7 +433,7 @@ it("an abandoned call answers at once instead of waiting for the request", async
 // Live smoke tests (opt-in): run against the System One server named by JEV_URL in the shell; skipped without it.
 // Nothing is hardcoded: the URL, key and model come only from the environment.
 describe.skipIf(!process.env.JEV_URL)("live JEV System One (JEV_URL)", () => {
-  /** Forwards the module's http.fetch to the real global fetch; the mock clock is never advanced (no 30 s race). */
+  /** Forwards the module's http.fetch to the real global fetch; the mock clock is never advanced (no timeout race). */
   function live(on: On) {
     mock.env(on, { JEV_URL: process.env.JEV_URL, TYPESAFE_API_KEY: process.env.TYPESAFE_API_KEY, TYPESAFE_DEFAULT_MODEL: process.env.TYPESAFE_DEFAULT_MODEL });
     mock.clock(on);

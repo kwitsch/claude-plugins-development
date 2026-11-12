@@ -10,10 +10,11 @@ const STATE = {
 	description: "The text the question is about."
 };
 const DEFAULT_TIMEOUT_S = 20;
+const MAX_TIMEOUT_S = 30;
 const TIMEOUT = {
 	type: "number",
 	exclusiveMinimum: 0,
-	description: `Optional: the HTTP timeout of the request in seconds. Default: the plugin's timeout option, else ${DEFAULT_TIMEOUT_S}.`
+	description: `Optional: the HTTP timeout of the request in seconds, at most ${MAX_TIMEOUT_S}. Default: the plugin's timeout option, else ${DEFAULT_TIMEOUT_S}.`
 };
 const DEFAULT_JEV_URL = "https://api.typesafe.ai/v1/systemone";
 const DEFAULT_MODEL = "jev-latest";
@@ -157,7 +158,7 @@ function fail(tool, reason) {
 	return { deny: `${tool}: ${reason}` };
 }
 function seconds(v) {
-	return typeof v === "number" && Number.isFinite(v) && v > 0 ? v : undefined;
+	return typeof v === "number" && Number.isFinite(v) && v > 0 ? Math.min(v, MAX_TIMEOUT_S) : undefined;
 }
 function isType(v) {
 	return TYPES.includes(v);

@@ -39,7 +39,7 @@ async function askJev($, state, questions) {
 			timeout: JEV_API_TIMEOUT_S
 		});
 		if (r.deny !== undefined) throw new Error(asText(r.deny));
-		if (r.isError === true || typeof r.result !== "string") throw new Error(r.result === undefined ? "batch: no result" : typeof r.result === "string" ? r.result : JSON.stringify(r.result));
+		if (r.isError === true || typeof r.result !== "string") throw new Error(`batch: ${r.result === undefined ? "no result" : typeof r.result === "string" ? r.result : JSON.stringify(r.result)}`);
 		let list;
 		try {
 			list = JSON.parse(r.result);
@@ -251,12 +251,10 @@ async function skillOptions($) {
 	const commands = await $.command.list().catch(() => []);
 	const blocked = new Set(await $.store.get(SKILL_BLOCKLIST_KEY).catch(() => undefined) ?? []);
 	const criteria = { [NONE]: "No listed skill is meant for this request" };
-	let options = 1;
 	for (const c of commands) {
-		if (options >= MAX_CHOICE_OPTIONS) break;
-		if ((c.source === "plugin" || c.source === "user") && c.name !== "jev" && !BUILTIN_COMMANDS.has(c.name) && !blocked.has(c.name) && !(c.name in criteria)) {
+		if (Object.keys(criteria).length >= MAX_CHOICE_OPTIONS) break;
+		if ((c.source === "plugin" || c.source === "user") && c.name !== "jev" && !BUILTIN_COMMANDS.has(c.name) && !blocked.has(c.name) && !Object.hasOwn(criteria, c.name)) {
 			criteria[c.name] = clip(c.description, 160);
-			options++;
 		}
 	}
 	return Object.keys(criteria).length > 1 ? criteria : undefined;
@@ -429,7 +427,7 @@ export const register = (on, options) => {
 			const claudeType = e.subagent_type ?? "";
 			if (offered.size < 2 || claudeType === "fork") return next(e);
 			const criteria = {};
-			for (const [name, description] of offered) criteria[name] = clip(description, 200);
+			for (const [name, description] of [...offered].slice(0, MAX_CHOICE_OPTIONS)) criteria[name] = clip(description, 200);
 			const r = await askJev($, {
 				task: clip(e.prompt, 3e3),
 				description: e.description
@@ -509,7 +507,6 @@ export const register = (on, options) => {
 	const firstTurns = new Map();
 	const ownCalls = new Set();
 	on("session.start", async function onSessionStart($, e, next) {
-		jevTools = undefined;
 		firstTurns.clear();
 		if (badRange) await record($, {
 			kind: "error",
@@ -521,6 +518,7 @@ export const register = (on, options) => {
 			description: "Jev pilot: status, /jev report, /jev candidates, /jev export, /jev clear"
 		});
 		const result = await next(e);
+		jevTools = undefined;
 		const missing = await jevMissing($);
 		if (missing.length) {
 			await record($, {
@@ -578,7 +576,7 @@ export const register = (on, options) => {
 		const counts = Object.entries(await stats($)).map(([k, v]) => `${k}=${v}`).join(", ") || "none yet";
 		const lines = recentDecisions().slice(-10).map((d) => `- ${d.kind}${d.applied ? "" : " (pass)"}: ${d.text}${d.ms !== undefined ? ` [${Math.round(d.ms)}ms]` : ""}`);
 		return { text: [
-			...missing.length ? [`Jev pilot: inactive, the jev-api tools are missing (${missing.join(", ")}). Install and enable the jev-api plugin.`] : [],
+			...missing.length ? [`Jev pilot: inactive, the jev-api tools are missing (${missing.join(", ")}). jevfort needs jev-api 0.2.0 or later and no permissions.deny rule matching its tools; then restart Claude Code.`] : [],
 			`Jev pilot: routing ${routing}, take steps ${takeSteps} (p ≥ ${takeThreshold}), done check ${doneCheck}, subagents ${subagents}`,
 			`Decisions (all sessions): ${counts}`,
 			lines.length ? `Recent:\n${lines.join("\n")}` : "No decisions this session yet.",

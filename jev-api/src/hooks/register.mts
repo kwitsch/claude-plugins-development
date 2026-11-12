@@ -12,7 +12,7 @@
  * @packageDocumentation
  */
 
-/** The tool names, which are also the System One question types. */
+/** The System One question types, which are also the names of the single-question tools. */
 const TYPES = ["noul", "choice", "score"] as const;
 
 /** One of {@link TYPES}. */
@@ -179,8 +179,14 @@ const STATE = { type: "string", description: "The text the question is about." }
 /** How long one request may take, in seconds, when neither the call's `timeout` nor the `timeout` option is valid. */
 const DEFAULT_TIMEOUT_S = 20;
 
+/**
+ * The longest timeout in seconds; a longer one counts as this. The engine ends one `$.http.fetch` after 30 s itself,
+ * and a delay past 2^31-1 ms would make the engine's setTimeout-based timer fire at once.
+ */
+const MAX_TIMEOUT_S = 30;
+
 /** The optional `timeout` input property shared by the tools. */
-const TIMEOUT = { type: "number", exclusiveMinimum: 0, description: `Optional: the HTTP timeout of the request in seconds. Default: the plugin's timeout option, else ${DEFAULT_TIMEOUT_S}.` };
+const TIMEOUT = { type: "number", exclusiveMinimum: 0, description: `Optional: the HTTP timeout of the request in seconds, at most ${MAX_TIMEOUT_S}. Default: the plugin's timeout option, else ${DEFAULT_TIMEOUT_S}.` };
 
 /** The System One endpoint used when neither JEV_URL nor TYPESAFE_BASE_URL is set. */
 const DEFAULT_JEV_URL = "https://api.typesafe.ai/v1/systemone";
@@ -345,13 +351,13 @@ function fail(tool: ToolName, reason: string): ToolResult {
 }
 
 /**
- * A timeout in seconds, if the value is one: a finite number above 0.
+ * A timeout in seconds, if the value is one: a finite number above 0, capped at {@link MAX_TIMEOUT_S}.
  *
  * @param v - The value to test (a tool input field or an option).
  * @returns The seconds, or undefined for anything else.
  */
 function seconds(v: unknown): number | undefined {
-  return typeof v === "number" && Number.isFinite(v) && v > 0 ? v : undefined;
+  return typeof v === "number" && Number.isFinite(v) && v > 0 ? Math.min(v, MAX_TIMEOUT_S) : undefined;
 }
 
 /**

@@ -68,7 +68,8 @@ test("The prompt classifier adds a hint only Claude reads", async ($, on) => {
     skill: { type: "choice", choice: "none", probabilities: { none: 0.9 }, confidence: 0.9 },
   };
   const sent = base(on, (q) => answers[PROMPT_IDS.get(q.instructions) ?? ""]);
-  on("command.list", () => ({ value: [{ name: "aws-diagrams", description: "Draw AWS diagrams", source: "plugin" }] }));
+  // A skill named like an Object.prototype member is offered too.
+  on("command.list", () => ({ value: [{ name: "aws-diagrams", description: "Draw AWS diagrams", source: "plugin" }, { name: "constructor", description: "Build things", source: "user" }] }));
   let seen: readonly string[] | undefined;
   on("prompt.submit", (_$, e) => {
     seen = e.context as readonly string[] | undefined;
@@ -76,9 +77,22 @@ test("The prompt classifier adds a hint only Claude reads", async ($, on) => {
   });
   await $.prompt.submit({ text: "rewrite the storage layer to use IndexedDB and sync across tabs", wait: false, origin: { kind: "composer" } });
   expect(seen?.join("\n") ?? "").toContain("plan");
-  // The batch's question types in order; the skill options are the listed skill plus `none`.
+  // The batch's question types in order; the skill options are the listed skills plus `none`.
   expect(sent.map((q) => q.type)).toEqual(["choice", "noul", "choice"]);
-  expect(Object.keys(sent[2].criteria as object)).toEqual(["none", "aws-diagrams"]);
+  expect(Object.keys(sent[2].criteria as object)).toEqual(["none", "aws-diagrams", "constructor"]);
+});
+
+test("The classifier offers at most 255 skill options, none first, each name once", async ($, on) => {
+  // Only the questions sent matter here, not the answers.
+  const sent = base(on, () => ({}));
+  const skills = Array.from({ length: 300 }, (_, i) => ({ name: `skill-${i}`, description: `Skill ${i}`, source: "user" }));
+  on("command.list", () => ({ value: [skills[0], ...skills] }));
+  on("prompt.submit", (_$, e) => ({ text: e.text }));
+  await $.prompt.submit({ text: "rewrite the storage layer", wait: false, origin: { kind: "composer" } });
+  const options = Object.keys(sent[2].criteria as object);
+  expect(options).toHaveLength(255);
+  expect(options.slice(0, 3)).toEqual(["none", "skill-0", "skill-1"]);
+  expect(options.at(-1)).toBe("skill-253");
 });
 
 test("A general-purpose subagent is switched only when Jev is confident; an explicit type is kept", async ($, on) => {
@@ -150,7 +164,7 @@ test("A short follow-up is classified with the previous reply as context", async
   on("command.list", () => ({ value: [] }));
   on("prompt.submit", (_$, e) => ({ text: e.text }));
   await $.prompt.submit({ text: "fix it", wait: false, origin: { kind: "composer" } });
-  // Both calls (kind, needs_plan) carry the same state as JSON text.
+  // Both questions (kind, needs_plan) carry the batch call's state as JSON text.
   const sentStates = sent.map((q) => JSON.parse(q.state) as Record<string, unknown>);
   expect(sentStates).toHaveLength(2);
   expect(String(sentStates[0]?.previous_reply)).toContain("Want me to fix that?");

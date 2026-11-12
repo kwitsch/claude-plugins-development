@@ -59,6 +59,7 @@ type Engine = {
   tool: {
     list(): Promise<ToolInfo[]>;
     register(spec: typeof ESTIMATE_SPEC): Promise<{ tool?: string }>;
+    /** Runs a tool through every hook but the calling one; resolves its result or `{ deny }` (it rejects only for an unknown tool or an abort). */
     call(input: { tool: string } & Record<string, unknown>): Promise<ToolResult>;
   };
   /** Model requests. */
@@ -173,8 +174,8 @@ async function askJev($: Engine, state: unknown, questions: Record<string, Quest
     const r = await $.tool.call({ tool: JEV_BATCH, state: JSON.stringify(state), questions: entries.map(([, q]) => q), timeout: JEV_API_TIMEOUT_S });
     // jev-api's deny text already starts with `batch:`.
     if (r.deny !== undefined) throw new Error(asText(r.deny));
-    // A structured error result is serialized, not printed as `[object Object]`.
-    if (r.isError === true || typeof r.result !== "string") throw new Error(r.result === undefined ? "batch: no result" : typeof r.result === "string" ? r.result : JSON.stringify(r.result));
+    // Core's error result (no hook answered) has no `batch:` prefix; a structured one is serialized, not printed as `[object Object]`.
+    if (r.isError === true || typeof r.result !== "string") throw new Error(`batch: ${r.result === undefined ? "no result" : typeof r.result === "string" ? r.result : JSON.stringify(r.result)}`);
     let list: unknown;
     try {
       list = JSON.parse(r.result);
@@ -446,8 +447,9 @@ async function summarizeResult($: Engine, request: string, action: string, outpu
 }
 
 /**
- * The skill options of the prompt classifier: every listed plugin or user skill that is not built in or
- * blocklisted, plus `none`.
+ * The skill options of the prompt classifier: `none` plus each listed plugin or user skill that is not built in or
+ * blocklisted, once per name and in listing order, at most `MAX_CHOICE_OPTIONS` options in all (jev-api's choice
+ * limit).
  *
  * @param $ - Engine interface.
  * @returns The options, or `undefined` when no skill is listed.
@@ -456,13 +458,12 @@ async function skillOptions($: Engine): Promise<Record<string, string> | undefin
   const commands = await $.command.list().catch(() => []);
   const blocked = new Set(((await $.store.get(SKILL_BLOCKLIST_KEY).catch(() => undefined)) as string[] | undefined) ?? []);
   const criteria: Record<string, string> = { [NONE]: "No listed skill is meant for this request" };
-  let options = 1;
   for (const c of commands) {
     // shortcut: past jev-api's choice limit later skills are left out; rank them if users hit it.
-    if (options >= MAX_CHOICE_OPTIONS) break;
-    if ((c.source === "plugin" || c.source === "user") && c.name !== "jev" && !BUILTIN_COMMANDS.has(c.name) && !blocked.has(c.name) && !(c.name in criteria)) {
+    if (Object.keys(criteria).length >= MAX_CHOICE_OPTIONS) break;
+    // Own keys only: `in` would also see Object.prototype members, dropping a skill named `constructor` or `toString`.
+    if ((c.source === "plugin" || c.source === "user") && c.name !== "jev" && !BUILTIN_COMMANDS.has(c.name) && !blocked.has(c.name) && !Object.hasOwn(criteria, c.name)) {
       criteria[c.name] = clip(c.description, 160);
-      options++;
     }
   }
   return Object.keys(criteria).length > 1 ? criteria : undefined;
@@ -675,7 +676,8 @@ export const register = (on: On, options: Options): void => {
       if (offered.size < 2 || claudeType === "fork") return next(e);
 
       const criteria: Record<string, string> = {};
-      for (const [name, description] of offered) criteria[name] = clip(description, 200);
+      // shortcut: past jev-api's choice limit later-offered agent types are left out; rank them if users hit it.
+      for (const [name, description] of [...offered].slice(0, MAX_CHOICE_OPTIONS)) criteria[name] = clip(description, 200);
       const r = await askJev(
         $,
         { task: clip(e.prompt, 3000), description: e.description },
@@ -740,8 +742,6 @@ export const register = (on: On, options: Options): void => {
   // Calls Jev made itself: `tool.check` approves them, their commands come from a vetted list.
   const ownCalls = new Set<string>();
   on("session.start", async function onSessionStart($: Engine, e: unknown, next: Next<unknown, unknown>): Promise<unknown> {
-    // A new session looks the jev-api tools up again.
-    jevTools = undefined;
     // A new conversation (also after /clear) gets its own first-turn estimate.
     firstTurns.clear();
     if (badRange) await record($, { kind: "error", applied: false, text: `invalid effort bounds (${badRange}): using low..xhigh` }).catch(() => undefined);
@@ -751,6 +751,9 @@ export const register = (on: On, options: Options): void => {
     });
     // After `next(e)`: jev-api registers its tools in its own session.start, which may run beneath this hook.
     const result = await next(e);
+    // A new session looks the jev-api tools up again, and only now: a jevfort hook raised inside `next(e)` (another
+    // plugin's session.start making a tool call) may have cached a listing from before jev-api registered.
+    jevTools = undefined;
     const missing = await jevMissing($);
     if (missing.length) {
       await record($, { kind: "error", applied: false, text: `inactive: jev-api tools missing (${missing.join(", ")})` }).catch(() => undefined);
@@ -812,7 +815,7 @@ export const register = (on: On, options: Options): void => {
       .map((d) => `- ${d.kind}${d.applied ? "" : " (pass)"}: ${d.text}${d.ms !== undefined ? ` [${Math.round(d.ms)}ms]` : ""}`);
     return {
       text: [
-        ...(missing.length ? [`Jev pilot: inactive, the jev-api tools are missing (${missing.join(", ")}). Install and enable the jev-api plugin.`] : []),
+        ...(missing.length ? [`Jev pilot: inactive, the jev-api tools are missing (${missing.join(", ")}). jevfort needs jev-api 0.2.0 or later and no permissions.deny rule matching its tools; then restart Claude Code.`] : []),
         `Jev pilot: routing ${routing}, take steps ${takeSteps} (p ≥ ${takeThreshold}), done check ${doneCheck}, subagents ${subagents}`,
         `Decisions (all sessions): ${counts}`,
         lines.length ? `Recent:\n${lines.join("\n")}` : "No decisions this session yet.",

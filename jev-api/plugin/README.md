@@ -19,7 +19,7 @@ The four tools are always registered. A call fails locally, without any request,
 | --------- | ------- | ----------------------------------------------------------------------------------------------------------- |
 | `timeout` | `20`    | HTTP timeout of one System One request in seconds, for tool calls that give no valid `timeout` of their own |
 
-The timeout of a call is its `timeout` input when that is a number above 0; otherwise the `timeout` option when that is a number above 0; otherwise 20 seconds. Claude Code ends one request after 30 seconds on its own, so a longer timeout has no effect.
+The timeout of a call is its `timeout` input when that is a number above 0; otherwise the `timeout` option when that is a number above 0; otherwise 20 seconds. Claude Code ends one request after 30 seconds on its own, so a longer timeout counts as 30.
 
 ## Tools
 
