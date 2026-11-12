@@ -202,7 +202,7 @@ let jevTools: Promise<string[]> | undefined;
 
 /**
  * The needed jev-api tools that are not listed; a non-empty answer turns jevfort off (every hook but `/jev` passes
- * through). A failed listing counts as all missing.
+ * through). A failed or malformed listing counts as all missing, so the cached promise never rejects.
  *
  * @remarks
  * Module level, with its cache, because the engine accepts `$` passed only to top-level functions.
@@ -211,7 +211,7 @@ let jevTools: Promise<string[]> | undefined;
  * @returns The missing full tool names, empty when jevfort can ask Jev.
  */
 function jevMissing($: Engine): Promise<string[]> {
-  return (jevTools ??= $.tool.list().then((t) => missingJevTools(t.map((x) => x.name)), () => [...JEV_TOOLS]));
+  return (jevTools ??= $.tool.list().then((t) => missingJevTools(t.map((x) => x.name))).catch(() => [...JEV_TOOLS]));
 }
 
 /**

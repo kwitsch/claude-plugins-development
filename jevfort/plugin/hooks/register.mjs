@@ -69,7 +69,7 @@ async function askJev($, state, questions) {
 }
 let jevTools;
 function jevMissing($) {
-	return jevTools ??= $.tool.list().then((t) => missingJevTools(t.map((x) => x.name)), () => [...JEV_TOOLS]);
+	return jevTools ??= $.tool.list().then((t) => missingJevTools(t.map((x) => x.name))).catch(() => [...JEV_TOOLS]);
 }
 async function readLog($) {
 	return await $.store.get(LOG_KEY) ?? [];

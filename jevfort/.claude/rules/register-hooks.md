@@ -25,8 +25,18 @@ the shapes below: `inline-headroom/docs/claude-code-verification.md`.
   blocklist) plus one with the matcher `{ tool: "Agent" }`; `turn.step`, `tool.check`, `turn.complete`,
   `session.start`, `prompt.submit`, `agent.offer` and `session.compact` have one each; `command.run` and `ui.render`
   carry matchers.
+- Jev is asked only through the jev-api plugin's tools `mcp__jev-api__noul`, `mcp__jev-api__choice` and `mcp__jev-api__score`: `askJev` raises one
+  `$.tool.call({ tool: "mcp__jev-api__<type>", instructions, state, criteria? })` per question (`state` is
+  `JSON.stringify` text), all at once, raced against `TIMEOUT_MS`; a `{ deny }`, `isError`, a rejection, a result that is
+  not the question's answer JSON or the timeout fails the whole `askJev` (`{ ok: false }`, never a throw). The engine
+  member is typed `tool.call(input): Promise<ToolResult>`; there is no `$.http` use.
+- Readiness guard: every hook except the `/jev` `command.run` and `ui.render` hooks starts with
+  `if ((await jevMissing($)).length) return next(e);` (`return yield* next(e)` in `turn.step`). `jevMissing` and its
+  cache `jevTools` are module level (`$` may only be passed to top-level functions): one `$.tool.list()` per session,
+  reset at `session.start`, a rejected or malformed listing counts as all three tools missing. A new hook needs the guard too.
 - `session.start` registers the `estimate_effort` tool with `$.tool.register(ESTIMATE_SPEC)` whatever `routing`
-  says (a throw is logged as `kind: "error"`). A registered tool that no hook answers fails, so the unmatched
+  says (a throw is logged as `kind: "error"`), but only when the jev-api tools are listed: it checks `jevMissing($)`
+  before `next(e)` and otherwise logs `inactive: jev-api tools missing (...)` and registers nothing. A registered tool that no hook answers fails, so the unmatched
   `tool.call` hook answers `mcp__jevfort__estimate_effort` itself and never calls `next(e)`: `{ result }` (the JSON
   estimate) or, on invalid input, `{ isError: true, result }` without a Jev request. Calls are logged as kind `estimate`.
 - `tool.call` failure is `isError: true` or `deny: string`; there is no `exitCode`.
@@ -43,5 +53,13 @@ Every mod-side storage (`$.mcp.call`) call must be awaited by a running hook of 
 core routes `$.mcp.call` through `$.tool.call` and its permission check, although the typings promise no prompt. A
 plugin's own hooks see a call it raises only while one of its hooks runs; a call raised after the hook returned (an
 unawaited chain, a `$.clock.every` callback) skips them, so in `default` mode the user gets a permission dialog per
-call and a headless session denies it. jevfort makes no storage calls today (it uses `$.store`, `$.http.fetch` and
-`$.fs`); the rule applies the day it does. Every `record(...)` is awaited inside its hook for the same reason.
+call and a headless session denies it. jevfort uses `$.store`, `$.tool.call` (the jev-api tools) and `$.fs`, and every
+`askJev` is awaited in-frame (also the `measure` promise of `turn.step`, awaited before the hook returns). Every
+`record(...)` is awaited inside its hook for the same reason.
+
+## Tests: the jev-api fake
+
+`tests/register.test.mts` and `tests/phase3.test.mts` stub `tool.list` (the three jev-api tools) and `tool.call`. The
+kit resolves a mod's `$.tool.call` to the stub's `value` and rejects with its `deny`, so the fake answers a jev-api
+call with `{ value: { result: "<answer JSON>" } }` or `{ deny: "<type>: <reason>" }` and passes every other tool on
+with `next(e)`. The tools carry no question id: the fake finds it by the `instructions` text.
