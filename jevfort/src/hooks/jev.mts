@@ -1,22 +1,19 @@
 /**
- * TypeSafe System One API shapes and answer readers. One request carries every question about one state. Pure: the
- * request itself (`askJev`) lives in `register.mts`, the only module that may use the engine API.
+ * TypeSafe System One question and answer shapes, answer readers and the name of the jev-api tool jevfort needs. All
+ * questions of one decision go to jev-api's `batch` tool in one call (one System One request). Pure: the call itself
+ * (`askJev`) lives in `register.mts`, the only module that may use the engine API.
  *
  * @packageDocumentation
  */
 
-/** The TypeSafe System One endpoint, used when JEV_URL is unset or blank. */
-export const DEFAULT_JEV_URL = "https://api.typesafe.ai/v1/systemone";
-/** The Jev model named in every request. */
-export const MODEL = "jev-latest";
-/** How long one Jev request may take before Claude Code's own behaviour wins, in ms. */
+/** The local budget of one `askJev` (its one batch call) before Claude Code's own behaviour wins, in ms. */
 export const TIMEOUT_MS = 4000;
 
-/** A question Jev answers about the request's `state`: a yes/no probability, a choice among options, or a score along levels. */
+/** A question Jev answers about a `state`, in the shape of one entry of jev-api's `batch` input: a yes/no probability, a choice among options, or a score along levels. */
 export type Question =
-  | { type: "noul"; instructions: unknown; criteria?: { true?: string; false?: string } }
-  | { type: "choice"; instructions: unknown; criteria: Record<string, string | null> }
-  | { type: "score"; instructions: unknown; criteria: string[] };
+  | { type: "noul"; instructions: string; criteria?: { true?: string; false?: string } }
+  | { type: "choice"; instructions: string; criteria: Record<string, string> }
+  | { type: "score"; instructions: string; criteria: string[] };
 
 /** A yes/no answer: the probability of `true`. */
 export type NoulAnswer = { type: "noul"; noul: number };
@@ -27,21 +24,28 @@ export type ScoreAnswer = { type: "score"; score: number; probabilities: Record<
 /** Any answer. */
 export type Answer = NoulAnswer | ChoiceAnswer | ScoreAnswer;
 
-/** What one Jev request came back with, and how long it took. */
+/** What one `askJev` came back with, and how long it took. */
 export type JevResult = { ok: true; answers: Record<string, Answer>; ms: number } | { ok: false; error: string; ms: number };
 
+/** The most options jev-api accepts in one `choice` question. */
+export const MAX_CHOICE_OPTIONS = 255;
+/** The HTTP timeout jevfort gives every jev-api call, in seconds (jev-api's `timeout` input). */
+export const JEV_API_TIMEOUT_S = 5;
+/** Prefix of the jev-api plugin's tools. */
+export const JEV_TOOL_PREFIX = "mcp__jev-api__";
+/** jev-api's tool for several questions about one `state` in one request; its result is the answers in question order. */
+export const JEV_BATCH = JEV_TOOL_PREFIX + "batch";
+/** The jev-api tools jevfort needs, by full name. */
+export const JEV_TOOLS = [JEV_BATCH];
+
 /**
- * The Jev endpoint: JEV_URL when set (trimmed, non-empty), else the TypeSafe API. Accepts `http:` and `https:` for
- * any host; any other scheme, a missing host or whitespace inside the URL is an error.
+ * The needed jev-api tools missing from a tool listing.
  *
- * @param raw - The raw `JEV_URL` value, `undefined` when unset.
- * @returns The URL to call, or the error to log.
+ * @param names - Full names of the listed tools.
+ * @returns The missing full names, empty when all are there.
  */
-export function jevUrl(raw: string | undefined): { ok: true; url: string } | { ok: false; error: string } {
-  const value = raw?.trim();
-  if (!value) return { ok: true, url: DEFAULT_JEV_URL };
-  if (!/^https?:\/\/[^/?#\s]+(?:[/?#]\S*)?$/i.test(value)) return { ok: false, error: "JEV_URL must be an http(s) URL" };
-  return { ok: true, url: value };
+export function missingJevTools(names: readonly string[]): string[] {
+  return JEV_TOOLS.filter((t) => !names.includes(t));
 }
 
 /**

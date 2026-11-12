@@ -27,7 +27,7 @@ export const PLAN_HINT = 0.85;
  * @param skills - The skill options, or `undefined` when none is listed.
  * @returns The questions.
  */
-export function promptQuestions(skills: Record<string, string | null> | undefined): Record<string, Question> {
+export function promptQuestions(skills: Record<string, string> | undefined): Record<string, Question> {
   const questions: Record<string, Question> = {
     kind: {
       type: "choice",

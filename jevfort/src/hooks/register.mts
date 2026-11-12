@@ -2,7 +2,8 @@
  * Claude Code function-hooks module of jevfort: every hook and every `$` use. The pure logic lives in the sibling
  * modules, which must never touch `$`. A port of nim-f/jev-pilot 0.5.0 `hooks/register.ts` plus the `$`-using parts
  * of its `jev`, `log`, `context`, `candidates`, `summarize`, `prompt`, `agents`, `compact` and `view`
- * modules, without upstream's modes (disable the plugin to turn it off) and with the endpoint read from `JEV_URL`.
+ * modules, without upstream's modes (disable the plugin to turn it off). Jev is asked only through the jev-api
+ * plugin's tools (`$.tool.call`); this module makes no network request of its own.
  *
  * @remarks
  * EARLY ACCESS API. No engine type import (the engine typings are not in the repo): the used `$` members and
@@ -18,7 +19,7 @@ import type { Candidate } from "./candidates.mjs";
 import { compactInstructions, compactItems, RELEVANCE } from "./compact.mjs";
 import { clip, splitTurn, summarize, toolCalls } from "./context.mjs";
 import type { SessionMessage, ToolUse, TurnContext } from "./context.mjs";
-import { choice, jevUrl, MODEL, noul, score, TIMEOUT_MS } from "./jev.mjs";
+import { choice, JEV_API_TIMEOUT_S, JEV_BATCH, JEV_TOOL_PREFIX, JEV_TOOLS, MAX_CHOICE_OPTIONS, missingJevTools, noul, score, TIMEOUT_MS } from "./jev.mjs";
 import type { Answer, ChoiceAnswer, JevResult, Question } from "./jev.mjs";
 import { LOG_KEY, MAX_ENTRIES, recentDecisions, remember, statsKey } from "./log.mjs";
 import type { Entry } from "./log.mjs";
@@ -29,8 +30,6 @@ import { buildReport } from "./report.mjs";
 import { SUMMARY_MODEL, SYSTEM } from "./summarize.mjs";
 import type { ModelUsage, Summary } from "./summarize.mjs";
 
-/** A `$.http.fetch` response. */
-type FetchResponse = { status: number; ok: boolean; headers: Record<string, string>; text: string };
 /** One entry of `$.command.list()`. */
 type CommandInfo = { name: string; description: string; source: string };
 /** One entry of `$.tool.list()`. */
@@ -43,8 +42,6 @@ type Engine = {
   clock: { now(): Promise<number>; sleep(ms: number): Promise<unknown> };
   /** Environment of the Claude Code process. */
   env: { get(name: string): Promise<string | undefined> };
-  /** HTTP. */
-  http: { fetch(url: string, init: { method: string; headers: Record<string, string>; body: string }): Promise<FetchResponse> };
   /** This plugin's key-value store. */
   store: { get(key: string): Promise<unknown>; set(key: string, value: unknown): Promise<unknown> };
   /** The session's transcript, directory and id. */
@@ -58,8 +55,13 @@ type Engine = {
   };
   /** Slash commands. */
   command: { register(spec: { name: string; description: string }): Promise<unknown>; list(): Promise<CommandInfo[]> };
-  /** Tools: the listed ones, and registering this plugin's own (`estimate_effort`). */
-  tool: { list(): Promise<ToolInfo[]>; register(spec: typeof ESTIMATE_SPEC): Promise<{ tool?: string }> };
+  /** Tools: the listed ones, registering this plugin's own (`estimate_effort`), and calling one (the jev-api tools). */
+  tool: {
+    list(): Promise<ToolInfo[]>;
+    register(spec: typeof ESTIMATE_SPEC): Promise<{ tool?: string }>;
+    /** Runs a tool through every hook but the calling one; resolves its result or `{ deny }` (it rejects only for an unknown tool or an abort). */
+    call(input: { tool: string } & Record<string, unknown>): Promise<ToolResult>;
+  };
   /** Model requests. */
   model: { complete(spec: { model: string; system: string; prompt: string; maxTokens: number; timeoutMs: number }): Promise<Completion> };
   /** User interface. */
@@ -153,42 +155,69 @@ const FINISHED = new Set(["completed", "failed", "killed", "idle"]);
 const asText = (v: unknown): string => String(v);
 
 /**
- * Asks Jev; never throws. Any failure is `{ ok: false }` so callers fall back to Claude Code's own behaviour. The
- * endpoint comes from `JEV_URL` on every request (unset or blank: the TypeSafe API); a value that is not an http(s)
- * URL is an error and no request is sent.
+ * Asks Jev through the jev-api plugin's `batch` tool; never throws. All questions go out in one `$.tool.call` (one
+ * System One request) inside the calling hook's frame, raced against `TIMEOUT_MS`. All or nothing: a failed call, a
+ * timeout or a wrong answer is `{ ok: false }`, so callers fall back to Claude Code's own behaviour. A call still
+ * running when the budget ends is ignored.
  *
  * @param $ - Engine interface.
- * @param state - The facts the questions are about.
+ * @param state - The facts the questions are about; sent as JSON text.
  * @param questions - The questions by id.
- * @returns The answers, or the error, with the request time.
+ * @returns The answers, or the error, with the time taken.
  */
 async function askJev($: Engine, state: unknown, questions: Record<string, Question>): Promise<JevResult> {
   const startedAt = await $.clock.now();
   const done = async (r: { ok: true; answers: Record<string, Answer> } | { ok: false; error: string }): Promise<JevResult> => ({ ...r, ms: (await $.clock.now()) - startedAt });
 
-  const key = await $.env.get("TYPESAFE_API_KEY");
-  if (!key) return done({ ok: false, error: "TYPESAFE_API_KEY is not set" });
-  const target = jevUrl(await $.env.get("JEV_URL"));
-  if (!target.ok) return done({ ok: false, error: target.error });
-
-  const request = $.http.fetch(target.url, {
-    method: "POST",
-    headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ model: MODEL, state, questions }),
-  });
-  request.catch(() => undefined);
+  const entries = Object.entries(questions);
+  const call = (async (): Promise<Record<string, Answer>> => {
+    const r = await $.tool.call({ tool: JEV_BATCH, state: JSON.stringify(state), questions: entries.map(([, q]) => q), timeout: JEV_API_TIMEOUT_S });
+    // jev-api's deny text already starts with `batch:`.
+    if (r.deny !== undefined) throw new Error(asText(r.deny));
+    // Core's error result (no hook answered) has no `batch:` prefix; a structured one is serialized, not printed as `[object Object]`.
+    if (r.isError === true || typeof r.result !== "string") throw new Error(`batch: ${r.result === undefined ? "no result" : typeof r.result === "string" ? r.result : JSON.stringify(r.result)}`);
+    let list: unknown;
+    try {
+      list = JSON.parse(r.result);
+    } catch {
+      throw new Error("batch: result is not JSON");
+    }
+    if (!Array.isArray(list) || list.length !== entries.length) throw new Error(`batch: expected ${entries.length} answers`);
+    // The answers come in question order.
+    return Object.fromEntries(entries.map(([id, q], i) => {
+      const answer = list[i] as Answer | null;
+      if (answer?.type !== q.type) throw new Error(`batch: no ${q.type} answer for questions[${i}]`);
+      return [id, answer];
+    }));
+  })();
+  // A call abandoned at the timeout must not raise an unhandled rejection.
+  call.catch(() => undefined);
   const timeout = $.clock.sleep(TIMEOUT_MS).then(() => undefined);
 
   try {
-    const res = await Promise.race([request, timeout]);
-    if (!res) return done({ ok: false, error: `timeout after ${TIMEOUT_MS}ms` });
-    if (!res.ok) return done({ ok: false, error: `HTTP ${res.status}` });
-    const body = JSON.parse(res.text) as { answers?: Record<string, Answer> };
-    if (!body.answers) return done({ ok: false, error: "response had no answers" });
-    return done({ ok: true, answers: body.answers });
+    const answers = await Promise.race([call, timeout]);
+    if (!answers) return done({ ok: false, error: `timeout after ${TIMEOUT_MS}ms` });
+    return done({ ok: true, answers });
   } catch (err) {
     return done({ ok: false, error: err instanceof Error ? err.message : String(err) });
   }
+}
+
+/** The needed jev-api tools missing from this session's tool listing: looked up once per session, reset at `session.start`. */
+let jevTools: Promise<string[]> | undefined;
+
+/**
+ * The needed jev-api tools that are not listed; a non-empty answer turns jevfort off (every hook but `/jev` passes
+ * through). A failed or malformed listing counts as all missing, so the cached promise never rejects.
+ *
+ * @remarks
+ * Module level, with its cache, because the engine accepts `$` passed only to top-level functions.
+ *
+ * @param $ - Engine interface.
+ * @returns The missing full tool names, empty when jevfort can ask Jev.
+ */
+function jevMissing($: Engine): Promise<string[]> {
+  return (jevTools ??= $.tool.list().then((t) => missingJevTools(t.map((x) => x.name))).catch(() => [...JEV_TOOLS]));
 }
 
 /**
@@ -302,7 +331,7 @@ async function packageRunner($: Engine, cwd: string): Promise<string> {
  * @param steps - The turn's steps so far.
  * @param calls - The turn's tool calls so far.
  * @param stepIndex - The step within the turn.
- * @returns At most 254 candidates (Jev's choice API takes 255 options, one of them `claude`).
+ * @returns At most `MAX_CHOICE_OPTIONS - 1` candidates (one of jev-api's choice options is `claude`).
  */
 async function buildCandidates($: Engine, request: string, steps: readonly SessionMessage[], calls: readonly ToolUse[], stepIndex: number): Promise<Candidate[]> {
   const cwd = await $.session.cwd();
@@ -384,14 +413,15 @@ async function buildCandidates($: Engine, request: string, steps: readonly Sessi
       out.push({ key: `skill ${c.name}`, description: `Use the skill or command "${c.name}": ${clipScript(c.description)}`, tool: "Skill", input: { skill: c.name } });
     }
     const loaded = new Set(calls.filter((c) => c.tool === "ToolSearch").map((c) => String(c.input.query)));
-    const tools = (await $.tool.list().catch(() => [])).filter((t) => t.mcp && !AUTH_TOOL.test(t.name) && !loaded.has(`select:${t.name}`));
+    // jev-api's tools are jevfort's own Jev back end, never a tool for Claude to load.
+    const tools = (await $.tool.list().catch(() => [])).filter((t) => t.mcp && !AUTH_TOOL.test(t.name) && !t.name.startsWith(JEV_TOOL_PREFIX) && !loaded.has(`select:${t.name}`));
     for (const t of relevant(request, tools)) {
       out.push({ key: `load ${t.name}`, description: `Load the tool ${t.name}: ${clipScript(t.description)}`, tool: "ToolSearch", input: { query: `select:${t.name}`, max_results: 1 } });
     }
   }
 
-  // Jev's choice API takes at most 255 options, one of them "claude".
-  return out.slice(0, 254);
+  // One of jev-api's choice options is "claude".
+  return out.slice(0, MAX_CHOICE_OPTIONS - 1);
 }
 
 /**
@@ -417,18 +447,24 @@ async function summarizeResult($: Engine, request: string, action: string, outpu
 }
 
 /**
- * The skill options of the prompt classifier: every listed plugin or user skill that is not built in or
- * blocklisted, plus `none`.
+ * The skill options of the prompt classifier: `none` plus each listed plugin or user skill that is not built in or
+ * blocklisted, once per name and in listing order, at most `MAX_CHOICE_OPTIONS` options in all (jev-api's choice
+ * limit).
  *
  * @param $ - Engine interface.
  * @returns The options, or `undefined` when no skill is listed.
  */
-async function skillOptions($: Engine): Promise<Record<string, string | null> | undefined> {
+async function skillOptions($: Engine): Promise<Record<string, string> | undefined> {
   const commands = await $.command.list().catch(() => []);
   const blocked = new Set(((await $.store.get(SKILL_BLOCKLIST_KEY).catch(() => undefined)) as string[] | undefined) ?? []);
-  const criteria: Record<string, string | null> = { [NONE]: "No listed skill is meant for this request" };
+  const criteria: Record<string, string> = { [NONE]: "No listed skill is meant for this request" };
   for (const c of commands) {
-    if ((c.source === "plugin" || c.source === "user") && c.name !== "jev" && !BUILTIN_COMMANDS.has(c.name) && !blocked.has(c.name)) criteria[c.name] = clip(c.description, 160);
+    // shortcut: past jev-api's choice limit later skills are left out; rank them if users hit it.
+    if (Object.keys(criteria).length >= MAX_CHOICE_OPTIONS) break;
+    // Own keys only: `in` would also see Object.prototype members, dropping a skill named `constructor` or `toString`.
+    if ((c.source === "plugin" || c.source === "user") && c.name !== "jev" && !BUILTIN_COMMANDS.has(c.name) && !blocked.has(c.name) && !Object.hasOwn(criteria, c.name)) {
+      criteria[c.name] = clip(c.description, 160);
+    }
   }
   return Object.keys(criteria).length > 1 ? criteria : undefined;
 }
@@ -594,6 +630,7 @@ export const register = (on: On, options: Options): void => {
   // Phase 3: classify each prompt as it is sent and, when Jev is confident, add a short hint only Claude reads.
   // This one hook also notes Jev's own done follow-up passing through, which arms the exemption.
   on("prompt.submit", async function onPromptSubmit($: Engine, e: PromptEvent, next: Next<PromptEvent, unknown>): Promise<unknown> {
+    if ((await jevMissing($)).length) return next(e);
     if (e.origin?.kind === "plugin" && e.origin.name === PLUGIN_NAME) {
       donePending = true;
       return next(e);
@@ -627,17 +664,20 @@ export const register = (on: On, options: Options): void => {
     // Agent types as the engine offers them to the model, with their descriptions.
     const offered = new Map<string, string>();
 
-    on("agent.offer", function onAgentOffer($: Engine, e: OfferEvent, next: Next<OfferEvent, unknown>): Promise<unknown> {
+    on("agent.offer", async function onAgentOffer($: Engine, e: OfferEvent, next: Next<OfferEvent, unknown>): Promise<unknown> {
+      if ((await jevMissing($)).length) return next(e);
       offered.set(e.agent, e.description);
       return next(e);
     });
 
     on("tool.call", { tool: "Agent" }, async function onAgentCall($: Engine, e: AgentCall, next: Next<AgentCall, ToolResult>): Promise<ToolResult> {
+      if ((await jevMissing($)).length) return next(e);
       const claudeType = e.subagent_type ?? "";
       if (offered.size < 2 || claudeType === "fork") return next(e);
 
-      const criteria: Record<string, string | null> = {};
-      for (const [name, description] of offered) criteria[name] = clip(description, 200);
+      const criteria: Record<string, string> = {};
+      // shortcut: past jev-api's choice limit later-offered agent types are left out; rank them if users hit it.
+      for (const [name, description] of [...offered].slice(0, MAX_CHOICE_OPTIONS)) criteria[name] = clip(description, 200);
       const r = await askJev(
         $,
         { task: clip(e.prompt, 3000), description: e.description },
@@ -662,6 +702,7 @@ export const register = (on: On, options: Options): void => {
   // Phase 3: before a compaction, Jev scores how relevant each recent tool result is; the summarizer is told what to keep.
   if (options.compaction !== false) {
     on("session.compact", async function onCompact($: Engine, e: CompactEvent, next: Next<CompactEvent, unknown>): Promise<unknown> {
+      if ((await jevMissing($)).length) return next(e);
       if (e.agentId || (e.trigger !== "manual" && e.trigger !== "auto")) return next(e);
       const items = compactItems(e.messages);
       if (items.length < 3) return next(e);
@@ -708,13 +749,23 @@ export const register = (on: On, options: Options): void => {
       name: "jev",
       description: "Jev pilot: status, /jev report, /jev candidates, /jev export, /jev clear",
     });
+    // After `next(e)`: jev-api registers its tools in its own session.start, which may run beneath this hook.
+    const result = await next(e);
+    // A new session looks the jev-api tools up again, and only now: a jevfort hook raised inside `next(e)` (another
+    // plugin's session.start making a tool call) may have cached a listing from before jev-api registered.
+    jevTools = undefined;
+    const missing = await jevMissing($);
+    if (missing.length) {
+      await record($, { kind: "error", applied: false, text: `inactive: jev-api tools missing (${missing.join(", ")})` }).catch(() => undefined);
+      return result;
+    }
     // Registered whatever `routing` says: Skills and subagents call it too. Turn start does not depend on it.
     try {
       await $.tool.register(ESTIMATE_SPEC);
     } catch (err) {
       await record($, { kind: "error", applied: false, text: `estimate_effort not registered: ${String(err)}` }).catch(() => undefined);
     }
-    return next(e);
+    return result;
   });
 
   on("command.run", { command: "jev" }, async function onJevCommand($: Engine, e: CommandEvent): Promise<{ text: string }> {
@@ -757,12 +808,14 @@ export const register = (on: On, options: Options): void => {
         return { text: `Jev pilot: could not write ${path}: ${err instanceof Error ? err.message : String(err)}` };
       }
     }
+    const missing = await jevMissing($);
     const counts = Object.entries(await stats($)).map(([k, v]) => `${k}=${v}`).join(", ") || "none yet";
     const lines = recentDecisions()
       .slice(-10)
       .map((d) => `- ${d.kind}${d.applied ? "" : " (pass)"}: ${d.text}${d.ms !== undefined ? ` [${Math.round(d.ms)}ms]` : ""}`);
     return {
       text: [
+        ...(missing.length ? [`Jev pilot: inactive, the jev-api tools are missing (${missing.join(", ")}). jevfort needs jev-api 0.2.0 or later and no permissions.deny rule matching its tools; then restart Claude Code.`] : []),
         `Jev pilot: routing ${routing}, take steps ${takeSteps} (p ≥ ${takeThreshold}), done check ${doneCheck}, subagents ${subagents}`,
         `Decisions (all sessions): ${counts}`,
         lines.length ? `Recent:\n${lines.join("\n")}` : "No decisions this session yet.",
@@ -772,6 +825,7 @@ export const register = (on: On, options: Options): void => {
   });
 
   on("turn.complete", async function onTurnComplete($: Engine, e: TurnEnd, next: Next<TurnEnd, unknown>): Promise<unknown> {
+    if ((await jevMissing($)).length) return next(e);
     turns.delete(e.turnId);
     if (e.reason === "aborted" || e.reason === "error") {
       await record($, { kind: "turn", applied: false, text: `turn ${e.reason}`, turnId: e.turnId, data: { reason: e.reason } });
@@ -805,6 +859,7 @@ export const register = (on: On, options: Options): void => {
   // Answers the estimate_effort tool itself (never `next(e)`: a registered tool no hook answers fails), and logs the
   // outcome of each call Jev made itself, for the report.
   on("tool.call", async function onToolCall($: Engine, e: ToolCall, next: Next<ToolCall, ToolResult>): Promise<ToolResult> {
+    if ((await jevMissing($)).length) return next(e);
     if (e.tool === ESTIMATE_TOOL) {
       const input = parseEstimateInput(e);
       if (typeof input === "string") return { isError: true, result: `estimate_effort: ${input}` };
@@ -836,6 +891,7 @@ export const register = (on: On, options: Options): void => {
   // model. One Jev request carries all of it. Every answer is logged; when Claude takes the step, its call is compared
   // with Jev's top action so the take threshold can be calibrated.
   on("turn.step", async function* onTurnStep($: Engine, e: Step, next: (e: Step) => StepRun): StepRun {
+    if ((await jevMissing($)).length) return yield* next(e);
     if (e.agentId && !subagents) return yield* next(e);
 
     const turn = turns.get(e.turnId) ?? { taken: 0 };
@@ -1019,6 +1075,7 @@ export const register = (on: On, options: Options): void => {
   let scratchpad: { roots: string[]; sid: string } | undefined;
   // Permission check: approves Jev's own vetted calls and writes into this session's scratchpad; every other verdict stays Claude Code's.
   on("tool.check", async function onToolCheck($: Engine, e: Check, next: Next<Check, Verdict>): Promise<Verdict> {
+    if ((await jevMissing($)).length) return next(e);
     const base = await next(e);
     // Jev's own calls come from the vetted candidate list: approve them so auto mode's classifier doesn't refuse
     // them. This and the scratchpad branch are the only places jevfort loosens Claude Code's verdict. A settings deny rule still wins.

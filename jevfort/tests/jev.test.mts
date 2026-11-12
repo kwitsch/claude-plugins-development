@@ -1,26 +1,24 @@
-// jevUrl: the JEV_URL environment variable, trimmed, else the TypeSafe default; only http(s) URLs are accepted.
+// The jev-api tool name jevfort needs, and whether a tool listing lacks it (built plugin/hooks/jev.mjs).
 import assert from "node:assert/strict";
 import { test } from "vitest";
-import { DEFAULT_JEV_URL, jevUrl } from "../plugin/hooks/jev.mjs";
+import { JEV_BATCH, JEV_TOOL_PREFIX, JEV_TOOLS, missingJevTools } from "../plugin/hooks/jev.mjs";
 
-const ERROR = { ok: false, error: "JEV_URL must be an http(s) URL" };
-
-test("unset or blank JEV_URL falls back to the TypeSafe API", () => {
-  assert.equal(DEFAULT_JEV_URL, "https://api.typesafe.ai/v1/systemone");
-  assert.deepEqual(jevUrl(undefined), { ok: true, url: DEFAULT_JEV_URL });
-  assert.deepEqual(jevUrl(""), { ok: true, url: DEFAULT_JEV_URL });
-  assert.deepEqual(jevUrl("   "), { ok: true, url: DEFAULT_JEV_URL });
+test("the needed tool is jev-api's batch", () => {
+  assert.equal(JEV_TOOL_PREFIX, "mcp__jev-api__");
+  assert.equal(JEV_BATCH, "mcp__jev-api__batch");
+  assert.deepEqual(JEV_TOOLS, [JEV_BATCH]);
 });
 
-test("an http(s) URL is accepted for any host, trimmed, scheme case-insensitive", () => {
-  assert.deepEqual(jevUrl("  https://jev.example.test/v1/x  "), { ok: true, url: "https://jev.example.test/v1/x" });
-  assert.deepEqual(jevUrl("http://example.com"), { ok: true, url: "http://example.com" });
-  assert.deepEqual(jevUrl("http://localhost:8080/v1"), { ok: true, url: "http://localhost:8080/v1" });
-  assert.deepEqual(jevUrl("HTTP://JEV.EXAMPLE/x"), { ok: true, url: "HTTP://JEV.EXAMPLE/x" });
+test("nothing is missing when batch is listed", () => {
+  assert.deepEqual(missingJevTools([JEV_BATCH]), []);
+  assert.deepEqual(missingJevTools(["Bash", JEV_BATCH, "mcp__jevfort__estimate_effort"]), []);
 });
 
-test("anything that is not an http(s) URL is an error, so no request is sent", () => {
-  for (const bad of ["not a url", "ftp://x", "file:///etc/passwd", "https://", "https://a b/x"]) {
-    assert.deepEqual(jevUrl(bad), ERROR, bad);
-  }
+test("jev-api 0.1's single-question tools alone are not enough", () => {
+  assert.deepEqual(missingJevTools(["mcp__jev-api__noul", "mcp__jev-api__choice", "mcp__jev-api__score"]), [JEV_BATCH]);
+});
+
+test("an empty listing or a similar name misses batch", () => {
+  assert.deepEqual(missingJevTools([]), [JEV_BATCH]);
+  assert.deepEqual(missingJevTools(["mcp__other__batch", "batch", "mcp__jev-api__batches"]), [JEV_BATCH]);
 });
