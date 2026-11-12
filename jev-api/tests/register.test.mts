@@ -1,4 +1,4 @@
-// Kit tests for the built plugin/hooks/register.mjs of jev-api: the three System One tools noul, choice, score.
+// Kit tests for the built plugin/hooks/register.mjs of jev-api: the System One tools noul, choice, score and batch.
 import { createKit } from "claude-engine-vitest";
 import type { On } from "claude-engine-vitest";
 import { describe, expect, it } from "vitest";
@@ -6,7 +6,7 @@ import { describe, expect, it } from "vitest";
 const { test, mock } = createKit({ module: new URL("../plugin/hooks/register.mjs", import.meta.url), plugin: "jev-api" });
 
 type Reply = { value: { status: number; ok: boolean; headers: Record<string, string>; text: string } } | { deny: string } | Promise<never>;
-type Fetched = { url: string; method: string; headers: Record<string, string>; body: { model: string; state: string; questions: { answer: Record<string, unknown> } } };
+type Fetched = { url: string; method: string; headers: Record<string, string>; body: { model: string; state: string; questions: Record<string, Record<string, unknown>> } };
 
 const TOOL = (type: string) => `mcp__jev-api__${type}`;
 
@@ -36,7 +36,7 @@ function setup(on: On, opts: { env: Record<string, string>; reply?: (type: strin
     const init = e.init as { method: string; headers: Record<string, string>; body: string };
     const body = JSON.parse(init.body) as Fetched["body"];
     fetched.push({ url: String(e.url), method: init.method, headers: init.headers, body });
-    return (opts.reply ?? answerReply)(String(body.questions.answer.type));
+    return (opts.reply ?? answerReply)(String(body.questions.answer?.type));
   });
   // The engine refuses a session.start answer without { cwd }.
   on("session.start", async (_$, e) => ({ cwd: e.cwd }));
@@ -44,10 +44,11 @@ function setup(on: On, opts: { env: Record<string, string>; reply?: (type: strin
 }
 
 // Case 1: tools are always registered, whatever the env.
-test("session.start registers noul, choice and score without any env var", async ($, on) => {
+test("session.start registers noul, choice, score and batch without any env var", async ($, on) => {
   const { specs } = setup(on, { env: {} });
   await $.session.start({ cwd: "/proj", surface: "terminal", isInteractive: true });
-  expect(specs.map((s) => s.name)).toEqual(["noul", "choice", "score"]);
+  expect(specs.map((s) => s.name)).toEqual(["noul", "choice", "score", "batch"]);
+  expect(specs[3]).toMatchObject({ inputSchema: { required: ["state", "questions"] } });
   expect(specs[0]).toMatchObject({ inputSchema: { type: "object", required: ["instructions", "state"] } });
   expect(specs[1]).toMatchObject({ inputSchema: { required: ["instructions", "state", "criteria"] } });
   expect(specs[2]).toMatchObject({ inputSchema: { required: ["instructions", "state", "criteria"] } });
@@ -184,7 +185,7 @@ test("a failing tool.register is logged and does not stop the others", async ($,
   on("ui.log", async (_$, e) => (logs.push(String(e.text)), { value: undefined }));
   on("session.start", async (_$, e) => ({ cwd: e.cwd }));
   await $.session.start({ cwd: "/proj", surface: "terminal", isInteractive: true });
-  expect(registered).toEqual(["noul", "score"]);
+  expect(registered).toEqual(["noul", "score", "batch"]);
   // The engine itself starts the line with the plugin's name.
   expect(logs).toEqual([expect.stringMatching(/^registering choice failed: /)]);
 });
@@ -310,6 +311,49 @@ test("a response without answers is an error", async ($, on) => {
   expect(await call($, "choice")).toEqual({ deny: "choice: response had no choice answer" });
 });
 
+// batch: several questions in one request, keyed q0, q1, ... by index; the answers come back as an array in question order.
+const QUESTIONS = (["noul", "choice", "score"] as const).map((type) => {
+  const { instructions, criteria } = BASE[type];
+  return { type, instructions, criteria };
+});
+const batch = ($: Runner, input: Record<string, unknown> = {}) => $.tool.call({ tool: TOOL("batch"), state: "Hello there!", questions: QUESTIONS, ...input }) as Promise<{ result?: string; deny?: string }>;
+const batchReply = (answers: Record<string, unknown>) => httpReply(200, JSON.stringify({ model: "jev-1", answers, usage: {} }));
+
+test("batch sends every question in one request and returns the answers in question order", async ($, on) => {
+  const { fetched } = setup(on, { env: { TYPESAFE_API_KEY: "k" }, reply: batchReply({ q2: ANSWERS.score, q0: ANSWERS.noul, q1: ANSWERS.choice }) });
+  expect(await batch($)).toEqual({ result: JSON.stringify([ANSWERS.noul, ANSWERS.choice, ANSWERS.score]) });
+  expect(fetched).toHaveLength(1);
+  expect(fetched[0].body).toEqual({ model: "jev-latest", state: "Hello there!", questions: { q0: QUESTIONS[0], q1: QUESTIONS[1], q2: QUESTIONS[2] } });
+});
+
+test("batch: one missing or wrong-type answer fails the whole call", async ($, on) => {
+  setup(on, { env: { TYPESAFE_API_KEY: "k" }, reply: batchReply({ q0: ANSWERS.noul, q1: ANSWERS.score, q2: ANSWERS.score }) });
+  expect(await batch($)).toEqual({ deny: "batch: response had no choice answer for questions[1]" });
+});
+
+test("batch: an HTTP error is prefixed with batch", async ($, on) => {
+  setup(on, { env: { TYPESAFE_API_KEY: "k" }, reply: httpReply(503, "") });
+  expect(await batch($)).toEqual({ deny: "batch: HTTP 503" });
+});
+
+test("batch: invalid input names the question and sends nothing", async ($, on) => {
+  const { fetched } = setup(on, { env: { TYPESAFE_API_KEY: "k" } });
+  expect(await batch($, { state: " " })).toEqual({ deny: "batch: state must be a non-empty string" });
+  expect(await batch($, { questions: [] })).toEqual({ deny: "batch: questions must be a non-empty array" });
+  expect(await batch($, { questions: "noul" })).toEqual({ deny: "batch: questions must be a non-empty array" });
+  expect(await batch($, { questions: [QUESTIONS[0], { type: "rank", instructions: "x" }] })).toEqual({ deny: "batch: questions[1]: type must be one of noul, choice, score" });
+  expect(await batch($, { questions: [QUESTIONS[0], null] })).toEqual({ deny: "batch: questions[1]: type must be one of noul, choice, score" });
+  expect(await batch($, { questions: [{ ...QUESTIONS[2], criteria: ["only"] }] })).toEqual({ deny: "batch: questions[0]: criteria must be an array of 2 to 10 strings" });
+  expect(await batch($, { questions: [{ type: "noul", instructions: "" }] })).toEqual({ deny: "batch: questions[0]: instructions must be a non-empty string" });
+  expect(fetched).toHaveLength(0);
+});
+
+test("batch without any env var fails locally", async ($, on) => {
+  const { fetched } = setup(on, { env: {} });
+  expect(await batch($)).toEqual(NO_CONFIG("batch"));
+  expect(fetched).toHaveLength(0);
+});
+
 // A registered tool that no hook answers fails, so a throw before the answer must still answer.
 test("a refused env read still answers the tool", async ($, on) => {
   on("env.get", async () => ({ deny: "env reads blocked" }));
@@ -379,5 +423,12 @@ describe.skipIf(!process.env.JEV_URL)("live JEV System One (JEV_URL)", () => {
     expect(typeof score).toBe("number");
     expect(score as number).toBeGreaterThanOrEqual(0);
     expect(score as number).toBeLessThanOrEqual(2);
+  });
+
+  test("batch answers all three questions in one request", { timeoutMs: 60_000 }, async ($, on) => {
+    live(on);
+    const res = await batch($);
+    expect(res.deny).toBeUndefined();
+    expect((JSON.parse(String(res.result)) as { type: string }[]).map((a) => a.type)).toEqual(["noul", "choice", "score"]);
   });
 });

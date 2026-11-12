@@ -1,6 +1,6 @@
 # jev-api
 
-Gives Claude three tools that ask TypeSafe's **Jev System One** API one question each about a piece of text: `noul` (yes/no probability), `choice` (pick among named options) and `score` (rate along ordered levels). The tools take text only and use the same endpoint and auth conventions as the Typesafe JS SDK.
+Gives Claude three tools that ask TypeSafe's **Jev System One** API one question each about a piece of text: `noul` (yes/no probability), `choice` (pick among named options) and `score` (rate along ordered levels). A fourth tool, `batch`, asks several of these questions about one text in a single request. The tools take text only and use the same endpoint and auth conventions as the Typesafe JS SDK.
 
 ## Environment
 
@@ -11,7 +11,7 @@ Gives Claude three tools that ask TypeSafe's **Jev System One** API one question
 | `JEV_URL`                | no       | The full System One route; wins over `TYPESAFE_BASE_URL`. A jevfort convention, not an SDK variable.                             |
 | `TYPESAFE_DEFAULT_MODEL` | no       | Model sent with each request, default `jev-latest`.                                                                              |
 
-The three tools are always registered. A call fails locally, without any request, until at least one of `TYPESAFE_API_KEY`, `TYPESAFE_BASE_URL` or `JEV_URL` is non-blank. The variables are read from Claude Code's own environment on every call, so set them before Claude Code starts (in the shell or in the settings' `env`): a variable exported in another shell later does not reach it. With only `TYPESAFE_API_KEY` set, the default endpoint `https://api.typesafe.ai/v1/systemone` is used.
+The four tools are always registered. A call fails locally, without any request, until at least one of `TYPESAFE_API_KEY`, `TYPESAFE_BASE_URL` or `JEV_URL` is non-blank. The variables are read from Claude Code's own environment on every call, so set them before Claude Code starts (in the shell or in the settings' `env`): a variable exported in another shell later does not reach it. With only `TYPESAFE_API_KEY` set, the default endpoint `https://api.typesafe.ai/v1/systemone` is used.
 
 ## Tools
 
@@ -49,9 +49,18 @@ Result: `{"type":"choice","choice":<option>,"confidence":<0..1>,"probabilities":
 
 Result: `{"type":"score","score":<expected level>,"confidence":<0..1>,"legend":{"0":<level>,...},"probabilities":{"0":<0..1>,...}}`. The score is the probability-weighted level: 0 is the first level, and a value between two levels is fractional. `legend` and `probabilities` are keyed by level index.
 
+### `mcp__jev-api__batch`
+
+| Input       | Values                                   | Meaning                                                                                                                              |
+| ----------- | ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| `state`     | string, required                         | The text all questions are about                                                                                                     |
+| `questions` | array of at least one question, required | Each is `{ "type": "noul" \| "choice" \| "score", "instructions", "criteria" }` with that tool's `instructions` and `criteria` rules |
+
+All questions go out in one System One request. Result: a JSON array of the answers in question order, each exactly as the matching single tool returns it. The call is all or nothing: an invalid question (the error names it, `questions[<index>]: ...`), an HTTP error or a missing answer fails the whole call.
+
 ## Errors
 
-Errors come back as a tool error (Claude reads it as an error result) whose text starts with the question type: the type name and a colon (for example `noul:`).
+Errors come back as a tool error (Claude reads it as an error result) whose text starts with the tool's name and a colon (for example `noul:` or `batch:`).
 
 - No configuration (none of the three variables set): no request is sent.
 - Invalid input, or a `JEV_URL` / `TYPESAFE_BASE_URL` that is not an `http(s)` URL (for `TYPESAFE_BASE_URL` also one with a query or fragment): no request is sent.
