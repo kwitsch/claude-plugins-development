@@ -72,8 +72,11 @@ type Engine = {
     // The element factories are plain functions, called detached from the object (`const { Markdown } = …`).
     resolve(e: unknown): {
       Markdown: (props: { text: string }) => unknown;
+      /** Layout container. */
       Box: (props: Record<string, unknown>) => unknown;
+      /** Styled text run. */
       Text: (props: Record<string, unknown>) => unknown;
+      /** Pressable button. */
       Button: (props: Record<string, unknown>) => unknown;
     };
   };
@@ -137,6 +140,7 @@ type On = {
   (event: "agent.offer", hook: Hook<OfferEvent, unknown>): void;
   (event: "session.compact", hook: Hook<CompactEvent, unknown>): void;
   (event: "ui.render", matcher: { component: "CommandOutput"; props: { command: "jev" } }, hook: ($: Engine, e: RenderEvent, next: (e: RenderEvent) => unknown) => unknown): void;
+  /** Registers the effort band render hook for the `AbovePrompt` site. */
   (event: "ui.render", matcher: { component: "AbovePrompt" }, hook: ($: Engine, e: BandEvent, next: (e: BandEvent) => unknown) => unknown): void;
 };
 /** The plugin options the engine passes to `register` (the manifest's `userConfig` values). */
@@ -257,7 +261,9 @@ async function jevApply($: Engine, missing: string[]): Promise<void> {
   const key = missing.join(", ");
   if (key === jevState) return;
   jevState = key;
-  $.ui.invalidate("ui.render");
+  try {
+    $.ui.invalidate("ui.render");
+  } catch { /* no mounted render site (headless): the band just is not redrawn */ }
   if (key) {
     await record($, { kind: "error", applied: false, text: `inactive: jev-api tools missing (${key})` }).catch(() => undefined);
     return;

@@ -84,7 +84,9 @@ async function jevApply($, missing) {
 	const key = missing.join(", ");
 	if (key === jevState) return;
 	jevState = key;
-	$.ui.invalidate("ui.render");
+	try {
+		$.ui.invalidate("ui.render");
+	} catch {}
 	if (key) {
 		await record($, {
 			kind: "error",
