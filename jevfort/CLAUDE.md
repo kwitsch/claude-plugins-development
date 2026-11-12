@@ -15,7 +15,8 @@ subagents load it via ToolSearch), no skills, agents, command hooks or MCP serve
   rows) is gone. `tool.check` only approves Jev's own vetted calls and writes into the session scratchpad.
 - Jev is asked only through the jev-api plugin's tool `mcp__jev-api__batch` (upstream sends its own HTTP request):
   `askJev` raises one `$.tool.call` with all questions of the decision (one System One request, needs jev-api >= 0.2.0),
-  with a 4 s budget per `askJev` (`TIMEOUT_MS`), all or nothing. jevfort makes no network request and reads no
+  with a 4 s budget per `askJev` (`TIMEOUT_MS`), all or nothing. Every call gives jev-api `timeout: 5` (seconds,
+  `JEV_API_TIMEOUT_S`), so jev-api ends a request jevfort has given up on after 5 s, not its default 20 s. jevfort makes no network request and reads no
   endpoint or key: those are jev-api's environment (`TYPESAFE_API_KEY`, `TYPESAFE_BASE_URL`, `JEV_URL`,
   `TYPESAFE_DEFAULT_MODEL`). No `userConfig` entry for any of it.
 - jev-api is a declared plugin dependency (`claudePlugin.dependencies: ["jev-api"]` in `package.json`, copied into

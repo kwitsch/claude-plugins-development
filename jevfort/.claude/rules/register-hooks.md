@@ -26,7 +26,7 @@ the shapes below: `inline-headroom/docs/claude-code-verification.md`.
   `session.start`, `prompt.submit`, `agent.offer` and `session.compact` have one each; `command.run` and `ui.render`
   carry matchers.
 - Jev is asked only through the jev-api plugin's tool `mcp__jev-api__batch`: `askJev` raises one
-  `$.tool.call({ tool: "mcp__jev-api__batch", state, questions })` (`state` is `JSON.stringify` text, `questions` the
+  `$.tool.call({ tool: "mcp__jev-api__batch", state, questions, timeout: JEV_API_TIMEOUT_S })` (`state` is `JSON.stringify` text, `questions` the
   `Question` objects in id order), raced against `TIMEOUT_MS`; a `{ deny }`, `isError`, a rejection, a result that is not
   a JSON array with one answer of the asked type per question, or the timeout fails the whole `askJev` (`{ ok: false }`,
   never a throw). The engine

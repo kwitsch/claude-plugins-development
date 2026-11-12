@@ -50,7 +50,7 @@ const NEUTRAL: Record<string, Record<string, unknown>> = {
 };
 
 /** One question of a batch call as the fake saw it: its id (its instructions when unknown), its input and the call's `state` (JSON text). */
-type Asked = { id: string; type: string; instructions: string; state: string; criteria?: unknown };
+type Asked = { id: string; type: string; instructions: string; state: string; criteria?: unknown; timeout?: unknown };
 /** The fake Jev, called once per batch question: the answer object, a raw result string (the whole batch result), a number (an HTTP error status: the batch denies), `undefined` (a neutral answer), or a Promise that never settles (no answer). */
 type Jev = (q: Asked) => Record<string, unknown> | string | number | undefined | Promise<never>;
 type Msg = { role: "user" | "assistant"; text: string; toolUses: Record<string, unknown>[]; toolResults?: Record<string, unknown>[] };
@@ -80,7 +80,7 @@ function setup(on: On, opts: { messages: Msg[]; jev: Jev; files?: string[]; pack
   on("tool.call", async (_$, e, next) => {
     if (e.tool !== JEV_BATCH) return next(e);
     batchCalls++;
-    const asked = (e.questions as { type: string; instructions: string; criteria?: unknown }[]).map((b): Asked => ({ ...b, id: QUESTION_IDS.get(b.instructions) ?? b.instructions, state: String(e.state) }));
+    const asked = (e.questions as { type: string; instructions: string; criteria?: unknown }[]).map((b): Asked => ({ ...b, id: QUESTION_IDS.get(b.instructions) ?? b.instructions, state: String(e.state), timeout: e.timeout }));
     sent.push(...asked);
     const answers = await Promise.all(asked.map(async (q) => opts.jev(q)));
     const status = answers.find((a) => typeof a === "number");
@@ -221,6 +221,8 @@ test("A turn-start decision sends its questions in one jev-api batch call", asyn
 
   await drain($.turn.step(step));
   expect(calls()).toBe(1);
+  // Every jev-api call gives jev-api a 5 s HTTP timeout.
+  expect(sent.every((q) => q.timeout === 5)).toBe(true);
   expect(sent.map((q) => [q.id, q.type])).toEqual([
     ["next_action", "choice"],
     ["effort", "score"],

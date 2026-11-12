@@ -19,7 +19,7 @@ import type { Candidate } from "./candidates.mjs";
 import { compactInstructions, compactItems, RELEVANCE } from "./compact.mjs";
 import { clip, splitTurn, summarize, toolCalls } from "./context.mjs";
 import type { SessionMessage, ToolUse, TurnContext } from "./context.mjs";
-import { choice, JEV_BATCH, JEV_TOOL_PREFIX, JEV_TOOLS, missingJevTools, noul, score, TIMEOUT_MS } from "./jev.mjs";
+import { choice, JEV_API_TIMEOUT_S, JEV_BATCH, JEV_TOOL_PREFIX, JEV_TOOLS, missingJevTools, noul, score, TIMEOUT_MS } from "./jev.mjs";
 import type { Answer, ChoiceAnswer, JevResult, Question } from "./jev.mjs";
 import { LOG_KEY, MAX_ENTRIES, recentDecisions, remember, statsKey } from "./log.mjs";
 import type { Entry } from "./log.mjs";
@@ -170,7 +170,7 @@ async function askJev($: Engine, state: unknown, questions: Record<string, Quest
 
   const entries = Object.entries(questions);
   const call = (async (): Promise<Record<string, Answer>> => {
-    const r = await $.tool.call({ tool: JEV_BATCH, state: JSON.stringify(state), questions: entries.map(([, q]) => q) });
+    const r = await $.tool.call({ tool: JEV_BATCH, state: JSON.stringify(state), questions: entries.map(([, q]) => q), timeout: JEV_API_TIMEOUT_S });
     // jev-api's deny text already starts with `batch:`.
     if (r.deny !== undefined) throw new Error(asText(r.deny));
     // A structured error result is serialized, not printed as `[object Object]`.

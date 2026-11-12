@@ -2,7 +2,7 @@ import { GENERAL, SWITCH_AT } from "./agents.mjs";
 import { absolute, AUTH_TOOL, bash, BUILTIN_COMMANDS, clipScript, coversStep, dedupeSkills, isSafeToOffer, MAX_READS, mentionedPaths, quotedTerms, relevant, SAFE_MAKE, SAFE_SCRIPT, sameCall, SKILL_BLOCKLIST_KEY } from "./candidates.mjs";
 import { compactInstructions, compactItems, RELEVANCE } from "./compact.mjs";
 import { clip, splitTurn, summarize, toolCalls } from "./context.mjs";
-import { choice, JEV_BATCH, JEV_TOOL_PREFIX, JEV_TOOLS, missingJevTools, noul, score, TIMEOUT_MS } from "./jev.mjs";
+import { choice, JEV_API_TIMEOUT_S, JEV_BATCH, JEV_TOOL_PREFIX, JEV_TOOLS, missingJevTools, noul, score, TIMEOUT_MS } from "./jev.mjs";
 import { LOG_KEY, MAX_ENTRIES, recentDecisions, remember, statsKey } from "./log.mjs";
 import { bestAction, bounds, difficultyQuestion, doneQuestion, EFFORT_ORDER, effortQuestion, ESTIMATE_SPEC, ESTIMATE_TOOL, estimateEffort, EVERY_TURN_MODELS, inScratchpad, isEffort, lowerModel, mechanicalQuestion, modelFamily, nextActionQuestion, parseEstimateInput, pickCandidate, route, shouldContinue, singleActionQuestion } from "./policy.mjs";
 import { hints, NONE, promptQuestions } from "./prompt.mjs";
@@ -35,7 +35,8 @@ async function askJev($, state, questions) {
 		const r = await $.tool.call({
 			tool: JEV_BATCH,
 			state: JSON.stringify(state),
-			questions: entries.map(([, q]) => q)
+			questions: entries.map(([, q]) => q),
+			timeout: JEV_API_TIMEOUT_S
 		});
 		if (r.deny !== undefined) throw new Error(asText(r.deny));
 		if (r.isError === true || typeof r.result !== "string") throw new Error(r.result === undefined ? "batch: no result" : typeof r.result === "string" ? r.result : JSON.stringify(r.result));

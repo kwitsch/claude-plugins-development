@@ -27,6 +27,8 @@ export type Answer = NoulAnswer | ChoiceAnswer | ScoreAnswer;
 /** What one `askJev` came back with, and how long it took. */
 export type JevResult = { ok: true; answers: Record<string, Answer>; ms: number } | { ok: false; error: string; ms: number };
 
+/** The HTTP timeout jevfort gives every jev-api call, in seconds (jev-api's `timeout` input). */
+export const JEV_API_TIMEOUT_S = 5;
 /** Prefix of the jev-api plugin's tools. */
 export const JEV_TOOL_PREFIX = "mcp__jev-api__";
 /** jev-api's tool for several questions about one `state` in one request; its result is the answers in question order. */

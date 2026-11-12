@@ -281,15 +281,50 @@ for (
   });
 }
 
-// Case 12: timeout after 30 s.
-test("a hung request times out after 30000ms", async ($, on) => {
+// Case 12: the timeout is the call's `timeout` in seconds, else the `timeout` option, else 20 s; invalid values fall through.
+async function timesOutAfter($: Runner, on: On, ms: number, input: Record<string, unknown> = {}, type = "noul") {
   const { clock, fetched } = setup(on, { env: { TYPESAFE_API_KEY: "k" }, reply: () => new Promise<never>(() => {}) });
-  const pending = call($, "noul");
+  let settled = false;
+  const pending = call($, type, input).finally(() => (settled = true));
   // The module loads by dynamic import (file I/O), which one settle does not wait for: flush until the request is out.
   while (fetched.length === 0) await clock.advance(0);
-  await clock.advance(30_000);
-  expect(await pending).toEqual({ deny: "noul: timeout after 30000ms" });
+  await clock.advance(ms - 1);
+  expect(settled).toBe(false);
+  await clock.advance(1);
+  expect(await pending).toEqual({ deny: `${type}: timeout after ${ms}ms` });
+}
+
+test("a hung request times out after the default 20 s", async ($, on) => {
+  await timesOutAfter($, on, 20_000);
 });
+
+test("a call's timeout sets the request timeout in seconds", async ($, on) => {
+  await timesOutAfter($, on, 5000, { timeout: 5 });
+});
+
+test("batch takes a timeout too", async ($, on) => {
+  await timesOutAfter($, on, 2000, { timeout: 2 }, "batch");
+});
+
+test("without a call timeout the timeout option applies", { options: { timeout: 7 } }, async ($, on) => {
+  await timesOutAfter($, on, 7000);
+});
+
+test("a call's timeout wins over the timeout option", { options: { timeout: 7 } }, async ($, on) => {
+  await timesOutAfter($, on, 3000, { timeout: 3 });
+});
+
+for (const timeout of ["5", 0, -2, true, null]) {
+  test(`an invalid call timeout ${JSON.stringify(timeout)} falls back to the timeout option`, { options: { timeout: 7 } }, async ($, on) => {
+    await timesOutAfter($, on, 7000, { timeout });
+  });
+}
+
+for (const timeout of ["10", 0, -1]) {
+  test(`an invalid timeout option ${JSON.stringify(timeout)} falls back to 20 s`, { options: { timeout } }, async ($, on) => {
+    await timesOutAfter($, on, 20_000);
+  });
+}
 
 test("a settled request cancels its timeout timer", async ($, on) => {
   const signals: AbortSignal[] = [];

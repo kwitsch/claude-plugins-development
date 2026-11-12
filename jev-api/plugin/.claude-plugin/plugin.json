@@ -11,5 +11,13 @@
     "typesafe",
     "jev",
     "tools"
-  ]
+  ],
+  "userConfig": {
+    "timeout": {
+      "type": "number",
+      "title": "Timeout",
+      "description": "HTTP timeout of one System One request in seconds, used when a tool call gives no valid timeout of its own (invalid or unset: 20).",
+      "default": 20
+    }
+  }
 }

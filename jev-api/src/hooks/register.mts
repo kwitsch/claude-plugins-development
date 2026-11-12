@@ -149,6 +149,9 @@ type Env = {
   model: string | undefined;
 };
 
+/** The plugin's `userConfig` values as the engine passes them to `register`; any value may be missing or invalid. */
+type Options = Partial<Record<string, unknown>>;
+
 /** The `on` registrar of the module: one overload per hooked event. */
 type On = {
   /**
@@ -170,8 +173,11 @@ type On = {
 /** Description tail shared by the three tools. */
 const NEEDS = " Needs TYPESAFE_API_KEY, TYPESAFE_BASE_URL or JEV_URL to be set.";
 
-/** The `state` input property shared by the three tools. */
+/** The `state` input property shared by the tools. */
 const STATE = { type: "string", description: "The text the question is about." };
+
+/** The optional `timeout` input property shared by the tools. */
+const TIMEOUT = { type: "number", exclusiveMinimum: 0, description: "Optional: the HTTP timeout of the request in seconds. Default: the plugin's timeout option, else 20." };
 
 /** The System One endpoint used when neither JEV_URL nor TYPESAFE_BASE_URL is set. */
 const DEFAULT_JEV_URL = "https://api.typesafe.ai/v1/systemone";
@@ -179,8 +185,8 @@ const DEFAULT_JEV_URL = "https://api.typesafe.ai/v1/systemone";
 /** The model sent when TYPESAFE_DEFAULT_MODEL is unset or blank. */
 const DEFAULT_MODEL = "jev-latest";
 
-/** How long one request may take before the tool reports a timeout, in milliseconds. */
-const TIMEOUT_MS = 30_000;
+/** How long one request may take, in seconds, when neither the call's `timeout` nor the `timeout` option is valid. */
+const DEFAULT_TIMEOUT_S = 20;
 
 /** The key of a single-question tool's question in `questions` and of its answer in `answers` (`batch` keys them `q0`, `q1`, ... by index). */
 const QUESTION_ID = "answer";
@@ -212,6 +218,7 @@ const SPECS: Record<ToolName, Omit<ToolSpec, "name">> = {
       properties: {
         instructions: { type: "string", description: "The yes/no question to answer about the text." },
         state: STATE,
+        timeout: TIMEOUT,
         criteria: {
           type: "object",
           description: "Optional: what counts as true and what counts as false.",
@@ -232,6 +239,7 @@ const SPECS: Record<ToolName, Omit<ToolSpec, "name">> = {
       properties: {
         instructions: { type: "string", description: "What to choose." },
         state: STATE,
+        timeout: TIMEOUT,
         criteria: {
           type: "object",
           description: "The options: option name -> description of when to pick it.",
@@ -251,6 +259,7 @@ const SPECS: Record<ToolName, Omit<ToolSpec, "name">> = {
       properties: {
         instructions: { type: "string", description: "What to rate." },
         state: STATE,
+        timeout: TIMEOUT,
         criteria: {
           type: "array",
           description: "The levels, lowest first; scores start at 0.",
@@ -269,6 +278,7 @@ const SPECS: Record<ToolName, Omit<ToolSpec, "name">> = {
       type: "object",
       properties: {
         state: STATE,
+        timeout: TIMEOUT,
         questions: {
           type: "array",
           description: "The questions, each with the input of the noul, choice or score tool minus state, plus its type.",
@@ -332,6 +342,16 @@ function json(text: string): unknown {
  */
 function fail(tool: ToolName, reason: string): ToolResult {
   return { deny: `${tool}: ${reason}` };
+}
+
+/**
+ * A timeout in seconds, if the value is one: a finite number above 0.
+ *
+ * @param v - The value to test (a tool input field or an option).
+ * @returns The seconds, or undefined for anything else.
+ */
+function seconds(v: unknown): number | undefined {
+  return typeof v === "number" && Number.isFinite(v) && v > 0 ? v : undefined;
 }
 
 /**
@@ -480,11 +500,12 @@ function detail(text: string): string | undefined {
  * @param state - The text the questions are about.
  * @param questions - The questions, in input order.
  * @param env - The env values, trimmed, undefined when unset or blank.
+ * @param timeoutMs - How long the request may take before the tool reports a timeout.
  * @param signal - Aborts when the call is abandoned; the hook then answers at once.
  * @returns The answer object as JSON (for `batch` the array of answers in question order), or an error answer
  * prefixed with the tool name.
  */
-async function ask($: Engine, tool: ToolName, state: string, questions: Question[], env: Env, signal: AbortSignal): Promise<ToolResult> {
+async function ask($: Engine, tool: ToolName, state: string, questions: Question[], env: Env, timeoutMs: number, signal: AbortSignal): Promise<ToolResult> {
   // The id of each question in the request and of its answer in the response.
   const ids = questions.map((_, i) => (tool === "batch" ? `q${i}` : QUESTION_ID));
   const target = endpoint(env.jevUrl, env.base);
@@ -500,12 +521,12 @@ async function ask($: Engine, tool: ToolName, state: string, questions: Question
     request.catch(() => undefined); // a late rejection after the timeout or an abort won must not go unhandled
     // The engine does not stop a hook's request when its dispatch is abandoned: answer at once instead of lingering.
     const stop = new Promise<"timeout" | "aborted">((resolve) => {
-      timer = $.clock.after(TIMEOUT_MS, () => resolve("timeout"));
+      timer = $.clock.after(timeoutMs, () => resolve("timeout"));
       if (signal.aborted) resolve("aborted");
       else signal.addEventListener("abort", () => resolve("aborted"), { once: true });
     });
     const res = await Promise.race([request, stop]);
-    if (res === "timeout") return fail(tool, `timeout after ${TIMEOUT_MS}ms`);
+    if (res === "timeout") return fail(tool, `timeout after ${timeoutMs}ms`);
     if (res === "aborted") return fail(tool, "the call was abandoned");
     if (!res.ok) {
       const why = detail(res.text);
@@ -534,8 +555,12 @@ async function ask($: Engine, tool: ToolName, state: string, questions: Question
  * Registers the module's hooks.
  *
  * @param on - The engine's hook registrar.
+ * @param options - The plugin's `userConfig` values; `timeout` is the request timeout in seconds for calls that give
+ * none.
  */
-export function register(on: On): void {
+export function register(on: On, options?: Options): void {
+  // A call's own `timeout` wins; an invalid one falls back like a missing one.
+  const fallbackS = seconds(options?.["timeout"]) ?? DEFAULT_TIMEOUT_S;
   // Full tool name -> tool: the default names (a call can reach an instance that saw no session.start), plus what the engine returned.
   const names = new Map<string, ToolName>(TOOLS.map((t) => [TOOL_PREFIX + t, t]));
   on("session.start", async function onSessionStart($, e, next) {
@@ -563,7 +588,7 @@ export function register(on: On): void {
       if (!key && !base && !jevUrl) return fail(type, "none of TYPESAFE_API_KEY, TYPESAFE_BASE_URL, JEV_URL is set");
       const input = parseInput(type, e);
       if (typeof input === "string") return fail(type, input);
-      return await ask($, type, input.state, input.questions, { key, base, jevUrl, model }, next.signal);
+      return await ask($, type, input.state, input.questions, { key, base, jevUrl, model }, (seconds(e["timeout"]) ?? fallbackS) * 1000, next.signal);
     } catch (err) {
       return fail(type, message(err));
     }

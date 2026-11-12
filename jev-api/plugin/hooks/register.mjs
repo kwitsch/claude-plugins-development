@@ -9,9 +9,14 @@ const STATE = {
 	type: "string",
 	description: "The text the question is about."
 };
+const TIMEOUT = {
+	type: "number",
+	exclusiveMinimum: 0,
+	description: "Optional: the HTTP timeout of the request in seconds. Default: the plugin's timeout option, else 20."
+};
 const DEFAULT_JEV_URL = "https://api.typesafe.ai/v1/systemone";
 const DEFAULT_MODEL = "jev-latest";
-const TIMEOUT_MS = 3e4;
+const DEFAULT_TIMEOUT_S = 20;
 const QUESTION_ID = "answer";
 const HTTP_URL = /^https?:\/\/[^/?#\s]+(?:[/?#]\S*)?$/i;
 const HTTP_BASE = /^https?:\/\/[^/?#\s]+(?:\/[^?#\s]*)?$/i;
@@ -30,6 +35,7 @@ const SPECS = {
 					description: "The yes/no question to answer about the text."
 				},
 				state: STATE,
+				timeout: TIMEOUT,
 				criteria: {
 					type: "object",
 					description: "Optional: what counts as true and what counts as false.",
@@ -59,6 +65,7 @@ const SPECS = {
 					description: "What to choose."
 				},
 				state: STATE,
+				timeout: TIMEOUT,
 				criteria: {
 					type: "object",
 					description: "The options: option name -> description of when to pick it.",
@@ -84,6 +91,7 @@ const SPECS = {
 					description: "What to rate."
 				},
 				state: STATE,
+				timeout: TIMEOUT,
 				criteria: {
 					type: "array",
 					description: "The levels, lowest first; scores start at 0.",
@@ -105,6 +113,7 @@ const SPECS = {
 			type: "object",
 			properties: {
 				state: STATE,
+				timeout: TIMEOUT,
 				questions: {
 					type: "array",
 					description: "The questions, each with the input of the noul, choice or score tool minus state, plus its type.",
@@ -146,6 +155,9 @@ function json(text) {
 }
 function fail(tool, reason) {
 	return { deny: `${tool}: ${reason}` };
+}
+function seconds(v) {
+	return typeof v === "number" && Number.isFinite(v) && v > 0 ? v : undefined;
 }
 function isType(v) {
 	return TYPES.includes(v);
@@ -258,7 +270,7 @@ function detail(text) {
 	if (why === undefined) return undefined;
 	return typeof why === "string" ? why : JSON.stringify(why);
 }
-async function ask($, tool, state, questions, env, signal) {
+async function ask($, tool, state, questions, env, timeoutMs, signal) {
 	const ids = questions.map((_, i) => tool === "batch" ? `q${i}` : QUESTION_ID);
 	const target = endpoint(env.jevUrl, env.base);
 	if (!target.ok) return fail(tool, target.error);
@@ -279,12 +291,12 @@ async function ask($, tool, state, questions, env, signal) {
 		});
 		request.catch(() => undefined);
 		const stop = new Promise((resolve) => {
-			timer = $.clock.after(TIMEOUT_MS, () => resolve("timeout"));
+			timer = $.clock.after(timeoutMs, () => resolve("timeout"));
 			if (signal.aborted) resolve("aborted");
 			else signal.addEventListener("abort", () => resolve("aborted"), { once: true });
 		});
 		const res = await Promise.race([request, stop]);
-		if (res === "timeout") return fail(tool, `timeout after ${TIMEOUT_MS}ms`);
+		if (res === "timeout") return fail(tool, `timeout after ${timeoutMs}ms`);
 		if (res === "aborted") return fail(tool, "the call was abandoned");
 		if (!res.ok) {
 			const why = detail(res.text);
@@ -307,7 +319,8 @@ async function ask($, tool, state, questions, env, signal) {
 		timer?.cancel();
 	}
 }
-export function register(on) {
+export function register(on, options) {
+	const fallbackS = seconds(options?.["timeout"]) ?? DEFAULT_TIMEOUT_S;
 	const names = new Map(TOOLS.map((t) => [TOOL_PREFIX + t, t]));
 	on("session.start", async function onSessionStart($, e, next) {
 		const results = await Promise.allSettled(TOOLS.map((type) => $.tool.register({
@@ -342,7 +355,7 @@ export function register(on) {
 				base,
 				jevUrl,
 				model
-			}, next.signal);
+			}, (seconds(e["timeout"]) ?? fallbackS) * 1e3, next.signal);
 		} catch (err) {
 			return fail(type, message(err));
 		}
