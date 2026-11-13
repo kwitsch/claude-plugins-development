@@ -14,9 +14,9 @@ jobs:
     steps:
       - id: meta
         uses: dependabot/fetch-metadata@v3
-      # Patch and pin/digest updates (no semver update-type) merge once changed-plugins is green;
-      # minor and major updates wait for a manual merge.
-      - if: steps.meta.outputs.update-type == 'version-update:semver-patch' || steps.meta.outputs.update-type == ''
+      # Everything except major updates (patch, minor, pin/digest) merges once changed-plugins is green;
+      # major updates wait for a manual merge.
+      - if: steps.meta.outputs.update-type != 'version-update:semver-major'
         run: gh pr merge --auto --squash "$PR_URL"
         env:
           PR_URL: ${{ github.event.pull_request.html_url }}
