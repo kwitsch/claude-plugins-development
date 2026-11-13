@@ -37,7 +37,8 @@
             "timeout": 10,
             "input": {
               "agent_id": "${agent_id}",
-              "session_id": "${session_id}"
+              "session_id": "${session_id}",
+              "tool_use_id": "${tool_use_id}"
             }
           }
         ]
@@ -123,7 +124,8 @@
               "cwd": "${cwd}",
               "agent_id": "${agent_id}",
               "session_id": "${session_id}",
-              "scratchpad_dir": "${scratchpad_dir}"
+              "scratchpad_dir": "${scratchpad_dir}",
+              "tool_use_id": "${tool_use_id}"
             }
           }
         ]

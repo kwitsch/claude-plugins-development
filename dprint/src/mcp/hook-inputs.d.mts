@@ -41,6 +41,8 @@ export interface BashStartedInput {
   agent_id?: string;
   /** Template: `${session_id}`. */
   session_id?: string;
+  /** Template: `${tool_use_id}`. */
+  tool_use_id?: string;
 }
 
 /** Arguments of MCP tool `drain_notices` (PreToolUse `Edit|Write|Read|Bash|MultiEdit` hook). */
@@ -105,6 +107,8 @@ export interface BashFinishedInput {
   session_id?: string;
   /** Template: `${scratchpad_dir}`. */
   scratchpad_dir?: string;
+  /** Template: `${tool_use_id}`. */
+  tool_use_id?: string;
 }
 
 /** Arguments of MCP tool `cwd_changed` (CwdChanged hook). */

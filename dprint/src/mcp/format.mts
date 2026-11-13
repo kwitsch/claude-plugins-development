@@ -316,7 +316,7 @@ const takeNotices = (k: string): Set<string> => {
   return files;
 };
 
-/** Start time (ms) of the running Bash call per {@link overrideKey}, set by {@link bashStarted}. */
+/** Start time (ms) of the running Bash call per {@link bashKey}, set by {@link bashStarted}. */
 const bashStart = new Map<string, number>();
 
 /**
@@ -686,7 +686,8 @@ async function formatOnDisk(sc: Scope, s: { fp: string; real: string }, signal?:
  */
 function notice(args: { cwd?: string; agent_id?: string; session_id?: string }, event: string, files: string[]): HookResult {
   const root = scopeOf(args)?.root;
-  const rel = files.map((p) => root ? path.relative(root, p) : p).join(", ");
+  // quoted: a file name may hold newlines or text that reads like an instruction
+  const rel = files.map((p) => JSON.stringify(root ? path.relative(root, p) : p)).join(", ");
   return {
     hookSpecificOutput: {
       hookEventName: event,
@@ -728,13 +729,24 @@ export async function fileChanged(
 }
 
 /**
+ * Key of one Bash call in {@link bashStart}: the session/agent key plus the call's `tool_use_id`, so overlapping Bash
+ * calls of one session keep their own start times (without an id, one call per session/agent is assumed).
+ *
+ * @param args - Hook input of `bash_started` or `bash_finished`.
+ * @returns The map key.
+ */
+function bashKey(args: BashStartedInput & BashFinishedInput): string {
+  return overrideKey(args) + "\0" + (args.tool_use_id ?? "");
+}
+
+/**
  * PreToolUse `Bash` hook: remember when the Bash call started.
  *
- * @param args - Hook input: `session_id` and `agent_id`.
+ * @param args - Hook input: `session_id`, `agent_id` and `tool_use_id`.
  * @returns `{}`.
  */
 export function bashStarted(args: BashStartedInput = {}): HookResult {
-  bashStart.set(overrideKey(args), Date.now());
+  bashStart.set(bashKey(args), Date.now());
   return {};
 }
 
@@ -777,8 +789,8 @@ async function cachedWatchList(sc: Scope): Promise<Array<{ fp: string; real: str
 export async function bashFinished(args: BashFinishedInput = {}, signal?: AbortSignal): Promise<HookResult> {
   try {
     const k = overrideKey(args);
-    const since = bashStart.get(k);
-    bashStart.delete(k);
+    const since = bashStart.get(bashKey(args));
+    bashStart.delete(bashKey(args));
     const sc = scopeOf(args);
     if (since === undefined || !sc || findConfig(sc.root) === null) return {};
     const touched = (await cachedWatchList(sc)).filter((f) => {
@@ -788,10 +800,13 @@ export async function bashFinished(args: BashFinishedInput = {}, signal?: AbortS
         return false; // deleted meanwhile
       }
     });
-    const formatted = new Set<string>(takeNotices(k)); // a FileChanged that fired mid-Bash queued its notice already
+    const formatted = new Set<string>();
     await Promise.all(touched.map(async (f) => {
       if (await formatOnDisk(sc, f, signal)) formatted.add(f.fp);
     }));
+    // a FileChanged that fired mid-Bash may have formatted a file first (then formatOnDisk above saw nothing to do)
+    // and queued its notice: report it here, after the formats
+    for (const f of takeNotices(k)) formatted.add(f);
     return formatted.size ? notice(args, "PostToolUse", [...formatted].sort()) : {};
   } catch (e) {
     process.stderr.write(
@@ -914,11 +929,18 @@ export async function formatPre(
       // "\r\n" would be refused as not found. A lone "\r" left after normalizing is not handled: fail open.
       const O = readFileSync(fp, "utf8").replaceAll("\r\n", "\n"); // ENOENT -> catch -> {}
       if (O.includes("\r")) return {};
-      const oldStr = ti.old_string ?? "";
+      let oldStr = ti.old_string ?? "";
       const newStr = ti.new_string ?? "";
       const replaceAll = ti.replace_all === "true"; // template-substituted, so always a string
-      const M = applyEdit(O, oldStr, newStr, replaceAll);
+      let M = applyEdit(O, oldStr, newStr, replaceAll);
       if (M === null) return {};
+      // Claude Code's Edit with an empty new_string also deletes the line break after old_string (replace_all: only
+      // where one follows), so the intended result is that of the widened old_string (uniqueness was checked above)
+      if (newStr === "" && !oldStr.endsWith("\n") && O.includes(oldStr + "\n")) {
+        oldStr += "\n";
+        M = applyEdit(O, oldStr, newStr, replaceAll);
+        if (M === null) return {};
+      }
 
       // occurrences of old_string in O, non-overlapping left to right (as applyEdit/split replace them)
       const occ: number[] = [];
