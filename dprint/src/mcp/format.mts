@@ -332,10 +332,13 @@ const BASH_START_TTL_MS = 24 * 60 * 60 * 1000;
  * shortcut: files created after the first (non-empty) read are missing until a cwd change clears the cache (the same
  * limit as the FileChanged watch list; `DPRINT_WATCH_DIRECTORIES=1` fixes the watch list, not this cache).
  */
-const watchCache = new Map<string, { list: Promise<Array<{ fp: string; real: string }>>; at: number; failed: boolean }>();
+const watchCache = new Map<string, { list: Promise<Array<{ fp: string; real: string }>>; at: number; retryMs: number | null }>();
 
-/** A failed or empty watch-list read (dprint failing, timing out or missing, no files, above the limit) is retried after this long. */
+/** A failed watch-list read (dprint failing or timing out) is retried after this long. */
 const WATCH_RETRY_MS = 60_000;
+
+/** An empty watch-list read (dprint missing, no matching files, above the limit) is retried after this long: a dprint installed later is picked up, a config-only project re-lists rarely. */
+const WATCH_EMPTY_RETRY_MS = 5 * 60_000;
 
 /**
  * Record a cwd override for the payload's session or subagent.
@@ -793,13 +796,13 @@ export function bashStarted(args: BashStartedInput = {}): HookResult {
  * The in-scope files dprint formats in a cwd, cached per root.
  *
  * @param sc - Scope of the hook call.
- * @returns The files; `[]` on a dprint failure or when there are none (cached for {@link WATCH_RETRY_MS}, so a
+ * @returns The files; `[]` on a dprint failure or when there are none (cached for {@link WATCH_RETRY_MS} after a failure, {@link WATCH_EMPTY_RETRY_MS} when empty, so a
  * failing or missing dprint cannot stall every Bash call, and one installed later is picked up). The read is shared: a call while it runs gets the same promise.
  */
 async function cachedWatchList(sc: Scope): Promise<Array<{ fp: string; real: string }>> {
   const hit = watchCache.get(sc.root);
-  if (hit && !(hit.failed && Date.now() - hit.at > WATCH_RETRY_MS)) return hit.list;
-  const entry = { at: Date.now(), failed: false, list: Promise.resolve<Array<{ fp: string; real: string }>>([]) };
+  if (hit && !(hit.retryMs !== null && Date.now() - hit.at > hit.retryMs)) return hit.list;
+  const entry = { at: Date.now(), retryMs: null as number | null, list: Promise.resolve<Array<{ fp: string; real: string }>>([]) };
   entry.list = (async () => {
     const list: Array<{ fp: string; real: string }> = [];
     try {
@@ -807,9 +810,9 @@ async function cachedWatchList(sc: Scope): Promise<Array<{ fp: string; real: str
         const s = inScope(sc, p);
         if (s) list.push(s);
       }
-      if (list.length === 0) entry.failed = true; // dprint missing, no files or above the limit: look again in a minute
+      if (list.length === 0) entry.retryMs = WATCH_EMPTY_RETRY_MS; // dprint missing, no files or above the limit: look again later
     } catch (e) {
-      entry.failed = true; // an empty list for a minute, so a failing dprint cannot stall every Bash call
+      entry.retryMs = WATCH_RETRY_MS; // an empty list for a minute, so a failing dprint cannot stall every Bash call
       process.stderr.write(`[dprint-hooks] watch list failed: ${errText(e)}\n`);
     }
     return list;
