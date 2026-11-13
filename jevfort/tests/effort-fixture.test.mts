@@ -3,15 +3,16 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "vitest";
-import { effortLevel, estimateEffort } from "../plugin/hooks/policy.mjs";
+import { EFFORT_ORDER, estimateEffort } from "../plugin/hooks/policy.mjs";
 
 type Row = { id: number; lang: "en" | "de"; label: number; score: number; confidence: number; mechanical: number };
 const ROWS = JSON.parse(readFileSync(new URL("./fixtures/effort-scores.json", import.meta.url), "utf8")) as Row[];
 const B = { model: "opus", defaultEffort: "high", minEffort: "low", maxEffort: "xhigh" } as const;
 const answer = (r: Row) => ({ type: "score" as const, score: r.score, probabilities: {}, confidence: r.confidence });
 const count = (rows: Row[], f: (r: Row) => boolean) => rows.filter(f).length;
-/** The level without bias, as the calibrated rule gives it, capped at xhigh (the default maxEffort). */
-const level = (r: Row) => Math.min(Math.round(effortLevel(r.score)), 3);
+/** The level the shipped rule gives (no mechanical shortcut, no model bias), as a number; capped at xhigh by the default bounds. */
+const NO_SHORTCUT = undefined;
+const level = (r: Row) => EFFORT_ORDER.indexOf(estimateEffort(answer(r), NO_SHORTCUT, B).effort);
 
 test("the fixture has 120 records: 60 prompts in both languages, 24 per label", () => {
   assert.equal(ROWS.length, 120);

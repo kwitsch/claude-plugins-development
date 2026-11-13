@@ -115,8 +115,6 @@ export function isEffort(v: unknown): v is Effort {
 export type EstimateModel = "haiku" | "sonnet" | "opus" | "fable";
 /** The model families, cheapest first. */
 export const ESTIMATE_MODELS: readonly EstimateModel[] = ["haiku", "sonnet", "opus", "fable"];
-/** Effort levels added to Jev's score per model: a stronger model needs less. */
-const MODEL_BIAS: Record<EstimateModel, number> = { haiku: 0.75, sonnet: 0.25, opus: -0.25, fable: -0.75 };
 /**
  * Session models whose effort is estimated on every turn. On the others the effort is estimated on the loop's first
  * turn only and then held, so a later change of effort does not rewrite the prompt cache.
@@ -135,7 +133,7 @@ const CUT_Y: readonly number[] = [0, ...EFFORT_CUTS.map((_, i) => i + 0.5), 4];
 
 /**
  * Maps Jev's 0–4 effort score onto the level scale piecewise linearly, so that `Math.round` of the result gives the
- * calibrated level: the {@link EFFORT_CUTS} land on 0.5 / 1.5 / 2.5 / 3.5. The model bias is added afterwards.
+ * calibrated level: the {@link EFFORT_CUTS} land on 0.5 / 1.5 / 2.5 / 3.5. There is no model bias: the level is the same for every model.
  *
  * @param score - Jev's effort score; clamped to 0..4.
  * @returns The position on the level scale, 0..4.
@@ -153,7 +151,7 @@ export const ESTIMATE_TOOL = `mcp__jevfort__${ESTIMATE_NAME}`;
 
 /** What the estimate needs besides the prompt. */
 export type EstimateBounds = {
-  /** The model family that will run the prompt; picks the bias. */
+  /** The model family that will run the prompt; it does not change the estimate (the model bias was removed in 0.9.0), the tool keeps it for callers. */
   model: EstimateModel;
   /** Returned unchanged when Jev is unreachable or gives no effort score. */
   defaultEffort: Effort;
@@ -239,18 +237,18 @@ export function parseEstimateInput(raw: Record<string, unknown>): EstimateInput 
  * The single effort rule of the tool and of turn-start routing, in this order: a mechanical prompt (Jev p ≥
  * {@link MECHANICAL_FROM}) gets `minEffort`; without a finite score (missing or malformed) `defaultEffort` is
  * returned unclamped (the score's confidence is not checked: the discarded scores were as accurate as the kept ones);
- * otherwise Jev's 0–4 score mapped by {@link effortLevel} plus the model's bias, rounded and clamped to
+ * otherwise Jev's 0–4 score mapped by {@link effortLevel}, rounded and clamped to
  * `minEffort`..`maxEffort`.
  *
  * @param effort - Jev's effort score answer, `undefined` when missing or Jev was unreachable.
  * @param mechanical - Jev's probability that the prompt is purely mechanical, `undefined` when missing.
- * @param b - The model, the default and the bounds; the bounds must be valid ({@link bounds}).
+ * @param b - The default and the bounds (the model is not used); the bounds must be valid ({@link bounds}).
  * @returns The effort and its source.
  */
 export function estimateEffort(effort: ScoreAnswer | undefined, mechanical: number | undefined, b: EstimateBounds): Estimate {
   if (mechanical !== undefined && mechanical >= MECHANICAL_FROM) return { effort: b.minEffort, source: "mechanical" };
   if (!effort || !Number.isFinite(effort.score)) return { effort: b.defaultEffort, source: "fallback" };
-  const i = Math.round(effortLevel(effort.score) + MODEL_BIAS[b.model]);
+  const i = Math.round(effortLevel(effort.score));
   const clamped = Math.min(Math.max(i, EFFORT_ORDER.indexOf(b.minEffort)), EFFORT_ORDER.indexOf(b.maxEffort));
   return { effort: EFFORT_ORDER[clamped], source: "jev" };
 }
@@ -264,7 +262,7 @@ export const EFFORT_LEVELS = [
   "Max: a long multi-part task needing deep, novel reasoning where mistakes are costly",
 ];
 
-/** How much reasoning effort a mid-tier model needs for the request; "mid-tier" is the zero point of the model bias. */
+/** How much reasoning effort a mid-tier model needs for the request. */
 export const effortQuestion: Question = {
   type: "score",
   instructions: "How much reasoning effort does a mid-tier AI coding model need to fully handle the user request in `request`? When `previous_reply` is present, `request` answers the assistant's previous reply: judge a short follow-up like 'yes' or 'do it' by the work it approves or asks about there.",
@@ -284,7 +282,7 @@ export const mechanicalQuestion: Question = {
 /** The `estimate_effort` tool spec `session.start` registers through `$.tool.register`. */
 export const ESTIMATE_SPEC = {
   name: ESTIMATE_NAME,
-  description: "Estimate the reasoning effort a prompt most likely needs, decided by TypeSafe Jev. Returns JSON {\"effort\": level, \"source\": \"jev\"|\"mechanical\"|\"fallback\"}: a purely mechanical prompt gets minEffort; Jev's estimate is biased by the model (a stronger model needs less) and kept within minEffort..maxEffort; when Jev is unreachable or gives no effort score, defaultEffort.",
+  description: "Estimate the reasoning effort a prompt most likely needs, decided by TypeSafe Jev. Returns JSON {\"effort\": level, \"source\": \"jev\"|\"mechanical\"|\"fallback\"}: a purely mechanical prompt gets minEffort; Jev's estimate (the same for every model) is kept within minEffort..maxEffort; when Jev is unreachable or gives no effort score, defaultEffort.",
   inputSchema: {
     type: "object",
     properties: {

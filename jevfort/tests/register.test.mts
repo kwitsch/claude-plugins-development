@@ -819,7 +819,7 @@ test("estimate_effort rejects invalid input without asking Jev", async ($, on) =
 });
 
 test("estimate_effort estimates on every call, also for haiku", async ($, on) => {
-  const { sent } = setup(on, { messages: [], jev: inOrder({ effort: scored(0.2) }, { effort: scored(3), mechanical: mech(0.97) }) });
+  const { sent } = setup(on, { messages: [], jev: inOrder({ effort: scored(1.6) }, { effort: scored(3), mechanical: mech(0.97) }) });
   expect(await estimateCall($, { model: "haiku" })).toEqual({ result: JSON.stringify({ effort: "medium", source: "jev" }) });
   expect(await estimateCall($, { model: "haiku" })).toEqual({ result: JSON.stringify({ effort: "low", source: "mechanical" }) });
   expect(ids(sent)).toEqual(["effort", "mechanical", "effort", "mechanical"]);
@@ -888,10 +888,11 @@ for (const model of ["claude-opus-5-5", "claude-sonnet-5-5"]) {
   });
 }
 
-for (const [model, estimated] of [["claude-haiku-5-5", "medium"], ["claude-fable-5", "low"]] as const) {
+for (const model of ["claude-haiku-5-5", "claude-fable-5"]) {
+  const estimated = "medium";
   test(`On ${model} only the first turn is estimated and later turns hold it`, async ($, on) => {
     const seen: { effort?: string }[] = [];
-    const { sent } = setup(on, { messages: [user("what does this project do?")], jev: inOrder({ difficulty: easy, effort: scored(0.2) }, { difficulty: easy, effort: scored(2.9) }) });
+    const { sent } = setup(on, { messages: [user("what does this project do?")], jev: inOrder({ difficulty: easy, effort: scored(1.6) }, { difficulty: easy, effort: scored(2.9) }) });
     claudeBeneath(on, seen);
     await drain($.turn.step(turnStep("t1", model, "high")));
     await drain($.turn.step(turnStep("t2", model, "high")));
@@ -903,7 +904,7 @@ for (const [model, estimated] of [["claude-haiku-5-5", "medium"], ["claude-fable
 
 test("A held Haiku effort still applies when Jev fails on a later turn", async ($, on) => {
   const seen: { effort?: string }[] = [];
-  setup(on, { messages: [user("what does this project do?")], jev: inOrder({ difficulty: easy, effort: scored(0.2) }, 401) });
+  setup(on, { messages: [user("what does this project do?")], jev: inOrder({ difficulty: easy, effort: scored(1.6) }, 401) });
   claudeBeneath(on, seen);
   await drain($.turn.step(turnStep("t1", "claude-haiku-5-5", "high")));
   await drain($.turn.step(turnStep("t2", "claude-haiku-5-5", "high")));
@@ -932,7 +933,7 @@ test("A failed first Haiku turn is not re-asked and later turns keep the session
 
 test("A switch from Opus to Haiku starts a new first turn with its own estimate", async ($, on) => {
   const seen: { effort?: string }[] = [];
-  const { sent } = setup(on, { messages: [user("what does this project do?")], jev: inOrder({ difficulty: easy, effort: scored(0.2) }, { difficulty: easy, effort: scored(0.2) }) });
+  const { sent } = setup(on, { messages: [user("what does this project do?")], jev: inOrder({ difficulty: easy, effort: scored(0.2) }, { difficulty: easy, effort: scored(1.6) }) });
   claudeBeneath(on, seen);
   await drain($.turn.step(turnStep("t1", "claude-opus-5-5", "high")));
   await drain($.turn.step(turnStep("t2", "claude-haiku-5-5", "high")));

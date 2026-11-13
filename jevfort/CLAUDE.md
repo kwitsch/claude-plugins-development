@@ -100,9 +100,9 @@ subagents load it via ToolSearch), no skills, agents, command hooks or MCP serve
   p >= `MECHANICAL_FROM` 0.95 gives `minEffort`; a missing or non-finite score gives the unclamped `defaultEffort`; the
   score's confidence is NOT checked (the discarded scores were as accurate as the kept ones, and the threshold dropped
   every `high`/`xhigh` prompt; `MIN_CONFIDENCE` stays for the difficulty `route()`); otherwise `effortLevel(score)` (piecewise
-  linear, `EFFORT_CUTS` 1.05/1.9/2.5/3.1 land on 0.5/1.5/2.5/3.5, the last cut is provisional) plus the model bias, rounded,
-  clamped. The cuts are for `d1-3b` and the bias is not validated; the Haiku fallback of jev-api is not calibrated
-  either. `route` and `estimate` log entries carry `effortScore` and `effortConfidence` to recalibrate from real turns.
+  linear, `EFFORT_CUTS` 1.05/1.9/2.5/3.1 land on 0.5/1.5/2.5/3.5, the last cut is provisional), rounded, clamped. There is no model bias (removed in 0.9.0 by user decision: it was
+  never validated and shifted the calibrated cuts per model); the tool's `model` input stays for callers and is ignored by
+  the rule. The cuts are for `d1-3b`; the Haiku fallback of jev-api is not calibrated either. `route` and `estimate` log entries carry `effortScore` and `effortConfidence` to recalibrate from real turns.
   `tests/effort-fixture.test.mts` pins the acceptance numbers (A1 to A5). `words()` in `candidates.mts` splits at
   `[^\p{L}\p{N}]` so umlauts survive; German prompts still share few words with English skill descriptions.
   Opus/Sonnet sessions are estimated every turn; Haiku/Fable sessions only on each loop's first turn, whose estimate is

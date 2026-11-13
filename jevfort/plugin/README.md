@@ -51,7 +51,7 @@ Ported from [HeyCubit/effortless](https://github.com/HeyCubit/effortless). None 
 | `maxEffort`     | `low`, `medium`, `high`, `xhigh`, `max` | Highest effort to return                                        |
 | `prompt`        | text                                    | The prompt to estimate                                          |
 
-The result is JSON `{"effort": "<level>", "source": "jev" | "mechanical" | "fallback"}`: a purely mechanical prompt gets `minEffort`; otherwise Jev's effort score (mapped onto the levels by calibrated cut points, no confidence threshold) plus the model bias, kept within `minEffort`..`maxEffort`; when Jev is unreachable or gives no score, `defaultEffort`. A prompt counts as mechanical from a probability of 0.95. Invalid input is a tool error and sends no Jev request. The turn-start routing uses the same logic with the session model, the session effort as `defaultEffort` and the `minEffort`/`maxEffort` options.
+The result is JSON `{"effort": "<level>", "source": "jev" | "mechanical" | "fallback"}`: a purely mechanical prompt gets `minEffort`; otherwise Jev's effort score (mapped onto the levels by calibrated cut points, no confidence threshold) (the same for every model: there is no model bias, the `model` input is accepted but does not change the result), kept within `minEffort`..`maxEffort`; when Jev is unreachable or gives no score, `defaultEffort`. A prompt counts as mechanical from a probability of 0.95. Invalid input is a tool error and sends no Jev request. The turn-start routing uses the same logic with the session model, the session effort as `defaultEffort` and the `minEffort`/`maxEffort` options.
 
 ## Options
 
