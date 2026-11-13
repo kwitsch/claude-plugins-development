@@ -30,7 +30,7 @@ const NOT_DPRINT = ver("not dprint\n");
 const DENY = { deny: "spawn ENOENT" };
 const NEXT = "next-result";
 const T0 = Date.UTC(2026, 10, 5, 12);
-const NOT_INSTALLED_TEXT = "no dprint is installed (none on PATH, in ~/.dprint/bin or in the npx cache)";
+const NOT_INSTALLED_TEXT = "no dprint is installed (none on PATH, in $DPRINT_INSTALL/bin (default ~/.dprint/bin) or in the npx cache)";
 const COULD_NOT_START = `${PATH_DPRINT} could not start or took over 10 s to answer --version`;
 
 // Date is faked in every test so the 15 s toast window can be stepped past with vi.setSystemTime

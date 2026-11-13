@@ -1,6 +1,6 @@
 /**
- * The `format_pre`, `file_written`, `file_changed`, `cwd_changed`, `worktree_entered` and `worktree_exited` hook
- * handlers plus the pure helpers behind them.
+ * The `format_pre`, `file_written`, `file_changed`, `cwd_changed`, `worktree_entered`, `worktree_exited`,
+ * `bash_started`, `bash_finished` and `drain_notices` hook handlers plus the pure helpers behind them.
  *
  * @remarks
  * Helpers: {@link applyEdit} (Claude Code's Edit semantics, copied from universal-format), {@link lineDiff}
@@ -812,7 +812,7 @@ async function cachedWatchList(sc: Scope): Promise<Array<{ fp: string; real: str
  */
 const SLOW_STAT_MS = Number(process.env.DPRINT_HOOKS_SLOW_STAT_MS ?? "0.2");
 
-/** Files sampled to judge the stat cost, and the smallest list for which the judgement is made. */
+/** Files sampled to judge the stat cost, and the shortest list for which bash_finished asks git (shorter ones are stat-ed directly). */
 const STAT_SAMPLE = 16;
 
 /**

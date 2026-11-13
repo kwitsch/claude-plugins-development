@@ -6,7 +6,7 @@
  * `EnterWorktree`/`ExitWorktree` tool calls. The check runs detached after the event and swallows every error,
  * so it never blocks, delays or alters the event. A directory without a dprint config is left alone and nothing is
  * spawned; with one, the module picks the one dprint `find-dprint.mts` would pick (first `<PATH entry>/dprint` that
- * exists, else `~/.dprint/bin/dprint`, else the npx cache), runs `--version` on it via `$.process.run`, and only an
+ * exists, else `$DPRINT_INSTALL/bin/dprint` (default `~/.dprint/bin/dprint`), else the npx cache), runs `--version` on it via `$.process.run`, and only an
  * unusable pick (cannot start, exits non-zero, prints no version, older than `MIN_VERSION`) toasts, naming the
  * cause. No imports at all (hooks modules run without Node and the engine's declaration file is not
  * in the repo), so the used engine members are typed structurally below. The engine's static check wants every
@@ -41,8 +41,8 @@ const PROBE_RETRY_MS = 30_000;
 /** Minimum dprint version the format hooks need (`dprint lsp`). A copy of `MIN_VERSION` (`skills/dprint/check-dprint.mts`); `tests/notice.test.mts` fails on drift. */
 const MIN_VERSION = "0.50.0";
 
-/** The reason when no dprint exists on PATH, in `~/.dprint/bin` or in the npx cache (the wording lives only here). */
-const NOT_INSTALLED = "no dprint is installed (none on PATH, in ~/.dprint/bin or in the npx cache)";
+/** The reason when no dprint exists on PATH, in `$DPRINT_INSTALL/bin` (default `~/.dprint/bin`) or in the npx cache (the wording lives only here). */
+const NOT_INSTALLED = "no dprint is installed (none on PATH, in $DPRINT_INSTALL/bin (default ~/.dprint/bin) or in the npx cache)";
 
 /** When the last toast was shown (`Date.now()`); the cause is machine-wide, so one toast per {@link TOAST_MS} covers every directory. */
 let shownAt: number | undefined;
@@ -171,7 +171,7 @@ async function judge($: Engine, argv: string[], cwd: string, name: string): Prom
 
 /**
  * Why the dprint the MCP server's `findDprint` would pick is not usable, `null` when it is. Picks exactly one, in
- * `find-dprint.mts`'s order: the first `<PATH entry>/dprint` that exists, else `$HOME/.dprint/bin/dprint` if it
+ * `find-dprint.mts`'s order: the first `<PATH entry>/dprint` that exists, else `$DPRINT_INSTALL/bin/dprint` (default `$HOME/.dprint/bin/dprint`) if it
  * exists, else the npx cache; only the pick is run (`--version`), so a broken PATH dprint is never masked by a
  * working later one, as `findDprint` would not mask it either. Unlike `find-dprint.mts` (which runs on a format
  * request) this runs unprompted on every session start and cd, so npx gets `--no` (no download) and every probe runs

@@ -10,7 +10,7 @@ const TOAST_MS = 15e3;
 const PROBE_TIMEOUT_MS = 1e4;
 const PROBE_RETRY_MS = 3e4;
 const MIN_VERSION = "0.50.0";
-const NOT_INSTALLED = "no dprint is installed (none on PATH, in ~/.dprint/bin or in the npx cache)";
+const NOT_INSTALLED = "no dprint is installed (none on PATH, in $DPRINT_INSTALL/bin (default ~/.dprint/bin) or in the npx cache)";
 let shownAt;
 let probe = null;
 let dprintRuns = false;
