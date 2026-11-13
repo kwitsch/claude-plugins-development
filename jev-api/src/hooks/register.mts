@@ -186,7 +186,15 @@ const HAIKU_SYSTEM = `You stand in for a text classifier. Answer every question 
 An answer is, by question type:
 - noul: {"type":"noul","noul":<probability 0..1 that the answer is yes>}
 - choice: {"type":"choice","choice":"<exactly one option name>","confidence":<0..1>,"probabilities":{"<option>":<0..1>,...}} with every option listed
-- score: {"type":"score","score":<number from 0 to levels-1, fractional between levels>,"confidence":<0..1>,"probabilities":{"0":<0..1>,"1":<0..1>,...}} with every level index listed`;
+- score: {"type":"score","score":<number from 0 to levels-1, fractional between levels>,"confidence":<0..1>,"probabilities":{"0":<0..1>,"1":<0..1>,...}} with every level index listed
+Calibration: be a calibrated estimator, not a cautious one. For noul use the whole range: 0.97 to 0.99 when the answer is clearly yes, 0.01 to 0.03 when it is clearly no, values in between only when the case is genuinely open. For choice and score spread the probabilities honestly over neighbouring options; a score is the probability-weighted mean of the level indexes, so it is rarely a whole number. For a score over ordered levels pick the lowest level that fully handles the case: most everyday cases sit in the lower half of the scale and the top two levels are rare, so when two neighbouring levels fit, give the lower one more weight.`;
+
+/**
+ * How far Haiku's `noul` probability is pushed away from 0.5 (the logit is multiplied by this). Measured 2026-11-13
+ * on 120 effort prompts: Haiku says 0.8 to 0.93 where Jev says 0.95 or more, so with 2.5 the "purely mechanical"
+ * share of low prompts goes from 7 to 17 of 24 (Jev: 22) and no medium prompt crosses 0.95.
+ */
+const NOUL_STRETCH = 2.5;
 
 /** The `state` input property shared by the tools. */
 const STATE = { type: "string", description: "The text the question is about." };
@@ -535,7 +543,30 @@ function hasProbabilities(v: unknown, keys: string[]): v is Record<string, numbe
 }
 
 /**
- * Checks one answer Haiku gave against the System One answer format and rebuilds it without extra fields.
+ * Pushes a probability away from 0.5 in logit space by {@link NOUL_STRETCH}: Haiku's verbal probabilities are
+ * timid next to Jev's.
+ *
+ * @param p - A probability from 0 to 1; clamped to 0.001..0.999 so the logit stays finite.
+ * @returns The stretched probability; 0.5 stays 0.5.
+ */
+function stretch(p: number): number {
+  const c = Math.min(Math.max(p, 0.001), 0.999);
+  return 1 / (1 + Math.exp(-NOUL_STRETCH * Math.log(c / (1 - c))));
+}
+
+/**
+ * Rounds to four decimals (the answers are model estimates; more digits mean nothing).
+ *
+ * @param v - The number.
+ * @returns The rounded number.
+ */
+function round4(v: number): number {
+  return Math.round(v * 10000) / 10000;
+}
+
+/**
+ * Checks one answer Haiku gave against the System One answer format and rebuilds it without extra fields, calibrated
+ * toward Jev: a `noul` is stretched ({@link stretch}) and a score is the mean level index of the probabilities.
  *
  * @param q - The question.
  * @param a - The answer as parsed from Haiku's reply.
@@ -543,7 +574,7 @@ function hasProbabilities(v: unknown, keys: string[]): v is Record<string, numbe
  */
 function checkAnswer(q: Question, a: unknown): Record<string, unknown> | undefined {
   if (!isRecord(a) || a["type"] !== q.type) return undefined;
-  if (q.type === "noul") return isUnit(a["noul"]) ? { type: "noul", noul: a["noul"] } : undefined;
+  if (q.type === "noul") return isUnit(a["noul"]) ? { type: "noul", noul: round4(stretch(a["noul"])) } : undefined;
   const { confidence, probabilities } = a;
   if (!isUnit(confidence)) return undefined;
   if (q.type === "choice") {
@@ -553,9 +584,14 @@ function checkAnswer(q: Question, a: unknown): Record<string, unknown> | undefin
     return { type: "choice", choice: picked, confidence, probabilities: Object.fromEntries(options.map((o) => [o, probabilities[o]])) };
   }
   const levels = q.criteria.map((_, i) => String(i));
-  const value = a["score"];
-  if (typeof value !== "number" || !Number.isFinite(value) || value < 0 || value > levels.length - 1 || !hasProbabilities(probabilities, levels)) return undefined;
-  return { type: "score", score: value, confidence, legend: Object.fromEntries(q.criteria.map((l, i) => [i, l])), probabilities: Object.fromEntries(levels.map((l) => [l, probabilities[l]])) };
+  if (!hasProbabilities(probabilities, levels)) return undefined;
+  const total = levels.reduce((sum, l) => sum + probabilities[l], 0);
+  if (!(total > 0)) return undefined;
+  // Like Jev, the score is the mean level index of the (normalized) probabilities; Haiku's own `score` field is ignored
+  // (it is rounded toward whole levels and inflated: measured 2026-11-13).
+  const normalized = levels.map((l) => probabilities[l] / total);
+  const mean = normalized.reduce((sum, p, i) => sum + i * p, 0);
+  return { type: "score", score: round4(mean), confidence, legend: Object.fromEntries(q.criteria.map((l, i) => [i, l])), probabilities: Object.fromEntries(levels.map((l, i) => [l, round4(normalized[i])])) };
 }
 
 /**

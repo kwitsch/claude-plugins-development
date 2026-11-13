@@ -84,7 +84,15 @@ function haiku(on: On, reply: () => Completion) {
 const HAIKU_ANSWERS: Record<string, unknown> = {
   noul: { type: "noul", noul: 0.9 },
   choice: { type: "choice", choice: "greeting", confidence: 0.8, probabilities: { greeting: 0.8, question: 0.2 } },
-  score: { type: "score", score: 1.6, confidence: 0.4, probabilities: { 0: 0.04, 1: 0.31, 2: 0.65 } },
+  // Haiku's own `score` is ignored: the score is derived from the probabilities (here 0.2 + 2 * 0.7 = 1.6).
+  score: { type: "score", score: 3, confidence: 0.4, probabilities: { 0: 0.1, 1: 0.2, 2: 0.7 } },
+};
+
+// What the tool returns for those answers: noul stretched away from 0.5 (logit x 2.5: 0.9 -> 0.9959), score derived.
+const CALIBRATED: Record<string, unknown> = {
+  noul: { type: "noul", noul: 0.9959 },
+  choice: HAIKU_ANSWERS["choice"],
+  score: { type: "score", score: 1.6, confidence: 0.4, legend: { 0: "negative", 1: "neutral", 2: "positive" }, probabilities: { 0: 0.1, 1: 0.2, 2: 0.7 } },
 };
 
 for (const type of ["noul", "choice", "score"]) {
@@ -92,7 +100,7 @@ for (const type of ["noul", "choice", "score"]) {
     const { fetched } = setup(on, { env: { TYPESAFE_API_KEY: "  ", JEV_URL: "\t" } });
     const asked = haiku(on, () => said("```json\n" + JSON.stringify({ answers: { answer: HAIKU_ANSWERS[type] } }) + "\n```"));
     const r = await call($, type);
-    expect(JSON.parse(r.result ?? "null")).toMatchObject(HAIKU_ANSWERS[type] as object);
+    expect(JSON.parse(r.result ?? "null")).toMatchObject(CALIBRATED[type] as object);
     expect(fetched).toHaveLength(0);
     expect(asked).toHaveLength(1);
     expect(asked[0]).toMatchObject({ model: "claude-haiku-5-5" });
@@ -104,7 +112,7 @@ test("batch without any env var is answered by Haiku in question order", async (
   setup(on, { env: {} });
   haiku(on, () => said(JSON.stringify({ answers: { q0: HAIKU_ANSWERS["noul"], q1: HAIKU_ANSWERS["choice"] } })));
   const r = (await $.tool.call({ tool: TOOL("batch"), state: "Hello", questions: [{ type: "noul", instructions: "Greeting?" }, { type: "choice", instructions: "What?", criteria: { greeting: "hi", question: "?" } }] })) as { result?: string };
-  expect(JSON.parse(r.result ?? "null")).toEqual([HAIKU_ANSWERS["noul"], HAIKU_ANSWERS["choice"]]);
+  expect(JSON.parse(r.result ?? "null")).toEqual([CALIBRATED["noul"], CALIBRATED["choice"]]);
 });
 
 test("a Haiku reply that does not fit the System One format is an error, never a made-up answer", async ($, on) => {
@@ -120,7 +128,30 @@ test("a Haiku reply that does not fit the System One format is an error, never a
   await bad({ type: "noul", noul: 1.5 });
   await bad({ type: "score", noul: 0.5 });
   await bad({ type: "choice", choice: "other", confidence: 1, probabilities: { greeting: 1 } }, "choice");
-  await bad({ type: "score", score: 5, confidence: 1, probabilities: { 0: 1, 1: 0, 2: 0 } }, "score");
+  await bad({ type: "score", confidence: 1, probabilities: { 0: 0, 1: 0, 2: 0 } }, "score");
+});
+
+test("Haiku's noul is stretched away from 0.5 and its score is the mean of its normalized probabilities", async ($, on) => {
+  setup(on, { env: {} });
+  let reply: unknown;
+  haiku(on, () => said(JSON.stringify({ answers: { answer: reply } })));
+  const ask = async (type: string, answer: unknown) => {
+    reply = answer;
+    return JSON.parse((await call($, type)).result ?? "null") as Record<string, unknown>;
+  };
+  expect((await ask("noul", { type: "noul", noul: 0.5 }))["noul"]).toBe(0.5);
+  expect((await ask("noul", { type: "noul", noul: 0.1 }))["noul"]).toBe(0.0041);
+  expect((await ask("noul", { type: "noul", noul: 0.8 }))["noul"]).toBeGreaterThan(0.95);
+  // Probabilities that sum to 2 are normalized: mean (0.5 + 2 * 1) / 2 = 1.25; Haiku's own score of 4 is ignored.
+  expect(await ask("score", { type: "score", score: 4, confidence: 0.5, probabilities: { 0: 0.5, 1: 0.5, 2: 1 } })).toMatchObject({ score: 1.25, probabilities: { 0: 0.25, 1: 0.25, 2: 0.5 } });
+});
+
+test("the Haiku prompt carries the calibration guidance", async ($, on) => {
+  setup(on, { env: {} });
+  const asked = haiku(on, () => said(JSON.stringify({ answers: { answer: HAIKU_ANSWERS["noul"] } })));
+  await call($, "noul");
+  expect(String(asked[0]["system"])).toMatch(/calibrated estimator/);
+  expect(String(asked[0]["system"])).toMatch(/lowest level that fully handles the case/);
 });
 
 test("Haiku not answering is an error", async ($, on) => {
