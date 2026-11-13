@@ -73,7 +73,7 @@ interface RpcReply {
   /** The request id. */
   id: number;
   /** The result (initialize, tools/list or tools/call fields). */
-  result: { serverInfo?: unknown; tools: { name: string }[]; structuredContent: ToolOut };
+  result: { serverInfo?: unknown; tools: { name: string }[]; structuredContent: ToolOut; resultType?: string };
 }
 
 const servers: ReturnType<typeof spawn>[] = [];
@@ -215,6 +215,56 @@ test("initialize reports dprint-hooks with the manifest version; tools/list has 
       "drain_notices",
     ],
   );
+});
+
+/** The `_meta` envelope every 2026-07-28 request carries. */
+const MODERN_META = {
+  "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+  "io.modelcontextprotocol/clientInfo": { name: "test", version: "0" },
+  "io.modelcontextprotocol/clientCapabilities": {},
+};
+
+test("2026-07-28: server/discover answers without initialize and names the versions, capabilities and serverInfo", async () => {
+  const s = startServer();
+  const r = (await s.rpc("server/discover", { _meta: MODERN_META })).result as Record<string, unknown>;
+  const manifest = JSON.parse(readFileSync(path.join(PLUGIN, ".claude-plugin/plugin.json"), "utf8"));
+  assert.equal(r.resultType, "complete");
+  assert.deepEqual(r.supportedVersions, ["2026-07-28"]);
+  assert.deepEqual(r.capabilities, { tools: {} });
+  assert.deepEqual(r._meta, { "io.modelcontextprotocol/serverInfo": { name: "dprint-hooks", version: manifest.version } });
+  assert.equal(typeof r.ttlMs, "number");
+  assert.equal(r.cacheScope, "public");
+});
+
+test("2026-07-28: tools/list and tools/call carry the modern envelope, the handler result is the legacy one", async () => {
+  stubDprint();
+  const s = startServer();
+  const legacy = (await s.rpc("tools/list", {})).result as Record<string, unknown>;
+  assert.equal("resultType" in legacy, false);
+  const list = (await s.rpc("tools/list", { _meta: MODERN_META })).result as unknown as { tools: unknown[] } & Record<string, unknown>;
+  assert.equal(list.resultType, "complete");
+  assert.equal(typeof list.ttlMs, "number");
+  assert.equal(list.cacheScope, "public");
+  assert.deepEqual(list.tools, (legacy as typeof list).tools);
+  const file = path.join(repo, "a.ts");
+  const args = { cwd: repo, agent_id: "", session_id: "s", scratchpad_dir: "", tool_name: "Write", tool_input: { file_path: file, content: "x  \n" } };
+  const modern = (await s.rpc("tools/call", { name: "format_pre", arguments: args, _meta: MODERN_META })).result as Record<string, unknown>;
+  assert.equal(modern.resultType, "complete");
+  assert.deepEqual(modern.structuredContent, await s.tool("format_pre", args));
+  assert.deepEqual(JSON.parse((modern.content as { text: string }[])[0].text), modern.structuredContent);
+});
+
+test("2026-07-28: an unsupported version answers -32022 with the supported list; unknown methods -32601", async () => {
+  const s = startServer();
+  const bad = await s.rpc("tools/list", { _meta: { ...MODERN_META, "io.modelcontextprotocol/protocolVersion": "1900-01-01" } });
+  const err = (bad as unknown as { error: { code: number; data: unknown } }).error;
+  assert.equal(err.code, -32022);
+  assert.deepEqual(err.data, { supported: ["2026-07-28"], requested: "1900-01-01" });
+  const malformed = await s.rpc("tools/list", { _meta: { ...MODERN_META, "io.modelcontextprotocol/protocolVersion": 20260728 } });
+  assert.equal((malformed as unknown as { error: { code: number } }).error.code, -32022);
+  const unknown = await s.rpc("resources/list", { _meta: MODERN_META });
+  assert.equal((unknown as unknown as { error: { code: number } }).error.code, -32601);
+  assert.equal((await s.rpc("ping", { _meta: MODERN_META })).result.resultType, "complete");
 });
 
 test("excluded and out-of-root paths are never formatted", async () => {

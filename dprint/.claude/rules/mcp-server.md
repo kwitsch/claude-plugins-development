@@ -24,6 +24,7 @@ sources; this rule records behaviour and constraints only.
   the tools (ToolSearch finds none), `mcp_tool` hooks still call them. Live-checked on 2.1.323 with a local stdio
   server (a deny rule behaves the same but a plugin cannot ship one); the docs name the field only for cloud sessions,
   so `mcp-server.test.mts` pins it.
+- The server is dual-era (rule `.claude/rules/mcp-dual-era.md` at the repo root): 2025-11-25 `initialize`, and 2026-07-28 `server/discover` plus modern `ping`/`tools/list`/`tools/call` with `resultType`, `ttlMs`/`cacheScope`, serverInfo meta; an unsupported `_meta` version answers `-32022`. No tasks (every tool is a short hook call). `mcp-server.test.mts` covers both eras.
 
 ## Modules
 
