@@ -6,8 +6,6 @@ priority: none
 area: dprint/src/mcp/lsp.mts (DprintLsp.queue, DprintLsp.format), dprint/src/mcp/format.mts (client, fileChanged key "\0file_changed")
 ---
 
-# F11 Do not replace the per-client format queue or the second file_changed child
-
 ## Status
 
 Closed 2026-11-13, no change: `DprintLsp.queue` and the separate `file_changed` client are still the design (`formatOnDisk`, now also used by `bash_finished`, uses the second child).

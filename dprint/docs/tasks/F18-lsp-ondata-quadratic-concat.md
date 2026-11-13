@@ -6,8 +6,6 @@ priority: low
 area: dprint/src/mcp/lsp.mts (DprintLsp.onData, buf, start, broken)
 ---
 
-# F18 Linear frame accumulation in DprintLsp.onData
-
 ## Status
 
 Done in 0.12.1: `DprintLsp.onData` collects chunks in `chunks` and joins once per frame (`need` = bytes still missing); test "chunked lsp frames ... reassembled byte-exact" (stub mode `chunked`, 880 KB body).

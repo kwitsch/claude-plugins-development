@@ -6,8 +6,6 @@ priority: low
 area: dprint/src/mcp/format.mts (formatPre, trimToEdit, lineDiff); docs: dprint/plugin/README.md
 ---
 
-# F08 Large not-yet-formatted files make every Edit slow (documented only)
-
 ## Status
 
 Docs-only. No code change for F08 itself. `dprint/plugin/README.md` states: "Every Edit formats the whole file, so Edits on large files that were never formatted are slow; run `/dprint:dprint fmt` once on them." `dprint/CLAUDE.md` has no sentence on it. F01+F03 already cut the formatted 3000-line case from ~3 requests to 1 (~1.75 s -> ~0.55 s), which is the only code-side relief.

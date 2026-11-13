@@ -6,8 +6,6 @@ priority: none
 area: dprint/src/mcp/lsp.mts (DprintLsp.formatNow, noteTimeout, failedAt, COOLDOWN_MS, timeoutMs option)
 ---
 
-# F14 Back off after an lsp request timeout
-
 ## Status
 
 Done. After a request timeout (or an initialize timeout), formats of the SAME document (key: file URI, per `DprintLsp` client) fail at once for 60 s (`COOLDOWN_MS`). Test-only constructor option `timeoutMs` (default 30 s `REQUEST_TIMEOUT_MS`). Not done: capping `dprint file-paths` in watch-paths.mts at ~3 s (see Approach).

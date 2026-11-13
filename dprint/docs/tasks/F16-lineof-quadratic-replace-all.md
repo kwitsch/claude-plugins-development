@@ -6,8 +6,6 @@ priority: none
 area: dprint/src/mcp/format.mts (lineCursor, formatPre editLines computation)
 ---
 
-# F16 One-pass line counter for replace_all offsets
-
 ## Status
 
 Done. The per-occurrence `lineOf(text, idx)` (rescan from offset 0) was replaced by the module-private one-pass `lineCursor(text)`, which requires non-decreasing offsets.

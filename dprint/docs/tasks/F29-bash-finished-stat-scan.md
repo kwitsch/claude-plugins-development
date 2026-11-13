@@ -1,16 +1,14 @@
 ---
 id: F29
 title: Bound the per-Bash watch-list mtime scan in bash_finished
-status: open
+status: done
 priority: low
 area: dprint/src/mcp/format.mts (bashFinished, cachedWatchList, watchCache), dprint/src/mcp/watch-list.mts (dprintFilePaths)
 ---
 
-# F29 Bound the per-Bash watch-list mtime scan in bash_finished
-
 ## Status
 
-Open. Found in the 2026-11-13 evaluation ([../EVALUATION-2026-11-13.md](../EVALUATION-2026-11-13.md)), plugin 0.13.0. Not prototyped.
+Done in 0.13.2 (adaptive). `bash_finished` samples 16 evenly spread files of the list; only when the mean stat is above 0.2 ms (`SLOW_STAT_MS`, `DPRINT_HOOKS_SLOW_STAT_MS` for tests) it asks git for the changed files (`gitChanged`: one `git status --porcelain -z --no-renames --untracked-files=normal` plus `git rev-parse --show-toplevel`, an untracked directory matches everything below it) and stats only those. Fast file systems keep the plain scan: the git path costs 68 ms per call on the 4951-file ext4 repo (git spawns) against 14 ms for the scan, so a flat switch would have been a regression. Measured on a real 9P mount (`/mnt/c/Users/Public`, WSL2, 1500-file git repo, node 24, dprint 0.64.3): 3.7 s per Bash call with the stat scan, 0.9 s with the git path; ext4 unchanged (14 ms). Same measurement found a second defect, fixed together: mtimes on 9P lag `Date.now()` by about 1.5 s, so the 1 s slack missed every change made during the Bash call; the slack is 5 s on slow file systems (`MTIME_SLACK_MS`). The first call per cwd lists the files with `dprint file-paths`: 11 s on that 9P repo, close to the 10 s listing timeout. Tests: "bash_finished on a slow file system (git decides the candidates)..." (forced with the env override). Earlier state: ([../EVALUATION-2026-11-13.md](../EVALUATION-2026-11-13.md)), plugin 0.13.0. Not prototyped.
 
 ## Problem
 

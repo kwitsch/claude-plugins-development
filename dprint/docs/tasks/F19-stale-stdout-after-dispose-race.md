@@ -6,8 +6,6 @@ priority: none
 area: dprint/src/mcp/lsp.mts (DprintLsp.start stdout handler)
 ---
 
-# F19 Ignore stdout of a replaced dprint child
-
 ## Status
 
 Done. The child's stdout `data` handler in `start()` only calls `onData` when `this.child === child`.

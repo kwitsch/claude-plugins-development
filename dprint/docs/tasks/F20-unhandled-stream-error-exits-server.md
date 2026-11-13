@@ -6,8 +6,6 @@ priority: none
 area: dprint/src/mcp/server.mts (startServer, process.stdout/stderr), dprint/src/mcp/lsp.mts (DprintLsp.start)
 ---
 
-# F20 Optional no-op error listeners on server stdout/stderr
-
 ## Status
 
 Closed 2026-11-13, not done: a no-op stream error listener could leave an orphaned server process; the verdict of this document stands.

@@ -6,8 +6,6 @@ priority: none
 area: dprint/src/mcp/format.mts (trimToEdit)
 ---
 
-# F17 Cap trimToEdit uniqueness widening
-
 ## Status
 
 Done, with a different failure mode than the analysis proposed: `trimToEdit` widens at most 1000 single-line steps; at step 1001 it jumps once to the widest span available (`lo`..`hi`, bounded by neighbouring non-kept hunks) instead of searching per line. Highly repetitive files therefore still format, as one large Edit, rather than failing open.

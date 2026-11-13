@@ -6,8 +6,6 @@ priority: none
 area: dprint/src/mcp/format.mts (formatPre), dprint/src/mcp/lsp.mts (DprintLsp.formatNow)
 ---
 
-# F02 Format YAML Edits (range answer null no longer means already formatted)
-
 ## Status
 
 Done by the F01 change (release dprint 0.8.0): the Edit path asks for whole-document `formatting`, so `null` from a plugin without range support can no longer be mistaken for "no change". Test: "rangeFormatting answering null (yaml plugin) -> Edit still formatted".

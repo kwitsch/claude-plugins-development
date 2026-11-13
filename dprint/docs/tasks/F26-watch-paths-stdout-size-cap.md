@@ -6,8 +6,6 @@ priority: none
 area: dprint/src/mcp/watch-paths.mts (main, WATCH_LIMIT)
 ---
 
-# F26 Check whether Claude Code's hook stdout cap truncates huge watchPaths JSON
-
 ## Status
 
 Closed 2026-11-13: measurement record (not truncated on Claude Code 2.1.316), no code action; re-test after a Claude Code upgrade. `WATCH_LIMIT` now lives in `watch-list.mts`.

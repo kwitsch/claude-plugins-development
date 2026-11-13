@@ -781,12 +781,94 @@ async function cachedWatchList(sc: Scope): Promise<Array<{ fp: string; real: str
 }
 
 /**
+ * Mean cost (ms) of one `stat` above which a file system counts as slow (9P mounts of Windows drives: 0.7-1.6 ms;
+ * ext4: 0.003-0.005 ms). `DPRINT_HOOKS_SLOW_STAT_MS` overrides it (tests); a negative value forces the slow path.
+ */
+const SLOW_STAT_MS = Number(process.env.DPRINT_HOOKS_SLOW_STAT_MS ?? "0.2");
+
+/** Files sampled to judge the stat cost, and the smallest list for which the judgement is made. */
+const STAT_SAMPLE = 16;
+
+/**
+ * Slack (ms) when comparing a file's mtime with the start of the Bash call: coarse timestamps on ordinary file
+ * systems, and on slow ones (9P mounts of Windows drives, mtimes lag `Date.now()` by about 1.5 s: measured on
+ * `/mnt/c` in WSL2) the clock offset. A file that changed a little before the call and is formatted by it too is
+ * harmless: FileChanged would format it anyway.
+ */
+const MTIME_SLACK_MS = { fast: 1000, slow: 5000 };
+
+/**
+ * Whether a stat per file of this list is slow enough that asking git for the changed files is cheaper.
+ *
+ * @remarks
+ * git costs about 8 ms of spawns on a fast file system (68 ms measured with 5000 untracked files), so it is only used
+ * when a sample of evenly spread files shows slow stats; a list shorter than the sample is always stat-ed.
+ *
+ * @param list - The watch list of the cwd.
+ * @returns `true` when the mean stat time of the sample exceeds {@link SLOW_STAT_MS}.
+ */
+function statsAreSlow(list: Array<{ fp: string }>): boolean {
+  if (SLOW_STAT_MS < 0) return true;
+  if (list.length < STAT_SAMPLE) return false;
+  const step = Math.floor(list.length / STAT_SAMPLE);
+  const t0 = performance.now();
+  for (let i = 0; i < STAT_SAMPLE; i++) {
+    try {
+      statSync(list[i * step].fp);
+    } catch {
+      // deleted meanwhile: still a measured round trip
+    }
+  }
+  return (performance.now() - t0) / STAT_SAMPLE > SLOW_STAT_MS;
+}
+
+/**
+ * The files git sees as changed in a cwd: a predicate over real file paths, so `bash_finished` stats only those
+ * instead of every file of a big watch list (a stat is slow on 9P mounts, see {@link statsAreSlow}).
+ *
+ * @remarks
+ * One `git status --porcelain -z --no-renames --untracked-files=normal` plus `git rev-parse --show-toplevel`
+ * (paths of the status are relative to the toplevel). Modified, added, deleted and untracked entries count; an
+ * untracked directory is reported as one entry ending in `/` and matches every file below it. Clean files are left
+ * out on purpose: a file the Bash call rewrote back to its index content needs no format.
+ *
+ * @param root - Effective cwd.
+ * @returns The predicate, or `null` without git, outside a repository or on any error (the caller then checks every
+ * file).
+ */
+async function gitChanged(root: string): Promise<((real: string) => boolean) | null> {
+  try {
+    const opts = { cwd: root, encoding: "utf8" as const, timeout: 10_000, maxBuffer: 64 * 1024 * 1024 };
+    const [top, status] = await Promise.all([
+      execFileAsync("git", ["--no-optional-locks", "rev-parse", "--show-toplevel"], opts),
+      execFileAsync("git", ["--no-optional-locks", "status", "--porcelain", "-z", "--no-renames", "--untracked-files=normal"], opts),
+    ]);
+    const base = top.stdout.trim();
+    if (!base) return null;
+    const files = new Set<string>();
+    const dirs: string[] = [];
+    for (const entry of status.stdout.split("\0")) {
+      if (entry.length < 4) continue; // "XY path"
+      const rel = entry.slice(3);
+      const abs = path.join(base, rel);
+      if (rel.endsWith("/")) dirs.push(abs.endsWith(path.sep) ? abs : abs + path.sep); // path.join keeps the trailing slash
+      else files.add(abs);
+    }
+    return (real) => files.has(real) || dirs.some((d) => real.startsWith(d));
+  } catch {
+    return null;
+  }
+}
+
+/**
  * PostToolUse `Bash` hook: format the watched files the Bash call changed, right now, and tell the model.
  *
  * @remarks
  * FileChanged fires only after the Bash call ended, so its tool output shows the unformatted state. Every file of
  * the (cached) watch list with an mtime after the {@link bashStarted} time (minus 1 s for coarse file systems) goes
- * through {@link formatOnDisk}; false positives end at its digest and git checks. {@link fileChanged} later sees the
+ * through {@link formatOnDisk}; on a file system with slow stats ({@link statsAreSlow}) only the files git reports as
+ * changed ({@link gitChanged}) are stat-ed.
+ * false positives end at its digest and git checks. {@link fileChanged} later sees the
  * recorded digest and stays silent, so nothing is formatted or reported twice. Does nothing without a preceding
  * `bash_started`, a dprint config or a watch list.
  *
@@ -801,9 +883,14 @@ export async function bashFinished(args: BashFinishedInput = {}, signal?: AbortS
     bashStart.delete(bashKey(args));
     const sc = scopeOf(args);
     if (since === undefined || !sc || findConfig(sc.root) === null) return {};
-    const touched = (await cachedWatchList(sc)).filter((f) => {
+    const list = await cachedWatchList(sc);
+    // on a slow file system stat only what git reports as changed; otherwise (and without git) every file is checked
+    const slow = statsAreSlow(list);
+    const changed = slow ? await gitChanged(sc.root) : null;
+    const slack = slow ? MTIME_SLACK_MS.slow : MTIME_SLACK_MS.fast;
+    const touched = (changed ? list.filter((f) => changed(f.real)) : list).filter((f) => {
       try {
-        return statSync(f.fp).mtimeMs > since - 1000;
+        return statSync(f.fp).mtimeMs > since - slack;
       } catch {
         return false; // deleted meanwhile
       }

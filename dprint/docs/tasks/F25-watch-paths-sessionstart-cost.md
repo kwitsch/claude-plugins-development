@@ -6,8 +6,6 @@ priority: low
 area: dprint/src/mcp/format.mts (realish), dprint/src/mcp/watch-paths.mts (watchList, execFileSync timeout)
 ---
 
-# F25 Cut watch-paths SessionStart/CwdChanged cost on large repos
-
 ## Status
 
 Done in 0.12.1: `realish` uses `realpathSync.native` (one syscall), `dprintFilePaths` returns the list sorted (the 10 s timeout stays: a shorter one makes a slow first listing fail and be cached empty for the session).

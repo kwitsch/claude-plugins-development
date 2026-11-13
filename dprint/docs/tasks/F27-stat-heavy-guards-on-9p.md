@@ -6,8 +6,6 @@ priority: low
 area: dprint/src/skills/dprint/find-config.mts (findConfig), dprint/src/mcp/format.mts (realish, scopeOf, fileWritten, fileChanged, formatPre)
 ---
 
-# F27 Cache findConfig results to cut stat latency on 9P repos
-
 ## Status
 
 Done in 0.12.1: `findConfig` caches found configs per start directory and re-checks them with one `existsSync`; `null` is never cached, so a config created mid-session counts at once. The `realish` cache was not added (symlink safety).

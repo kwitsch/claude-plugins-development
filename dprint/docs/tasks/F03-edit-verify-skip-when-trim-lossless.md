@@ -6,8 +6,6 @@ priority: none
 area: dprint/src/mcp/format.mts (formatPre, trimToEdit)
 ---
 
-# F03 Skip the Edit verification formats when the trim reproduces dprint's output
-
 ## Status
 
 Done (release dprint 0.8.0). In the `formatPre` Edit branch the verification is `if (R !== out && out !== ((await lsp.format(uri, R)) ?? R)) return {};`: when R === out no extra format runs. A changed Edit on a clean file therefore costs exactly one lsp request.

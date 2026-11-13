@@ -69,5 +69,5 @@ sources; this rule records behaviour and constraints only.
   intended edit; skipped when the trim reproduces dprint's output, else one extra whole-document `formatting`. CRLF
   files are trimmed on their LF view.
 - `formatOnDisk` is the shared core of `fileChanged` (queues the file for `drainNotices`) and `bashFinished` (reports
-  directly; it formats every cached watch-list file with mtime > `bash_started` − 1 s, so the Bash result is not
+  directly; it formats every cached watch-list file with mtime > `bash_started` − 1 s (− 5 s on slow file systems; there only the files `git status` reports are stat-ed, chosen by a 16-file stat sample, `DPRINT_HOOKS_SLOW_STAT_MS` overrides the 0.2 ms threshold in tests), so the Bash result is not
   stale; the digest in `written` makes the later FileChanged a no-op). FileChanged, `file_written` and `drain_notices` are keyed by `overrideKey`, the Bash start by `bashKey` (`overrideKey` plus `tool_use_id`, so overlapping Bash calls keep their own start; entries older than an hour are dropped).

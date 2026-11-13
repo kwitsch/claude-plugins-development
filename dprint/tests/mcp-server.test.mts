@@ -1266,6 +1266,50 @@ test("bash_finished formats a file the Bash call changed and names it; a later f
   assert.deepEqual(await s.tool("drain_notices", { hook_event_name: "UserPromptSubmit", cwd: repo, ...SESSION }), {});
 });
 
+test("bash_finished on a slow file system (git decides the candidates): stats only changed files; an untracked directory and an old dirty file are handled", async (t) => {
+  const git = spawnSync("which", ["git"], { encoding: "utf8" }).stdout?.trim();
+  if (!git) return t.skip("git not on PATH");
+  symlinkSync(git, path.join(bin, "git"));
+  // the file list: sub/b.ts (in an untracked directory), a.ts (tracked, dirty since before the Bash call), c.ts (clean)
+  writeFileSync(
+    path.join(bin, "dprint"),
+    [
+      "#!/usr/bin/env bash",
+      `if [ "$1" = "file-paths" ]; then printf '%s\\n' "$PWD/sub/b.ts" "$PWD/a.ts" "$PWD/c.ts" "$PWD/d.ts"; exit 0; fi`,
+      `exec node "${path.join(tmp, "stub-lsp.mjs")}" ok`,
+      "",
+    ].join("\n"),
+  );
+  chmodSync(path.join(bin, "dprint"), 0o755);
+  const g = (...args: string[]) => {
+    const r = spawnSync(git, ["-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false", ...args], { cwd: repo, encoding: "utf8" });
+    assert.equal(r.status, 0, r.stderr);
+  };
+  writeFileSync(path.join(repo, "a.ts"), "a  \n");
+  writeFileSync(path.join(repo, "c.ts"), "c  \n");
+  writeFileSync(path.join(repo, "d.ts"), "d  \n");
+  g("init", "-q");
+  g("add", ".");
+  g("commit", "-qm", "init");
+  writeFileSync(path.join(repo, "a.ts"), "a2  \n"); // dirty, but before the Bash call
+  const old = new Date(Date.now() - 60_000);
+  utimesSync(path.join(repo, "a.ts"), old, old);
+  writeFileSync(path.join(repo, "d.ts"), "d2  \n"); // dirty, mtime 3 s before the call: inside the slow file system's slack
+  const recent = new Date(Date.now() - 3000);
+  utimesSync(path.join(repo, "d.ts"), recent, recent);
+  const s = startServer({ env: { DPRINT_HOOKS_SLOW_STAT_MS: "-1" } }); // forces the slow-file-system path (git decides the candidates);
+  await s.tool("bash_started", SESSION);
+  mkdirSync(path.join(repo, "sub"));
+  writeFileSync(path.join(repo, "sub/b.ts"), "b  \n"); // untracked directory: git reports "sub/"
+  const r = await s.tool("bash_finished", { cwd: repo, ...SESSION });
+  assert.match(r.hookSpecificOutput.additionalContext, /"sub\/b\.ts"/);
+  assert.ok(!r.hookSpecificOutput.additionalContext.includes("a.ts"), r.hookSpecificOutput.additionalContext);
+  assert.equal(readFileSync(path.join(repo, "sub/b.ts"), "utf8"), "b\n");
+  assert.equal(readFileSync(path.join(repo, "d.ts"), "utf8"), "d2\n"); // mtime lag of slow file systems tolerated
+  assert.equal(readFileSync(path.join(repo, "a.ts"), "utf8"), "a2  \n"); // not this call's change
+  assert.equal(readFileSync(path.join(repo, "c.ts"), "utf8"), "c  \n"); // clean: never touched
+});
+
 test("overlapping Bash calls of one session keep their own start times (tool_use_id)", async () => {
   stubDprint();
   const s = startServer();

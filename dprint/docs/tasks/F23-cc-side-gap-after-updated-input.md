@@ -6,8 +6,6 @@ priority: none
 area: n/a (Claude Code behaviour; dprint/src/mcp/format.mts formatPre returns the updatedInput)
 ---
 
-# F23 Re-verify the apparent Claude-side gap after format_pre updatedInput
-
 ## Status
 
 Closed 2026-11-13: measurement record (gap refuted), no code action.

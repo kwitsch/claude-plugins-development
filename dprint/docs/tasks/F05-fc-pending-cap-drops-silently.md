@@ -6,8 +6,6 @@ priority: none
 area: dprint/src/mcp/format.mts (fileChanged, acquireChangeSlot, releaseChangeSlot)
 ---
 
-# F05 FileChanged burst handling without silent drops
-
 ## Status
 
 Done (release dprint 0.8.0). `fileChanged` runs at most `MAX_ACTIVE_CHANGES` = 8 events at once (git + dprint); further events wait FIFO in `waitingChanges` (up to `MAX_WAITING_CHANGES` = 1000); beyond that an event is dropped with one stderr line `[dprint-hooks] file_changed dropped (1000 waiting): <path>`.

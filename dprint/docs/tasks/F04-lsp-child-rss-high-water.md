@@ -6,8 +6,6 @@ priority: medium
 area: dprint/src/mcp/format.mts (fileChanged, client, MAX_CLIENTS, MAX_CHANGED_BYTES), dprint/src/mcp/lsp.mts (DprintLsp)
 ---
 
-# F04 Bound dprint lsp child memory for large documents
-
 ## Status
 
 Done in 0.13.0: `DprintLsp` stops its child after 2 min idle (`IDLE_MS`, constructor option `idleMs`; the timer is armed when the format queue drains and cleared by the next format; the next format respawns). Test: "idle lsp child exits after idleMs and the next format respawns it".

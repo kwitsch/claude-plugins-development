@@ -6,8 +6,6 @@ priority: low
 area: dprint/tests/mcp-server.test.mts, dprint/src/mcp/lsp.mts (DprintLsp constructor option timeoutMs)
 ---
 
-# F28 Test the performance-relevant server paths
-
 ## Status
 
 Partial. Done in 0.8.0 (branch feature/performance-analysis-fixes, PR #19): tests for a 60-event file_changed burst ("60 concurrent file_changed events are all formatted"), the 1 MiB size guard ("file_changed skips files above 1 MiB"), `status.showUntrackedFiles=no`, rangeFormatting-null stub (stub mode `range-null`; Edit still formatted), and the timeout cooldown ("lsp timeout -> later formats of that document fail fast for the cooldown ..."; in-process `new DprintLsp({ cwd, timeoutMs: 300 })`). The test-only seam is the constructor option `timeoutMs` (defaults to `REQUEST_TIMEOUT_MS`, 30 s); no env var was added.

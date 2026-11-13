@@ -6,8 +6,6 @@ priority: low
 area: dprint/src/mcp/format.mts (fileChanged, MAX_CHANGED_BYTES, formatPre), dprint/src/mcp/server.mts (tools/call response), dprint/src/mcp/lsp.mts (send, onData)
 ---
 
-# F12 Bound MCP server RSS growth from multi-MB payloads
-
 ## Status
 
 Done in 0.13.0: `formatPre` skips Write content and Edit targets (file size plus new_string) above `MAX_CHANGED_BYTES` (1 MiB) before any git or lsp spawn (`overCap`, shared with `formatOnDisk`); the document passes through unformatted. The double serialization in server.mts is required by the dual-era rule and stays. Test: "Write and Edit above 1 MiB pass through unformatted without spawning dprint lsp".

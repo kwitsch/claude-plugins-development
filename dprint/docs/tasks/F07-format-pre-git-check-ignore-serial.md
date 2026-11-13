@@ -6,8 +6,6 @@ priority: low
 area: dprint/src/mcp/format.mts (formatPre, isGitIgnored)
 ---
 
-# F07 Overlap or drop the git check-ignore spawn in formatPre
-
 ## Status
 
 Closed 2026-11-13, not done: still current, but skipping the check changes gitignore behaviour (a user decision) and the gain is one git spawn; the verdict of this document stands.

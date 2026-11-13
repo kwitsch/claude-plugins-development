@@ -6,8 +6,6 @@ priority: none
 area: dprint/src/mcp/format.mts (formatPre), dprint/src/mcp/lsp.mts (DprintLsp.format/formatNow)
 ---
 
-# F01 Drop the rangeFormatting request from the Edit path
-
 ## Status
 
 Done (branch feature/performance-analysis-fixes, release dprint 0.8.0). `formatPre` Edit branch sends no `rangeFormatting`; it issues one whole-document `textDocument/formatting` of the edited text M. `DprintLsp.format(uri, text)` has no `range` parameter and no RpcError fallback.

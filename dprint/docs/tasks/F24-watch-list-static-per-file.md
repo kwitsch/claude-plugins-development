@@ -6,8 +6,6 @@ priority: high
 area: dprint/src/mcp/watch-paths.mts (watchList, main), dprint/src/mcp/format.mts (fileChanged), dprint/plugin/hooks/hooks.json (SessionStart/CwdChanged command hook)
 ---
 
-# F24 Make the FileChanged watch list survive new files and git checkout
-
 ## Status
 
 Reviewed 2026-11-13; live smoke test below confirms the problem (priority back to high). Designs depend on Claude Code watcher behavior (re-creation on an unchanged sorted list, honoring watchPaths from an mcp_tool FileChanged result, directory-watch event volume without `ignored`) that only a live `claude -p --plugin-dir dprint/plugin --debug` run with an inotify sampler can prove. Mitigated for Bash: `bash_finished` formats rewritten watched files via an mtime scan of the cached list. Still uncovered: files rewritten by non-Bash tools after a watch is lost, and new files (watch list and `bash_finished` cache are read once per cwd). The list is sorted since 0.12.1. Next step: live prototype of directories as watchPaths (option 2, re-list from FileChanged, was prototyped and does not work, see below).

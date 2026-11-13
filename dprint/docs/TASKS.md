@@ -25,12 +25,12 @@ Legend: `[x]` finished (done, or closed without code: status `closed` in the tas
 - [x] [F10](tasks/F10-edit-no-change-full-document-format.md) Even a no-change TS Edit formats the whole document (dprint-side sizing)
 - [x] [F04](tasks/F04-lsp-child-rss-high-water.md) Bound dprint lsp child memory for large documents
 - [x] [F12](tasks/F12-server-rss-growth-inflates-spawn-cost.md) Bound MCP server RSS growth from multi-MB payloads
+- [x] [F29](tasks/F29-bash-finished-stat-scan.md) Bound the per-Bash watch-list mtime scan in bash_finished
 
 ## Remaining
 
 - [ ] [F24](tasks/F24-watch-list-static-per-file.md) Make the FileChanged watch list survive new files and git checkout `open` priority:high
 - [ ] [F28](tasks/F28-tests-miss-perf-paths.md) Test the performance-relevant server paths `partial` priority:low
-- [ ] [F29](tasks/F29-bash-finished-stat-scan.md) Bound the per-Bash watch-list mtime scan in bash_finished `open` priority:low
 
 ## Closed without code (decided 2026-11-13: not worth doing, or measurement record)
 
