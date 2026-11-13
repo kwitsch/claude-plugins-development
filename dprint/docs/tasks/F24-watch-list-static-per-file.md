@@ -1,12 +1,14 @@
 ---
 id: F24
 title: Make the FileChanged watch list survive new files and git checkout
-status: open
-priority: high
+status: done
+priority: medium
 area: dprint/src/mcp/watch-paths.mts (watchList, main), dprint/src/mcp/format.mts (fileChanged), dprint/plugin/hooks/hooks.json (SessionStart/CwdChanged command hook)
 ---
 
 ## Status
+
+Done in 0.13.2 as an opt-in, default unchanged: `DPRINT_WATCH_DIRECTORIES=1` (environment of the Claude Code process, e.g. `env` in the settings) makes `watch-paths.mjs` print the directories of the listed files (nested ones collapsed, `watchDirectories` in `watch-list.mts`) instead of the files. Live validation (Claude Code 2.1.323, real dprint plugin, same harness as the smoke test, 2 runs per mode): with directories every scenario was formatted (in-place write, two delete-and-recreate rounds, an in-place write afterwards, a new file, a write after `git checkout`) and the watch count stayed at 60; with files (default) the same run lost the watches (count 9 to 0) and the later scenarios were not formatted. Directory watching is recursive, so everything below a watched directory reaches the hook: a burst of 3000 files in a new directory produced about 100 events per second (all delivered, 35 s) and `.git` writes appear as events too (`file_changed` returns `{}` for them without a spawn). That event volume is why it is not the default; a `pnpm install` into `node_modules` below the root would queue minutes of events. Earlier state:
 
 Reviewed 2026-11-13; live smoke test below confirms the problem (priority back to high). Designs depend on Claude Code watcher behavior (re-creation on an unchanged sorted list, honoring watchPaths from an mcp_tool FileChanged result, directory-watch event volume without `ignored`) that only a live `claude -p --plugin-dir dprint/plugin --debug` run with an inotify sampler can prove. Mitigated for Bash: `bash_finished` formats rewritten watched files via an mtime scan of the cached list. Still uncovered: files rewritten by non-Bash tools after a watch is lost, and new files (watch list and `bash_finished` cache are read once per cwd). The list is sorted since 0.12.1. Next step: live prototype of directories as watchPaths (option 2, re-list from FileChanged, was prototyped and does not work, see below).
 

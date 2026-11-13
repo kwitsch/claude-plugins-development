@@ -1267,6 +1267,24 @@ test("watch-paths.mjs prints the in-cwd dprint file paths as watchPaths on Sessi
   });
 });
 
+test("DPRINT_WATCH_DIRECTORIES=1: watch-paths.mjs prints the directories of the files, nested ones collapsed", async () => {
+  stubDprint();
+  const r = spawnSync(process.execPath, [WATCH], {
+    env: { PATH: bin, HOME: home, DPRINT_WATCH_DIRECTORIES: "1" },
+    input: JSON.stringify({ hook_event_name: "SessionStart", cwd: repo }),
+    encoding: "utf8",
+  });
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(JSON.parse(r.stdout).hookSpecificOutput.watchPaths, [repo]);
+  const { watchDirectories } = await import("../plugin/mcp/watch-list.mjs");
+  assert.deepEqual(
+    watchDirectories(["/r/a.ts", "/r/sub/b.ts", "/r/sub/deep/c.ts", "/r2/x.ts", "/r/z/d.ts", "/rx/e.ts"]),
+    ["/r", "/r2", "/rx"],
+  );
+  assert.deepEqual(watchDirectories(["/r/sub/b.ts", "/r/a.ts"]), ["/r"]); // order independent
+  assert.deepEqual(watchDirectories([]), []);
+});
+
 test("watch-paths.mjs prints nothing for a cwd without a dprint config", () => {
   stubDprint();
   const bare = path.join(tmp, "bare");

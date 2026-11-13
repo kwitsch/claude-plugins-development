@@ -47,7 +47,7 @@ sources; this rule records behaviour and constraints only.
   `bashFinished`.
 - `watch-paths.mts`: `command` hook for SessionStart and CwdChanged (SessionStart `mcp_tool` hooks are skipped while
   the server connects). Runs `dprint file-paths` (fallback `output-file-paths` for dprint 0.50-0.54) in the cwd,
-  filters through `inScope`, caps at `WATCH_LIMIT` (above it nothing is watched) and prints
+  filters through `inScope`, caps at `WATCH_LIMIT` (above it nothing is watched; with `DPRINT_WATCH_DIRECTORIES=1` the files are collapsed to their directories by `watchDirectories`, which Claude Code watches recursively: no lost watches, new files seen, but every event below the directories) and prints
   `hookSpecificOutput.watchPaths`.
 
 ## `format.mts`

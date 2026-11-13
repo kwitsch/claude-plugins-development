@@ -27,10 +27,11 @@ Legend: `[x]` finished (done, or closed without code: status `closed` in the tas
 - [x] [F12](tasks/F12-server-rss-growth-inflates-spawn-cost.md) Bound MCP server RSS growth from multi-MB payloads
 - [x] [F29](tasks/F29-bash-finished-stat-scan.md) Bound the per-Bash watch-list mtime scan in bash_finished
 - [x] [F28](tasks/F28-tests-miss-perf-paths.md) Test the performance-relevant server paths
+- [x] [F24](tasks/F24-watch-list-static-per-file.md) Make the FileChanged watch list survive new files and git checkout (opt-in `DPRINT_WATCH_DIRECTORIES=1`)
 
 ## Remaining
 
-- [ ] [F24](tasks/F24-watch-list-static-per-file.md) Make the FileChanged watch list survive new files and git checkout `open` priority:high
+None: every task is done or closed (see below).
 
 ## Closed without code (decided 2026-11-13: not worth doing, or measurement record)
 
@@ -44,5 +45,5 @@ Legend: `[x]` finished (done, or closed without code: status `closed` in the tas
 
 ## Notes
 
-- F24 stays open: the live smoke test (2026-11-13) confirmed it; the re-list-from-FileChanged prototype does not fix it, next candidate is directories as `watchPaths` (see its Status).
+- F24 is done as an opt-in (`DPRINT_WATCH_DIRECTORIES=1`, live-validated); the default stays on files because directory watches deliver every event below them.
 - Finding ids match the headings of the original analysis; file names are `<id>-<slug>.md`.

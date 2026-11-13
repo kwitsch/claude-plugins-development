@@ -4,8 +4,8 @@
  *
  * @remarks
  * A `command` hook, not an `mcp_tool` hook: Claude Code skips SessionStart `mcp_tool` hooks while the MCP server
- * is still connecting. The list is what `dprint file-paths` (dprint 0.50-0.54: `output-file-paths`) reports in the
- * cwd, filtered by `inScope`. On CwdChanged the list replaces the previous one, so empty output in a config-less
+ * is still connecting. With `DPRINT_WATCH_DIRECTORIES=1` the list is collapsed to directories, see {@link watchDirectories}. The list is what `dprint file-paths`
+ * (dprint 0.50-0.54: `output-file-paths`) reports in the cwd, filtered by `inScope`. On CwdChanged the list replaces the previous one, so empty output in a config-less
  * cwd stops watching. Must not import `server.mjs` (it starts the server at import). Sync calls are fine: this is
  * its own short-lived process. Always exits 0; stdout carries exactly one JSON object or nothing.
  *
@@ -13,7 +13,7 @@
  */
 import { readFileSync } from "node:fs";
 import { inScope, scopeOf } from "./format.mjs";
-import { dprintFilePaths } from "./watch-list.mjs";
+import { dprintFilePaths, watchDirectories } from "./watch-list.mjs";
 
 /**
  * Files of the cwd that dprint formats and that are in scope.
@@ -42,10 +42,11 @@ async function main(): Promise<void> {
     };
     const ev = input.hook_event_name;
     if (ev !== "SessionStart" && ev !== "CwdChanged") return;
-    const watchPaths = await watchList(
+    const files = await watchList(
       input.new_cwd || input.cwd || "",
       input.scratchpad_dir,
     );
+    const watchPaths = process.env.DPRINT_WATCH_DIRECTORIES === "1" ? watchDirectories(files) : files;
     if (watchPaths.length) {
       process.stdout.write(
         JSON.stringify({ hookSpecificOutput: { hookEventName: ev, watchPaths } }),

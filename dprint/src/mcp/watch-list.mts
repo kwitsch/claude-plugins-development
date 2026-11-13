@@ -8,6 +8,7 @@
  * @packageDocumentation
  */
 import { execFile } from "node:child_process";
+import path from "node:path";
 import { promisify } from "node:util";
 import { findConfig } from "../skills/dprint/find-config.mjs";
 import { dprintArgv, findDprint } from "../skills/dprint/find-dprint.mjs";
@@ -56,4 +57,27 @@ export async function dprintFilePaths(cwd: string): Promise<string[]> {
     return [];
   }
   return lines.sort();
+}
+
+/**
+ * Collapse a file list to the directories Claude Code should watch instead of the files themselves.
+ *
+ * @remarks
+ * Claude Code watches a directory recursively (checked live on 2.1.323: files created later, also in new
+ * subdirectories, and files that are deleted and recreated, produce events), while a watched file that is unlinked
+ * loses its watch. The price is every event below the directory: `.git`, `node_modules` and build output churn
+ * reaches the `file_changed` hook too (about 100 events per second, 3000 files took 35 s). Hence opt-in
+ * (`DPRINT_WATCH_DIRECTORIES=1`, e.g. in the `env` of the Claude Code settings).
+ *
+ * @param files - Absolute file paths.
+ * @returns The sorted directories of the files, minus every directory below another one in the result.
+ */
+export function watchDirectories(files: string[]): string[] {
+  const dirs = [...new Set(files.map((f) => path.dirname(f)))].sort();
+  const out: string[] = [];
+  for (const d of dirs) {
+    const last = out[out.length - 1];
+    if (last === undefined || !(d === last || d.startsWith(last.endsWith(path.sep) ? last : last + path.sep))) out.push(d);
+  }
+  return out;
 }
