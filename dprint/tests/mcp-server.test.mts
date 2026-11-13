@@ -1456,6 +1456,34 @@ test("bash_finished never formats the session scratchpad, whichever call read th
   assert.equal(readFileSync(path.join(repo, "scratch/s.ts"), "utf8"), "x  \n");
 });
 
+test("bash_finished scopes a touched file again: a listed file swapped for a symlink to an excluded or outside file is left alone", async () => {
+  mkdirSync(path.join(repo, "vendor"));
+  const target = path.join(repo, "vendor/v.ts");
+  const outside = path.join(tmp, "outside.ts");
+  writeFileSync(target, "v  \n");
+  writeFileSync(outside, "o  \n");
+  writeFileSync(
+    path.join(bin, "dprint"),
+    ["#!/usr/bin/env bash", `if [ "$1" = "file-paths" ]; then printf '%s\\n' "$PWD/a.ts" "$PWD/b.ts"; exit 0; fi`, `exec node "${path.join(tmp, "stub-lsp.mjs")}" ok`, ""].join("\n"),
+  );
+  chmodSync(path.join(bin, "dprint"), 0o755);
+  writeFileSync(path.join(repo, "a.ts"), "a\n");
+  writeFileSync(path.join(repo, "b.ts"), "b\n");
+  const s = startServer();
+  await s.tool("bash_started", { cwd: repo, ...SESSION, tool_use_id: "L" }); // reads the list: a.ts and b.ts are in scope
+  rmSync(path.join(repo, "a.ts"));
+  symlinkSync(target, path.join(repo, "a.ts")); // into vendor/
+  rmSync(path.join(repo, "b.ts"));
+  symlinkSync(outside, path.join(repo, "b.ts")); // outside the cwd
+  const now = new Date();
+  utimesSync(target, now, now);
+  utimesSync(outside, now, now);
+  const r = await s.tool("bash_finished", { cwd: repo, ...SESSION, tool_use_id: "L" });
+  assert.deepEqual(r, {});
+  assert.equal(readFileSync(target, "utf8"), "v  \n");
+  assert.equal(readFileSync(outside, "utf8"), "o  \n");
+});
+
 test("hooks.json: bash_started carries cwd and scratchpad_dir (it starts the watch-list read)", () => {
   const hooks = JSON.parse(readFileSync(path.join(PLUGIN, "hooks/hooks.json"), "utf8")).hooks;
   const h = hooks.PreToolUse.filter((g) => g.matcher === "Bash").flatMap((g) => g.hooks).find((x) => x.tool === "bash_started");

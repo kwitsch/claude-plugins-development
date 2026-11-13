@@ -923,7 +923,10 @@ export async function bashFinished(args: BashFinishedInput = {}, signal?: AbortS
     });
     const formatted = new Set<string>();
     await Promise.all(touched.map(async (f) => {
-      if (await formatOnDisk(sc, f, signal)) formatted.add(f.fp);
+      // scoped again: the cached real path is stale if the Bash call swapped the file for a symlink (to a file outside
+      // the cwd, or under node_modules, vendor, ...), and formatOnDisk reads and writes through the path
+      const s = inScope(sc, f.fp);
+      if (s && (await formatOnDisk(sc, s, signal))) formatted.add(s.fp);
     }));
     // a FileChanged that fired mid-Bash may have formatted a file first (then formatOnDisk above saw nothing to do)
     // and queued its notice: report it here, after the formats
