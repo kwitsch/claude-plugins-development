@@ -25,7 +25,7 @@ export const WATCH_LIMIT = 5000;
  * Files of the cwd that dprint formats, before any scope filter.
  *
  * @param cwd - Working directory.
- * @returns Absolute paths as dprint printed them; `[]` without a cwd, a dprint config, a way to run dprint
+ * @returns Absolute paths, sorted (a stable list for diffing); `[]` without a cwd, a dprint config, a way to run dprint
  * (binary or npx), or above {@link WATCH_LIMIT}. Rejects when dprint fails.
  */
 export async function dprintFilePaths(cwd: string): Promise<string[]> {
@@ -37,7 +37,7 @@ export async function dprintFilePaths(cwd: string): Promise<string[]> {
     (await promisify(execFile)(...dprintArgv(cmd, [sub]), {
       cwd,
       encoding: "utf8",
-      timeout: 10_000,
+      timeout: 3_000,
       maxBuffer: 16 * 1024 * 1024,
     })).stdout;
   let out: string;
@@ -55,5 +55,5 @@ export async function dprintFilePaths(cwd: string): Promise<string[]> {
     );
     return [];
   }
-  return lines;
+  return lines.sort();
 }

@@ -71,6 +71,12 @@ export class DprintLsp {
   private ready: Promise<void> | null = null;
   /** Unconsumed stdout bytes (an incomplete frame). */
   private buf: Buffer = Buffer.alloc(0);
+  /** Chunks read while the frame at the head of {@link buf} is still incomplete; joined once per frame. */
+  private chunks: Buffer[] = [];
+  /** Bytes in {@link chunks}. */
+  private pendingLen = 0;
+  /** Bytes still missing for the frame at the head of {@link buf}; `0` while its size is unknown. */
+  private need = 0;
   /** Id of the next request. */
   private nextId = 1;
   /** In-flight requests by id. */
@@ -203,7 +209,7 @@ export class DprintLsp {
     // via npx the child is npx; killing it also ends the dprint lsp it started (checked: npx -> sh -> dprint)
     const child = spawn(...dprintArgv(cmd, ["lsp"]), { cwd: this.cwd, stdio: "pipe" });
     this.child = child;
-    this.buf = Buffer.alloc(0);
+    this.resetBuf();
     child.stdin.on("error", () => {}); // EPIPE after a crash; the crash itself surfaces via exit/error
     child.stderr.on("data", (d: Buffer) => process.stderr.write(d));
     child.stdout.on("data", (d: Buffer) => {
@@ -238,7 +244,13 @@ export class DprintLsp {
    * @param chunk - Bytes just read from the child's stdout.
    */
   private onData(chunk: Buffer): void {
-    this.buf = Buffer.concat([this.buf, chunk]);
+    this.chunks.push(chunk);
+    this.pendingLen += chunk.length;
+    if (this.pendingLen < this.need) return; // a big body arrives in many chunks: join once, not per chunk
+    this.buf = Buffer.concat([this.buf, ...this.chunks]);
+    this.chunks = [];
+    this.pendingLen = 0;
+    this.need = 0;
     for (;;) {
       const sep = this.buf.indexOf("\r\n\r\n");
       if (sep === -1) return;
@@ -250,7 +262,10 @@ export class DprintLsp {
         return;
       }
       const end = sep + 4 + Number(len);
-      if (this.buf.length < end) return;
+      if (this.buf.length < end) {
+        this.need = end - this.buf.length;
+        return;
+      }
       const body = this.buf.subarray(sep + 4, end).toString("utf8");
       this.buf = this.buf.subarray(end);
       let msg: unknown;
@@ -264,12 +279,20 @@ export class DprintLsp {
     }
   }
 
+  /** Drop all buffered stdout bytes. */
+  private resetBuf(): void {
+    this.buf = Buffer.alloc(0);
+    this.chunks = [];
+    this.pendingLen = 0;
+    this.need = 0;
+  }
+
   /**
    * Handle an unparseable frame: the stream is out of sync, so kill the child and let pending requests
    * reject now instead of timing out.
    */
   private broken(): void {
-    this.buf = Buffer.alloc(0);
+    this.resetBuf();
     this.dispose();
   }
 

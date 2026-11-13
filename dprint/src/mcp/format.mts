@@ -404,7 +404,7 @@ const isExcludedPath = (rel: string): boolean => {
  */
 const realish = (p: string): string => {
   try {
-    return realpathSync(p);
+    return realpathSync.native(p);
   } catch (e) {
     if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw e;
     try {

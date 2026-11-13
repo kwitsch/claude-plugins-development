@@ -3,13 +3,14 @@
 import type { JSONRPCErrorResponse } from "@modelcontextprotocol/server";
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, statSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { createInterface } from "node:readline";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { afterEach, beforeEach, test } from "vitest";
 import { DprintLsp } from "../plugin/mcp/lsp.mjs";
+import { findConfig } from "../plugin/skills/dprint/find-config.mjs";
 import type { HookResult } from "../src/mcp/format.mts";
 
 const PLUGIN = path.resolve(
@@ -20,7 +21,7 @@ const SERVER = path.join(PLUGIN, "mcp/server.mjs");
 
 // Stub `dprint lsp`: formatting and rangeFormatting answer one whole-document TextEdit with trailing
 // spaces stripped and exactly one final newline. argv mode "range-null" answers rangeFormatting with
-// `result: null` (like dprint-plugin-yaml); "hang" never answers textDocument/formatting; "crash" exits at once.
+// `result: null` (like dprint-plugin-yaml); "chunked" writes every frame in small pieces; "hang" never answers textDocument/formatting; "crash" exits at once.
 const STUB_LSP = `
 const MODE = process.argv[2] ?? "ok";
 if (MODE === "crash") process.exit(1);
@@ -28,7 +29,10 @@ const docs = new Map();
 let buf = Buffer.alloc(0);
 const send = (msg) => {
   const body = Buffer.from(JSON.stringify(msg));
-  process.stdout.write(Buffer.concat([Buffer.from("Content-Length: " + body.length + "\\r\\n\\r\\n"), body]));
+  const frame = Buffer.concat([Buffer.from("Content-Length: " + body.length + "\\r\\n\\r\\n"), body]);
+  // "chunked": a frame leaves in 7-byte pieces (header split mid-way), a big one in 64 KiB pieces
+  const piece = MODE !== "chunked" ? frame.length : frame.length > 100000 ? 65536 : 7;
+  for (let i = 0; i < frame.length; i += piece) process.stdout.write(frame.subarray(i, i + piece));
 };
 const fmt = (t) => t.split("\\n").map((l) => l.replace(/[ \\t]+$/, "")).join("\\n").replace(/\\n*$/, "\\n");
 process.stdin.on("data", (chunk) => {
@@ -461,6 +465,35 @@ test("Edit: whole-file reformat by the stub -> far hunks dropped", async () => {
     replace_all: false,
   });
   assert.ok(O.replace(u.old_string, () => u.new_string).includes("l1   \n"));
+});
+
+test("chunked lsp frames (split header, multi-MB body) are reassembled byte-exact", async () => {
+  stubDprint("chunked");
+  const s = startServer();
+  const small = await s.call({
+    cwd: repo,
+    tool_name: "Write",
+    tool_input: { file_path: path.join(repo, "a.ts"), content: "x   \n" },
+  });
+  assert.equal(small.hookSpecificOutput.updatedInput.content, "x\n");
+  const big = "line of text   \n".repeat(250_000); // 4 MB, one frame in ~60 pieces
+  const out = await s.call({
+    cwd: repo,
+    tool_name: "Write",
+    tool_input: { file_path: path.join(repo, "b.ts"), content: big },
+  });
+  assert.equal(out.hookSpecificOutput.updatedInput.content, "line of text\n".repeat(250_000));
+});
+
+test("findConfig: a cached config stops counting once deleted, a new one counts at once", () => {
+  const dir = path.join(tmp, "fc");
+  mkdirSync(dir);
+  assert.equal(findConfig(dir), null);
+  writeFileSync(path.join(dir, "dprint.json"), "{}");
+  assert.deepEqual(findConfig(dir), { dir, name: "dprint.json" });
+  assert.deepEqual(findConfig(dir), { dir, name: "dprint.json" }); // served from the cache
+  rmSync(path.join(dir, "dprint.json"));
+  assert.equal(findConfig(dir), null);
 });
 
 test("rangeFormatting answering null (yaml plugin) -> Edit still formatted", async () => {

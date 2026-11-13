@@ -1,7 +1,7 @@
 ---
 id: F09
 title: dprint lsp formatting cost scales with the amount of change (dprint-side)
-status: docs-only
+status: done
 priority: low
 area: dprint upstream (crates/dprint/src/commands/lsp/text.rs get_edits); client side: dprint/src/mcp/lsp.mts DprintLsp.formatNow
 ---
@@ -10,7 +10,7 @@ area: dprint upstream (crates/dprint/src/commands/lsp/text.rs get_edits); client
 
 ## Status
 
-Docs-only; not fixable client-side. Current docs: `dprint/plugin/README.md` only has the F08 sentence ("Edits on large files that were never formatted are slow; run `/dprint:dprint fmt` once"); `dprint/CLAUDE.md` and README contain NO sentence about the ~0.5 s dirty-document plateau or the 500 ms diff deadline (verified by grep). Remaining action, if wanted: add that sentence and file the upstream report.
+Done in 0.12.1: the README sentence (up to ~0.5 s dprint diff deadline, ~0.3-0.5 ms per KB) was added to `plugin/README.md` next to the F08 sentence. Earlier state: Docs-only; not fixable client-side. Current docs: `dprint/plugin/README.md` only has the F08 sentence ("Edits on large files that were never formatted are slow; run `/dprint:dprint fmt` once"); `dprint/CLAUDE.md` and README contain NO sentence about the ~0.5 s dirty-document plateau or the 500 ms diff deadline (verified by grep). Remaining action, if wanted: add that sentence and file the upstream report.
 
 ## Problem
 
