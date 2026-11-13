@@ -227,6 +227,7 @@ export class DprintLsp {
     if (this.ready) return this.ready;
     if (Date.now() < this.noDprintUntil) throw new Error("dprint not found");
     const cmd = await findDprint();
+    if (this.closed) throw new Error("dprint lsp: client closed"); // closed while the lookup (an npx probe) ran
     if (this.ready) return this.ready; // another caller started the child while the lookup (an npx probe) ran
     if (!cmd) {
       this.noDprintUntil = Date.now() + NOT_FOUND_RETRY_MS;

@@ -36,7 +36,7 @@ Resolution order of `findDprint`: see the skill-scripts rule. The notice judges 
 with `$.process.run`:
 
 - The first `<abs PATH entry>/dprint` that exists (`$.env.get("PATH")` + `$.fs.exists`; relative entries skipped, a
-  weaker check than `findDprint`'s executable-file test), else `$HOME/.dprint/bin/dprint` if it exists
+  weaker check than `findDprint`'s executable-file test), else `$DPRINT_INSTALL/bin/dprint` (default `$HOME/.dprint/bin/dprint`) if it exists
   (`$.env.get("HOME")`), else `npx --no --prefer-offline -- dprint --version`.
 - npx uses the cached package only: unlike `findDprint`, which runs on a format request, this runs unprompted, so it
   never downloads. `--prefer-offline` so a name-only spec is not checked against the registry's latest, which fails

@@ -734,6 +734,35 @@ test("idle lsp child exits after idleMs and the next format respawns it", { time
   }
 });
 
+test("close() while the dprint lookup runs: the format rejects and no child is spawned", { timeout: 10_000 }, async () => {
+  const log = path.join(tmp, "spawned.log");
+  const real = path.join(tmp, "dprint");
+  writeFileSync(real, `#!/usr/bin/env bash\necho spawned >> "${log}"\nexec node "${path.join(tmp, "stub-lsp.mjs")}" ok\n`);
+  chmodSync(real, 0o755);
+  // only npx finds dprint, and its probe is slow (bin holds just bash and node: link sleep in)
+  symlinkSync(spawnSync("sh", ["-c", "command -v sleep"], { encoding: "utf8" }).stdout.trim(), path.join(bin, "sleep"));
+  const npx = path.join(bin, "npx");
+  writeFileSync(npx, `#!/usr/bin/env bash\nshift 2\nif [ "$1" = "--version" ]; then sleep 1; echo "dprint 0.64.3"; exit 0; fi\nexec "${real}" "$@"\n`);
+  chmodSync(npx, 0o755);
+  const oldPath = process.env.PATH;
+  const oldHome = process.env.HOME;
+  process.env.PATH = bin;
+  process.env.HOME = home; // not the real ~/.dprint/bin
+  const lsp = new DprintLsp({ cwd: repo });
+  try {
+    const f = lsp.format(pathToFileURL(path.join(repo, "a.ts")).href, "x   \n");
+    const settled = assert.rejects(f, /closed/);
+    await new Promise((r) => setTimeout(r, 200));
+    lsp.close();
+    await settled;
+    assert.equal(spawns(log), 0);
+  } finally {
+    lsp.dispose();
+    process.env.PATH = oldPath;
+    process.env.HOME = oldHome;
+  }
+});
+
 test("at most 8 dprint lsp children: the least recently used cwd is evicted and respawned", async () => {
   const log = loggingDprint();
   const s = startServer();
