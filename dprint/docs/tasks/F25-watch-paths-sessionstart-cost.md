@@ -10,7 +10,7 @@ area: dprint/src/mcp/format.mts (realish), dprint/src/mcp/watch-paths.mts (watch
 
 ## Status
 
-Done in 0.12.1: `realish` uses `realpathSync.native` (one syscall), `dprintFilePaths` times out after 3 s and returns the list sorted.
+Done in 0.12.1: `realish` uses `realpathSync.native` (one syscall), `dprintFilePaths` returns the list sorted (the 10 s timeout stays: a shorter one makes a slow first listing fail and be cached empty for the session).
 
 ## Problem
 

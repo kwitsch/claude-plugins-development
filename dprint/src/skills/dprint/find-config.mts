@@ -38,7 +38,10 @@ export function findConfig(dir: string): FoundConfig | null {
     cache.delete(key);
   }
   const found = walk(key);
-  if (found !== null) cache.set(key, found);
+  if (found !== null) {
+    if (cache.size >= 64) cache.clear(); // bounded: one entry per distinct start directory
+    cache.set(key, found);
+  }
   return found;
 }
 
