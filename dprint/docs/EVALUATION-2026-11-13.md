@@ -221,8 +221,8 @@ Observed, no new finding:
 - A Bash command that exits non-zero (`PostToolUseFailure`): the file is formatted and the notice arrives.
 - Skill `/dprint:dprint check` (exit 20, files untouched) and `/dprint:dprint fmt` (exit 0, files formatted).
 - FileChanged smoke test of the watch list (files vs directories): see `tasks/F24-watch-list-static-per-file.md`.
-- Skill `/dprint:dprint init` (dprint present and current, config without plugins for `.md`/`.yaml`/`.json`): the version check passed, no install was offered, the scan listed the three uncovered types with their candidates, and it stopped at the question (`AskUserQuestion` is off in `claude -p`) without changing `dprint.json`. The install branch (download of dprint) was not run live.
-- FileChanged on the 9P mount (`/mnt/c`, WSL2): with `DPRINT_WATCH_DIRECTORIES=1` change and add events arrive for writes made from WSL (in-place writes, delete-and-recreate, new files, a 50-file burst). Changes made from the Windows side were not tried.
+- Skill `/dprint:dprint init` (dprint present and current, config without plugins for `.md`/`.yaml`/`.json`): the version check passed, no install was offered, the scan listed the three uncovered types with their candidates, and it stopped at the question (`AskUserQuestion` is off in `claude -p`) without changing `dprint.json`. The install branch (download of dprint) was not run live: the official installer script also runs `pkill -9 dprint`, which would kill the user's running dprint processes, and running a downloaded script was not permitted in the session.
+- FileChanged on the 9P mount (`/mnt/c`, WSL2): with `DPRINT_WATCH_DIRECTORIES=1` change and add events arrive for writes made from WSL (in-place writes, delete-and-recreate, new files, a 50-file burst). A file created from the Windows side (`cmd.exe`) was delivered as an `add` event too; an append made from the Windows side could not be attributed to an event in that run (inconclusive).
 - The 5-minute retry of an empty watch list is covered by an in-process test with a controlled clock (`tests/mcp-format.test.mts`).
 
 ## Assurance beyond reviews
