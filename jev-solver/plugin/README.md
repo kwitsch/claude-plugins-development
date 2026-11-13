@@ -10,7 +10,7 @@ The `jev-api` plugin (declared as dependency) with `TYPESAFE_API_KEY`, `TYPESAFE
 
 `solve` is the only skill. Its phases are reference files next to it (`skills/solve/<name>.reference.md`), loaded through the decision matrix in `solve/SKILL.md`: `decide`, `worktree`, `design`, `spec`, `plan`, `pr`, `execute`, `tdd`, `debug`, `verify`, `request-review`, `receive-review`, `finish`.
 
-The `decider` agent (opus, xhigh effort) answers the questions of a `--headless` run.
+The `decider` agent answers the questions of a `--headless` run: opus with high effort for sizes S, M and L, Fable with high effort for XL.
 
 ## Arguments
 

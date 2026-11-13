@@ -22,7 +22,7 @@ Every question to the user goes through `AskUserQuestion`, never as plain text. 
 
 Before an `AskUserQuestion` that concerns a file (design, spec, plan, review notes), first print the file's content to the user as a summary in bullet points, with the file's full absolute path. Then ask for approval (approve, change, abort); on change, fix the file and ask again until approved. The summary is skipped with `--headless`: the decider reads the file itself. Each reference only says what its summary covers.
 
-With `--headless`, `AskUserQuestion` is never called. Instead, for each question spawn the `decider` agent (`subagent_type: jev-solver:decider`, the plugin-namespaced name; continue the same agent with `SendMessage` for later questions) and brief it with:
+With `--headless`, `AskUserQuestion` is never called. Instead, for each question spawn the `decider` agent (`subagent_type: jev-solver:decider`, the plugin-namespaced name; model and effort by size: S, M and L run with the agent's own `opus`/`high`, XL with `model: fable`, `effort: high`, passed in the Agent call; continue the same agent with `SendMessage` for later questions) and brief it with:
 
 - the question and the options that `AskUserQuestion` would have shown (label and description, the recommended one first),
 - the task text, track, size, branch and worktree path,

@@ -99,11 +99,15 @@ describe("jev-solver", () => {
     assert.ok(manifest.dependencies.includes("jev-api"));
   });
 
-  it("decider agent is opus with xhigh effort", () => {
+  it("decider agent is opus with high effort", () => {
     const f = front(read("agents/decider.md"));
     assert.match(f, /^name: decider$/m);
     assert.match(f, /^model: opus$/m);
-    assert.match(f, /^effort: xhigh$/m);
+    assert.match(f, /^effort: high$/m);
+  });
+
+  it("solve runs the decider on fable/high for XL", () => {
+    assert.match(read("skills/solve/SKILL.md"), /XL with `model: fable`, `effort: high`/);
   });
 
   it("solve handles --headless through decider and --size", () => {

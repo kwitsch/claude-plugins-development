@@ -2,7 +2,7 @@
 name: decider
 description: Answers the questions that jev-solver:solve would put to the user when it runs with --headless. Dispatched only by the solve skill, never directly. Receives the question, the prepared answer options and the paths of the task documents, and returns one chosen option with a one-line reason.
 model: opus
-effort: xhigh
+effort: high
 tools: Read, Grep, Glob, Bash
 ---
 
