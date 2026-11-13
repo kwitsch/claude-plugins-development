@@ -6,7 +6,7 @@
  * `EnterWorktree`/`ExitWorktree` tool calls. The check runs detached after the event and swallows every error,
  * so it never blocks, delays or alters the event. A directory without a dprint config is left alone and nothing is
  * spawned; with one, the module picks the one dprint `find-dprint.mts` would pick (first `<PATH entry>/dprint` that
- * exists, else `~/.dprint/bin/dprint`, else the npx cache), runs `--version` on it via `$.process.run`, and only an
+ * exists, else `$DPRINT_INSTALL/bin/dprint` (default `~/.dprint/bin/dprint`), else the npx cache), runs `--version` on it via `$.process.run`, and only an
  * unusable pick (cannot start, exits non-zero, prints no version, older than `MIN_VERSION`) toasts, naming the
  * cause. No imports at all (hooks modules run without Node and the engine's declaration file is not
  * in the repo), so the used engine members are typed structurally below. The engine's static check wants every
@@ -41,8 +41,8 @@ const PROBE_RETRY_MS = 30_000;
 /** Minimum dprint version the format hooks need (`dprint lsp`). A copy of `MIN_VERSION` (`skills/dprint/check-dprint.mts`); `tests/notice.test.mts` fails on drift. */
 const MIN_VERSION = "0.50.0";
 
-/** The reason when no dprint exists on PATH, in `~/.dprint/bin` or in the npx cache (the wording lives only here). */
-const NOT_INSTALLED = "no dprint is installed (none on PATH, in ~/.dprint/bin or in the npx cache)";
+/** The reason when no dprint exists on PATH, in `$DPRINT_INSTALL/bin` (default `~/.dprint/bin`) or in the npx cache (the wording lives only here). */
+const NOT_INSTALLED = "no dprint is installed (none on PATH, in $DPRINT_INSTALL/bin (default ~/.dprint/bin) or in the npx cache)";
 
 /** When the last toast was shown (`Date.now()`); the cause is machine-wide, so one toast per {@link TOAST_MS} covers every directory. */
 let shownAt: number | undefined;
@@ -171,7 +171,7 @@ async function judge($: Engine, argv: string[], cwd: string, name: string): Prom
 
 /**
  * Why the dprint the MCP server's `findDprint` would pick is not usable, `null` when it is. Picks exactly one, in
- * `find-dprint.mts`'s order: the first `<PATH entry>/dprint` that exists, else `$HOME/.dprint/bin/dprint` if it
+ * `find-dprint.mts`'s order: the first `<PATH entry>/dprint` that exists, else `$DPRINT_INSTALL/bin/dprint` (default `$HOME/.dprint/bin/dprint`) if it
  * exists, else the npx cache; only the pick is run (`--version`), so a broken PATH dprint is never masked by a
  * working later one, as `findDprint` would not mask it either. Unlike `find-dprint.mts` (which runs on a format
  * request) this runs unprompted on every session start and cd, so npx gets `--no` (no download) and every probe runs
@@ -185,7 +185,7 @@ function dprintProblem($: Engine): Promise<string | null> {
   if (probe && (probe.failedAt === undefined || withinMs(probe.failedAt, PROBE_RETRY_MS))) return probe.problem;
   const entry: Probe = {
     problem: (async () => {
-      const [home, pathVar] = await Promise.all([$.env.get("HOME"), $.env.get("PATH")]);
+      const [home, pathVar, install] = await Promise.all([$.env.get("HOME"), $.env.get("PATH"), $.env.get("DPRINT_INSTALL")]);
       // a HOME that does not exist would make every spawn fail and the toast blame dprint
       const cwd = home && (await $.fs.exists(home)) ? home : "/";
       // shortcut: existence is weaker than findDprint's executable-file check (a non-executable `dprint` earlier on PATH is picked here), upgrade when the engine offers an executable check
@@ -196,7 +196,9 @@ function dprintProblem($: Engine): Promise<string | null> {
         .map((d) => `${d.replace(/\/+$/, "")}/dprint`);
       const found = await Promise.all(candidates.map((p) => $.fs.exists(p)));
       let pick = candidates.find((_, i) => found[i]);
-      if (!pick && home && (await $.fs.exists(`${home}/.dprint/bin/dprint`))) pick = `${home}/.dprint/bin/dprint`;
+      // the official installer puts dprint in ${DPRINT_INSTALL:-$HOME/.dprint}/bin (as findDprint looks)
+      const fallback = install ? `${install.replace(/\/+$/, "")}/bin/dprint` : home ? `${home}/.dprint/bin/dprint` : "";
+      if (!pick && fallback && (await $.fs.exists(fallback))) pick = fallback;
       if (pick) return (await judge($, [pick, "--version"], cwd, pick))?.text ?? null;
       // `--` keeps npx from reading --version as its own flag once --no is given; --prefer-offline: npx checks a
       // name-only spec against the registry's latest, which offline or after a new release fails a cached dprint
@@ -250,16 +252,24 @@ async function warnIfNoDprint($: Engine, dir: string): Promise<void> {
  * The directory the event left the session in: a worktree tool's own result (as the format gate reads it), else
  * the session cwd.
  *
+ * @remarks
+ * Each tool names its own field: `EnterWorktree` the new `worktreePath`, `ExitWorktree` the `restoredCwd` (its
+ * output also carries the `worktreePath` it just left, which must not be checked). The engine hands a tool's output
+ * back as `{ result }` in the chain's result; a `tool_response` on the event is read too.
+ *
  * @param $ - Engine interface.
- * @param e - Event, may carry `tool_response`.
+ * @param e - Event: `tool` names the worktree tool; may carry `tool_response`.
  * @param r - The chain's result.
  * @returns Absolute directory, or `""` when unknown.
  */
 async function resultingCwd($: Engine, e: unknown, r: unknown): Promise<string> {
-  const fromEvent = (e as { tool_response?: WorktreeResult } | null | undefined)?.tool_response;
-  for (const x of [fromEvent, r as WorktreeResult]) {
-    const dir = x?.worktreePath ?? x?.restoredCwd;
-    if (typeof dir === "string" && dir) return dir;
+  const ev = e as { tool?: string; tool_response?: WorktreeResult } | null | undefined;
+  const key = ev?.tool === "ExitWorktree" ? "restoredCwd" : ev?.tool === "EnterWorktree" ? "worktreePath" : null;
+  if (key !== null) {
+    for (const x of [ev?.tool_response, (r as { result?: WorktreeResult } | null | undefined)?.result, r as WorktreeResult | null | undefined]) {
+      const dir = x?.[key];
+      if (typeof dir === "string" && dir) return dir;
+    }
   }
   return $.session.cwd();
 }

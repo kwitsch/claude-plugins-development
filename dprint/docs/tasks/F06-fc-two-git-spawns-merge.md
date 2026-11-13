@@ -6,8 +6,6 @@ priority: none
 area: dprint/src/mcp/format.mts (fileChanged, isGitIgnored)
 ---
 
-# F06 One git spawn per FileChanged event
-
 ## Status
 
 Done (release dprint 0.8.0). `fileChanged` runs a single `git --no-optional-locks status --porcelain --untracked-files=normal --ignored=matching -- <file>` (cwd = dirname of the file): empty stdout (tracked and unchanged) or stdout starting with `!!` (ignored) skips; any git failure (no git, not a repo, timeout) means format. `isGitIgnored` (`git check-ignore -q`) is kept and used only by `formatPre`.

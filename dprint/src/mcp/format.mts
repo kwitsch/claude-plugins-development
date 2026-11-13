@@ -1,6 +1,6 @@
 /**
- * The `format_pre`, `file_written`, `file_changed`, `cwd_changed`, `worktree_entered` and `worktree_exited` hook
- * handlers plus the pure helpers behind them.
+ * The `format_pre`, `file_written`, `file_changed`, `cwd_changed`, `worktree_entered`, `worktree_exited`,
+ * `bash_started`, `bash_finished` and `drain_notices` hook handlers plus the pure helpers behind them.
  *
  * @remarks
  * Helpers: {@link applyEdit} (Claude Code's Edit semantics, copied from universal-format), {@link lineDiff}
@@ -231,7 +231,7 @@ const client = (cwd: string, key = cwd): DprintLsp => {
     // evict the idle children of cwds the session left long ago
     for (const [k, old] of clients) {
       if (clients.size < MAX_CLIENTS) break;
-      old.dispose();
+      old.close();
       clients.delete(k);
     }
   }
@@ -254,8 +254,21 @@ let activeChanges = 0;
 /** Wake-ups of the waiting FileChanged events, oldest first. */
 const waitingChanges: Array<() => void> = [];
 
-/** Largest file FileChanged formats; bigger ones are generated data, and formatting them parks GBs in the lsp child. */
+/** Largest document any hook formats; bigger ones are generated data, and formatting them parks GBs in the lsp child. */
 const MAX_CHANGED_BYTES = 1024 * 1024;
+
+/**
+ * Whether a document is too big to format; logs the skip.
+ *
+ * @param bytes - Size of the document.
+ * @param fp - Its path, for the log line.
+ * @returns `true` when `bytes` exceeds {@link MAX_CHANGED_BYTES}.
+ */
+function overCap(bytes: number, fp: string): boolean {
+  if (bytes <= MAX_CHANGED_BYTES) return false;
+  process.stderr.write(`[dprint-hooks] format skipped (over ${MAX_CHANGED_BYTES} bytes): ${fp}\n`);
+  return true;
+}
 
 /**
  * Working directory per session or subagent, set by `cwd_changed`/`worktree_entered`: EnterWorktree and
@@ -303,17 +316,29 @@ const takeNotices = (k: string): Set<string> => {
   return files;
 };
 
-/** Start time (ms) of the running Bash call per {@link overrideKey}, set by {@link bashStarted}. */
+/** Start time (ms) of the running Bash call per {@link bashKey}, set by {@link bashStarted}. */
 const bashStart = new Map<string, number>();
+
+/** Whether stats are slow on the file system of a cwd (see {@link statsAreSlow}), judged once per root. */
+const slowRoots = new Map<string, boolean>();
+
+/** How long a {@link bashStart} entry of a Bash call that never reported back is kept (longer than any Bash call runs). */
+const BASH_START_TTL_MS = 24 * 60 * 60 * 1000;
 
 /**
  * In-scope watch list per effective cwd, read lazily by {@link cachedWatchList}.
  *
  * @remarks
- * shortcut: files created after the first read are missing until a cwd change clears the cache (the same
- * limit as the FileChanged watch list), upgrade with F24.
+ * shortcut: files created after the first (non-empty) read are missing until a cwd change clears the cache (the same
+ * limit as the FileChanged watch list; `DPRINT_WATCH_DIRECTORIES=1` fixes the watch list, not this cache).
  */
-const watchCache = new Map<string, Array<{ fp: string; real: string }>>();
+const watchCache = new Map<string, { list: Promise<Array<{ fp: string; real: string }>>; at: number; retryMs: number | null }>();
+
+/** A failed watch-list read (dprint failing or timing out) is retried after this long. */
+const WATCH_RETRY_MS = 60_000;
+
+/** An empty watch-list read (dprint missing, no matching files, above the limit) is retried after this long: a dprint installed later is picked up, a config-only project re-lists rarely. */
+const WATCH_EMPTY_RETRY_MS = 5 * 60_000;
 
 /**
  * Record a cwd override for the payload's session or subagent.
@@ -332,7 +357,10 @@ function setCwd(
     if (cwd) cwdOverrides.set(key, cwd);
     else cwdOverrides.delete(key);
   }
-  if (cwd) watchCache.delete(cwd); // entering a directory re-reads its list on the next bash_finished
+  if (cwd) {
+    watchCache.delete(cwd); // entering a directory re-reads its list on the next bash_finished
+    slowRoots.delete(cwd);
+  }
   return {};
 }
 
@@ -367,7 +395,7 @@ export const worktreeExited = (args: WorktreeExitedInput = {}): HookResult => se
  * Kill every `dprint lsp` child (called when MCP stdin closes).
  */
 export function disposeLsp(): void {
-  for (const c of clients.values()) c.dispose();
+  for (const c of clients.values()) c.close();
   clients.clear();
 }
 
@@ -404,7 +432,7 @@ const isExcludedPath = (rel: string): boolean => {
  */
 const realish = (p: string): string => {
   try {
-    return realpathSync(p);
+    return realpathSync.native(p);
   } catch (e) {
     if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw e;
     try {
@@ -517,7 +545,7 @@ const digest = (text: string): string => createHash("sha256").update(text).diges
 const errText = (e: unknown): string => e instanceof Error ? e.message : String(e);
 
 /** Strict UTF-8 decoder: throws on invalid bytes. */
-const utf8 = new TextDecoder("utf-8", { fatal: true });
+const utf8 = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }); // keep a BOM, like readFileSync (the digests must agree)
 
 /** `execFile` returning a promise of `{ stdout, stderr }`. */
 const execFileAsync = promisify(execFile);
@@ -529,7 +557,8 @@ const execFileAsync = promisify(execFile);
  * Runs in the nearest existing ancestor directory of the file, so a nested repository or submodule applies its own
  * ignore rules and a Write to a new directory still resolves. No git, no repository or a timeout mean "not ignored".
  *
- * @param fp - Absolute file path.
+ * @param fp - Absolute real path (symlinks resolved: git refuses a pathspec beyond a symbolic link and would answer
+ * "not ignored").
  * @returns `true` only when git reports the file as ignored (exit 0).
  */
 async function isGitIgnored(fp: string): Promise<boolean> {
@@ -609,10 +638,7 @@ function releaseChangeSlot(): void {
 async function formatOnDisk(sc: Scope, s: { fp: string; real: string }, signal?: AbortSignal): Promise<boolean> {
   try {
     if (signal?.aborted) return false;
-    if (statSync(s.fp).size > MAX_CHANGED_BYTES) {
-      process.stderr.write(`[dprint-hooks] format skipped (over ${MAX_CHANGED_BYTES} bytes): ${s.fp}\n`);
-      return false;
-    }
+    if (overCap(statSync(s.fp).size, s.fp)) return false;
     if (!(await acquireChangeSlot(s.fp))) return false;
     try {
       // cancelled while waiting for the slot: give it back without reading or spawning anything
@@ -624,6 +650,7 @@ async function formatOnDisk(sc: Scope, s: { fp: string; real: string }, signal?:
       // CRLF files are formatted on their LF view (as formatPre's Edit does) and written back with CRLF; a lone "\r" fails open
       const lf = text.replaceAll("\r\n", "\n");
       if (lf.includes("\r")) return false;
+      if (text !== lf && /(?<!\r)\n/.test(text)) return false; // mixed line endings: writing all CRLF would change every line
       // user decision: gitignored files (`!!`) and tracked files equal to the index (empty output) are left alone;
       // one spawn answers both. --untracked-files=normal is required: under status.showUntrackedFiles=no git
       // rejects --ignored otherwise. --no-optional-locks keeps .git/index.lock free for the user's git,
@@ -631,8 +658,8 @@ async function formatOnDisk(sc: Scope, s: { fp: string; real: string }, signal?:
       try {
         const { stdout } = await execFileAsync(
           "git",
-          ["--no-optional-locks", "status", "--porcelain", "--untracked-files=normal", "--ignored=matching", "--", s.fp],
-          { cwd: path.dirname(s.fp), encoding: "utf8", timeout: 10_000 },
+          ["--literal-pathspecs", "--no-optional-locks", "status", "--porcelain", "--untracked-files=normal", "--ignored=matching", "--", s.real],
+          { cwd: path.dirname(s.real), encoding: "utf8", timeout: 10_000 },
         );
         if (stdout === "" || stdout.startsWith("!!")) return false;
       } catch {
@@ -647,6 +674,9 @@ async function formatOnDisk(sc: Scope, s: { fp: string; real: string }, signal?:
       // a cancelled call writes nothing
       if (out === null || signal?.aborted) return false;
       const final = text === lf ? out : out.replaceAll("\n", "\r\n");
+      // the path was validated before the slot wait and the format: a file (or a directory above it) swapped for a
+      // symlink since then must not be written through (to a file outside the cwd, under node_modules, ...)
+      if (realish(s.fp) !== s.real) return false;
       // a write that landed while dprint was formatting (or while the event waited) wins
       if (utf8.decode(readFileSync(s.fp)) !== text) return false;
       // an Edit/Write record that landed during the awaits wins (keeps trimToEdit's minimal diff)
@@ -674,8 +704,21 @@ async function formatOnDisk(sc: Scope, s: { fp: string; real: string }, signal?:
  * @returns A PostToolUse/PreToolUse/UserPromptSubmit output with plain facts (no instructions to the system).
  */
 function notice(args: { cwd?: string; agent_id?: string; session_id?: string }, event: string, files: string[]): HookResult {
-  const root = scopeOf(args)?.root;
-  const rel = files.map((p) => root ? path.relative(root, p) : p).join(", ");
+  const sc = scopeOf(args);
+  // relative to the real root: dprint prints physical paths, so under a symlinked cwd the lexical root would give "../.."
+  // quoted: a file name may hold newlines or text that reads like an instruction
+  /**
+   * Display name of a file: relative to the real root, else to the lexical root.
+   *
+   * @param p - Absolute path as dprint printed it.
+   * @returns The relative name (unquoted).
+   */
+  const name = (p: string): string => {
+    if (!sc) return p;
+    const under = path.relative(sc.realRoot, p);
+    return under !== "" && under !== ".." && !under.startsWith(".." + path.sep) && !path.isAbsolute(under) ? under : path.relative(sc.root, p);
+  };
+  const rel = files.map((p) => JSON.stringify(name(p))).join(", ");
   return {
     hookSpecificOutput: {
       hookEventName: event,
@@ -717,13 +760,35 @@ export async function fileChanged(
 }
 
 /**
+ * Key of one Bash call in {@link bashStart}: the session/agent key plus the call's `tool_use_id`, so overlapping Bash
+ * calls of one session keep their own start times (without an id, one call per session/agent is assumed).
+ *
+ * @param args - Hook input of `bash_started` or `bash_finished`.
+ * @returns The map key.
+ */
+function bashKey(args: BashStartedInput & BashFinishedInput): string {
+  return overrideKey(args) + "\0" + (args.tool_use_id ?? "");
+}
+
+/**
  * PreToolUse `Bash` hook: remember when the Bash call started.
  *
- * @param args - Hook input: `session_id` and `agent_id`.
+ * @param args - Hook input: `cwd`, `session_id`, `agent_id` and `tool_use_id`.
  * @returns `{}`.
  */
 export function bashStarted(args: BashStartedInput = {}): HookResult {
-  bashStart.set(overrideKey(args), Date.now());
+  const now = Date.now();
+  // start reading the watch list now, so the first listing (11 s for 1500 files on a 9P mount) runs during the Bash
+  // call and not inside bash_finished
+  try {
+    const sc = scopeOf(args);
+    if (sc && findConfig(sc.root) !== null) void cachedWatchList(sc);
+  } catch {
+    // fail open
+  }
+  // a call that never finished (interrupted, killed) leaves its entry behind: drop entries older than a day
+  for (const [key, at] of bashStart) if (now - at > BASH_START_TTL_MS) bashStart.delete(key);
+  bashStart.set(bashKey(args), now);
   return {};
 }
 
@@ -731,23 +796,115 @@ export function bashStarted(args: BashStartedInput = {}): HookResult {
  * The in-scope files dprint formats in a cwd, cached per root.
  *
  * @param sc - Scope of the hook call.
- * @returns The files; `[]` (also cached, so a failing dprint cannot stall every Bash call) on a dprint failure.
+ * @returns The files; `[]` on a dprint failure or when there are none (cached for {@link WATCH_RETRY_MS} after a failure, {@link WATCH_EMPTY_RETRY_MS} when empty, so a
+ * failing or missing dprint cannot stall every Bash call, and one installed later is picked up). The read is shared: a call while it runs gets the same promise.
  */
 async function cachedWatchList(sc: Scope): Promise<Array<{ fp: string; real: string }>> {
-  let list = watchCache.get(sc.root);
-  if (!list) {
-    list = [];
+  const hit = watchCache.get(sc.root);
+  if (hit && !(hit.retryMs !== null && Date.now() - hit.at > hit.retryMs)) return hit.list;
+  const entry = { at: Date.now(), retryMs: null as number | null, list: Promise.resolve<Array<{ fp: string; real: string }>>([]) };
+  entry.list = (async () => {
+    const list: Array<{ fp: string; real: string }> = [];
     try {
+      const shared = { ...sc, realScratch: null }; // the list is shared by calls with other scratchpads: each call applies its own
       for (const p of await dprintFilePaths(sc.root)) {
-        const s = inScope(sc, p);
+        const s = inScope(shared, p);
         if (s) list.push(s);
       }
+      if (list.length === 0) entry.retryMs = WATCH_EMPTY_RETRY_MS; // dprint missing, no files or above the limit: look again later
     } catch (e) {
+      entry.retryMs = WATCH_RETRY_MS; // an empty list for a minute, so a failing dprint cannot stall every Bash call
       process.stderr.write(`[dprint-hooks] watch list failed: ${errText(e)}\n`);
     }
-    watchCache.set(sc.root, list);
+    return list;
+  })();
+  watchCache.set(sc.root, entry);
+  return entry.list;
+}
+
+/**
+ * Mean cost (ms) of one `stat` above which a file system counts as slow (9P mounts of Windows drives: 0.7-1.6 ms;
+ * ext4: 0.003-0.005 ms). `DPRINT_HOOKS_SLOW_STAT_MS` overrides it (tests); a negative value forces the slow path.
+ */
+const SLOW_STAT_MS = Number(process.env.DPRINT_HOOKS_SLOW_STAT_MS ?? "0.2");
+
+/** Files sampled to judge the stat cost, and the shortest list for which bash_finished asks git (shorter ones are stat-ed directly). */
+const STAT_SAMPLE = 16;
+
+/**
+ * Slack (ms) when comparing a file's mtime with the start of the Bash call: coarse timestamps on ordinary file
+ * systems, and on slow ones (9P mounts of Windows drives, mtimes lag `Date.now()` by about 1.5 s: measured on
+ * `/mnt/c` in WSL2) the clock offset. A file that changed a little before the call and is formatted by it too is
+ * harmless: FileChanged would format it anyway.
+ */
+const MTIME_SLACK_MS = { fast: 1000, slow: 5000 };
+
+/**
+ * Whether a stat per file of this list is slow enough that asking git for the changed files is cheaper.
+ *
+ * @remarks
+ * git costs about 8 ms of spawns on a fast file system (68 ms measured with 5000 untracked files), so it is only used
+ * when a sample of evenly spread files shows slow stats; a list shorter than the sample is always stat-ed (it is
+ * cheap even on 9P) but still judged, so the mtime slack follows the file system.
+ *
+ * @param list - The watch list of the cwd.
+ * @returns `true` when the mean stat time of the sample exceeds {@link SLOW_STAT_MS}.
+ */
+function statsAreSlow(list: Array<{ fp: string }>): boolean {
+  if (SLOW_STAT_MS < 0) return true;
+  const n = Math.min(STAT_SAMPLE, list.length);
+  if (n === 0) return false;
+  const step = Math.floor(list.length / n);
+  const t0 = performance.now();
+  for (let i = 0; i < n; i++) {
+    try {
+      statSync(list[i * step].fp);
+    } catch {
+      // deleted meanwhile: still a measured round trip
+    }
   }
-  return list;
+  return (performance.now() - t0) / n > SLOW_STAT_MS;
+}
+
+/**
+ * The files git sees as changed in a cwd: a predicate over real file paths, so `bash_finished` stats only those
+ * instead of every file of a big watch list (a stat is slow on 9P mounts, see {@link statsAreSlow}).
+ *
+ * @remarks
+ * One `git status --porcelain -z --no-renames --untracked-files=normal` plus `git rev-parse --show-toplevel`
+ * (paths of the status are relative to the toplevel). Modified, added, deleted and untracked entries count; an
+ * untracked directory (entry ending in `/`) and a changed submodule (entry without it) match every file below
+ * them. Clean files are left out on purpose: a file the Bash call rewrote back to its index content needs no format.
+ *
+ * @param root - Effective cwd.
+ * @returns The predicate, or `null` without git, outside a repository or on any error (the caller then checks every
+ * file).
+ */
+async function gitChanged(root: string): Promise<((real: string) => boolean) | null> {
+  try {
+    const opts = { cwd: root, encoding: "utf8" as const, timeout: 10_000, maxBuffer: 64 * 1024 * 1024 };
+    const [top, status] = await Promise.all([
+      execFileAsync("git", ["--no-optional-locks", "rev-parse", "--show-toplevel"], opts),
+      execFileAsync("git", ["--no-optional-locks", "status", "--porcelain", "-z", "--no-renames", "--ignore-submodules=none", "--untracked-files=normal"], opts),
+    ]);
+    const base = top.stdout.trim();
+    if (!base) return null;
+    // compared case-insensitively: on a Windows drive mounted by 9P git's toplevel keeps the casing of the cwd as
+    // entered and the status the casing of the index, while the file system itself ignores case (measured on /mnt/c);
+    // on a case-sensitive file system a file differing only in case is a harmless extra candidate
+    const entries = new Set<string>();
+    for (const entry of status.stdout.split("\0")) {
+      if (entry.length < 4) continue; // "XY path"
+      entries.add(path.join(base, entry.slice(3)).replace(/\/+$/, "").toLowerCase()); // an untracked directory ends in a slash
+    }
+    // the file itself, or a directory or submodule above it (up to the toplevel) is listed
+    return (real) => {
+      for (let p = real; p.length > base.length; p = path.dirname(p)) if (entries.has(p.toLowerCase())) return true;
+      return false;
+    };
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -755,33 +912,59 @@ async function cachedWatchList(sc: Scope): Promise<Array<{ fp: string; real: str
  *
  * @remarks
  * FileChanged fires only after the Bash call ended, so its tool output shows the unformatted state. Every file of
- * the (cached) watch list with an mtime after the {@link bashStarted} time (minus 1 s for coarse file systems) goes
- * through {@link formatOnDisk}; false positives end at its digest and git checks. {@link fileChanged} later sees the
+ * the (cached) watch list with an mtime after the {@link bashStarted} time (minus 1 s for coarse file systems, 5 s on
+ * file systems with slow stats, whose mtimes lag the clock) goes through {@link formatOnDisk}; on such a file system
+ * ({@link statsAreSlow}) only the files git reports as changed ({@link gitChanged}) are stat-ed. False positives end
+ * at its digest and git checks. {@link fileChanged} later sees the
  * recorded digest and stays silent, so nothing is formatted or reported twice. Does nothing without a preceding
  * `bash_started`, a dprint config or a watch list.
  *
- * @param args - Hook input: `cwd`, `agent_id`, `session_id` and `scratchpad_dir`.
- * @returns A PostToolUse notice naming the reformatted files, else `{}` (fail open).
+ * @param args - Hook input: `cwd`, `agent_id`, `session_id`, `scratchpad_dir`, `tool_use_id` and `hook_event_name`
+ * (`PostToolUse`, or `PostToolUseFailure` for a Bash call that exited non-zero).
+ * @returns A PostToolUse (or PostToolUseFailure) notice naming the reformatted files, else `{}` (fail open).
  */
 export async function bashFinished(args: BashFinishedInput = {}, signal?: AbortSignal): Promise<HookResult> {
   try {
     const k = overrideKey(args);
-    const since = bashStart.get(k);
-    bashStart.delete(k);
+    const since = bashStart.get(bashKey(args));
+    bashStart.delete(bashKey(args));
     const sc = scopeOf(args);
     if (since === undefined || !sc || findConfig(sc.root) === null) return {};
-    const touched = (await cachedWatchList(sc)).filter((f) => {
+    // the list is cached per root and may have been read by a call with another (or no) scratchpad: apply this call's
+    const scratch = sc.realScratch;
+    const list = (await cachedWatchList(sc)).filter(
+      (f) => scratch === null || !(f.real === scratch || f.real.startsWith(scratch + path.sep)),
+    );
+    // on a slow file system stat only what git reports as changed; otherwise (and without git) every file is checked
+    // the verdict is a property of the file system: measured once per root (an empty list says nothing)
+    let slow = slowRoots.get(sc.root);
+    if (slow === undefined) {
+      slow = statsAreSlow(list);
+      if (list.length > 0) slowRoots.set(sc.root, slow);
+    }
+    // git only pays off for a long list (a short one is cheap to stat even on 9P); a negative override forces it
+    const changed = slow && (list.length >= STAT_SAMPLE || SLOW_STAT_MS < 0) ? await gitChanged(sc.root) : null;
+    const slack = slow ? MTIME_SLACK_MS.slow : MTIME_SLACK_MS.fast;
+    const touched = (changed ? list.filter((f) => changed(f.real)) : list).filter((f) => {
       try {
-        return statSync(f.fp).mtimeMs > since - 1000;
+        return statSync(f.fp).mtimeMs > since - slack;
       } catch {
         return false; // deleted meanwhile
       }
     });
-    const formatted = new Set<string>(takeNotices(k)); // a FileChanged that fired mid-Bash queued its notice already
+    const formatted = new Set<string>();
     await Promise.all(touched.map(async (f) => {
-      if (await formatOnDisk(sc, f, signal)) formatted.add(f.fp);
+      // scoped again: the cached real path is stale if the Bash call swapped the file for a symlink (to a file outside
+      // the cwd, or under node_modules, vendor, ...), and formatOnDisk reads and writes through the path
+      const s = inScope(sc, f.fp);
+      if (s && (await formatOnDisk(sc, s, signal))) formatted.add(s.fp);
     }));
-    return formatted.size ? notice(args, "PostToolUse", [...formatted].sort()) : {};
+    // a FileChanged that fired mid-Bash may have formatted a file first (then formatOnDisk above saw nothing to do)
+    // and queued its notice: report it here, after the formats
+    if (signal?.aborted) return {}; // cancelled: the queued notices stay for the next hook
+    for (const f of takeNotices(k)) formatted.add(f);
+    // PostToolUseFailure too: a Bash call that exits non-zero fires that event, not PostToolUse
+    return formatted.size ? notice(args, args.hook_event_name === "PostToolUseFailure" ? "PostToolUseFailure" : "PostToolUse", [...formatted].sort()) : {};
   } catch (e) {
     process.stderr.write(
       `[dprint-hooks] bash_finished failed open: ${errText(e)}\n`,
@@ -880,8 +1063,11 @@ export async function formatPre(
     const fp = s.fp;
     // formatting is opt-in: only when the effective cwd, or an ancestor up to the git repo/worktree root, holds a dprint config
     if (findConfig(root) === null) return {};
+    // oversized documents pass through unformatted (upper bound for an Edit: file plus new_string); no git spawn
+    if (args.tool_name === "Write" && overCap(Buffer.byteLength(ti.content ?? ""), fp)) return {};
+    if (args.tool_name === "Edit" && overCap(statSync(fp).size + Buffer.byteLength(ti.new_string ?? ""), fp)) return {}; // ENOENT -> catch -> {}
     // user decision: gitignored files are never formatted
-    if (await isGitIgnored(fp)) return {};
+    if (await isGitIgnored(s.real)) return {};
     // cancelled meanwhile: spawn and format nothing (checked again before the second Edit format)
     if (signal?.aborted) return {};
     const uri = pathToFileURL(fp).href;
@@ -900,11 +1086,23 @@ export async function formatPre(
       // "\r\n" would be refused as not found. A lone "\r" left after normalizing is not handled: fail open.
       const O = readFileSync(fp, "utf8").replaceAll("\r\n", "\n"); // ENOENT -> catch -> {}
       if (O.includes("\r")) return {};
-      const oldStr = ti.old_string ?? "";
+      let oldStr = ti.old_string ?? "";
       const newStr = ti.new_string ?? "";
       const replaceAll = ti.replace_all === "true"; // template-substituted, so always a string
-      const M = applyEdit(O, oldStr, newStr, replaceAll);
+      if (replaceAll && oldStr !== "") {
+        // every occurrence grows by the difference: refuse before the result (up to occurrences x new_string) is built
+        const grow = Buffer.byteLength(newStr) - Buffer.byteLength(oldStr);
+        if (grow > 0 && overCap(Buffer.byteLength(O) + (O.split(oldStr).length - 1) * grow, fp)) return {};
+      }
+      let M = applyEdit(O, oldStr, newStr, replaceAll);
       if (M === null) return {};
+      // Claude Code's Edit with an empty new_string also deletes the line break after old_string (replace_all: only
+      // where one follows), so the intended result is that of the widened old_string (uniqueness was checked above)
+      if (newStr === "" && !oldStr.endsWith("\n") && O.includes(oldStr + "\n")) {
+        oldStr += "\n";
+        M = applyEdit(O, oldStr, newStr, replaceAll);
+        if (M === null) return {};
+      }
 
       // occurrences of old_string in O, non-overlapping left to right (as applyEdit/split replace them)
       const occ: number[] = [];

@@ -37,10 +37,16 @@ export interface FormatPreInput {
 
 /** Arguments of MCP tool `bash_started` (PreToolUse `Bash` hook). */
 export interface BashStartedInput {
+  /** Template: `${cwd}`. */
+  cwd?: string;
   /** Template: `${agent_id}`. */
   agent_id?: string;
   /** Template: `${session_id}`. */
   session_id?: string;
+  /** Template: `${scratchpad_dir}`. */
+  scratchpad_dir?: string;
+  /** Template: `${tool_use_id}`. */
+  tool_use_id?: string;
 }
 
 /** Arguments of MCP tool `drain_notices` (PreToolUse `Edit|Write|Read|Bash|MultiEdit` hook). */
@@ -97,6 +103,8 @@ export interface FileWrittenInput {
 
 /** Arguments of MCP tool `bash_finished` (PostToolUse `Bash` hook). */
 export interface BashFinishedInput {
+  /** Template: `${hook_event_name}`. */
+  hook_event_name?: string;
   /** Template: `${cwd}`. */
   cwd?: string;
   /** Template: `${agent_id}`. */
@@ -105,6 +113,8 @@ export interface BashFinishedInput {
   session_id?: string;
   /** Template: `${scratchpad_dir}`. */
   scratchpad_dir?: string;
+  /** Template: `${tool_use_id}`. */
+  tool_use_id?: string;
 }
 
 /** Arguments of MCP tool `cwd_changed` (CwdChanged hook). */

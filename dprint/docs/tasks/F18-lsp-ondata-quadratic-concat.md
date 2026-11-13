@@ -1,16 +1,14 @@
 ---
 id: F18
 title: Linear frame accumulation in DprintLsp.onData
-status: open
+status: done
 priority: low
 area: dprint/src/mcp/lsp.mts (DprintLsp.onData, buf, start, broken)
 ---
 
-# F18 Linear frame accumulation in DprintLsp.onData
-
 ## Status
 
-Open. Current code still does `this.buf = Buffer.concat([this.buf, chunk])` per stdout chunk and re-scans for `\r\n\r\n` from 0. Low value: only matters for multi-MB lsp responses, and the 1 MiB FileChanged guard (F12) already cuts most such cases.
+Done in 0.12.1: `DprintLsp.onData` collects chunks in `chunks` and joins once per frame (`need` = bytes still missing); test "chunked lsp frames ... reassembled byte-exact" (stub mode `chunked`, 880 KB body).
 
 ## Problem
 

@@ -30,7 +30,7 @@ const NOT_DPRINT = ver("not dprint\n");
 const DENY = { deny: "spawn ENOENT" };
 const NEXT = "next-result";
 const T0 = Date.UTC(2026, 10, 5, 12);
-const NOT_INSTALLED_TEXT = "no dprint is installed (none on PATH, in ~/.dprint/bin or in the npx cache)";
+const NOT_INSTALLED_TEXT = "no dprint is installed (none on PATH, in $DPRINT_INSTALL/bin (default ~/.dprint/bin) or in the npx cache)";
 const COULD_NOT_START = `${PATH_DPRINT} could not start or took over 10 s to answer --version`;
 
 // Date is faked in every test so the 15 s toast window can be stepped past with vi.setSystemTime
@@ -81,9 +81,13 @@ interface SetupOptions {
   path?: string | null;
   /** The fake executables fs.exists reports. */
   bins?: string[];
+  /** A tool's output as the engine hands it back in the chain's `{ result }`; default: the plain next result. */
+  toolResult?: (e: Record<string, unknown>) => unknown;
+  /** DPRINT_INSTALL (default unset). */
+  install?: string;
 }
 
-function setup($, on, { cwd = "", exists, run = () => OK, home = HOME, path: pathVar = PATH_DIRS, bins = [PATH_DPRINT] }: SetupOptions = {}) {
+function setup($, on, { cwd = "", exists, run = () => OK, home = HOME, path: pathVar = PATH_DIRS, bins = [PATH_DPRINT], toolResult = () => NEXT, install }: SetupOptions = {}) {
   const exist = exists ?? ((p) => ({ value: p === HOME || bins.includes(p) || existsSync(p) }));
   const toasts: { text: string; timeoutMs?: number }[] = [];
   const runs: { argv: string[]; init: Record<string, unknown> }[] = [];
@@ -93,7 +97,7 @@ function setup($, on, { cwd = "", exists, run = () => OK, home = HOME, path: pat
   on("env.get", (_$, e) => {
     envGets.push(e.name);
     if (typeof home === "object" && home) return home;
-    const value = e.name === "HOME" ? (home ?? undefined) : e.name === "PATH" ? (pathVar ?? undefined) : undefined;
+    const value = e.name === "HOME" ? (home ?? undefined) : e.name === "PATH" ? (pathVar ?? undefined) : e.name === "DPRINT_INSTALL" ? install : undefined;
     return { value };
   });
   on("process.run", (_$, e) => {
@@ -106,7 +110,7 @@ function setup($, on, { cwd = "", exists, run = () => OK, home = HOME, path: pat
   });
   on("session.start", () => NEXT);
   on("classic.CwdChanged", () => NEXT);
-  on("tool.call", () => ({ result: NEXT }));
+  on("tool.call", (_$, e) => ({ result: toolResult(e) }));
   const clock = mock.clock(on);
   /** Fires `event` as Claude Code, waits until the detached check has settled, resolves to the event's result. */
   const fire = async (event, e = {}) => {
@@ -374,13 +378,13 @@ test("a rejecting env.get is cached as a failed probe for 30 s, then re-probed; 
   const b = withConfig(repo());
   const { fire, runs, toasts, envGets } = setup($, on, { home: { deny: "boom" }, run: () => DENY });
   await fire("classic.CwdChanged", { new_cwd: a });
-  assert.equal(envGets.length, 2, "HOME and PATH are read together and both reject before any probe");
+  assert.equal(envGets.length, 3, "HOME, PATH and DPRINT_INSTALL are read together and both reject before any probe");
   vi.setSystemTime(T0 + 10_000);
   await fire("classic.CwdChanged", { new_cwd: b });
-  assert.equal(envGets.length, 2, "within 30 s: no re-probe");
+  assert.equal(envGets.length, 3, "within 30 s: no re-probe");
   vi.setSystemTime(T0 + 31_000);
   await fire("classic.CwdChanged", { new_cwd: b });
-  assert.equal(envGets.length, 4, "after 31 s: re-probed");
+  assert.equal(envGets.length, 6, "after 31 s: re-probed");
   assert.deepEqual(runs, []);
   assert.equal(toasts.length, 0);
 });
@@ -428,7 +432,7 @@ plainTest("the probe constants, MIN_VERSION and version regex equal the shared s
   const versionRe = "/^dprint (\\d+)\\.(\\d+)\\.(\\d+)(-\\S+)?/";
   assert.ok(check.includes(versionRe) && notice.includes(versionRe), "version regex");
   assert.ok(find.includes("[\"--yes\", \"dprint\"]") && notice.includes("[\"npx\", \"--no\", \"--prefer-offline\", \"--\", \"dprint\", \"--version\"]"), "npx argv (notice never downloads)");
-  assert.ok(find.includes("join(homedir(), \".dprint\", \"bin\", \"dprint\")") && notice.includes("${home}/.dprint/bin/dprint"), "home path");
+  assert.ok(find.includes("join(homedir(), \".dprint\")") && notice.includes("${home}/.dprint/bin/dprint") && find.includes("process.env.DPRINT_INSTALL") && notice.includes("DPRINT_INSTALL"), "home path");
 });
 
 plainTest("built module keeps the names Claude Code's static check needs (no mangling)", () => {
@@ -442,4 +446,40 @@ plainTest("built module keeps the names Claude Code's static check needs (no man
   assert.match(src, /\$\.process\.run\(/);
   assert.match(src, /\$\.env\.get\("HOME"\)/);
   assert.match(src, /\$\.env\.get\("PATH"\)/);
+});
+
+test("worktree tool output in the engine's { result } shape: ExitWorktree checks restoredCwd, never the worktree it left", async ($, on) => {
+  const left = withConfig(repo()); // ExitWorktree's output also names the worktree just left
+  const restored = withConfig(repo());
+  const entered = withConfig(repo());
+  const { fire, toasts } = setup($, on, {
+    cwd: "",
+    run: () => DENY,
+    toolResult: (e) => (e.tool === "ExitWorktree" ? { worktreePath: left, restoredCwd: restored } : { worktreePath: entered }),
+  });
+  await fire("tool.call", { tool: "ExitWorktree" });
+  assert.deepEqual(toasts.map((t) => t.text), [toastText(restored, COULD_NOT_START)]);
+  vi.setSystemTime(T0 + 16_000);
+  await fire("tool.call", { tool: "EnterWorktree" });
+  assert.deepEqual(toasts.map((t) => t.text), [toastText(restored, COULD_NOT_START), toastText(entered, COULD_NOT_START)]);
+});
+
+test("DPRINT_INSTALL/bin/dprint is the fallback when set (and ~/.dprint/bin is then not looked at)", async ($, on) => {
+  const dir = withConfig(repo());
+  const install = "/opt/dprint-install/";
+  const probed: string[] = [];
+  const { fire, runs, toasts } = setup($, on, {
+    cwd: dir,
+    install,
+    bins: [],
+    exists: (p) => {
+      probed.push(p);
+      return { value: p === HOME || p === "/opt/dprint-install/bin/dprint" || existsSync(p) };
+    },
+    run: () => OK,
+  });
+  await fire("session.start", {});
+  assert.deepEqual(runs.map((r) => r.argv), [["/opt/dprint-install/bin/dprint", "--version"]]);
+  assert.equal(toasts.length, 0);
+  assert.ok(!probed.includes(`${HOME}/.dprint/bin/dprint`), probed.join(","));
 });

@@ -1,16 +1,16 @@
 ---
 id: F07
 title: Overlap or drop the git check-ignore spawn in formatPre
-status: open
+status: closed
 priority: low
 area: dprint/src/mcp/format.mts (formatPre, isGitIgnored)
 ---
 
-# F07 Overlap or drop the git check-ignore spawn in formatPre
-
 ## Status
 
-Open, deliberately not done: the analysis verdict is "not worth fixing". No code change in dprint 0.8.0; `formatPre` still awaits `isGitIgnored(fp)` before the dprint request. Do not spend a version bump on it alone.
+Closed 2026-11-13, not done: still current, but skipping the check changes gitignore behaviour (a user decision) and the gain is one git spawn; the verdict of this document stands.
+
+Earlier state: Open, deliberately not done: the analysis verdict is "not worth fixing". No code change in dprint 0.8.0; `formatPre` still awaits `isGitIgnored(fp)` before the dprint request. Do not spend a version bump on it alone.
 
 ## Problem
 

@@ -1,16 +1,14 @@
 ---
 id: F10
 title: Even a no-change TS Edit formats the whole document (dprint-side sizing)
-status: docs-only
+status: done
 priority: low
 area: dprint upstream (@dprint/typescript ignores ranges); client side: dprint/src/mcp/format.mts formatPre
 ---
 
-# F10 Even a no-change TS Edit formats the whole document (dprint-side sizing)
-
 ## Status
 
-Docs-only. Current docs: only the README sentence "Every Edit formats the whole file ..." (`dprint/plugin/README.md`) and the Edit description in `dprint/CLAUDE.md` ("Edit: whole-file `formatting` of the edited text"). The per-size numbers (below) are NOT in README or CLAUDE.md (verified by grep). Remaining action, if wanted: add one sizing line.
+Done in 0.12.1: covered by the same README sentence as F09. Earlier state (before 0.12.1): Docs-only. Docs at that time: only the README sentence "Every Edit formats the whole file ..." (`dprint/plugin/README.md`) and the Edit description in `dprint/CLAUDE.md` ("Edit: whole-file `formatting` of the edited text"). The per-size numbers (below) are NOT in README or CLAUDE.md (verified by grep). Remaining action, if wanted: add one sizing line.
 
 ## Problem
 

@@ -37,17 +37,17 @@ sources; this rule records behaviour and constraints only.
 - `server.mts`: MCP stdio loop (newline-delimited JSON-RPC), tools `format_pre`, `cwd_changed` (CwdChanged hook),
   `worktree_entered` and `worktree_exited` (PostToolUse EnterWorktree/ExitWorktree hooks), `file_written`
   (PostToolUse Write|Edit), `file_changed` (FileChanged), `bash_started`/`bash_finished` (PreToolUse/PostToolUse
-  `Bash`) and `drain_notices` (PreToolUse `Edit|Write|Read|Bash|MultiEdit`, UserPromptSubmit). Typed by `HookInputs`
+  and PostToolUseFailure `Bash`; a Bash call that exits non-zero fires the failure event) and `drain_notices` (PreToolUse `Edit|Write|Read|Bash|MultiEdit`, UserPromptSubmit). Typed by `HookInputs`
   (see the hook-inputs rule).
 - `lsp.mts`: `dprint lsp` client: one lazily spawned child per cwd, Content-Length JSON-RPC, a request timeout
   (constructor option `timeoutMs`, tests only), a cooldown after a request timeout during which formats of that
-  document fail at once, a per-client pause before `findDprint` is retried after dprint was not found, stdout of a
+  document fail at once, an idle exit (`idleMs`, 2 min: the child is stopped, the next format respawns it), `close()` (eviction/shutdown: later formats fail instead of spawning), a per-client pause before `findDprint` is retried after dprint was not found, stdout of a
   replaced child ignored, respawn after a crash, `applyTextEdits`.
 - `watch-list.mts`: `dprintFilePaths` (`dprint file-paths` + `WATCH_LIMIT`), shared by `watch-paths.mts` and
   `bashFinished`.
 - `watch-paths.mts`: `command` hook for SessionStart and CwdChanged (SessionStart `mcp_tool` hooks are skipped while
   the server connects). Runs `dprint file-paths` (fallback `output-file-paths` for dprint 0.50-0.54) in the cwd,
-  filters through `inScope`, caps at `WATCH_LIMIT` (above it nothing is watched) and prints
+  filters through `inScope`, caps at `WATCH_LIMIT` (above it nothing is watched; with `DPRINT_WATCH_DIRECTORIES=1` the files are collapsed to their directories by `watchDirectories`, which Claude Code watches recursively: no lost watches, new files seen, but every event below the directories) and prints
   `hookSpecificOutput.watchPaths`.
 
 ## `format.mts`
@@ -56,18 +56,18 @@ sources; this rule records behaviour and constraints only.
   inside the real cwd, not excluded, not inside `scratchpad_dir`; dangling links rejected); universal-format's path
   exclusions apply. One `DprintLsp` per cwd; the least recently used child is disposed past the child cap.
 - `fileWritten` records Edit/Write content per real path, as a SHA-256 digest, only where a config exists.
-- `fileChanged` formats a watched file whole on disk unless it is out of scope, has a lone CR (CRLF files are
+- `fileChanged` formats a watched file whole on disk unless it is out of scope, has a lone CR or mixed CRLF/LF endings (pure CRLF files are
   formatted on their LF view), equals the recorded content, is gitignored, or is tracked and unchanged against the git
-  index. One `git --no-optional-locks status --porcelain --untracked-files=normal --ignored=matching` decides: `!!` or
+  index. One `git --literal-pathspecs --no-optional-locks status --porcelain --untracked-files=normal --ignored=matching` decides: `!!` or
   empty output skips; a git failure means format. It uses its own `dprint lsp`, runs a bounded number of events at once
   (git + dprint), queues a bounded number more and drops beyond that with a stderr line, and skips oversized files.
 - `formatPre`: config gate first (`{}` and no `dprint lsp` spawn unless `findConfig` finds a config in the effective
-  cwd or an ancestor), then the gitignore check (`git check-ignore`; Write/Edit skip ignored files). Write: whole-file
+  cwd or an ancestor), then the size guard (Write content or Edit target + new_string above `MAX_CHANGED_BYTES`, 1 MiB: `{}`, no spawn), then the gitignore check (`git check-ignore`; Write/Edit skip ignored files). Write: whole-file
   `formatting`; Edit: whole-file `formatting` of the edited text.
 - `lineDiff` and `trimToEdit`: keep only hunks touching the edit, widen `old_string` until it is unique (bounded
   single-line widening steps, then one jump to the widest span). Accepted only if the trimmed file formats like the
   intended edit; skipped when the trim reproduces dprint's output, else one extra whole-document `formatting`. CRLF
   files are trimmed on their LF view.
 - `formatOnDisk` is the shared core of `fileChanged` (queues the file for `drainNotices`) and `bashFinished` (reports
-  directly; it formats every cached watch-list file with mtime > `bash_started` − 1 s, so the Bash result is not
-  stale; the digest in `written` makes the later FileChanged a no-op). All three are keyed by `overrideKey`.
+  directly (the watch list is a cached promise: `bash_started` starts the first read, a failed read is retried after 60 s, an empty one (dprint missing, no files, above `WATCH_LIMIT`) after 5 min; the listing timeout is 25 s); it formats every cached watch-list file with mtime > `bash_started` − 1 s (− 5 s on slow file systems; there only the files `git status` reports are stat-ed, compared case-insensitively, chosen by a 16-file stat sample, `DPRINT_HOOKS_SLOW_STAT_MS` overrides the 0.2 ms threshold in tests), so the Bash result is not
+  stale; the digest in `written` makes the later FileChanged a no-op). FileChanged, `file_written` and `drain_notices` are keyed by `overrideKey`, the Bash start by `bashKey` (`overrideKey` plus `tool_use_id`, so overlapping Bash calls keep their own start; entries older than a day are dropped).

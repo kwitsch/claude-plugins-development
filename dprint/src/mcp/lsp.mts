@@ -29,6 +29,9 @@ type TextEdit = {
 
 /** Default per-request timeout; a request that exceeds it kills the child, the next format respawns it. */
 const REQUEST_TIMEOUT_MS = 30_000;
+
+/** Idle time after which the child exits (it holds the memory of the largest document it formatted); the next format respawns it. */
+const IDLE_MS = 120_000;
 /** After a request timeout, formats of the same document fail at once for this long (offline plugin host). */
 const COOLDOWN_MS = 60_000;
 /** After dprint was not found, {@link DprintLsp.start} does not search again for this long (a dprint installed mid-session is picked up). */
@@ -71,6 +74,12 @@ export class DprintLsp {
   private ready: Promise<void> | null = null;
   /** Unconsumed stdout bytes (an incomplete frame). */
   private buf: Buffer = Buffer.alloc(0);
+  /** Chunks read while the frame at the head of {@link buf} is still incomplete; joined once per frame. */
+  private chunks: Buffer[] = [];
+  /** Bytes in {@link chunks}. */
+  private pendingLen = 0;
+  /** Bytes still missing for the frame at the head of {@link buf}; `0` while its size is unknown. */
+  private need = 0;
   /** Id of the next request. */
   private nextId = 1;
   /** In-flight requests by id. */
@@ -79,6 +88,12 @@ export class DprintLsp {
   private queue: Promise<unknown> = Promise.resolve();
   /** Request timeout in ms. */
   private readonly timeoutMs: number;
+  /** Idle time in ms before the child is stopped. */
+  private readonly idleMs: number;
+  /** Set by {@link DprintLsp.close}: the client was evicted or shut down and must not start a child again. */
+  private closed = false;
+  /** Pending idle stop; armed when the format queue drains, cleared by the next format. */
+  private idle: NodeJS.Timeout | undefined;
   /** `Date.now()` of the last request timeout by document URI; pruned when it grows. */
   private readonly failedAt = new Map<string, number>();
   /** `Date.now()` until which {@link DprintLsp.start} does not search for dprint again after a miss. */
@@ -88,10 +103,11 @@ export class DprintLsp {
    * Create a client; the child is spawned lazily on the first {@link DprintLsp.format}.
    *
    * @param opts - Client options; `cwd` is the working directory and LSP root of the child, `timeoutMs`
-   * (default 30 s; tests) the request timeout.
+   * (default 30 s; tests) the request timeout, `idleMs` (default 2 min; tests) the idle time before the child exits.
    */
-  constructor(opts: { cwd: string; timeoutMs?: number }) {
+  constructor(opts: { cwd: string; timeoutMs?: number; idleMs?: number }) {
     this.cwd = opts.cwd;
+    this.idleMs = opts.idleMs ?? IDLE_MS;
     this.timeoutMs = opts.timeoutMs ?? REQUEST_TIMEOUT_MS;
   }
 
@@ -104,8 +120,12 @@ export class DprintLsp {
    * Rejects on any failure: dprint missing, crash, timeout, cooldown or error response.
    */
   format(uri: string, text: string): Promise<string | null> {
+    clearTimeout(this.idle);
     const run = this.queue.then(() => this.formatNow(uri, text));
-    this.queue = run.catch(() => {}); // a failed call must not block the next one
+    const tail = run.catch(() => {}).then(() => { // a failed call must not block the next one
+      if (this.queue === tail) this.idle = setTimeout(() => this.dispose(), this.idleMs).unref();
+    });
+    this.queue = tail;
     return run;
   }
 
@@ -113,11 +133,22 @@ export class DprintLsp {
    * Kill the child, if any, and reject every in-flight request.
    */
   dispose(): void {
+    clearTimeout(this.idle);
+    this.resetBuf(); // a big last reply must not stay pinned in a client without a child
     const child = this.child;
     this.child = null;
     this.ready = null;
     child?.kill();
     this.failPending(new Error("dprint lsp disposed")); // the exit handler ignores a disposed child
+  }
+
+  /**
+   * Retire the client for good (eviction, shutdown): like {@link DprintLsp.dispose}, but formats still queued or
+   * started later fail instead of spawning a child nobody tracks.
+   */
+  close(): void {
+    this.closed = true;
+    this.dispose();
   }
 
   /**
@@ -145,6 +176,7 @@ export class DprintLsp {
    * not affected.
    */
   private async formatNow(uri: string, text: string): Promise<string | null> {
+    if (this.closed) throw new Error("dprint lsp: client closed");
     const now = Date.now();
     if (now - (this.failedAt.get(uri) ?? 0) < COOLDOWN_MS) {
       throw new Error("dprint lsp: cooling down after a timeout");
@@ -195,6 +227,7 @@ export class DprintLsp {
     if (this.ready) return this.ready;
     if (Date.now() < this.noDprintUntil) throw new Error("dprint not found");
     const cmd = await findDprint();
+    if (this.closed) throw new Error("dprint lsp: client closed"); // closed while the lookup (an npx probe) ran
     if (this.ready) return this.ready; // another caller started the child while the lookup (an npx probe) ran
     if (!cmd) {
       this.noDprintUntil = Date.now() + NOT_FOUND_RETRY_MS;
@@ -203,7 +236,7 @@ export class DprintLsp {
     // via npx the child is npx; killing it also ends the dprint lsp it started (checked: npx -> sh -> dprint)
     const child = spawn(...dprintArgv(cmd, ["lsp"]), { cwd: this.cwd, stdio: "pipe" });
     this.child = child;
-    this.buf = Buffer.alloc(0);
+    this.resetBuf();
     child.stdin.on("error", () => {}); // EPIPE after a crash; the crash itself surfaces via exit/error
     child.stderr.on("data", (d: Buffer) => process.stderr.write(d));
     child.stdout.on("data", (d: Buffer) => {
@@ -238,7 +271,13 @@ export class DprintLsp {
    * @param chunk - Bytes just read from the child's stdout.
    */
   private onData(chunk: Buffer): void {
-    this.buf = Buffer.concat([this.buf, chunk]);
+    this.chunks.push(chunk);
+    this.pendingLen += chunk.length;
+    if (this.pendingLen < this.need) return; // a big body arrives in many chunks: join once, not per chunk
+    this.buf = Buffer.concat([this.buf, ...this.chunks]);
+    this.chunks = [];
+    this.pendingLen = 0;
+    this.need = 0;
     for (;;) {
       const sep = this.buf.indexOf("\r\n\r\n");
       if (sep === -1) return;
@@ -250,9 +289,13 @@ export class DprintLsp {
         return;
       }
       const end = sep + 4 + Number(len);
-      if (this.buf.length < end) return;
+      if (this.buf.length < end) {
+        this.need = end - this.buf.length;
+        return;
+      }
       const body = this.buf.subarray(sep + 4, end).toString("utf8");
-      this.buf = this.buf.subarray(end);
+      // an empty view would pin the whole buffer the reply was assembled in
+      this.buf = end === this.buf.length ? Buffer.alloc(0) : this.buf.subarray(end);
       let msg: unknown;
       try {
         msg = JSON.parse(body);
@@ -264,12 +307,20 @@ export class DprintLsp {
     }
   }
 
+  /** Drop all buffered stdout bytes. */
+  private resetBuf(): void {
+    this.buf = Buffer.alloc(0);
+    this.chunks = [];
+    this.pendingLen = 0;
+    this.need = 0;
+  }
+
   /**
    * Handle an unparseable frame: the stream is out of sync, so kill the child and let pending requests
    * reject now instead of timing out.
    */
   private broken(): void {
-    this.buf = Buffer.alloc(0);
+    this.resetBuf();
     this.dispose();
   }
 

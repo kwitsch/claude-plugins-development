@@ -144,7 +144,7 @@ function startServer(): void {
       handler: bashStarted,
     },
     bash_finished: {
-      description: "PostToolUse Bash: format the watched files the Bash call changed and tell the model its tool output predates the formatting.",
+      description: "PostToolUse and PostToolUseFailure Bash: format the watched files the Bash call changed and tell the model its tool output predates the formatting.",
       handler: bashFinished,
     },
     drain_notices: {
@@ -173,7 +173,8 @@ function startServer(): void {
     switch (method) {
       case "initialize":
         return ok(id, {
-          protocolVersion: params?.protocolVersion ?? DEFAULT_PROTOCOL,
+          // spec: answer with a version this server supports (the client then accepts or disconnects), never echo the request
+          protocolVersion: DEFAULT_PROTOCOL,
           capabilities: CAPABILITIES,
           serverInfo: SERVER_INFO,
         });

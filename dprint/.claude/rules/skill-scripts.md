@@ -20,7 +20,7 @@ Built to `plugin/skills/dprint/`, next to the hand-written `SKILL.md`, the `*.re
 
 ## Resolution (single source; the MCP and notice rules refer here)
 
-- `findDprint` (`find-dprint.mts`, async): `PATH`, then `~/.dprint/bin`, then `npx --yes dprint` (async probe, a
+- `findDprint` (`find-dprint.mts`, async): `PATH`, then `$DPRINT_INSTALL/bin` (default `~/.dprint/bin`, the installer's target), then `npx --yes dprint` (async probe, a
   failure re-probed after 30 s). `dprintArgv` builds the spawn arguments from the returned argv prefix.
 - `findConfig` (`find-config.mts`): first of `CONFIG_NAMES` in a directory or its ancestors, never above the
   git/worktree root (nearest dir holding `.git`). Used by `run-dprint`, `scan-plugins` and `mcp/format`.

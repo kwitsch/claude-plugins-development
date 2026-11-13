@@ -19,7 +19,7 @@ when the working directory has a dprint config but dprint cannot run.
   hook functions, `$`/`on` spelled as such and no shadowed names; whitespace removal would turn string literals into
   template literals.
 - `scripts/hooks.mts` validates only the `hooks` map; `claude plugin validate plugin` checks the module, lists
-  `process.run`, `env.get` and the env vars `HOME` and `PATH` among its uses, and warns "gating hook without .catch"
+  `process.run`, `env.get` and the env vars `DPRINT_INSTALL`, `HOME` and `PATH` among its uses, and warns "gating hook without .catch"
   for three of its hooks. Expected: the check is detached with `.catch`.
 
 ## When it checks
@@ -36,8 +36,8 @@ Resolution order of `findDprint`: see the skill-scripts rule. The notice judges 
 with `$.process.run`:
 
 - The first `<abs PATH entry>/dprint` that exists (`$.env.get("PATH")` + `$.fs.exists`; relative entries skipped, a
-  weaker check than `findDprint`'s executable-file test), else `$HOME/.dprint/bin/dprint` if it exists
-  (`$.env.get("HOME")`), else `npx --no --prefer-offline -- dprint --version`.
+  weaker check than `findDprint`'s executable-file test), else `$DPRINT_INSTALL/bin/dprint` (default `$HOME/.dprint/bin/dprint`) if it exists
+  (`$.env.get("DPRINT_INSTALL")`, `$.env.get("HOME")`), else `npx --no --prefer-offline -- dprint --version`.
 - npx uses the cached package only: unlike `findDprint`, which runs on a format request, this runs unprompted, so it
   never downloads. `--prefer-offline` so a name-only spec is not checked against the registry's latest, which fails
   offline or after a release.

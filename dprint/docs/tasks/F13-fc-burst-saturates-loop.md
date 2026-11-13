@@ -6,8 +6,6 @@ priority: none
 area: dprint/src/mcp/format.mts (fileChanged, acquireChangeSlot, releaseChangeSlot, MAX_ACTIVE_CHANGES, MAX_WAITING_CHANGES)
 ---
 
-# F13 Bound FileChanged burst load on the MCP server event loop
-
 ## Status
 
 Done. FileChanged handling admits at most 8 concurrent events (`MAX_ACTIVE_CHANGES`), queues up to 1000 more (`MAX_WAITING_CHANGES`, dropped beyond with a stderr line), and runs one git spawn per event instead of two.

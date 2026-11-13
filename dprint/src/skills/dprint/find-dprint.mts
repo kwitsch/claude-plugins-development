@@ -77,7 +77,7 @@ async function runProbe(npx: string): Promise<boolean> {
     why = (e instanceof Error ? e.message : String(e)).replace(/\s+/g, " ").trim();
   }
   process.stderr.write(
-    `find-dprint: no dprint on PATH or in ~/.dprint/bin, and '${npx} --yes dprint --version' failed (${why}); treating dprint as not installed\n`,
+    `find-dprint: no dprint on PATH or in $DPRINT_INSTALL/bin (default ~/.dprint/bin), and '${npx} --yes dprint --version' failed (${why}); treating dprint as not installed\n`,
   );
   return false;
 }
@@ -115,12 +115,12 @@ export function dprintArgv(cmd: string[], args: string[]): [string, string[]] {
 }
 
 /**
- * Find how to run dprint: the first executable `dprint` on `PATH`, else `~/.dprint/bin/dprint` (the install
- * script's default location), else the dprint npm package through the first `npx` on `PATH`, if a probe shows it
+ * Find how to run dprint: the first executable `dprint` on `PATH`, else `$DPRINT_INSTALL/bin/dprint`
+ * or, without `DPRINT_INSTALL`, `~/.dprint/bin/dprint` (where the install script puts it), else the dprint npm package through the first `npx` on `PATH`, if a probe shows it
  * runs.
  *
  * @remarks
- * `PATH` and `~/.dprint/bin` are checked on every call, so a dprint installed later wins over npx. The probe is
+ * `PATH` and the install directory are checked on every call, so a dprint installed later wins over npx. The probe is
  * asynchronous (the MCP server keeps answering other hooks during a cold download) and cached, see {@link probeNpx}.
  *
  * @returns The argv prefix to spawn without a shell (`[dprint]` or `[npx, "--yes", "dprint"]`, absolute first
@@ -129,7 +129,8 @@ export function dprintArgv(cmd: string[], args: string[]): [string, string[]] {
 export async function findDprint(): Promise<string[] | null> {
   const bin = onPath("dprint");
   if (bin) return [bin];
-  const fallback = join(homedir(), ".dprint", "bin", "dprint");
+  // the official installer puts dprint in ${DPRINT_INSTALL:-$HOME/.dprint}/bin
+  const fallback = join(process.env.DPRINT_INSTALL || join(homedir(), ".dprint"), "bin", "dprint");
   if (isExecutableFile(fallback)) return [fallback];
   const npx = onPath("npx");
   return npx && (await probeNpx(npx)) ? [npx, ...NPX_DPRINT] : null;

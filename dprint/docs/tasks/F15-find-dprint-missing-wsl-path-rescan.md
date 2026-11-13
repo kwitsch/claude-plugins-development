@@ -6,8 +6,6 @@ priority: none
 area: dprint/src/mcp/lsp.mts (DprintLsp.start, noDprintUntil, NOT_FOUND_RETRY_MS)
 ---
 
-# F15 Negative cache for a missing dprint binary
-
 ## Status
 
 Done. After `findDprint()` returned null, `DprintLsp.start()` rejects "dprint not found" without searching again for 30 s (`NOT_FOUND_RETRY_MS`), per client instance (not module-global).

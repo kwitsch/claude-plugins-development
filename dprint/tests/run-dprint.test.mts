@@ -3,17 +3,17 @@
 // Every run passes a cwd inside proj: otherwise findConfig walks up to the repo-root dprint.json (it stops at the nearest `.git`).
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { beforeEach, test } from "vitest";
+import { afterEach, beforeEach, test } from "vitest";
 
 const SCRIPT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../plugin/skills/dprint/run-dprint.mjs");
 
-let bin, home, proj;
+let tmp, bin, home, proj;
 beforeEach(() => {
-  const tmp = mkdtempSync(path.join(tmpdir(), "dprint-run-test-"));
+  tmp = mkdtempSync(path.join(tmpdir(), "dprint-run-test-"));
   bin = path.join(tmp, "bin");
   home = path.join(tmp, "home");
   proj = path.join(tmp, "proj");
@@ -23,6 +23,8 @@ beforeEach(() => {
     if (src) symlinkSync(src, path.join(bin, t));
   }
 });
+
+afterEach(() => rmSync(tmp, { recursive: true, force: true }));
 
 function stub(file, ...lines) {
   mkdirSync(path.dirname(file), { recursive: true });

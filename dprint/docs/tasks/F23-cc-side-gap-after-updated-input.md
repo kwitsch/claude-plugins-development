@@ -1,16 +1,16 @@
 ---
 id: F23
 title: Re-verify the apparent Claude-side gap after format_pre updatedInput
-status: open
+status: closed
 priority: none
 area: n/a (Claude Code behaviour; dprint/src/mcp/format.mts formatPre returns the updatedInput)
 ---
 
-# F23 Re-verify the apparent Claude-side gap after format_pre updatedInput
-
 ## Status
 
-Open, no action expected. Analysis verdict: refuted (clock artefact). Kept so a future session does not re-investigate it from the smoke log alone.
+Closed 2026-11-13: measurement record (gap refuted), no code action.
+
+Earlier state: Open, no action expected. Analysis verdict: refuted (clock artefact). Kept so a future session does not re-investigate it from the smoke log alone.
 
 ## Problem
 

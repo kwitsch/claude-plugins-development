@@ -1,16 +1,14 @@
 ---
 id: F25
 title: Cut watch-paths SessionStart/CwdChanged cost on large repos
-status: open
+status: done
 priority: low
 area: dprint/src/mcp/format.mts (realish), dprint/src/mcp/watch-paths.mts (watchList, execFileSync timeout)
 ---
 
-# F25 Cut watch-paths SessionStart/CwdChanged cost on large repos
-
 ## Status
 
-Open. Verified in the current source: `realish` still calls `realpathSync`, and `watchList` still passes `timeout: 10_000` to `execFileSync`. Marginal value; one-line fixes are free.
+Done in 0.12.1: `realish` uses `realpathSync.native` (one syscall), `dprintFilePaths` returns the list sorted (the timeout stays at 10 s in 0.13.2 and was raised to 25 s later in 0.13.2 (a 1500-file listing took 11 s on a 9P mount): a shorter one makes a slow first listing fail and be cached empty for the session).
 
 ## Problem
 

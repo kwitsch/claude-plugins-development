@@ -1,10 +1,11 @@
 // Unit tests for the pure helpers of the built plugin/mcp/format.mjs (no dprint, no spawn).
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { test } from "vitest";
-import { applyEdit, formatPre, lineDiff, trimToEdit } from "../plugin/mcp/format.mjs";
+import { test, vi } from "vitest";
+import { applyEdit, bashFinished, bashStarted, formatPre, lineDiff, trimToEdit } from "../plugin/mcp/format.mjs";
 import { applyTextEdits } from "../plugin/mcp/lsp.mjs";
 
 const h = (aStart, aEnd, bStart, bEnd) => ({ aStart, aEnd, bStart, bEnd });
@@ -291,4 +292,49 @@ test("trimToEdit: a highly repetitive file jumps to the widest span after the st
   const t0 = Date.now();
   assert.deepEqual(trimToEdit(O, F, [[11_000, 11_000]]), { oldString: O, newString: F });
   assert.ok(Date.now() - t0 < 1000, `took ${Date.now() - t0} ms`);
+});
+
+test("watch list: an empty read (dprint missing) is retried after 5 minutes, not before", async () => {
+  const tmp = mkdtempSync(path.join(tmpdir(), "dprint-retry-"));
+  const bin = path.join(tmp, "bin");
+  const repo = path.join(tmp, "repo");
+  mkdirSync(bin);
+  mkdirSync(path.join(repo, ".git"), { recursive: true });
+  writeFileSync(path.join(repo, "dprint.json"), "{}");
+  for (const t of ["bash", "node"]) {
+    const src = spawnSync("sh", ["-c", `command -v ${t}`], { encoding: "utf8" }).stdout.trim();
+    if (src) symlinkSync(src, path.join(bin, t));
+  }
+  const log = path.join(tmp, "listed.log");
+  const oldPath = process.env.PATH;
+  const oldHome = process.env.HOME;
+  const oldInstall = process.env.DPRINT_INSTALL;
+  process.env.PATH = bin;
+  process.env.HOME = tmp;
+  delete process.env.DPRINT_INSTALL; // the installer's directory is looked at before npx
+  vi.useFakeTimers({ toFake: ["Date"] }); // only the clock: the spawned processes keep real timers
+  const args = { cwd: repo, agent_id: "", session_id: "retry", scratchpad_dir: "" };
+  const cycle = async (id: string) => {
+    bashStarted({ ...args, tool_use_id: id });
+    await bashFinished({ ...args, tool_use_id: id });
+  };
+  const listings = () => (existsSync(log) ? readFileSync(log, "utf8").split("\n").filter(Boolean).length : 0);
+  try {
+    await cycle("a"); // no dprint anywhere: the list is empty
+    assert.equal(listings(), 0);
+    writeFileSync(path.join(bin, "dprint"), `#!/usr/bin/env bash\necho listed >> "${log}"\n`);
+    chmodSync(path.join(bin, "dprint"), 0o755);
+    vi.setSystemTime(Date.now() + 4 * 60_000);
+    await cycle("b");
+    assert.equal(listings(), 0, "within 5 minutes the empty list is kept");
+    vi.setSystemTime(Date.now() + 2 * 60_000);
+    await cycle("c");
+    assert.equal(listings(), 1, "after 5 minutes the list is read again and the installed dprint is found");
+  } finally {
+    vi.useRealTimers();
+    process.env.PATH = oldPath;
+    process.env.HOME = oldHome;
+    if (oldInstall !== undefined) process.env.DPRINT_INSTALL = oldInstall;
+    rmSync(tmp, { recursive: true, force: true });
+  }
 });
