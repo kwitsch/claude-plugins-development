@@ -195,10 +195,11 @@ No `dprint` child after the idle period; 0 `dprint` children over all 10 guarded
 
 ## Bug hunt
 
-Three review rounds over the plugin after the 0.13.0 evaluation; every finding was fixed (code fixes with tests), none changed the numbers above.
+Four review rounds over the plugin after the 0.13.0 evaluation; every finding was fixed (code fixes with tests), none changed the numbers above.
 
 - **0.13.1 (round 1)**, server: an evicted `DprintLsp` is closed for good instead of respawning, and an empty reply view no longer pins the whole assembled buffer; `git status` gets `--literal-pathspecs` (a glob character in a file name matched other files); the digest decoder keeps a UTF-8 BOM like `readFileSync` (digests disagreed, so BOM files were handled wrong); files with mixed line endings are not rewritten all-CRLF; `initialize` answers the server's own `protocolVersion` instead of echoing the client's. Notice hook: the worktree cwd is read from the field of the tool that fired (`worktreePath` for EnterWorktree, `restoredCwd` for ExitWorktree, also from the engine's `{ result }`); `DPRINT_INSTALL` is honored. Skill scripts: extensions matched case-sensitively like dprint, a BOM config is reported as unusable (dprint rejects it), `latest.` plugin URLs count as configured, `findDprint` honors `DPRINT_INSTALL`; README fixes.
 - **0.13.2 (rounds 2 and 3)**: `close()` also stops a spawn that is still waiting for the dprint lookup; an Edit with an empty `new_string` also removes the following line break, as Claude Code does; file names in notices are JSON-quoted (a name could hold a newline or read like an instruction); the Bash start time is keyed per call (`tool_use_id`, new hook input), so overlapping Bash calls of one session keep their own window; `bash_finished` reports a `file_changed` reformat that finished mid-Bash after running its own formats (race); `bash_finished` also runs on PostToolUseFailure (a Bash call exiting non-zero) and answers with that event name; Bash start entries that never finish are pruned after an hour. Tests added for the review gaps (hooks.json wiring, the race, closed client, `initialize`, `DPRINT_INSTALL`).
+- **0.13.2 (round 4)**: `git check-ignore` and the index check (`git status`) run on the real path: git refuses a pathspec beyond a symbolic link, so a file reached through a symlink into an ignored directory was formatted (Write/Edit) or skipped wrongly (FileChanged, `bash_finished`). Round 5 (a last independent pass over the whole plugin) found no code defect.
 
 ## Remaining findings
 
