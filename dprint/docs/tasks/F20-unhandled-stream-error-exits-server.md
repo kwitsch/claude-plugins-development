@@ -10,7 +10,7 @@ area: dprint/src/mcp/server.mts (startServer, process.stdout/stderr), dprint/src
 
 Closed 2026-11-13, not done: a no-op stream error listener could leave an orphaned server process; the verdict of this document stands.
 
-Open, verdict REFUTED (worth fixing: no). No change required. Only optional two-line hardening exists, with a downside.
+Earlier state: Open, verdict REFUTED (worth fixing: no). No change required. Only optional two-line hardening exists, with a downside.
 
 ## Problem
 

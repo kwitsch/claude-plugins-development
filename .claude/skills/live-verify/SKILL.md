@@ -16,6 +16,7 @@ Recipe worked out for the dprint plugin; see `.claude/rules/claude-code-hook-fac
 ## Run
 
 ```bash
+cd "$R" # the throwaway repo: Claude's Write/Edit/Bash steps act in the current directory, never in this repository
 claude -p --plugin-dir <worktree>/<plugin>/plugin \
   --debug-file "$S/debug.log" --allowedTools "Write,Edit,Read,Bash" --max-budget-usd 1 \
   "<exact tool steps; end with: Reply with the single word done.>"

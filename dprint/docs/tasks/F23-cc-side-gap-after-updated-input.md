@@ -10,7 +10,7 @@ area: n/a (Claude Code behaviour; dprint/src/mcp/format.mts formatPre returns th
 
 Closed 2026-11-13: measurement record (gap refuted), no code action.
 
-Open, no action expected. Analysis verdict: refuted (clock artefact). Kept so a future session does not re-investigate it from the smoke log alone.
+Earlier state: Open, no action expected. Analysis verdict: refuted (clock artefact). Kept so a future session does not re-investigate it from the smoke log alone.
 
 ## Problem
 

@@ -492,6 +492,25 @@ test("chunked lsp frames (split header, near-1-MiB body) are reassembled byte-ex
   assert.equal(out.hookSpecificOutput.updatedInput.content, "line of text\n".repeat(55_000));
 });
 
+test("findConfig: a higher-priority name created next to a cached lower-priority one wins", () => {
+  const dir = path.join(tmp, "fcp");
+  mkdirSync(path.join(dir, ".config"), { recursive: true });
+  writeFileSync(path.join(dir, ".config/dprint.json"), "{}");
+  assert.deepEqual(findConfig(dir), { dir, name: ".config/dprint.json" });
+  writeFileSync(path.join(dir, "dprint.json"), "{}");
+  assert.deepEqual(findConfig(dir), { dir, name: "dprint.json" });
+});
+
+test("Edit with replace_all: the size cap counts every replacement, not new_string once", async () => {
+  const log = loggingDprint();
+  const s = startServer();
+  const file = path.join(repo, "ra.ts");
+  writeFileSync(file, "x;\n".repeat(200_000)); // 600 KB
+  const out = await s.call({ cwd: repo, tool_name: "Edit", tool_input: { file_path: file, old_string: "x", new_string: "y".repeat(2000), replace_all: "true" } });
+  assert.deepEqual(out, {});
+  assert.equal(spawns(log), 0);
+});
+
 test("findConfig: a nearer config is seen at once even when an ancestor config was found before", () => {
   const top = path.join(tmp, "fcn");
   const sub = path.join(top, "pkg");
@@ -1585,6 +1604,23 @@ test("Edit property (seeded fuzz): whatever format_pre returns, applying it like
     assert.equal(fmt(got as string), fmt(intended), JSON.stringify({ i, original, old, neu, all, u }));
   }
   assert.ok(returned > 20, "the property was exercised: " + returned);
+});
+
+test("the cached watch list does not bake in the first caller's scratchpad: another session's scratchpad dir stays formatted", async () => {
+  mkdirSync(path.join(repo, "scratch-a"));
+  writeFileSync(
+    path.join(bin, "dprint"),
+    ["#!/usr/bin/env bash", `if [ "$1" = "file-paths" ]; then printf '%s\\n' "$PWD/scratch-a/s.ts"; exit 0; fi`, `exec node "${path.join(tmp, "stub-lsp.mjs")}" ok`, ""].join("\n"),
+  );
+  chmodSync(path.join(bin, "dprint"), 0o755);
+  const s = startServer();
+  // session A (scratchpad scratch-a) starts first and fills the cache; session B has another scratchpad
+  await s.tool("bash_started", { cwd: repo, session_id: "A", agent_id: "", scratchpad_dir: path.join(repo, "scratch-a"), tool_use_id: "A1" });
+  await s.tool("bash_started", { cwd: repo, session_id: "B", agent_id: "", scratchpad_dir: path.join(repo, "scratch-b"), tool_use_id: "B1" });
+  writeFileSync(path.join(repo, "scratch-a/s.ts"), "x  \n");
+  const r = await s.tool("bash_finished", { cwd: repo, session_id: "B", agent_id: "", scratchpad_dir: path.join(repo, "scratch-b"), tool_use_id: "B1" });
+  assert.match(r.hookSpecificOutput.additionalContext, /scratch-a\/s\.ts/);
+  assert.equal(readFileSync(path.join(repo, "scratch-a/s.ts"), "utf8"), "x\n");
 });
 
 test("hooks.json: bash_started carries cwd and scratchpad_dir (it starts the watch-list read)", () => {

@@ -10,7 +10,7 @@ area: dprint/src/mcp/watch-paths.mts (main, WATCH_LIMIT)
 
 Closed 2026-11-13: measurement record (not truncated on Claude Code 2.1.316), no code action; re-test after a Claude Code upgrade. `WATCH_LIMIT` now lives in `watch-list.mts`.
 
-Open, no action expected. Analysis verdict: refuted for Claude Code 2.1.316 (the cap does not precede the hookSpecificOutput parse). Re-test only after a Claude Code upgrade or if FileChanged silently stops on large repos.
+Earlier state: Open, no action expected. Analysis verdict: refuted for Claude Code 2.1.316 (the cap does not precede the hookSpecificOutput parse). Re-test only after a Claude Code upgrade or if FileChanged silently stops on large repos.
 
 ## Problem
 

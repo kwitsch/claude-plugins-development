@@ -34,7 +34,9 @@ export function findConfig(dir: string): FoundConfig | null {
   const key = path.resolve(dir);
   const hit = cache.get(key);
   if (hit !== undefined) {
-    if (existsSync(path.join(hit.dir, hit.name))) return hit;
+    // still there, and no name of higher priority (CONFIG_NAMES order) appeared next to it
+    const higher = CONFIG_NAMES.slice(0, CONFIG_NAMES.indexOf(hit.name)).some((n) => existsSync(path.join(hit.dir, n)));
+    if (!higher && existsSync(path.join(hit.dir, hit.name))) return hit;
     cache.delete(key);
   }
   const found = walk(key);

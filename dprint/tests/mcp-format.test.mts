@@ -308,8 +308,10 @@ test("watch list: an empty read (dprint missing) is retried after 5 minutes, not
   const log = path.join(tmp, "listed.log");
   const oldPath = process.env.PATH;
   const oldHome = process.env.HOME;
+  const oldInstall = process.env.DPRINT_INSTALL;
   process.env.PATH = bin;
   process.env.HOME = tmp;
+  delete process.env.DPRINT_INSTALL; // the installer's directory is looked at before npx
   vi.useFakeTimers({ toFake: ["Date"] }); // only the clock: the spawned processes keep real timers
   const args = { cwd: repo, agent_id: "", session_id: "retry", scratchpad_dir: "" };
   const cycle = async (id: string) => {
@@ -332,6 +334,7 @@ test("watch list: an empty read (dprint missing) is retried after 5 minutes, not
     vi.useRealTimers();
     process.env.PATH = oldPath;
     process.env.HOME = oldHome;
+    if (oldInstall !== undefined) process.env.DPRINT_INSTALL = oldInstall;
     rmSync(tmp, { recursive: true, force: true });
   }
 });

@@ -806,8 +806,9 @@ async function cachedWatchList(sc: Scope): Promise<Array<{ fp: string; real: str
   entry.list = (async () => {
     const list: Array<{ fp: string; real: string }> = [];
     try {
+      const shared = { ...sc, realScratch: null }; // the list is shared by calls with other scratchpads: each call applies its own
       for (const p of await dprintFilePaths(sc.root)) {
-        const s = inScope(sc, p);
+        const s = inScope(shared, p);
         if (s) list.push(s);
       }
       if (list.length === 0) entry.retryMs = WATCH_EMPTY_RETRY_MS; // dprint missing, no files or above the limit: look again later
@@ -960,6 +961,7 @@ export async function bashFinished(args: BashFinishedInput = {}, signal?: AbortS
     }));
     // a FileChanged that fired mid-Bash may have formatted a file first (then formatOnDisk above saw nothing to do)
     // and queued its notice: report it here, after the formats
+    if (signal?.aborted) return {}; // cancelled: the queued notices stay for the next hook
     for (const f of takeNotices(k)) formatted.add(f);
     // PostToolUseFailure too: a Bash call that exits non-zero fires that event, not PostToolUse
     return formatted.size ? notice(args, args.hook_event_name === "PostToolUseFailure" ? "PostToolUseFailure" : "PostToolUse", [...formatted].sort()) : {};
@@ -1087,6 +1089,11 @@ export async function formatPre(
       let oldStr = ti.old_string ?? "";
       const newStr = ti.new_string ?? "";
       const replaceAll = ti.replace_all === "true"; // template-substituted, so always a string
+      if (replaceAll && oldStr !== "") {
+        // every occurrence grows by the difference: refuse before the result (up to occurrences x new_string) is built
+        const grow = Buffer.byteLength(newStr) - Buffer.byteLength(oldStr);
+        if (grow > 0 && overCap(Buffer.byteLength(O) + (O.split(oldStr).length - 1) * grow, fp)) return {};
+      }
       let M = applyEdit(O, oldStr, newStr, replaceAll);
       if (M === null) return {};
       // Claude Code's Edit with an empty new_string also deletes the line break after old_string (replace_all: only

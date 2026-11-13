@@ -10,7 +10,7 @@ area: dprint/src/mcp/lsp.mts (DprintLsp.queue, DprintLsp.format), dprint/src/mcp
 
 Closed 2026-11-13, no change: `DprintLsp.queue` and the separate `file_changed` client are still the design (`formatOnDisk`, now also used by `bash_finished`, uses the second child).
 
-Open, verdict REFUTED (worth fixing: no). Nothing to implement. Only optional hardening (comment reword + regression test) remains.
+Earlier state: Open, verdict REFUTED (worth fixing: no). Nothing to implement. Only optional hardening (comment reword + regression test) remains.
 
 ## Problem
 
