@@ -44,6 +44,12 @@ Use the official types, not hand-written shapes or `unknown`: `@modelcontextprot
   `capabilities.extensions["io.modelcontextprotocol/tasks"] = {}` only when a tool can return a task.
 - Keep the 2025-era fields (`structuredContent` plus a text block with the same JSON) in both eras; stdout carries
   JSON-RPC only; notifications (no `id`) get no answer; an unknown method answers `-32601`.
+- Cancellation: the client sends `notifications/cancelled { requestId, reason }` (no `id`, modern `_meta` envelope inside
+  `params`) when a call is aborted, e.g. an `mcp_tool` hook that hit its `timeout` (verified live: 4 cancels for 4 delayed
+  calls). The server must stop waiting and send no answer for that id: keep an `AbortController` per in-flight
+  `tools/call`, race the handler against its abort, hand the handler the `signal`, and check it before every new spawn
+  and before every write. Work past its last check finishes in the background, its result is dropped. A cancel for an
+  unknown or finished id is ignored. A message without `id` never gets an answer.
 - Tool `_meta` the client reads: `ui.visibility` without `"model"` keeps the tool from the model and ToolSearch (hooks
   still call it; hook-only servers set `{ ui: { visibility: ["app"] } }` on every tool, also `mcp_status` still shows
   it); `anthropic/alwaysLoad` (true: never deferred behind ToolSearch, at server level it also blocks startup until

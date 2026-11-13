@@ -603,16 +603,20 @@ function releaseChangeSlot(): void {
  *
  * @param sc - Scope of the hook call.
  * @param s - The file, from {@link inScope}.
- * @returns `true` when the file was rewritten, `false` on every skip and error (fail open).
+ * @param signal - Aborts when the client cancels the call: nothing is read, spawned or written after it fires.
+ * @returns `true` when the file was rewritten, `false` on every skip, cancel and error (fail open).
  */
-async function formatOnDisk(sc: Scope, s: { fp: string; real: string }): Promise<boolean> {
+async function formatOnDisk(sc: Scope, s: { fp: string; real: string }, signal?: AbortSignal): Promise<boolean> {
   try {
+    if (signal?.aborted) return false;
     if (statSync(s.fp).size > MAX_CHANGED_BYTES) {
       process.stderr.write(`[dprint-hooks] format skipped (over ${MAX_CHANGED_BYTES} bytes): ${s.fp}\n`);
       return false;
     }
     if (!(await acquireChangeSlot(s.fp))) return false;
     try {
+      // cancelled while waiting for the slot: give it back without reading or spawning anything
+      if (signal?.aborted) return false;
       // read after the slot is held: waiting events must not each keep up to 1 MiB of text alive
       // fatal decoder: a non-UTF-8 file throws (fails open) instead of being rewritten with U+FFFD
       const text = utf8.decode(readFileSync(s.fp));
@@ -634,12 +638,14 @@ async function formatOnDisk(sc: Scope, s: { fp: string; real: string }): Promise
       } catch {
         // no git, not a repository or timeout: format
       }
+      if (signal?.aborted) return false;
       // own client: whole-file formats here never queue in front of a Write/Edit format_pre call
       const out = changed(
         await client(sc.root, sc.root + "\0file_changed").format(pathToFileURL(s.fp).href, lf),
         lf,
       );
-      if (out === null) return false;
+      // a cancelled call writes nothing
+      if (out === null || signal?.aborted) return false;
       const final = text === lf ? out : out.replaceAll("\n", "\r\n");
       // a write that landed while dprint was formatting (or while the event waited) wins
       if (utf8.decode(readFileSync(s.fp)) !== text) return false;
@@ -691,13 +697,14 @@ function notice(args: { cwd?: string; agent_id?: string; session_id?: string }, 
  */
 export async function fileChanged(
   args: FileChangedInput = {},
+  signal?: AbortSignal,
 ): Promise<HookResult> {
   try {
     if (args.event === "unlink") return {};
     const sc = scopeOf(args);
     const s = sc && inScope(sc, args.file_path ?? "");
     if (!sc || !s || findConfig(sc.root) === null) return {};
-    if (await formatOnDisk(sc, s)) {
+    if (await formatOnDisk(sc, s, signal)) {
       const k = overrideKey(args);
       queueNotice(k, s.fp);
     }
@@ -756,7 +763,7 @@ async function cachedWatchList(sc: Scope): Promise<Array<{ fp: string; real: str
  * @param args - Hook input: `cwd`, `agent_id`, `session_id` and `scratchpad_dir`.
  * @returns A PostToolUse notice naming the reformatted files, else `{}` (fail open).
  */
-export async function bashFinished(args: BashFinishedInput = {}): Promise<HookResult> {
+export async function bashFinished(args: BashFinishedInput = {}, signal?: AbortSignal): Promise<HookResult> {
   try {
     const k = overrideKey(args);
     const since = bashStart.get(k);
@@ -772,7 +779,7 @@ export async function bashFinished(args: BashFinishedInput = {}): Promise<HookRe
     });
     const formatted = new Set<string>(takeNotices(k)); // a FileChanged that fired mid-Bash queued its notice already
     await Promise.all(touched.map(async (f) => {
-      if (await formatOnDisk(sc, f)) formatted.add(f.fp);
+      if (await formatOnDisk(sc, f, signal)) formatted.add(f.fp);
     }));
     return formatted.size ? notice(args, "PostToolUse", [...formatted].sort()) : {};
   } catch (e) {
@@ -861,6 +868,7 @@ function done(updatedInput: Record<string, unknown>, fp: string): HookResult {
  */
 export async function formatPre(
   args: FormatPreInput = {},
+  signal?: AbortSignal,
 ): Promise<HookResult> {
   try {
     const ti = args.tool_input ?? {};
@@ -874,6 +882,8 @@ export async function formatPre(
     if (findConfig(root) === null) return {};
     // user decision: gitignored files are never formatted
     if (await isGitIgnored(fp)) return {};
+    // cancelled meanwhile: spawn and format nothing (checked again before the second Edit format)
+    if (signal?.aborted) return {};
     const uri = pathToFileURL(fp).href;
 
     if (args.tool_name === "Write") {
@@ -919,6 +929,7 @@ export async function formatPre(
       // exactly like the intended edit, anything else would lose or duplicate content
       const R = O.replace(r.oldString, () => r.newString);
       // out is format(M) (non-null here); R === out is a lossless trim and needs no extra formats
+      if (signal?.aborted) return {};
       if (R !== out && out !== ((await lsp.format(uri, R)) ?? R)) return {};
       return done(
         {

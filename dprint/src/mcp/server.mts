@@ -70,8 +70,8 @@ function readVersion(): string {
 type ToolDef<A> = {
   /** Human-readable purpose shown in `tools/list`. */
   description: string;
-  /** Hook handler; its result becomes the tool call's `structuredContent`. */
-  handler: (args: A) => HookResult | Promise<HookResult>;
+  /** Hook handler; its result becomes the tool call's `structuredContent`. `signal` aborts when the client cancels the call. */
+  handler: (args: A, signal: AbortSignal) => HookResult | Promise<HookResult>;
 };
 
 /**
@@ -87,7 +87,7 @@ type RpcRequest = {
   /** Method name. */
   method?: unknown;
   /** Method parameters. */
-  params?: { protocolVersion?: unknown; name?: unknown; arguments?: unknown; _meta?: unknown };
+  params?: { protocolVersion?: unknown; name?: unknown; arguments?: unknown; requestId?: unknown; _meta?: unknown };
 };
 
 /**
@@ -152,6 +152,8 @@ function startServer(): void {
       handler: drainNotices,
     },
   };
+  /** Abort controllers of the `tools/call` requests in flight, by request id: `notifications/cancelled` aborts one. */
+  const inflight = new Map<RequestId, AbortController>();
   const send = (msg: JSONRPCResultResponse | JSONRPCErrorResponse) => process.stdout.write(JSON.stringify(msg) + "\n");
   // a message without an id is a notification: it never gets an answer
   const ok = (id: RequestId | undefined, result: JSONRPCResultResponse["result"]) => id === undefined || send({ jsonrpc: "2.0", id, result });
@@ -182,8 +184,13 @@ function startServer(): void {
           _meta: SERVER_INFO_META,
         }, true);
       case "notifications/initialized":
-      case "notifications/cancelled":
         return;
+      case "notifications/cancelled": {
+        // an unknown or finished request id is ignored (the spec allows a cancel to race the answer)
+        const target = params?.requestId;
+        if (typeof target === "string" || typeof target === "number") inflight.get(target)?.abort();
+        return;
+      }
       case "ping":
         return reply({});
       case "tools/list":
@@ -207,11 +214,24 @@ function startServer(): void {
         }
         // trust boundary: the object's shape is the hooks.json template that typed this tool's input
         const handler = TOOLS[name as keyof Tools].handler;
-        let result;
+        // a cancelled call stops being waited for and gets no answer (spec); handler work already past its last
+        // abort check finishes in the background, its result is dropped
+        const call = new AbortController();
+        if (id !== undefined) inflight.set(id, call);
+        let result: HookResult | undefined;
         try {
-          result = await handler(args);
+          result = await Promise.race([
+            handler(args, call.signal),
+            new Promise<undefined>((resolve) => call.signal.addEventListener("abort", () => resolve(undefined), { once: true })),
+          ]);
         } catch (e) {
-          return fail(id, -32603, `tool error: ${errMsg(e)}`);
+          if (!call.signal.aborted) return fail(id, -32603, `tool error: ${errMsg(e)}`);
+        } finally {
+          if (id !== undefined) inflight.delete(id);
+        }
+        if (call.signal.aborted || result === undefined) {
+          process.stderr.write(`[${SERVER_NAME}] cancelled tools/call ${String(id)} (${name})\n`);
+          return;
         }
         return reply({
           content: [{ type: "text", text: JSON.stringify(result) }],

@@ -152,10 +152,13 @@ function startServer(opts: { cwd?: string; env?: Record<string, string> } = {}) 
     stdio: ["pipe", "pipe", "pipe"],
   });
   servers.push(child);
-  child.stderr.resume();
+  let stderr = "";
+  child.stderr.on("data", (d) => (stderr += d));
+  const answered = new Set<number>();
   const waiting = new Map<number, (msg: RpcReply) => void>();
   createInterface({ input: child.stdout }).on("line", (line) => {
     const msg = JSON.parse(line) as RpcReply; // throws (fails the run) if stdout carries anything but JSON-RPC
+    answered.add(msg.id);
     waiting.get(msg.id)?.(msg);
     waiting.delete(msg.id);
   });
@@ -172,7 +175,9 @@ function startServer(opts: { cwd?: string; env?: Record<string, string> } = {}) 
     (await rpc("tools/call", { name, arguments: args })).result
       .structuredContent;
   const call = (args) => tool("format_pre", args);
-  return { rpc, call, tool };
+  /** Write one raw JSON-RPC message (no answer awaited). */
+  const raw = (msg: object) => child.stdin.write(JSON.stringify({ jsonrpc: "2.0", ...msg }) + "\n");
+  return { rpc, call, tool, raw, answered, stderr: () => stderr };
 }
 
 const lines = (n) => Array.from({ length: n }, (_, i) => `l${i}`);
@@ -276,6 +281,22 @@ test("a request without an id is a notification: no answer, in either era", asyn
   child?.stdin?.write(JSON.stringify({ jsonrpc: "2.0", method: "tools/list", params: { _meta: { ...MODERN_META, "io.modelcontextprotocol/protocolVersion": "1900-01-01" } } }) + "\n");
   // the next answer on stdout is the one to this ping: nothing was written for the id-less messages before it
   assert.equal((await s.rpc("ping", {})).id, 1);
+});
+
+test("notifications/cancelled stops waiting for the call and sends no answer for it", async () => {
+  stubDprint("hang"); // the format never answers, so the call is in flight until the 30 s request timeout
+  const s = startServer();
+  const args = { cwd: repo, agent_id: "", session_id: "s", scratchpad_dir: "", tool_name: "Write", tool_input: { file_path: path.join(repo, "a.ts"), content: "x  \n" } };
+  s.raw({ id: 99, method: "tools/call", params: { name: "format_pre", arguments: args } });
+  await new Promise((r) => setTimeout(r, 400));
+  s.raw({ method: "notifications/cancelled", params: { requestId: 99, reason: "test" } });
+  await s.rpc("ping", {}); // the loop is alive and answers on
+  for (let i = 0; i < 40 && !s.stderr().includes("cancelled tools/call 99"); i++) await new Promise((r) => setTimeout(r, 50));
+  assert.match(s.stderr(), /cancelled tools\/call 99/);
+  assert.equal(s.answered.has(99), false);
+  // a cancel for an unknown or finished id is ignored
+  s.raw({ method: "notifications/cancelled", params: { requestId: 12345 } });
+  assert.deepEqual((await s.rpc("ping", {})).result, {});
 });
 
 test("excluded and out-of-root paths are never formatted", async () => {
