@@ -1,6 +1,8 @@
 export const TIMEOUT_MS = 4e3;
 export const MAX_CHOICE_OPTIONS = 255;
-export const JEV_API_TIMEOUT_S = 5;
+export const JEV_API_TIMEOUT_S = 4;
+export const COMPACT_TIMEOUT_MS = 12e3;
+export const COMPACT_API_TIMEOUT_S = 12;
 export const HAIKU_TIMEOUT_MS = 15e3;
 export const HAIKU_API_TIMEOUT_S = 14;
 export const JEV_TOOL_PREFIX = "mcp__jev-api__";

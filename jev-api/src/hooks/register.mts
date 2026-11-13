@@ -235,6 +235,12 @@ const MIN_LEVELS = 2;
 /** The most levels a `score` question may have. */
 const MAX_LEVELS = 10;
 
+/** The most output tokens a Haiku fallback call may ask for. */
+const HAIKU_MAX_TOKENS = 16_384;
+
+/** How long a hook waits for the tools to register before it goes on (ms): a registration that never answers must not hold a call. */
+const REGISTER_WAIT_MS = 1000;
+
 /** The engine names a registered tool `mcp__<plugin>__<name>`. */
 const TOOL_PREFIX = "mcp__jev-api__";
 
@@ -595,7 +601,24 @@ function checkAnswer(q: Question, a: unknown): Record<string, unknown> | undefin
 }
 
 /**
- * Answers the questions of one tool call with Claude Haiku instead of System One (no Jev access configured). The
+ * The output budget of one Haiku call: a base per question plus the tokens of every option or level the answer lists
+ * with its probability (a `choice` with 255 options needs thousands of tokens), capped.
+ *
+ * @param questions - The questions of the call.
+ * @returns The `maxTokens` to ask for.
+ */
+function haikuTokens(questions: Question[]): number {
+  let n = 256;
+  for (const q of questions) {
+    n += 256;
+    if (q.type === "choice") { for (const key of Object.keys(q.criteria)) n += Math.ceil(key.length / 3) + 12; }
+    else if (q.type === "score") n += 16 * q.criteria.length;
+  }
+  return Math.min(HAIKU_MAX_TOKENS, n);
+}
+
+/**
+ instead of System One (no Jev access configured). The
  * reply must be JSON in the System One response format; anything else is an error, never a made-up answer.
  *
  * @param $ - The engine.
@@ -609,12 +632,16 @@ function checkAnswer(q: Question, a: unknown): Record<string, unknown> | undefin
 async function askHaiku($: Engine, tool: ToolName, state: string, questions: Question[], timeoutMs: number, signal: AbortSignal): Promise<ToolResult> {
   const ids = questions.map((_, i) => (tool === "batch" ? `q${i}` : QUESTION_ID));
   const prompt = `Text:\n${state}\n\nQuestions (JSON):\n${JSON.stringify(Object.fromEntries(ids.map((id, i) => [id, questions[i]])))}`;
+  let onAbort: (() => void) | undefined;
   try {
-    const reply = $.model.complete({ model: HAIKU_MODEL, system: HAIKU_SYSTEM, prompt, maxTokens: Math.min(4096, 256 + 256 * questions.length), timeoutMs });
+    const reply = $.model.complete({ model: HAIKU_MODEL, system: HAIKU_SYSTEM, prompt, maxTokens: haikuTokens(questions), timeoutMs });
     reply.catch(() => undefined); // a late rejection after an abort must not go unhandled
     const aborted = new Promise<"aborted">((resolve) => {
       if (signal.aborted) resolve("aborted");
-      else signal.addEventListener("abort", () => resolve("aborted"), { once: true });
+      else {
+        onAbort = () => resolve("aborted");
+        signal.addEventListener("abort", onAbort, { once: true });
+      }
     });
     const r = await Promise.race([reply, aborted]);
     if (r === "aborted") return fail(tool, "the call was abandoned");
@@ -630,6 +657,8 @@ async function askHaiku($: Engine, tool: ToolName, state: string, questions: Que
     return { result: JSON.stringify(tool === "batch" ? list : list[0]) };
   } catch (err) {
     return fail(tool, `fallback: ${message(err)}`);
+  } finally {
+    if (onAbort) signal.removeEventListener("abort", onAbort); // a signal shared by many calls must not collect listeners
   }
 }
 
@@ -657,6 +686,7 @@ async function ask($: Engine, tool: ToolName, state: string, questions: Question
   // The key never travels in cleartext: over plain http the request goes out without it.
   if (key && /^https:/i.test(target.url)) headers["Authorization"] = `Bearer ${key}`;
   let timer: { cancel(): void } | undefined;
+  let onAbort: (() => void) | undefined;
   try {
     const request = $.http.fetch(target.url, { method: "POST", headers, body: JSON.stringify({ model, state, questions: Object.fromEntries(ids.map((id, i) => [id, questions[i]])) }) });
     request.catch(() => undefined); // a late rejection after the timeout or an abort won must not go unhandled
@@ -664,7 +694,10 @@ async function ask($: Engine, tool: ToolName, state: string, questions: Question
     const stop = new Promise<"timeout" | "aborted">((resolve) => {
       timer = $.clock.after(timeoutMs, () => resolve("timeout"));
       if (signal.aborted) resolve("aborted");
-      else signal.addEventListener("abort", () => resolve("aborted"), { once: true });
+      else {
+        onAbort = () => resolve("aborted");
+        signal.addEventListener("abort", onAbort, { once: true });
+      }
     });
     const res = await Promise.race([request, stop]);
     if (res === "timeout") return fail(tool, `timeout after ${timeoutMs}ms`);
@@ -689,6 +722,7 @@ async function ask($: Engine, tool: ToolName, state: string, questions: Question
     return fail(tool, env.jevUrl ? hide(why, target.url, "<JEV_URL>") : env.base ? hide(why, target.url, "<TYPESAFE_BASE_URL>/v1/systemone") : why);
   } finally {
     timer?.cancel();
+    if (onAbort) signal.removeEventListener("abort", onAbort); // a signal shared by many calls must not collect listeners
   }
 }
 
@@ -698,18 +732,41 @@ async function ask($: Engine, tool: ToolName, state: string, questions: Question
  * @param $ - The engine.
  * @param names - Full tool name to tool; gains the names the engine returned.
  */
-async function registerTools($: Engine, names: Map<string, ToolName>): Promise<void> {
-  // One failing registration must not drop the others.
-  const results = await Promise.allSettled(TOOLS.map((type) => $.tool.register({ name: type, ...SPECS[type] })));
+async function registerTools($: Engine, names: Map<string, ToolName>, missing: Set<ToolName>): Promise<void> {
+  // One failing registration must not drop the others; only the tools still missing are tried (a later hook retries the rest).
+  const todo = TOOLS.filter((t) => missing.has(t));
+  const results = await Promise.allSettled(todo.map((type) => $.tool.register({ name: type, ...SPECS[type] })));
   for (const [i, r] of results.entries()) {
-    const type = TOOLS[i];
+    const type = todo[i];
     // The engine starts a log line with the plugin's name; logging is best effort.
     if (r.status === "rejected") await Promise.resolve($.ui.log(`registering ${type} failed: ${message(r.reason)}`)).catch(() => undefined);
     else {
       // Only a mcp__<plugin>__<type> name: a hook above answering anything else must not make this hook claim another tool.
       const tool = r.value?.tool;
       if (tool?.startsWith("mcp__") && tool.endsWith(`__${type}`)) names.set(tool, type);
+      missing.delete(type);
     }
+  }
+}
+
+/**
+ * Waits for a promise, at most `ms`: a registration that never answers must not hold the hook (or the call) forever.
+ *
+ * @param $ - The engine.
+ * @param p - The promise to wait for; its rejection is ignored.
+ * @param ms - The longest wait.
+ */
+async function within($: Engine, p: Promise<void>, ms: number): Promise<void> {
+  let timer: { cancel(): void } | undefined;
+  try {
+    await Promise.race([
+      p.catch(() => undefined),
+      new Promise<void>((resolve) => {
+        timer = $.clock.after(ms, resolve);
+      }),
+    ]);
+  } finally {
+    timer?.cancel();
   }
 }
 
@@ -727,9 +784,19 @@ export function register(on: On, options?: Options): void {
   const names = new Map<string, ToolName>(TOOLS.map((t) => [TOOL_PREFIX + t, t]));
   // `$` reaches a module only inside its hooks, so the tools register in the first hook that runs (session.start, or an earlier tool call), once.
   // The engine accepts `$` only as an argument to a top-level function, hence `registerTools` and the memo spelled out in both hooks.
+  // A tool whose registration failed stays in `missing`: the next hook registers it again (no timers, the hooks are the retry points).
+  const missing = new Set<ToolName>(TOOLS);
   let registering: Promise<void> | undefined;
   on("session.start", async function onSessionStart($, e, next) {
-    await (registering ??= registerTools($, names));
+    if (missing.size > 0) {
+      await within(
+        $,
+        registering ??= registerTools($, names, missing).finally(() => {
+          registering = undefined;
+        }),
+        5 * REGISTER_WAIT_MS,
+      );
+    }
     return next(e);
   });
   on("tool.call", async function onToolCall($, e, next) {
@@ -737,11 +804,23 @@ export function register(on: On, options?: Options): void {
     if (type === undefined) return next(e);
     // Answered on every path, a throw too (a hook above refusing $.env.get): a registered tool that no hook answers fails.
     try {
-      await (registering ??= registerTools($, names)).catch(() => undefined); // best effort: a failed registration must not block the answer
-      // Literal names: the engine's static check only accepts a literal first argument to $.env.get.
-      const [key, base, jevUrl, model] = (await Promise.all([$.env.get("TYPESAFE_API_KEY"), $.env.get("TYPESAFE_BASE_URL"), $.env.get("JEV_URL"), $.env.get("TYPESAFE_DEFAULT_MODEL")])).map((v) => v?.trim() || undefined);
+      // best effort and bounded: a failed or hanging registration must not hold the answer
+      if (missing.size > 0) {
+        await within(
+          $,
+          registering ??= registerTools($, names, missing).finally(() => {
+            registering = undefined;
+          }),
+          REGISTER_WAIT_MS,
+        );
+      }
+      // Validation needs no env: an invalid call answers before any env read.
       const input = parseInput(type, e);
       if (typeof input === "string") return fail(type, input);
+      // Literal names: the engine's static check only accepts a literal first argument to $.env.get.
+      const [key, base, jevUrl, model] = (await Promise.all([$.env.get("TYPESAFE_API_KEY"), $.env.get("TYPESAFE_BASE_URL"), $.env.get("JEV_URL"), $.env.get("TYPESAFE_DEFAULT_MODEL")])).map((v) => v?.trim() || undefined);
+      // F05: an abandoned call sends nothing
+      if (next.signal.aborted) return fail(type, "the call was abandoned");
       // No Jev access configured: Haiku stands in. A configured Jev that fails stays an error.
       if (!key && !base && !jevUrl) return await askHaiku($, type, input.state, input.questions, (seconds(e["timeout"]) ?? fallbackS) * 1000, next.signal);
       return await ask($, type, input.state, input.questions, { key, base, jevUrl, model }, (seconds(e["timeout"]) ?? fallbackS) * 1000, next.signal);

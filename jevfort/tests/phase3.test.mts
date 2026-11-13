@@ -155,6 +155,43 @@ test("session.compact passes the ranking to the summarizer", async ($, on) => {
   expect(sent.map((q) => q.type)).toEqual(["score", "score", "score"]);
 });
 
+test("session.compact waits longer for Jev than an interactive call, and tells jev-api so", async ($, on) => {
+  const messages: Msg[] = [
+    { role: "user", text: "fix the failing date test", toolUses: [] },
+    {
+      role: "assistant",
+      text: "",
+      toolUses: ["a", "b", "c"].map((x, i) => ({ tool_use_id: `t${i}`, tool: "Bash", input: { command: `step ${x}` }, text: x })),
+    },
+  ];
+  mock.store(on, {});
+  mock.env(on, { TYPESAFE_API_KEY: "k" }); // Jev configured: System One answers, not Haiku
+  const clock = mock.clock(on);
+  on("session.cwd", () => ({ value: CWD }));
+  on("session.messages", () => ({ value: messages }));
+  on("ui.status", () => ({ value: undefined }));
+  on("tool.list", () => ({ value: JEV_TOOLS }));
+  let apiTimeout: unknown;
+  on("tool.call", async (_$, e, next) => {
+    if (e.tool !== JEV_BATCH) return next(e);
+    apiTimeout = e.timeout;
+    await _$.clock.sleep(4500); // longer than the interactive 4 s budget
+    const asked = e.questions as { instructions: string }[];
+    return { value: { result: JSON.stringify(asked.map((q) => ({ type: "score", score: q.instructions.includes("Call: Bash step a.") ? 2.8 : 0.3, probabilities: {}, confidence: 0.8 }))) } };
+  });
+  let instructions = "";
+  on("session.compact", (_$, e) => {
+    instructions = typeof e.instructions === "string" ? e.instructions : "";
+    return { skip: "test" };
+  });
+  const done = $.session.compact({ trigger: "manual", messages });
+  while (apiTimeout === undefined) await clock.advance(0); // until the batch call is under way
+  await clock.advance(4600);
+  await done;
+  expect(apiTimeout).toBe(12);
+  expect(instructions).toContain("Keep exact details (paths, errors, decisions, values) from: Bash step a.");
+});
+
 test("A short follow-up is classified with the previous reply as context", async ($, on) => {
   const answers: Record<string, Record<string, unknown>> = {
     kind: { type: "choice", choice: "task", probabilities: { task: 1 }, confidence: 1 },

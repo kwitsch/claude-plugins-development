@@ -281,8 +281,8 @@ test("A turn-start decision sends its questions in one jev-api batch call", asyn
 
   await drain($.turn.step(step));
   expect(calls()).toBe(1);
-  // Every jev-api call gives jev-api a 5 s HTTP timeout (14 s while Haiku answers because no Jev variable is set).
-  expect(sent.every((q) => q.timeout === 5)).toBe(true);
+  // Every interactive jev-api call gives jev-api an HTTP timeout equal to the 4 s askJev budget (14 s while Haiku answers because no Jev variable is set).
+  expect(sent.every((q) => q.timeout === 4)).toBe(true);
   expect(sent.map((q) => [q.id, q.type])).toEqual([
     ["next_action", "choice"],
     ["effort", "score"],

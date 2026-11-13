@@ -21,7 +21,7 @@ import type { Candidate } from "./candidates.mjs";
 import { COMPACT_MAX_TOKENS, COMPACT_MODEL, COMPACT_SYSTEM, compactInstructions, compactItems, haikuTranscript, RELEVANCE } from "./compact.mjs";
 import { clip, splitTurn, summarize, toolCalls } from "./context.mjs";
 import type { SessionMessage, ToolUse, TurnContext } from "./context.mjs";
-import { choice, HAIKU_API_TIMEOUT_S, HAIKU_TIMEOUT_MS, JEV_API_TIMEOUT_S, JEV_BATCH, JEV_TOOL_PREFIX, JEV_TOOLS, MAX_CHOICE_OPTIONS, missingJevTools, noul, score, TIMEOUT_MS } from "./jev.mjs";
+import { choice, COMPACT_API_TIMEOUT_S, COMPACT_TIMEOUT_MS, HAIKU_API_TIMEOUT_S, HAIKU_TIMEOUT_MS, JEV_API_TIMEOUT_S, JEV_BATCH, JEV_TOOL_PREFIX, JEV_TOOLS, MAX_CHOICE_OPTIONS, missingJevTools, noul, score, TIMEOUT_MS } from "./jev.mjs";
 import type { Answer, ChoiceAnswer, JevResult, Question } from "./jev.mjs";
 import { LOG_KEY, MAX_ENTRIES, recentDecisions, remember, statsKey } from "./log.mjs";
 import type { Entry } from "./log.mjs";
@@ -199,19 +199,21 @@ const asText = (v: unknown): string => String(v);
  * @param $ - Engine interface.
  * @param state - The facts the questions are about; sent as JSON text.
  * @param questions - The questions by id.
+ * @param slow - The call is off the interactive path (a compaction ranking): it gets the longer {@link COMPACT_TIMEOUT_MS} budget.
  * @returns The answers, or the error, with the time taken.
  */
-async function askJev($: Engine, state: unknown, questions: Record<string, Question>): Promise<JevResult> {
+async function askJev($: Engine, state: unknown, questions: Record<string, Question>, slow = false): Promise<JevResult> {
   const startedAt = await $.clock.now();
   const done = async (r: { ok: true; answers: Record<string, Answer> } | { ok: false; error: string }): Promise<JevResult> => ({ ...r, ms: (await $.clock.now()) - startedAt });
 
   // Without Jev access jev-api answers through Haiku, which needs a longer budget (jev-api reads the same three variables).
   const [key, base, jevUrl] = await Promise.all([$.env.get("TYPESAFE_API_KEY"), $.env.get("TYPESAFE_BASE_URL"), $.env.get("JEV_URL")]).catch(() => [undefined, undefined, undefined]);
   const haiku = ![key, base, jevUrl].some((v) => v?.trim());
-  const budgetMs = haiku ? HAIKU_TIMEOUT_MS : TIMEOUT_MS;
+  const budgetMs = haiku ? HAIKU_TIMEOUT_MS : slow ? COMPACT_TIMEOUT_MS : TIMEOUT_MS;
+  const apiTimeoutS = haiku ? HAIKU_API_TIMEOUT_S : slow ? COMPACT_API_TIMEOUT_S : JEV_API_TIMEOUT_S;
   const entries = Object.entries(questions);
   const call = (async (): Promise<Record<string, Answer>> => {
-    const r = await $.tool.call({ tool: JEV_BATCH, state: JSON.stringify(state), questions: entries.map(([, q]) => q), timeout: haiku ? HAIKU_API_TIMEOUT_S : JEV_API_TIMEOUT_S });
+    const r = await $.tool.call({ tool: JEV_BATCH, state: JSON.stringify(state), questions: entries.map(([, q]) => q), timeout: apiTimeoutS });
     // jev-api's deny text already starts with `batch:`.
     if (r.deny !== undefined) throw new Error(asText(r.deny));
     // Core's error result (no hook answered) has no `batch:` prefix; a structured one is serialized, not printed as `[object Object]`.
@@ -370,7 +372,7 @@ async function withJevRanking($: Engine, e: CompactEvent): Promise<CompactEvent>
       criteria: RELEVANCE,
     };
   });
-  const r = await askJev($, { request: clip(request, 2000), item_count: items.length }, questions);
+  const r = await askJev($, { request: clip(request, 2000), item_count: items.length }, questions, true);
   if (!r.ok) return e;
   const scores = items.map((_, i) => score(r.answers, `item_${i}`)?.score);
   const added = compactInstructions(items, scores);

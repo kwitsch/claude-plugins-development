@@ -3,7 +3,7 @@ import { CACHE_TTL, cacheColor, cacheLabel, minutesLeft, nextTtl } from "./cache
 import { absolute, AUTH_TOOL, bash, BUILTIN_COMMANDS, clipScript, coversStep, dedupeSkills, isSafeToOffer, MAX_READS, mentionedPaths, quotedTerms, relevant, SAFE_MAKE, SAFE_SCRIPT, sameCall, SKILL_BLOCKLIST_KEY } from "./candidates.mjs";
 import { COMPACT_MAX_TOKENS, COMPACT_MODEL, COMPACT_SYSTEM, compactInstructions, compactItems, haikuTranscript, RELEVANCE } from "./compact.mjs";
 import { clip, splitTurn, summarize, toolCalls } from "./context.mjs";
-import { choice, HAIKU_API_TIMEOUT_S, HAIKU_TIMEOUT_MS, JEV_API_TIMEOUT_S, JEV_BATCH, JEV_TOOL_PREFIX, JEV_TOOLS, MAX_CHOICE_OPTIONS, missingJevTools, noul, score, TIMEOUT_MS } from "./jev.mjs";
+import { choice, COMPACT_API_TIMEOUT_S, COMPACT_TIMEOUT_MS, HAIKU_API_TIMEOUT_S, HAIKU_TIMEOUT_MS, JEV_API_TIMEOUT_S, JEV_BATCH, JEV_TOOL_PREFIX, JEV_TOOLS, MAX_CHOICE_OPTIONS, missingJevTools, noul, score, TIMEOUT_MS } from "./jev.mjs";
 import { LOG_KEY, MAX_ENTRIES, recentDecisions, remember, statsKey } from "./log.mjs";
 import { bestAction, bounds, difficultyQuestion, doneQuestion, EFFORT_ORDER, effortQuestion, ESTIMATE_SPEC, ESTIMATE_TOOL, estimateEffort, EVERY_TURN_MODELS, inBandRange, inScratchpad, isEffort, lowerModel, mechanicalQuestion, modelFamily, nextActionQuestion, parseEstimateInput, pickCandidate, route, shouldContinue, singleActionQuestion } from "./policy.mjs";
 import { hints, NONE, promptQuestions } from "./prompt.mjs";
@@ -26,7 +26,7 @@ const FINISHED = new Set([
 	"idle"
 ]);
 const asText = (v) => String(v);
-async function askJev($, state, questions) {
+async function askJev($, state, questions, slow = false) {
 	const startedAt = await $.clock.now();
 	const done = async (r) => ({
 		...r,
@@ -46,14 +46,15 @@ async function askJev($, state, questions) {
 		base,
 		jevUrl
 	].some((v) => v?.trim());
-	const budgetMs = haiku ? HAIKU_TIMEOUT_MS : TIMEOUT_MS;
+	const budgetMs = haiku ? HAIKU_TIMEOUT_MS : slow ? COMPACT_TIMEOUT_MS : TIMEOUT_MS;
+	const apiTimeoutS = haiku ? HAIKU_API_TIMEOUT_S : slow ? COMPACT_API_TIMEOUT_S : JEV_API_TIMEOUT_S;
 	const entries = Object.entries(questions);
 	const call = (async () => {
 		const r = await $.tool.call({
 			tool: JEV_BATCH,
 			state: JSON.stringify(state),
 			questions: entries.map(([, q]) => q),
-			timeout: haiku ? HAIKU_API_TIMEOUT_S : JEV_API_TIMEOUT_S
+			timeout: apiTimeoutS
 		});
 		if (r.deny !== undefined) throw new Error(asText(r.deny));
 		if (r.isError === true || typeof r.result !== "string") throw new Error(`batch: ${r.result === undefined ? "no result" : typeof r.result === "string" ? r.result : JSON.stringify(r.result)}`);
@@ -159,7 +160,7 @@ async function withJevRanking($, e) {
 	const r = await askJev($, {
 		request: clip(request, 2e3),
 		item_count: items.length
-	}, questions);
+	}, questions, true);
 	if (!r.ok) return e;
 	const scores = items.map((_, i) => score(r.answers, `item_${i}`)?.score);
 	const added = compactInstructions(items, scores);

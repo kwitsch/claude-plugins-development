@@ -454,7 +454,9 @@ test("a settled request cancels its timeout timer", async ($, on) => {
   on("clock.after", (_$, e, next) => (signals.push(next.signal), next(e)));
   setup(on, { env: { TYPESAFE_API_KEY: "k" } });
   expect(await call($, "noul")).toEqual({ result: JSON.stringify(ANSWERS.noul) });
-  expect(signals.map((s) => s.aborted)).toEqual([true]);
+  // the lazy registration waits behind a timer of its own: every timer, that one too, is cancelled when its wait ends
+  expect(signals.length).toBeGreaterThan(0);
+  expect(signals.every((s) => s.aborted)).toBe(true);
 });
 
 // Case 13: missing or wrong-type answer.
@@ -544,6 +546,98 @@ it("an abandoned call answers at once instead of waiting for the request", async
   while (!sent) await new Promise((r) => setImmediate(r));
   ctl.abort();
   expect(await pending).toEqual({ deny: "noul: the call was abandoned" });
+});
+
+/** The module's hooks driven directly (the kit cannot abandon a dispatch, count listeners or leave a registration pending). */
+async function direct(overrides: Record<string, unknown>) {
+  const { register } = await import("../plugin/hooks/register.mjs");
+  const hooks = new Map<string, (...args: unknown[]) => Promise<unknown>>();
+  register((event: string, hook: (...args: unknown[]) => Promise<unknown>) => void hooks.set(event, hook));
+  const fetched: unknown[] = [];
+  const $ = {
+    env: { get: async (name: string) => (name === "TYPESAFE_API_KEY" ? "k" : undefined) },
+    http: { fetch: (...a: unknown[]) => (fetched.push(a), Promise.resolve({ status: 200, ok: true, headers: {}, text: JSON.stringify({ answers: { answer: ANSWERS["noul"] } }) })) },
+    clock: { after: () => ({ cancel() {} }) },
+    ...overrides,
+  };
+  const run = (type: string, signal: unknown = new AbortController().signal) => hooks.get("tool.call")?.($, { tool: TOOL(type), ...BASE[type] }, Object.assign(async () => ({}), { signal })) as Promise<{ result?: string; deny?: string }>;
+  return { run, fetched, hooks, $ };
+}
+
+// F02: a tool whose registration failed is registered again by the next hook, the others are not registered twice.
+it("a failed registration is retried by the next call, only for the tools still missing", async () => {
+  const tries: string[] = [];
+  let failBatch = true;
+  const { run } = await direct({
+    tool: {
+      register: async (spec: { name: string }) => {
+        tries.push(spec.name);
+        if (spec.name === "batch" && failBatch) throw new Error("boom");
+        return { tool: TOOL(spec.name) };
+      },
+    },
+    ui: { log: async () => undefined },
+  });
+  await run("noul");
+  expect(tries).toEqual(["noul", "choice", "score", "batch"]);
+  failBatch = false;
+  await run("noul");
+  expect(tries).toEqual(["noul", "choice", "score", "batch", "batch"]);
+  await run("noul");
+  expect(tries).toHaveLength(5); // nothing is missing any more
+});
+
+// F03: a registration that never answers must not hold the call.
+it("a registration that never answers does not hold the call", async () => {
+  const { run, fetched } = await direct({
+    tool: { register: () => new Promise(() => {}) },
+    clock: {
+      after: (ms: number, fn: () => void) => {
+        const t = ms === 1000 ? setTimeout(fn, 0) : undefined;
+        return { cancel: () => clearTimeout(t) };
+      },
+    },
+  });
+  expect(await run("noul")).toEqual({ result: JSON.stringify(ANSWERS["noul"]) });
+  expect(fetched).toHaveLength(1);
+});
+
+// F05: an already abandoned call sends nothing.
+it("an already abandoned call sends no request", async () => {
+  const { run, fetched } = await direct({ tool: { register: async (s: { name: string }) => ({ tool: TOOL(s.name) }) } });
+  const ctl = new AbortController();
+  ctl.abort();
+  expect(await run("noul", ctl.signal)).toEqual({ deny: "noul: the call was abandoned" });
+  expect(fetched).toHaveLength(0);
+});
+
+// F06: the abort listeners of settled calls are removed from a signal shared by many calls.
+it("settled calls leave no abort listeners on a shared signal", async () => {
+  const { run } = await direct({ tool: { register: async (s: { name: string }) => ({ tool: TOOL(s.name) }) } });
+  let listeners = 0;
+  const signal = { aborted: false, addEventListener: () => void listeners++, removeEventListener: () => void listeners-- };
+  for (let i = 0; i < 5; i++) await run("noul", signal);
+  expect(listeners).toBe(0);
+});
+
+// F07: invalid input is answered before any env read.
+it("an invalid call reads no env variable", async () => {
+  let reads = 0;
+  const { hooks, $ } = await direct({ tool: { register: async (s: { name: string }) => ({ tool: TOOL(s.name) }) }, env: { get: async () => (reads++, undefined) } });
+  const r = (await hooks.get("tool.call")?.($, { tool: TOOL("noul"), state: 1 }, Object.assign(async () => ({}), { signal: new AbortController().signal }))) as { deny?: string };
+  expect(r.deny).toMatch(/^noul: /);
+  expect(reads).toBe(0);
+});
+
+// F04: the Haiku output budget grows with the options a choice answer has to list.
+test("the Haiku output budget covers a choice with many options", async ($, on) => {
+  const asked = haiku(on, () => said("{}"));
+  mock.env(on, {});
+  const criteria = Object.fromEntries(Array.from({ length: 255 }, (_, i) => [`option number ${i}`, "d"]));
+  await call($, "choice", { criteria });
+  await call($, "noul");
+  expect(Number(asked[0]["maxTokens"])).toBeGreaterThan(4096);
+  expect(Number(asked[1]["maxTokens"])).toBe(512); // unchanged for a noul question
 });
 
 // Live smoke tests (opt-in): run against the System One server named by JEV_URL in the shell; skipped without it.

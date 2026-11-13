@@ -32,6 +32,8 @@ const HTTP_BASE = /^https?:\/\/[^/?#\s]+(?:\/[^?#\s]*)?$/i;
 const MAX_OPTIONS = 255;
 const MIN_LEVELS = 2;
 const MAX_LEVELS = 10;
+const HAIKU_MAX_TOKENS = 16384;
+const REGISTER_WAIT_MS = 1e3;
 const TOOL_PREFIX = "mcp__jev-api__";
 const SPECS = {
 	noul: {
@@ -325,21 +327,35 @@ function checkAnswer(q, a) {
 		probabilities: Object.fromEntries(levels.map((l, i) => [l, round4(normalized[i])]))
 	};
 }
+function haikuTokens(questions) {
+	let n = 256;
+	for (const q of questions) {
+		n += 256;
+		if (q.type === "choice") {
+			for (const key of Object.keys(q.criteria)) n += Math.ceil(key.length / 3) + 12;
+		} else if (q.type === "score") n += 16 * q.criteria.length;
+	}
+	return Math.min(HAIKU_MAX_TOKENS, n);
+}
 async function askHaiku($, tool, state, questions, timeoutMs, signal) {
 	const ids = questions.map((_, i) => tool === "batch" ? `q${i}` : QUESTION_ID);
 	const prompt = `Text:\n${state}\n\nQuestions (JSON):\n${JSON.stringify(Object.fromEntries(ids.map((id, i) => [id, questions[i]])))}`;
+	let onAbort;
 	try {
 		const reply = $.model.complete({
 			model: HAIKU_MODEL,
 			system: HAIKU_SYSTEM,
 			prompt,
-			maxTokens: Math.min(4096, 256 + 256 * questions.length),
+			maxTokens: haikuTokens(questions),
 			timeoutMs
 		});
 		reply.catch(() => undefined);
 		const aborted = new Promise((resolve) => {
 			if (signal.aborted) resolve("aborted");
-			else signal.addEventListener("abort", () => resolve("aborted"), { once: true });
+			else {
+				onAbort = () => resolve("aborted");
+				signal.addEventListener("abort", onAbort, { once: true });
+			}
 		});
 		const r = await Promise.race([reply, aborted]);
 		if (r === "aborted") return fail(tool, "the call was abandoned");
@@ -355,6 +371,8 @@ async function askHaiku($, tool, state, questions, timeoutMs, signal) {
 		return { result: JSON.stringify(tool === "batch" ? list : list[0]) };
 	} catch (err) {
 		return fail(tool, `fallback: ${message(err)}`);
+	} finally {
+		if (onAbort) signal.removeEventListener("abort", onAbort);
 	}
 }
 async function ask($, tool, state, questions, env, timeoutMs, signal) {
@@ -366,6 +384,7 @@ async function ask($, tool, state, questions, env, timeoutMs, signal) {
 	const headers = { "Content-Type": "application/json" };
 	if (key && /^https:/i.test(target.url)) headers["Authorization"] = `Bearer ${key}`;
 	let timer;
+	let onAbort;
 	try {
 		const request = $.http.fetch(target.url, {
 			method: "POST",
@@ -380,7 +399,10 @@ async function ask($, tool, state, questions, env, timeoutMs, signal) {
 		const stop = new Promise((resolve) => {
 			timer = $.clock.after(timeoutMs, () => resolve("timeout"));
 			if (signal.aborted) resolve("aborted");
-			else signal.addEventListener("abort", () => resolve("aborted"), { once: true });
+			else {
+				onAbort = () => resolve("aborted");
+				signal.addEventListener("abort", onAbort, { once: true });
+			}
 		});
 		const res = await Promise.race([request, stop]);
 		if (res === "timeout") return fail(tool, `timeout after ${timeoutMs}ms`);
@@ -404,43 +426,66 @@ async function ask($, tool, state, questions, env, timeoutMs, signal) {
 		return fail(tool, env.jevUrl ? hide(why, target.url, "<JEV_URL>") : env.base ? hide(why, target.url, "<TYPESAFE_BASE_URL>/v1/systemone") : why);
 	} finally {
 		timer?.cancel();
+		if (onAbort) signal.removeEventListener("abort", onAbort);
 	}
 }
-async function registerTools($, names) {
-	const results = await Promise.allSettled(TOOLS.map((type) => $.tool.register({
+async function registerTools($, names, missing) {
+	const todo = TOOLS.filter((t) => missing.has(t));
+	const results = await Promise.allSettled(todo.map((type) => $.tool.register({
 		name: type,
 		...SPECS[type]
 	})));
 	for (const [i, r] of results.entries()) {
-		const type = TOOLS[i];
+		const type = todo[i];
 		if (r.status === "rejected") await Promise.resolve($.ui.log(`registering ${type} failed: ${message(r.reason)}`)).catch(() => undefined);
 		else {
 			const tool = r.value?.tool;
 			if (tool?.startsWith("mcp__") && tool.endsWith(`__${type}`)) names.set(tool, type);
+			missing.delete(type);
 		}
+	}
+}
+async function within($, p, ms) {
+	let timer;
+	try {
+		await Promise.race([p.catch(() => undefined), new Promise((resolve) => {
+			timer = $.clock.after(ms, resolve);
+		})]);
+	} finally {
+		timer?.cancel();
 	}
 }
 export function register(on, options) {
 	const fallbackS = seconds(options?.["timeout"]) ?? DEFAULT_TIMEOUT_S;
 	const names = new Map(TOOLS.map((t) => [TOOL_PREFIX + t, t]));
+	const missing = new Set(TOOLS);
 	let registering;
 	on("session.start", async function onSessionStart($, e, next) {
-		await (registering ??= registerTools($, names));
+		if (missing.size > 0) {
+			await within($, registering ??= registerTools($, names, missing).finally(() => {
+				registering = undefined;
+			}), 5 * REGISTER_WAIT_MS);
+		}
 		return next(e);
 	});
 	on("tool.call", async function onToolCall($, e, next) {
 		const type = names.get(e.tool);
 		if (type === undefined) return next(e);
 		try {
-			await (registering ??= registerTools($, names)).catch(() => undefined);
+			if (missing.size > 0) {
+				await within($, registering ??= registerTools($, names, missing).finally(() => {
+					registering = undefined;
+				}), REGISTER_WAIT_MS);
+			}
+			const input = parseInput(type, e);
+			if (typeof input === "string") return fail(type, input);
 			const [key, base, jevUrl, model] = (await Promise.all([
 				$.env.get("TYPESAFE_API_KEY"),
 				$.env.get("TYPESAFE_BASE_URL"),
 				$.env.get("JEV_URL"),
 				$.env.get("TYPESAFE_DEFAULT_MODEL")
 			])).map((v) => v?.trim() || undefined);
-			const input = parseInput(type, e);
-			if (typeof input === "string") return fail(type, input);
+			if (next.signal.aborted) return fail(type, "the call was abandoned");
 			if (!key && !base && !jevUrl) return await askHaiku($, type, input.state, input.questions, (seconds(e["timeout"]) ?? fallbackS) * 1e3, next.signal);
 			return await ask($, type, input.state, input.questions, {
 				key,
