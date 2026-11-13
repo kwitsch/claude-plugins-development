@@ -802,24 +802,26 @@ const MTIME_SLACK_MS = { fast: 1000, slow: 5000 };
  *
  * @remarks
  * git costs about 8 ms of spawns on a fast file system (68 ms measured with 5000 untracked files), so it is only used
- * when a sample of evenly spread files shows slow stats; a list shorter than the sample is always stat-ed.
+ * when a sample of evenly spread files shows slow stats; a list shorter than the sample is always stat-ed (it is
+ * cheap even on 9P) but still judged, so the mtime slack follows the file system.
  *
  * @param list - The watch list of the cwd.
  * @returns `true` when the mean stat time of the sample exceeds {@link SLOW_STAT_MS}.
  */
 function statsAreSlow(list: Array<{ fp: string }>): boolean {
   if (SLOW_STAT_MS < 0) return true;
-  if (list.length < STAT_SAMPLE) return false;
-  const step = Math.floor(list.length / STAT_SAMPLE);
+  const n = Math.min(STAT_SAMPLE, list.length);
+  if (n === 0) return false;
+  const step = Math.floor(list.length / n);
   const t0 = performance.now();
-  for (let i = 0; i < STAT_SAMPLE; i++) {
+  for (let i = 0; i < n; i++) {
     try {
       statSync(list[i * step].fp);
     } catch {
       // deleted meanwhile: still a measured round trip
     }
   }
-  return (performance.now() - t0) / STAT_SAMPLE > SLOW_STAT_MS;
+  return (performance.now() - t0) / n > SLOW_STAT_MS;
 }
 
 /**
@@ -829,8 +831,8 @@ function statsAreSlow(list: Array<{ fp: string }>): boolean {
  * @remarks
  * One `git status --porcelain -z --no-renames --untracked-files=normal` plus `git rev-parse --show-toplevel`
  * (paths of the status are relative to the toplevel). Modified, added, deleted and untracked entries count; an
- * untracked directory is reported as one entry ending in `/` and matches every file below it. Clean files are left
- * out on purpose: a file the Bash call rewrote back to its index content needs no format.
+ * untracked directory (entry ending in `/`) and a changed submodule (entry without it) match every file below
+ * them. Clean files are left out on purpose: a file the Bash call rewrote back to its index content needs no format.
  *
  * @param root - Effective cwd.
  * @returns The predicate, or `null` without git, outside a repository or on any error (the caller then checks every
@@ -845,16 +847,16 @@ async function gitChanged(root: string): Promise<((real: string) => boolean) | n
     ]);
     const base = top.stdout.trim();
     if (!base) return null;
-    const files = new Set<string>();
-    const dirs: string[] = [];
+    const entries = new Set<string>();
     for (const entry of status.stdout.split("\0")) {
       if (entry.length < 4) continue; // "XY path"
-      const rel = entry.slice(3);
-      const abs = path.join(base, rel);
-      if (rel.endsWith("/")) dirs.push(abs.endsWith(path.sep) ? abs : abs + path.sep); // path.join keeps the trailing slash
-      else files.add(abs);
+      entries.add(path.join(base, entry.slice(3)).replace(/\/+$/, "")); // an untracked directory ends in a slash
     }
-    return (real) => files.has(real) || dirs.some((d) => real.startsWith(d));
+    // the file itself, or a directory or submodule above it (up to the toplevel) is listed
+    return (real) => {
+      for (let p = real; p.length > base.length; p = path.dirname(p)) if (entries.has(p)) return true;
+      return false;
+    };
   } catch {
     return null;
   }
@@ -886,7 +888,8 @@ export async function bashFinished(args: BashFinishedInput = {}, signal?: AbortS
     const list = await cachedWatchList(sc);
     // on a slow file system stat only what git reports as changed; otherwise (and without git) every file is checked
     const slow = statsAreSlow(list);
-    const changed = slow ? await gitChanged(sc.root) : null;
+    // git only pays off for a long list (a short one is cheap to stat even on 9P); a negative override forces it
+    const changed = slow && (list.length >= STAT_SAMPLE || SLOW_STAT_MS < 0) ? await gitChanged(sc.root) : null;
     const slack = slow ? MTIME_SLACK_MS.slow : MTIME_SLACK_MS.fast;
     const touched = (changed ? list.filter((f) => changed(f.real)) : list).filter((f) => {
       try {

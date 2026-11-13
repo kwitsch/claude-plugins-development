@@ -73,11 +73,11 @@ export async function dprintFilePaths(cwd: string): Promise<string[]> {
  * @returns The sorted directories of the files, minus every directory below another one in the result.
  */
 export function watchDirectories(files: string[]): string[] {
-  const dirs = [...new Set(files.map((f) => path.dirname(f)))].sort();
+  // sorted with a trailing separator, so a directory is followed by its descendants and not by '/r/src-gen' or '/r/a.b'
+  const dirs = [...new Set(files.map((f) => path.dirname(f)))].sort((a, b) => (a + path.sep < b + path.sep ? -1 : 1));
   const out: string[] = [];
   for (const d of dirs) {
-    const last = out[out.length - 1];
-    if (last === undefined || !(d === last || d.startsWith(last.endsWith(path.sep) ? last : last + path.sep))) out.push(d);
+    if (!out.some((o) => d === o || d.startsWith(o.endsWith(path.sep) ? o : o + path.sep))) out.push(d);
   }
   return out;
 }
