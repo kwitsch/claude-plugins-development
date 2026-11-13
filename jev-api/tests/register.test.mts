@@ -1002,6 +1002,44 @@ it("an oversized error reason is cut after the redaction", async () => {
   expect(r.deny).toContain("<TYPESAFE_API_KEY>".slice(0, 5));
 });
 
+// A blank reason has no dangling colon, the cut leaves no lone surrogate.
+it("a blank error reason adds nothing, a cut astral text stays valid", async () => {
+  const reply = (detail: string) =>
+    direct({
+      env: { get: async (n: string) => (n === "JEV_URL" ? "https://jev.example/x" : undefined) },
+      http: { fetch: () => Promise.resolve({ status: 500, ok: false, headers: {}, text: JSON.stringify({ detail }) }) },
+      tool: { register: async (s: { name: string }) => ({ tool: TOOL(s.name) }) },
+    }).then(({ run }) => run("noul"));
+  expect((await reply("  ")).deny).toBe("noul: HTTP 500");
+  const cut = (await reply("x" + "😀".repeat(1500))).deny ?? "";
+  expect(cut).not.toMatch(/[\uD800-\uDBFF]…$/);
+});
+
+// An engine that resolves `aborted` first on an abandoned call still reads as abandoned.
+it("a Haiku reply `aborted` with the signal aborted reads as abandoned", async () => {
+  const ctl = new AbortController();
+  const { run } = await direct({
+    env: { get: async () => undefined },
+    model: { complete: () => (ctl.abort(), Promise.resolve({ isAnswered: false, reason: "aborted" })) },
+    tool: { register: async (s: { name: string }) => ({ tool: TOOL(s.name) }) },
+  });
+  expect((await run("noul", ctl.signal)).deny).toBe("noul: the call was abandoned");
+});
+
+// A log call that never settles must not keep a refused tool from being retried.
+it("a hanging ui.log does not keep a failed registration pending", async () => {
+  const tries: string[] = [];
+  let fail = true;
+  const { run } = await direct({
+    tool: { register: async (s: { name: string }) => (tries.push(s.name), s.name === "batch" && fail ? Promise.reject(new Error("refused")) : { tool: TOOL(s.name) }) },
+    ui: { log: () => new Promise(() => {}) },
+  });
+  await run("noul");
+  fail = false;
+  await run("noul");
+  expect(tries.filter((n) => n === "batch")).toHaveLength(2);
+});
+
 // Gaps found by the second mutation round (round 7a).
 it("JJ a DNS error that quotes the bare host of TYPESAFE_BASE_URL is redacted", async () => {
   const { run } = await direct({

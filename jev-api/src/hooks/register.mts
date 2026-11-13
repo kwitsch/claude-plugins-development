@@ -677,7 +677,11 @@ async function askHaiku($: Engine, tool: ToolName, state: string, questions: Que
     const r = await Promise.race([reply, aborted]);
     if (r === "aborted") return fail(tool, "the call was abandoned");
     // The engine reports its own timeout as `aborted`: told apart from an abandoned call by the signal.
-    if (!r.isAnswered) return fail(tool, r.reason === "aborted" && !signal.aborted ? `fallback: timeout after ${timeoutMs}ms` : `fallback: ${r.reason}`);
+    if (!r.isAnswered) {
+      if (r.reason !== "aborted") return fail(tool, `fallback: ${r.reason}`);
+      // `aborted` is also how the engine reports its own timeout; the signal tells the two apart (whichever abort path won the race)
+      return fail(tool, signal.aborted ? "the call was abandoned" : `fallback: timeout after ${timeoutMs}ms`);
+    }
     const body = json(r.text.trim().replace(/^```(?:json)?\s*/i, "").replace(/```$/, ""));
     const answers = isRecord(body) ? body["answers"] : undefined;
     const list: Record<string, unknown>[] = [];
@@ -744,8 +748,13 @@ async function ask($: Engine, tool: ToolName, state: string, questions: Question
     if (res === "aborted") return fail(tool, "the call was abandoned");
     if (!res.ok) {
       const why = detail(res.text);
-      const text = why === undefined ? "" : redact(why);
-      return fail(tool, `HTTP ${res.status}${why === undefined ? "" : `: ${text.length > MAX_DETAIL ? `${text.slice(0, MAX_DETAIL)}…` : text}`}`);
+      let text = why === undefined ? "" : redact(why).trim();
+      if (text.length > MAX_DETAIL) {
+        text = text.slice(0, MAX_DETAIL);
+        if (/[\uD800-\uDBFF]$/.test(text)) text = text.slice(0, -1); // not a lone high surrogate
+        text += "…";
+      }
+      return fail(tool, `HTTP ${res.status}${text === "" ? "" : `: ${text}`}`);
     }
     const body = json(res.text);
     if (body === undefined) return fail(tool, `HTTP ${res.status} response was not valid JSON`);
@@ -807,7 +816,8 @@ async function registerOne($: Engine, st: RegState, type: ToolName): Promise<voi
     // The engine starts a log line with the plugin's name; logging is best effort, and once per tool.
     if (n === 1) {
       try {
-        await $.ui.log(`registering ${type} failed: ${message(err)}`);
+        // not awaited: a log call that never settles must not keep the tool pending (and so never retried)
+        void Promise.resolve($.ui.log(`registering ${type} failed: ${message(err)}`)).catch(() => undefined);
       } catch {
         // best effort: this function never rejects
       }
@@ -830,7 +840,10 @@ async function ensureTools($: Engine, st: RegState, ms: number): Promise<void> {
     if (!st.missing.has(type) || st.pending.has(type) || (st.retryAt.get(type) ?? 0) > now) continue;
     const p = registerOne($, st, type);
     st.pending.set(type, p);
-    void p.then(() => st.pending.delete(type));
+    void p.then(() => {
+      st.pending.delete(type);
+      st.stuck.delete(type); // a tool that hung once is waited for again when it is retried
+    });
   }
   const waiting = [...st.pending].filter(([type]) => !st.stuck.has(type));
   if (waiting.length === 0) return;
@@ -865,7 +878,11 @@ export function register(on: On, options?: Options): void {
   // A tool whose registration failed stays in `missing`: the next hook tries it again (after a growing delay), no timers.
   const st: RegState = { names, missing: new Set<ToolName>(TOOLS), pending: new Map(), retryAt: new Map(), failures: new Map(), stuck: new Set() };
   on("session.start", async function onSessionStart($, e, next) {
-    if (st.missing.size > 0) await ensureTools($, st, 5 * REGISTER_WAIT_MS);
+    try {
+      if (st.missing.size > 0) await ensureTools($, st, 5 * REGISTER_WAIT_MS);
+    } catch {
+      // best effort (a hook above refusing $.clock): the session.start chain goes on
+    }
     return next(e);
   });
   on("tool.call", async function onToolCall($, e, next) {

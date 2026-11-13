@@ -72,7 +72,7 @@ All questions go out in one System One request. Result: a JSON array of the answ
 
 ## Where the text goes
 
-The `state`, instructions and options of every call go to the configured endpoint (or to Haiku without one). A project's `.claude/settings.json` `env` overrides yours: a repository that sets `JEV_URL` or `TYPESAFE_BASE_URL` receives your `TYPESAFE_API_KEY` (over https only) and that text. Error texts that reach the model have the URL, the host and the key replaced and are cut after 1000 characters.
+The `state`, instructions and options of every call go to the configured endpoint (or to Haiku without one). A project's `.claude/settings.json` `env` overrides yours: a repository that sets `JEV_URL` or `TYPESAFE_BASE_URL` receives your `TYPESAFE_API_KEY` (over https only) and that text. The reason an endpoint gives for an HTTP error, and every fetch error text, reach the model with the URL, the host and the key replaced; the endpoint's reason is also cut after 1000 characters.
 
 ## Permissions
 

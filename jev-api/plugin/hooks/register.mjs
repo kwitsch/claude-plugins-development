@@ -376,7 +376,10 @@ async function askHaiku($, tool, state, questions, timeoutMs, signal) {
 		});
 		const r = await Promise.race([reply, aborted]);
 		if (r === "aborted") return fail(tool, "the call was abandoned");
-		if (!r.isAnswered) return fail(tool, r.reason === "aborted" && !signal.aborted ? `fallback: timeout after ${timeoutMs}ms` : `fallback: ${r.reason}`);
+		if (!r.isAnswered) {
+			if (r.reason !== "aborted") return fail(tool, `fallback: ${r.reason}`);
+			return fail(tool, signal.aborted ? "the call was abandoned" : `fallback: timeout after ${timeoutMs}ms`);
+		}
 		const body = json(r.text.trim().replace(/^```(?:json)?\s*/i, "").replace(/```$/, ""));
 		const answers = isRecord(body) ? body["answers"] : undefined;
 		const list = [];
@@ -431,8 +434,13 @@ async function ask($, tool, state, questions, env, timeoutMs, signal) {
 		if (res === "aborted") return fail(tool, "the call was abandoned");
 		if (!res.ok) {
 			const why = detail(res.text);
-			const text = why === undefined ? "" : redact(why);
-			return fail(tool, `HTTP ${res.status}${why === undefined ? "" : `: ${text.length > MAX_DETAIL ? `${text.slice(0, MAX_DETAIL)}…` : text}`}`);
+			let text = why === undefined ? "" : redact(why).trim();
+			if (text.length > MAX_DETAIL) {
+				text = text.slice(0, MAX_DETAIL);
+				if (/[\uD800-\uDBFF]$/.test(text)) text = text.slice(0, -1);
+				text += "…";
+			}
+			return fail(tool, `HTTP ${res.status}${text === "" ? "" : `: ${text}`}`);
 		}
 		const body = json(res.text);
 		if (body === undefined) return fail(tool, `HTTP ${res.status} response was not valid JSON`);
@@ -467,7 +475,7 @@ async function registerOne($, st, type) {
 		st.retryAt.set(type, Date.now() + (n === 1 ? 0 : Math.min(MAX_RETRY_MS, 5e3 * 2 ** (n - 2))));
 		if (n === 1) {
 			try {
-				await $.ui.log(`registering ${type} failed: ${message(err)}`);
+				void Promise.resolve($.ui.log(`registering ${type} failed: ${message(err)}`)).catch(() => undefined);
 			} catch {}
 		}
 	}
@@ -478,7 +486,10 @@ async function ensureTools($, st, ms) {
 		if (!st.missing.has(type) || st.pending.has(type) || (st.retryAt.get(type) ?? 0) > now) continue;
 		const p = registerOne($, st, type);
 		st.pending.set(type, p);
-		void p.then(() => st.pending.delete(type));
+		void p.then(() => {
+			st.pending.delete(type);
+			st.stuck.delete(type);
+		});
 	}
 	const waiting = [...st.pending].filter(([type]) => !st.stuck.has(type));
 	if (waiting.length === 0) return;
@@ -506,7 +517,9 @@ export function register(on, options) {
 		stuck: new Set()
 	};
 	on("session.start", async function onSessionStart($, e, next) {
-		if (st.missing.size > 0) await ensureTools($, st, 5 * REGISTER_WAIT_MS);
+		try {
+			if (st.missing.size > 0) await ensureTools($, st, 5 * REGISTER_WAIT_MS);
+		} catch {}
 		return next(e);
 	});
 	on("tool.call", async function onToolCall($, e, next) {
