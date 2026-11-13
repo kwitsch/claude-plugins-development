@@ -24,7 +24,7 @@ With `--headless`, `AskUserQuestion` is never called. Instead, for each question
 
 - the question and the options that `AskUserQuestion` would have shown (label and description, the recommended one first),
 - the task text, track, size, branch and worktree path,
-- the absolute paths of `spec.md`, `plan.md` and `review.md` as far as they exist, and what the answer is used for.
+- the absolute paths of `design.md`, `spec.md`, `plan.md` and `review.md` as far as they exist, and what the answer is used for.
 
 It replies `answer:` (an option label, or free text if none fits) and `reason:`. Apply the answer as if the user had chosen it and note the decision in one line in the spec or plan. Approval gates (spec, discard) are answered by it too; discarding a branch, merging and other destructive or outward-facing steps beyond the normal flow are not taken headless: keep the branch.
 
@@ -67,8 +67,9 @@ Details and baseline: [worktree](worktree.reference.md).
 | ----------------------------------------------------- | --------------------------------------------- |
 | Choosing between defined options, rating risk or size | [Decide](decide.reference.md)                 |
 | Work starts, or starts outside a worktree             | [Worktree](worktree.reference.md)             |
-| Feature or refactor, no approved spec yet             | [Design](design.reference.md)                 |
-| Approved spec, multi-step work                        | [Plan](plan.reference.md)                     |
+| Feature, size L or XL, no approved design yet         | [Design](design.reference.md)                 |
+| Feature, size XL, approved design, no spec yet        | [Spec](spec.reference.md)                     |
+| Feature, size M or larger, no approved plan yet       | [Plan](plan.reference.md)                     |
 | A plan (or a tiny change) is to be carried out        | [Execute](execute.reference.md)               |
 | Writing any production code                           | [Test first](tdd.reference.md)                |
 | Bug, failing test, error, unexpected behaviour        | [Debug](debug.reference.md)                   |
@@ -87,19 +88,28 @@ Implement directly. Then [Verify](verify.reference.md) and a light review: read 
 
 ### feature
 
-1. [Design](design.reference.md): writes the spec to the scratchpad; the user approves it.
-2. [Plan](plan.reference.md): writes the plan to the scratchpad.
-3. [Execute](execute.reference.md) (with [Test first](tdd.reference.md) for code).
-4. [Verify](verify.reference.md).
-5. `/simplify` once on the finished work (any size), then [Verify](verify.reference.md) again.
-6. [Request review](request-review.reference.md), depth by size (L and XL: the per-phase and spec/plan reviews; the final diff is covered by the `/code-review` of the section below):
+Flow by size, each "confirm" is an `AskUserQuestion` after a bullet-point summary of the file (headless: decider):
 
-| Size | Review                                                          |
-| ---- | --------------------------------------------------------------- |
-| S    | read your own diff                                              |
-| M    | one review of the final diff                                    |
-| L    | a review after each plan phase, plus one of the final diff      |
-| XL   | additionally a review of the spec and of the plan before coding |
+| Size | Flow                                                                                                                      |
+| ---- | ------------------------------------------------------------------------------------------------------------------------- |
+| S    | implement directly                                                                                                        |
+| M    | [Plan](plan.reference.md), confirm, implement                                                                             |
+| L    | [Design](design.reference.md), confirm, [Plan](plan.reference.md), confirm, implement                                     |
+| XL   | [Design](design.reference.md), confirm, [Spec](spec.reference.md), confirm, [Plan](plan.reference.md), confirm, implement |
+
+Then:
+
+1. Implement with [Execute](execute.reference.md) (with [Test first](tdd.reference.md) for code); on S there is no plan, so execute works from the task text.
+2. [Verify](verify.reference.md).
+3. `/simplify` once on the finished work (any size), then [Verify](verify.reference.md) again.
+4. [Request review](request-review.reference.md), depth by size (L and XL: the per-phase reviews and, on XL, the design and spec reviews; the final diff is covered by the `/code-review` of the section below):
+
+| Size | Review                                                            |
+| ---- | ----------------------------------------------------------------- |
+| S    | read your own diff                                                |
+| M    | one review of the final diff                                      |
+| L    | a review after each plan phase, plus one of the final diff        |
+| XL   | additionally a review of the design and of the spec before coding |
 
 Findings are handled with [Receive review](receive-review.reference.md). Then the final `/code-review` and [Finish](finish.reference.md).
 
@@ -117,7 +127,7 @@ The skill ends only when every change is committed and pushed on the work branch
 
 ## Documents
 
-Spec, plan and review notes live in the session scratchpad directory (named in the system prompt) under `jev-solver/<task-slug>/` (`spec.md`, `plan.md`, `review.md`), never in the repository. Name them with their full absolute path when you mention them to the user (and to the decider).
+Design, spec, plan and review notes live in the session scratchpad directory (named in the system prompt) under `jev-solver/<task-slug>/` (`design.md`, `spec.md`, `plan.md`, `review.md`), never in the repository. Name them with their full absolute path when you mention them to the user (and to the decider).
 
 ## Code exploration
 

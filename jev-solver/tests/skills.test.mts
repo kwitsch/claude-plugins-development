@@ -11,6 +11,7 @@ const REFERENCES = [
   "decide",
   "worktree",
   "design",
+  "spec",
   "plan",
   "execute",
   "tdd",
@@ -69,6 +70,15 @@ describe("jev-solver", () => {
   it("file-related questions get a bullet-point summary first, skipped when headless", () => {
     assert.match(read("skills/solve/SKILL.md"), /summary in bullet points[\s\S]*skipped with `--headless`/);
     assert.match(read("skills/solve/design.reference.md"), /bullet-point summary[^\n]*`--headless`/);
+    for (const r of ["spec", "plan"]) assert.match(read(`skills/solve/${r}.reference.md`), /bullet-point summary[^\n]*`--headless`/);
+  });
+
+  it("feature track flow by size: S direct, M plan, L design+plan, XL design+spec+plan, each confirmed", () => {
+    const text = read("skills/solve/SKILL.md");
+    assert.match(text, /\| S +\| implement directly/);
+    assert.match(text, /\| M +\| \[Plan\]\(plan.reference.md\), confirm, implement/);
+    assert.match(text, /\| L +\| \[Design\]\(design.reference.md\), confirm, \[Plan\]\(plan.reference.md\), confirm, implement/);
+    assert.match(text, /\| XL +\| \[Design\]\(design.reference.md\), confirm, \[Spec\]\(spec.reference.md\), confirm, \[Plan\]\(plan.reference.md\), confirm, implement/);
   });
 
   it("solve dispatches the plugin-namespaced decider agent", () => {

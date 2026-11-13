@@ -8,7 +8,7 @@ The `jev-api` plugin (declared as dependency) with `TYPESAFE_API_KEY`, `TYPESAFE
 
 ## Skill, references and agent
 
-`solve` is the only skill. Its phases are reference files next to it (`skills/solve/<name>.reference.md`), loaded through the decision matrix in `solve/SKILL.md`: `decide`, `worktree`, `design`, `plan`, `execute`, `tdd`, `debug`, `verify`, `request-review`, `receive-review`, `finish`.
+`solve` is the only skill. Its phases are reference files next to it (`skills/solve/<name>.reference.md`), loaded through the decision matrix in `solve/SKILL.md`: `decide`, `worktree`, `design`, `spec`, `plan`, `execute`, `tdd`, `debug`, `verify`, `request-review`, `receive-review`, `finish`.
 
 The `decider` agent (opus, xhigh effort) answers the questions of a `--headless` run.
 
@@ -23,11 +23,11 @@ Without `--headless`, every question goes through `AskUserQuestion`.
 
 ## Tracks
 
-| Track   | Flow                                                                                                           |
-| ------- | -------------------------------------------------------------------------------------------------------------- |
-| tiny    | Implement directly, light review of the diff                                                                   |
-| feature | design, plan, execute, verify, `/simplify`; review depth grows with size (M, L, XL), then `/code-review --fix` |
-| bugfix  | `fix/` branch, debug, failing test, one fix, verify, review, `/code-review --fix`                              |
+| Track   | Flow                                                                                                                                                |
+| ------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| tiny    | Implement directly, light review of the diff                                                                                                        |
+| feature | by size: S direct; M plan; L design, plan; XL design, spec, plan (each confirmed), then execute, verify, `/simplify`, reviews, `/code-review --fix` |
+| bugfix  | `fix/` branch, debug, failing test, one fix, verify, review, `/code-review --fix`                                                                   |
 
 ## Options
 
