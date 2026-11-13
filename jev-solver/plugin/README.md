@@ -6,22 +6,20 @@ A collection of workflow skills modelled on the superpowers plugin, without its 
 
 The `jev-api` plugin (declared as dependency) with `TYPESAFE_API_KEY`, `TYPESAFE_BASE_URL` or `JEV_URL` set. Without it, or on any jev-api error, the skills decide with Claude's own reasoning.
 
-## Skills
+## Skill, references and agent
 
-| Skill            | What it does                                                                  |
-| ---------------- | ----------------------------------------------------------------------------- |
-| `solve`          | Entry point. Triages the task (track and size) through jev-api and routes it  |
-| `decide`         | Shared rule for direction decisions through jev-api `choice`, `score`, `noul` |
-| `design`         | Explores the task and writes a spec to the session scratchpad                 |
-| `plan`           | Turns the spec into a step-by-step plan in the scratchpad                     |
-| `execute`        | Carries out the plan inline, step by step                                     |
-| `tdd`            | Test first, then code                                                         |
-| `debug`          | Root cause before any fix                                                     |
-| `request-review` | Reviews a change; depth depends on size                                       |
-| `receive-review` | Handles review feedback with verification                                     |
-| `verify`         | Evidence before any success claim                                             |
-| `worktree`       | Own worktree on a `feat/` or `fix/` branch, entered by `solve` for every task |
-| `finish`         | Wraps up a finished branch                                                    |
+`solve` is the only skill. Its phases are reference files next to it (`skills/solve/<name>.reference.md`), loaded through the decision matrix in `solve/SKILL.md`: `decide`, `worktree`, `design`, `plan`, `execute`, `tdd`, `debug`, `verify`, `request-review`, `receive-review`, `finish`.
+
+The `decider` agent (opus, xhigh effort) answers the questions of a `--headless` run.
+
+## Arguments
+
+| Argument               | Meaning                                                                                               |
+| ---------------------- | ----------------------------------------------------------------------------------------------------- |
+| `--headless`           | No `AskUserQuestion`; the `decider` agent is asked instead, with the options, task and document paths |
+| `--size=<S\|M\|L\|XL>` | Uses that size instead of the triage score                                                            |
+
+Without `--headless`, every question goes through `AskUserQuestion`.
 
 ## Tracks
 

@@ -1,7 +1,3 @@
----
-name: worktree
-description: Puts work into its own git worktree on a feat/ or fix/ branch, never on main or in the user's checkout. Used by jev-solver:solve right after triage; use it directly when work starts outside solve.
----
 
 # worktree
 
