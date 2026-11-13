@@ -663,6 +663,16 @@ it("the Haiku call gets the abort signal as an option", async () => {
   expect((calls[0][1] as { signal?: AbortSignal }).signal).toBe(ctl.signal);
 });
 
+// A Haiku choice answer is normalized like a score: the probabilities sum to 1.
+test("Haiku choice probabilities are normalized", async ($, on) => {
+  haiku(on, () => said(JSON.stringify({ answers: { answer: { type: "choice", choice: "greeting", confidence: 0.8, probabilities: { greeting: 0.97, question: 0.195 } } } })));
+  mock.env(on, {});
+  const r = await call($, "choice");
+  const answer = JSON.parse(r.result ?? "{}") as { probabilities: Record<string, number> };
+  expect(answer.probabilities["greeting"]).toBeCloseTo(0.8325, 3);
+  expect(answer.probabilities["greeting"] + answer.probabilities["question"]).toBeCloseTo(1, 3);
+});
+
 // D3: $.model.complete refuses a timeoutMs that is not a positive whole number; 2.01 s * 1000 is 2009.9999999999998.
 test("the Haiku timeout is a whole number of milliseconds", async ($, on) => {
   const asked = haiku(on, () => said("{}"));
@@ -684,6 +694,19 @@ it("an error that quotes the bearer key is redacted", async () => {
   expect(r.deny).toMatch(/^noul: /);
   expect(r.deny).not.toContain(key);
   expect(r.deny).toContain("<TYPESAFE_API_KEY>");
+});
+
+// D4: a DNS failure quotes the bare host of the endpoint (live on 2.1.325), which is redacted too.
+it("a DNS error that quotes the bare host is redacted", async () => {
+  const { run } = await direct({
+    env: { get: async (n: string) => (n === "JEV_URL" ? "https://secret-host-zq82.invalid/route/sys?token=TOK" : n === "TYPESAFE_API_KEY" ? "k" : undefined) },
+    http: { fetch: () => Promise.reject(new Error("$.http.fetch(https://secret-host-zq82.invalid/route/sys?token=TOK) failed: getaddrinfo ENOTFOUND secret-host-zq82.invalid")) },
+    tool: { register: async (s: { name: string }) => ({ tool: TOOL(s.name) }) },
+  });
+  const r = await run("noul");
+  expect(r.deny).not.toContain("secret-host-zq82");
+  expect(r.deny).not.toContain("TOK");
+  expect(r.deny).toContain("ENOTFOUND <host>");
 });
 
 // D2: an error body a server fills with the request URL is redacted like a fetch error.

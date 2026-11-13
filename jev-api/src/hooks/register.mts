@@ -419,12 +419,17 @@ function message(err: unknown): string {
  */
 function hide(text: string, url: string, placeholder: string): string {
   let href = url;
+  let host = "";
   try {
-    href = new URL(url).href;
+    const u = new URL(url);
+    href = u.href;
+    host = u.hostname;
   } catch {
     // The engine quotes a URL it cannot parse as given.
   }
-  return text.replaceAll(href, placeholder).replaceAll(url, placeholder);
+  const t = text.replaceAll(href, placeholder).replaceAll(url, placeholder);
+  // A DNS failure quotes the bare host (`getaddrinfo ENOTFOUND <host>`, live on 2.1.325), which may be private too.
+  return host ? t.replaceAll(host, "<host>") : t;
 }
 
 /**
@@ -587,7 +592,10 @@ function checkAnswer(q: Question, a: unknown): Record<string, unknown> | undefin
     const options = Object.keys(q.criteria);
     const picked = a["choice"];
     if (typeof picked !== "string" || !options.includes(picked) || !hasProbabilities(probabilities, options)) return undefined;
-    return { type: "choice", choice: picked, confidence, probabilities: Object.fromEntries(options.map((o) => [o, probabilities[o]])) };
+    // Like System One (and like score below) the probabilities sum to 1: jevfort compares probabilities[choice] with a threshold.
+    const sum = options.reduce((t, o) => t + probabilities[o], 0);
+    if (!(sum > 0)) return undefined;
+    return { type: "choice", choice: picked, confidence, probabilities: Object.fromEntries(options.map((o) => [o, round4(probabilities[o] / sum)])) };
   }
   const levels = q.criteria.map((_, i) => String(i));
   if (!hasProbabilities(probabilities, levels)) return undefined;

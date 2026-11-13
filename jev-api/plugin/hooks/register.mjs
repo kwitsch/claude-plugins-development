@@ -178,10 +178,14 @@ function message(err) {
 }
 function hide(text, url, placeholder) {
 	let href = url;
+	let host = "";
 	try {
-		href = new URL(url).href;
+		const u = new URL(url);
+		href = u.href;
+		host = u.hostname;
 	} catch {}
-	return text.replaceAll(href, placeholder).replaceAll(url, placeholder);
+	const t = text.replaceAll(href, placeholder).replaceAll(url, placeholder);
+	return host ? t.replaceAll(host, "<host>") : t;
 }
 function isText(v) {
 	return typeof v === "string" && v.trim() !== "";
@@ -306,11 +310,13 @@ function checkAnswer(q, a) {
 		const options = Object.keys(q.criteria);
 		const picked = a["choice"];
 		if (typeof picked !== "string" || !options.includes(picked) || !hasProbabilities(probabilities, options)) return undefined;
+		const sum = options.reduce((t, o) => t + probabilities[o], 0);
+		if (!(sum > 0)) return undefined;
 		return {
 			type: "choice",
 			choice: picked,
 			confidence,
-			probabilities: Object.fromEntries(options.map((o) => [o, probabilities[o]]))
+			probabilities: Object.fromEntries(options.map((o) => [o, round4(probabilities[o] / sum)]))
 		};
 	}
 	const levels = q.criteria.map((_, i) => String(i));
