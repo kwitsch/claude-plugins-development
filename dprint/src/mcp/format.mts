@@ -326,12 +326,12 @@ const BASH_START_TTL_MS = 60 * 60 * 1000;
  * In-scope watch list per effective cwd, read lazily by {@link cachedWatchList}.
  *
  * @remarks
- * shortcut: files created after the first read are missing until a cwd change clears the cache (the same
+ * shortcut: files created after the first (non-empty) read are missing until a cwd change clears the cache (the same
  * limit as the FileChanged watch list; `DPRINT_WATCH_DIRECTORIES=1` fixes the watch list, not this cache).
  */
 const watchCache = new Map<string, { list: Promise<Array<{ fp: string; real: string }>>; at: number; failed: boolean }>();
 
-/** A failed watch-list read (dprint failing or timing out) is retried after this long. */
+/** A failed or empty watch-list read (dprint failing, timing out or missing, no files, above the limit) is retried after this long. */
 const WATCH_RETRY_MS = 60_000;
 
 /**
@@ -701,7 +701,7 @@ function notice(args: { cwd?: string; agent_id?: string; session_id?: string }, 
   const name = (p: string): string => {
     if (!sc) return p;
     const under = path.relative(sc.realRoot, p);
-    return under !== "" && !under.startsWith("..") && !path.isAbsolute(under) ? under : path.relative(sc.root, p);
+    return under !== "" && under !== ".." && !under.startsWith(".." + path.sep) && !path.isAbsolute(under) ? under : path.relative(sc.root, p);
   };
   const rel = files.map((p) => JSON.stringify(name(p))).join(", ");
   return {
