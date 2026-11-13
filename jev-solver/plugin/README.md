@@ -8,7 +8,7 @@ The `jev-api` plugin (declared as dependency) with `TYPESAFE_API_KEY`, `TYPESAFE
 
 ## Skill, references and agent
 
-`solve` is the only skill. Its phases are reference files next to it (`skills/solve/<name>.reference.md`), loaded through the decision matrix in `solve/SKILL.md`: `decide`, `worktree`, `design`, `spec`, `plan`, `execute`, `tdd`, `debug`, `verify`, `request-review`, `receive-review`, `finish`.
+`solve` is the only skill. Its phases are reference files next to it (`skills/solve/<name>.reference.md`), loaded through the decision matrix in `solve/SKILL.md`: `decide`, `worktree`, `design`, `spec`, `plan`, `pr`, `execute`, `tdd`, `debug`, `verify`, `request-review`, `receive-review`, `finish`.
 
 The `decider` agent (opus, xhigh effort) answers the questions of a `--headless` run.
 
@@ -20,6 +20,8 @@ The `decider` agent (opus, xhigh effort) answers the questions of a `--headless`
 | `--size=<S\|M\|L\|XL>` | Uses that size instead of the triage score                                                            |
 
 Without `--headless`, every question goes through `AskUserQuestion`.
+
+Every track pushes after the first commit and opens a draft PR, updates the PR description on every push, and ends with the branch pushed, up to date with its base (conflicts resolved), checks green and the PR marked ready (merge-ready).
 
 ## Tracks
 

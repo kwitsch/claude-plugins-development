@@ -76,6 +76,7 @@ Details and baseline: [worktree](worktree.reference.md).
 | Before any claim of done, fixed or passing            | [Verify](verify.reference.md)                 |
 | A change, phase or finished task needs review         | [Request review](request-review.reference.md) |
 | Review feedback arrived (reviewer, user, PR)          | [Receive review](receive-review.reference.md) |
+| First commit, every push, merge-ready at the end      | [Pull request](pr.reference.md)               |
 | Implementation and review done                        | [Finish](finish.reference.md)                 |
 
 ## 4. Tracks
@@ -121,9 +122,13 @@ On its `fix/` work branch (step 2): [Debug](debug.reference.md) (root cause, fai
 
 After the track's own reviews and before [Finish](finish.reference.md), run `/code-review <level> --fix` on the branch, the level taken from the size: S `low`, M `medium`, L `high`, XL `xhigh`. Never `max` unless the user asks. Re-run [Verify](verify.reference.md) after it applied fixes.
 
-### Done means pushed
+### Pull request
 
-The skill ends only when every change is committed and pushed on the work branch and a draft PR for it exists ([Finish](finish.reference.md) does this; no question about opening it). Report the PR URL.
+After the first commit on every track: push and open a draft PR; after every push: update the PR description ([Pull request](pr.reference.md); no question about it). Commit and push per step or phase, not only at the end.
+
+### Done means merge-ready
+
+The skill ends only when every change is committed and pushed on the work branch, the PR description is current, all merge conflicts with the base are resolved, the checks are green and the PR is merge-ready ([Finish](finish.reference.md) with [Pull request](pr.reference.md) does this). Report the PR URL.
 
 ## Documents
 

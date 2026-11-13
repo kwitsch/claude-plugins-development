@@ -19,6 +19,7 @@ const REFERENCES = [
   "verify",
   "request-review",
   "receive-review",
+  "pr",
   "finish",
 ];
 
@@ -79,6 +80,15 @@ describe("jev-solver", () => {
     assert.match(text, /\| M +\| \[Plan\]\(plan.reference.md\), confirm, implement/);
     assert.match(text, /\| L +\| \[Design\]\(design.reference.md\), confirm, \[Plan\]\(plan.reference.md\), confirm, implement/);
     assert.match(text, /\| XL +\| \[Design\]\(design.reference.md\), confirm, \[Spec\]\(spec.reference.md\), confirm, \[Plan\]\(plan.reference.md\), confirm, implement/);
+  });
+
+  it("solve pushes after the first commit, updates the PR per push and ends merge-ready", () => {
+    assert.match(read("skills/solve/SKILL.md"), /first commit[\s\S]*draft PR[\s\S]*every push[\s\S]*description/i);
+    assert.match(read("skills/solve/SKILL.md"), /merge conflicts[^\n]*resolved[^\n]*merge-ready/);
+    const pr = read("skills/solve/pr.reference.md");
+    assert.match(pr, /gh pr create --draft/);
+    assert.match(pr, /gh pr edit --body/);
+    assert.match(pr, /gh pr ready/);
   });
 
   it("solve dispatches the plugin-namespaced decider agent", () => {
