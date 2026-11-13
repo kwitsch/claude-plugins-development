@@ -10,10 +10,10 @@
 
 ## Environment
 
-| Var    | Purpose                                                                                                                                                                                          | Required |
-| ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------- |
-| `PATH` | Searched first, entry by entry, for an executable regular file named `dprint`; if neither `PATH` nor `$HOME/.dprint/bin` has one, for `npx` (runs the dprint npm package via `npx --yes dprint`) | no       |
-| `HOME` | Fallback location `$HOME/.dprint/bin/dprint` (where the official installer puts dprint)                                                                                                          | no       |
+| Var                      | Purpose                                                                                                                                                                                          | Required |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------- |
+| `PATH`                   | Searched first, entry by entry, for an executable regular file named `dprint`; if neither `PATH` nor `$HOME/.dprint/bin` has one, for `npx` (runs the dprint npm package via `npx --yes dprint`) | no       |
+| `HOME`, `DPRINT_INSTALL` | Fallback location `$DPRINT_INSTALL/bin/dprint`, else `$HOME/.dprint/bin/dprint` (where the official installer puts dprint)                                                                       | no       |
 
 ## Output
 

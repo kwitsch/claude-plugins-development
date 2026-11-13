@@ -177,7 +177,7 @@ test(".gitignore'd files are not scanned", () => {
   assert.deepEqual(r.lines, ["status=ok config=dprint.json missing=0"]);
 });
 
-test("exact file names and upper-case extensions are recognized", () => {
+test("exact file names are recognized; extensions match case-sensitively like dprint (README.MD is no .md file)", () => {
   write("Dockerfile");
   write("README.MD");
   write("dprint.json", config(JSON_URL));
@@ -187,11 +187,8 @@ test("exact file names and upper-case extensions are recognized", () => {
     .join(",");
   const r = run();
   assert.equal(r.code, 10);
-  assert.equal(r.lines[0], "status=missing config=dprint.json missing=2");
-  assert.ok(
-    r.lines.includes(`type=.md files=1 candidates=${cands("md")}`),
-    r.lines.join("\n"),
-  );
+  assert.equal(r.lines[0], "status=missing config=dprint.json missing=1");
+  assert.ok(!r.lines.some((l) => l.startsWith("type=.MD") || l.startsWith("type=.md")), r.lines.join("\n"));
   assert.ok(
     r.lines.includes(`type=Dockerfile files=1 candidates=${docker}`),
     r.lines.join("\n"),
@@ -238,4 +235,19 @@ test("any argument is a usage error -> exit 2", () => {
   const r = run("--help");
   assert.equal(r.code, 2);
   assert.deepEqual(r.lines, ["status=error config=- missing=-"]);
+});
+
+test("a '-latest.wasm' plugin URL counts as configured", () => {
+  write("a.ts");
+  write("dprint.json", config("https://plugins.dprint.dev/typescript-latest.wasm", JSON_URL));
+  const r = run();
+  assert.equal(r.code, 0, r.lines.join("\n"));
+});
+
+test("a config with a UTF-8 BOM is an error: dprint rejects it", () => {
+  write("a.ts");
+  write("dprint.json", "\uFEFF" + config(TS_URL));
+  const r = run();
+  assert.equal(r.code, 2);
+  assert.match(r.err, /BOM/);
 });

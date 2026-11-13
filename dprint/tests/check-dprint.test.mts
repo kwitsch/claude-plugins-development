@@ -117,6 +117,16 @@ test("fallback ~/.dprint/bin/dprint used when not on PATH", () => {
   assert.equal(r.out, `status=ok version=9.9.9 min=${MIN} path=${home}/.dprint/bin/dprint`);
 });
 
+test("DPRINT_INSTALL/bin/dprint (the installer's target) is found when not on PATH, and wins over ~/.dprint/bin", () => {
+  const install = path.join(home, "custom");
+  mkdirSync(path.join(install, "bin"), { recursive: true });
+  stub(path.join(install, "bin/dprint"), "echo \"dprint 8.8.8\"");
+  stubHomeDprint("9.9.9");
+  const r = spawnSync(path.join(bin, "node"), [SCRIPT], { env: { PATH: bin, HOME: home, DPRINT_INSTALL: install }, encoding: "utf8" });
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.stdout.trim(), `status=ok version=8.8.8 min=${MIN} path=${install}/bin/dprint`);
+});
+
 test("PATH dprint wins over ~/.dprint/bin/dprint", () => {
   stubDprint("echo \"dprint 0.10.0\"");
   stubHomeDprint("9.9.9");

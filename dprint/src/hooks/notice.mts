@@ -185,7 +185,7 @@ function dprintProblem($: Engine): Promise<string | null> {
   if (probe && (probe.failedAt === undefined || withinMs(probe.failedAt, PROBE_RETRY_MS))) return probe.problem;
   const entry: Probe = {
     problem: (async () => {
-      const [home, pathVar] = await Promise.all([$.env.get("HOME"), $.env.get("PATH")]);
+      const [home, pathVar, install] = await Promise.all([$.env.get("HOME"), $.env.get("PATH"), $.env.get("DPRINT_INSTALL")]);
       // a HOME that does not exist would make every spawn fail and the toast blame dprint
       const cwd = home && (await $.fs.exists(home)) ? home : "/";
       // shortcut: existence is weaker than findDprint's executable-file check (a non-executable `dprint` earlier on PATH is picked here), upgrade when the engine offers an executable check
@@ -196,7 +196,9 @@ function dprintProblem($: Engine): Promise<string | null> {
         .map((d) => `${d.replace(/\/+$/, "")}/dprint`);
       const found = await Promise.all(candidates.map((p) => $.fs.exists(p)));
       let pick = candidates.find((_, i) => found[i]);
-      if (!pick && home && (await $.fs.exists(`${home}/.dprint/bin/dprint`))) pick = `${home}/.dprint/bin/dprint`;
+      // the official installer puts dprint in ${DPRINT_INSTALL:-$HOME/.dprint}/bin (as findDprint looks)
+      const fallback = install ? `${install.replace(/\/+$/, "")}/bin/dprint` : home ? `${home}/.dprint/bin/dprint` : "";
+      if (!pick && fallback && (await $.fs.exists(fallback))) pick = fallback;
       if (pick) return (await judge($, [pick, "--version"], cwd, pick))?.text ?? null;
       // `--` keeps npx from reading --version as its own flag once --no is given; --prefer-offline: npx checks a
       // name-only spec against the registry's latest, which offline or after a new release fails a cached dprint

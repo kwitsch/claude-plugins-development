@@ -64,7 +64,7 @@ function inConfig(p: RefPlugin, entries: string[]): boolean {
   const npm = p.npm;
   return entries.some(
     (e) =>
-      (e.startsWith(prefix) && /^v?\d/.test(e.slice(prefix.length)))
+      (e.startsWith(prefix) && /^(v?\d|latest\.)/.test(e.slice(prefix.length)))
       || (npm !== undefined
         && (e === `npm:${npm}`
           || e.startsWith(`npm:${npm}@`)
@@ -78,13 +78,14 @@ function inConfig(p: RefPlugin, entries: string[]): boolean {
  *
  * @param path - Repository-relative path as printed by `git ls-files`.
  * @param names - Exact file names known from the reference data.
- * @returns The base name when it is a known file name, else `.` plus the lower-cased extension, else `null`.
+ * @returns The base name when it is a known file name, else `.` plus the extension as written (dprint matches
+ * extensions case-sensitively, so `README.MD` is no `.md` file), else `null`.
  */
 function fileType(path: string, names: Set<string>): string | null {
   const base = path.slice(path.lastIndexOf("/") + 1);
   if (names.has(base)) return base;
   const dot = base.lastIndexOf(".");
-  return dot > 0 ? "." + base.slice(dot + 1).toLowerCase() : null;
+  return dot > 0 ? "." + base.slice(dot + 1) : null;
 }
 
 /**
@@ -112,8 +113,9 @@ function scan(args: string[]): ScanResult {
 
   let entries: string[];
   try {
-    // strip a UTF-8 BOM (Windows editors); JSON.parse rejects it, dprint accepts it
-    const raw = readFileSync(configPath, "utf8").replace(/^\uFEFF/, "");
+    const raw = readFileSync(configPath, "utf8");
+    // dprint itself rejects a UTF-8 BOM ("Unexpected token on line 1 column 1"), so a config with one is no config
+    if (raw.startsWith("\uFEFF")) throw new Error("starts with a UTF-8 BOM, which dprint rejects");
     // a non-object config (e.g. `null`) throws on the member access below -> reported as unreadable
     const parsed = JSON.parse(stripJsonc(raw)) as {
       plugins?: unknown;

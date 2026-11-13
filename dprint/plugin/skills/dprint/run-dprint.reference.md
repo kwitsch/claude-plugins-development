@@ -11,11 +11,11 @@
 
 ## Environment
 
-| Var               | Purpose                                                                                                                                                                                          | Required |
-| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------- |
-| `PATH`            | Searched first, entry by entry, for an executable regular file named `dprint`; if neither `PATH` nor `$HOME/.dprint/bin` has one, for `npx` (runs the dprint npm package via `npx --yes dprint`) | no       |
-| `HOME`            | Fallback location `$HOME/.dprint/bin/dprint` (where the official installer puts dprint)                                                                                                          | no       |
-| working directory | The project directory to check or format; dprint runs here with no file arguments when no scope is given (its subtree)                                                                           | yes      |
+| Var                      | Purpose                                                                                                                                                                                          | Required |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------- |
+| `PATH`                   | Searched first, entry by entry, for an executable regular file named `dprint`; if neither `PATH` nor `$HOME/.dprint/bin` has one, for `npx` (runs the dprint npm package via `npx --yes dprint`) | no       |
+| `HOME`, `DPRINT_INSTALL` | Fallback location `$DPRINT_INSTALL/bin/dprint`, else `$HOME/.dprint/bin/dprint` (where the official installer puts dprint)                                                                       | no       |
+| working directory        | The project directory to check or format; dprint runs here with no file arguments when no scope is given (its subtree)                                                                           | yes      |
 
 ## Output
 
@@ -31,15 +31,15 @@ Otherwise the output is dprint's own stdout/stderr (may contain ANSI colours); i
 
 ## Exit codes
 
-| Code  | Meaning           | Notes                                                                                                       |
-| ----- | ----------------- | ----------------------------------------------------------------------------------------------------------- |
-| 3     | not set up        | `missing` or `noconfig`; dprint was not run                                                                 |
-| 2     | error             | usage error, or dprint could not be started / was killed by a signal (stderr explains)                      |
-| 0     | success           | dprint finished without findings                                                                            |
-| 11    | config error      | dprint could not resolve or parse the config                                                                |
-| 12/13 | plugin problem    | dprint could not load or run a plugin; 12 per dprint's documentation, not verified by this plugin's tests   |
-| 14    | no files          | no files matched the scope; per dprint's documentation, not verified by this plugin's tests                 |
-| 20    | unformatted files | `check` found files that are not formatted; per dprint's documentation, not verified by this plugin's tests |
-| other | dprint error      | any other non-zero code is dprint's own; its output explains                                                |
+| Code  | Meaning           | Notes                                                                                                           |
+| ----- | ----------------- | --------------------------------------------------------------------------------------------------------------- |
+| 3     | not set up        | `missing` or `noconfig`; dprint was not run                                                                     |
+| 2     | error             | usage error, or dprint could not be started / was killed by a signal (stderr explains)                          |
+| 0     | success           | dprint finished without findings                                                                                |
+| 11    | config error      | dprint could not resolve or parse the config                                                                    |
+| 12/13 | plugin problem    | 12: a plugin cannot be resolved or loaded; 13: the config configures no plugins ("No formatting plugins found") |
+| 14    | no files          | no files matched the scope; per dprint's documentation, not verified by this plugin's tests                     |
+| 20    | unformatted files | `check` found files that are not formatted; per dprint's documentation, not verified by this plugin's tests     |
+| other | dprint error      | any other non-zero code is dprint's own; its output explains                                                    |
 
 `check` is read-only; `fmt` rewrites files in place.

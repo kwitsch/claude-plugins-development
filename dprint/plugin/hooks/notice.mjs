@@ -58,12 +58,17 @@ async function judge($, argv, cwd, name) {
 function dprintProblem($) {
 	if (probe && (probe.failedAt === undefined || withinMs(probe.failedAt, PROBE_RETRY_MS))) return probe.problem;
 	const entry = { problem: (async () => {
-		const [home, pathVar] = await Promise.all([$.env.get("HOME"), $.env.get("PATH")]);
+		const [home, pathVar, install] = await Promise.all([
+			$.env.get("HOME"),
+			$.env.get("PATH"),
+			$.env.get("DPRINT_INSTALL")
+		]);
 		const cwd = home && await $.fs.exists(home) ? home : "/";
 		const candidates = (pathVar ?? "").split(":").filter((d) => d.startsWith("/")).map((d) => `${d.replace(/\/+$/, "")}/dprint`);
 		const found = await Promise.all(candidates.map((p) => $.fs.exists(p)));
 		let pick = candidates.find((_, i) => found[i]);
-		if (!pick && home && await $.fs.exists(`${home}/.dprint/bin/dprint`)) pick = `${home}/.dprint/bin/dprint`;
+		const fallback = install ? `${install.replace(/\/+$/, "")}/bin/dprint` : home ? `${home}/.dprint/bin/dprint` : "";
+		if (!pick && fallback && await $.fs.exists(fallback)) pick = fallback;
 		if (pick) return (await judge($, [pick, "--version"], cwd, pick))?.text ?? null;
 		const npx = await judge($, [
 			"npx",

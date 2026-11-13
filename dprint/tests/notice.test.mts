@@ -376,13 +376,13 @@ test("a rejecting env.get is cached as a failed probe for 30 s, then re-probed; 
   const b = withConfig(repo());
   const { fire, runs, toasts, envGets } = setup($, on, { home: { deny: "boom" }, run: () => DENY });
   await fire("classic.CwdChanged", { new_cwd: a });
-  assert.equal(envGets.length, 2, "HOME and PATH are read together and both reject before any probe");
+  assert.equal(envGets.length, 3, "HOME, PATH and DPRINT_INSTALL are read together and both reject before any probe");
   vi.setSystemTime(T0 + 10_000);
   await fire("classic.CwdChanged", { new_cwd: b });
-  assert.equal(envGets.length, 2, "within 30 s: no re-probe");
+  assert.equal(envGets.length, 3, "within 30 s: no re-probe");
   vi.setSystemTime(T0 + 31_000);
   await fire("classic.CwdChanged", { new_cwd: b });
-  assert.equal(envGets.length, 4, "after 31 s: re-probed");
+  assert.equal(envGets.length, 6, "after 31 s: re-probed");
   assert.deepEqual(runs, []);
   assert.equal(toasts.length, 0);
 });
@@ -430,7 +430,7 @@ plainTest("the probe constants, MIN_VERSION and version regex equal the shared s
   const versionRe = "/^dprint (\\d+)\\.(\\d+)\\.(\\d+)(-\\S+)?/";
   assert.ok(check.includes(versionRe) && notice.includes(versionRe), "version regex");
   assert.ok(find.includes("[\"--yes\", \"dprint\"]") && notice.includes("[\"npx\", \"--no\", \"--prefer-offline\", \"--\", \"dprint\", \"--version\"]"), "npx argv (notice never downloads)");
-  assert.ok(find.includes("join(homedir(), \".dprint\", \"bin\", \"dprint\")") && notice.includes("${home}/.dprint/bin/dprint"), "home path");
+  assert.ok(find.includes("join(homedir(), \".dprint\")") && notice.includes("${home}/.dprint/bin/dprint") && find.includes("process.env.DPRINT_INSTALL") && notice.includes("DPRINT_INSTALL"), "home path");
 });
 
 plainTest("built module keeps the names Claude Code's static check needs (no mangling)", () => {

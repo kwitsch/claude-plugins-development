@@ -129,7 +129,8 @@ export function dprintArgv(cmd: string[], args: string[]): [string, string[]] {
 export async function findDprint(): Promise<string[] | null> {
   const bin = onPath("dprint");
   if (bin) return [bin];
-  const fallback = join(homedir(), ".dprint", "bin", "dprint");
+  // the official installer puts dprint in ${DPRINT_INSTALL:-$HOME/.dprint}/bin
+  const fallback = join(process.env.DPRINT_INSTALL || join(homedir(), ".dprint"), "bin", "dprint");
   if (isExecutableFile(fallback)) return [fallback];
   const npx = onPath("npx");
   return npx && (await probeNpx(npx)) ? [npx, ...NPX_DPRINT] : null;
