@@ -55,7 +55,7 @@ the shapes below: `inline-headroom/docs/claude-code-verification.md`.
   unregister and a registered tool that no hook answers fails, so the unmatched `tool.call` hook answers
   `mcp__jevfort__estimate_effort` before the readiness guard and never calls `next(e)`: `{ result }` (the JSON
   estimate; while inactive `askJev` fails and it is `defaultEffort` with source `fallback`) or, on invalid input,
-  `{ isError: true, result }` without a Jev request; `tool.check` approves it before the guard (a settings deny still
+  `{ deny: "estimate_effort: <reason>" }` without a Jev request (a hook's own `isError` is dropped: the model sees a normal result, live on 2.1.325); `tool.check` approves it before the guard (a settings deny still
   wins). Calls are logged as kind `estimate`.
 - Effort band: the `ui.render` hook with matcher `{ component: "AbovePrompt" }` draws `Box`/`Text`/`Button` from
   `$.ui.resolve(e)` (detached factories) out of the closure state `band` (written at main-loop step 0 in `turn.step`:
@@ -74,7 +74,7 @@ the shapes below: `inline-headroom/docs/claude-code-verification.md`.
   overlap); `session.end` (raised for /clear and /resume, where `session.start` is not) resets the conversation state.
   `cacheTick` calls `$.ui.invalidate` through `showMinutes` in try/catch, `$.command.run` for `/compact` (rejects are
   said with `$.ui.status`) and reads `$.session.usage()`; none of these runs in a hook frame.
-- `tool.call` failure is `isError: true` or `deny: string`; there is no `exitCode`.
+- `tool.call` failure: a result read back through `$.tool.call` carries `isError: true` or `deny: string`; an answer a hook gives for the model must use `deny` (its own `isError` is dropped, live on 2.1.325); there is no `exitCode`.
 - `turn.step` `usage` may be `null`; `command.run` returning `{}` prints no row and records no model context.
 - `cc-plugin-sec-default` skips every user-tier `prompt.compose`/`prompt.section`/`prompt.context` hook, so the mod
   registers none of them; the prompt classifier uses `prompt.submit` and adds `context` entries. It also passes

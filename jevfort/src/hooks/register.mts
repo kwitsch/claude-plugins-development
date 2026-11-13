@@ -602,7 +602,7 @@ async function buildCandidates($: Engine, request: string, steps: readonly Sessi
       // a malformed package.json offers no scripts
     }
     const runner = await packageRunner($, cwd);
-    for (const name of Object.keys(scripts).filter((n) => SAFE_SCRIPT.test(n))) {
+    for (const name of Object.keys(scripts).filter((n) => SAFE_SCRIPT.test(n) && typeof scripts[n] === "string")) {
       const command = name === "test" ? `${runner} test` : `${runner} run ${name}`;
       out.push(bash(command, `Run the project's "${name}" script (${clipScript(scripts[name])})`));
     }
@@ -1172,7 +1172,7 @@ export const register = (on: On, options: Options): void => {
   on("tool.call", async function onToolCall($: Engine, e: ToolCall, next: Next<ToolCall, ToolResult>): Promise<ToolResult> {
     if (e.tool === ESTIMATE_TOOL) {
       const input = parseEstimateInput(e);
-      if (typeof input === "string") return { isError: true, result: `estimate_effort: ${input}` };
+      if (typeof input === "string") return { deny: `estimate_effort: ${input}` }; // a hook's own isError never reaches the model (live, 2.1.325); a deny does, as an error
       const r = await askJev($, { request: clip(input.prompt, 4000) }, { effort: effortQuestion, mechanical: mechanicalQuestion });
       const effortAnswer = r.ok ? score(r.answers, "effort") : undefined;
       const est = estimateEffort(effortAnswer, r.ok ? noul(r.answers, "mechanical") : undefined, input);

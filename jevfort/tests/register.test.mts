@@ -808,7 +808,7 @@ test("Effort routing does not ask Jev the difficulty question", async ($, on) =>
 });
 
 const ESTIMATE = { tool: "mcp__jevfort__estimate_effort", model: "opus", defaultEffort: "high", minEffort: "low", maxEffort: "xhigh", prompt: "add a retry to the HTTP client" };
-const estimateCall = async ($: Runner, input: Record<string, unknown> = {}) => (await $.tool.call({ ...ESTIMATE, ...input })) as { result?: string; isError?: boolean };
+const estimateCall = async ($: Runner, input: Record<string, unknown> = {}) => (await $.tool.call({ ...ESTIMATE, ...input })) as { result?: string; isError?: boolean; deny?: string };
 
 test("estimate_effort returns Jev's estimate with the model bias", async ($, on) => {
   const { sent } = setup(on, { messages: [], jev: byId({ effort: scored(1.6), mechanical: mech(0.1) }) });
@@ -823,10 +823,19 @@ test("estimate_effort falls back to defaultEffort when Jev is unreachable", asyn
   expect(await runJev($, "")).toContain("estimate (pass): opus: high (fallback, batch: HTTP 401)");
 });
 
+test("A null script in the project's package.json does not stop the turn's routing", async ($, on) => {
+  const seen: unknown[] = [];
+  setup(on, { messages: [user("run the tests please")], packageJson: { scripts: { test: null } }, jev: byId({ effort: easy }) });
+  claudeBeneath(on, seen);
+
+  await drain($.turn.step(step));
+  expect(seen[0]).toMatchObject({ effort: "low" });
+});
+
 test("estimate_effort rejects invalid input without asking Jev", async ($, on) => {
   const { sent } = setup(on, { messages: [], jev: byId({ effort: scored(1.6) }) });
-  expect(await estimateCall($, { model: "gpt" })).toEqual({ isError: true, result: "estimate_effort: model must be one of haiku, sonnet, opus, fable" });
-  expect(await estimateCall($, { minEffort: "high", maxEffort: "low" })).toEqual({ isError: true, result: "estimate_effort: minEffort must not be above maxEffort" });
+  expect(await estimateCall($, { model: "gpt" })).toEqual({ deny: "estimate_effort: model must be one of haiku, sonnet, opus, fable" });
+  expect(await estimateCall($, { minEffort: "high", maxEffort: "low" })).toEqual({ deny: "estimate_effort: minEffort must not be above maxEffort" });
   expect(sent).toHaveLength(0);
 });
 

@@ -314,7 +314,7 @@ async function buildCandidates($, request, steps, calls, stepIndex) {
 			scripts = JSON.parse(pkg).scripts ?? {};
 		} catch {}
 		const runner = await packageRunner($, cwd);
-		for (const name of Object.keys(scripts).filter((n) => SAFE_SCRIPT.test(n))) {
+		for (const name of Object.keys(scripts).filter((n) => SAFE_SCRIPT.test(n) && typeof scripts[n] === "string")) {
 			const command = name === "test" ? `${runner} test` : `${runner} run ${name}`;
 			out.push(bash(command, `Run the project's "${name}" script (${clipScript(scripts[name])})`));
 		}
@@ -812,10 +812,7 @@ export const register = (on, options) => {
 	on("tool.call", async function onToolCall($, e, next) {
 		if (e.tool === ESTIMATE_TOOL) {
 			const input = parseEstimateInput(e);
-			if (typeof input === "string") return {
-				isError: true,
-				result: `estimate_effort: ${input}`
-			};
+			if (typeof input === "string") return { deny: `estimate_effort: ${input}` };
 			const r = await askJev($, { request: clip(input.prompt, 4e3) }, {
 				effort: effortQuestion,
 				mechanical: mechanicalQuestion
