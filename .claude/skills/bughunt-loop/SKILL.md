@@ -1,12 +1,12 @@
 ---
 name: bughunt-loop
 description: Run the bughunt method of this repository as a Workflow loop on one plugin - rounds of parallel read-only reviewers with a new lens each round, every finding triaged and fixed with a failing-first test, commit and push per fix, until several rounds in a row find nothing new (or a round cap), then simplify, code-review and a learnings pass. Use when the user asks for an automated, repeated or looped bug hunt of a plugin.
-argument-hint: "<plugin-name> [dryRounds=3] [maxRounds=8]"
+argument-hint: "<plugin-name> [dryRounds=3] [maxRounds=20]"
 ---
 
 # bughunt-loop
 
-The loop form of the `bughunt` skill (`.claude/skills/bughunt/SKILL.md`): read it first, its method, rules and "What to claim" apply unchanged. The first argument is the plugin directory name (stop with one line if `<plugin>/package.json` does not exist); optional `dryRounds` (default 3) and `maxRounds` (default 8).
+The loop form of the `bughunt` skill (`.claude/skills/bughunt/SKILL.md`): read it first, its method, rules and "What to claim" apply unchanged. The first argument is the plugin directory name (stop with one line if `<plugin>/package.json` does not exist); optional `dryRounds` (default 3) and `maxRounds` (default 20).
 
 The user's request for this skill is the opt-in for the Workflow tool (load `workflow-authoring` first if it is not loaded).
 
@@ -65,7 +65,7 @@ const FIX = { type: 'object', properties: { verdict: { enum: ['fixed', 'refuted'
 const CLOSE = { type: 'object', properties: { status: { enum: ['clean', 'fixed', 'blocked'] }, summary: { type: 'string' } }, required: ['status', 'summary'] }
 const { plugin, worktree, date, areas } = args
 const dryRounds = args.dryRounds ?? 3
-const maxRounds = args.maxRounds ?? 8
+const maxRounds = args.maxRounds ?? 20
 const LENSES = [
   'the newest diff of this branch and the history of the last fixes',
   'interactions between earlier fixes and regressions they introduced',
