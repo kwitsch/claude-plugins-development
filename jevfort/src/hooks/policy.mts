@@ -122,10 +122,30 @@ const MODEL_BIAS: Record<EstimateModel, number> = { haiku: 0.75, sonnet: 0.25, o
  * turn only and then held, so a later change of effort does not rewrite the prompt cache.
  */
 export const EVERY_TURN_MODELS: readonly EstimateModel[] = ["sonnet", "opus"];
-/** Below this confidence a Jev score is not used. */
+/** Below this confidence a Jev difficulty answer is not used ({@link route}); the effort score has no such threshold. */
 export const MIN_CONFIDENCE = 0.5;
-/** From this probability on, a prompt counts as purely mechanical. */
-export const MECHANICAL_FROM = 0.8;
+/** From this probability on, a prompt counts as purely mechanical (measured 2026-11-13: 0.8 sent 16 of 24 medium prompts to minEffort). */
+export const MECHANICAL_FROM = 0.95;
+/** Score cut points between low|medium|high|xhigh|max, measured on 120 labelled prompts (2026-11-13, d1-3b). The last one is provisional. */
+export const EFFORT_CUTS = [1.05, 1.9, 2.5, 3.1] as const;
+/** The score ends of the {@link effortLevel} segments: 0, the cut points, 4. */
+const CUT_X: readonly number[] = [0, ...EFFORT_CUTS, 4];
+/** The level-scale ends of the segments: 0, then each cut on the middle of a level (0.5, 1.5, ...), then 4. */
+const CUT_Y: readonly number[] = [0, ...EFFORT_CUTS.map((_, i) => i + 0.5), 4];
+
+/**
+ * Maps Jev's 0–4 effort score onto the level scale piecewise linearly, so that `Math.round` of the result gives the
+ * calibrated level: the {@link EFFORT_CUTS} land on 0.5 / 1.5 / 2.5 / 3.5. The model bias is added afterwards.
+ *
+ * @param score - Jev's effort score; clamped to 0..4.
+ * @returns The position on the level scale, 0..4.
+ */
+export function effortLevel(score: number): number {
+  const s = Math.min(Math.max(score, 0), 4);
+  // The segment's upper end; s <= 4 always finds one, and a score of 0 uses the first segment.
+  const i = Math.max(1, CUT_X.findIndex((x) => s <= x));
+  return CUT_Y[i - 1] + ((s - CUT_X[i - 1]) / (CUT_X[i] - CUT_X[i - 1])) * (CUT_Y[i] - CUT_Y[i - 1]);
+}
 /** The tool's registered name; the model sees it as {@link ESTIMATE_TOOL}. */
 export const ESTIMATE_NAME = "estimate_effort";
 /** The name calls to the tool arrive under at `tool.call`. */
@@ -135,7 +155,7 @@ export const ESTIMATE_TOOL = `mcp__jevfort__${ESTIMATE_NAME}`;
 export type EstimateBounds = {
   /** The model family that will run the prompt; picks the bias. */
   model: EstimateModel;
-  /** Returned unchanged when Jev is unreachable or unsure. */
+  /** Returned unchanged when Jev is unreachable or gives no effort score. */
   defaultEffort: Effort;
   /** Lowest effort Jev's estimate may give; the answer for a mechanical prompt. */
   minEffort: Effort;
@@ -217,9 +237,10 @@ export function parseEstimateInput(raw: Record<string, unknown>): EstimateInput 
 
 /**
  * The single effort rule of the tool and of turn-start routing, in this order: a mechanical prompt (Jev p ≥
- * {@link MECHANICAL_FROM}) gets `minEffort`; without a confident score (missing, malformed, or confidence below
- * {@link MIN_CONFIDENCE}) `defaultEffort` is returned unclamped; otherwise Jev's 0–4 score plus the model's bias,
- * rounded and clamped to `minEffort`..`maxEffort`.
+ * {@link MECHANICAL_FROM}) gets `minEffort`; without a finite score (missing or malformed) `defaultEffort` is
+ * returned unclamped (the score's confidence is not checked: the discarded scores were as accurate as the kept ones);
+ * otherwise Jev's 0–4 score mapped by {@link effortLevel} plus the model's bias, rounded and clamped to
+ * `minEffort`..`maxEffort`.
  *
  * @param effort - Jev's effort score answer, `undefined` when missing or Jev was unreachable.
  * @param mechanical - Jev's probability that the prompt is purely mechanical, `undefined` when missing.
@@ -228,8 +249,8 @@ export function parseEstimateInput(raw: Record<string, unknown>): EstimateInput 
  */
 export function estimateEffort(effort: ScoreAnswer | undefined, mechanical: number | undefined, b: EstimateBounds): Estimate {
   if (mechanical !== undefined && mechanical >= MECHANICAL_FROM) return { effort: b.minEffort, source: "mechanical" };
-  if (!effort || !Number.isFinite(effort.score) || !(effort.confidence >= MIN_CONFIDENCE)) return { effort: b.defaultEffort, source: "fallback" };
-  const i = Math.round(effort.score + MODEL_BIAS[b.model]);
+  if (!effort || !Number.isFinite(effort.score)) return { effort: b.defaultEffort, source: "fallback" };
+  const i = Math.round(effortLevel(effort.score) + MODEL_BIAS[b.model]);
   const clamped = Math.min(Math.max(i, EFFORT_ORDER.indexOf(b.minEffort)), EFFORT_ORDER.indexOf(b.maxEffort));
   return { effort: EFFORT_ORDER[clamped], source: "jev" };
 }
@@ -263,12 +284,12 @@ export const mechanicalQuestion: Question = {
 /** The `estimate_effort` tool spec `session.start` registers through `$.tool.register`. */
 export const ESTIMATE_SPEC = {
   name: ESTIMATE_NAME,
-  description: "Estimate the reasoning effort a prompt most likely needs, decided by TypeSafe Jev. Returns JSON {\"effort\": level, \"source\": \"jev\"|\"mechanical\"|\"fallback\"}: a purely mechanical prompt gets minEffort; Jev's estimate is biased by the model (a stronger model needs less) and kept within minEffort..maxEffort; when Jev is unreachable or unsure, defaultEffort.",
+  description: "Estimate the reasoning effort a prompt most likely needs, decided by TypeSafe Jev. Returns JSON {\"effort\": level, \"source\": \"jev\"|\"mechanical\"|\"fallback\"}: a purely mechanical prompt gets minEffort; Jev's estimate is biased by the model (a stronger model needs less) and kept within minEffort..maxEffort; when Jev is unreachable or gives no effort score, defaultEffort.",
   inputSchema: {
     type: "object",
     properties: {
       model: { type: "string", enum: [...ESTIMATE_MODELS], description: "The model that will run the prompt" },
-      defaultEffort: { type: "string", enum: [...EFFORT_ORDER], description: "Returned when Jev is unreachable or unsure" },
+      defaultEffort: { type: "string", enum: [...EFFORT_ORDER], description: "Returned when Jev is unreachable or gives no effort score" },
       minEffort: { type: "string", enum: [...EFFORT_ORDER], description: "Lowest effort to return; also the answer for a mechanical prompt" },
       maxEffort: { type: "string", enum: [...EFFORT_ORDER], description: "Highest effort to return" },
       prompt: { type: "string", description: "The prompt to estimate" },

@@ -1172,13 +1172,15 @@ export const register = (on: On, options: Options): void => {
       const input = parseEstimateInput(e);
       if (typeof input === "string") return { isError: true, result: `estimate_effort: ${input}` };
       const r = await askJev($, { request: clip(input.prompt, 4000) }, { effort: effortQuestion, mechanical: mechanicalQuestion });
-      const est = estimateEffort(r.ok ? score(r.answers, "effort") : undefined, r.ok ? noul(r.answers, "mechanical") : undefined, input);
+      const effortAnswer = r.ok ? score(r.answers, "effort") : undefined;
+      const est = estimateEffort(effortAnswer, r.ok ? noul(r.answers, "mechanical") : undefined, input);
       await record($, {
         kind: "estimate",
         applied: est.source !== "fallback",
         text: `${input.model}: ${est.effort} (${est.source}${r.ok ? "" : `, ${r.error}`})`,
         ms: r.ms,
-        data: { model: input.model, effort: est.effort, source: est.source, error: r.ok ? undefined : r.error },
+        // effortScore/effortConfidence: raw material to recalibrate EFFORT_CUTS from real turns.
+        data: { model: input.model, effort: est.effort, source: est.source, error: r.ok ? undefined : r.error, effortScore: effortAnswer?.score, effortConfidence: effortAnswer?.confidence },
       });
       return { result: JSON.stringify(est) };
     }
@@ -1330,7 +1332,8 @@ export const register = (on: On, options: Options): void => {
       turn.route = difficulty ? route(difficulty, "model") : undefined;
       const model = lowerModel(e.model, turn.route?.model);
       const mechanical = noul(r.answers, "mechanical");
-      const est = estimate ? estimateEffort(score(r.answers, "effort"), mechanical, estimate) : undefined;
+      const effortAnswer = estimate ? score(r.answers, "effort") : undefined;
+      const est = estimate ? estimateEffort(effortAnswer, mechanical, estimate) : undefined;
       if (est) {
         turn.effort = est.effort !== e.effort ? est.effort : undefined;
         if (firstTurn) firstTurn.effort = est.effort;
@@ -1349,7 +1352,7 @@ export const register = (on: On, options: Options): void => {
         text: `${difficulty ? `difficulty ${difficulty.score.toFixed(2)}` : "effort"} → ${lowered || raised ? `${model ?? e.model}, effort ${effort ?? String(e.effort)}` : "no change"}${source ? ` · ${source}` : ""}`,
         ms: r.ms,
         turnId: e.turnId,
-        data: { score: difficulty?.score, confidence: difficulty?.confidence, effort, model, lowered, raised, estimate: est?.effort, source, mechanical },
+        data: { score: difficulty?.score, confidence: difficulty?.confidence, effort, model, lowered, raised, estimate: est?.effort, source, mechanical, effortScore: effortAnswer?.score, effortConfidence: effortAnswer?.confidence },
       });
     }
 
