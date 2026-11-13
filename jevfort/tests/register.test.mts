@@ -1079,14 +1079,32 @@ test("The band shows the session effort bold and Jev's choice blue", async ($, o
   await $.session.start(START);
   const ui = await $.ui.mount(BAND);
   // Before the first turn every level is dim and only the button is live.
-  for (const level of ["low", "medium", "high", "xhigh", "max"]) expect(await levelProps(ui, level)).toEqual({ dimColor: true });
+  for (const level of ["low", "medium", "high", "xhigh"]) expect(await levelProps(ui, level)).toEqual({ dimColor: true });
+  // `max` lies above the default maxEffort (xhigh): not drawn.
+  expect(await levelProps(ui, "max")).toBeUndefined();
   expect(await autoLabel(ui)).toBe("Jev auto: on");
 
   await drain($.turn.step(step));
   await clock.settle();
   expect(await levelProps(ui, "high")).toEqual({ bold: true });
   expect(await levelProps(ui, "low")).toEqual({ color: "blue" });
-  for (const level of ["medium", "xhigh", "max"]) expect(await levelProps(ui, level)).toEqual({ dimColor: true });
+  for (const level of ["medium", "xhigh"]) expect(await levelProps(ui, level)).toEqual({ dimColor: true });
+  await ui.unmount();
+});
+
+test("The band shows only the configured range plus a session effort outside it", { options: { minEffort: "medium", maxEffort: "high" } }, async ($, on) => {
+  const { clock } = setup(on, { messages: [user("what does this project do?")], jev: byId({ effort: easy }) });
+  claudeBeneath(on, []);
+  sessionStubs(on);
+  await $.session.start(START);
+  const ui = await $.ui.mount(BAND);
+  for (const level of ["low", "xhigh", "max"]) expect(await levelProps(ui, level)).toBeUndefined();
+  for (const level of ["medium", "high"]) expect(await levelProps(ui, level)).toEqual({ dimColor: true });
+
+  await drain($.turn.step(turnStep("t1", "claude-opus-5-5", "max")));
+  await clock.settle();
+  expect(await levelProps(ui, "max")).toEqual({ bold: true });
+  expect(await levelProps(ui, "xhigh")).toBeUndefined();
   await ui.unmount();
 });
 

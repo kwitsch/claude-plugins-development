@@ -174,6 +174,18 @@ export function modelFamily(id: string): EstimateModel | undefined {
 }
 
 /**
+ * Whether an effort level lies within the bounds (both ends included).
+ *
+ * @param level - The effort level.
+ * @param range - The bounds.
+ * @returns `true` when the level ranks neither below the minimum nor above the maximum.
+ */
+export function inBandRange(level: Effort, range: { minEffort: Effort; maxEffort: Effort }): boolean {
+  const i = EFFORT_ORDER.indexOf(level);
+  return i >= EFFORT_ORDER.indexOf(range.minEffort) && i <= EFFORT_ORDER.indexOf(range.maxEffort);
+}
+
+/**
  * The effort bounds, when both are effort levels and the minimum does not rank above the maximum.
  *
  * @param min - The lowest effort.
