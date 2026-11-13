@@ -123,7 +123,8 @@ for (let round = 1; round <= maxRounds; round++) {
   rounds.push({ round, lens, found: fresh.length, fixed: roundFixed })
   log(`round ${round}: ${fresh.length} new, ${roundFixed} fixed`)
   if (blocked) { stop = 'blocked fix'; break }
-  dry = roundFixed === 0 ? dry + 1 : 0
+  // a round with a failed reviewer is not a clean round
+  dry = roundFixed === 0 && reports.every(Boolean) ? dry + 1 : 0
   if (dry >= dryRounds) { stop = `${dryRounds} rounds without a confirmed new finding`; break }
 }
 
