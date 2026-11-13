@@ -13,6 +13,6 @@ Rules:
 - One behaviour per test, a name that says it, real code over mocks wherever feasible.
 - A bug fix starts with a test that reproduces the bug and fails ([debug](debug.reference.md)).
 - Edge cases and error paths get their own tests.
-- Use the project's own test runner and conventions; in a graphmind project find existing tests with `/gm` first and match their style.
+- Use the project's own test runner and conventions and match the style of existing tests.
 
 Exceptions (config, generated code, throwaway prototypes) only with the user's explicit agreement.

@@ -3,7 +3,7 @@
 Feedback is a claim to check, not an order.
 
 1. **Read all of it** before acting. Put all points in one jev-api `batch` call (`state`: the numbered points with their code excerpts; per point a `noul` for unclear and one for correct, plus a `choice` for each matter of taste; [decide](decide.reference.md)); for the unclear answers: if any is confidently unclear, ask through `AskUserQuestion` before implementing any of them: points can depend on each other.
-2. **Verify each point against the code.** The batch answer says whether it is correct; then check it yourself; the code decides when they disagree. Is it true? Does the suggested change break something, drop a behaviour or conflict with an earlier decision? In a graphmind project check callers with `/gm-fn` or `/gm-impact`.
+2. **Verify each point against the code.** The batch answer says whether it is correct; then check it yourself; the code decides when they disagree. Is it true? Does the suggested change break something, drop a behaviour or conflict with an earlier decision?
 3. **Decide per point:**
    - correct: fix it;
    - wrong or already handled: say so with the evidence (file and line, test output), do not implement it;

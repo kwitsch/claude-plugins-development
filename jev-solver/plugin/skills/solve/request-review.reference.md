@@ -2,7 +2,7 @@
 
 Review the change as a reader who has not seen how it was made.
 
-1. **Scope.** The diff to review: `git diff <base>...HEAD` (or the phase's commits). In a graphmind project run `/gm-diff` (diff impact) and `/gm-impact` on the changed symbols to see what else the change reaches.
+1. **Scope.** The diff to review: `git diff <base>...HEAD` (or the phase's commits).
 2. **Depth by size** (from `solve`): the review table of the track in `solve`.
 3. **Check, in this order:** it does what the spec or task says and nothing more; correctness and edge cases; callers, tests and fixtures the change must also touch; security and data loss; tests exist for new logic and really test it; simplicity (anything to delete or merge).
 4. **Report** to `review.md` in the scratchpad for L and above (`jev-solver/<task-slug>/review.md`), in chat for smaller ones. Each finding: file and line, what is wrong, the failing scenario, severity (blocking, should fix, note). No praise filler, no style nitpicks the linter already covers.
