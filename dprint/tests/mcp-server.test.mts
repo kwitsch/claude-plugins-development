@@ -1437,6 +1437,32 @@ test("bash_started starts the (slow) watch-list read, so bash_finished does not 
   assert.match(r.hookSpecificOutput.additionalContext, /"a\.ts"/);
 });
 
+test("bash_finished never formats the session scratchpad, whichever call read the cached watch list", async () => {
+  mkdirSync(path.join(repo, "scratch"));
+  writeFileSync(
+    path.join(bin, "dprint"),
+    ["#!/usr/bin/env bash", `if [ "$1" = "file-paths" ]; then printf '%s\\n' "$PWD/a.ts" "$PWD/scratch/s.ts"; exit 0; fi`, `exec node "${path.join(tmp, "stub-lsp.mjs")}" ok`, ""].join("\n"),
+  );
+  chmodSync(path.join(bin, "dprint"), 0o755);
+  const s = startServer();
+  const scratchpad_dir = path.join(repo, "scratch");
+  // bash_started without the scratchpad (as before the wiring fix) reads the list unfiltered; bash_finished still excludes it
+  await s.tool("bash_started", { cwd: repo, ...SESSION, tool_use_id: "S" });
+  writeFileSync(path.join(repo, "a.ts"), "x  \n");
+  writeFileSync(path.join(repo, "scratch/s.ts"), "x  \n");
+  const r = await s.tool("bash_finished", { cwd: repo, ...SESSION, scratchpad_dir, tool_use_id: "S" });
+  assert.match(r.hookSpecificOutput.additionalContext, /"a\.ts"/);
+  assert.ok(!r.hookSpecificOutput.additionalContext.includes("scratch"), r.hookSpecificOutput.additionalContext);
+  assert.equal(readFileSync(path.join(repo, "scratch/s.ts"), "utf8"), "x  \n");
+});
+
+test("hooks.json: bash_started carries cwd and scratchpad_dir (it starts the watch-list read)", () => {
+  const hooks = JSON.parse(readFileSync(path.join(PLUGIN, "hooks/hooks.json"), "utf8")).hooks;
+  const h = hooks.PreToolUse.filter((g) => g.matcher === "Bash").flatMap((g) => g.hooks).find((x) => x.tool === "bash_started");
+  assert.equal(h.input.cwd, "${cwd}");
+  assert.equal(h.input.scratchpad_dir, "${scratchpad_dir}");
+});
+
 test("overlapping Bash calls of one session keep their own start times (tool_use_id)", async () => {
   stubDprint();
   const s = startServer();

@@ -43,6 +43,8 @@ export interface BashStartedInput {
   agent_id?: string;
   /** Template: `${session_id}`. */
   session_id?: string;
+  /** Template: `${scratchpad_dir}`. */
+  scratchpad_dir?: string;
   /** Template: `${tool_use_id}`. */
   tool_use_id?: string;
 }

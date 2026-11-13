@@ -904,7 +904,11 @@ export async function bashFinished(args: BashFinishedInput = {}, signal?: AbortS
     bashStart.delete(bashKey(args));
     const sc = scopeOf(args);
     if (since === undefined || !sc || findConfig(sc.root) === null) return {};
-    const list = await cachedWatchList(sc);
+    // the list is cached per root and may have been read by a call with another (or no) scratchpad: apply this call's
+    const scratch = sc.realScratch;
+    const list = (await cachedWatchList(sc)).filter(
+      (f) => scratch === null || !(f.real === scratch || f.real.startsWith(scratch + path.sep)),
+    );
     // on a slow file system stat only what git reports as changed; otherwise (and without git) every file is checked
     const slow = statsAreSlow(list);
     // git only pays off for a long list (a short one is cheap to stat even on 9P); a negative override forces it
