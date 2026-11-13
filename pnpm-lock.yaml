@@ -51,6 +51,8 @@ importers:
         specifier: workspace:*
         version: link:../development/vitest/claude-engine
 
+  jev-solver: {}
+
   jevfort:
     devDependencies:
       claude-engine-vitest:
