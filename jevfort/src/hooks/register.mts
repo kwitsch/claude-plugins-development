@@ -25,7 +25,7 @@ import { choice, JEV_API_TIMEOUT_S, JEV_BATCH, JEV_TOOL_PREFIX, JEV_TOOLS, MAX_C
 import type { Answer, ChoiceAnswer, JevResult, Question } from "./jev.mjs";
 import { LOG_KEY, MAX_ENTRIES, recentDecisions, remember, statsKey } from "./log.mjs";
 import type { Entry } from "./log.mjs";
-import { bestAction, bounds, difficultyQuestion, doneQuestion, EFFORT_ORDER, effortQuestion, ESTIMATE_SPEC, ESTIMATE_TOOL, estimateEffort, EVERY_TURN_MODELS, inScratchpad, isEffort, lowerModel, mechanicalQuestion, modelFamily, nextActionQuestion, parseEstimateInput, pickCandidate, route, shouldContinue, singleActionQuestion } from "./policy.mjs";
+import { bestAction, bounds, difficultyQuestion, doneQuestion, EFFORT_ORDER, effortQuestion, ESTIMATE_SPEC, ESTIMATE_TOOL, estimateEffort, EVERY_TURN_MODELS, inBandRange, inScratchpad, isEffort, lowerModel, mechanicalQuestion, modelFamily, nextActionQuestion, parseEstimateInput, pickCandidate, route, shouldContinue, singleActionQuestion } from "./policy.mjs";
 import type { Effort, EstimateBounds, EstimateModel, Route } from "./policy.mjs";
 import { hints, NONE, promptQuestions } from "./prompt.mjs";
 import { buildReport } from "./report.mjs";
@@ -849,7 +849,7 @@ export const register = (on: On, options: Options): void => {
   /** Temporary off switch of the automatic effort choice, pressed in the band; reset when a conversation ends. */
   let autoOff = false;
 
-  // The effort band above the prompt: the five levels, the session effort bold, Jev's choice for the turn blue, and the
+  // The effort band above the prompt: the levels between the configured minimum and maximum (plus the session effort when outside), the session effort bold, Jev's choice for the turn blue, and the
   // Auto button, then the cache countdown. Without the effort row (jevfort inactive, also before the session
   // baseline, or `routing: "off"`) only the countdown shows, above whatever another plugin draws in the band beneath
   // (the effort row takes the whole band); a survey holds the band.
@@ -864,7 +864,7 @@ export const register = (on: On, options: Options): void => {
     return Box({
       flexDirection: "row",
       children: [
-        ...EFFORT_ORDER.map((level) =>
+        ...EFFORT_ORDER.filter((level) => inBandRange(level, effortRange) || level === band.configured || level === band.chosen).map((level) =>
           Text({
             ...(level === band.configured ? { bold: true } : {}),
             ...(level === band.chosen ? { color: "blue" } : {}),
