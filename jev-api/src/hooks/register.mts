@@ -795,8 +795,6 @@ async function registerOne($: Engine, st: RegState, type: ToolName): Promise<voi
     const tool = r?.tool;
     if (tool?.startsWith("mcp__") && tool.endsWith(`__${type}`)) st.names.set(tool, type);
     st.missing.delete(type);
-    st.failures.delete(type);
-    st.stuck.delete(type);
   } catch (err) {
     const n = (st.failures.get(type) ?? 0) + 1;
     st.failures.set(type, n);

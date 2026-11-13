@@ -830,6 +830,164 @@ test("the Haiku output budget covers a choice with many options", async ($, on) 
   expect(Number(asked[1]["maxTokens"])).toBe(512); // unchanged for a noul question
 });
 
+// Gaps found by mutation testing (round 6a): each test kills at least one mutant of the shipped code.
+it("X14 a hanging registration is not started again by later calls", async () => {
+  const tries: string[] = [];
+  const { run } = await direct({
+    tool: { register: (spec: { name: string }) => (tries.push(spec.name), spec.name === "score" ? new Promise(() => {}) : Promise.resolve({ tool: TOOL(spec.name) })) },
+    clock: {
+      after: (ms: number, fn: () => void) => {
+        const t = ms === 1000 ? setTimeout(fn, 0) : undefined;
+        return { cancel: () => clearTimeout(t) };
+      },
+    },
+  });
+  for (let i = 0; i < 3; i++) await run("noul");
+  expect(tries.filter((n) => n === "score")).toHaveLength(1);
+});
+
+it("X25 a key inside JEV_URL: the whole URL still becomes <JEV_URL>", async () => {
+  const key = "sk-SECRET-1234567890";
+  const url = `https://jev.example/tenant-7?key=${key}`;
+  const { run } = await direct({
+    env: { get: async (n: string) => (n === "JEV_URL" ? url : n === "TYPESAFE_API_KEY" ? key : undefined) },
+    http: { fetch: () => Promise.reject(new Error(`$.http.fetch(${url}) failed: ECONNREFUSED`)) },
+    tool: { register: async (s: { name: string }) => ({ tool: TOOL(s.name) }) },
+  });
+  expect((await run("noul")).deny).toBe("noul: $.http.fetch(<JEV_URL>) failed: ECONNREFUSED");
+});
+
+it("X27 the bare host is hidden whatever its case", async () => {
+  const { run } = await direct({
+    env: { get: async (n: string) => (n === "JEV_URL" ? "https://secret-host-zq82.invalid/x" : undefined) },
+    http: { fetch: () => Promise.reject(new Error("getaddrinfo ENOTFOUND SECRET-HOST-ZQ82.invalid")) },
+    tool: { register: async (s: { name: string }) => ({ tool: TOOL(s.name) }) },
+  });
+  expect((await run("noul")).deny).toBe("noul: getaddrinfo ENOTFOUND <host>");
+});
+
+test("X39 a Haiku choice whose probabilities are all 0 is an error", async ($, on) => {
+  setup(on, { env: {} });
+  haiku(on, () => said(JSON.stringify({ answers: { answer: { type: "choice", choice: "greeting", confidence: 1, probabilities: { greeting: 0, question: 0 } } } })));
+  expect((await call($, "choice")).deny).toMatch(/^choice: fallback/);
+});
+
+it("X48 a URL quoted as given (not as the parser spells it) becomes <JEV_URL>", async () => {
+  const url = "https://jev.example/a/../tenant-7";
+  const { run } = await direct({
+    env: { get: async (n: string) => (n === "JEV_URL" ? url : undefined) },
+    http: { fetch: () => Promise.reject(new Error(`$.http.fetch(${url}) failed: ECONNREFUSED`)) },
+    tool: { register: async (s: { name: string }) => ({ tool: TOOL(s.name) }) },
+  });
+  expect((await run("noul")).deny).toBe("noul: $.http.fetch(<JEV_URL>) failed: ECONNREFUSED");
+});
+
+it("X50 a Haiku call that rejects after it was abandoned raises no unhandled rejection", async () => {
+  let rejectIt: ((e: Error) => void) | undefined;
+  const { run } = await direct({
+    env: { get: async () => undefined },
+    model: { complete: () => new Promise((_, rej) => (rejectIt = rej)) },
+    tool: { register: async (s: { name: string }) => ({ tool: TOOL(s.name) }) },
+  });
+  const ctl = new AbortController();
+  const pending = run("noul", ctl.signal);
+  while (!rejectIt) await new Promise((r) => setImmediate(r));
+  ctl.abort();
+  expect((await pending).deny).toBe("noul: the call was abandoned");
+  const seen: unknown[] = [];
+  const h = (e: unknown) => void seen.push(e);
+  process.prependListener("unhandledRejection", h);
+  rejectIt(new Error("late"));
+  await new Promise((r) => setTimeout(r, 20));
+  process.off("unhandledRejection", h);
+  expect(seen).toHaveLength(0);
+});
+
+test("X53 the Haiku output budget is capped at 16384", async ($, on) => {
+  const asked = haiku(on, () => said("{}"));
+  mock.env(on, {});
+  const criteria = Object.fromEntries(Array.from({ length: 255 }, (_, i) => [`${"x".repeat(200)}${i}`, "d"]));
+  await call($, "choice", { criteria });
+  expect(asked[0]["maxTokens"]).toBe(16384);
+});
+
+it("X04 the registration back-off stops growing at 5 minutes", async () => {
+  const tries: string[] = [];
+  const { run } = await direct({
+    tool: {
+      register: async (spec: { name: string }) => {
+        tries.push(spec.name);
+        if (spec.name === "batch") throw new Error("refused");
+        return { tool: TOOL(spec.name) };
+      },
+    },
+    ui: { log: async () => undefined },
+  });
+  vi.useFakeTimers({ toFake: ["Date"] });
+  try {
+    const t0 = Date.now();
+    for (let i = 0; i < 12; i++) {
+      vi.setSystemTime(t0 + 300_001 * i);
+      await run("noul");
+    }
+    expect(tries.filter((n) => n === "batch")).toHaveLength(12); // the delay stops growing
+    vi.setSystemTime(t0 + 300_001 * 11 + 200_000);
+    await run("noul");
+    expect(tries.filter((n) => n === "batch")).toHaveLength(12); // and it is 5 minutes, not less
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+it("X05 the first delayed retry waits 5 s, not less", async () => {
+  const tries: string[] = [];
+  const { run } = await direct({
+    tool: {
+      register: async (spec: { name: string }) => {
+        tries.push(spec.name);
+        if (spec.name === "batch") throw new Error("refused");
+        return { tool: TOOL(spec.name) };
+      },
+    },
+    ui: { log: async () => undefined },
+  });
+  vi.useFakeTimers({ toFake: ["Date"] });
+  try {
+    await run("noul");
+    await run("noul"); // immediate retry
+    vi.setSystemTime(Date.now() + 4000);
+    await run("noul");
+  } finally {
+    vi.useRealTimers();
+  }
+  expect(tries.filter((n) => n === "batch")).toHaveLength(2);
+});
+
+it("X02 session.start waits up to 5 s for a registration", async () => {
+  const waits: number[] = [];
+  const { hooks, $ } = await direct({
+    tool: { register: () => new Promise(() => {}) },
+    clock: {
+      after: (ms: number, fn: () => void) => {
+        waits.push(ms);
+        const t = setTimeout(fn, 0);
+        return { cancel: () => clearTimeout(t) };
+      },
+    },
+  });
+  await hooks.get("session.start")?.($, { cwd: "/p" }, async () => ({}));
+  expect(waits).toEqual([5000]);
+});
+
+it("X23 a key shorter than 6 characters is not redacted", async () => {
+  const { run } = await direct({
+    env: { get: async (n: string) => (n === "JEV_URL" ? "https://jev.example/x" : n === "TYPESAFE_API_KEY" ? "abc" : undefined) },
+    http: { fetch: () => Promise.resolve({ status: 400, ok: false, headers: {}, text: JSON.stringify({ detail: "abc is wrong" }) }) },
+    tool: { register: async (s: { name: string }) => ({ tool: TOOL(s.name) }) },
+  });
+  expect((await run("noul")).deny).toBe("noul: HTTP 400: abc is wrong");
+});
+
 // Live smoke tests (opt-in): run against the System One server named by JEV_URL in the shell; skipped without it.
 // Nothing is hardcoded: the URL, key and model come only from the environment.
 describe.skipIf(!process.env.JEV_URL)("live JEV System One (JEV_URL)", () => {
