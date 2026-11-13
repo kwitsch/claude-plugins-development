@@ -221,7 +221,9 @@ Observed, no new finding:
 - A Bash command that exits non-zero (`PostToolUseFailure`): the file is formatted and the notice arrives.
 - Skill `/dprint:dprint check` (exit 20, files untouched) and `/dprint:dprint fmt` (exit 0, files formatted).
 - FileChanged smoke test of the watch list (files vs directories): see `tasks/F24-watch-list-static-per-file.md`.
-- Not run live: the `init` flow (it asks questions and installs software; its scripts are covered by the contract tests).
+- Skill `/dprint:dprint init` (dprint present and current, config without plugins for `.md`/`.yaml`/`.json`): the version check passed, no install was offered, the scan listed the three uncovered types with their candidates, and it stopped at the question (`AskUserQuestion` is off in `claude -p`) without changing `dprint.json`. The install branch (download of dprint) was not run live.
+- FileChanged on the 9P mount (`/mnt/c`, WSL2): with `DPRINT_WATCH_DIRECTORIES=1` change and add events arrive for writes made from WSL (in-place writes, delete-and-recreate, new files, a 50-file burst). Changes made from the Windows side were not tried.
+- The 5-minute retry of an empty watch list is covered by an in-process test with a controlled clock (`tests/mcp-format.test.mts`).
 
 ## Assurance beyond reviews
 
