@@ -173,6 +173,10 @@ Not run in Claude Code (no `claude -p --plugin-dir` session): the engine's hook 
 
 F16-F19 are done in jev-api 0.3.2 / jevfort 0.9.1 (see the task documents): per-tool registration state with a once-paid wait and back-off, the Haiku abort signal as an option of `$.model.complete`, and a compaction ranking budget of **9 s** (the re-run measured the 12 s budget above; it was lowered to 9 s to stay under the engine's 10 s per hook). The tables above keep the numbers as measured.
 
-## Bug hunt
+## Bug hunt (fixes)
 
 Round 1 (three reviewers: registration, request path, jevfort and docs) found: the bearer key and the endpoint could reach the model through an error text (a runtime quoting a rejected header value; an error body echoing the request URL) - both redacted now; the Haiku abort signal sat in the wrong argument; stale numbers and symbols in these documents; a damaged TSDoc. All fixed with tests.
+
+Round 2: a Haiku call refused for a fractional `timeoutMs` (`2.01 s * 1000`): rounded to whole milliseconds. Round 3 (with live sessions on Claude Code 2.1.325): the endpoint host reached the model in a DNS error (`getaddrinfo ENOTFOUND <host>`): redacted; Haiku `choice` probabilities now sum to 1 like System One's. Round 4: a key containing the host text was broken up by the host step (order: URL, key, host), the host step damaged ordinary words (`jev-latest`; now whole host names only, ignoring case), a quadratic regex on whitespace in a Haiku reply. Round 5: IPv6 hosts (bare address in error texts), a Haiku timeout reading as `aborted` (now `fallback: timeout after Nms`), weak or missing tests (host order, listeners on the Haiku path), stale task documents.
+
+Engine facts found live (2.1.325), recorded in `.claude/rules/claude-code-hook-facts.md`: plugin-registered tools run without a permission check (a deny rule withholds them), and the built-in `cc-plugin-sec-default` bypasses user-tier `session.compact` hooks.

@@ -22,6 +22,8 @@ Proven (harness, `tool.register` returning a never-settling promise): `session.s
 
 ## Code locations
 
+Before 0.3.2; since the rewrite the code is `RegState`, `registerOne` and `ensureTools` in the same file.
+
 - `onToolCall` (the `await (registering ??= ...)` line), `onSessionStart`
 - `registerTools`
 

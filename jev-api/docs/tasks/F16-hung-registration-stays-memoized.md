@@ -30,6 +30,8 @@ Proven (harness `rerun.mjs`, `tool.register` never settling): all four hung: `se
 
 ## Code locations
 
+Before 0.3.2; since the rewrite the code is `RegState`, `registerOne` and `ensureTools` in the same file.
+
 - `onToolCall` and `onSessionStart` (the `registering ??=` memo and `within`)
 - `registerTools` (`Promise.allSettled`, results applied after all settle)
 - `within`
@@ -42,7 +44,7 @@ Proven (harness `rerun.mjs`, `tool.register` never settling): all four hung: `se
 
 ## Verification
 
-Tests in `tests/register.test.mts` (fake clock of the kit): "a hung registration costs one wait, not one per call" (register never settles; first owned call may wait up to the bound, the next four answer without the 1 s wait), "one hung tool does not hold the others" (only `score` hangs; `noul`'s engine-returned name is recorded after session.start). Re-measure with `rerun.mjs f03`.
+As shipped: the test named under Status ("a hanging registration of one tool is waited for once, not by every call": one tool hangs, four owned calls, one 1 s wait). The plan before the fix also named a check that `noul`'s name is recorded while `score` hangs; the shipped test checks that the calls are answered.
 
 ## Constraints
 

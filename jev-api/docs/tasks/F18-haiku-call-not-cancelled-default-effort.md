@@ -32,7 +32,7 @@ Proven from the engine typings (`claude-code.d.ts` of 2.1.323: `ModelCompleteOpt
 
 ## Verification
 
-Test: "an abandoned Haiku call is cut" (the kit's `model.complete` stub records the `signal` it got and that it aborted). Live numbers go into a new dated evaluation.
+As shipped: the test named under Status ("the Haiku call gets the abort signal as an option": the second argument of `$.model.complete` carries the dispatch signal, the request has none). That the engine really cuts the call was not measured; a Haiku timeout reads as `fallback: timeout after Nms` (live finding of the bug hunt).
 
 ## Constraints
 

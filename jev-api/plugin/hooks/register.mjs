@@ -191,7 +191,11 @@ function hideHost(text, url) {
 		return text;
 	}
 	if (!host) return text;
-	return text.replace(new RegExp(`(?<![\\w.-])${host.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\w-])`, "gi"), "<host>");
+	let t = text;
+	for (const h of new Set([host, host.replace(/^\[(.*)\]$/, "$1")])) {
+		t = t.replace(new RegExp(`(?<![\\w.-])${h.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\w-])`, "gi"), "<host>");
+	}
+	return t;
 }
 function isText(v) {
 	return typeof v === "string" && v.trim() !== "";
@@ -371,7 +375,7 @@ async function askHaiku($, tool, state, questions, timeoutMs, signal) {
 		});
 		const r = await Promise.race([reply, aborted]);
 		if (r === "aborted") return fail(tool, "the call was abandoned");
-		if (!r.isAnswered) return fail(tool, `fallback: ${r.reason}`);
+		if (!r.isAnswered) return fail(tool, r.reason === "aborted" && !signal.aborted ? `fallback: timeout after ${timeoutMs}ms` : `fallback: ${r.reason}`);
 		const body = json(r.text.trim().replace(/^```(?:json)?\s*/i, "").replace(/```$/, ""));
 		const answers = isRecord(body) ? body["answers"] : undefined;
 		const list = [];

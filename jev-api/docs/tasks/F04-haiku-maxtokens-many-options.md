@@ -41,7 +41,7 @@ Size the budget from the questions: e.g. 128 tokens base per question plus ~16 p
 
 ## Verification
 
-Kit test: the `model.complete` request for a 100-option `choice` carries `maxTokens` >= 1600; a batch of 30 4-level scores keeps <= 4096. Optional live check with `claude -p --model claude-haiku-5-5` on a 60-option choice (count the reply tokens).
+As shipped: the test named under Status (the `maxTokens` of a 255-option choice is above 4096, a `noul` stays 512). The plan before the fix also had "a batch of 30 4-level scores keeps <= 4096": that no longer holds on purpose (30 four-level scores get 9856). An optional live check with `claude -p --model claude-haiku-5-5` on a 60-option choice was run in the bug hunt: 3.3 s, answered.
 
 ## Constraints
 

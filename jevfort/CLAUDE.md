@@ -108,6 +108,10 @@ subagents load it via ToolSearch), no skills, agents, command hooks or MCP serve
   then held while the session effort is unchanged. A model switch starts a new first turn. Bounds: options
   `minEffort`/`maxEffort`; invalid or inverted values fall back to `low`/`xhigh` with a logged error at session start.
 
+## Known limit: session.compact is bypassed (Claude Code 2.1.325)
+
+The built-in `cc-plugin-sec-default` passes `session.compact` on past every user-tier hook (debug log: `jevfort: session.compact bypassed by cc-plugin-sec-default (tier user); beneath runs`, and `its session.compact hook was skipped`), as it does for `prompt.compose`, `prompt.section`, `prompt.context`, `classic.Stop` and (see above) `tool.check`. So the Jev ranking, the Haiku compaction and the `cacheExpires = 0` reset after a compaction do not run until that changes; core compacts on its own. Seen live with a manual `/compact` in `claude -p`; an interactive session and an auto-compaction were not tried. Nothing in this plugin can get past a prepend-tier hook; the code and its tests stay as they are (the kit runs the hook).
+
 ## Layout
 
 `package.json` is the only manifest source (`claudePlugin.userConfig`, 16 options). `pnpm build` compiles

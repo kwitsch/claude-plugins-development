@@ -70,6 +70,10 @@ Result: `{"type":"score","score":<expected level>,"confidence":<0..1>,"legend":{
 
 All questions go out in one System One request. Result: a JSON array of the answers in question order, each exactly as the matching single tool returns it. The call is all or nothing: an invalid question (the error names it, `questions[<index>]: ...`), an HTTP error or a missing answer fails the whole call.
 
+## Permissions
+
+Claude Code does not ask before it runs a tool that a plugin registered (live on 2.1.325): the model can send text to the configured endpoint without a prompt. A deny rule withholds a tool from the session, for example `--disallowedTools mcp__jev-api__batch` or a `permissions.deny` entry in the settings.
+
 ## Errors
 
 Errors come back as a tool error (Claude reads it as an error result) whose text starts with the tool's name and a colon (for example `noul:` or `batch:`).

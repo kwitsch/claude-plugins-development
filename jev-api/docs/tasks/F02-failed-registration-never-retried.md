@@ -22,6 +22,8 @@ Proven (harness, fake `$` whose `tool.register` rejects `batch` once and succeed
 
 ## Code locations
 
+Before 0.3.2; since the rewrite the code is `RegState`, `registerOne` and `ensureTools` in the same file.
+
 - `register` (`registering` memo), `onSessionStart`, `onToolCall` (`registering ??= ...`)
 - `registerTools` (`Promise.allSettled`, `$.ui.log` on rejection)
 

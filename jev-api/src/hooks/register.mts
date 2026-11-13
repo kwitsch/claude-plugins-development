@@ -238,7 +238,7 @@ const MAX_LEVELS = 10;
 /** The most output tokens a Haiku fallback call may ask for. */
 const HAIKU_MAX_TOKENS = 16_384;
 
-/** How long a hook waits for the tools to register before it goes on (ms): a registration that never answers must not hold a call. */
+/** How long an owned tool call waits for the tools to register before it goes on (ms; session.start waits five times as long): a registration that never answers must not hold a call. */
 const REGISTER_WAIT_MS = 1000;
 
 /** The engine names a registered tool `mcp__<plugin>__<name>`. */
@@ -430,7 +430,7 @@ function hide(text: string, url: string, placeholder: string): string {
 /**
  * Replaces the bare host of a URL in an error text. A DNS failure quotes only the host (`getaddrinfo ENOTFOUND <host>`,
  * live on 2.1.325), which may be private too. Only whole host names are replaced, ignoring case: the host `jev` must
- * not turn `jev-latest` or `110.0.0.5` into something else.
+ * not turn `jev-latest` or `api.jev`, nor the host `10.0.0.5` turn `110.0.0.5`, into something else.
  *
  * @param text - The text.
  * @param url - The endpoint URL; one that does not parse changes nothing.
@@ -444,7 +444,12 @@ function hideHost(text: string, url: string): string {
     return text;
   }
   if (!host) return text;
-  return text.replace(new RegExp(`(?<![\\w.-])${host.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\w-])`, "gi"), "<host>");
+  // An IPv6 host comes with brackets, an error text quotes the bare address.
+  let t = text;
+  for (const h of new Set([host, host.replace(/^\[(.*)\]$/, "$1")])) {
+    t = t.replace(new RegExp(`(?<![\\w.-])${h.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\w-])`, "gi"), "<host>");
+  }
+  return t;
 }
 
 /**
@@ -668,7 +673,8 @@ async function askHaiku($: Engine, tool: ToolName, state: string, questions: Que
     });
     const r = await Promise.race([reply, aborted]);
     if (r === "aborted") return fail(tool, "the call was abandoned");
-    if (!r.isAnswered) return fail(tool, `fallback: ${r.reason}`);
+    // The engine reports its own timeout as `aborted`: told apart from an abandoned call by the signal.
+    if (!r.isAnswered) return fail(tool, r.reason === "aborted" && !signal.aborted ? `fallback: timeout after ${timeoutMs}ms` : `fallback: ${r.reason}`);
     const body = json(r.text.trim().replace(/^```(?:json)?\s*/i, "").replace(/```$/, ""));
     const answers = isRecord(body) ? body["answers"] : undefined;
     const list: Record<string, unknown>[] = [];

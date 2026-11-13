@@ -721,6 +721,54 @@ it("redaction: a key containing the host is replaced whole, a host inside other 
   expect(r.deny).toBe("noul: HTTP 400: bad token Bearer <TYPESAFE_API_KEY> for model 'jev-latest' on 110.0.0.5, host <host>");
 });
 
+// D5 (order): the host step must come after the key step, and the host lookbehind keeps `api.jev` as it is.
+it("redaction: a key like jev.<rest> is replaced whole before the host step; api.jev stays", async () => {
+  const key = "jev.9f8e7d6c5b4a";
+  const { run } = await direct({
+    env: { get: async (n: string) => (n === "JEV_URL" ? "https://jev/v1/systemone" : n === "TYPESAFE_API_KEY" ? key : undefined) },
+    http: { fetch: () => Promise.resolve({ status: 400, ok: false, headers: {}, text: JSON.stringify({ detail: `bad token Bearer ${key} via api.jev, host jev` }) }) },
+    tool: { register: async (s: { name: string }) => ({ tool: TOOL(s.name) }) },
+  });
+  expect((await run("noul")).deny).toBe("noul: HTTP 400: bad token Bearer <TYPESAFE_API_KEY> via api.jev, host <host>");
+});
+
+// IPv6 endpoint: the host carries brackets, the error text quotes the bare address.
+it("redaction: an IPv6 endpoint host is hidden without its brackets", async () => {
+  const { run } = await direct({
+    env: { get: async (n: string) => (n === "JEV_URL" ? "http://[2001:db8::7]:8080/v1/systemone" : undefined) },
+    http: { fetch: () => Promise.reject(new Error("connect ECONNREFUSED 2001:db8::7:8080")) },
+    tool: { register: async (s: { name: string }) => ({ tool: TOOL(s.name) }) },
+  });
+  expect((await run("noul")).deny).not.toContain("2001:db8");
+});
+
+// F06 (Haiku path): the abort listener is removed there too.
+it("settled Haiku calls leave no abort listeners on a shared signal", async () => {
+  const { run } = await direct({
+    env: { get: async () => undefined },
+    model: { complete: () => Promise.resolve({ isAnswered: true, text: "{}", usage: {} }) },
+    tool: { register: async (s: { name: string }) => ({ tool: TOOL(s.name) }) },
+  });
+  let listeners = 0;
+  const signal = { aborted: false, addEventListener: () => void listeners++, removeEventListener: () => void listeners-- };
+  for (let i = 0; i < 5; i++) await run("noul", signal);
+  expect(listeners).toBe(0);
+});
+
+// The engine reports its own model timeout as `aborted`: the model must read a timeout, not an interrupt.
+it("a Haiku timeout reads as a timeout, an abandoned call as abandoned", async () => {
+  const { run } = await direct({
+    env: { get: async () => undefined },
+    model: { complete: () => Promise.resolve({ isAnswered: false, reason: "aborted" }) },
+    tool: { register: async (s: { name: string }) => ({ tool: TOOL(s.name) }) },
+  });
+  expect((await run("noul")).deny).toMatch(/^noul: fallback: timeout after \d+ms$/);
+  const ctl = new AbortController();
+  const pending = run("noul", ctl.signal);
+  ctl.abort();
+  expect((await pending).deny).toBe("noul: the call was abandoned");
+});
+
 // The Haiku reply cleanup must not take quadratic time on a long whitespace run.
 test("a Haiku reply with a long whitespace run is cleaned in linear time", async ($, on) => {
   const pad = " ".repeat(80_000);

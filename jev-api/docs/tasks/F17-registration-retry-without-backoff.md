@@ -22,6 +22,8 @@ Proven (harness `rerun.mjs failing`): `batch` registration rejecting at once, 10
 
 ## Code locations
 
+Before 0.3.2; since the rewrite the code is `RegState`, `registerOne` and `ensureTools` in the same file.
+
 - `onToolCall` (the awaited `within(registering ??= registerTools(...), REGISTER_WAIT_MS)`)
 - `registerTools` (one log line per failed tool per round)
 
@@ -35,7 +37,7 @@ Check first whether an unawaited `$.tool.register` from a hook that has already 
 
 ## Verification
 
-Test: "a failing registration is retried at most once per back-off and logged once" (kit fake clock: 10 owned calls inside the back-off make 1 attempt and 1 log line; after advancing the clock past it, one more). Re-measure with `rerun.mjs failing`.
+As shipped: the test named under Status ("a permanently failing registration is retried with back-off and logged once": 2 attempts inside the back-off, a third after 6 s, none within the next 10 s window, one log line).
 
 ## Constraints
 
