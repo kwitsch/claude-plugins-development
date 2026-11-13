@@ -1405,6 +1405,7 @@ test("bash_finished on a slow file system: a file inside a changed git submodule
   run(sub, "commit", "-qm", "s");
   run(repo, "init", "-q");
   run(repo, "submodule", "add", "-q", sub, "mod");
+  run(repo, "config", "-f", ".gitmodules", "submodule.mod.ignore", "dirty"); // git status would hide the submodule's changes
   run(repo, "add", ".");
   run(repo, "commit", "-qm", "mod");
   const s = startServer({ env: { DPRINT_HOOKS_SLOW_STAT_MS: "-1" } });

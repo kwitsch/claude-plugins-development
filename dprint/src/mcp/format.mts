@@ -843,7 +843,7 @@ async function gitChanged(root: string): Promise<((real: string) => boolean) | n
     const opts = { cwd: root, encoding: "utf8" as const, timeout: 10_000, maxBuffer: 64 * 1024 * 1024 };
     const [top, status] = await Promise.all([
       execFileAsync("git", ["--no-optional-locks", "rev-parse", "--show-toplevel"], opts),
-      execFileAsync("git", ["--no-optional-locks", "status", "--porcelain", "-z", "--no-renames", "--untracked-files=normal"], opts),
+      execFileAsync("git", ["--no-optional-locks", "status", "--porcelain", "-z", "--no-renames", "--ignore-submodules=none", "--untracked-files=normal"], opts),
     ]);
     const base = top.stdout.trim();
     if (!base) return null;
