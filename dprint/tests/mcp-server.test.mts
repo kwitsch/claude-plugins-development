@@ -1198,6 +1198,17 @@ test("overlapping Bash calls of one session keep their own start times (tool_use
   assert.equal(readFileSync(a, "utf8"), "x\n");
 });
 
+test("a failed Bash call (PostToolUseFailure) is handled like a finished one and answers with that event name", async () => {
+  stubDprint();
+  const s = startServer();
+  const a = path.join(repo, "a.ts");
+  await s.tool("bash_started", { ...SESSION, tool_use_id: "F" });
+  writeFileSync(a, "x  \n");
+  const r = await s.tool("bash_finished", { cwd: repo, ...SESSION, tool_use_id: "F", hook_event_name: "PostToolUseFailure" });
+  assert.equal(r.hookSpecificOutput.hookEventName, "PostToolUseFailure");
+  assert.equal(readFileSync(a, "utf8"), "x\n");
+});
+
 test("notices quote file names: a name with newlines or instruction-like text stays data", async () => {
   stubDprint();
   const s = startServer();

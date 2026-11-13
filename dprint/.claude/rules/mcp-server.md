@@ -37,7 +37,7 @@ sources; this rule records behaviour and constraints only.
 - `server.mts`: MCP stdio loop (newline-delimited JSON-RPC), tools `format_pre`, `cwd_changed` (CwdChanged hook),
   `worktree_entered` and `worktree_exited` (PostToolUse EnterWorktree/ExitWorktree hooks), `file_written`
   (PostToolUse Write|Edit), `file_changed` (FileChanged), `bash_started`/`bash_finished` (PreToolUse/PostToolUse
-  `Bash`) and `drain_notices` (PreToolUse `Edit|Write|Read|Bash|MultiEdit`, UserPromptSubmit). Typed by `HookInputs`
+  and PostToolUseFailure `Bash`; a Bash call that exits non-zero fires the failure event) and `drain_notices` (PreToolUse `Edit|Write|Read|Bash|MultiEdit`, UserPromptSubmit). Typed by `HookInputs`
   (see the hook-inputs rule).
 - `lsp.mts`: `dprint lsp` client: one lazily spawned child per cwd, Content-Length JSON-RPC, a request timeout
   (constructor option `timeoutMs`, tests only), a cooldown after a request timeout during which formats of that

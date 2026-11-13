@@ -50,6 +50,7 @@ const EVENT_FIELDS: Record<string, string[] | undefined> = {
     "tool_response.*",
     "duration_ms",
   ],
+  PostToolUseFailure: [...COMMON, ...TOOL, "tool_use_id", "error", "is_interrupt"],
   CwdChanged: [...COMMON, "old_cwd", "new_cwd"],
   // Claude Code 2.1.316: file_path is absolute, event is change|add|unlink
   FileChanged: [...COMMON, "file_path", "event"],

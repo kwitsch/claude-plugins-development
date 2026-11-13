@@ -144,7 +144,7 @@ function startServer(): void {
       handler: bashStarted,
     },
     bash_finished: {
-      description: "PostToolUse Bash: format the watched files the Bash call changed and tell the model its tool output predates the formatting.",
+      description: "PostToolUse and PostToolUseFailure Bash: format the watched files the Bash call changed and tell the model its tool output predates the formatting.",
       handler: bashFinished,
     },
     drain_notices: {

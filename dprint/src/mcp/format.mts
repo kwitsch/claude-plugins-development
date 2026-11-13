@@ -319,6 +319,9 @@ const takeNotices = (k: string): Set<string> => {
 /** Start time (ms) of the running Bash call per {@link bashKey}, set by {@link bashStarted}. */
 const bashStart = new Map<string, number>();
 
+/** How long a {@link bashStart} entry of a Bash call that never reported back is kept. */
+const BASH_START_TTL_MS = 60 * 60 * 1000;
+
 /**
  * In-scope watch list per effective cwd, read lazily by {@link cachedWatchList}.
  *
@@ -746,7 +749,10 @@ function bashKey(args: BashStartedInput & BashFinishedInput): string {
  * @returns `{}`.
  */
 export function bashStarted(args: BashStartedInput = {}): HookResult {
-  bashStart.set(bashKey(args), Date.now());
+  const now = Date.now();
+  // a call that never finished (interrupted, killed) leaves its entry behind: drop entries older than an hour
+  for (const [key, at] of bashStart) if (now - at > BASH_START_TTL_MS) bashStart.delete(key);
+  bashStart.set(bashKey(args), now);
   return {};
 }
 
@@ -783,8 +789,9 @@ async function cachedWatchList(sc: Scope): Promise<Array<{ fp: string; real: str
  * recorded digest and stays silent, so nothing is formatted or reported twice. Does nothing without a preceding
  * `bash_started`, a dprint config or a watch list.
  *
- * @param args - Hook input: `cwd`, `agent_id`, `session_id` and `scratchpad_dir`.
- * @returns A PostToolUse notice naming the reformatted files, else `{}` (fail open).
+ * @param args - Hook input: `cwd`, `agent_id`, `session_id`, `scratchpad_dir`, `tool_use_id` and `hook_event_name`
+ * (`PostToolUse`, or `PostToolUseFailure` for a Bash call that exited non-zero).
+ * @returns A PostToolUse (or PostToolUseFailure) notice naming the reformatted files, else `{}` (fail open).
  */
 export async function bashFinished(args: BashFinishedInput = {}, signal?: AbortSignal): Promise<HookResult> {
   try {
@@ -807,7 +814,8 @@ export async function bashFinished(args: BashFinishedInput = {}, signal?: AbortS
     // a FileChanged that fired mid-Bash may have formatted a file first (then formatOnDisk above saw nothing to do)
     // and queued its notice: report it here, after the formats
     for (const f of takeNotices(k)) formatted.add(f);
-    return formatted.size ? notice(args, "PostToolUse", [...formatted].sort()) : {};
+    // PostToolUseFailure too: a Bash call that exits non-zero fires that event, not PostToolUse
+    return formatted.size ? notice(args, args.hook_event_name === "PostToolUseFailure" ? "PostToolUseFailure" : "PostToolUse", [...formatted].sort()) : {};
   } catch (e) {
     process.stderr.write(
       `[dprint-hooks] bash_finished failed open: ${errText(e)}\n`,

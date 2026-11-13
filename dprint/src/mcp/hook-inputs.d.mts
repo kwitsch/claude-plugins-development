@@ -99,6 +99,8 @@ export interface FileWrittenInput {
 
 /** Arguments of MCP tool `bash_finished` (PostToolUse `Bash` hook). */
 export interface BashFinishedInput {
+  /** Template: `${hook_event_name}`. */
+  hook_event_name?: string;
   /** Template: `${cwd}`. */
   cwd?: string;
   /** Template: `${agent_id}`. */
