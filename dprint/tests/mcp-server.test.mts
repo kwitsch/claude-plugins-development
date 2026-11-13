@@ -21,7 +21,7 @@ const SERVER = path.join(PLUGIN, "mcp/server.mjs");
 
 // Stub `dprint lsp`: formatting and rangeFormatting answer one whole-document TextEdit with trailing
 // spaces stripped and exactly one final newline. argv mode "range-null" answers rangeFormatting with
-// `result: null` (like dprint-plugin-yaml); "hang-init" never answers initialize; "stderr" writes a line to stderr at start; "chunked" writes every frame in small pieces; "hang" never answers textDocument/formatting; "crash" exits at once.
+// `result: null` (like dprint-plugin-yaml); "slow" answers a formatting request after 1.5 s; "hang-init" never answers initialize; "stderr" writes a line to stderr at start; "chunked" writes every frame in small pieces; "hang" never answers textDocument/formatting; "crash" exits at once.
 const STUB_LSP = `
 const MODE = process.argv[2] ?? "ok";
 if (MODE === "crash") process.exit(1);
@@ -61,7 +61,8 @@ process.stdin.on("data", (chunk) => {
     } else if (msg.method === "textDocument/formatting" || msg.method === "textDocument/rangeFormatting") {
       const text = docs.get(p.textDocument.uri);
       const end = { line: text.split("\\n").length, character: 0 };
-      send({ jsonrpc: "2.0", id: msg.id, result: [{ range: { start: { line: 0, character: 0 }, end }, newText: fmt(text) }] });
+      const reply = () => send({ jsonrpc: "2.0", id: msg.id, result: [{ range: { start: { line: 0, character: 0 }, end }, newText: fmt(text) }] });
+      if (MODE === "slow") setTimeout(reply, 1500); else reply();
     } else if (msg.id !== undefined) {
       send({ jsonrpc: "2.0", id: msg.id, result: null });
     }
@@ -1482,6 +1483,21 @@ test("bash_finished scopes a touched file again: a listed file swapped for a sym
   assert.deepEqual(r, {});
   assert.equal(readFileSync(target, "utf8"), "v  \n");
   assert.equal(readFileSync(outside, "utf8"), "o  \n");
+});
+
+test("file_changed: a file swapped for a symlink to an outside file while dprint formats is not written through", { timeout: 15_000 }, async () => {
+  stubDprint("slow");
+  const s = startServer();
+  const a = path.join(repo, "a.ts");
+  const outside = path.join(tmp, "outside.ts");
+  writeFileSync(a, "x  \n");
+  writeFileSync(outside, "x  \n"); // same content: the re-read compare alone would not stop the write
+  const done = s.tool("file_changed", { cwd: repo, file_path: a, event: "change", ...SESSION });
+  await new Promise((r) => setTimeout(r, 500)); // inside the slow format
+  rmSync(a);
+  symlinkSync(outside, a);
+  assert.deepEqual(await done, {});
+  assert.equal(readFileSync(outside, "utf8"), "x  \n");
 });
 
 test("hooks.json: bash_started carries cwd and scratchpad_dir (it starts the watch-list read)", () => {

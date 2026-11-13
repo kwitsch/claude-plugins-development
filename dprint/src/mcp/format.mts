@@ -665,6 +665,9 @@ async function formatOnDisk(sc: Scope, s: { fp: string; real: string }, signal?:
       // a cancelled call writes nothing
       if (out === null || signal?.aborted) return false;
       const final = text === lf ? out : out.replaceAll("\n", "\r\n");
+      // the path was validated before the slot wait and the format: a file (or a directory above it) swapped for a
+      // symlink since then must not be written through (to a file outside the cwd, under node_modules, ...)
+      if (realish(s.fp) !== s.real) return false;
       // a write that landed while dprint was formatting (or while the event waited) wins
       if (utf8.decode(readFileSync(s.fp)) !== text) return false;
       // an Edit/Write record that landed during the awaits wins (keeps trimToEdit's minimal diff)
