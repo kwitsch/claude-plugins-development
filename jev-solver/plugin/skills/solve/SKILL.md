@@ -15,6 +15,7 @@ Strip these flags from the task text before anything else; the rest is the task.
 
 - `--headless`: no question goes to the user. See [Questions and --headless](#questions-and---headless).
 - `--size=<value>`: `S`, `M`, `L` or `XL` (case-insensitive). That value is the size; the size question of the triage is skipped. Any other value counts as no `--size`: the triage rates the size.
+- `--type=<value>`: `tiny`, `feature` or `bugfix` (case-insensitive). That value is the track; the track question of the triage is skipped and its confidence rule does not apply. Any other value counts as no `--type`: the triage picks the track. The track-specific rules below (worktree prefix, flow, size flow) apply as for a triaged track. A `--type=bugfix` that the root cause shows to be a feature still switches to the feature track, as in the bugfix track.
 
 ## Questions and --headless
 
@@ -48,7 +49,7 @@ questions:
     criteria: [S: a few lines in one place, M: one component, L: several components, XL: cross-cutting or architectural]
 ```
 
-Put the task-ambiguity question in the same call (`noul`: is the task text too ambiguous to start?; it counts only for the `feature` and `bugfix` tracks, and only a confident yes goes to the user via `AskUserQuestion`, headless: decider). With `--size`, leave out the score question. The score is fractional: round to the nearest level. Apply the confidence rule of [decide](decide.reference.md) to every answer; if it is low or the call fails (any error, no configuration), triage with your own reasoning using the same criteria and say so in one line.
+Put the task-ambiguity question in the same call (`noul`: is the task text too ambiguous to start?; it counts only for the `feature` and `bugfix` tracks, and only a confident yes goes to the user via `AskUserQuestion`, headless: decider). With `--size`, leave out the score question; with `--type`, the track question; with `--type=tiny`, all questions (tiny needs neither size nor ambiguity check, so no call is made). With `--type=feature` or `bugfix` and a valid `--size`, only the ambiguity question remains. The score is fractional: round to the nearest level. Apply the confidence rule of [decide](decide.reference.md) to every answer; if it is low or the call fails (any error, no configuration), triage with your own reasoning using the same criteria and say so in one line.
 
 ## 2. Worktree and work branch
 

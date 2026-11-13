@@ -17,6 +17,7 @@ The `decider` agent answers the questions of a `--headless` run: opus with high 
 | Argument               | Meaning                                                                                               |
 | ---------------------- | ----------------------------------------------------------------------------------------------------- |
 | `--headless`           | No `AskUserQuestion`; the `decider` agent is asked instead, with the options, task and document paths |
+| `--type=<tiny\|feature\|bugfix>` | Uses that track instead of the triage choice                                                  |
 | `--size=<S\|M\|L\|XL>` | Uses that size instead of the triage score                                                            |
 
 Without `--headless`, every question goes through `AskUserQuestion`.

@@ -110,6 +110,10 @@ describe("jev-solver", () => {
     assert.match(read("skills/solve/SKILL.md"), /XL with `model: fable`, `effort: high`/);
   });
 
+  it("solve takes --type=<tiny|feature|bugfix> as the track and skips the track question", () => {
+    assert.match(read("skills/solve/SKILL.md"), /`--type=<value>`: `tiny`, `feature` or `bugfix`[^\n]*track question of the triage is skipped/);
+  });
+
   it("solve handles --headless through decider and --size", () => {
     const text = read("skills/solve/SKILL.md");
     assert.match(text, /--headless/);
