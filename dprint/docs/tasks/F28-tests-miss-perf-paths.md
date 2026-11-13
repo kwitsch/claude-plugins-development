@@ -1,12 +1,14 @@
 ---
 id: F28
 title: Test the performance-relevant server paths
-status: partial
+status: done
 priority: low
 area: dprint/tests/mcp-server.test.mts, dprint/src/mcp/lsp.mts (DprintLsp constructor option timeoutMs)
 ---
 
 ## Status
+
+Done in 0.13.2: the four remaining gaps have tests: `initialize` never answered (stub mode `hang-init`, in-process `DprintLsp` with `timeoutMs`: times out, then cools down), a hanging git (the 10 s ignore check times out and the Write is formatted), dprint stderr forwarding (stub mode `stderr`) and two requests in one stdin chunk (`rawChunk`). Earlier state:
 
 Partial. Done in 0.8.0 (branch feature/performance-analysis-fixes, PR #19): tests for a 60-event file_changed burst ("60 concurrent file_changed events are all formatted"), the 1 MiB size guard ("file_changed skips files above 1 MiB"), `status.showUntrackedFiles=no`, rangeFormatting-null stub (stub mode `range-null`; Edit still formatted), and the timeout cooldown ("lsp timeout -> later formats of that document fail fast for the cooldown ..."; in-process `new DprintLsp({ cwd, timeoutMs: 300 })`). The test-only seam is the constructor option `timeoutMs` (defaults to `REQUEST_TIMEOUT_MS`, 30 s); no env var was added.
 Done in 0.12.1: Content-Length frames split over several chunks and a ~900 KB payload (stub mode `chunked`); in 0.13.0 the `MAX_CLIENTS = 8` LRU eviction and respawn. Remaining gaps (still untested): hanging `initialize` through the server (cooldown after initialize timeout) at the server level; slow git (10 s `execFile` timeouts fail open); dprint stderr forwarding; two requests in one stdin chunk.

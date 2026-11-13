@@ -21,10 +21,11 @@ const SERVER = path.join(PLUGIN, "mcp/server.mjs");
 
 // Stub `dprint lsp`: formatting and rangeFormatting answer one whole-document TextEdit with trailing
 // spaces stripped and exactly one final newline. argv mode "range-null" answers rangeFormatting with
-// `result: null` (like dprint-plugin-yaml); "chunked" writes every frame in small pieces; "hang" never answers textDocument/formatting; "crash" exits at once.
+// `result: null` (like dprint-plugin-yaml); "hang-init" never answers initialize; "stderr" writes a line to stderr at start; "chunked" writes every frame in small pieces; "hang" never answers textDocument/formatting; "crash" exits at once.
 const STUB_LSP = `
 const MODE = process.argv[2] ?? "ok";
 if (MODE === "crash") process.exit(1);
+if (MODE === "stderr") process.stderr.write("stub-stderr-line\\n");
 const docs = new Map();
 let buf = Buffer.alloc(0);
 const send = (msg) => {
@@ -45,7 +46,9 @@ process.stdin.on("data", (chunk) => {
     const msg = JSON.parse(buf.subarray(sep + 4, sep + 4 + len).toString());
     buf = buf.subarray(sep + 4 + len);
     const p = msg.params;
-    if (msg.method === "initialize") {
+    if (msg.method === "initialize" && MODE === "hang-init") {
+      // never answer: the client's request timeout must fire during initialize
+    } else if (msg.method === "initialize") {
       send({ jsonrpc: "2.0", id: msg.id, result: { capabilities: { documentFormattingProvider: true, documentRangeFormattingProvider: true } } });
     } else if (msg.method === "textDocument/didOpen") {
       docs.set(p.textDocument.uri, p.textDocument.text);
@@ -182,7 +185,9 @@ function startServer(opts: { cwd?: string; env?: Record<string, string> } = {}) 
   const call = (args) => tool("format_pre", args);
   /** Write one raw JSON-RPC message (no answer awaited). */
   const raw = (msg: object) => child.stdin.write(JSON.stringify({ jsonrpc: "2.0", ...msg }) + "\n");
-  return { rpc, call, tool, raw, answered, stderr: () => stderr };
+  /** Write several JSON-RPC messages in ONE stdin chunk. */
+  const rawChunk = (msgs: object[]) => child.stdin.write(msgs.map((m) => JSON.stringify({ jsonrpc: "2.0", ...m }) + "\n").join(""));
+  return { rpc, call, tool, raw, rawChunk, answered, stderr: () => stderr };
 }
 
 const lines = (n) => Array.from({ length: n }, (_, i) => `l${i}`);
@@ -845,6 +850,53 @@ test("at most 8 dprint lsp children: the least recently used cwd is evicted and 
   assert.equal(spawns(log), 9, "a cwd still held is reused");
   await write(dirs[0]); // evicted when the ninth started
   assert.equal(spawns(log), 10, "the evicted cwd respawns");
+});
+
+test("lsp initialize never answered -> the format times out, then the document cools down", { timeout: 10_000 }, async () => {
+  stubDprint("hang-init");
+  const oldPath = process.env.PATH;
+  process.env.PATH = bin;
+  const lsp = new DprintLsp({ cwd: repo, timeoutMs: 300 });
+  try {
+    const u = pathToFileURL(path.join(repo, "a.ts")).href;
+    await assert.rejects(lsp.format(u, "x   \n"), /timed out/);
+    const t0 = Date.now();
+    await assert.rejects(lsp.format(u, "x   \n"), /cooling down/);
+    assert.ok(Date.now() - t0 < 250, "the cooldown answers at once");
+  } finally {
+    lsp.dispose();
+    process.env.PATH = oldPath;
+  }
+});
+
+test("dprint lsp stderr is forwarded to the server's stderr", async () => {
+  stubDprint("stderr");
+  const s = startServer();
+  assert.equal((await s.call({ cwd: repo, tool_name: "Write", tool_input: { file_path: path.join(repo, "a.ts"), content: "x   \n" } })).hookSpecificOutput.updatedInput.content, "x\n");
+  for (let i = 0; i < 40 && !s.stderr().includes("stub-stderr-line"); i++) await new Promise((r) => setTimeout(r, 50));
+  assert.match(s.stderr(), /stub-stderr-line/);
+});
+
+test("two requests in one stdin chunk are both answered", async () => {
+  stubDprint();
+  const s = startServer();
+  const args = { cwd: repo, tool_name: "Write", tool_input: { file_path: path.join(repo, "a.ts"), content: "x   \n" } };
+  s.rawChunk([
+    { id: 9001, method: "tools/call", params: { name: "format_pre", arguments: args } },
+    { id: 9002, method: "tools/call", params: { name: "drain_notices", arguments: { hook_event_name: "UserPromptSubmit", cwd: repo } } },
+  ]);
+  for (let i = 0; i < 100 && !(s.answered.has(9001) && s.answered.has(9002)); i++) await new Promise((r) => setTimeout(r, 50));
+  assert.ok(s.answered.has(9001) && s.answered.has(9002), [...s.answered].join(","));
+});
+
+test("a git that hangs fails open: the ignore check times out and the Write is formatted", { timeout: 40_000 }, async () => {
+  stubDprint();
+  symlinkSync(spawnSync("sh", ["-c", "command -v sleep"], { encoding: "utf8" }).stdout.trim(), path.join(bin, "sleep"));
+  writeFileSync(path.join(bin, "git"), "#!/usr/bin/env bash\nsleep 60\n");
+  chmodSync(path.join(bin, "git"), 0o755);
+  const s = startServer();
+  const out = await s.call({ cwd: repo, tool_name: "Write", tool_input: { file_path: path.join(repo, "a.ts"), content: "x   \n" } });
+  assert.equal(out.hookSpecificOutput.updatedInput.content, "x\n");
 });
 
 test("Write and Edit above 1 MiB pass through unformatted without spawning dprint lsp", async () => {
