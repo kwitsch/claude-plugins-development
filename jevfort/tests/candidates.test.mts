@@ -69,6 +69,17 @@ test("a skill listed under two names is offered once, unprefixed", () => {
   expect(dedupeSkills(SKILLS).map((s) => s.name)).toEqual(["youtube-metadata", "pdf", "i-have-adhd:i-have-adhd", "chrome-browser"]);
 });
 
+test("relevant scores a name word 2 (once, also when the description repeats it), a description word 1, and stays fast on a pasted log", () => {
+  const items = [{ name: "pdf-merge", description: "merge pdf files" }, { name: "other", description: "merge things into one" }];
+  expect(relevant("merge pdf", items).map((i) => i.name)).toEqual(["pdf-merge"]);
+  // 300 items against 2 MB of distinct words took 1.7 s when the loop ran over the prompt's words.
+  const many = Array.from({ length: 300 }, (_, i) => ({ name: `tool-${i}`, description: `does thing ${i} with files` }));
+  const log = Array.from({ length: 200_000 }, (_, i) => `req${i.toString(36)}x`).join(" ");
+  const t = performance.now();
+  relevant(`look at this log ${log}`, many);
+  expect(performance.now() - t).toBeLessThan(800);
+});
+
 test("only skills related to the prompt are offered", () => {
   const skills = dedupeSkills(SKILLS);
   expect(relevant("can you show me the full list", skills)).toEqual([]);
