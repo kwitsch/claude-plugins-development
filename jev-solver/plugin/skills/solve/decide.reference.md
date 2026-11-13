@@ -28,7 +28,6 @@
 | -------------------------------------------------------- | -------- | ------------------------------------------------------------------------------------ |
 | `solve` triage                                           | `batch`  | track (choice) and size (score) of the task text                                     |
 | `solve` task ambiguity (in the triage batch)              | `batch`  | is the task too ambiguous to start? Only a confident yes goes to the user            |
-| `solve` invalid `--size`                                 | `score`  | size of the task text, as in the triage                                              |
 | `solve` bugfix turns out to be a feature                 | `noul`   | does the root cause call for new behaviour or design?                                |
 | `design` clarifying question                             | `noul`   | do the code and sensible defaults already answer it? Only a confident no is asked    |
 | `design` approaches, `plan` orderings or strategies      | `choice` | the named options with their trade-offs                                              |
@@ -36,7 +35,8 @@
 | `execute` unclear or wrong step, plan gap                | `noul`   | is the step really unclear or wrong? Only a confident yes stops and asks             |
 | `debug` several plausible causes                         | `choice` | the causes (the evidence still decides)                                              |
 | `request-review` severity of each finding                | `score`  | note, should fix, blocking                                                           |
-| `receive-review` unclear point, correct point, taste     | `noul`, `choice` | is the point unclear? is it correct (state: point and code excerpt)? taste options |
+| `receive-review` unclear point, correct point            | `noul`   | is the point unclear? is it correct (state: point and code excerpt)?                 |
+| `receive-review` matter of taste                         | `choice` | the taste options                                                                    |
 | `worktree` uncommitted changes in the way, red baseline  | `noul`   | do they block the task? are the failures unrelated to it?                            |
 | `pr` rebase or merge, unclear conflict hunk              | `choice` | the repo's convention first; otherwise rebase or merge; keep ours, theirs or both    |
 | `pr` failing check                                       | `noul`   | flaky or environmental rather than caused by the change?                             |

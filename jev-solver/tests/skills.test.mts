@@ -6,22 +6,8 @@ import { describe, it } from "vitest";
 /** Root of the built plugin. */
 const plugin = join(import.meta.dirname, "..", "plugin");
 
-/** Reference files under skills/solve; a new one is added here. */
-const REFERENCES = [
-  "decide",
-  "worktree",
-  "design",
-  "spec",
-  "plan",
-  "execute",
-  "tdd",
-  "debug",
-  "verify",
-  "request-review",
-  "receive-review",
-  "pr",
-  "finish",
-];
+/** Reference files under skills/solve, found on disk. */
+const REFERENCES = readdirSync(join(plugin, "skills/solve")).filter((f) => f.endsWith(".reference.md")).map((f) => f.replace(".reference.md", ""));
 
 /**
  * Reads a file of the plugin.
@@ -54,24 +40,19 @@ describe("jev-solver", () => {
     });
   }
 
-  it("references no longer name skills that do not exist", () => {
-    for (const ref of ["SKILL", ...REFERENCES.map((r) => `${r}.reference`)]) {
-      assert.doesNotMatch(read(`skills/solve/${ref}.md`), /jev-solver:(?!solve|decider)/, ref);
-    }
-  });
-
-  it("every relative markdown link in solve and its references resolves to a file", () => {
-    for (const ref of ["SKILL", ...REFERENCES.map((r) => `${r}.reference`)]) {
-      for (const m of read(`skills/solve/${ref}.md`).matchAll(/\]\(([^)#:]+\.md)(?:#[^)]*)?\)/g)) {
-        assert.ok(existsSync(join(plugin, "skills/solve", m[1])), `${ref} -> ${m[1]}`);
+  it("solve and its references name no removed skills and only link to existing files", () => {
+    for (const name of ["SKILL", ...REFERENCES.map((r) => `${r}.reference`)]) {
+      const text = read(`skills/solve/${name}.md`);
+      assert.doesNotMatch(text, /jev-solver:(?!solve|decider)/, name);
+      for (const m of text.matchAll(/\]\(([^)#:]+\.md)(?:#[^)]*)?\)/g)) {
+        assert.ok(existsSync(join(plugin, "skills/solve", m[1])), `${name} -> ${m[1]}`);
       }
     }
   });
 
-  it("file-related questions get a bullet-point summary first, skipped when headless", () => {
-    assert.match(read("skills/solve/SKILL.md"), /summary in bullet points[\s\S]*skipped with `--headless`/);
-    assert.match(read("skills/solve/design.reference.md"), /bullet-point summary[^\n]*`--headless`/);
-    for (const r of ["spec", "plan"]) assert.match(read(`skills/solve/${r}.reference.md`), /bullet-point summary[^\n]*`--headless`/);
+  it("file questions get a bullet-point summary first (skipped when headless) and an approval loop", () => {
+    assert.match(read("skills/solve/SKILL.md"), /summary in bullet points[\s\S]*approve, change, abort[\s\S]*skipped with `--headless`/);
+    for (const r of ["design", "spec", "plan"]) assert.match(read(`skills/solve/${r}.reference.md`), /Confirmation\*\* as `solve` describes/, r);
   });
 
   it("feature track flow by size: S direct, M plan, L design+plan, XL design+spec+plan, each confirmed", () => {

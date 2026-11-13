@@ -14,15 +14,15 @@ Entry point and the only skill of this plugin. The phases are reference files ne
 Strip these flags from the task text before anything else; the rest is the task.
 
 - `--headless`: no question goes to the user. See [Questions and --headless](#questions-and---headless).
-- `--size=<value>`: `S`, `M`, `L` or `XL` (case-insensitive). That value is the size; the size question of the triage is skipped. Any other value is not guessed: rate the size of the task with the `score` of the triage ([decide](decide.reference.md)) and use it; if that gives no usable answer, ask for the size through `AskUserQuestion` (options S, M, L, XL; headless: decider) after triage, and use the answer.
+- `--size=<value>`: `S`, `M`, `L` or `XL` (case-insensitive). That value is the size; the size question of the triage is skipped. Any other value counts as no `--size`: the triage rates the size.
 
 ## Questions and --headless
 
 Every question to the user goes through `AskUserQuestion`, never as plain text. This holds for this file and for every reference.
 
-Before an `AskUserQuestion` that concerns a file (design, spec, plan, review notes), first print the file's content to the user as a summary in bullet points, with the file's full absolute path. Then ask. The summary is skipped with `--headless`: the decider reads the file itself.
+Before an `AskUserQuestion` that concerns a file (design, spec, plan, review notes), first print the file's content to the user as a summary in bullet points, with the file's full absolute path. Then ask for approval (approve, change, abort); on change, fix the file and ask again until approved. The summary is skipped with `--headless`: the decider reads the file itself. Each reference only says what its summary covers.
 
-With `--headless`, `AskUserQuestion` is never called. Instead, for each question spawn the `decider` agent (`subagent_type: jev-solver:decider`, the plugin-namespaced name; continue the same agent with `SendMessage` while it still runs) and brief it with:
+With `--headless`, `AskUserQuestion` is never called. Instead, for each question spawn the `decider` agent (`subagent_type: jev-solver:decider`, the plugin-namespaced name; continue the same agent with `SendMessage` for later questions) and brief it with:
 
 - the question and the options that `AskUserQuestion` would have shown (label and description, the recommended one first),
 - the task text, track, size, branch and worktree path,
@@ -48,20 +48,13 @@ questions:
     criteria: [S: a few lines in one place, M: one component, L: several components, XL: cross-cutting or architectural]
 ```
 
-Put the task-ambiguity question in the same call for the `feature` and `bugfix` tracks it can apply to (`noul`: is the task text too ambiguous to start?; its answer counts only when the track is `feature` or `bugfix`). With `--size`, leave out the score question. The score is fractional: round to the nearest level. Apply the confidence rule of [decide](decide.reference.md) to the track; if it is low or the call fails (any error, no configuration), triage with your own reasoning using the same criteria and say so in one line.
-
-When the track is `feature` or `bugfix`, the ambiguity answer of the triage call applies ([decide](decide.reference.md) rules); only a confident yes goes to the user via `AskUserQuestion` (headless: decider), and own reasoning only replaces a low-confidence answer.
+Put the task-ambiguity question in the same call (`noul`: is the task text too ambiguous to start?; it counts only for the `feature` and `bugfix` tracks, and only a confident yes goes to the user via `AskUserQuestion`, headless: decider). With `--size`, leave out the score question. The score is fractional: round to the nearest level. Apply the confidence rule of [decide](decide.reference.md) to every answer; if it is low or the call fails (any error, no configuration), triage with your own reasoning using the same criteria and say so in one line.
 
 ## 2. Worktree and work branch
 
 Always, for every track, right after triage and before any spec, plan, debugging or edit:
 
-1. **Branch name.** Derive it from the task now: prefix `fix/` for the bugfix track, `feat/` for tiny and feature, then a short kebab-case slug of at most 40 characters (`fix/login-timeout`, `feat/retry-config`). Follow the repo's branch conventions if CLAUDE.md names any; the prefix stays.
-2. **Enter a worktree.** Call `EnterWorktree` (load it via ToolSearch if deferred) with the slug as its name. Skip only when the session already is in a linked worktree (step 1 of [worktree](worktree.reference.md)); never nest.
-3. **Switch to the work branch.** In the worktree, `git switch -c <branch>` (the harness names its own branch, for example `worktree-<name>`); in an already-linked worktree whose branch has no commits of its own, do the same. A branch that already has its own commits stays.
-4. Report branch and worktree path in one line, then continue. The same slug names the scratchpad directory below.
-
-Details and baseline: [worktree](worktree.reference.md).
+Follow [worktree](worktree.reference.md) (branch name `fix/<slug>` for the bugfix track, `feat/<slug>` for tiny and feature; never nest; baseline), then report branch and worktree path in one line and continue. The same slug names the scratchpad directory below.
 
 ## 3. Decision matrix
 
