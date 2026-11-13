@@ -2,7 +2,7 @@
 id: F24
 title: Make the FileChanged watch list survive new files and git checkout
 status: open
-priority: medium
+priority: high
 area: dprint/src/mcp/watch-paths.mts (watchList, main), dprint/src/mcp/format.mts (fileChanged), dprint/plugin/hooks/hooks.json (SessionStart/CwdChanged command hook)
 ---
 
@@ -10,9 +10,25 @@ area: dprint/src/mcp/watch-paths.mts (watchList, main), dprint/src/mcp/format.mt
 
 ## Status
 
-Reviewed 2026-11-13, deferred: both designs depend on Claude Code watcher behavior (re-creation on an unchanged sorted list, honoring watchPaths from an mcp_tool FileChanged result, directory-watch event volume without `ignored`) that only a live `claude -p --plugin-dir dprint/plugin --debug` run with an inotify sampler can prove. Mitigated for Bash: `bash_finished` formats rewritten watched files via an mtime scan of the cached list. Still uncovered: files rewritten by non-Bash tools after a watch is lost, and new files (watch list and `bash_finished` cache are read once per cwd). The list is sorted since 0.12.1. Next step: live prototype of option 2 with a debounced re-list. Priority lowered to medium.
+Reviewed 2026-11-13; live smoke test below confirms the problem (priority back to high). Designs depend on Claude Code watcher behavior (re-creation on an unchanged sorted list, honoring watchPaths from an mcp_tool FileChanged result, directory-watch event volume without `ignored`) that only a live `claude -p --plugin-dir dprint/plugin --debug` run with an inotify sampler can prove. Mitigated for Bash: `bash_finished` formats rewritten watched files via an mtime scan of the cached list. Still uncovered: files rewritten by non-Bash tools after a watch is lost, and new files (watch list and `bash_finished` cache are read once per cwd). The list is sorted since 0.12.1. Next step: live prototype of option 2 with a debounced re-list.
 
 Open. Explicitly deferred in the 0.8.0 work (branch feature/performance-analysis-fixes, PR #19) as an unprototyped redesign. Analysis ranks it #2 by user impact; it limits the value of the F05 burst fix after the first checkout.
+
+## Live smoke test (2026-11-13, Claude Code 2.1.323, plugin 0.13.0)
+
+Method: `claude -p --plugin-dir dprint/plugin --debug-file ... --allowedTools Bash` in a throwaway git repo (5 tracked unformatted `*.ts`, root `dprint.json`), one Bash call `sleep 60` keeps the session alive; a harness outside edits files and counts inotify watches of the claude process (`/proc/<pid>/fdinfo`). Debug log: `FileChanged: watching 6 paths` (SessionStart `watchPaths` of watch-paths.mjs is honored). Two runs, same script:
+
+| Scenario                                                 | Run 1                   | Run 2                         |
+| -------------------------------------------------------- | ----------------------- | ----------------------------- |
+| in-place write of a watched file (control)               | formatted               | formatted                     |
+| delete + recreate a watched file (1st time)              | formatted               | formatted, watch count 9 -> 8 |
+| delete + recreate again                                  | formatted               | NOT formatted, no event       |
+| in-place write after that                                | formatted               | NOT formatted, no event       |
+| brand-new file                                           | NOT formatted           | NOT formatted                 |
+| `git checkout -- f` (unlink+create), then in-place write | NOT formatted, no event | NOT formatted, no event       |
+| watch count start / end                                  | 9 / 7                   | 9 / 0                         |
+
+Findings: (1) new files are never watched: confirmed. (2) A watched file that is unlinked and recreated loses its watch, racily (run 1 survived a quick delete+recreate twice, run 2 lost the watch at the first one; after `git checkout` the watch was gone in both runs): confirmed, and the watch count only falls. (3) 9 inotify watches for 6 listed files (the other 3 were not attributed). Not tested: directories as `watchPaths`, `watchPaths` returned by a FileChanged hook (needs a prototype; with the loss being racy a re-list after an `unlink` event, as in option 2, is the design the data points to, but an unlink event is not even delivered after the loss). Scripts: scratchpad `f24-run.mjs` (not in the repo).
 
 ## Problem
 

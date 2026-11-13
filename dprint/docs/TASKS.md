@@ -44,5 +44,5 @@ Legend: `[x]` finished (done, or closed without code: status `closed` in the tas
 
 ## Notes
 
-- F24 stays open: it needs a live Claude Code prototype (see its Status).
+- F24 stays open: the live smoke test (2026-11-13) confirmed it; the fix needs a prototype (see its Status).
 - Finding ids match the headings of the original analysis; file names are `<id>-<slug>.md`.
