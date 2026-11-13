@@ -1,7 +1,7 @@
 // Kit tests for the built plugin/hooks/register.mjs of jev-api: the System One tools noul, choice, score and batch.
 import { createKit } from "claude-engine-vitest";
 import type { On } from "claude-engine-vitest";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 const { test, mock } = createKit({ module: new URL("../plugin/hooks/register.mjs", import.meta.url), plugin: "jev-api" });
 
@@ -633,17 +633,60 @@ it("a permanently failing registration is retried with back-off and logged once"
     },
     ui: { log: async (text: string) => void logs.push(text) },
   });
-  for (let i = 0; i < 20; i++) await run("noul");
-  expect(tries.filter((n) => n === "batch").length).toBeLessThanOrEqual(2); // the first try and the immediate retry
+  vi.useFakeTimers({ toFake: ["Date"] });
+  try {
+    for (let i = 0; i < 20; i++) await run("noul");
+    expect(tries.filter((n) => n === "batch")).toHaveLength(2); // the first try and the immediate retry
+    vi.setSystemTime(Date.now() + 6000);
+    await run("noul");
+    expect(tries.filter((n) => n === "batch")).toHaveLength(3); // after 5 s the next try
+    for (let i = 0; i < 5; i++) await run("noul");
+    expect(tries.filter((n) => n === "batch")).toHaveLength(3); // the next delay is 10 s
+  } finally {
+    vi.useRealTimers();
+  }
   expect(logs).toHaveLength(1);
 });
 
-// F18: the Haiku call carries the abort signal of the dispatch.
-test("the Haiku call gets the abort signal", async ($, on) => {
-  const asked = haiku(on, () => said("{}"));
-  mock.env(on, {});
-  await call($, "noul");
-  expect(asked[0]["signal"]).toBeDefined();
+// F18: the Haiku call carries the abort signal as an option of $.model.complete (the second argument; the request has no signal field).
+it("the Haiku call gets the abort signal as an option", async () => {
+  const calls: unknown[][] = [];
+  const { run } = await direct({
+    env: { get: async () => undefined },
+    model: { complete: (...a: unknown[]) => (calls.push(a), Promise.resolve({ isAnswered: true, text: "{}", usage: {} })) },
+    tool: { register: async (s: { name: string }) => ({ tool: TOOL(s.name) }) },
+  });
+  const ctl = new AbortController();
+  await run("noul", ctl.signal);
+  expect(calls).toHaveLength(1);
+  expect((calls[0][0] as Record<string, unknown>)["signal"]).toBeUndefined();
+  expect((calls[0][1] as { signal?: AbortSignal }).signal).toBe(ctl.signal);
+});
+
+// D1: the key never reaches the model, not even in the text of a runtime that rejects the header value.
+it("an error that quotes the bearer key is redacted", async () => {
+  const key = "sk-SECRET-1234567890";
+  const { run } = await direct({
+    env: { get: async (n: string) => (n === "JEV_URL" ? "https://jev.example/x" : n === "TYPESAFE_API_KEY" ? key : undefined) },
+    http: { fetch: () => Promise.reject(new Error(`Header 'Authorization' has invalid value: 'Bearer ${key}\nX'`)) },
+    tool: { register: async (s: { name: string }) => ({ tool: TOOL(s.name) }) },
+  });
+  const r = await run("noul");
+  expect(r.deny).toMatch(/^noul: /);
+  expect(r.deny).not.toContain(key);
+  expect(r.deny).toContain("<TYPESAFE_API_KEY>");
+});
+
+// D2: an error body a server fills with the request URL is redacted like a fetch error.
+it("an error body that echoes the endpoint is redacted", async () => {
+  const url = "https://private.example/tenant-42/systemone?token=SECRET";
+  const { run } = await direct({
+    env: { get: async (n: string) => (n === "JEV_URL" ? url : undefined) },
+    http: { fetch: () => Promise.resolve({ status: 404, ok: false, headers: {}, text: JSON.stringify({ detail: `no route for POST ${url}` }) }) },
+    tool: { register: async (s: { name: string }) => ({ tool: TOOL(s.name) }) },
+  });
+  const r = await run("noul");
+  expect(r.deny).toBe("noul: HTTP 404: no route for POST <JEV_URL>");
 });
 
 // F05: an already abandoned call sends nothing.

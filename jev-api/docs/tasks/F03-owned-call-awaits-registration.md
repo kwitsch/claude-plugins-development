@@ -8,7 +8,7 @@ area: bug (jev-api/src/hooks/register.mts: onToolCall, onSessionStart, registerT
 
 ## Status
 
-Done in jev-api 0.3.2: the registration wait is bounded (`within`, 1 s in an owned call, 5 s in session.start); a registration that never answers no longer holds the call. Test: "a registration that never answers does not hold the call".
+Done in jev-api 0.3.2: the registration wait is bounded (`ensureTools`, 1 s in an owned call, 5 s in session.start; F16: paid once per hanging tool); a registration that never answers no longer holds the call. Test: "a registration that never answers does not hold the call".
 
 Earlier state: Open.
 

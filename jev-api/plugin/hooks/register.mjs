@@ -347,9 +347,8 @@ async function askHaiku($, tool, state, questions, timeoutMs, signal) {
 			system: HAIKU_SYSTEM,
 			prompt,
 			maxTokens: haikuTokens(questions),
-			timeoutMs,
-			signal
-		});
+			timeoutMs
+		}, { signal });
 		reply.catch(() => undefined);
 		const aborted = new Promise((resolve) => {
 			if (signal.aborted) resolve("aborted");
@@ -384,6 +383,11 @@ async function ask($, tool, state, questions, env, timeoutMs, signal) {
 	const model = env.model ?? DEFAULT_MODEL;
 	const headers = { "Content-Type": "application/json" };
 	if (key && /^https:/i.test(target.url)) headers["Authorization"] = `Bearer ${key}`;
+	const redact = (text) => {
+		let t = env.jevUrl ? hide(text, target.url, "<JEV_URL>") : env.base ? hide(text, target.url, "<TYPESAFE_BASE_URL>/v1/systemone") : text;
+		if (key && key.length >= 6) t = t.replaceAll(key, "<TYPESAFE_API_KEY>");
+		return t;
+	};
 	let timer;
 	let onAbort;
 	try {
@@ -410,7 +414,7 @@ async function ask($, tool, state, questions, env, timeoutMs, signal) {
 		if (res === "aborted") return fail(tool, "the call was abandoned");
 		if (!res.ok) {
 			const why = detail(res.text);
-			return fail(tool, `HTTP ${res.status}${why === undefined ? "" : `: ${why}`}`);
+			return fail(tool, `HTTP ${res.status}${why === undefined ? "" : `: ${redact(why)}`}`);
 		}
 		const body = json(res.text);
 		if (body === undefined) return fail(tool, `HTTP ${res.status} response was not valid JSON`);
@@ -423,8 +427,7 @@ async function ask($, tool, state, questions, env, timeoutMs, signal) {
 		}
 		return { result: JSON.stringify(tool === "batch" ? list : list[0]) };
 	} catch (err) {
-		const why = message(err);
-		return fail(tool, env.jevUrl ? hide(why, target.url, "<JEV_URL>") : env.base ? hide(why, target.url, "<TYPESAFE_BASE_URL>/v1/systemone") : why);
+		return fail(tool, redact(message(err)));
 	} finally {
 		timer?.cancel();
 		if (onAbort) signal.removeEventListener("abort", onAbort);

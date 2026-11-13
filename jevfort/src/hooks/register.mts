@@ -192,7 +192,7 @@ const asText = (v: unknown): string => String(v);
 
 /**
  * Asks Jev through the jev-api plugin's `batch` tool; never throws. All questions go out in one `$.tool.call` (one
- * System One request) inside the calling hook's frame, raced against `TIMEOUT_MS`. All or nothing: a failed call, a
+ * System One request) inside the calling hook's frame, raced against its budget (`TIMEOUT_MS`, `COMPACT_TIMEOUT_MS` for the compaction ranking, `HAIKU_TIMEOUT_MS` while Haiku answers). All or nothing: a failed call, a
  * timeout or a wrong answer is `{ ok: false }`, so callers fall back to Claude Code's own behaviour. A call still
  * running when the budget ends is ignored.
  *

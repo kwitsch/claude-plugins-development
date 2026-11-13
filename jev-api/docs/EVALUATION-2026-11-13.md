@@ -168,3 +168,11 @@ Defects introduced or left by the fixes: F16 (the `registering` memo keeps a hun
 ### Live validation (re-run)
 
 Not run in Claude Code (no `claude -p --plugin-dir` session): the engine's hook budget for `session.compact` while `$.tool.call` and `$.clock.sleep` overlap (F19), whether an abandoned `$.tool.call` aborts jev-api's `next.signal`, the engine's real `$.tool.register` failure modes, and Haiku latency/thinking through `$.model.complete` are not measured. Real System One: yes, 10 requests through jevfort's built hooks and jev-api's built hook. No model call.
+
+## Update after the re-run (same day)
+
+F16-F19 are done in jev-api 0.3.2 / jevfort 0.9.1 (see the task documents): per-tool registration state with a once-paid wait and back-off, the Haiku abort signal as an option of `$.model.complete`, and a compaction ranking budget of **9 s** (the re-run measured the 12 s budget above; it was lowered to 9 s to stay under the engine's 10 s per hook). The tables above keep the numbers as measured.
+
+## Bug hunt
+
+Round 1 (three reviewers: registration, request path, jevfort and docs) found: the bearer key and the endpoint could reach the model through an error text (a runtime quoting a rejected header value; an error body echoing the request URL) - both redacted now; the Haiku abort signal sat in the wrong argument; stale numbers and symbols in these documents; a damaged TSDoc. All fixed with tests.

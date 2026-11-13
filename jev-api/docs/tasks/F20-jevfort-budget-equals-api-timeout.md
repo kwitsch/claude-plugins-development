@@ -12,7 +12,7 @@ Closed without code (measurement record, re-run 2026-11-13): harmless.
 
 ## Problem
 
-Since 0.9.1 jevfort passes `timeout: 4` with its own 4000 ms budget (likewise 12 / 12,000 for a compaction). Both clocks run out at about the same time, so the question was which one decides and whether a late answer is lost or misreported.
+Since 0.9.1 jevfort passes `timeout: 4` with its own 4000 ms budget (likewise 9 / 9000 for a compaction). Both clocks run out at about the same time, so the question was which one decides and whether a late answer is lost or misreported.
 
 ## Evidence
 

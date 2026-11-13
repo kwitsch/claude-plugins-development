@@ -103,7 +103,7 @@ type Engine = {
   /** Model requests: the stand-in for Jev when no System One access is configured. */
   model: {
     /** Asks a model one question; resolves the reply, or `isAnswered: false` with the reason. */
-    complete(spec: { model: string; system: string; prompt: string; maxTokens: number; timeoutMs: number; signal?: AbortSignal }): Promise<{ isAnswered: true; text: string } | { isAnswered: false; reason: string }>;
+    complete(spec: { model: string; system: string; prompt: string; maxTokens: number; timeoutMs: number }, options?: { signal?: AbortSignal }): Promise<{ isAnswered: true; text: string } | { isAnswered: false; reason: string }>;
   };
   /** Tool registry. */
   tool: {
@@ -618,7 +618,7 @@ function haikuTokens(questions: Question[]): number {
 }
 
 /**
- instead of System One (no Jev access configured). The
+ * Answers the questions of one tool call with Claude Haiku instead of System One (no Jev access configured). The
  * reply must be JSON in the System One response format; anything else is an error, never a made-up answer.
  *
  * @param $ - The engine.
@@ -634,7 +634,7 @@ async function askHaiku($: Engine, tool: ToolName, state: string, questions: Que
   const prompt = `Text:\n${state}\n\nQuestions (JSON):\n${JSON.stringify(Object.fromEntries(ids.map((id, i) => [id, questions[i]])))}`;
   let onAbort: (() => void) | undefined;
   try {
-    const reply = $.model.complete({ model: HAIKU_MODEL, system: HAIKU_SYSTEM, prompt, maxTokens: haikuTokens(questions), timeoutMs, signal });
+    const reply = $.model.complete({ model: HAIKU_MODEL, system: HAIKU_SYSTEM, prompt, maxTokens: haikuTokens(questions), timeoutMs }, { signal });
     reply.catch(() => undefined); // a late rejection after an abort must not go unhandled
     const aborted = new Promise<"aborted">((resolve) => {
       if (signal.aborted) resolve("aborted");
@@ -685,6 +685,13 @@ async function ask($: Engine, tool: ToolName, state: string, questions: Question
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   // The key never travels in cleartext: over plain http the request goes out without it.
   if (key && /^https:/i.test(target.url)) headers["Authorization"] = `Bearer ${key}`;
+  // Text that reaches the model (a fetch error, an error body a server may echo the request into) must not carry the endpoint
+  // or the key: a runtime quotes a header value it rejects (a newline or a non-Latin1 character in the key), whole.
+  const redact = (text: string): string => {
+    let t = env.jevUrl ? hide(text, target.url, "<JEV_URL>") : env.base ? hide(text, target.url, "<TYPESAFE_BASE_URL>/v1/systemone") : text;
+    if (key && key.length >= 6) t = t.replaceAll(key, "<TYPESAFE_API_KEY>"); // not a short key: it would match ordinary words
+    return t;
+  };
   let timer: { cancel(): void } | undefined;
   let onAbort: (() => void) | undefined;
   try {
@@ -704,7 +711,7 @@ async function ask($: Engine, tool: ToolName, state: string, questions: Question
     if (res === "aborted") return fail(tool, "the call was abandoned");
     if (!res.ok) {
       const why = detail(res.text);
-      return fail(tool, `HTTP ${res.status}${why === undefined ? "" : `: ${why}`}`);
+      return fail(tool, `HTTP ${res.status}${why === undefined ? "" : `: ${redact(why)}`}`);
     }
     const body = json(res.text);
     if (body === undefined) return fail(tool, `HTTP ${res.status} response was not valid JSON`);
@@ -718,14 +725,14 @@ async function ask($: Engine, tool: ToolName, state: string, questions: Question
     return { result: JSON.stringify(tool === "batch" ? list : list[0]) };
   } catch (err) {
     // The engine's fetch errors quote the URL, whose host, path or query may be private: name the variable instead.
-    const why = message(err);
-    return fail(tool, env.jevUrl ? hide(why, target.url, "<JEV_URL>") : env.base ? hide(why, target.url, "<TYPESAFE_BASE_URL>/v1/systemone") : why);
+    return fail(tool, redact(message(err)));
   } finally {
     timer?.cancel();
     if (onAbort) signal.removeEventListener("abort", onAbort); // a signal shared by many calls must not collect listeners
   }
 }
 
+/** The registration state of one module instance: what is registered, under way, refused and hanging. */
 type RegState = {
   /** Full tool name -> tool: the default names plus what the engine returned. */
   names: Map<string, ToolName>;

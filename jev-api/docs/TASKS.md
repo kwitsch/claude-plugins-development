@@ -17,7 +17,7 @@ Legend: `[x]` finished (done, or closed without code: status `closed` in the tas
 - [x] [F16](tasks/F16-hung-registration-stays-memoized.md) medium, bug: a hung registration stays memoized; every owned call waits 1 s, every session.start 5 s, no retry; one hung tool holds the other three
 - [x] [F17](tasks/F17-registration-retry-without-backoff.md) low: a failing registration is retried on every owned call (1 attempt + 1 log line per call), no back-off
 - [x] [F18](tasks/F18-haiku-call-not-cancelled-default-effort.md) low: the Haiku fallback call gets no `signal` (not cancelled when abandoned) and no `effort` (thinking shares `maxTokens`)
-- [x] [F19](tasks/F19-jevfort-compaction-wait-and-hook-budget.md) medium (jevfort): every compaction now waits ~4.6 s for the ranking (12 s when Jev hangs); 12 s / 15 s budgets vs the engine's 10 s hook budget need a live check
+- [x] [F19](tasks/F19-jevfort-compaction-wait-and-hook-budget.md) medium (jevfort): every compaction now waits ~4.6 s for the ranking (9 s when Jev hangs, since 0.9.1; 12 s before); 12 s / 15 s budgets vs the engine's 10 s hook budget need a live check
 
 ## Remaining
 
@@ -37,7 +37,7 @@ None: every finding is done or closed (F16-F19 came from the re-run on 0.3.2 / j
 ## Notes
 
 - F01 is worked in jevfort (`jevfort/src/hooks/register.mts`, `jevfort/src/hooks/jev.mts`, `jevfort/src/hooks/compact.mts`); jev-api itself cannot make System One faster.
-- F02 and F03 touch the same code (`registering`, `registerTools`, both hooks): do them together.
+- F02 and F03 touched the same code (since the rewrite: `RegState`, `registerOne`, `ensureTools`, both hooks).
 - F05 and F06 touch `ask`/`askHaiku`'s race: do them together.
-- F16 and F17 touch the same registration code (`registering`, `registerTools`, `within`, both hooks): do them together. F03 is done (the wait is bounded), F16 is its residual.
-- F19 is worked in jevfort and starts with a live check (skill `live-verify`); F18 needs a live Haiku measurement before any `effort` change.
+- F16 and F17 touched the same registration code (since the rewrite: `RegState`, `registerOne`, `ensureTools`, both hooks); F03 (a bounded wait) was its first step, F16 its residual.
+- F19 was worked in jevfort and closed by sizing (9 s), no live check of the engine's hook limit was run (skill `live-verify` would do it); F18 needs a live Haiku measurement before any `effort` change.

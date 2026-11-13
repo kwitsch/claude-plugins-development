@@ -8,7 +8,7 @@ area: jev-api/src/hooks/register.mts (askHaiku)
 
 ## Status
 
-Done in jev-api 0.3.2 for the abort signal: `askHaiku` passes `signal` to `$.model.complete`. The effort setting of the Haiku call is not available in the engine typings used here and stays open as an observation (thinking may take part of `maxTokens`; not measured). Test: "the Haiku call gets the abort signal".
+Done in jev-api 0.3.2 for the abort signal: `askHaiku` passes `{ signal }` as the second argument (options) of `$.model.complete`; a first version put it into the request, where the typings have no such field (found by the bug hunt). `ModelCompleteRequest.effort` exists in the typings but is not set: an observation, not measured (thinking may take part of `maxTokens`). Test: "the Haiku call gets the abort signal as an option".
 
 Earlier state: Open. Found in the re-run on 0.3.2 (EVALUATION-2026-11-13.md, "Re-run on 0.3.2 / jevfort 0.9.1") while checking F04 against the 2.1.323 typings.
 

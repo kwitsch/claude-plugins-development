@@ -8,7 +8,7 @@ area: bug (jev-api/src/hooks/register.mts: registerTools, register, onSessionSta
 
 ## Status
 
-Done in jev-api 0.3.2: `registerTools` registers only the tools still in `missing`; a failed one stays there and the next hook (session.start, or an owned call) registers it again, concurrent hooks share one in-flight promise. Test: "a failed registration is retried by the next call, only for the tools still missing".
+Done in jev-api 0.3.2: `registerOne`/`ensureTools` (state `RegState`) register only the tools still missing; a failed one stays there and the next hook (session.start, or an owned call) registers it again (F17: with back-off), concurrent hooks share the per-tool in-flight promise. Test: "a failed registration is retried by the next call, only for the tools still missing".
 
 Earlier state: Open.
 

@@ -8,7 +8,7 @@ area: jevfort/src/hooks/jev.mts (TIMEOUT_MS, JEV_API_TIMEOUT_S), jevfort/src/hoo
 
 ## Status
 
-Done in jevfort 0.9.1: a compaction ranking has its own `askJev` budget (`COMPACT_TIMEOUT_MS` 12 s, jev-api `timeout` 12), the interactive budget stays 4 s and jev-api's `timeout` equals it (`JEV_API_TIMEOUT_S` 4, was 5: the request ends with the budget, not a second after). Test: "session.compact waits longer for Jev than an interactive call, and tells jev-api so" (a stub batch answering after 4.5 s).
+Done in jevfort 0.9.1: a compaction ranking has its own `askJev` budget (`COMPACT_TIMEOUT_MS` 9 s, jev-api `timeout` 9; first 12 s, lowered to 9 s after the re-run, see F19), the interactive budget stays 4 s and jev-api's `timeout` equals it (`JEV_API_TIMEOUT_S` 4, was 5: the request ends with the budget, not a second after). Test: "session.compact waits longer for Jev than an interactive call, and tells jev-api so" (a stub batch answering after 4.5 s).
 
 Earlier state: Open. Found in the jev-api analysis; the change belongs to jevfort (jev-api cannot make System One answer faster).
 

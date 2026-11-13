@@ -29,7 +29,7 @@ the shapes below: `inline-headroom/docs/claude-code-verification.md`.
   `/jev` output, `{ component: "AbovePrompt" }` for the effort band).
 - Jev is asked only through the jev-api plugin's tool `mcp__jev-api__batch`: `askJev` raises one
   `$.tool.call({ tool: "mcp__jev-api__batch", state, questions, timeout: JEV_API_TIMEOUT_S })` (`state` is `JSON.stringify` text, `questions` the
-  `Question` objects in id order), raced against `TIMEOUT_MS`; a `{ deny }`, `isError`, a rejection, a result that is not
+  `Question` objects in id order, `timeout` in seconds equal to the budget), raced against the budget (`TIMEOUT_MS` 4 s, `COMPACT_TIMEOUT_MS` 9 s for the compaction ranking, `HAIKU_TIMEOUT_MS` 15 s without Jev access); a `{ deny }`, `isError`, a rejection, a result that is not
   a JSON array with one answer of the asked type per question, or the timeout fails the whole `askJev` (`{ ok: false }`,
   never a throw). The engine
   member is typed `tool.call(input): Promise<ToolResult>`; there is no `$.http` use.
