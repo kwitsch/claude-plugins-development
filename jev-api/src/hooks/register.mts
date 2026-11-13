@@ -100,6 +100,11 @@ type Engine = {
     /** Sends a request; resolves the response (rejects on network failure). */
     fetch(url: string, init: { method: string; headers: Record<string, string>; body: string }): Promise<FetchResponse>;
   };
+  /** Model requests: the stand-in for Jev when no System One access is configured. */
+  model: {
+    /** Asks a model one question; resolves the reply, or `isAnswered: false` with the reason. */
+    complete(spec: { model: string; system: string; prompt: string; maxTokens: number; timeoutMs: number }): Promise<{ isAnswered: true; text: string } | { isAnswered: false; reason: string }>;
+  };
   /** Tool registry. */
   tool: {
     /** Registers a tool; resolves the full tool name the engine gave it (a hook above may answer anything). */
@@ -171,7 +176,17 @@ type On = {
 };
 
 /** Description tail shared by the tools. */
-const NEEDS = " Needs TYPESAFE_API_KEY, TYPESAFE_BASE_URL or JEV_URL to be set.";
+const NEEDS = " Set TYPESAFE_API_KEY, TYPESAFE_BASE_URL or JEV_URL to use Jev; without any of them Claude Haiku answers instead.";
+
+/** The model that stands in for Jev when none of the System One variables is set. */
+const HAIKU_MODEL = "claude-haiku-5-5";
+
+/** What Haiku is told: the System One answer format it has to reproduce. */
+const HAIKU_SYSTEM = `You stand in for a text classifier. Answer every question about the given text and reply with JSON only (no prose, no code fence): {"answers":{"<id>":<answer>}} with one answer per question id.
+An answer is, by question type:
+- noul: {"type":"noul","noul":<probability 0..1 that the answer is yes>}
+- choice: {"type":"choice","choice":"<exactly one option name>","confidence":<0..1>,"probabilities":{"<option>":<0..1>,...}} with every option listed
+- score: {"type":"score","score":<number from 0 to levels-1, fractional between levels>,"confidence":<0..1>,"probabilities":{"0":<0..1>,"1":<0..1>,...}} with every level index listed`;
 
 /** The `state` input property shared by the tools. */
 const STATE = { type: "string", description: "The text the question is about." };
@@ -499,6 +514,90 @@ function detail(text: string): string | undefined {
 }
 
 /**
+ * Whether a value is a probability: a finite number from 0 to 1.
+ *
+ * @param v - The value to test.
+ * @returns True for a number in 0..1.
+ */
+function isUnit(v: unknown): v is number {
+  return typeof v === "number" && Number.isFinite(v) && v >= 0 && v <= 1;
+}
+
+/**
+ * Whether a value maps every key to a probability.
+ *
+ * @param v - The value to test.
+ * @param keys - The keys it must have.
+ * @returns True when each key is present with a probability.
+ */
+function hasProbabilities(v: unknown, keys: string[]): v is Record<string, number> {
+  return isRecord(v) && keys.every((k) => isUnit(v[k]));
+}
+
+/**
+ * Checks one answer Haiku gave against the System One answer format and rebuilds it without extra fields.
+ *
+ * @param q - The question.
+ * @param a - The answer as parsed from Haiku's reply.
+ * @returns The answer as System One would give it, or undefined when it does not fit the question.
+ */
+function checkAnswer(q: Question, a: unknown): Record<string, unknown> | undefined {
+  if (!isRecord(a) || a["type"] !== q.type) return undefined;
+  if (q.type === "noul") return isUnit(a["noul"]) ? { type: "noul", noul: a["noul"] } : undefined;
+  const { confidence, probabilities } = a;
+  if (!isUnit(confidence)) return undefined;
+  if (q.type === "choice") {
+    const options = Object.keys(q.criteria);
+    const picked = a["choice"];
+    if (typeof picked !== "string" || !options.includes(picked) || !hasProbabilities(probabilities, options)) return undefined;
+    return { type: "choice", choice: picked, confidence, probabilities: Object.fromEntries(options.map((o) => [o, probabilities[o]])) };
+  }
+  const levels = q.criteria.map((_, i) => String(i));
+  const value = a["score"];
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0 || value > levels.length - 1 || !hasProbabilities(probabilities, levels)) return undefined;
+  return { type: "score", score: value, confidence, legend: Object.fromEntries(q.criteria.map((l, i) => [i, l])), probabilities: Object.fromEntries(levels.map((l) => [l, probabilities[l]])) };
+}
+
+/**
+ * Answers the questions of one tool call with Claude Haiku instead of System One (no Jev access configured). The
+ * reply must be JSON in the System One response format; anything else is an error, never a made-up answer.
+ *
+ * @param $ - The engine.
+ * @param tool - The tool called.
+ * @param state - The text the questions are about.
+ * @param questions - The questions, in input order.
+ * @param timeoutMs - How long Haiku may take.
+ * @param signal - Aborts when the call is abandoned.
+ * @returns The answers as {@link ask} returns them, or an error answer.
+ */
+async function askHaiku($: Engine, tool: ToolName, state: string, questions: Question[], timeoutMs: number, signal: AbortSignal): Promise<ToolResult> {
+  const ids = questions.map((_, i) => (tool === "batch" ? `q${i}` : QUESTION_ID));
+  const prompt = `Text:\n${state}\n\nQuestions (JSON):\n${JSON.stringify(Object.fromEntries(ids.map((id, i) => [id, questions[i]])))}`;
+  try {
+    const reply = $.model.complete({ model: HAIKU_MODEL, system: HAIKU_SYSTEM, prompt, maxTokens: Math.min(4096, 256 + 256 * questions.length), timeoutMs });
+    reply.catch(() => undefined); // a late rejection after an abort must not go unhandled
+    const aborted = new Promise<"aborted">((resolve) => {
+      if (signal.aborted) resolve("aborted");
+      else signal.addEventListener("abort", () => resolve("aborted"), { once: true });
+    });
+    const r = await Promise.race([reply, aborted]);
+    if (r === "aborted") return fail(tool, "the call was abandoned");
+    if (!r.isAnswered) return fail(tool, `fallback: ${r.reason}`);
+    const body = json(r.text.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, ""));
+    const answers = isRecord(body) ? body["answers"] : undefined;
+    const list: Record<string, unknown>[] = [];
+    for (const [i, q] of questions.entries()) {
+      const answer = checkAnswer(q, isRecord(answers) ? answers[ids[i]] : undefined);
+      if (answer === undefined) return fail(tool, `fallback: Haiku's reply had no valid ${q.type} answer${tool === "batch" ? ` for questions[${i}]` : ""}`);
+      list.push(answer);
+    }
+    return { result: JSON.stringify(tool === "batch" ? list : list[0]) };
+  } catch (err) {
+    return fail(tool, `fallback: ${message(err)}`);
+  }
+}
+
+/**
  * Sends the questions of one tool call in one System One request and maps every outcome to a tool result.
  *
  * @param $ - The engine.
@@ -558,6 +657,27 @@ async function ask($: Engine, tool: ToolName, state: string, questions: Question
 }
 
 /**
+ * Registers the four tools and records the full name the engine gave each.
+ *
+ * @param $ - The engine.
+ * @param names - Full tool name to tool; gains the names the engine returned.
+ */
+async function registerTools($: Engine, names: Map<string, ToolName>): Promise<void> {
+  // One failing registration must not drop the others.
+  const results = await Promise.allSettled(TOOLS.map((type) => $.tool.register({ name: type, ...SPECS[type] })));
+  for (const [i, r] of results.entries()) {
+    const type = TOOLS[i];
+    // The engine starts a log line with the plugin's name; logging is best effort.
+    if (r.status === "rejected") await Promise.resolve($.ui.log(`registering ${type} failed: ${message(r.reason)}`)).catch(() => undefined);
+    else {
+      // Only a mcp__<plugin>__<type> name: a hook above answering anything else must not make this hook claim another tool.
+      const tool = r.value?.tool;
+      if (tool?.startsWith("mcp__") && tool.endsWith(`__${type}`)) names.set(tool, type);
+    }
+  }
+}
+
+/**
  * Registers the module's hooks.
  *
  * @param on - The engine's hook registrar.
@@ -569,19 +689,11 @@ export function register(on: On, options?: Options): void {
   const fallbackS = seconds(options?.["timeout"]) ?? DEFAULT_TIMEOUT_S;
   // Full tool name -> tool: the default names (a call can reach an instance that saw no session.start), plus what the engine returned.
   const names = new Map<string, ToolName>(TOOLS.map((t) => [TOOL_PREFIX + t, t]));
+  // `$` reaches a module only inside its hooks, so the tools register in the first hook that runs (session.start, or an earlier tool call), once.
+  // The engine accepts `$` only as an argument to a top-level function, hence `registerTools` and the memo spelled out in both hooks.
+  let registering: Promise<void> | undefined;
   on("session.start", async function onSessionStart($, e, next) {
-    // One failing registration must not drop the others.
-    const results = await Promise.allSettled(TOOLS.map((type) => $.tool.register({ name: type, ...SPECS[type] })));
-    for (const [i, r] of results.entries()) {
-      const type = TOOLS[i];
-      // The engine starts a log line with the plugin's name; logging is best effort.
-      if (r.status === "rejected") await Promise.resolve($.ui.log(`registering ${type} failed: ${message(r.reason)}`)).catch(() => undefined);
-      else {
-        // Only a mcp__<plugin>__<type> name: a hook above answering anything else must not make this hook claim another tool.
-        const tool = r.value?.tool;
-        if (tool?.startsWith("mcp__") && tool.endsWith(`__${type}`)) names.set(tool, type);
-      }
-    }
+    await (registering ??= registerTools($, names));
     return next(e);
   });
   on("tool.call", async function onToolCall($, e, next) {
@@ -589,11 +701,13 @@ export function register(on: On, options?: Options): void {
     if (type === undefined) return next(e);
     // Answered on every path, a throw too (a hook above refusing $.env.get): a registered tool that no hook answers fails.
     try {
+      await (registering ??= registerTools($, names)).catch(() => undefined); // best effort: a failed registration must not block the answer
       // Literal names: the engine's static check only accepts a literal first argument to $.env.get.
       const [key, base, jevUrl, model] = (await Promise.all([$.env.get("TYPESAFE_API_KEY"), $.env.get("TYPESAFE_BASE_URL"), $.env.get("JEV_URL"), $.env.get("TYPESAFE_DEFAULT_MODEL")])).map((v) => v?.trim() || undefined);
-      if (!key && !base && !jevUrl) return fail(type, "none of TYPESAFE_API_KEY, TYPESAFE_BASE_URL, JEV_URL is set");
       const input = parseInput(type, e);
       if (typeof input === "string") return fail(type, input);
+      // No Jev access configured: Haiku stands in. A configured Jev that fails stays an error.
+      if (!key && !base && !jevUrl) return await askHaiku($, type, input.state, input.questions, (seconds(e["timeout"]) ?? fallbackS) * 1000, next.signal);
       return await ask($, type, input.state, input.questions, { key, base, jevUrl, model }, (seconds(e["timeout"]) ?? fallbackS) * 1000, next.signal);
     } catch (err) {
       return fail(type, message(err));

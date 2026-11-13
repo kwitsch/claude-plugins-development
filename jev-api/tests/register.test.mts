@@ -67,26 +67,88 @@ const BASE: Record<string, Record<string, unknown>> = {
 const call = ($: Runner, type: string, input: Record<string, unknown> = {}) => $.tool.call({ tool: TOOL(type), ...BASE[type], ...input }) as Promise<{ result?: string; deny?: string }>;
 
 // Errors are a `deny`: the model reads it as an error result (core drops a hook's own isError).
-const NO_CONFIG = (type: string) => ({ deny: `${type}: none of TYPESAFE_API_KEY, TYPESAFE_BASE_URL, JEV_URL is set` });
+// Without any env var (blank counts as unset) Haiku, through `$.model.complete`, answers instead of System One.
+type Completion = { value: { isAnswered: true; text: string; usage: Record<string, number> } } | { value: { isAnswered: false; reason: string } };
+const said = (text: string): Completion => ({ value: { isAnswered: true, text, usage: { input_tokens: 1, output_tokens: 1 } } });
 
-// Cases 2, 3: the env gate runs on every call, sends no request, and blank counts as unset (BASE.batch is set below, before any test runs).
-for (const type of ["noul", "choice", "score", "batch"]) {
-  test(`${type} without any env var fails locally`, async ($, on) => {
-    const { fetched } = setup(on, { env: {} });
-    expect(await call($, type)).toEqual(NO_CONFIG(type));
-    expect(fetched).toHaveLength(0);
+/** Stubs model.complete with `reply`, recording each request. */
+function haiku(on: On, reply: () => Completion) {
+  const asked: Record<string, unknown>[] = [];
+  on("model.complete", (_$, e) => {
+    asked.push(e);
+    return reply();
   });
+  return asked;
+}
 
-  test(`${type} with blank env vars fails locally`, async ($, on) => {
-    const { fetched } = setup(on, { env: { TYPESAFE_API_KEY: "  ", TYPESAFE_BASE_URL: " ", JEV_URL: "\t" } });
-    expect(await call($, type)).toEqual(NO_CONFIG(type));
+const HAIKU_ANSWERS: Record<string, unknown> = {
+  noul: { type: "noul", noul: 0.9 },
+  choice: { type: "choice", choice: "greeting", confidence: 0.8, probabilities: { greeting: 0.8, question: 0.2 } },
+  score: { type: "score", score: 1.6, confidence: 0.4, probabilities: { 0: 0.04, 1: 0.31, 2: 0.65 } },
+};
+
+for (const type of ["noul", "choice", "score"]) {
+  test(`${type} without any env var (or blank ones) is answered by Haiku, no System One request`, async ($, on) => {
+    const { fetched } = setup(on, { env: { TYPESAFE_API_KEY: "  ", JEV_URL: "\t" } });
+    const asked = haiku(on, () => said("```json\n" + JSON.stringify({ answers: { answer: HAIKU_ANSWERS[type] } }) + "\n```"));
+    const r = await call($, type);
+    expect(JSON.parse(r.result ?? "null")).toMatchObject(HAIKU_ANSWERS[type] as object);
     expect(fetched).toHaveLength(0);
+    expect(asked).toHaveLength(1);
+    expect(asked[0]).toMatchObject({ model: "claude-haiku-5-5" });
+    expect(String(asked[0]["prompt"])).toContain("Hello there!");
   });
 }
 
-test("the env gate runs before input validation", async ($, on) => {
+test("batch without any env var is answered by Haiku in question order", async ($, on) => {
   setup(on, { env: {} });
-  expect(await call($, "noul", { instructions: undefined })).toEqual(NO_CONFIG("noul"));
+  haiku(on, () => said(JSON.stringify({ answers: { q0: HAIKU_ANSWERS["noul"], q1: HAIKU_ANSWERS["choice"] } })));
+  const r = (await $.tool.call({ tool: TOOL("batch"), state: "Hello", questions: [{ type: "noul", instructions: "Greeting?" }, { type: "choice", instructions: "What?", criteria: { greeting: "hi", question: "?" } }] })) as { result?: string };
+  expect(JSON.parse(r.result ?? "null")).toEqual([HAIKU_ANSWERS["noul"], HAIKU_ANSWERS["choice"]]);
+});
+
+test("a Haiku reply that does not fit the System One format is an error, never a made-up answer", async ($, on) => {
+  setup(on, { env: {} });
+  let text = "";
+  haiku(on, () => said(text));
+  const bad = async (reply: unknown, type = "noul") => {
+    text = typeof reply === "string" ? reply : JSON.stringify({ answers: { answer: reply } });
+    expect((await call($, type)).deny).toMatch(new RegExp(`^${type}: fallback`));
+  };
+  await bad("not json");
+  await bad("{}");
+  await bad({ type: "noul", noul: 1.5 });
+  await bad({ type: "score", noul: 0.5 });
+  await bad({ type: "choice", choice: "other", confidence: 1, probabilities: { greeting: 1 } }, "choice");
+  await bad({ type: "score", score: 5, confidence: 1, probabilities: { 0: 1, 1: 0, 2: 0 } }, "score");
+});
+
+test("Haiku not answering is an error", async ($, on) => {
+  setup(on, { env: {} });
+  haiku(on, () => ({ value: { isAnswered: false, reason: "down" } }));
+  expect((await call($, "noul")).deny).toBe("noul: fallback: down");
+});
+
+test("the Haiku fallback still validates input first", async ($, on) => {
+  setup(on, { env: {} });
+  const asked = haiku(on, () => said("{}"));
+  expect(await call($, "noul", { instructions: undefined })).toEqual({ deny: "noul: instructions must be a non-empty string" });
+  expect(asked).toHaveLength(0);
+});
+
+test("a configured Jev that fails is an error, not a Haiku fallback", async ($, on) => {
+  setup(on, { env: { JEV_URL: "https://jev.example/v1/systemone" }, reply: httpReply(500, "{}") });
+  const asked = haiku(on, () => said("{}"));
+  expect((await call($, "noul")).deny).toMatch(/^noul: HTTP 500/);
+  expect(asked).toHaveLength(0);
+});
+
+test("a tool call before session.start registers the tools once", async ($, on) => {
+  const { specs } = setup(on, { env: {} });
+  haiku(on, () => said(JSON.stringify({ answers: { answer: HAIKU_ANSWERS["noul"] } })));
+  await call($, "noul");
+  await call($, "noul");
+  expect(specs.map((s) => s.name)).toEqual(["noul", "choice", "score", "batch"]);
 });
 
 // Case 10: invalid input, exact messages, no request.

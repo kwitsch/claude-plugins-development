@@ -276,12 +276,12 @@ test("When Jev is unreachable the step goes to Claude unchanged", async ($, on) 
 
 // askJev: all questions of a decision go out in one jev-api batch call; `state` travels as JSON text.
 test("A turn-start decision sends its questions in one jev-api batch call", async ($, on) => {
-  const { sent, calls } = setup(on, { messages: [user("what does src/app.ts export?")], files: [`${CWD}/src/app.ts`], jev: () => undefined });
+  const { sent, calls } = setup(on, { messages: [user("what does src/app.ts export?")], files: [`${CWD}/src/app.ts`], jev: () => undefined, env: { TYPESAFE_API_KEY: "k" } });
   claudeBeneath(on, []);
 
   await drain($.turn.step(step));
   expect(calls()).toBe(1);
-  // Every jev-api call gives jev-api a 5 s HTTP timeout.
+  // Every jev-api call gives jev-api a 5 s HTTP timeout (14 s while Haiku answers because no Jev variable is set).
   expect(sent.every((q) => q.timeout === 5)).toBe(true);
   expect(sent.map((q) => [q.id, q.type])).toEqual([
     ["next_action", "choice"],
@@ -343,7 +343,7 @@ for (const [name, answer, error] of [["of another type", mech(0.5), "batch: no s
 
 test("Jev calls that do not answer within 4000 ms time out and Claude takes the step", async ($, on) => {
   const seen: unknown[] = [];
-  const { sent, clock } = setup(on, { messages: [user("what does this project do?")], jev: () => new Promise<never>(() => {}) });
+  const { sent, clock } = setup(on, { messages: [user("what does this project do?")], jev: () => new Promise<never>(() => {}), env: { JEV_URL: "https://jev.example/x" } });
   claudeBeneath(on, seen);
 
   const run = drain($.turn.step(step));
@@ -356,6 +356,21 @@ test("Jev calls that do not answer within 4000 ms time out and Claude takes the 
   expect(ids(sent)).toEqual(["effort", "mechanical"]);
   expect(seen[0]).toMatchObject({ effort: "high", model: "claude-opus-5-5" });
   expect(await runJev($, "")).toContain("unavailable: timeout after 4000ms");
+});
+
+test("without any Jev variable (Haiku answers in jev-api) the budget is 15000 ms", async ($, on) => {
+  const seen: unknown[] = [];
+  const { sent, clock } = setup(on, { messages: [user("what does this project do?")], jev: () => new Promise<never>(() => {}) });
+  claudeBeneath(on, seen);
+
+  const run = drain($.turn.step(step));
+  while (sent.length < 2) await clock.advance(0);
+  await clock.advance(14_999);
+  expect(seen).toHaveLength(0);
+  await clock.advance(1);
+  await run;
+  expect(seen).toHaveLength(1);
+  expect(await runJev($, "")).toContain("unavailable: timeout after 15000ms");
 });
 
 // What the engine does for a plugin's own `$.prompt.submit`: the hooks see it stamped with the plugin as origin (the kit stamps none).
