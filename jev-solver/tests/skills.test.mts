@@ -50,4 +50,12 @@ describe("jev-solver skills", () => {
       assert.ok(text.includes(`jev-solver:${skill}`), skill);
     }
   });
+
+  it("solve runs /simplify and a leveled /code-review --fix, and ends with a draft PR", () => {
+    const text = skillText("solve");
+    assert.match(text, /`\/simplify`/);
+    assert.match(text, /`\/code-review <level> --fix`/);
+    assert.match(text, /S `low`, M `medium`, L `high`, XL `xhigh`/);
+    assert.match(text, /draft PR/);
+  });
 });
