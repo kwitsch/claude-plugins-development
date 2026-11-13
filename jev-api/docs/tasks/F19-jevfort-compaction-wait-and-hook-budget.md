@@ -1,14 +1,14 @@
 ---
 id: F19
 title: jevfort compaction now waits ~4.6 s for the ranking, and its 12 s / 15 s budgets exceed the engine's 10 s hook budget
-status: done
+status: partial
 priority: medium
 area: jevfort/src/hooks/register.mts (askJev, withJevRanking, onCompact), jevfort/src/hooks/jev.mts
 ---
 
 ## Status
 
-Partly done, in jevfort 0.9.1 by sizing, not by a live check (the 15 s budget while Haiku answers is unchanged; the bug hunt measured live that an in-flight `$.tool.call` is not cut at 10 s, which supports leaving it). Also found live: in Claude Code 2.1.325 the built-in `cc-plugin-sec-default` bypasses every user-tier `session.compact` hook, so the ranking and Haiku compaction do not run at all for now (see jevfort/CLAUDE.md): the compaction ranking budget is 9 s (`COMPACT_TIMEOUT_MS`), below the engine's 10 s per hook in case the overlapping `$.clock.sleep` counts against it; a ranking takes about 4.6 s with 30 items. A live check of the hook time limit was not run.
+Partly done, in jevfort 0.9.1 by sizing, not by a live check (the 15 s budget while Haiku answers is unchanged). Found live in the bug hunt: a 30 s in-flight `$.tool.call` inside `prompt.submit` was not cut at 10 s (which supports leaving the 15 s), but a live check of the compaction path itself is impossible for now, because in Claude Code 2.1.325 the built-in `cc-plugin-sec-default` bypasses every user-tier `session.compact` hook, so the ranking and Haiku compaction do not run at all for now (see jevfort/CLAUDE.md): the compaction ranking budget is 9 s (`COMPACT_TIMEOUT_MS`), below the engine's 10 s per hook in case the overlapping `$.clock.sleep` counts against it; a ranking takes about 4.6 s with 30 items. A live check of the hook time limit was not run.
 
 Earlier state: Open: needs a live check and a decision. Found in the re-run on 0.3.2 / jevfort 0.9.1 (EVALUATION-2026-11-13.md).
 

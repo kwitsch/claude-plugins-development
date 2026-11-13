@@ -35,6 +35,9 @@ const MAX_LEVELS = 10;
 const HAIKU_MAX_TOKENS = 16384;
 const MAX_DETAIL = 1e3;
 const REGISTER_WAIT_MS = 1e3;
+const MAX_RETRY_MS = 3e5;
+const RETRY_BASE_MS = 5e3;
+const MIN_REDACT_KEY = 6;
 const TOOL_PREFIX = "mcp__jev-api__";
 const SPECS = {
 	noul: {
@@ -405,7 +408,7 @@ async function ask($, tool, state, questions, env, timeoutMs, signal) {
 	if (key && /^https:/i.test(target.url)) headers["Authorization"] = `Bearer ${key}`;
 	const redact = (text) => {
 		let t = env.jevUrl ? hide(text, target.url, "<JEV_URL>") : env.base ? hide(text, target.url, "<TYPESAFE_BASE_URL>/v1/systemone") : text;
-		if (key && key.length >= 6) t = t.replaceAll(key, "<TYPESAFE_API_KEY>");
+		if (key && key.length >= MIN_REDACT_KEY) t = t.replaceAll(key, "<TYPESAFE_API_KEY>");
 		return env.jevUrl || env.base ? hideHost(t, target.url) : t;
 	};
 	let timer;
@@ -459,7 +462,6 @@ async function ask($, tool, state, questions, env, timeoutMs, signal) {
 		if (onAbort) signal.removeEventListener("abort", onAbort);
 	}
 }
-const MAX_RETRY_MS = 3e5;
 async function registerOne($, st, type) {
 	try {
 		const r = await $.tool.register({
@@ -472,7 +474,7 @@ async function registerOne($, st, type) {
 	} catch (err) {
 		const n = (st.failures.get(type) ?? 0) + 1;
 		st.failures.set(type, n);
-		st.retryAt.set(type, Date.now() + (n === 1 ? 0 : Math.min(MAX_RETRY_MS, 5e3 * 2 ** (n - 2))));
+		st.retryAt.set(type, Date.now() + (n === 1 ? 0 : Math.min(MAX_RETRY_MS, RETRY_BASE_MS * 2 ** (n - 2))));
 		if (n === 1) {
 			try {
 				void Promise.resolve($.ui.log(`registering ${type} failed: ${message(err)}`)).catch(() => undefined);

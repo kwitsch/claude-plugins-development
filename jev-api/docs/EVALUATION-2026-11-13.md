@@ -171,7 +171,7 @@ Not run in Claude Code (no `claude -p --plugin-dir` session): the engine's hook 
 
 ## Update after the re-run (same day)
 
-F16-F19 are done in jev-api 0.3.2 / jevfort 0.9.1 (see the task documents): per-tool registration state with a once-paid wait and back-off, the Haiku abort signal as an option of `$.model.complete`, and a compaction ranking budget of **9 s** (the re-run measured the 12 s budget above; it was lowered to 9 s to stay under the engine's 10 s per hook). The tables above keep the numbers as measured.
+F16 and F17 are done and F18 and F19 partly (see their task documents) in jev-api 0.3.2 / jevfort 0.9.1 (see the task documents): per-tool registration state with a once-paid wait and back-off, the Haiku abort signal as an option of `$.model.complete`, and a compaction ranking budget of **9 s** (the re-run measured the 12 s budget above; it was lowered to 9 s to stay under the engine's 10 s per hook). The tables above keep the numbers as measured.
 
 ## Bug hunt (fixes)
 

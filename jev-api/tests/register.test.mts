@@ -831,7 +831,7 @@ test("the Haiku output budget covers a choice with many options", async ($, on) 
 });
 
 // Gaps found by mutation testing (round 6a): each test kills at least one mutant of the shipped code.
-it("X14 a hanging registration is not started again by later calls", async () => {
+it("a hanging registration is not started again by later calls", async () => {
   const tries: string[] = [];
   const { run } = await direct({
     tool: { register: (spec: { name: string }) => (tries.push(spec.name), spec.name === "score" ? new Promise(() => {}) : Promise.resolve({ tool: TOOL(spec.name) })) },
@@ -846,7 +846,7 @@ it("X14 a hanging registration is not started again by later calls", async () =>
   expect(tries.filter((n) => n === "score")).toHaveLength(1);
 });
 
-it("X25 a key inside JEV_URL: the whole URL still becomes <JEV_URL>", async () => {
+it("a key inside JEV_URL: the whole URL still becomes <JEV_URL>", async () => {
   const key = "sk-SECRET-1234567890";
   const url = `https://jev.example/tenant-7?key=${key}`;
   const { run } = await direct({
@@ -857,7 +857,7 @@ it("X25 a key inside JEV_URL: the whole URL still becomes <JEV_URL>", async () =
   expect((await run("noul")).deny).toBe("noul: $.http.fetch(<JEV_URL>) failed: ECONNREFUSED");
 });
 
-it("X27 the bare host is hidden whatever its case", async () => {
+it("the bare host is hidden whatever its case", async () => {
   const { run } = await direct({
     env: { get: async (n: string) => (n === "JEV_URL" ? "https://secret-host-zq82.invalid/x" : undefined) },
     http: { fetch: () => Promise.reject(new Error("getaddrinfo ENOTFOUND SECRET-HOST-ZQ82.invalid")) },
@@ -866,13 +866,13 @@ it("X27 the bare host is hidden whatever its case", async () => {
   expect((await run("noul")).deny).toBe("noul: getaddrinfo ENOTFOUND <host>");
 });
 
-test("X39 a Haiku choice whose probabilities are all 0 is an error", async ($, on) => {
+test("a Haiku choice whose probabilities are all 0 is an error", async ($, on) => {
   setup(on, { env: {} });
   haiku(on, () => said(JSON.stringify({ answers: { answer: { type: "choice", choice: "greeting", confidence: 1, probabilities: { greeting: 0, question: 0 } } } })));
   expect((await call($, "choice")).deny).toMatch(/^choice: fallback/);
 });
 
-it("X48 a URL quoted as given (not as the parser spells it) becomes <JEV_URL>", async () => {
+it("a URL quoted as given (not as the parser spells it) becomes <JEV_URL>", async () => {
   const url = "https://jev.example/a/../tenant-7";
   const { run } = await direct({
     env: { get: async (n: string) => (n === "JEV_URL" ? url : undefined) },
@@ -882,7 +882,7 @@ it("X48 a URL quoted as given (not as the parser spells it) becomes <JEV_URL>", 
   expect((await run("noul")).deny).toBe("noul: $.http.fetch(<JEV_URL>) failed: ECONNREFUSED");
 });
 
-it("X50 a Haiku call that rejects after it was abandoned raises no unhandled rejection", async () => {
+it("a Haiku call that rejects after it was abandoned raises no unhandled rejection", async () => {
   let rejectIt: ((e: Error) => void) | undefined;
   const { run } = await direct({
     env: { get: async () => undefined },
@@ -903,7 +903,7 @@ it("X50 a Haiku call that rejects after it was abandoned raises no unhandled rej
   expect(seen).toHaveLength(0);
 });
 
-test("X53 the Haiku output budget is capped at 16384", async ($, on) => {
+test("the Haiku output budget is capped at 16384", async ($, on) => {
   const asked = haiku(on, () => said("{}"));
   mock.env(on, {});
   const criteria = Object.fromEntries(Array.from({ length: 255 }, (_, i) => [`${"x".repeat(200)}${i}`, "d"]));
@@ -911,7 +911,7 @@ test("X53 the Haiku output budget is capped at 16384", async ($, on) => {
   expect(asked[0]["maxTokens"]).toBe(16384);
 });
 
-it("X04 the registration back-off stops growing at 5 minutes", async () => {
+it("the registration back-off stops growing at 5 minutes", async () => {
   const tries: string[] = [];
   const { run } = await direct({
     tool: {
@@ -939,7 +939,7 @@ it("X04 the registration back-off stops growing at 5 minutes", async () => {
   }
 });
 
-it("X05 the first delayed retry waits 5 s, not less", async () => {
+it("the first delayed retry waits 5 s, not less", async () => {
   const tries: string[] = [];
   const { run } = await direct({
     tool: {
@@ -963,7 +963,7 @@ it("X05 the first delayed retry waits 5 s, not less", async () => {
   expect(tries.filter((n) => n === "batch")).toHaveLength(2);
 });
 
-it("X02 session.start waits up to 5 s for a registration", async () => {
+it("session.start waits up to 5 s for a registration", async () => {
   const waits: number[] = [];
   const { hooks, $ } = await direct({
     tool: { register: () => new Promise(() => {}) },
@@ -979,7 +979,7 @@ it("X02 session.start waits up to 5 s for a registration", async () => {
   expect(waits).toEqual([5000]);
 });
 
-it("X23 a key shorter than 6 characters is not redacted", async () => {
+it("a key shorter than 6 characters is not redacted", async () => {
   const { run } = await direct({
     env: { get: async (n: string) => (n === "JEV_URL" ? "https://jev.example/x" : n === "TYPESAFE_API_KEY" ? "abc" : undefined) },
     http: { fetch: () => Promise.resolve({ status: 400, ok: false, headers: {}, text: JSON.stringify({ detail: "abc is wrong" }) }) },
@@ -1040,8 +1040,62 @@ it("a hanging ui.log does not keep a failed registration pending", async () => {
   expect(tries.filter((n) => n === "batch")).toHaveLength(2);
 });
 
+// A tool that hangs, is marked stuck and later fails is waited for again when it is retried (once per retry, not per call).
+it("a tool that hung once is waited for again at its next retry", async () => {
+  const waits: number[] = [];
+  let rejectFirst: (() => void) | undefined;
+  let tries = 0;
+  const { run } = await direct({
+    tool: {
+      register: (spec: { name: string }) => {
+        if (spec.name !== "score") return Promise.resolve({ tool: TOOL(spec.name) });
+        tries++;
+        return tries === 1 ? new Promise((_, rej) => (rejectFirst = () => rej(new Error("late")))) : new Promise(() => {});
+      },
+    },
+    ui: { log: async () => undefined },
+    clock: {
+      after: (ms: number, fn: () => void) => {
+        waits.push(ms);
+        const t = ms === 1000 ? setTimeout(fn, 0) : undefined;
+        return { cancel: () => clearTimeout(t) };
+      },
+    },
+  });
+  await run("noul"); // the first wait: score hangs, is marked stuck
+  rejectFirst?.();
+  await new Promise((r) => setTimeout(r, 5));
+  await run("noul"); // the retry is waited for again
+  expect(waits.filter((ms) => ms === 1000)).toHaveLength(2);
+});
+
+// A hook above refusing $.clock must not stop the session.start chain.
+it("session.start goes on when waiting for the registration throws", async () => {
+  const { hooks, $ } = await direct({
+    tool: { register: () => new Promise(() => {}) },
+    clock: {
+      after: () => {
+        throw new Error("refused");
+      },
+    },
+  });
+  let called = false;
+  await hooks.get("session.start")?.($, { cwd: "/p" }, Object.assign(async () => ((called = true), { cwd: "/p" }), { signal: new AbortController().signal }));
+  expect(called).toBe(true);
+});
+
+// The cut reason ends with an ellipsis.
+it("an oversized error reason ends with an ellipsis", async () => {
+  const { run } = await direct({
+    env: { get: async (n: string) => (n === "JEV_URL" ? "https://jev.example/x" : undefined) },
+    http: { fetch: () => Promise.resolve({ status: 500, ok: false, headers: {}, text: JSON.stringify({ detail: "z".repeat(5000) }) }) },
+    tool: { register: async (s: { name: string }) => ({ tool: TOOL(s.name) }) },
+  });
+  expect((await run("noul")).deny).toMatch(/z…$/);
+});
+
 // Gaps found by the second mutation round (round 7a).
-it("JJ a DNS error that quotes the bare host of TYPESAFE_BASE_URL is redacted", async () => {
+it("a DNS error that quotes the bare host of TYPESAFE_BASE_URL is redacted", async () => {
   const { run } = await direct({
     env: { get: async (n: string) => (n === "TYPESAFE_BASE_URL" ? "https://secret-base-zq82.invalid" : undefined) },
     http: { fetch: () => Promise.reject(new Error("getaddrinfo ENOTFOUND secret-base-zq82.invalid")) },
@@ -1050,7 +1104,7 @@ it("JJ a DNS error that quotes the bare host of TYPESAFE_BASE_URL is redacted", 
   expect((await run("noul")).deny).toBe("noul: getaddrinfo ENOTFOUND <host>");
 });
 
-it("JJ a key of exactly 6 characters is redacted", async () => {
+it("a key of exactly 6 characters is redacted", async () => {
   const key = "k9Q2x7";
   const { run } = await direct({
     env: { get: async (n: string) => (n === "JEV_URL" ? "https://jev.example/x" : n === "TYPESAFE_API_KEY" ? key : undefined) },
@@ -1062,7 +1116,7 @@ it("JJ a key of exactly 6 characters is redacted", async () => {
   expect(r.deny).toContain("<TYPESAFE_API_KEY>");
 });
 
-it("JJ a JEV_URL without a host is an error, not a request", async () => {
+it("a JEV_URL without a host is an error, not a request", async () => {
   const fetched: string[] = [];
   const { run } = await direct({
     env: { get: async (n: string) => (n === "JEV_URL" ? "https:///v1/systemone" : n === "TYPESAFE_API_KEY" ? "sk-SECRET-1234567890" : undefined) },
@@ -1073,7 +1127,7 @@ it("JJ a JEV_URL without a host is an error, not a request", async () => {
   expect(fetched).toHaveLength(0);
 });
 
-test("JJ a blank TYPESAFE_DEFAULT_MODEL counts as unset: jev-latest", async ($, on) => {
+test("a blank TYPESAFE_DEFAULT_MODEL counts as unset: jev-latest", async ($, on) => {
   const { fetched } = setup(on, { env: { JEV_URL: "https://jev.example/x", TYPESAFE_DEFAULT_MODEL: "  " } });
   await call($, "noul");
   expect(fetched[0]?.body.model).toBe("jev-latest");

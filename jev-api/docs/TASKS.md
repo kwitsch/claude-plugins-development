@@ -16,12 +16,11 @@ Legend: `[x]` finished (done, or closed without code: status `closed` in the tas
 - [x] [F09](tasks/F09-abandoned-request-not-cancelled.md) A timed-out or abandoned request keeps running on the server
 - [x] [F16](tasks/F16-hung-registration-stays-memoized.md) medium, bug: a hung registration stays memoized; every owned call waits 1 s, every session.start 5 s, no retry; one hung tool holds the other three
 - [x] [F17](tasks/F17-registration-retry-without-backoff.md) low: a failing registration is retried on every owned call (1 attempt + 1 log line per call), no back-off
-- [x] [F18](tasks/F18-haiku-call-not-cancelled-default-effort.md) low: the Haiku fallback call gets no `signal` (not cancelled when abandoned) and no `effort` (thinking shares `maxTokens`)
-- [x] [F19](tasks/F19-jevfort-compaction-wait-and-hook-budget.md) medium (jevfort): every compaction now waits ~4.6 s for the ranking (9 s when Jev hangs, since 0.9.1; 12 s before); 12 s / 15 s budgets vs the engine's 10 s hook budget need a live check
 
 ## Remaining
 
-None: every finding is done or closed (F16-F19 came from the re-run on 0.3.2 / jevfort 0.9.1, see the evaluation).
+- [ ] [F18](tasks/F18-haiku-call-not-cancelled-default-effort.md) `partial` low: the Haiku fallback call gets no `signal` (not cancelled when abandoned) and no `effort` (thinking shares `maxTokens`)
+- [ ] [F19](tasks/F19-jevfort-compaction-wait-and-hook-budget.md) `partial` medium (jevfort): every compaction now waits ~4.6 s for the ranking (9 s when Jev hangs, since 0.9.1; 12 s before); 12 s / 15 s budgets vs the engine's 10 s hook budget need a live check
 
 ## Closed without code (measurement records, decided 2026-11-13)
 

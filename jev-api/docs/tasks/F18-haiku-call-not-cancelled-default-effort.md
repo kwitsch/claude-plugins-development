@@ -1,7 +1,7 @@
 ---
 id: F18
 title: The Haiku fallback call is not cancelled when abandoned and runs at the model's default effort
-status: done
+status: partial
 priority: low
 area: jev-api/src/hooks/register.mts (askHaiku)
 ---

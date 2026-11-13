@@ -102,7 +102,7 @@ type Engine = {
   };
   /** Model requests: the stand-in for Jev when no System One access is configured. */
   model: {
-    /** Asks a model one question; resolves the reply, or `isAnswered: false` with the reason. */
+    /** Asks a model one question; resolves the reply, or `isAnswered: false` with the reason. `options.signal` cuts the call (the request has no such field). */
     complete(spec: { model: string; system: string; prompt: string; maxTokens: number; timeoutMs: number }, options?: { signal?: AbortSignal }): Promise<{ isAnswered: true; text: string } | { isAnswered: false; reason: string }>;
   };
   /** Tool registry. */
@@ -243,6 +243,15 @@ const MAX_DETAIL = 1000;
 
 /** How long an owned tool call waits for the tools to register before it goes on (ms; session.start waits five times as long): a registration that never answers must not hold a call. */
 const REGISTER_WAIT_MS = 1000;
+
+/** The longest a failed registration waits for its next try (ms); the first retry is immediate. */
+const MAX_RETRY_MS = 300_000;
+
+/** The delay before the second retry of a refused tool (ms); it doubles for every further one. */
+const RETRY_BASE_MS = 5000;
+
+/** The shortest API key that is replaced in error texts (a shorter one would match ordinary words). */
+const MIN_REDACT_KEY = 6;
 
 /** The engine names a registered tool `mcp__<plugin>__<name>`. */
 const TOOL_PREFIX = "mcp__jev-api__";
@@ -600,7 +609,8 @@ function round4(v: number): number {
 
 /**
  * Checks one answer Haiku gave against the System One answer format and rebuilds it without extra fields, calibrated
- * toward Jev: a `noul` is stretched ({@link stretch}) and a score is the mean level index of the probabilities.
+ * toward Jev: a `noul` is stretched ({@link stretch}), a score is the mean level index of the probabilities, and the
+ * probabilities of a `choice` and of a score are normalized to sum 1 (an all-zero set is rejected).
  *
  * @param q - The question.
  * @param a - The answer as parsed from Haiku's reply.
@@ -676,7 +686,6 @@ async function askHaiku($: Engine, tool: ToolName, state: string, questions: Que
     });
     const r = await Promise.race([reply, aborted]);
     if (r === "aborted") return fail(tool, "the call was abandoned");
-    // The engine reports its own timeout as `aborted`: told apart from an abandoned call by the signal.
     if (!r.isAnswered) {
       if (r.reason !== "aborted") return fail(tool, `fallback: ${r.reason}`);
       // `aborted` is also how the engine reports its own timeout; the signal tells the two apart (whichever abort path won the race)
@@ -726,7 +735,7 @@ async function ask($: Engine, tool: ToolName, state: string, questions: Question
   const redact = (text: string): string => {
     // In this order: the URL first (it may contain the key), the key before the host (a key may contain the host text).
     let t = env.jevUrl ? hide(text, target.url, "<JEV_URL>") : env.base ? hide(text, target.url, "<TYPESAFE_BASE_URL>/v1/systemone") : text;
-    if (key && key.length >= 6) t = t.replaceAll(key, "<TYPESAFE_API_KEY>"); // not a short key: it would match ordinary words
+    if (key && key.length >= MIN_REDACT_KEY) t = t.replaceAll(key, "<TYPESAFE_API_KEY>"); // not a short key: it would match ordinary words
     return env.jevUrl || env.base ? hideHost(t, target.url) : t;
   };
   let timer: { cancel(): void } | undefined;
@@ -791,9 +800,6 @@ type RegState = {
   stuck: Set<ToolName>;
 };
 
-/** The longest a failed registration waits for its next try (ms); the first retry is immediate. */
-const MAX_RETRY_MS = 300_000;
-
 /**
  * Registers one tool and records the full name the engine gave it; never rejects.
  *
@@ -811,8 +817,8 @@ async function registerOne($: Engine, st: RegState, type: ToolName): Promise<voi
   } catch (err) {
     const n = (st.failures.get(type) ?? 0) + 1;
     st.failures.set(type, n);
-    // The first retry is immediate (the next hook), then 5 s, 10 s, ... up to MAX_RETRY_MS: a tool the engine keeps refusing must not cost every call.
-    st.retryAt.set(type, Date.now() + (n === 1 ? 0 : Math.min(MAX_RETRY_MS, 5000 * 2 ** (n - 2))));
+    // The first retry is immediate (the next hook), then RETRY_BASE_MS, twice that, ... up to MAX_RETRY_MS: a tool the engine keeps refusing must not cost every call.
+    st.retryAt.set(type, Date.now() + (n === 1 ? 0 : Math.min(MAX_RETRY_MS, RETRY_BASE_MS * 2 ** (n - 2))));
     // The engine starts a log line with the plugin's name; logging is best effort, and once per tool.
     if (n === 1) {
       try {

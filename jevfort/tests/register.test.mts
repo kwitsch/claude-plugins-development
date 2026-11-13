@@ -1217,14 +1217,14 @@ test("With routing off the band passes", { options: { routing: "off" } }, async 
 });
 
 // JJ tests (round 7a).
-test("JJ the done check's jev-api call gets the interactive 4 s timeout", { options: { classify: false } }, async ($, on) => {
+test("the done check's jev-api call gets the interactive 4 s timeout", { options: { classify: false } }, async ($, on) => {
   const { sent } = setup(on, { messages: [user("rename foo to bar in all files")], jev: unfinished, env: { TYPESAFE_API_KEY: "k" } });
   followUps(on);
   await $.turn.complete(answered("t1", "I renamed it in one file."));
   expect(sent.map((q) => q.timeout)).toEqual([4]);
 });
 
-test("JJ the prompt classifier's jev-api call gets the interactive 4 s timeout", async ($, on) => {
+test("the prompt classifier's jev-api call gets the interactive 4 s timeout", async ($, on) => {
   const { sent } = setup(on, { messages: [user("x")], jev: () => undefined, env: { TYPESAFE_API_KEY: "k" } });
   on("command.list", () => ({ value: [] }));
   on("prompt.submit", (_$, e) => ({ text: e.text }));
@@ -1233,7 +1233,7 @@ test("JJ the prompt classifier's jev-api call gets the interactive 4 s timeout",
   expect(sent.every((q) => q.timeout === 4)).toBe(true);
 });
 
-test("JJ a blank Jev variable counts as unset, as in jev-api: Haiku budget and timeout 14", async ($, on) => {
+test("a blank Jev variable counts as unset, as in jev-api: Haiku budget and timeout 14", async ($, on) => {
   const seen: unknown[] = [];
   const { sent } = setup(on, { messages: [user("what does this project do?")], jev: () => undefined, env: { TYPESAFE_API_KEY: "  ", JEV_URL: " " } });
   claudeBeneath(on, seen);

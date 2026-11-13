@@ -23,14 +23,14 @@ Facts a plugin author keeps getting wrong. Re-verify with the `live-verify` skil
 - A **directory** in `watchPaths` is watched recursively and survives unlink+create, new files and new subdirectories (also on 9P for changes made from WSL), but every event below it reaches the hook: about 100 events per second (3000 files = 35 s of hook backlog), `.git` writes included. Offer it as an opt-in (env var), never as the default.
 - SessionStart and CwdChanged `command` hooks can print `watchPaths`; `mcp_tool` hooks of SessionStart are skipped while the server connects.
 
-## Mods engine (`$`) behaviour (function-hooks modules, checked live on 2.1.325)
+## Mods engine (`$`) behaviour (function-hooks modules; 2.1.323 typings, checked live on 2.1.325 except where marked)
 
 - `$.model.complete(request, options?)`: `signal` is an option (second argument), not a request field; `maxTokens` and `timeoutMs` must be whole numbers >= 1 (round seconds * 1000: `2.01 * 1000` is 2009.9999999999998, a refused value); its own timeout comes back as `{ isAnswered: false, reason: "aborted" }`, so tell it from an abandoned call by your own signal.
 - `$.http.fetch` errors quote the URL, a DNS failure only the bare host (`getaddrinfo ENOTFOUND <host>`), and a runtime quotes a rejected header value whole (a key with a newline). Redact in this order: URL, secret, host (whole names only, ignoring case, IPv6 without brackets); a secret may contain the host text, a host may be part of ordinary words.
 - Tools a plugin registers with `$.tool.register` run **without a permission check**; only a deny rule withholds them. State it in the plugin's README.
 - The built-in `cc-plugin-sec-default` bypasses user-tier hooks of several events, now including `session.compact` (debug log `bypassed by cc-plugin-sec-default (tier user)`): a hook that must run there cannot be a user-tier plugin hook.
 - An in-flight `$.tool.call` does not use up the hook's 10 s budget (a 30 s call inside `prompt.submit` was not cut); the engine caps one `$.http.fetch` at 30 s.
-- Registration: `$.tool.register` rejects until the session is bound (before `session.start`): retry per hook with back-off instead of memoizing a failure, and bound the wait for a registration that never answers (pay it once per tool).
+- Registration (typings and an in-process harness, not measured live): `$.tool.register` rejects until the session is bound (before `session.start`): retry per hook with back-off instead of memoizing a failure, and bound the wait for a registration that never answers (pay it once per tool).
 
 ## MCP and misc
 
