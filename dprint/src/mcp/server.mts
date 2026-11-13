@@ -28,6 +28,11 @@ const SERVER_INFO = { name: SERVER_NAME, version: readVersion() };
 const DEFAULT_PROTOCOL = "2025-11-25";
 /** Input schema of every tool: any object, since Claude Code builds the input from the `hooks.json` templates. */
 const ANY_OBJECT = { type: "object", additionalProperties: true };
+/**
+ * Tool `_meta` that withholds every tool from the model (ToolSearch finds none) while `mcp_tool` hooks still call
+ * them. Live-checked on Claude Code 2.1.323 with a local stdio server; the docs name it only for cloud sessions.
+ */
+const HOOK_ONLY_META = { ui: { visibility: ["app"] } };
 
 /**
  * Read the plugin version from the generated manifest next to this server.
@@ -146,6 +151,7 @@ function startServer(): void {
             name,
             description,
             inputSchema: ANY_OBJECT,
+            _meta: HOOK_ONLY_META,
           })),
         });
       case "tools/call": {

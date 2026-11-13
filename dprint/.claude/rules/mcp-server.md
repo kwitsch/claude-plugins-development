@@ -20,6 +20,10 @@ sources; this rule records behaviour and constraints only.
   `watch-paths` runs as its own `command` hook.
 - Scope never uses `process.cwd()`.
 - Needs dprint >= 0.50.
+- Every tool in `tools/list` carries `_meta: { ui: { visibility: ["app"] } }` (`HOOK_ONLY_META`): the model never sees
+  the tools (ToolSearch finds none), `mcp_tool` hooks still call them. Live-checked on 2.1.323 with a local stdio
+  server (a deny rule behaves the same but a plugin cannot ship one); the docs name the field only for cloud sessions,
+  so `mcp-server.test.mts` pins it.
 
 ## Modules
 

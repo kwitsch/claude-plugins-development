@@ -197,6 +197,10 @@ test("initialize reports dprint-hooks with the manifest version; tools/list has 
     version: manifest.version,
   });
   const list = await s.rpc("tools/list", {});
+  // hook-only tools: no model visibility, so ToolSearch never lists them
+  for (const t of list.result.tools) {
+    assert.deepEqual((t as { _meta?: unknown })._meta, { ui: { visibility: ["app"] } });
+  }
   assert.deepEqual(
     list.result.tools.map((t) => t.name),
     [
