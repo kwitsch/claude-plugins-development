@@ -238,6 +238,9 @@ const MAX_LEVELS = 10;
 /** The most output tokens a Haiku fallback call may ask for. */
 const HAIKU_MAX_TOKENS = 16_384;
 
+/** The most characters of an API error reason passed on to the model (a server may send megabytes; cut after the redaction, never before it). */
+const MAX_DETAIL = 1000;
+
 /** How long an owned tool call waits for the tools to register before it goes on (ms; session.start waits five times as long): a registration that never answers must not hold a call. */
 const REGISTER_WAIT_MS = 1000;
 
@@ -741,7 +744,8 @@ async function ask($: Engine, tool: ToolName, state: string, questions: Question
     if (res === "aborted") return fail(tool, "the call was abandoned");
     if (!res.ok) {
       const why = detail(res.text);
-      return fail(tool, `HTTP ${res.status}${why === undefined ? "" : `: ${redact(why)}`}`);
+      const text = why === undefined ? "" : redact(why);
+      return fail(tool, `HTTP ${res.status}${why === undefined ? "" : `: ${text.length > MAX_DETAIL ? `${text.slice(0, MAX_DETAIL)}…` : text}`}`);
     }
     const body = json(res.text);
     if (body === undefined) return fail(tool, `HTTP ${res.status} response was not valid JSON`);

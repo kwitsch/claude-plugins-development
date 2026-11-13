@@ -988,6 +988,68 @@ it("X23 a key shorter than 6 characters is not redacted", async () => {
   expect((await run("noul")).deny).toBe("noul: HTTP 400: abc is wrong");
 });
 
+// F21: an error body of megabytes reaches the model cut, and a key at the cut is gone whole.
+it("an oversized error reason is cut after the redaction", async () => {
+  const key = "sk-SECRET-1234567890";
+  const { run } = await direct({
+    env: { get: async (n: string) => (n === "JEV_URL" ? "https://jev.example/x" : n === "TYPESAFE_API_KEY" ? key : undefined) },
+    http: { fetch: () => Promise.resolve({ status: 500, ok: false, headers: {}, text: JSON.stringify({ detail: "x".repeat(995) + key + "y".repeat(5_000_000) }) }) },
+    tool: { register: async (s: { name: string }) => ({ tool: TOOL(s.name) }) },
+  });
+  const r = await run("noul");
+  expect(r.deny?.length).toBeLessThanOrEqual("noul: HTTP 500: ".length + 1001);
+  expect(r.deny).not.toContain("sk-SECRET");
+  expect(r.deny).toContain("<TYPESAFE_API_KEY>".slice(0, 5));
+});
+
+// Gaps found by the second mutation round (round 7a).
+it("JJ a DNS error that quotes the bare host of TYPESAFE_BASE_URL is redacted", async () => {
+  const { run } = await direct({
+    env: { get: async (n: string) => (n === "TYPESAFE_BASE_URL" ? "https://secret-base-zq82.invalid" : undefined) },
+    http: { fetch: () => Promise.reject(new Error("getaddrinfo ENOTFOUND secret-base-zq82.invalid")) },
+    tool: { register: async (s: { name: string }) => ({ tool: TOOL(s.name) }) },
+  });
+  expect((await run("noul")).deny).toBe("noul: getaddrinfo ENOTFOUND <host>");
+});
+
+it("JJ a key of exactly 6 characters is redacted", async () => {
+  const key = "k9Q2x7";
+  const { run } = await direct({
+    env: { get: async (n: string) => (n === "JEV_URL" ? "https://jev.example/x" : n === "TYPESAFE_API_KEY" ? key : undefined) },
+    http: { fetch: () => Promise.reject(new Error(`Header 'Authorization' has invalid value: 'Bearer ${key}\nX'`)) },
+    tool: { register: async (s: { name: string }) => ({ tool: TOOL(s.name) }) },
+  });
+  const r = await run("noul");
+  expect(r.deny).not.toContain(key);
+  expect(r.deny).toContain("<TYPESAFE_API_KEY>");
+});
+
+it("JJ a JEV_URL without a host is an error, not a request", async () => {
+  const fetched: string[] = [];
+  const { run } = await direct({
+    env: { get: async (n: string) => (n === "JEV_URL" ? "https:///v1/systemone" : n === "TYPESAFE_API_KEY" ? "sk-SECRET-1234567890" : undefined) },
+    http: { fetch: (url: string) => (fetched.push(url), Promise.reject(new Error("x"))) },
+    tool: { register: async (s: { name: string }) => ({ tool: TOOL(s.name) }) },
+  });
+  expect((await run("noul")).deny).toBe("noul: JEV_URL must be an http(s) URL");
+  expect(fetched).toHaveLength(0);
+});
+
+test("JJ a blank TYPESAFE_DEFAULT_MODEL counts as unset: jev-latest", async ($, on) => {
+  const { fetched } = setup(on, { env: { JEV_URL: "https://jev.example/x", TYPESAFE_DEFAULT_MODEL: "  " } });
+  await call($, "noul");
+  expect(fetched[0]?.body.model).toBe("jev-latest");
+});
+
+for (const [label, wrap] of [["a fenced reply with a trailing newline", (j: string) => "```json\n" + j + "\n```\n"], ["a bare fence", (j: string) => "```\n" + j + "\n```"]] as const) {
+  test(`JJ Haiku: ${label} is read`, async ($, on) => {
+    setup(on, { env: {} });
+    haiku(on, () => said(wrap(JSON.stringify({ answers: { answer: HAIKU_ANSWERS["noul"] } }))));
+    const r = await call($, "noul");
+    expect(JSON.parse(r.result ?? "null")).toMatchObject(CALIBRATED["noul"] as object);
+  });
+}
+
 // Live smoke tests (opt-in): run against the System One server named by JEV_URL in the shell; skipped without it.
 // Nothing is hardcoded: the URL, key and model come only from the environment.
 describe.skipIf(!process.env.JEV_URL)("live JEV System One (JEV_URL)", () => {

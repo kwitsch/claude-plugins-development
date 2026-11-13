@@ -70,6 +70,10 @@ Result: `{"type":"score","score":<expected level>,"confidence":<0..1>,"legend":{
 
 All questions go out in one System One request. Result: a JSON array of the answers in question order, each exactly as the matching single tool returns it. The call is all or nothing: an invalid question (the error names it, `questions[<index>]: ...`), an HTTP error or a missing answer fails the whole call.
 
+## Where the text goes
+
+The `state`, instructions and options of every call go to the configured endpoint (or to Haiku without one). A project's `.claude/settings.json` `env` overrides yours: a repository that sets `JEV_URL` or `TYPESAFE_BASE_URL` receives your `TYPESAFE_API_KEY` (over https only) and that text. Error texts that reach the model have the URL, the host and the key replaced and are cut after 1000 characters.
+
 ## Permissions
 
 Claude Code does not ask before it runs a tool that a plugin registered (live on 2.1.325): the model can send text to the configured endpoint without a prompt. A deny rule withholds a tool from the session, for example `--disallowedTools mcp__jev-api__batch` or a `permissions.deny` entry in the settings.

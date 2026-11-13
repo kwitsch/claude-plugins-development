@@ -207,3 +207,39 @@ test("A short follow-up is classified with the previous reply as context", async
   expect(String(sentStates[0]?.previous_reply)).toContain("Want me to fix that?");
   expect(sentStates[0]?.request).toBe("fix it");
 });
+
+// JJ: the compaction ranking's budget and jev-api timeout, with Jev configured and while Haiku answers.
+for (const [label, env, ms, s] of [["Jev", { TYPESAFE_API_KEY: "k" }, 9000, 9], ["Haiku", {}, 15_000, 14]] as const) {
+  test(`JJ session.compact gives a ${label} ranking ${ms} ms and jev-api ${s} s`, async ($, on) => {
+    const messages: Msg[] = [
+      { role: "user", text: "fix the failing date test", toolUses: [] },
+      { role: "assistant", text: "", toolUses: ["a", "b", "c"].map((x, i) => ({ tool_use_id: `t${i}`, tool: "Bash", input: { command: `step ${x}` }, text: x })) },
+    ];
+    mock.store(on, {});
+    mock.env(on, env);
+    const clock = mock.clock(on);
+    on("session.cwd", () => ({ value: CWD }));
+    on("session.messages", () => ({ value: messages }));
+    on("ui.status", () => ({ value: undefined }));
+    on("tool.list", () => ({ value: JEV_TOOLS }));
+    let apiTimeout: unknown;
+    on("tool.call", (_$, e, next) => {
+      if (e.tool !== JEV_BATCH) return next(e);
+      apiTimeout = e.timeout;
+      return new Promise<never>(() => {});
+    });
+    let compacted = false;
+    on("session.compact", () => {
+      compacted = true;
+      return { skip: "test" };
+    });
+    const done = $.session.compact({ trigger: "manual", messages });
+    while (apiTimeout === undefined) await clock.advance(0);
+    await clock.advance(ms - 1);
+    expect(compacted).toBe(false);
+    await clock.advance(1);
+    await done;
+    expect(compacted).toBe(true);
+    expect(apiTimeout).toBe(s);
+  });
+}

@@ -33,6 +33,7 @@ const MAX_OPTIONS = 255;
 const MIN_LEVELS = 2;
 const MAX_LEVELS = 10;
 const HAIKU_MAX_TOKENS = 16384;
+const MAX_DETAIL = 1e3;
 const REGISTER_WAIT_MS = 1e3;
 const TOOL_PREFIX = "mcp__jev-api__";
 const SPECS = {
@@ -430,7 +431,8 @@ async function ask($, tool, state, questions, env, timeoutMs, signal) {
 		if (res === "aborted") return fail(tool, "the call was abandoned");
 		if (!res.ok) {
 			const why = detail(res.text);
-			return fail(tool, `HTTP ${res.status}${why === undefined ? "" : `: ${redact(why)}`}`);
+			const text = why === undefined ? "" : redact(why);
+			return fail(tool, `HTTP ${res.status}${why === undefined ? "" : `: ${text.length > MAX_DETAIL ? `${text.slice(0, MAX_DETAIL)}…` : text}`}`);
 		}
 		const body = json(res.text);
 		if (body === undefined) return fail(tool, `HTTP ${res.status} response was not valid JSON`);
