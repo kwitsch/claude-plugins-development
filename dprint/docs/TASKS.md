@@ -1,6 +1,6 @@
 # dprint performance tasks
 
-Source: performance analysis of the dprint MCP server (findings F01-F28) and the re-evaluation of plugin 0.13.0 in [EVALUATION-2026-11-13.md](EVALUATION-2026-11-13.md) (current numbers, comparison with the task documents, finding F29). One detail document per task in `tasks/`; read it before working on the task. Release carrying the finished work: dprint 0.8.0 (PR #19); F09, F10, F18, F25, F27 and part of F28: dprint 0.12.1; F04, F12: dprint 0.13.0.
+Source: performance analysis of the dprint MCP server (findings F01-F28) and the re-evaluation of plugin 0.13.0, re-run on 0.13.2, in [EVALUATION-2026-11-13.md](EVALUATION-2026-11-13.md) (current numbers, comparison with the task documents and between the two versions, bug hunt, finding F29). One detail document per task in `tasks/`; read it before working on the task. Release carrying the finished work: dprint 0.8.0 (PR #19); F09, F10, F18, F25, F27 and part of F28: dprint 0.12.1; F04, F12: dprint 0.13.0.
 
 Legend: `[x]` finished (done, or closed without code: status `closed` in the task document). `[ ]` not finished; tag = `open` (not started), `partial` (some of it shipped, remainder described in the task), `docs-only` (no code change intended; the remaining action is a documentation sentence).
 
@@ -44,5 +44,5 @@ Legend: `[x]` finished (done, or closed without code: status `closed` in the tas
 
 ## Notes
 
-- F24 stays open: the live smoke test (2026-11-13) confirmed it; the fix needs a prototype (see its Status).
+- F24 stays open: the live smoke test (2026-11-13) confirmed it; the re-list-from-FileChanged prototype does not fix it, next candidate is directories as `watchPaths` (see its Status).
 - Finding ids match the headings of the original analysis; file names are `<id>-<slug>.md`.

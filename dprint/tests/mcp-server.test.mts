@@ -994,6 +994,29 @@ test("file_changed formats an in-cwd file on disk (CRLF files keep CRLF); unlink
   assert.equal(readFileSync(cr, "utf8"), "x  \ry  \r");
 });
 
+test("git checks use the real path: a file reached through a symlink into an ignored directory is not formatted", async (t) => {
+  const git = spawnSync("which", ["git"], { encoding: "utf8" }).stdout?.trim();
+  if (!git) return t.skip("git not on PATH");
+  symlinkSync(git, path.join(bin, "git"));
+  stubDprint();
+  const g = (...args: string[]) => {
+    const r = spawnSync(git, ["-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false", ...args], { cwd: repo, encoding: "utf8" });
+    assert.equal(r.status, 0, r.stderr);
+  };
+  mkdirSync(path.join(repo, "gen"));
+  writeFileSync(path.join(repo, ".gitignore"), "gen/\n");
+  symlinkSync(path.join(repo, "gen"), path.join(repo, "out"));
+  g("init", "-q");
+  g("add", ".gitignore", "dprint.json");
+  g("commit", "-qm", "init");
+  const s = startServer();
+  const viaLink = path.join(repo, "out/x.ts");
+  assert.deepEqual(await s.call({ cwd: repo, tool_name: "Write", tool_input: { file_path: viaLink, content: "x   \n" } }), {}); // Write: ignored
+  writeFileSync(path.join(repo, "gen/y.ts"), "y  \n");
+  assert.deepEqual(await s.tool("file_changed", { cwd: repo, file_path: path.join(repo, "out/y.ts"), event: "change" }), {});
+  assert.equal(readFileSync(path.join(repo, "gen/y.ts"), "utf8"), "y  \n"); // file_changed: ignored
+});
+
 test("file_changed: mixed line endings and BOM files; a git glob in the path matches only that file", async (t) => {
   const git = spawnSync("which", ["git"], { encoding: "utf8" }).stdout?.trim();
   if (!git) return t.skip("git not on PATH");

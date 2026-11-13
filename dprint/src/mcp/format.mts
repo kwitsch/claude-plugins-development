@@ -545,7 +545,8 @@ const execFileAsync = promisify(execFile);
  * Runs in the nearest existing ancestor directory of the file, so a nested repository or submodule applies its own
  * ignore rules and a Write to a new directory still resolves. No git, no repository or a timeout mean "not ignored".
  *
- * @param fp - Absolute file path.
+ * @param fp - Absolute real path (symlinks resolved: git refuses a pathspec beyond a symbolic link and would answer
+ * "not ignored").
  * @returns `true` only when git reports the file as ignored (exit 0).
  */
 async function isGitIgnored(fp: string): Promise<boolean> {
@@ -645,8 +646,8 @@ async function formatOnDisk(sc: Scope, s: { fp: string; real: string }, signal?:
       try {
         const { stdout } = await execFileAsync(
           "git",
-          ["--literal-pathspecs", "--no-optional-locks", "status", "--porcelain", "--untracked-files=normal", "--ignored=matching", "--", s.fp],
-          { cwd: path.dirname(s.fp), encoding: "utf8", timeout: 10_000 },
+          ["--literal-pathspecs", "--no-optional-locks", "status", "--porcelain", "--untracked-files=normal", "--ignored=matching", "--", s.real],
+          { cwd: path.dirname(s.real), encoding: "utf8", timeout: 10_000 },
         );
         if (stdout === "" || stdout.startsWith("!!")) return false;
       } catch {
@@ -918,7 +919,7 @@ export async function formatPre(
     if (args.tool_name === "Write" && overCap(Buffer.byteLength(ti.content ?? ""), fp)) return {};
     if (args.tool_name === "Edit" && overCap(statSync(fp).size + Buffer.byteLength(ti.new_string ?? ""), fp)) return {}; // ENOENT -> catch -> {}
     // user decision: gitignored files are never formatted
-    if (await isGitIgnored(fp)) return {};
+    if (await isGitIgnored(s.real)) return {};
     // cancelled meanwhile: spawn and format nothing (checked again before the second Edit format)
     if (signal?.aborted) return {};
     const uri = pathToFileURL(fp).href;

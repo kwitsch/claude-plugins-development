@@ -1,6 +1,6 @@
-# dprint MCP server evaluation 2026-11-13 (plugin 0.13.0)
+# dprint MCP server evaluation 2026-11-13 (plugin 0.13.0, re-run on 0.13.2)
 
-Fresh measurement of the built `plugin/mcp/server.mjs` after the F01-F28 work (last changes: 0.12.1 and 0.13.0). Purpose: check that the shipped fixes hold, compare with the figures in the task documents, and record what is left.
+Fresh measurement of the built `plugin/mcp/server.mjs` after the F01-F28 work (last changes: 0.12.1 and 0.13.0). Purpose: check that the shipped fixes hold, compare with the figures in the task documents, and record what is left. The same day the measurement was repeated on 0.13.2 after the bug hunt: see [Re-run on 0.13.2](#re-run-on-0132) and [Bug hunt](#bug-hunt).
 
 **One machine only**: WSL2 (kernel 6.18.33.2-microsoft-standard-WSL2), 12 vCPUs, 9.7 GB RAM, ext4 work tree, Node v24.22.2, real dprint 0.64.3 from PATH (`~/.local/bin/dprint`) with `@dprint/typescript` 0.96.1 and `@dprint/json` 0.25.2 from the local plugin cache. The same machine class as the old task documents, but a different day and load; treat differences below ~20% as noise. Re-measure before relying on a number.
 
@@ -116,11 +116,97 @@ Per-`statSync` cost, same probe loop as `bashFinished`'s filter: ext4 3-5 us; 9P
 | dprint lsp child RSS                             | 500 KB .ts 180-290 MB (F04)                                                                     | 205 KB .ts 104 MB, released after 2 min idle                                   | Consistent; now bounded in time                                                      |
 | file_written                                     | 0.5-1.3 ms (F22, real session)                                                                  | 0.2-0.5 ms                                                                     | Consistent                                                                           |
 
+## Re-run on 0.13.2
+
+Same machine, same day (load average ~0.8-1.0 during the runs), same fixtures, real dprint 0.64.3, against the built `plugin/mcp/server.mjs` of 0.13.2 (stderr `running (v0.13.2)`). Code changes on the measured paths since 0.13.0: idle-exit client `close()` and no pinned reply buffer in `DprintLsp`, `git status --literal-pathspecs`, BOM-keeping decoder and a mixed-line-ending check in the on-disk format, empty-`new_string` Edit widening, JSON-quoted notice names, per-call Bash start keys (`tool_use_id`) with an hourly prune, `bash_finished` on PostToolUseFailure, server answers its own `protocolVersion`. `watch-paths.mjs` and `watch-list.mjs` are unchanged since 0.12.1 (`git diff`). Harness: `bench2.mjs` (scratchpad copy of `bench.mjs`) differs only in the Bash phase: every `bash_started`/`bash_finished` pair carries its own `tool_use_id` and `hook_event_name: "PostToolUse"` (without them 0.13.2 keys all calls of a session alike, as 0.13.0 did), 15 instead of 11 later calls, and a new cold case (7 fresh servers, `initialize`, first Bash call in the 4951-file repo, then a second one). Two full runs; medians run A / run B, p90 in brackets; 0.13.0 medians (run 1 / run 2) from the tables above for comparison. Single machine: differences below ~20% are noise.
+
+### format_pre
+
+| Case                                          | 0.13.2 median ms (A / B) | p90 (A / B)   | 0.13.0 median |
+| --------------------------------------------- | ------------------------ | ------------- | ------------- |
+| Cold first call, Write small (dirty)          | 13.9 / 14.0              | 14.4 / 15.6   | 13.5 / 13.8   |
+| Cold first call, Edit small (dirty line)      | 14.3 / 14.2              | 15.3 / 17.4   | 14.2 / 13.6   |
+| Warm Write small, dirty                       | 4.0 / 4.3                | 4.5 / 4.5     | 4.3 / 4.0     |
+| Warm Write small, already formatted (no-op)   | 3.7 / 3.9                | 4.3 / 4.3     | 3.8 / 3.6     |
+| Warm Edit small, dirty line                   | 3.9 / 4.0                | 4.1 / 4.2     | 4.2 / 3.9     |
+| Warm Edit small, no-op (formatted new_string) | 3.7 / 4.2                | 4.0 / 4.9     | 4.0 / 3.9     |
+| Write 200 KB, already formatted               | 103.7 / 104.5            | 108.2 / 108.4 | 102.8 / 100.8 |
+| Write 200 KB, one dirty line                  | 129.2 / 128.3            | 135.7 / 130.3 | 126.8 / 125.0 |
+| Edit 200 KB, dirty line                       | 126.3 / 121.5            | 136.0 / 123.1 | 121.0 / 120.6 |
+| Edit 200 KB, no-op                            | 103.4 / 101.3            | 105.0 / 104.3 | 102.8 / 103.1 |
+| Edit on unformatted 518-line file             | 55.9 / 54.9              | 61.3 / 56.5   | 54.8 / 53.4   |
+| Edit on unformatted 7490-line file (`{}`)     | 604.5 / 606.4            | 612.3 / 608.8 | 604.1 / 603.7 |
+| Warm Write small again after the 200 KB cases | 4.8 / 4.9                | 5.5 / 5.6     | n/a / 4.9     |
+
+`file_written` small 0.2 ms, 200 KB 0.5 ms; `drain_notices` (empty) 0.1-0.2 ms. Same results (formatted or `{}`) as on 0.13.0 in every case.
+
+### Idle respawn, 1 MiB guard, FileChanged burst
+
+| Case                                                | 0.13.2 median ms (A / B) | p90 (A / B)   | 0.13.0 median |
+| --------------------------------------------------- | ------------------------ | ------------- | ------------- |
+| `DprintLsp` very first format (spawn + plugin load) | 8.0 / 8.0                | n/a           | 8.3 / 8.3     |
+| Small format, warm child                            | 1.0 / 1.0                | 1.1 / 1.1     | 1.0 / 1.0     |
+| Small format, after idle exit (respawn)             | 7.4 / 7.5                | 8.1 / 8.3     | 7.7 / 7.3     |
+| 200 KB format, warm child                           | 107.2 / 98.7             | 119.2 / 105.8 | 103.1 / 100.8 |
+| 200 KB format, after idle exit (respawn)            | 144.3 / 131.0            | 145.4 / 136.3 | 130.3 / 130.0 |
+| Guard: Write 1.15 MB, first call on a fresh server  | 11.7 / 11.1              | 14.2 / 14.2   | 11.9 / 13.2   |
+| Guard: Edit on the 1.15 MB file                     | 0.3 / 0.3                | 0.4 / 0.4     | 0.4 / 0.3     |
+| Burst of 60 `file_changed`: wall time               | 254.9 / 241.9            | 288.9 / 250.2 | 266.4 / 252.7 |
+| Burst: per-event latency (360 events per run)       | 153.0 / 141.9            | 250.3 / 233.3 | 158.3 / 146.7 |
+| Small `format_pre` Write sent 5 ms into the burst   | 19.9 / 18.9              | 21.0 / 19.9   | 23.8 / 19.3   |
+| Small `format_pre` Write after the bursts           | 4.7 / 4.6                | 5.1 / 5.3     | n/a / 4.4     |
+
+No `dprint` child after the idle period; 0 `dprint` children over all 10 guarded servers, server RSS after 5 x 1.15 MB Writes 65.2 MB (HWM 65.9); 60/60 files formatted in every burst rep.
+
+### watch-paths and bash_started/bash_finished (F25, F29)
+
+| Case                                                                    | 0.13.2 median ms (A / B)     | p90 (A / B)   | 0.13.0 median               |
+| ----------------------------------------------------------------------- | ---------------------------- | ------------- | --------------------------- |
+| watch-paths, bench repo (106 paths, 14 KB)                              | 61.4 / 56.7                  | 67.2 / 58.2   | 57.1 / 55.5                 |
+| watch-paths, 4951 paths (672 KB)                                        | 173.1 / 181.0                | 182.2 / 186.9 | 167.2 / 162.7               |
+| `dprint file-paths` alone, bench repo / 4951 files                      | 9.1 / 8.1 and 26.7 / 27.6    | n/a           | 7.5-7.7 and 23.8-25.7       |
+| 4951-file repo, cold: fresh server, first Bash call (7 servers per run) | 136.6 / 138.2                | 139.3 / 140.7 | not measured                |
+| 4951-file repo, second Bash call on that fresh server                   | 15.1 / 15.3                  | 15.3 / 15.6   | not measured                |
+| 4951-file repo, first Bash call on the long-lived server                | 125.6 / 129.6 (single calls) | n/a           | 135.3 / 127.9 (single call) |
+| 4951-file repo, warm: later Bash calls (15 per run)                     | 13.9 / 14.0                  | 15.3 / 15.0   | 14.4 / 14.1                 |
+| Bench repo, later Bash calls                                            | 1.4 / 1.4                    | 1.6 / 1.5     | 0.5 / 1.3                   |
+
+9P `statSync` probe repeated (`stat9p.mjs`, `/mnt/c/Windows/System32`, 2000 entries, cwd not pinned): 1.58-1.86 ms per stat, i.e. ~7.8-9.2 s for 4951 files (0.13.0 run: 1.53-1.59 ms, ~7.6 s). The pinned case was not repeated.
+
+### Memory
+
+| Point                                         | Server VmRSS MB (A / B)                       | Children                                                     |
+| --------------------------------------------- | --------------------------------------------- | ------------------------------------------------------------ |
+| After `initialize`                            | 54.7 / 54.7                                   | none                                                         |
+| After the format_pre phase                    | 93.5 / 87.4 (HWM 93.6 / 94.5)                 | format_pre `dprint lsp` 111.1 / 104.4 MB (HWM 118.2 / 111.3) |
+| After 6 x 60-event bursts                     | 98.7 / 96.7                                   | + file_changed `dprint lsp` 21.9 MB                          |
+| After the bash phase (4951-entry list cached) | 108.3 / 110.9                                 | unchanged                                                    |
+| Fresh server after one 4951-file Bash scan    | 73.2 / 72.9 (7 servers each, p90 73.5 / 73.2) | none                                                         |
+| Fresh server after 5 x 1.15 MB guarded Writes | 65.2 / 65.2                                   | none                                                         |
+
+### Comparison with the 0.13.0 run
+
+- **No measurable change.** Every median is within ~10% of the 0.13.0 run and most within 5%; the bug-hunt changes on the hot paths are constant-time or one linear pass over a document already in memory (flag on the git spawn, decoder flag, a regex test for mixed line endings, a string key per Bash call), far below the noise of these numbers.
+- **200 KB respawn 144 ms in run A** (0.13.0: 130 ms, run B: 131 ms): the warm 200 KB format of the same run is also up (p90 119 ms vs 106 ms in run B), so it is machine load during run A, not the code (the `DprintLsp` changes only touch `close()` and the buffer reset after a reply).
+- **watch-paths +4-11% on 4951 paths** (and +10% on the bench repo in run A): `dprint file-paths` alone rose by the same share (+12-16%), and the script is byte-identical since 0.12.1, so this is dprint/file-system timing on the day, not a regression.
+- **format_pre during a burst** is slightly better at p90 (20-21 ms vs 24-30 ms): no code change on that path except `--literal-pathspecs`; treat it as noise. F13's < 30 ms criterion holds at p90 in both runs.
+- **Bench-repo Bash calls 1.4 ms** (0.13.0 run 1: 0.5 ms, run 2: 1.3 ms): sub-millisecond spread; the 0.13.0 run-2 figure already matched.
+- **New cold Bash figure**: the first Bash call per cwd on a fresh server costs 137-138 ms at 4951 files (listing + `inScope` + 4951 stats), the second already 15 ms; on a fresh server that first scan (listing plus the cached 4951-entry list) raises RSS from 54.7 to ~73 MB. The F29 numbers are unchanged: 14 ms per later Bash call on ext4, and the 9P extrapolation of ~8-9 s unpinned stands (re-probed, not measured end to end).
+
+## Bug hunt
+
+Three review rounds over the plugin after the 0.13.0 evaluation; every finding was fixed (code fixes with tests), none changed the numbers above.
+
+- **0.13.1 (round 1)**, server: an evicted `DprintLsp` is closed for good instead of respawning, and an empty reply view no longer pins the whole assembled buffer; `git status` gets `--literal-pathspecs` (a glob character in a file name matched other files); the digest decoder keeps a UTF-8 BOM like `readFileSync` (digests disagreed, so BOM files were handled wrong); files with mixed line endings are not rewritten all-CRLF; `initialize` answers the server's own `protocolVersion` instead of echoing the client's. Notice hook: the worktree cwd is read from the field of the tool that fired (`worktreePath` for EnterWorktree, `restoredCwd` for ExitWorktree, also from the engine's `{ result }`); `DPRINT_INSTALL` is honored. Skill scripts: extensions matched case-sensitively like dprint, a BOM config is reported as unusable (dprint rejects it), `latest.` plugin URLs count as configured, `findDprint` honors `DPRINT_INSTALL`; README fixes.
+- **0.13.2 (rounds 2 and 3)**: `close()` also stops a spawn that is still waiting for the dprint lookup; an Edit with an empty `new_string` also removes the following line break, as Claude Code does; file names in notices are JSON-quoted (a name could hold a newline or read like an instruction); the Bash start time is keyed per call (`tool_use_id`, new hook input), so overlapping Bash calls of one session keep their own window; `bash_finished` reports a `file_changed` reformat that finished mid-Bash after running its own formats (race); `bash_finished` also runs on PostToolUseFailure (a Bash call exiting non-zero) and answers with that event name; Bash start entries that never finish are pruned after an hour. Tests added for the review gaps (hooks.json wiring, the race, closed client, `initialize`, `DPRINT_INSTALL`).
+
 ## Remaining findings
 
-- **F24 (open, priority medium)**: unchanged. `fileChanged` still ignores `unlink`, and `watch-paths.mjs` and the `bash_finished` watch cache list files once per cwd. Not measurable offline: it needs a live `claude -p --plugin-dir dprint/plugin --debug` run with an inotify sampler (see its document). Nothing in this run changes its priority.
-- **F28 (partial, priority low)**: remaining gaps unchanged and confirmed against the test names: hanging `initialize` through the server (cooldown after an initialize timeout at server level), slow git (10 s `execFile` timeouts fail open), dprint stderr forwarding to the server's stderr, two JSON-RPC requests in one stdin chunk. New gap from this run: no test pins the cost or the blocking behavior of the `bash_finished` watch-list scan (F29).
-- **F29 (new, open, priority low)**: `bash_finished` runs one synchronous `statSync` per cached watch-list file on every Bash call. 14 ms per Bash call on a 4951-file ext4 repo, but on a 9P repo (`/mnt/c/...`) the same loop extrapolates to ~3.3 s per Bash call (cwd pinned) and blocks the server event loop meanwhile (concurrent `format_pre` and `file_changed` wait). The first Bash call per cwd also pays the listing plus `inScope` (128-135 ms at 4951 files on ext4). Detail: [tasks/F29-bash-finished-stat-scan.md](tasks/F29-bash-finished-stat-scan.md).
+State after the 0.13.2 re-run.
+
+- **F24 (open, priority high)**: the live smoke test (Claude Code 2.1.323, plugin 0.13.0, inotify watch count sampled from `/proc`) confirmed it: new files are never watched, and a watched file that is unlinked and recreated (also by `git checkout`) loses its watch, racily, after which in-place writes are no longer formatted; the watch count only falls (9 to 7 or 0 in two runs). The prototype that re-listed `dprint file-paths` from `file_changed` and returned it as `watchPaths` does not fix it: Claude Code never delivers `unlink` events to FileChanged hooks, and although `watchPaths` from a FileChanged `mcp_tool` hook is honored, re-listing on every `change` event still missed the later writes in 2 of 3 runs (the loss happens after the event), at one `dprint file-paths` per burst (55-160 ms); not shipped. Next candidates (untested): directories as `watchPaths`, or a refresh at another trigger. `bash_finished` mitigates it for Bash-made changes only. Detail: [tasks/F24-watch-list-static-per-file.md](tasks/F24-watch-list-static-per-file.md).
+- **F28 (partial, priority low)**: remaining gaps unchanged and confirmed against the test names of 0.13.2: hanging `initialize` through the server (cooldown after an initialize timeout at server level), slow git (10 s `execFile` timeouts fail open), dprint stderr forwarding to the server's stderr, two JSON-RPC requests in one stdin chunk, and no test pins the cost or the blocking behavior of the `bash_finished` watch-list scan (F29). The bug-hunt tests (per-call `tool_use_id`, PostToolUseFailure, mid-Bash race, closed client, MCP `initialize` version) close none of these.
+- **F29 (open, priority low)**: `bash_finished` runs one synchronous `statSync` per cached watch-list file on every Bash call. 0.13.2: 14 ms per Bash call on a 4951-file ext4 repo (p90 15 ms), 137-138 ms for the first call on a fresh server; on a 9P repo (`/mnt/c/...`) the same loop extrapolates to ~3.3 s per Bash call (cwd pinned, 0.13.0 probe) or ~8-9 s unpinned (re-probed on 0.13.2), blocking the server event loop meanwhile (concurrent `format_pre` and `file_changed` wait). Since 0.13.2 the scan also runs on PostToolUseFailure, so a failing Bash call pays it too. Detail: [tasks/F29-bash-finished-stat-scan.md](tasks/F29-bash-finished-stat-scan.md).
 
 Observed, no new finding:
 
