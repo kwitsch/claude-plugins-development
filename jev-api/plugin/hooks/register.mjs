@@ -507,13 +507,14 @@ export function register(on, options) {
 				$.env.get("TYPESAFE_DEFAULT_MODEL")
 			])).map((v) => v?.trim() || undefined);
 			if (next.signal.aborted) return fail(type, "the call was abandoned");
-			if (!key && !base && !jevUrl) return await askHaiku($, type, input.state, input.questions, (seconds(e["timeout"]) ?? fallbackS) * 1e3, next.signal);
+			const timeoutMs = Math.max(1, Math.round((seconds(e["timeout"]) ?? fallbackS) * 1e3));
+			if (!key && !base && !jevUrl) return await askHaiku($, type, input.state, input.questions, timeoutMs, next.signal);
 			return await ask($, type, input.state, input.questions, {
 				key,
 				base,
 				jevUrl,
 				model
-			}, (seconds(e["timeout"]) ?? fallbackS) * 1e3, next.signal);
+			}, timeoutMs, next.signal);
 		} catch (err) {
 			return fail(type, message(err));
 		}

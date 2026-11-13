@@ -663,6 +663,15 @@ it("the Haiku call gets the abort signal as an option", async () => {
   expect((calls[0][1] as { signal?: AbortSignal }).signal).toBe(ctl.signal);
 });
 
+// D3: $.model.complete refuses a timeoutMs that is not a positive whole number; 2.01 s * 1000 is 2009.9999999999998.
+test("the Haiku timeout is a whole number of milliseconds", async ($, on) => {
+  const asked = haiku(on, () => said("{}"));
+  mock.env(on, {});
+  await call($, "noul", { timeout: 2.01 });
+  await call($, "noul", { timeout: 0.0004 });
+  expect(asked.map((r) => r["timeoutMs"])).toEqual([2010, 1]);
+});
+
 // D1: the key never reaches the model, not even in the text of a runtime that rejects the header value.
 it("an error that quotes the bearer key is redacted", async () => {
   const key = "sk-SECRET-1234567890";

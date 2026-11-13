@@ -851,8 +851,10 @@ export function register(on: On, options?: Options): void {
       // F05: an abandoned call sends nothing
       if (next.signal.aborted) return fail(type, "the call was abandoned");
       // No Jev access configured: Haiku stands in. A configured Jev that fails stays an error.
-      if (!key && !base && !jevUrl) return await askHaiku($, type, input.state, input.questions, (seconds(e["timeout"]) ?? fallbackS) * 1000, next.signal);
-      return await ask($, type, input.state, input.questions, { key, base, jevUrl, model }, (seconds(e["timeout"]) ?? fallbackS) * 1000, next.signal);
+      // A whole number of milliseconds, at least 1: $.model.complete refuses anything else (2.01 s * 1000 is 2009.9999999999998).
+      const timeoutMs = Math.max(1, Math.round((seconds(e["timeout"]) ?? fallbackS) * 1000));
+      if (!key && !base && !jevUrl) return await askHaiku($, type, input.state, input.questions, timeoutMs, next.signal);
+      return await ask($, type, input.state, input.questions, { key, base, jevUrl, model }, timeoutMs, next.signal);
     } catch (err) {
       return fail(type, message(err));
     }
