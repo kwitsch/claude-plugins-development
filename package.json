@@ -11,7 +11,7 @@
     "@types/node": "^26.6.6",
     "oxc-minify": "^0.157.0",
     "oxc-transform": "^0.157.0",
-    "oxlint": "^1.91.0",
+    "oxlint": "^1.93.0",
     "oxlint-tsgolint": "^7.0.2006",
     "vitest": "^5.1.0"
   },
