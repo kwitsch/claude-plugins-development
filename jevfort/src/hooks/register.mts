@@ -21,7 +21,7 @@ import type { Candidate } from "./candidates.mjs";
 import { COMPACT_MAX_TOKENS, COMPACT_MODEL, COMPACT_SYSTEM, compactInstructions, compactItems, haikuTranscript, RELEVANCE } from "./compact.mjs";
 import { clip, splitTurn, summarize, toolCalls } from "./context.mjs";
 import type { SessionMessage, ToolUse, TurnContext } from "./context.mjs";
-import { choice, JEV_API_TIMEOUT_S, JEV_BATCH, JEV_TOOL_PREFIX, JEV_TOOLS, MAX_CHOICE_OPTIONS, missingJevTools, noul, score, TIMEOUT_MS } from "./jev.mjs";
+import { choice, HAIKU_API_TIMEOUT_S, HAIKU_TIMEOUT_MS, JEV_API_TIMEOUT_S, JEV_BATCH, JEV_TOOL_PREFIX, JEV_TOOLS, MAX_CHOICE_OPTIONS, missingJevTools, noul, score, TIMEOUT_MS } from "./jev.mjs";
 import type { Answer, ChoiceAnswer, JevResult, Question } from "./jev.mjs";
 import { LOG_KEY, MAX_ENTRIES, recentDecisions, remember, statsKey } from "./log.mjs";
 import type { Entry } from "./log.mjs";
@@ -205,9 +205,13 @@ async function askJev($: Engine, state: unknown, questions: Record<string, Quest
   const startedAt = await $.clock.now();
   const done = async (r: { ok: true; answers: Record<string, Answer> } | { ok: false; error: string }): Promise<JevResult> => ({ ...r, ms: (await $.clock.now()) - startedAt });
 
+  // Without Jev access jev-api answers through Haiku, which needs a longer budget (jev-api reads the same three variables).
+  const [key, base, jevUrl] = await Promise.all([$.env.get("TYPESAFE_API_KEY"), $.env.get("TYPESAFE_BASE_URL"), $.env.get("JEV_URL")]).catch(() => [undefined, undefined, undefined]);
+  const haiku = ![key, base, jevUrl].some((v) => v?.trim());
+  const budgetMs = haiku ? HAIKU_TIMEOUT_MS : TIMEOUT_MS;
   const entries = Object.entries(questions);
   const call = (async (): Promise<Record<string, Answer>> => {
-    const r = await $.tool.call({ tool: JEV_BATCH, state: JSON.stringify(state), questions: entries.map(([, q]) => q), timeout: JEV_API_TIMEOUT_S });
+    const r = await $.tool.call({ tool: JEV_BATCH, state: JSON.stringify(state), questions: entries.map(([, q]) => q), timeout: haiku ? HAIKU_API_TIMEOUT_S : JEV_API_TIMEOUT_S });
     // jev-api's deny text already starts with `batch:`.
     if (r.deny !== undefined) throw new Error(asText(r.deny));
     // Core's error result (no hook answered) has no `batch:` prefix; a structured one is serialized, not printed as `[object Object]`.
@@ -228,11 +232,11 @@ async function askJev($: Engine, state: unknown, questions: Record<string, Quest
   })();
   // A call abandoned at the timeout must not raise an unhandled rejection.
   call.catch(() => undefined);
-  const timeout = $.clock.sleep(TIMEOUT_MS).then(() => undefined);
+  const timeout = $.clock.sleep(budgetMs).then(() => undefined);
 
   try {
     const answers = await Promise.race([call, timeout]);
-    if (!answers) return done({ ok: false, error: `timeout after ${TIMEOUT_MS}ms` });
+    if (!answers) return done({ ok: false, error: `timeout after ${budgetMs}ms` });
     return done({ ok: true, answers });
   } catch (err) {
     return done({ ok: false, error: err instanceof Error ? err.message : String(err) });

@@ -31,6 +31,10 @@ export type JevResult = { ok: true; answers: Record<string, Answer>; ms: number 
 export const MAX_CHOICE_OPTIONS = 255;
 /** The HTTP timeout jevfort gives every jev-api call, in seconds (jev-api's `timeout` input). */
 export const JEV_API_TIMEOUT_S = 5;
+/** The `askJev` budget in milliseconds while jev-api has no Jev access configured and Haiku answers (a model call, slower than System One). */
+export const HAIKU_TIMEOUT_MS = 15_000;
+/** jev-api's `timeout` input in seconds in that case: just under {@link HAIKU_TIMEOUT_MS}. */
+export const HAIKU_API_TIMEOUT_S = 14;
 /** Prefix of the jev-api plugin's tools. */
 export const JEV_TOOL_PREFIX = "mcp__jev-api__";
 /** jev-api's tool for several questions about one `state` in one request; its result is the answers in question order. */
