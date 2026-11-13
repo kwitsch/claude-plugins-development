@@ -59,6 +59,10 @@ const REVIEW = { type: 'object', properties: { status: { enum: ['clean', 'fixed'
 const ANALYSIS = { type: 'object', properties: { newOpen: { type: 'array', items: { type: 'string' } }, summary: { type: 'string' } }, required: ['newOpen', 'summary'] }
 const { plugin, worktree, date } = args
 
+// No human reads the agents' text: no narration between tool calls, only the structured result.
+const QUIET = '\n\nNo narration: no text between tool calls, no plans, no progress notes, no recap. Call tools silently and end with the structured result only.'
+const run = (prompt, opts) => agent(prompt + QUIET, opts)
+
 const jobPrompt = (j) => `Work performance task ${j.id} (${j.title}) of plugin "${plugin}" in the git worktree ${worktree} (stay there; run git and pnpm from its root).
 Read ${plugin}/docs/tasks/${j.file}, ${plugin}/docs/TASKS.md, ${plugin}/CLAUDE.md, .claude/rules/plugin-docs-tasks.md and the rules the task names.
 1. Check the task against the CURRENT code (moved files, renamed symbols, drift). Obsolete or not worth doing: status closed with the reason in the task document, no code.
@@ -83,7 +87,7 @@ const results = []
 if (args.mode === 'jobs') {
   phase('Jobs')
   for (const j of args.jobs) {
-    const r = await agent(jobPrompt(j), { label: j.id, phase: 'Jobs', model: j.model, effort: j.effort, schema: JOB })
+    const r = await run(jobPrompt(j), { label: j.id, phase: 'Jobs', model: j.model, effort: j.effort, schema: JOB })
     results.push({ id: j.id, ...(r ?? { status: 'blocked', summary: 'agent failed' }) })
     log(`${j.id}: ${results.at(-1).status}`)
     if (results.at(-1).status === 'blocked') break
@@ -94,7 +98,7 @@ let proceed = results.every((r) => r.status !== 'blocked')
 let review = null
 if (proceed && results.some((r) => r.status === 'done')) {
   phase('Review')
-  review = await agent(reviewPrompt(), { label: 'simplify + code-review', phase: 'Review', model: 'opus', effort: 'high', schema: REVIEW })
+  review = await run(reviewPrompt(), { label: 'simplify + code-review', phase: 'Review', model: 'opus', effort: 'high', schema: REVIEW })
   log(`review: ${review?.status ?? 'agent failed'}`)
   proceed = review !== null && review.status !== 'blocked'
 }
@@ -102,7 +106,7 @@ if (proceed && results.some((r) => r.status === 'done')) {
 let analysis = null
 if (args.mode === 'analyse' || proceed) {
   phase('Analysis')
-  analysis = await agent(analysisPrompt(), { label: 'analysis', phase: 'Analysis', model: 'opus', effort: 'xhigh', schema: ANALYSIS })
+  analysis = await run(analysisPrompt(), { label: 'analysis', phase: 'Analysis', model: 'opus', effort: 'xhigh', schema: ANALYSIS })
 } else {
   log('Analysis skipped: a job or the review is blocked')
 }
