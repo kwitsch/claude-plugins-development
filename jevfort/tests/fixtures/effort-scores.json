@@ -1,0 +1,962 @@
+[
+ {
+  "id": 1,
+  "lang": "en",
+  "label": 0,
+  "score": 1.0031,
+  "confidence": 0.9554,
+  "mechanical": 0.9818
+ },
+ {
+  "id": 1,
+  "lang": "de",
+  "label": 0,
+  "score": 0.995,
+  "confidence": 0.9461,
+  "mechanical": 0.9731
+ },
+ {
+  "id": 2,
+  "lang": "en",
+  "label": 0,
+  "score": 1.0294,
+  "confidence": 0.9646,
+  "mechanical": 0.9899
+ },
+ {
+  "id": 2,
+  "lang": "de",
+  "label": 0,
+  "score": 1.0211,
+  "confidence": 0.964,
+  "mechanical": 0.9877
+ },
+ {
+  "id": 3,
+  "lang": "en",
+  "label": 0,
+  "score": 0.265,
+  "confidence": 0.7791,
+  "mechanical": 0.6226
+ },
+ {
+  "id": 3,
+  "lang": "de",
+  "label": 0,
+  "score": 0.303,
+  "confidence": 0.7475,
+  "mechanical": 0.4121
+ },
+ {
+  "id": 4,
+  "lang": "en",
+  "label": 0,
+  "score": 0.9649,
+  "confidence": 0.9157,
+  "mechanical": 0.9798
+ },
+ {
+  "id": 4,
+  "lang": "de",
+  "label": 0,
+  "score": 0.9972,
+  "confidence": 0.9497,
+  "mechanical": 0.9799
+ },
+ {
+  "id": 5,
+  "lang": "en",
+  "label": 0,
+  "score": 0.9856,
+  "confidence": 0.8593,
+  "mechanical": 0.9792
+ },
+ {
+  "id": 5,
+  "lang": "de",
+  "label": 0,
+  "score": 0.9614,
+  "confidence": 0.8553,
+  "mechanical": 0.9834
+ },
+ {
+  "id": 6,
+  "lang": "en",
+  "label": 0,
+  "score": 0.4697,
+  "confidence": 0.6086,
+  "mechanical": 0.9759
+ },
+ {
+  "id": 6,
+  "lang": "de",
+  "label": 0,
+  "score": 0.4822,
+  "confidence": 0.5982,
+  "mechanical": 0.9668
+ },
+ {
+  "id": 7,
+  "lang": "en",
+  "label": 0,
+  "score": 1.0176,
+  "confidence": 0.9618,
+  "mechanical": 0.9821
+ },
+ {
+  "id": 7,
+  "lang": "de",
+  "label": 0,
+  "score": 1.0232,
+  "confidence": 0.9584,
+  "mechanical": 0.9835
+ },
+ {
+  "id": 8,
+  "lang": "en",
+  "label": 0,
+  "score": 1.0078,
+  "confidence": 0.9443,
+  "mechanical": 0.9723
+ },
+ {
+  "id": 8,
+  "lang": "de",
+  "label": 0,
+  "score": 1.0092,
+  "confidence": 0.9491,
+  "mechanical": 0.9824
+ },
+ {
+  "id": 9,
+  "lang": "en",
+  "label": 0,
+  "score": 1.0126,
+  "confidence": 0.9765,
+  "mechanical": 0.9881
+ },
+ {
+  "id": 9,
+  "lang": "de",
+  "label": 0,
+  "score": 1.0114,
+  "confidence": 0.9699,
+  "mechanical": 0.9867
+ },
+ {
+  "id": 10,
+  "lang": "en",
+  "label": 0,
+  "score": 1.0264,
+  "confidence": 0.9592,
+  "mechanical": 0.9778
+ },
+ {
+  "id": 10,
+  "lang": "de",
+  "label": 0,
+  "score": 1.0305,
+  "confidence": 0.9638,
+  "mechanical": 0.9838
+ },
+ {
+  "id": 11,
+  "lang": "en",
+  "label": 0,
+  "score": 0.3402,
+  "confidence": 0.7165,
+  "mechanical": 0.9903
+ },
+ {
+  "id": 11,
+  "lang": "de",
+  "label": 0,
+  "score": 0.4259,
+  "confidence": 0.6451,
+  "mechanical": 0.9926
+ },
+ {
+  "id": 12,
+  "lang": "en",
+  "label": 0,
+  "score": 0.2998,
+  "confidence": 0.7501,
+  "mechanical": 0.9462
+ },
+ {
+  "id": 12,
+  "lang": "de",
+  "label": 0,
+  "score": 0.2471,
+  "confidence": 0.7941,
+  "mechanical": 0.9491
+ },
+ {
+  "id": 13,
+  "lang": "en",
+  "label": 1,
+  "score": 1.4726,
+  "confidence": 0.4916,
+  "mechanical": 0.8235
+ },
+ {
+  "id": 13,
+  "lang": "de",
+  "label": 1,
+  "score": 1.4832,
+  "confidence": 0.5157,
+  "mechanical": 0.8057
+ },
+ {
+  "id": 14,
+  "lang": "en",
+  "label": 1,
+  "score": 1.0947,
+  "confidence": 0.8965,
+  "mechanical": 0.9354
+ },
+ {
+  "id": 14,
+  "lang": "de",
+  "label": 1,
+  "score": 1.1516,
+  "confidence": 0.8381,
+  "mechanical": 0.9099
+ },
+ {
+  "id": 15,
+  "lang": "en",
+  "label": 1,
+  "score": 1.4259,
+  "confidence": 0.6176,
+  "mechanical": 0.4723
+ },
+ {
+  "id": 15,
+  "lang": "de",
+  "label": 1,
+  "score": 1.3325,
+  "confidence": 0.6882,
+  "mechanical": 0.7309
+ },
+ {
+  "id": 16,
+  "lang": "en",
+  "label": 1,
+  "score": 1.8972,
+  "confidence": 0.2409,
+  "mechanical": 0.936
+ },
+ {
+  "id": 16,
+  "lang": "de",
+  "label": 1,
+  "score": 1.7383,
+  "confidence": 0.3675,
+  "mechanical": 0.9206
+ },
+ {
+  "id": 17,
+  "lang": "en",
+  "label": 1,
+  "score": 1.7651,
+  "confidence": 0.2391,
+  "mechanical": 0.8251
+ },
+ {
+  "id": 17,
+  "lang": "de",
+  "label": 1,
+  "score": 1.7934,
+  "confidence": 0.22,
+  "mechanical": 0.8897
+ },
+ {
+  "id": 18,
+  "lang": "en",
+  "label": 1,
+  "score": 1.581,
+  "confidence": 0.4972,
+  "mechanical": 0.7472
+ },
+ {
+  "id": 18,
+  "lang": "de",
+  "label": 1,
+  "score": 1.4765,
+  "confidence": 0.5791,
+  "mechanical": 0.8197
+ },
+ {
+  "id": 19,
+  "lang": "en",
+  "label": 1,
+  "score": 1.1252,
+  "confidence": 0.6418,
+  "mechanical": 0.8718
+ },
+ {
+  "id": 19,
+  "lang": "de",
+  "label": 1,
+  "score": 1.2188,
+  "confidence": 0.632,
+  "mechanical": 0.8259
+ },
+ {
+  "id": 20,
+  "lang": "en",
+  "label": 1,
+  "score": 1.5661,
+  "confidence": 0.4835,
+  "mechanical": 0.9371
+ },
+ {
+  "id": 20,
+  "lang": "de",
+  "label": 1,
+  "score": 1.6687,
+  "confidence": 0.4256,
+  "mechanical": 0.8813
+ },
+ {
+  "id": 21,
+  "lang": "en",
+  "label": 1,
+  "score": 1.8079,
+  "confidence": 0.2776,
+  "mechanical": 0.7245
+ },
+ {
+  "id": 21,
+  "lang": "de",
+  "label": 1,
+  "score": 1.8638,
+  "confidence": 0.2041,
+  "mechanical": 0.7643
+ },
+ {
+  "id": 22,
+  "lang": "en",
+  "label": 1,
+  "score": 1.2983,
+  "confidence": 0.6635,
+  "mechanical": 0.7468
+ },
+ {
+  "id": 22,
+  "lang": "de",
+  "label": 1,
+  "score": 1.2971,
+  "confidence": 0.6867,
+  "mechanical": 0.7444
+ },
+ {
+  "id": 23,
+  "lang": "en",
+  "label": 1,
+  "score": 1.1991,
+  "confidence": 0.6168,
+  "mechanical": 0.7149
+ },
+ {
+  "id": 23,
+  "lang": "de",
+  "label": 1,
+  "score": 1.0329,
+  "confidence": 0.6553,
+  "mechanical": 0.8107
+ },
+ {
+  "id": 24,
+  "lang": "en",
+  "label": 1,
+  "score": 1.1631,
+  "confidence": 0.7296,
+  "mechanical": 0.8356
+ },
+ {
+  "id": 24,
+  "lang": "de",
+  "label": 1,
+  "score": 1.3347,
+  "confidence": 0.6513,
+  "mechanical": 0.8664
+ },
+ {
+  "id": 25,
+  "lang": "en",
+  "label": 2,
+  "score": 2.2584,
+  "confidence": 0.3612,
+  "mechanical": 0.1085
+ },
+ {
+  "id": 25,
+  "lang": "de",
+  "label": 2,
+  "score": 2.3524,
+  "confidence": 0.3528,
+  "mechanical": 0.1054
+ },
+ {
+  "id": 26,
+  "lang": "en",
+  "label": 2,
+  "score": 2.9634,
+  "confidence": 0.1362,
+  "mechanical": 0.2868
+ },
+ {
+  "id": 26,
+  "lang": "de",
+  "label": 2,
+  "score": 2.8202,
+  "confidence": 0.1756,
+  "mechanical": 0.4694
+ },
+ {
+  "id": 27,
+  "lang": "en",
+  "label": 2,
+  "score": 2.8129,
+  "confidence": 0.1917,
+  "mechanical": 0.1359
+ },
+ {
+  "id": 27,
+  "lang": "de",
+  "label": 2,
+  "score": 2.916,
+  "confidence": 0.0967,
+  "mechanical": 0.1623
+ },
+ {
+  "id": 28,
+  "lang": "en",
+  "label": 2,
+  "score": 2.2762,
+  "confidence": 0.2602,
+  "mechanical": 0.1231
+ },
+ {
+  "id": 28,
+  "lang": "de",
+  "label": 2,
+  "score": 1.9328,
+  "confidence": 0.0621,
+  "mechanical": 0.1357
+ },
+ {
+  "id": 29,
+  "lang": "en",
+  "label": 2,
+  "score": 2.9104,
+  "confidence": 0.092,
+  "mechanical": 0.1342
+ },
+ {
+  "id": 29,
+  "lang": "de",
+  "label": 2,
+  "score": 2.8949,
+  "confidence": 0.0791,
+  "mechanical": 0.1606
+ },
+ {
+  "id": 30,
+  "lang": "en",
+  "label": 2,
+  "score": 2.3728,
+  "confidence": 0.2312,
+  "mechanical": 0.7937
+ },
+ {
+  "id": 30,
+  "lang": "de",
+  "label": 2,
+  "score": 1.7317,
+  "confidence": 0.1761,
+  "mechanical": 0.808
+ },
+ {
+  "id": 31,
+  "lang": "en",
+  "label": 2,
+  "score": 2.33,
+  "confidence": 0.2226,
+  "mechanical": 0.2087
+ },
+ {
+  "id": 31,
+  "lang": "de",
+  "label": 2,
+  "score": 1.6201,
+  "confidence": 0.3802,
+  "mechanical": 0.6922
+ },
+ {
+  "id": 32,
+  "lang": "en",
+  "label": 2,
+  "score": 1.975,
+  "confidence": 0.0447,
+  "mechanical": 0.1476
+ },
+ {
+  "id": 32,
+  "lang": "de",
+  "label": 2,
+  "score": 1.7841,
+  "confidence": 0.1492,
+  "mechanical": 0.1618
+ },
+ {
+  "id": 33,
+  "lang": "en",
+  "label": 2,
+  "score": 2.4808,
+  "confidence": 0.0,
+  "mechanical": 0.2203
+ },
+ {
+  "id": 33,
+  "lang": "de",
+  "label": 2,
+  "score": 2.7378,
+  "confidence": 0.0,
+  "mechanical": 0.1967
+ },
+ {
+  "id": 34,
+  "lang": "en",
+  "label": 2,
+  "score": 2.9638,
+  "confidence": 0.1365,
+  "mechanical": 0.3776
+ },
+ {
+  "id": 34,
+  "lang": "de",
+  "label": 2,
+  "score": 2.6028,
+  "confidence": 0.2723,
+  "mechanical": 0.5545
+ },
+ {
+  "id": 35,
+  "lang": "en",
+  "label": 2,
+  "score": 1.552,
+  "confidence": 0.1901,
+  "mechanical": 0.1594
+ },
+ {
+  "id": 35,
+  "lang": "de",
+  "label": 2,
+  "score": 2.3082,
+  "confidence": 0.1575,
+  "mechanical": 0.1243
+ },
+ {
+  "id": 36,
+  "lang": "en",
+  "label": 2,
+  "score": 3.0294,
+  "confidence": 0.1912,
+  "mechanical": 0.2636
+ },
+ {
+  "id": 36,
+  "lang": "de",
+  "label": 2,
+  "score": 2.8823,
+  "confidence": 0.0686,
+  "mechanical": 0.1461
+ },
+ {
+  "id": 37,
+  "lang": "en",
+  "label": 3,
+  "score": 2.2997,
+  "confidence": 0.1491,
+  "mechanical": 0.1173
+ },
+ {
+  "id": 37,
+  "lang": "de",
+  "label": 3,
+  "score": 2.5443,
+  "confidence": 0.2581,
+  "mechanical": 0.0887
+ },
+ {
+  "id": 38,
+  "lang": "en",
+  "label": 3,
+  "score": 3.2976,
+  "confidence": 0.4147,
+  "mechanical": 0.112
+ },
+ {
+  "id": 38,
+  "lang": "de",
+  "label": 3,
+  "score": 3.3659,
+  "confidence": 0.4716,
+  "mechanical": 0.0743
+ },
+ {
+  "id": 39,
+  "lang": "en",
+  "label": 3,
+  "score": 2.6195,
+  "confidence": 0.1664,
+  "mechanical": 0.0954
+ },
+ {
+  "id": 39,
+  "lang": "de",
+  "label": 3,
+  "score": 2.5514,
+  "confidence": 0.2201,
+  "mechanical": 0.0904
+ },
+ {
+  "id": 40,
+  "lang": "en",
+  "label": 3,
+  "score": 3.1709,
+  "confidence": 0.3091,
+  "mechanical": 0.1155
+ },
+ {
+  "id": 40,
+  "lang": "de",
+  "label": 3,
+  "score": 3.2159,
+  "confidence": 0.3466,
+  "mechanical": 0.7304
+ },
+ {
+  "id": 41,
+  "lang": "en",
+  "label": 3,
+  "score": 3.0928,
+  "confidence": 0.244,
+  "mechanical": 0.1321
+ },
+ {
+  "id": 41,
+  "lang": "de",
+  "label": 3,
+  "score": 2.8686,
+  "confidence": 0.0572,
+  "mechanical": 0.1715
+ },
+ {
+  "id": 42,
+  "lang": "en",
+  "label": 3,
+  "score": 2.6239,
+  "confidence": 0.241,
+  "mechanical": 0.1302
+ },
+ {
+  "id": 42,
+  "lang": "de",
+  "label": 3,
+  "score": 2.7098,
+  "confidence": 0.0,
+  "mechanical": 0.1274
+ },
+ {
+  "id": 43,
+  "lang": "en",
+  "label": 3,
+  "score": 3.02,
+  "confidence": 0.4715,
+  "mechanical": 0.1566
+ },
+ {
+  "id": 43,
+  "lang": "de",
+  "label": 3,
+  "score": 3.041,
+  "confidence": 0.4746,
+  "mechanical": 0.1299
+ },
+ {
+  "id": 44,
+  "lang": "en",
+  "label": 3,
+  "score": 3.0945,
+  "confidence": 0.4601,
+  "mechanical": 0.243
+ },
+ {
+  "id": 44,
+  "lang": "de",
+  "label": 3,
+  "score": 3.1478,
+  "confidence": 0.2898,
+  "mechanical": 0.403
+ },
+ {
+  "id": 45,
+  "lang": "en",
+  "label": 3,
+  "score": 2.7081,
+  "confidence": 0.1574,
+  "mechanical": 0.5093
+ },
+ {
+  "id": 45,
+  "lang": "de",
+  "label": 3,
+  "score": 3.1554,
+  "confidence": 0.2961,
+  "mechanical": 0.3223
+ },
+ {
+  "id": 46,
+  "lang": "en",
+  "label": 3,
+  "score": 2.7194,
+  "confidence": 0.2596,
+  "mechanical": 0.0676
+ },
+ {
+  "id": 46,
+  "lang": "de",
+  "label": 3,
+  "score": 2.7432,
+  "confidence": 0.2263,
+  "mechanical": 0.0764
+ },
+ {
+  "id": 47,
+  "lang": "en",
+  "label": 3,
+  "score": 2.514,
+  "confidence": 0.23,
+  "mechanical": 0.1367
+ },
+ {
+  "id": 47,
+  "lang": "de",
+  "label": 3,
+  "score": 2.5526,
+  "confidence": 0.2201,
+  "mechanical": 0.1312
+ },
+ {
+  "id": 48,
+  "lang": "en",
+  "label": 3,
+  "score": 3.1051,
+  "confidence": 0.4583,
+  "mechanical": 0.0909
+ },
+ {
+  "id": 48,
+  "lang": "de",
+  "label": 3,
+  "score": 2.5154,
+  "confidence": 0.2394,
+  "mechanical": 0.3184
+ },
+ {
+  "id": 49,
+  "lang": "en",
+  "label": 4,
+  "score": 3.357,
+  "confidence": 0.4642,
+  "mechanical": 0.0482
+ },
+ {
+  "id": 49,
+  "lang": "de",
+  "label": 4,
+  "score": 3.348,
+  "confidence": 0.4566,
+  "mechanical": 0.0353
+ },
+ {
+  "id": 50,
+  "lang": "en",
+  "label": 4,
+  "score": 3.2274,
+  "confidence": 0.3561,
+  "mechanical": 0.033
+ },
+ {
+  "id": 50,
+  "lang": "de",
+  "label": 4,
+  "score": 3.308,
+  "confidence": 0.4233,
+  "mechanical": 0.0291
+ },
+ {
+  "id": 51,
+  "lang": "en",
+  "label": 4,
+  "score": 3.164,
+  "confidence": 0.468,
+  "mechanical": 0.1155
+ },
+ {
+  "id": 51,
+  "lang": "de",
+  "label": 4,
+  "score": 3.0316,
+  "confidence": 0.4088,
+  "mechanical": 0.1309
+ },
+ {
+  "id": 52,
+  "lang": "en",
+  "label": 4,
+  "score": 3.2674,
+  "confidence": 0.3895,
+  "mechanical": 0.0814
+ },
+ {
+  "id": 52,
+  "lang": "de",
+  "label": 4,
+  "score": 3.2724,
+  "confidence": 0.3936,
+  "mechanical": 0.0821
+ },
+ {
+  "id": 53,
+  "lang": "en",
+  "label": 4,
+  "score": 3.4197,
+  "confidence": 0.5164,
+  "mechanical": 0.1241
+ },
+ {
+  "id": 53,
+  "lang": "de",
+  "label": 4,
+  "score": 3.3629,
+  "confidence": 0.4691,
+  "mechanical": 0.2145
+ },
+ {
+  "id": 54,
+  "lang": "en",
+  "label": 4,
+  "score": 2.8649,
+  "confidence": 0.4071,
+  "mechanical": 0.168
+ },
+ {
+  "id": 54,
+  "lang": "de",
+  "label": 4,
+  "score": 3.0449,
+  "confidence": 0.2041,
+  "mechanical": 0.146
+ },
+ {
+  "id": 55,
+  "lang": "en",
+  "label": 4,
+  "score": 3.2908,
+  "confidence": 0.409,
+  "mechanical": 0.047
+ },
+ {
+  "id": 55,
+  "lang": "de",
+  "label": 4,
+  "score": 3.1377,
+  "confidence": 0.2814,
+  "mechanical": 0.0543
+ },
+ {
+  "id": 56,
+  "lang": "en",
+  "label": 4,
+  "score": 3.5355,
+  "confidence": 0.613,
+  "mechanical": 0.0871
+ },
+ {
+  "id": 56,
+  "lang": "de",
+  "label": 4,
+  "score": 3.4339,
+  "confidence": 0.5282,
+  "mechanical": 0.2072
+ },
+ {
+  "id": 57,
+  "lang": "en",
+  "label": 4,
+  "score": 3.3613,
+  "confidence": 0.4677,
+  "mechanical": 0.0944
+ },
+ {
+  "id": 57,
+  "lang": "de",
+  "label": 4,
+  "score": 3.4164,
+  "confidence": 0.5137,
+  "mechanical": 0.0887
+ },
+ {
+  "id": 58,
+  "lang": "en",
+  "label": 4,
+  "score": 2.9745,
+  "confidence": 0.445,
+  "mechanical": 0.0765
+ },
+ {
+  "id": 58,
+  "lang": "de",
+  "label": 4,
+  "score": 2.8456,
+  "confidence": 0.4108,
+  "mechanical": 0.1265
+ },
+ {
+  "id": 59,
+  "lang": "en",
+  "label": 4,
+  "score": 3.1291,
+  "confidence": 0.5135,
+  "mechanical": 0.0352
+ },
+ {
+  "id": 59,
+  "lang": "de",
+  "label": 4,
+  "score": 3.2319,
+  "confidence": 0.3599,
+  "mechanical": 0.0428
+ },
+ {
+  "id": 60,
+  "lang": "en",
+  "label": 4,
+  "score": 2.9974,
+  "confidence": 0.471,
+  "mechanical": 0.1105
+ },
+ {
+  "id": 60,
+  "lang": "de",
+  "label": 4,
+  "score": 3.1189,
+  "confidence": 0.4678,
+  "mechanical": 0.0718
+ }
+]

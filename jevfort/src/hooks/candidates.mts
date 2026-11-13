@@ -214,7 +214,7 @@ const STOPWORDS = new Set(
  */
 export function words(text: string): Set<string> {
   const out = new Set<string>();
-  for (const w of text.toLowerCase().split(/[^a-z0-9]+/)) {
+  for (const w of text.toLowerCase().split(/[^\p{L}\p{N}]+/u)) {
     if (w.length < 3 || STOPWORDS.has(w) || /^\d+$/.test(w)) continue;
     const stem = w.replace(/(ing|ed|es|e|s)$/, "");
     out.add(stem.length >= 3 && !w.endsWith("ss") ? stem : w);

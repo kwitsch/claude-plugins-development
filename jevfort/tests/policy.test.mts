@@ -1,7 +1,7 @@
 // Pure tests of the built plugin/hooks/policy.mjs.
 import assert from "node:assert/strict";
 import { test } from "vitest";
-import { bounds, estimateEffort, inScratchpad, isEffort, modelFamily, nextActionQuestion, parseEstimateInput } from "../plugin/hooks/policy.mjs";
+import { bounds, effortLevel, estimateEffort, inScratchpad, isEffort, modelFamily, nextActionQuestion, parseEstimateInput } from "../plugin/hooks/policy.mjs";
 
 const ROOTS = ["/tmp"];
 const SP = "/tmp/claude-1000/-proj/sid-1/scratchpad";
@@ -32,28 +32,39 @@ test("inScratchpad honours a custom root with a trailing slash", () => {
   assert.equal(inScratchpad("/var/folders/T/claude-501/-proj/sid-1/scratchpad/x", "sid-1", ["/tmp"]), false);
 });
 
-// The estimate_effort decision rule: mechanical -> minEffort, unsure -> defaultEffort, else score + model bias within the bounds.
+// The estimate_effort decision rule: mechanical -> minEffort, unsure -> defaultEffort, else the calibrated score level within the bounds (no model bias).
 const B = { model: "opus", defaultEffort: "high", minEffort: "low", maxEffort: "xhigh" } as const;
 const sc = (score: number, confidence = 0.9) => ({ type: "score" as const, score, probabilities: {}, confidence });
 
-test("estimateEffort falls back to the default without a confident answer, unclamped", () => {
+test("estimateEffort falls back to the default without a usable score, unclamped", () => {
   assert.deepEqual(estimateEffort(undefined, undefined, B), { effort: "high", source: "fallback" });
-  assert.deepEqual(estimateEffort(sc(0.2, 0.4), undefined, B), { effort: "high", source: "fallback" });
+  // The effort score's confidence is not checked: a low-confidence score is used.
+  assert.deepEqual(estimateEffort(sc(0.2, 0.4), undefined, B), { effort: "low", source: "jev" });
   assert.deepEqual(estimateEffort(undefined, undefined, { ...B, defaultEffort: "max" }), { effort: "max", source: "fallback" });
   assert.deepEqual(estimateEffort(sc(Number.NaN), undefined, B), { effort: "high", source: "fallback" });
 });
 
 test("estimateEffort gives a mechanical prompt minEffort, whatever the score", () => {
-  assert.deepEqual(estimateEffort(undefined, 0.9, B), { effort: "low", source: "mechanical" });
-  assert.deepEqual(estimateEffort(sc(3.5), 0.8, { ...B, minEffort: "medium" }), { effort: "medium", source: "mechanical" });
+  assert.deepEqual(estimateEffort(undefined, 0.95, B), { effort: "low", source: "mechanical" });
+  assert.deepEqual(estimateEffort(sc(3.5), 0.95, { ...B, minEffort: "medium" }), { effort: "medium", source: "mechanical" });
+  // Below MECHANICAL_FROM (0.95) the score decides: 0.9 and 0.8 no longer count.
+  assert.deepEqual(estimateEffort(sc(2), 0.9, B), { effort: "high", source: "jev" });
   assert.deepEqual(estimateEffort(sc(2), 0.5, B), { effort: "high", source: "jev" });
 });
 
-test("estimateEffort adds the model bias: a stronger model needs less", () => {
-  assert.equal(estimateEffort(sc(1.6), undefined, { ...B, model: "haiku" }).effort, "high");
-  assert.equal(estimateEffort(sc(1.6), undefined, { ...B, model: "opus" }).effort, "medium");
-  assert.equal(estimateEffort(sc(1.2), undefined, { ...B, model: "fable" }).effort, "low");
-  assert.equal(estimateEffort(sc(1.2), undefined, { ...B, model: "sonnet" }).effort, "medium");
+test("effortLevel puts the cut points on 0.5 / 1.5 / 2.5 / 3.5 and clamps to 0..4", () => {
+  const close = (a: number, b: number) => assert.ok(Math.abs(a - b) < 1e-9, `${a} != ${b}`);
+  [0, 1.05, 1.9, 2.5, 3.1, 4].forEach((s, i) => close(effortLevel(s), [0, 0.5, 1.5, 2.5, 3.5, 4][i]));
+  assert.equal(effortLevel(-1), 0);
+  assert.equal(effortLevel(9), 4);
+});
+
+test("estimateEffort gives every model the same level for the same score", () => {
+  for (const model of ["haiku", "sonnet", "opus", "fable"] as const) {
+    assert.equal(estimateEffort(sc(1.6), undefined, { ...B, model }).effort, "medium");
+    assert.equal(estimateEffort(sc(1.2), undefined, { ...B, model }).effort, "medium");
+    assert.equal(estimateEffort(sc(2.2), undefined, { ...B, model }).effort, "high");
+  }
 });
 
 test("estimateEffort keeps Jev's estimate within minEffort..maxEffort", () => {

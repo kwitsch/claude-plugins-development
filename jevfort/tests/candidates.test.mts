@@ -1,6 +1,6 @@
 // Pure logic of the built plugin/hooks/{candidates,report,context,policy}.mjs: upstream jev-pilot tests/candidates.test.ts.
 import { expect, test } from "vitest";
-import { commandKey, coversStep, dedupeSkills, isSafeToOffer, mentionedPaths, quotedTerms, relevant } from "../plugin/hooks/candidates.mjs";
+import { commandKey, coversStep, dedupeSkills, isSafeToOffer, mentionedPaths, quotedTerms, relevant, words } from "../plugin/hooks/candidates.mjs";
 import { splitTurn } from "../plugin/hooks/context.mjs";
 import { route } from "../plugin/hooks/policy.mjs";
 import { buildReport, when } from "../plugin/hooks/report.mjs";
@@ -102,4 +102,8 @@ test("route: in model mode trivial goes to Haiku and routine to Sonnet; effort m
   expect(route(rated(2.9), "model")).toEqual({ level: 2.9 });
   expect(route(rated(0.95), "effort")).toEqual({ level: 0.95 });
   expect(route(rated(2.9, 0.3), "model")).toBeUndefined();
+});
+
+test("words keeps umlauts whole instead of splitting at them", () => {
+  expect([...words("ändere die Größe")]).toEqual(expect.arrayContaining(["änder", "größ"]));
 });
