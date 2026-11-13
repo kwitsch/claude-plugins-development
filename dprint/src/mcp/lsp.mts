@@ -90,6 +90,8 @@ export class DprintLsp {
   private readonly timeoutMs: number;
   /** Idle time in ms before the child is stopped. */
   private readonly idleMs: number;
+  /** Set by {@link DprintLsp.close}: the client was evicted or shut down and must not start a child again. */
+  private closed = false;
   /** Pending idle stop; armed when the format queue drains, cleared by the next format. */
   private idle: NodeJS.Timeout | undefined;
   /** `Date.now()` of the last request timeout by document URI; pruned when it grows. */
@@ -132,11 +134,21 @@ export class DprintLsp {
    */
   dispose(): void {
     clearTimeout(this.idle);
+    this.resetBuf(); // a big last reply must not stay pinned in a client without a child
     const child = this.child;
     this.child = null;
     this.ready = null;
     child?.kill();
     this.failPending(new Error("dprint lsp disposed")); // the exit handler ignores a disposed child
+  }
+
+  /**
+   * Retire the client for good (eviction, shutdown): like {@link DprintLsp.dispose}, but formats still queued or
+   * started later fail instead of spawning a child nobody tracks.
+   */
+  close(): void {
+    this.closed = true;
+    this.dispose();
   }
 
   /**
@@ -164,6 +176,7 @@ export class DprintLsp {
    * not affected.
    */
   private async formatNow(uri: string, text: string): Promise<string | null> {
+    if (this.closed) throw new Error("dprint lsp: client closed");
     const now = Date.now();
     if (now - (this.failedAt.get(uri) ?? 0) < COOLDOWN_MS) {
       throw new Error("dprint lsp: cooling down after a timeout");
@@ -280,7 +293,8 @@ export class DprintLsp {
         return;
       }
       const body = this.buf.subarray(sep + 4, end).toString("utf8");
-      this.buf = this.buf.subarray(end);
+      // an empty view would pin the whole buffer the reply was assembled in
+      this.buf = end === this.buf.length ? Buffer.alloc(0) : this.buf.subarray(end);
       let msg: unknown;
       try {
         msg = JSON.parse(body);

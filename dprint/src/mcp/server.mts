@@ -173,7 +173,8 @@ function startServer(): void {
     switch (method) {
       case "initialize":
         return ok(id, {
-          protocolVersion: params?.protocolVersion ?? DEFAULT_PROTOCOL,
+          // spec: answer with a version this server supports (the client then accepts or disconnects), never echo the request
+          protocolVersion: DEFAULT_PROTOCOL,
           capabilities: CAPABILITIES,
           serverInfo: SERVER_INFO,
         });

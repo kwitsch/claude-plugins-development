@@ -104,10 +104,17 @@ async function warnIfNoDprint($, dir) {
 	$.ui.toast(`dprint: ${dir} (or a parent up to the git root) has a dprint config but ${problem}; run /dprint:dprint init`, { timeoutMs: TOAST_MS });
 }
 async function resultingCwd($, e, r) {
-	const fromEvent = e?.tool_response;
-	for (const x of [fromEvent, r]) {
-		const dir = x?.worktreePath ?? x?.restoredCwd;
-		if (typeof dir === "string" && dir) return dir;
+	const ev = e;
+	const key = ev?.tool === "ExitWorktree" ? "restoredCwd" : ev?.tool === "EnterWorktree" ? "worktreePath" : null;
+	if (key !== null) {
+		for (const x of [
+			ev?.tool_response,
+			r?.result,
+			r
+		]) {
+			const dir = x?.[key];
+			if (typeof dir === "string" && dir) return dir;
+		}
 	}
 	return $.session.cwd();
 }

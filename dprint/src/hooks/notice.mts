@@ -250,16 +250,24 @@ async function warnIfNoDprint($: Engine, dir: string): Promise<void> {
  * The directory the event left the session in: a worktree tool's own result (as the format gate reads it), else
  * the session cwd.
  *
+ * @remarks
+ * Each tool names its own field: `EnterWorktree` the new `worktreePath`, `ExitWorktree` the `restoredCwd` (its
+ * output also carries the `worktreePath` it just left, which must not be checked). The engine hands a tool's output
+ * back as `{ result }` in the chain's result; a `tool_response` on the event is read too.
+ *
  * @param $ - Engine interface.
- * @param e - Event, may carry `tool_response`.
+ * @param e - Event: `tool` names the worktree tool; may carry `tool_response`.
  * @param r - The chain's result.
  * @returns Absolute directory, or `""` when unknown.
  */
 async function resultingCwd($: Engine, e: unknown, r: unknown): Promise<string> {
-  const fromEvent = (e as { tool_response?: WorktreeResult } | null | undefined)?.tool_response;
-  for (const x of [fromEvent, r as WorktreeResult]) {
-    const dir = x?.worktreePath ?? x?.restoredCwd;
-    if (typeof dir === "string" && dir) return dir;
+  const ev = e as { tool?: string; tool_response?: WorktreeResult } | null | undefined;
+  const key = ev?.tool === "ExitWorktree" ? "restoredCwd" : ev?.tool === "EnterWorktree" ? "worktreePath" : null;
+  if (key !== null) {
+    for (const x of [ev?.tool_response, (r as { result?: WorktreeResult } | null | undefined)?.result, r as WorktreeResult | null | undefined]) {
+      const dir = x?.[key];
+      if (typeof dir === "string" && dir) return dir;
+    }
   }
   return $.session.cwd();
 }

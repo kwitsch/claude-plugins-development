@@ -900,6 +900,42 @@ test("file_changed formats an in-cwd file on disk (CRLF files keep CRLF); unlink
   assert.equal(readFileSync(cr, "utf8"), "x  \ry  \r");
 });
 
+test("file_changed: mixed line endings and BOM files; a git glob in the path matches only that file", async (t) => {
+  const git = spawnSync("which", ["git"], { encoding: "utf8" }).stdout?.trim();
+  if (!git) return t.skip("git not on PATH");
+  symlinkSync(git, path.join(bin, "git"));
+  stubDprint();
+  const g = (...args) => {
+    const r = spawnSync(git, ["-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false", ...args], { cwd: repo, encoding: "utf8" });
+    assert.equal(r.status, 0, r.stderr);
+  };
+  const s = startServer();
+  const ev = (file) => ({ cwd: repo, file_path: file, event: "change" });
+  // one stray CRLF in an LF file: left alone, not converted to CRLF throughout
+  const mixed = path.join(repo, "mixed.ts");
+  writeFileSync(mixed, "a  \nb  \r\n");
+  assert.deepEqual(await s.tool("file_changed", ev(mixed)), {});
+  assert.equal(readFileSync(mixed, "utf8"), "a  \nb  \r\n");
+  // an Edit/Write result with a BOM is recognised by its digest, so file_changed does not reformat it
+  const bom = path.join(repo, "bom.ts");
+  writeFileSync(bom, "\uFEFFx  \n");
+  assert.deepEqual(await s.tool("file_written", { cwd: repo, tool_input: { file_path: bom } }), {});
+  assert.deepEqual(await s.tool("file_changed", ev(bom)), {});
+  assert.equal(readFileSync(bom, "utf8"), "\uFEFFx  \n");
+  // app/[slug]/page.ts must not match the dirty sibling app/s/page.ts (git pathspec glob)
+  mkdirSync(path.join(repo, "app/[slug]"), { recursive: true });
+  mkdirSync(path.join(repo, "app/s"));
+  const page = path.join(repo, "app/[slug]/page.ts");
+  writeFileSync(page, "x  \n");
+  writeFileSync(path.join(repo, "app/s/page.ts"), "x  \n");
+  g("init", "-q");
+  g("add", "app");
+  g("commit", "-qm", "app");
+  writeFileSync(path.join(repo, "app/s/page.ts"), "y  \n");
+  assert.deepEqual(await s.tool("file_changed", ev(page)), {});
+  assert.equal(readFileSync(page, "utf8"), "x  \n");
+});
+
 test("file_written records the Edit/Write result: file_changed leaves it alone, also on repeated events", async () => {
   stubDprint();
   const s = startServer();

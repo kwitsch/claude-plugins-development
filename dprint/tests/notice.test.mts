@@ -81,9 +81,11 @@ interface SetupOptions {
   path?: string | null;
   /** The fake executables fs.exists reports. */
   bins?: string[];
+  /** A tool's output as the engine hands it back in the chain's `{ result }`; default: the plain next result. */
+  toolResult?: (e: Record<string, unknown>) => unknown;
 }
 
-function setup($, on, { cwd = "", exists, run = () => OK, home = HOME, path: pathVar = PATH_DIRS, bins = [PATH_DPRINT] }: SetupOptions = {}) {
+function setup($, on, { cwd = "", exists, run = () => OK, home = HOME, path: pathVar = PATH_DIRS, bins = [PATH_DPRINT], toolResult = () => NEXT }: SetupOptions = {}) {
   const exist = exists ?? ((p) => ({ value: p === HOME || bins.includes(p) || existsSync(p) }));
   const toasts: { text: string; timeoutMs?: number }[] = [];
   const runs: { argv: string[]; init: Record<string, unknown> }[] = [];
@@ -106,7 +108,7 @@ function setup($, on, { cwd = "", exists, run = () => OK, home = HOME, path: pat
   });
   on("session.start", () => NEXT);
   on("classic.CwdChanged", () => NEXT);
-  on("tool.call", () => ({ result: NEXT }));
+  on("tool.call", (_$, e) => ({ result: toolResult(e) }));
   const clock = mock.clock(on);
   /** Fires `event` as Claude Code, waits until the detached check has settled, resolves to the event's result. */
   const fire = async (event, e = {}) => {
@@ -442,4 +444,20 @@ plainTest("built module keeps the names Claude Code's static check needs (no man
   assert.match(src, /\$\.process\.run\(/);
   assert.match(src, /\$\.env\.get\("HOME"\)/);
   assert.match(src, /\$\.env\.get\("PATH"\)/);
+});
+
+test("worktree tool output in the engine's { result } shape: ExitWorktree checks restoredCwd, never the worktree it left", async ($, on) => {
+  const left = withConfig(repo()); // ExitWorktree's output also names the worktree just left
+  const restored = withConfig(repo());
+  const entered = withConfig(repo());
+  const { fire, toasts } = setup($, on, {
+    cwd: "",
+    run: () => DENY,
+    toolResult: (e) => (e.tool === "ExitWorktree" ? { worktreePath: left, restoredCwd: restored } : { worktreePath: entered }),
+  });
+  await fire("tool.call", { tool: "ExitWorktree" });
+  assert.deepEqual(toasts.map((t) => t.text), [toastText(restored, COULD_NOT_START)]);
+  vi.setSystemTime(T0 + 16_000);
+  await fire("tool.call", { tool: "EnterWorktree" });
+  assert.deepEqual(toasts.map((t) => t.text), [toastText(restored, COULD_NOT_START), toastText(entered, COULD_NOT_START)]);
 });

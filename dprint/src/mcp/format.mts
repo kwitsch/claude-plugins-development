@@ -231,7 +231,7 @@ const client = (cwd: string, key = cwd): DprintLsp => {
     // evict the idle children of cwds the session left long ago
     for (const [k, old] of clients) {
       if (clients.size < MAX_CLIENTS) break;
-      old.dispose();
+      old.close();
       clients.delete(k);
     }
   }
@@ -380,7 +380,7 @@ export const worktreeExited = (args: WorktreeExitedInput = {}): HookResult => se
  * Kill every `dprint lsp` child (called when MCP stdin closes).
  */
 export function disposeLsp(): void {
-  for (const c of clients.values()) c.dispose();
+  for (const c of clients.values()) c.close();
   clients.clear();
 }
 
@@ -530,7 +530,7 @@ const digest = (text: string): string => createHash("sha256").update(text).diges
 const errText = (e: unknown): string => e instanceof Error ? e.message : String(e);
 
 /** Strict UTF-8 decoder: throws on invalid bytes. */
-const utf8 = new TextDecoder("utf-8", { fatal: true });
+const utf8 = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }); // keep a BOM, like readFileSync (the digests must agree)
 
 /** `execFile` returning a promise of `{ stdout, stderr }`. */
 const execFileAsync = promisify(execFile);
@@ -634,6 +634,7 @@ async function formatOnDisk(sc: Scope, s: { fp: string; real: string }, signal?:
       // CRLF files are formatted on their LF view (as formatPre's Edit does) and written back with CRLF; a lone "\r" fails open
       const lf = text.replaceAll("\r\n", "\n");
       if (lf.includes("\r")) return false;
+      if (text !== lf && /(?<!\r)\n/.test(text)) return false; // mixed line endings: writing all CRLF would change every line
       // user decision: gitignored files (`!!`) and tracked files equal to the index (empty output) are left alone;
       // one spawn answers both. --untracked-files=normal is required: under status.showUntrackedFiles=no git
       // rejects --ignored otherwise. --no-optional-locks keeps .git/index.lock free for the user's git,
@@ -641,7 +642,7 @@ async function formatOnDisk(sc: Scope, s: { fp: string; real: string }, signal?:
       try {
         const { stdout } = await execFileAsync(
           "git",
-          ["--no-optional-locks", "status", "--porcelain", "--untracked-files=normal", "--ignored=matching", "--", s.fp],
+          ["--literal-pathspecs", "--no-optional-locks", "status", "--porcelain", "--untracked-files=normal", "--ignored=matching", "--", s.fp],
           { cwd: path.dirname(s.fp), encoding: "utf8", timeout: 10_000 },
         );
         if (stdout === "" || stdout.startsWith("!!")) return false;
