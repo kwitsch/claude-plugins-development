@@ -12,13 +12,13 @@ Entry point and the only skill of this plugin. The phases are reference files ne
 Strip these flags from the task text before anything else; the rest is the task.
 
 - `--headless`: no question goes to the user. See [Questions and --headless](#questions-and---headless).
-- `--size=<value>`: `S`, `M`, `L` or `XL` (case-insensitive). That value is the size; the size question of the triage is skipped. Any other value is a question (see below), never a silent guess.
+- `--size=<value>`: `S`, `M`, `L` or `XL` (case-insensitive). That value is the size; the size question of the triage is skipped. Any other value is not guessed: ask for the size through `AskUserQuestion` (options S, M, L, XL; headless: decider) after triage, and use the answer.
 
 ## Questions and --headless
 
 Every question to the user goes through `AskUserQuestion`, never as plain text. This holds for this file and for every reference.
 
-With `--headless`, `AskUserQuestion` is never called. Instead, for each question spawn the `decider` agent (`subagent_type: decider`; continue the same agent with `SendMessage` while it still runs) and brief it with:
+With `--headless`, `AskUserQuestion` is never called. Instead, for each question spawn the `decider` agent (`subagent_type: jev-solver:decider`, the plugin-namespaced name; continue the same agent with `SendMessage` while it still runs) and brief it with:
 
 - the question and the options that `AskUserQuestion` would have shown (label and description, the recommended one first),
 - the task text, track, size, branch and worktree path,

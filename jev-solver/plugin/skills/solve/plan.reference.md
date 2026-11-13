@@ -1,4 +1,3 @@
-
 # plan
 
 Input: the approved `spec.md` from the scratchpad. Output: `plan.md` next to it (`jev-solver/<task-slug>/plan.md`, never in the repo).

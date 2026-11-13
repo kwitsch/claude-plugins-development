@@ -1,4 +1,3 @@
-
 # verify
 
 Evidence before claims.

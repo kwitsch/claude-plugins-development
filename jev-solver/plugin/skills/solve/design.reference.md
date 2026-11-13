@@ -1,4 +1,3 @@
-
 # design
 
 No code and no plan before the spec is approved.

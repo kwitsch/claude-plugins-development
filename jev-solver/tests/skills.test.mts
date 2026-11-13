@@ -54,8 +54,20 @@ describe("jev-solver", () => {
 
   it("references no longer name skills that do not exist", () => {
     for (const ref of ["SKILL", ...REFERENCES.map((r) => `${r}.reference`)]) {
-      assert.doesNotMatch(read(`skills/solve/${ref}.md`), /jev-solver:(?!solve)/, ref);
+      assert.doesNotMatch(read(`skills/solve/${ref}.md`), /jev-solver:(?!solve|decider)/, ref);
     }
+  });
+
+  it("every relative markdown link in solve and its references resolves to a file", () => {
+    for (const ref of ["SKILL", ...REFERENCES.map((r) => `${r}.reference`)]) {
+      for (const m of read(`skills/solve/${ref}.md`).matchAll(/\]\(([^)#:]+\.md)(?:#[^)]*)?\)/g)) {
+        assert.ok(existsSync(join(plugin, "skills/solve", m[1])), `${ref} -> ${m[1]}`);
+      }
+    }
+  });
+
+  it("solve dispatches the plugin-namespaced decider agent", () => {
+    assert.match(read("skills/solve/SKILL.md"), /subagent_type: jev-solver:decider/);
   });
 
   it("declares jev-api as dependency", () => {

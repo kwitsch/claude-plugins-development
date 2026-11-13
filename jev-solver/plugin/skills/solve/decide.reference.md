@@ -1,4 +1,3 @@
-
 # decide
 
 Use for a direction decision that has defined options or a rating scale, never for a decision that belongs to the user (approvals, destructive or outward-facing actions): those go to the user via `AskUserQuestion` (with `--headless`: to the `decider` agent, see [SKILL.md](SKILL.md#questions-and---headless)).

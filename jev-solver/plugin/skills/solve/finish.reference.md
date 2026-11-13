@@ -1,4 +1,3 @@
-
 # finish
 
 1. **Verify:** [verify](verify.reference.md) on the branch; do not go on while anything fails.

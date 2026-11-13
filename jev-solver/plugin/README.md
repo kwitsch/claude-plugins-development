@@ -1,10 +1,10 @@
 # jev-solver
 
-A collection of workflow skills modelled on the superpowers plugin, without its SessionStart steering and subagent-driven-development. Start with `/jev-solver:solve <task>`.
+One workflow skill modelled on the superpowers plugin, without its SessionStart steering and subagent-driven-development. Start with `/jev-solver:solve <task>`.
 
 ## Requirements
 
-The `jev-api` plugin (declared as dependency) with `TYPESAFE_API_KEY`, `TYPESAFE_BASE_URL` or `JEV_URL` set. Without it, or on any jev-api error, the skills decide with Claude's own reasoning.
+The `jev-api` plugin (declared as dependency) with `TYPESAFE_API_KEY`, `TYPESAFE_BASE_URL` or `JEV_URL` set. Without it, or on any jev-api error, the skill decides with Claude's own reasoning.
 
 ## Skill, references and agent
 
