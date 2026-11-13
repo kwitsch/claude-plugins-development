@@ -1,7 +1,7 @@
 ---
 id: F22
 title: Per-Write/Edit hook overhead breakdown (measurement baseline)
-status: open
+status: closed
 priority: none
 area: dprint/plugin/hooks/hooks.json, dprint/src/mcp/server.mts, dprint/src/mcp/format.mts (formatPre, fileWritten)
 ---
@@ -9,6 +9,8 @@ area: dprint/plugin/hooks/hooks.json, dprint/src/mcp/server.mts, dprint/src/mcp/
 # F22 Per-Write/Edit hook overhead breakdown (measurement baseline)
 
 ## Status
+
+Closed 2026-11-13: measurement record, no code action. The baseline is out of date: Write/Edit now runs three `mcp_tool` hooks (`format_pre`, `drain_notices`, `file_written`) and each Bash call two (`bash_started`, `bash_finished`); re-measure before relying on it.
 
 Open, docs-only. No fix proposed: this is the reference baseline for judging other changes. Analysis verdict: confirmed, not worth fixing.
 

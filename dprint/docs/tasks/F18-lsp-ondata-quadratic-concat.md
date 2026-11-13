@@ -10,7 +10,7 @@ area: dprint/src/mcp/lsp.mts (DprintLsp.onData, buf, start, broken)
 
 ## Status
 
-Done in 0.12.1: `DprintLsp.onData` collects chunks in `chunks` and joins once per frame (`need` = bytes still missing); test "chunked lsp frames ... reassembled byte-exact" (stub mode `chunked`, 4 MB body).
+Done in 0.12.1: `DprintLsp.onData` collects chunks in `chunks` and joins once per frame (`need` = bytes still missing); test "chunked lsp frames ... reassembled byte-exact" (stub mode `chunked`, 880 KB body).
 
 ## Problem
 

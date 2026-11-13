@@ -254,8 +254,21 @@ let activeChanges = 0;
 /** Wake-ups of the waiting FileChanged events, oldest first. */
 const waitingChanges: Array<() => void> = [];
 
-/** Largest file FileChanged formats; bigger ones are generated data, and formatting them parks GBs in the lsp child. */
+/** Largest document any hook formats; bigger ones are generated data, and formatting them parks GBs in the lsp child. */
 const MAX_CHANGED_BYTES = 1024 * 1024;
+
+/**
+ * Whether a document is too big to format; logs the skip.
+ *
+ * @param bytes - Size of the document.
+ * @param fp - Its path, for the log line.
+ * @returns `true` when `bytes` exceeds {@link MAX_CHANGED_BYTES}.
+ */
+function overCap(bytes: number, fp: string): boolean {
+  if (bytes <= MAX_CHANGED_BYTES) return false;
+  process.stderr.write(`[dprint-hooks] format skipped (over ${MAX_CHANGED_BYTES} bytes): ${fp}\n`);
+  return true;
+}
 
 /**
  * Working directory per session or subagent, set by `cwd_changed`/`worktree_entered`: EnterWorktree and
@@ -609,10 +622,7 @@ function releaseChangeSlot(): void {
 async function formatOnDisk(sc: Scope, s: { fp: string; real: string }, signal?: AbortSignal): Promise<boolean> {
   try {
     if (signal?.aborted) return false;
-    if (statSync(s.fp).size > MAX_CHANGED_BYTES) {
-      process.stderr.write(`[dprint-hooks] format skipped (over ${MAX_CHANGED_BYTES} bytes): ${s.fp}\n`);
-      return false;
-    }
+    if (overCap(statSync(s.fp).size, s.fp)) return false;
     if (!(await acquireChangeSlot(s.fp))) return false;
     try {
       // cancelled while waiting for the slot: give it back without reading or spawning anything
@@ -880,6 +890,9 @@ export async function formatPre(
     const fp = s.fp;
     // formatting is opt-in: only when the effective cwd, or an ancestor up to the git repo/worktree root, holds a dprint config
     if (findConfig(root) === null) return {};
+    // oversized documents pass through unformatted (upper bound for an Edit: file plus new_string); no git spawn
+    if (args.tool_name === "Write" && overCap(Buffer.byteLength(ti.content ?? ""), fp)) return {};
+    if (args.tool_name === "Edit" && overCap(statSync(fp).size + Buffer.byteLength(ti.new_string ?? ""), fp)) return {}; // ENOENT -> catch -> {}
     // user decision: gitignored files are never formatted
     if (await isGitIgnored(fp)) return {};
     // cancelled meanwhile: spawn and format nothing (checked again before the second Edit format)

@@ -5,7 +5,7 @@ Working documents for agent sessions. Not shipped (`plugin/` is the installable 
 ## Layout
 
 - `TASKS.md`: index and checklist of all performance tasks (F01-F28). Start here.
-- `tasks/<id>-<slug>.md`: one detail document per task. Frontmatter: `id`, `title`, `status` (`done|partial|docs-only|open`), `priority`, `area`. Sections: Status, Problem, Evidence, Code locations, Approach, Verification, Constraints, Related.
+- `tasks/<id>-<slug>.md`: one detail document per task. Frontmatter: `id`, `title`, `status` (`done|partial|docs-only|open|closed`; closed = decided not to do, or a measurement record), `priority`, `area`. Sections: Status, Problem, Evidence, Code locations, Approach, Verification, Constraints, Related.
 
 ## How to work a task
 

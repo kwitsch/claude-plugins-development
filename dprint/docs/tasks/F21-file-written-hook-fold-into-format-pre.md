@@ -1,7 +1,7 @@
 ---
 id: F21
 title: Evaluate folding the file_written hook into format_pre
-status: open
+status: closed
 priority: low
 area: dprint/src/mcp/format.mts (fileWritten, formatPre, written map), dprint/plugin/hooks/hooks.json (PostToolUse Write|Edit -> file_written)
 ---
@@ -9,6 +9,8 @@ area: dprint/src/mcp/format.mts (fileWritten, formatPre, written map), dprint/pl
 # F21 Evaluate folding the file_written hook into format_pre
 
 ## Status
+
+Closed 2026-11-13, not done: unprototyped idea worth about 15 ms per Edit with CRLF/BOM and rejected-Edit risks; re-measure the hook overhead (the F22 baseline predates `drain_notices`, 0.11.3, 0.12.0) before reopening.
 
 Open. Hypothesis, never prototyped. Analysis verdict: gate passed (saving >= 10 ms), hypothesis unvalidated (critic dispute). Not worth doing unless the ~15 ms matters.
 

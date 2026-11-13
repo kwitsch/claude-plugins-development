@@ -467,7 +467,7 @@ test("Edit: whole-file reformat by the stub -> far hunks dropped", async () => {
   assert.ok(O.replace(u.old_string, () => u.new_string).includes("l1   \n"));
 });
 
-test("chunked lsp frames (split header, multi-MB body) are reassembled byte-exact", async () => {
+test("chunked lsp frames (split header, near-1-MiB body) are reassembled byte-exact", async () => {
   stubDprint("chunked");
   const s = startServer();
   const small = await s.call({
@@ -476,13 +476,13 @@ test("chunked lsp frames (split header, multi-MB body) are reassembled byte-exac
     tool_input: { file_path: path.join(repo, "a.ts"), content: "x   \n" },
   });
   assert.equal(small.hookSpecificOutput.updatedInput.content, "x\n");
-  const big = "line of text   \n".repeat(250_000); // 4 MB, one frame in ~60 pieces
+  const big = "line of text   \n".repeat(55_000); // 880 KB (just under the 1 MiB cap), one frame in ~14 pieces
   const out = await s.call({
     cwd: repo,
     tool_name: "Write",
     tool_input: { file_path: path.join(repo, "b.ts"), content: big },
   });
-  assert.equal(out.hookSpecificOutput.updatedInput.content, "line of text\n".repeat(250_000));
+  assert.equal(out.hookSpecificOutput.updatedInput.content, "line of text\n".repeat(55_000));
 });
 
 test("findConfig: a cached config stops counting once deleted, a new one counts at once", () => {
@@ -701,6 +701,73 @@ test("lsp timeout -> later formats of that document fail fast for the cooldown, 
     lsp.dispose();
     process.env.PATH = oldPath;
   }
+});
+
+/** A dprint stub that appends a line to the returned log file on every spawn (`dprint lsp` or file list). */
+function loggingDprint(): string {
+  const log = path.join(tmp, "spawned.log");
+  const f = path.join(bin, "dprint");
+  writeFileSync(f, `#!/usr/bin/env bash\necho spawned >> "${log}"\nexec node "${path.join(tmp, "stub-lsp.mjs")}" ok\n`);
+  chmodSync(f, 0o755);
+  return log;
+}
+
+/** Number of spawns recorded in `log`. */
+const spawns = (log: string): number => (existsSync(log) ? readFileSync(log, "utf8").split("\n").filter(Boolean).length : 0);
+
+test("idle lsp child exits after idleMs and the next format respawns it", { timeout: 10_000 }, async () => {
+  const log = loggingDprint();
+  const oldPath = process.env.PATH;
+  process.env.PATH = bin;
+  const lsp = new DprintLsp({ cwd: repo, idleMs: 200 });
+  try {
+    const u = pathToFileURL(path.join(repo, "a.ts")).href;
+    assert.equal(await lsp.format(u, "x   \n"), "x\n");
+    assert.equal(await lsp.format(u, "y   \n"), "y\n");
+    assert.equal(spawns(log), 1, "back to back formats share one child");
+    await new Promise((r) => setTimeout(r, 500));
+    assert.equal(await lsp.format(u, "z   \n"), "z\n");
+    assert.equal(spawns(log), 2, "the idle child was stopped and respawned");
+  } finally {
+    lsp.dispose();
+    process.env.PATH = oldPath;
+  }
+});
+
+test("at most 8 dprint lsp children: the least recently used cwd is evicted and respawned", async () => {
+  const log = loggingDprint();
+  const s = startServer();
+  const write = (dir: string) => s.call({ cwd: dir, tool_name: "Write", tool_input: { file_path: path.join(dir, "a.ts"), content: "x   \n" } });
+  const dirs: string[] = [];
+  for (let i = 0; i < 9; i++) {
+    const d = path.join(tmp, `c${i}`);
+    mkdirSync(d);
+    writeFileSync(path.join(d, "dprint.json"), "{}");
+    dirs.push(d);
+  }
+  for (const d of dirs) assert.equal((await write(d)).hookSpecificOutput.updatedInput.content, "x\n");
+  assert.equal(spawns(log), 9, "one child per cwd");
+  await write(dirs[8]);
+  assert.equal(spawns(log), 9, "a cwd still held is reused");
+  await write(dirs[0]); // evicted when the ninth started
+  assert.equal(spawns(log), 10, "the evicted cwd respawns");
+});
+
+test("Write and Edit above 1 MiB pass through unformatted without spawning dprint lsp", async () => {
+  const log = loggingDprint();
+  const s = startServer();
+  const big = "x   \n".repeat(300_000); // 1.5 MB
+  assert.deepEqual(
+    await s.call({ cwd: repo, tool_name: "Write", tool_input: { file_path: path.join(repo, "w.ts"), content: big } }),
+    {},
+  );
+  const file = path.join(repo, "e.ts");
+  writeFileSync(file, big);
+  assert.deepEqual(
+    await s.call({ cwd: repo, tool_name: "Edit", tool_input: { file_path: file, old_string: "x   \nx", new_string: "y" } }),
+    {},
+  );
+  assert.equal(spawns(log), 0);
 });
 
 test(".mcp.json key matches every hooks.json server id and each hook tool is listed", async () => {

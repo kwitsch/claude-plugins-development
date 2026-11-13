@@ -29,6 +29,9 @@ type TextEdit = {
 
 /** Default per-request timeout; a request that exceeds it kills the child, the next format respawns it. */
 const REQUEST_TIMEOUT_MS = 30_000;
+
+/** Idle time after which the child exits (it holds the memory of the largest document it formatted); the next format respawns it. */
+const IDLE_MS = 120_000;
 /** After a request timeout, formats of the same document fail at once for this long (offline plugin host). */
 const COOLDOWN_MS = 60_000;
 /** After dprint was not found, {@link DprintLsp.start} does not search again for this long (a dprint installed mid-session is picked up). */
@@ -85,6 +88,10 @@ export class DprintLsp {
   private queue: Promise<unknown> = Promise.resolve();
   /** Request timeout in ms. */
   private readonly timeoutMs: number;
+  /** Idle time in ms before the child is stopped. */
+  private readonly idleMs: number;
+  /** Pending idle stop; armed when the format queue drains, cleared by the next format. */
+  private idle: NodeJS.Timeout | undefined;
   /** `Date.now()` of the last request timeout by document URI; pruned when it grows. */
   private readonly failedAt = new Map<string, number>();
   /** `Date.now()` until which {@link DprintLsp.start} does not search for dprint again after a miss. */
@@ -94,10 +101,11 @@ export class DprintLsp {
    * Create a client; the child is spawned lazily on the first {@link DprintLsp.format}.
    *
    * @param opts - Client options; `cwd` is the working directory and LSP root of the child, `timeoutMs`
-   * (default 30 s; tests) the request timeout.
+   * (default 30 s; tests) the request timeout, `idleMs` (default 2 min; tests) the idle time before the child exits.
    */
-  constructor(opts: { cwd: string; timeoutMs?: number }) {
+  constructor(opts: { cwd: string; timeoutMs?: number; idleMs?: number }) {
     this.cwd = opts.cwd;
+    this.idleMs = opts.idleMs ?? IDLE_MS;
     this.timeoutMs = opts.timeoutMs ?? REQUEST_TIMEOUT_MS;
   }
 
@@ -110,8 +118,12 @@ export class DprintLsp {
    * Rejects on any failure: dprint missing, crash, timeout, cooldown or error response.
    */
   format(uri: string, text: string): Promise<string | null> {
+    clearTimeout(this.idle);
     const run = this.queue.then(() => this.formatNow(uri, text));
-    this.queue = run.catch(() => {}); // a failed call must not block the next one
+    const tail = run.catch(() => {}).then(() => { // a failed call must not block the next one
+      if (this.queue === tail) this.idle = setTimeout(() => this.dispose(), this.idleMs).unref();
+    });
+    this.queue = tail;
     return run;
   }
 
@@ -119,6 +131,7 @@ export class DprintLsp {
    * Kill the child, if any, and reject every in-flight request.
    */
   dispose(): void {
+    clearTimeout(this.idle);
     const child = this.child;
     this.child = null;
     this.ready = null;
