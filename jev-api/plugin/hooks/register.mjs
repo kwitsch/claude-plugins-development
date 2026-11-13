@@ -297,7 +297,8 @@ function detail(text, redact) {
 	const error = body["error"];
 	const why = body["detail"] ?? (isRecord(error) ? error["message"] : undefined);
 	if (why === undefined) return undefined;
-	return typeof why === "string" ? redact(why) : JSON.stringify(why, (_k, v) => typeof v === "string" ? redact(v) : v);
+	const clean = (v) => typeof v === "string" ? redact(v) : isRecord(v) ? Object.fromEntries(Object.entries(v).map(([k, x]) => [redact(k), x])) : v;
+	return typeof why === "string" ? redact(why) : JSON.stringify(why, (_k, v) => clean(v));
 }
 function isUnit(v) {
 	return typeof v === "number" && Number.isFinite(v) && v >= 0 && v <= 1;
@@ -437,7 +438,7 @@ async function ask($, tool, state, questions, env, timeoutMs, signal) {
 		if (res === "aborted") return fail(tool, "the call was abandoned");
 		if (!res.ok) {
 			const why = detail(res.text, redact);
-			let text = why === undefined ? "" : redact(why).trim();
+			let text = why === undefined ? "" : why.trim();
 			if (text.length > MAX_DETAIL) {
 				text = text.slice(0, MAX_DETAIL);
 				if (/[\uD800-\uDBFF]$/.test(text)) text = text.slice(0, -1);

@@ -988,7 +988,7 @@ it("a key shorter than 6 characters is not redacted", async () => {
   expect((await run("noul")).deny).toBe("noul: HTTP 400: abc is wrong");
 });
 
-// F21: an error body of megabytes reaches the model cut, and a key at the cut is gone whole.
+// An error body of megabytes reaches the model cut, and a key at the cut is gone whole.
 it("an oversized error reason is cut after the redaction", async () => {
   const key = "sk-SECRET-1234567890";
   const { run } = await direct({
@@ -1105,6 +1105,23 @@ it("a key containing a quote is redacted inside an object error reason", async (
   const r = await run("noul");
   expect(r.deny).not.toContain("en12345");
   expect(r.deny).toContain("<TYPESAFE_API_KEY>");
+});
+
+// An object KEY holding the secret is redacted too, and a host named like a word is replaced once (no nested placeholder).
+it("a secret used as an object key in an error reason is redacted, the host placeholder is not nested", async () => {
+  const key = "tok\"en12345";
+  const { run } = await direct({
+    env: { get: async (n: string) => (n === "JEV_URL" ? "https://host/x" : n === "TYPESAFE_API_KEY" ? key : undefined) },
+    http: { fetch: () => Promise.resolve({ status: 401, ok: false, headers: {}, text: JSON.stringify({ detail: { [`Bearer ${key}`]: "rejected" } }) }) },
+    tool: { register: async (s: { name: string }) => ({ tool: TOOL(s.name) }) },
+  });
+  expect((await run("noul")).deny).toBe("noul: HTTP 401: {\"Bearer <TYPESAFE_API_KEY>\":\"rejected\"}");
+  const plain = await direct({
+    env: { get: async (n: string) => (n === "JEV_URL" ? "https://host/x" : undefined) },
+    http: { fetch: () => Promise.resolve({ status: 401, ok: false, headers: {}, text: JSON.stringify({ detail: "cannot reach host" }) }) },
+    tool: { register: async (s: { name: string }) => ({ tool: TOOL(s.name) }) },
+  });
+  expect((await plain.run("noul")).deny).toBe("noul: HTTP 401: cannot reach <host>");
 });
 
 // A registration answer without a string tool name is a registration, not a failure.
