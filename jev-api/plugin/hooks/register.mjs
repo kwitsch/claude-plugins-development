@@ -347,7 +347,8 @@ async function askHaiku($, tool, state, questions, timeoutMs, signal) {
 			system: HAIKU_SYSTEM,
 			prompt,
 			maxTokens: haikuTokens(questions),
-			timeoutMs
+			timeoutMs,
+			signal
 		});
 		reply.catch(() => undefined);
 		const aborted = new Promise((resolve) => {
@@ -429,28 +430,47 @@ async function ask($, tool, state, questions, env, timeoutMs, signal) {
 		if (onAbort) signal.removeEventListener("abort", onAbort);
 	}
 }
-async function registerTools($, names, missing) {
-	const todo = TOOLS.filter((t) => missing.has(t));
-	const results = await Promise.allSettled(todo.map((type) => $.tool.register({
-		name: type,
-		...SPECS[type]
-	})));
-	for (const [i, r] of results.entries()) {
-		const type = todo[i];
-		if (r.status === "rejected") await Promise.resolve($.ui.log(`registering ${type} failed: ${message(r.reason)}`)).catch(() => undefined);
-		else {
-			const tool = r.value?.tool;
-			if (tool?.startsWith("mcp__") && tool.endsWith(`__${type}`)) names.set(tool, type);
-			missing.delete(type);
+const MAX_RETRY_MS = 3e5;
+async function registerOne($, st, type) {
+	try {
+		const r = await $.tool.register({
+			name: type,
+			...SPECS[type]
+		});
+		const tool = r?.tool;
+		if (tool?.startsWith("mcp__") && tool.endsWith(`__${type}`)) st.names.set(tool, type);
+		st.missing.delete(type);
+		st.failures.delete(type);
+		st.stuck.delete(type);
+	} catch (err) {
+		const n = (st.failures.get(type) ?? 0) + 1;
+		st.failures.set(type, n);
+		st.retryAt.set(type, Date.now() + (n === 1 ? 0 : Math.min(MAX_RETRY_MS, 5e3 * 2 ** (n - 2))));
+		if (n === 1) {
+			try {
+				await $.ui.log(`registering ${type} failed: ${message(err)}`);
+			} catch {}
 		}
 	}
 }
-async function within($, p, ms) {
+async function ensureTools($, st, ms) {
+	const now = Date.now();
+	for (const type of TOOLS) {
+		if (!st.missing.has(type) || st.pending.has(type) || (st.retryAt.get(type) ?? 0) > now) continue;
+		const p = registerOne($, st, type);
+		st.pending.set(type, p);
+		void p.then(() => st.pending.delete(type));
+	}
+	const waiting = [...st.pending].filter(([type]) => !st.stuck.has(type));
+	if (waiting.length === 0) return;
 	let timer;
 	try {
-		await Promise.race([p.catch(() => undefined), new Promise((resolve) => {
-			timer = $.clock.after(ms, resolve);
+		const late = await Promise.race([Promise.all(waiting.map(([, p]) => p)).then(() => false), new Promise((resolve) => {
+			timer = $.clock.after(ms, () => resolve(true));
 		})]);
+		if (late) {
+			for (const [type] of waiting) if (st.pending.has(type)) st.stuck.add(type);
+		}
 	} finally {
 		timer?.cancel();
 	}
@@ -458,25 +478,23 @@ async function within($, p, ms) {
 export function register(on, options) {
 	const fallbackS = seconds(options?.["timeout"]) ?? DEFAULT_TIMEOUT_S;
 	const names = new Map(TOOLS.map((t) => [TOOL_PREFIX + t, t]));
-	const missing = new Set(TOOLS);
-	let registering;
+	const st = {
+		names,
+		missing: new Set(TOOLS),
+		pending: new Map(),
+		retryAt: new Map(),
+		failures: new Map(),
+		stuck: new Set()
+	};
 	on("session.start", async function onSessionStart($, e, next) {
-		if (missing.size > 0) {
-			await within($, registering ??= registerTools($, names, missing).finally(() => {
-				registering = undefined;
-			}), 5 * REGISTER_WAIT_MS);
-		}
+		if (st.missing.size > 0) await ensureTools($, st, 5 * REGISTER_WAIT_MS);
 		return next(e);
 	});
 	on("tool.call", async function onToolCall($, e, next) {
 		const type = names.get(e.tool);
 		if (type === undefined) return next(e);
 		try {
-			if (missing.size > 0) {
-				await within($, registering ??= registerTools($, names, missing).finally(() => {
-					registering = undefined;
-				}), REGISTER_WAIT_MS);
-			}
+			if (st.missing.size > 0) await ensureTools($, st, REGISTER_WAIT_MS);
 			const input = parseInput(type, e);
 			if (typeof input === "string") return fail(type, input);
 			const [key, base, jevUrl, model] = (await Promise.all([

@@ -188,7 +188,7 @@ test("session.compact waits longer for Jev than an interactive call, and tells j
   while (apiTimeout === undefined) await clock.advance(0); // until the batch call is under way
   await clock.advance(4600);
   await done;
-  expect(apiTimeout).toBe(12);
+  expect(apiTimeout).toBe(9);
   expect(instructions).toContain("Keep exact details (paths, errors, decisions, values) from: Bash step a.");
 });
 

@@ -4,8 +4,8 @@ Working documents for agent sessions. Not shipped (`plugin/` is the installable 
 
 ## Layout
 
-- `TASKS.md`: index and checklist of the performance and robustness findings (F01-F15). Start here.
-- `EVALUATION-<date>.md`: a dated measurement run of the built `plugin/hooks/register.mjs` (method, machine, numbers, findings). Latest: `EVALUATION-2026-11-13.md` (plugin 0.3.1).
+- `TASKS.md`: index and checklist of the performance and robustness findings (F01-F20). Start here.
+- `EVALUATION-<date>.md`: a dated measurement run of the built `plugin/hooks/register.mjs` (method, machine, numbers, findings). Latest: `EVALUATION-2026-11-13.md` (plugin 0.3.1, plus its section "Re-run on 0.3.2 / jevfort 0.9.1").
 - `tasks/<id>-<slug>.md`: one document per finding. Frontmatter `id`, `title`, `status` (`done|partial|docs-only|open|closed`), `priority`, `area`; sections Status, Problem, Evidence, Code locations, Approach, Verification, Constraints, Related.
 
 ## How to work a task

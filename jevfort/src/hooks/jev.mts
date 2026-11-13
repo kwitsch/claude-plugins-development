@@ -33,11 +33,11 @@ export const MAX_CHOICE_OPTIONS = 255;
 export const JEV_API_TIMEOUT_S = 4;
 /**
  * The `askJev` budget of a compaction ranking in milliseconds. System One answers a batch question by question
- * (about 140 ms each, 30 compaction-sized questions took 4.1 s), and a compaction is off the interactive path.
+ * (about 140 ms each, 30 compaction-sized questions took 4.1 to 5.1 s), and a compaction is off the interactive path. Kept below the engine's 10 s limit per hook.
  */
-export const COMPACT_TIMEOUT_MS = 12_000;
+export const COMPACT_TIMEOUT_MS = 9000;
 /** jev-api's `timeout` input in seconds for a compaction ranking: {@link COMPACT_TIMEOUT_MS}. */
-export const COMPACT_API_TIMEOUT_S = 12;
+export const COMPACT_API_TIMEOUT_S = 9;
 /** The `askJev` budget in milliseconds while jev-api has no Jev access configured and Haiku answers (a model call, slower than System One). */
 export const HAIKU_TIMEOUT_MS = 15_000;
 /** jev-api's `timeout` input in seconds in that case: just under {@link HAIKU_TIMEOUT_MS}. */

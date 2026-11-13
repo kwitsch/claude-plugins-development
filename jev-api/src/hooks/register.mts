@@ -103,7 +103,7 @@ type Engine = {
   /** Model requests: the stand-in for Jev when no System One access is configured. */
   model: {
     /** Asks a model one question; resolves the reply, or `isAnswered: false` with the reason. */
-    complete(spec: { model: string; system: string; prompt: string; maxTokens: number; timeoutMs: number }): Promise<{ isAnswered: true; text: string } | { isAnswered: false; reason: string }>;
+    complete(spec: { model: string; system: string; prompt: string; maxTokens: number; timeoutMs: number; signal?: AbortSignal }): Promise<{ isAnswered: true; text: string } | { isAnswered: false; reason: string }>;
   };
   /** Tool registry. */
   tool: {
@@ -634,7 +634,7 @@ async function askHaiku($: Engine, tool: ToolName, state: string, questions: Que
   const prompt = `Text:\n${state}\n\nQuestions (JSON):\n${JSON.stringify(Object.fromEntries(ids.map((id, i) => [id, questions[i]])))}`;
   let onAbort: (() => void) | undefined;
   try {
-    const reply = $.model.complete({ model: HAIKU_MODEL, system: HAIKU_SYSTEM, prompt, maxTokens: haikuTokens(questions), timeoutMs });
+    const reply = $.model.complete({ model: HAIKU_MODEL, system: HAIKU_SYSTEM, prompt, maxTokens: haikuTokens(questions), timeoutMs, signal });
     reply.catch(() => undefined); // a late rejection after an abort must not go unhandled
     const aborted = new Promise<"aborted">((resolve) => {
       if (signal.aborted) resolve("aborted");
@@ -726,45 +726,84 @@ async function ask($: Engine, tool: ToolName, state: string, questions: Question
   }
 }
 
+type RegState = {
+  /** Full tool name -> tool: the default names plus what the engine returned. */
+  names: Map<string, ToolName>;
+  /** The tools not registered yet. */
+  missing: Set<ToolName>;
+  /** The tools whose registration is under way. */
+  pending: Map<ToolName, Promise<void>>;
+  /** When a failed tool may be tried again (ms since epoch). */
+  retryAt: Map<ToolName, number>;
+  /** Failed attempts per tool. */
+  failures: Map<ToolName, number>;
+  /** Tools whose registration did not answer within a hook's wait: later hooks do not wait for them again. */
+  stuck: Set<ToolName>;
+};
+
+/** The longest a failed registration waits for its next try (ms); the first retry is immediate. */
+const MAX_RETRY_MS = 300_000;
+
 /**
- * Registers the four tools and records the full name the engine gave each.
+ * Registers one tool and records the full name the engine gave it; never rejects.
  *
  * @param $ - The engine.
- * @param names - Full tool name to tool; gains the names the engine returned.
+ * @param st - The registration state.
+ * @param type - The tool to register.
  */
-async function registerTools($: Engine, names: Map<string, ToolName>, missing: Set<ToolName>): Promise<void> {
-  // One failing registration must not drop the others; only the tools still missing are tried (a later hook retries the rest).
-  const todo = TOOLS.filter((t) => missing.has(t));
-  const results = await Promise.allSettled(todo.map((type) => $.tool.register({ name: type, ...SPECS[type] })));
-  for (const [i, r] of results.entries()) {
-    const type = todo[i];
-    // The engine starts a log line with the plugin's name; logging is best effort.
-    if (r.status === "rejected") await Promise.resolve($.ui.log(`registering ${type} failed: ${message(r.reason)}`)).catch(() => undefined);
-    else {
-      // Only a mcp__<plugin>__<type> name: a hook above answering anything else must not make this hook claim another tool.
-      const tool = r.value?.tool;
-      if (tool?.startsWith("mcp__") && tool.endsWith(`__${type}`)) names.set(tool, type);
-      missing.delete(type);
+async function registerOne($: Engine, st: RegState, type: ToolName): Promise<void> {
+  try {
+    const r = await $.tool.register({ name: type, ...SPECS[type] });
+    // Only a mcp__<plugin>__<type> name: a hook above answering anything else must not make this hook claim another tool.
+    const tool = r?.tool;
+    if (tool?.startsWith("mcp__") && tool.endsWith(`__${type}`)) st.names.set(tool, type);
+    st.missing.delete(type);
+    st.failures.delete(type);
+    st.stuck.delete(type);
+  } catch (err) {
+    const n = (st.failures.get(type) ?? 0) + 1;
+    st.failures.set(type, n);
+    // The first retry is immediate (the next hook), then 5 s, 10 s, ... up to MAX_RETRY_MS: a tool the engine keeps refusing must not cost every call.
+    st.retryAt.set(type, Date.now() + (n === 1 ? 0 : Math.min(MAX_RETRY_MS, 5000 * 2 ** (n - 2))));
+    // The engine starts a log line with the plugin's name; logging is best effort, and once per tool.
+    if (n === 1) {
+      try {
+        await $.ui.log(`registering ${type} failed: ${message(err)}`);
+      } catch {
+        // best effort: this function never rejects
+      }
     }
   }
 }
 
 /**
- * Waits for a promise, at most `ms`: a registration that never answers must not hold the hook (or the call) forever.
+ * Starts the registration of every missing tool that is not under way and not waiting for a retry, then waits for the
+ * ones that did not hang before, at most `ms`. A registration that never answers is waited for once: the tool is marked
+ * stuck, and the other tools and later hooks do not wait for it again.
  *
  * @param $ - The engine.
- * @param p - The promise to wait for; its rejection is ignored.
+ * @param st - The registration state.
  * @param ms - The longest wait.
  */
-async function within($: Engine, p: Promise<void>, ms: number): Promise<void> {
+async function ensureTools($: Engine, st: RegState, ms: number): Promise<void> {
+  const now = Date.now();
+  for (const type of TOOLS) {
+    if (!st.missing.has(type) || st.pending.has(type) || (st.retryAt.get(type) ?? 0) > now) continue;
+    const p = registerOne($, st, type);
+    st.pending.set(type, p);
+    void p.then(() => st.pending.delete(type));
+  }
+  const waiting = [...st.pending].filter(([type]) => !st.stuck.has(type));
+  if (waiting.length === 0) return;
   let timer: { cancel(): void } | undefined;
   try {
-    await Promise.race([
-      p.catch(() => undefined),
-      new Promise<void>((resolve) => {
-        timer = $.clock.after(ms, resolve);
+    const late = await Promise.race([
+      Promise.all(waiting.map(([, p]) => p)).then(() => false),
+      new Promise<boolean>((resolve) => {
+        timer = $.clock.after(ms, () => resolve(true));
       }),
     ]);
+    if (late) { for (const [type] of waiting) if (st.pending.has(type)) st.stuck.add(type); }
   } finally {
     timer?.cancel();
   }
@@ -782,21 +821,12 @@ export function register(on: On, options?: Options): void {
   const fallbackS = seconds(options?.["timeout"]) ?? DEFAULT_TIMEOUT_S;
   // Full tool name -> tool: the default names (a call can reach an instance that saw no session.start), plus what the engine returned.
   const names = new Map<string, ToolName>(TOOLS.map((t) => [TOOL_PREFIX + t, t]));
-  // `$` reaches a module only inside its hooks, so the tools register in the first hook that runs (session.start, or an earlier tool call), once.
-  // The engine accepts `$` only as an argument to a top-level function, hence `registerTools` and the memo spelled out in both hooks.
-  // A tool whose registration failed stays in `missing`: the next hook registers it again (no timers, the hooks are the retry points).
-  const missing = new Set<ToolName>(TOOLS);
-  let registering: Promise<void> | undefined;
+  // `$` reaches a module only inside its hooks, so the tools register in the first hook that runs (session.start, or an earlier tool call).
+  // The engine accepts `$` only as an argument to a top-level function, hence `ensureTools` and the state object.
+  // A tool whose registration failed stays in `missing`: the next hook tries it again (after a growing delay), no timers.
+  const st: RegState = { names, missing: new Set<ToolName>(TOOLS), pending: new Map(), retryAt: new Map(), failures: new Map(), stuck: new Set() };
   on("session.start", async function onSessionStart($, e, next) {
-    if (missing.size > 0) {
-      await within(
-        $,
-        registering ??= registerTools($, names, missing).finally(() => {
-          registering = undefined;
-        }),
-        5 * REGISTER_WAIT_MS,
-      );
-    }
+    if (st.missing.size > 0) await ensureTools($, st, 5 * REGISTER_WAIT_MS);
     return next(e);
   });
   on("tool.call", async function onToolCall($, e, next) {
@@ -805,15 +835,7 @@ export function register(on: On, options?: Options): void {
     // Answered on every path, a throw too (a hook above refusing $.env.get): a registered tool that no hook answers fails.
     try {
       // best effort and bounded: a failed or hanging registration must not hold the answer
-      if (missing.size > 0) {
-        await within(
-          $,
-          registering ??= registerTools($, names, missing).finally(() => {
-            registering = undefined;
-          }),
-          REGISTER_WAIT_MS,
-        );
-      }
+      if (st.missing.size > 0) await ensureTools($, st, REGISTER_WAIT_MS);
       // Validation needs no env: an invalid call answers before any env read.
       const input = parseInput(type, e);
       if (typeof input === "string") return fail(type, input);

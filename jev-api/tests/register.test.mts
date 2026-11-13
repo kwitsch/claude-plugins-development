@@ -602,6 +602,50 @@ it("a registration that never answers does not hold the call", async () => {
   expect(fetched).toHaveLength(1);
 });
 
+// F16: one tool whose registration hangs is waited for once; the other tools and later calls do not wait for it again.
+it("a hanging registration of one tool is waited for once, not by every call", async () => {
+  const waits: number[] = [];
+  const { run } = await direct({
+    tool: { register: (spec: { name: string }) => (spec.name === "score" ? new Promise(() => {}) : Promise.resolve({ tool: TOOL(spec.name) })) },
+    clock: {
+      after: (ms: number, fn: () => void) => {
+        waits.push(ms);
+        const t = ms === 1000 ? setTimeout(fn, 0) : undefined;
+        return { cancel: () => clearTimeout(t) };
+      },
+    },
+  });
+  for (let i = 0; i < 4; i++) expect(await run("noul")).toEqual({ result: JSON.stringify(ANSWERS["noul"]) });
+  expect(waits.filter((ms) => ms === 1000)).toHaveLength(1);
+});
+
+// F17: a tool the engine keeps refusing is retried once at once, then with a growing delay, and logged once.
+it("a permanently failing registration is retried with back-off and logged once", async () => {
+  const tries: string[] = [];
+  const logs: string[] = [];
+  const { run } = await direct({
+    tool: {
+      register: async (spec: { name: string }) => {
+        tries.push(spec.name);
+        if (spec.name === "batch") throw new Error("refused");
+        return { tool: TOOL(spec.name) };
+      },
+    },
+    ui: { log: async (text: string) => void logs.push(text) },
+  });
+  for (let i = 0; i < 20; i++) await run("noul");
+  expect(tries.filter((n) => n === "batch").length).toBeLessThanOrEqual(2); // the first try and the immediate retry
+  expect(logs).toHaveLength(1);
+});
+
+// F18: the Haiku call carries the abort signal of the dispatch.
+test("the Haiku call gets the abort signal", async ($, on) => {
+  const asked = haiku(on, () => said("{}"));
+  mock.env(on, {});
+  await call($, "noul");
+  expect(asked[0]["signal"]).toBeDefined();
+});
+
 // F05: an already abandoned call sends nothing.
 it("an already abandoned call sends no request", async () => {
   const { run, fetched } = await direct({ tool: { register: async (s: { name: string }) => ({ tool: TOOL(s.name) }) } });

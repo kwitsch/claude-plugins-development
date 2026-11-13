@@ -14,11 +14,14 @@ Legend: `[x]` finished (done, or closed without code: status `closed` in the tas
 - [x] [F06](tasks/F06-abort-listener-not-removed.md) Abort listeners stay on `next.signal` after the call settles
 - [x] [F07](tasks/F07-env-reads-before-validation.md) Four `$.env.get` dispatches per owned call, also for invalid input
 - [x] [F09](tasks/F09-abandoned-request-not-cancelled.md) A timed-out or abandoned request keeps running on the server
+- [x] [F16](tasks/F16-hung-registration-stays-memoized.md) medium, bug: a hung registration stays memoized; every owned call waits 1 s, every session.start 5 s, no retry; one hung tool holds the other three
+- [x] [F17](tasks/F17-registration-retry-without-backoff.md) low: a failing registration is retried on every owned call (1 attempt + 1 log line per call), no back-off
+- [x] [F18](tasks/F18-haiku-call-not-cancelled-default-effort.md) low: the Haiku fallback call gets no `signal` (not cancelled when abandoned) and no `effort` (thinking shares `maxTokens`)
+- [x] [F19](tasks/F19-jevfort-compaction-wait-and-hook-budget.md) medium (jevfort): every compaction now waits ~4.6 s for the ranking (12 s when Jev hangs); 12 s / 15 s budgets vs the engine's 10 s hook budget need a live check
 
 ## Remaining
 
-None: every finding is done or closed.
-
+None: every finding is done or closed (F16-F19 came from the re-run on 0.3.2 / jevfort 0.9.1, see the evaluation).
 
 ## Closed without code (measurement records, decided 2026-11-13)
 
@@ -29,9 +32,12 @@ None: every finding is done or closed.
 - [x] [F14](tasks/F14-timers-and-memory.md) Timer cleanup and module memory
 - [x] [F15](tasks/F15-test-suite-runtime.md) Test-suite runtime
 - [x] [F08](tasks/F08-haiku-prompt-repeats-criteria.md) Haiku prompt repeats identical criteria per question (26% of a compaction prompt)
+- [x] [F20](tasks/F20-jevfort-budget-equals-api-timeout.md) jevfort's 4 s budget and jev-api's 4 s timeout race: jevfort always decides, harmless (re-run)
 
 ## Notes
 
 - F01 is worked in jevfort (`jevfort/src/hooks/register.mts`, `jevfort/src/hooks/jev.mts`, `jevfort/src/hooks/compact.mts`); jev-api itself cannot make System One faster.
 - F02 and F03 touch the same code (`registering`, `registerTools`, both hooks): do them together.
 - F05 and F06 touch `ask`/`askHaiku`'s race: do them together.
+- F16 and F17 touch the same registration code (`registering`, `registerTools`, `within`, both hooks): do them together. F03 is done (the wait is bounded), F16 is its residual.
+- F19 is worked in jevfort and starts with a live check (skill `live-verify`); F18 needs a live Haiku measurement before any `effort` change.
