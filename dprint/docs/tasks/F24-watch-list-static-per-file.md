@@ -10,7 +10,7 @@ area: dprint/src/mcp/watch-paths.mts (watchList, main), dprint/src/mcp/format.mt
 
 ## Status
 
-Reviewed 2026-11-13; live smoke test below confirms the problem (priority back to high). Designs depend on Claude Code watcher behavior (re-creation on an unchanged sorted list, honoring watchPaths from an mcp_tool FileChanged result, directory-watch event volume without `ignored`) that only a live `claude -p --plugin-dir dprint/plugin --debug` run with an inotify sampler can prove. Mitigated for Bash: `bash_finished` formats rewritten watched files via an mtime scan of the cached list. Still uncovered: files rewritten by non-Bash tools after a watch is lost, and new files (watch list and `bash_finished` cache are read once per cwd). The list is sorted since 0.12.1. Next step: live prototype of option 2 with a debounced re-list.
+Reviewed 2026-11-13; live smoke test below confirms the problem (priority back to high). Designs depend on Claude Code watcher behavior (re-creation on an unchanged sorted list, honoring watchPaths from an mcp_tool FileChanged result, directory-watch event volume without `ignored`) that only a live `claude -p --plugin-dir dprint/plugin --debug` run with an inotify sampler can prove. Mitigated for Bash: `bash_finished` formats rewritten watched files via an mtime scan of the cached list. Still uncovered: files rewritten by non-Bash tools after a watch is lost, and new files (watch list and `bash_finished` cache are read once per cwd). The list is sorted since 0.12.1. Next step: live prototype of directories as watchPaths (option 2, re-list from FileChanged, was prototyped and does not work, see below).
 
 Open. Explicitly deferred in the 0.8.0 work (branch feature/performance-analysis-fixes, PR #19) as an unprototyped redesign. Analysis ranks it #2 by user impact; it limits the value of the F05 burst fix after the first checkout.
 
@@ -29,6 +29,17 @@ Method: `claude -p --plugin-dir dprint/plugin --debug-file ... --allowedTools Ba
 | watch count start / end                                  | 9 / 7                   | 9 / 0                         |
 
 Findings: (1) new files are never watched: confirmed. (2) A watched file that is unlinked and recreated loses its watch, racily (run 1 survived a quick delete+recreate twice, run 2 lost the watch at the first one; after `git checkout` the watch was gone in both runs): confirmed, and the watch count only falls. (3) 9 inotify watches for 6 listed files (the other 3 were not attributed). Not tested: directories as `watchPaths`, `watchPaths` returned by a FileChanged hook (needs a prototype; with the loss being racy a re-list after an `unlink` event, as in option 2, is the design the data points to, but an unlink event is not even delivered after the loss). Scripts: scratchpad `f24-run.mjs` (not in the repo).
+
+## Prototype result (2026-11-13, Claude Code 2.1.323): re-list via FileChanged `watchPaths`, not shipped
+
+Prototype (reverted): `file_changed` re-read `dprint file-paths` (sorted, in scope, one shared listing per second) and returned it as `hookSpecificOutput.watchPaths`, first on `unlink` events, then after every `change` event. Same harness as above, 3 runs per variant.
+
+- **`unlink` trigger: dead.** Claude Code never delivers an `unlink` event to FileChanged hooks here: the debug log shows only `change` events, also for deleted-and-recreated files and after `git checkout`. A re-list on `unlink` never ran (0 of 3 runs).
+- **`watchPaths` from a FileChanged `mcp_tool` hook is honored:** the log shows a second `FileChanged: watching N paths` right after the event (once with 7 paths when a new file had appeared).
+- **Re-list on every `change` event: partial at best.** The watch count at the end of the run was 9, 9, 0 (baseline without it: 7, 0, 7), but a second delete-and-recreate, an in-place write afterwards, a new file and the write after `git checkout` were still not formatted in 2 of 3 runs. The re-list answers the event of a file whose watch is about to be lost; the loss happens after it and nothing re-arms the watch.
+- Cost of that variant: one `dprint file-paths` per change burst (about 55 ms for 100 files, 160 ms for 5000), and 6 tests that expect `{}` from `file_changed` fail.
+
+Conclusion: re-listing from FileChanged does not fix the loss; do not ship it. Untested next candidates: directories as `watchPaths` (Claude Code would watch directories, so unlink+create of a child cannot drop the watch; open questions: event volume from `.git`/`node_modules` and whether Claude Code accepts directories) and a SessionStart/CwdChanged-style refresh at another trigger (no hook event fires on loss).
 
 ## Problem
 
