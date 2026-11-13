@@ -27,6 +27,8 @@ If the session is not already in a linked git worktree, `EnterWorktree` (ToolSea
 
 Run the script below with `Workflow`, `args = { mode: "jobs", plugin, worktree, date, jobs: [{ id, file, title, model, effort }] }`. Jobs run one after the other in the same worktree (no `isolation`; they all edit the same files). Every job commits and pushes itself. A `blocked` job stops the run; report it and leave the rest open.
 
+After the last job and before the analysis, a review job runs (when at least one job shipped code or docs): `/simplify` once, then `/code-review high --fix` on the branch, then build, lint and tests again, commit and push of what changed (`opus`/`high`; `high` is the ceiling here, never `max`). A blocked review also skips the analysis.
+
 ## Step 3: analysis
 
 The script's last phase (and `mode: "analyse"`) runs one analysis agent (`opus`/`xhigh`, read-only on code, writes docs only): method of `<plugin>/docs/EVALUATION-*.md` (same machine, built output, 5+ repetitions where cheap, a comparison with the previous evaluation, never edit old numbers), new findings as `tasks/<id>-<slug>.md` with the next free `F<nn>` id and `status: open`, `TASKS.md` updated. It commits and pushes, and returns the new open ids.
@@ -43,10 +45,15 @@ After the workflow: `gh pr create --draft` for the branch when none exists (`gh 
 export const meta = {
   name: 'perf-worklist',
   description: 'Work off a plugin perf task list job by job (commit + push each), then re-run the analysis',
-  phases: [{ title: 'Jobs', detail: 'one subagent per open task, sequential' }, { title: 'Analysis', detail: 'fresh performance analysis' }],
+  phases: [
+    { title: 'Jobs', detail: 'one subagent per open task, sequential' },
+    { title: 'Review', detail: '/simplify, then /code-review --fix on the branch' },
+    { title: 'Analysis', detail: 'fresh performance analysis' },
+  ],
 }
 
 const JOB = { type: 'object', properties: { status: { enum: ['done', 'closed', 'blocked'] }, commit: { type: 'string' }, summary: { type: 'string' } }, required: ['status', 'summary'] }
+const REVIEW = { type: 'object', properties: { status: { enum: ['clean', 'fixed', 'blocked'] }, commit: { type: 'string' }, summary: { type: 'string' } }, required: ['status', 'summary'] }
 const ANALYSIS = { type: 'object', properties: { newOpen: { type: 'array', items: { type: 'string' } }, summary: { type: 'string' } }, required: ['newOpen', 'summary'] }
 const { plugin, worktree, date } = args
 
@@ -58,6 +65,13 @@ Read ${plugin}/docs/tasks/${j.file}, ${plugin}/docs/TASKS.md, ${plugin}/CLAUDE.m
 4. Update the task document (status, Verification with the test and numbers, the version that ships it) and TASKS.md in the same commit. Bump ${plugin}/package.json version (patch, minor for behaviour) only if \`git diff origin/main -- ${plugin}/package.json\` shows no version change yet, then rebuild.
 5. \`git add\` only what this job changed, commit (message "${plugin}: ${j.id} <what>", no Co-Authored-By, no generated-with footer), \`git push -u origin HEAD\`.
 Return status done|closed|blocked (blocked: tests cannot be made green or the task needs a user decision; commit nothing broken), the commit sha, and one summary sentence.`
+
+const reviewPrompt = () => `Review the work of this run on the branch in the git worktree ${worktree} (everything since origin/main for plugin "${plugin}"; stay in the worktree).
+1. Invoke the Skill "simplify" once on the branch changes and apply its fixes.
+2. Invoke the Skill "code-review" with args "high --fix" (never max) on the branch.
+3. Run \`pnpm --filter ${plugin} build\`, \`pnpm lint\`, \`pnpm --filter ${plugin} test\` and fix until green; read the output.
+4. If anything changed: commit ("${plugin}: simplify and review fixes", no Co-Authored-By) and \`git push\`. Never touch plugin/**/*.mjs by hand.
+Return status clean (nothing to change), fixed or blocked (not green), the commit sha and one summary sentence.`
 
 const analysisPrompt = () => `Run a fresh performance analysis of plugin "${plugin}" in the git worktree ${worktree}. Follow .claude/rules/plugin-docs-tasks.md and the method of the latest ${plugin}/docs/EVALUATION-*.md (and ${plugin}/docs/README.md if present). Date: ${date}.
 Write ${plugin}/docs/EVALUATION-${date}.md (a dated file; never edit old numbers; state what was and was not run). New findings: ${plugin}/docs/tasks/F<next free nn>-<slug>.md with status open, frontmatter and sections per the rule; update TASKS.md. Docs only: do not change code.
@@ -74,12 +88,21 @@ if (args.mode === 'jobs') {
   }
 }
 
+let proceed = results.every((r) => r.status !== 'blocked')
+let review = null
+if (proceed && results.some((r) => r.status === 'done')) {
+  phase('Review')
+  review = await agent(reviewPrompt(), { label: 'simplify + code-review', phase: 'Review', model: 'opus', effort: 'high', schema: REVIEW })
+  log(`review: ${review?.status ?? 'agent failed'}`)
+  proceed = review !== null && review.status !== 'blocked'
+}
+
 let analysis = null
-if (args.mode === 'analyse' || results.every((r) => r.status !== 'blocked')) {
+if (args.mode === 'analyse' || proceed) {
   phase('Analysis')
   analysis = await agent(analysisPrompt(), { label: 'analysis', phase: 'Analysis', model: 'opus', effort: 'xhigh', schema: ANALYSIS })
 } else {
-  log('Analysis skipped: a job is blocked')
+  log('Analysis skipped: a job or the review is blocked')
 }
 return { results, analysis }
 ```
