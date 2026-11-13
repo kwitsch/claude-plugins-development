@@ -29,7 +29,7 @@ Proven (`chain.mjs`, jevfort's built `session.compact` hook -> jev-api's built h
 ## Approach
 
 1. Live check (skill `live-verify`): a jevfort `session.compact` with a jev-api that answers after 11 s (e.g. `JEV_URL` to a local stub) under `claude -p --plugin-dir`; read the debug log for a `timeout` of the hook and check whether the ranking arrives. Same for a `prompt.submit` with the Haiku path.
-2. If the sleep counts: replace `$.clock.sleep` by a timer that is not a hook wait (`$.clock.after` resolving a promise, as jev-api's `within` does) or keep every budget at or below ~9 s (compaction 9 s still covers the measured 5.1 s worst run).
+2. If the sleep counts: replace `$.clock.sleep` by a timer that is not a hook wait (`$.clock.after` resolving a promise, as jev-api's `ensureTools` does) or keep every budget at or below ~9 s (compaction 9 s still covers the measured 5.1 s worst run).
 3. Decide the wait: keep (a 4.6 s ranking ahead of a summary that takes longer anyway), or lower it (rank only the newest 15 items, ~2.3 s at ~150 ms per score, or skip the ranking for `auto` compaction where the user waits). Decision by the user or a decision agent; reasoning into this document.
 
 ## Verification

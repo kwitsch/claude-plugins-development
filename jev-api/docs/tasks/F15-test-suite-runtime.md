@@ -23,7 +23,7 @@ Proven (vitest, 3 runs with `JEV_URL` unset, 2 with it set, Node v24.22.2):
 | `JEV_URL` unset (live block skipped) | 68 passed, 4 skipped | 0.51-1.03 s (first run cold) | 1.25-2.06 s       | 187-254 MB |
 | `JEV_URL` set (4 live requests)      | 72 passed            | 0.92-1.21 s                  | 1.69-1.95 s       | n/a        |
 
-Slowest offline test 11 ms ("invalid input is rejected without a request"); the live block costs 73-298 ms per test (real requests). The timeout tests use the kit's mock clock, so 20-30 s timeouts cost nothing. Not tested today: a hanging or retried registration (F02, F03), a pre-aborted signal (F05), listener removal (F06), the Haiku `maxTokens` for large questions (F04).
+Slowest offline test 11 ms ("invalid input is rejected without a request"); the live block costs 73-298 ms per test (real requests). The timeout tests use the kit's mock clock, so 20-30 s timeouts cost nothing. Not tested today: a hanging or retried registration (F02, F03), a pre-aborted signal (F05), listener removal (F06), the Haiku `maxTokens` for large questions (F04). Since 0.3.2 all of these are tested (the tests named in the Status of F02 to F06).
 
 ## Code locations
 

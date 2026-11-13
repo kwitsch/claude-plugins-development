@@ -1094,6 +1094,43 @@ it("an oversized error reason ends with an ellipsis", async () => {
   expect((await run("noul")).deny).toMatch(/z…$/);
 });
 
+// A key or URL with a quote or backslash inside an object reason: JSON would escape it, so the strings are redacted first.
+it("a key containing a quote is redacted inside an object error reason", async () => {
+  const key = "tok\"en12345";
+  const { run } = await direct({
+    env: { get: async (n: string) => (n === "JEV_URL" ? "https://jev.internal/x" : n === "TYPESAFE_API_KEY" ? key : undefined) },
+    http: { fetch: () => Promise.resolve({ status: 401, ok: false, headers: {}, text: JSON.stringify({ detail: { msg: `bad key: Bearer ${key}` } }) }) },
+    tool: { register: async (s: { name: string }) => ({ tool: TOOL(s.name) }) },
+  });
+  const r = await run("noul");
+  expect(r.deny).not.toContain("en12345");
+  expect(r.deny).toContain("<TYPESAFE_API_KEY>");
+});
+
+// A registration answer without a string tool name is a registration, not a failure.
+it("a registration answering a non-string tool is not retried", async () => {
+  const tries: string[] = [];
+  const { run } = await direct({ tool: { register: async (s: { name: string }) => (tries.push(s.name), { tool: 42 }) } });
+  await run("noul");
+  await run("noul");
+  expect(tries).toHaveLength(4);
+});
+
+// A hook above refusing $.clock must not fail an owned call (the Haiku path needs no clock).
+it("an owned call is answered when waiting for the registration throws", async () => {
+  const { run } = await direct({
+    env: { get: async () => undefined },
+    model: { complete: () => Promise.resolve({ isAnswered: true, text: JSON.stringify({ answers: { answer: { type: "noul", noul: 0.5 } } }), usage: {} }) },
+    tool: { register: () => new Promise(() => {}) },
+    clock: {
+      after: () => {
+        throw new Error("clock refused");
+      },
+    },
+  });
+  expect((await run("noul")).result).toBeDefined();
+});
+
 // Gaps found by the second mutation round (round 7a).
 it("a DNS error that quotes the bare host of TYPESAFE_BASE_URL is redacted", async () => {
   const { run } = await direct({

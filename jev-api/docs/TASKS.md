@@ -19,8 +19,8 @@ Legend: `[x]` finished (done, or closed without code: status `closed` in the tas
 
 ## Remaining
 
-- [ ] [F18](tasks/F18-haiku-call-not-cancelled-default-effort.md) `partial` low: the Haiku fallback call gets no `signal` (not cancelled when abandoned) and no `effort` (thinking shares `maxTokens`)
-- [ ] [F19](tasks/F19-jevfort-compaction-wait-and-hook-budget.md) `partial` medium (jevfort): every compaction now waits ~4.6 s for the ranking (9 s when Jev hangs, since 0.9.1; 12 s before); 12 s / 15 s budgets vs the engine's 10 s hook budget need a live check
+- [ ] [F18](tasks/F18-haiku-call-not-cancelled-default-effort.md) `partial` low: the Haiku call carries the abort signal since 0.3.2; still no `effort` (thinking shares `maxTokens`, not measured)
+- [ ] [F19](tasks/F19-jevfort-compaction-wait-and-hook-budget.md) `partial` medium (jevfort): the compaction ranking budget is 9 s since 0.9.1 (~4.6 s measured); the hook is bypassed by `cc-plugin-sec-default` on 2.1.325, and the 15 s Haiku budget against the engine's 10 s hook budget was not checked on the compaction path
 
 ## Closed without code (measurement records, decided 2026-11-13)
 
@@ -39,4 +39,4 @@ Legend: `[x]` finished (done, or closed without code: status `closed` in the tas
 - F02 and F03 touched the same code (since the rewrite: `RegState`, `registerOne`, `ensureTools`, both hooks).
 - F05 and F06 touch `ask`/`askHaiku`'s race: do them together.
 - F16 and F17 touched the same registration code (since the rewrite: `RegState`, `registerOne`, `ensureTools`, both hooks); F03 (a bounded wait) was its first step, F16 its residual.
-- F19 was worked in jevfort and closed by sizing (9 s), no live check of the engine's hook limit was run (skill `live-verify` would do it); F18 needs a live Haiku measurement before any `effort` change.
+- F19 was worked in jevfort and partly done by sizing (9 s), no live check of the engine's hook limit was run (skill `live-verify` would do it); F18 needs a live Haiku measurement before any `effort` change.

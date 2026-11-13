@@ -25,7 +25,7 @@ The timeout of a call is its `timeout` input when that is a number above 0; othe
 
 Each tool is registered at session start and called by its full name, `mcp__jev-api__<type>`. `instructions` and `state` are text; `criteria` is an object or an array depending on the type; `batch` takes its questions as a required array of objects; the optional `timeout` is a number of seconds.
 
-The plugin answers these calls itself, before Claude Code's permission check: there is no permission prompt, `ask` rules and PreToolUse hooks do not apply, and the text goes to the configured endpoint as soon as Claude calls a tool. A `permissions.deny` rule for `mcp__jev-api` (or `mcp__jev-api__<type>`) removes the tools.
+The plugin answers these calls itself, before Claude Code's permission check: there is no permission prompt, `ask` rules and PreToolUse hooks do not apply, and the text goes to the configured endpoint as soon as Claude calls a tool. A `permissions.deny` rule for `mcp__jev-api` (or `mcp__jev-api__<type>`), or `--disallowedTools mcp__jev-api__batch`, removes the tools.
 
 ### `mcp__jev-api__noul`
 
@@ -71,8 +71,6 @@ Result: `{"type":"score","score":<expected level>,"confidence":<0..1>,"legend":{
 All questions go out in one System One request. Result: a JSON array of the answers in question order, each exactly as the matching single tool returns it. The call is all or nothing: an invalid question (the error names it, `questions[<index>]: ...`), an HTTP error or a missing answer fails the whole call.
 
 ## Where the text goes
-
-A deny rule withholds a tool from the session (for example `--disallowedTools mcp__jev-api__batch` or a `permissions.deny` entry in the settings); without one, Claude Code runs these tools without asking.
 
 The `state`, instructions and options of every call go to the configured endpoint (or to Haiku without one). A project's `.claude/settings.json` `env` overrides yours: a repository that sets `JEV_URL` or `TYPESAFE_BASE_URL` receives your `TYPESAFE_API_KEY` (over https only) and that text. The reason an endpoint gives for an HTTP error, and every fetch error text, reach the model with the URL, the host and the key replaced; the endpoint's reason is also cut after 1000 characters.
 

@@ -28,6 +28,8 @@ Proven (harness; `$.clock.after` mapped to `setTimeout`, counters for created, c
 
 ## Code locations
 
+Before 0.3.2; since the rewrite the module state is `RegState` (at most 4 tools) next to `names`, and `registering` is gone.
+
 - `ask` (`timer`, `finally { timer?.cancel() }`), `register` (`names`, `registering`)
 
 ## Approach

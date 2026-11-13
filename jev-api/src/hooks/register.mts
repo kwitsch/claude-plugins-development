@@ -553,15 +553,17 @@ function endpoint(jev: string | undefined, base: string | undefined): { ok: true
  * Extracts the API's reason from an error body: its `detail`, else the `message` of its `error` object.
  *
  * @param text - The raw response body.
- * @returns The reason (a string as is, anything else JSON-stringified), or undefined when there is none.
+ * @param redact - Replaces what must not reach the model; applied to every string of the reason before a non-string one is made into JSON text.
+ * @returns The reason redacted (a string as is, anything else JSON-stringified), or undefined when there is none.
  */
-function detail(text: string): string | undefined {
+function detail(text: string, redact: (s: string) => string): string | undefined {
   const body = json(text);
   if (!isRecord(body)) return undefined;
   const error = body["error"];
   const why = body["detail"] ?? (isRecord(error) ? error["message"] : undefined);
   if (why === undefined) return undefined;
-  return typeof why === "string" ? why : JSON.stringify(why);
+  // Redacted per string before the JSON text is made: JSON escapes quotes and backslashes, a secret containing one would no longer match.
+  return typeof why === "string" ? redact(why) : JSON.stringify(why, (_k, v: unknown) => (typeof v === "string" ? redact(v) : v));
 }
 
 /**
@@ -756,7 +758,7 @@ async function ask($: Engine, tool: ToolName, state: string, questions: Question
     if (res === "timeout") return fail(tool, `timeout after ${timeoutMs}ms`);
     if (res === "aborted") return fail(tool, "the call was abandoned");
     if (!res.ok) {
-      const why = detail(res.text);
+      const why = detail(res.text, redact);
       let text = why === undefined ? "" : redact(why).trim();
       if (text.length > MAX_DETAIL) {
         text = text.slice(0, MAX_DETAIL);
@@ -812,7 +814,7 @@ async function registerOne($: Engine, st: RegState, type: ToolName): Promise<voi
     const r = await $.tool.register({ name: type, ...SPECS[type] });
     // Only a mcp__<plugin>__<type> name: a hook above answering anything else must not make this hook claim another tool.
     const tool = r?.tool;
-    if (tool?.startsWith("mcp__") && tool.endsWith(`__${type}`)) st.names.set(tool, type);
+    if (typeof tool === "string" && tool.startsWith("mcp__") && tool.endsWith(`__${type}`)) st.names.set(tool, type);
     st.missing.delete(type);
   } catch (err) {
     const n = (st.failures.get(type) ?? 0) + 1;
@@ -897,7 +899,13 @@ export function register(on: On, options?: Options): void {
     // Answered on every path, a throw too (a hook above refusing $.env.get): a registered tool that no hook answers fails.
     try {
       // best effort and bounded: a failed or hanging registration must not hold the answer
-      if (st.missing.size > 0) await ensureTools($, st, REGISTER_WAIT_MS);
+      if (st.missing.size > 0) {
+        try {
+          await ensureTools($, st, REGISTER_WAIT_MS);
+        } catch {
+          // best effort (a hook above refusing $.clock): the call is answered anyway
+        }
+      }
       // Validation needs no env: an invalid call answers before any env read.
       const input = parseInput(type, e);
       if (typeof input === "string") return fail(type, input);

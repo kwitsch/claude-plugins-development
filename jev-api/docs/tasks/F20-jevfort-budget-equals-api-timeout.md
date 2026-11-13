@@ -16,7 +16,7 @@ Since 0.9.1 jevfort passes `timeout: 4` with its own 4000 ms budget (likewise 9 
 
 ## Evidence
 
-Proven (`chain.mjs`, stub): answer after 4.5 s: jevfort reports `timeout after 4000ms` at 4000-4001 ms and falls back; jev-api's own timer starts later (after the dispatch, its env reads and, while a registration is pending, up to 1 s of `within`, F16), so its answer comes after jevfort gave up and is ignored. Answer after 3.9 s: both succeed (3904 ms). Haiku path: jev-api's 14 s fires before jevfort's 15 s, so jev-api's `deny` reaches jevfort as the error. In every case the HTTP request runs on (F09).
+Proven (`chain.mjs`, stub): answer after 4.5 s: jevfort reports `timeout after 4000ms` at 4000-4001 ms and falls back; jev-api's own timer starts later (after the dispatch, its env reads and, while a registration is pending, up to 1 s of the `ensureTools` wait, F16), so its answer comes after jevfort gave up and is ignored. Answer after 3.9 s: both succeed (3904 ms). Haiku path: jev-api's 14 s fires before jevfort's 15 s, so jev-api's `deny` reaches jevfort as the error. In every case the HTTP request runs on (F09).
 
 ## Code locations
 

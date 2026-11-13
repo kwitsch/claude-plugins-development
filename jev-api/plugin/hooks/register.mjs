@@ -291,13 +291,13 @@ function endpoint(jev, base) {
 		url: DEFAULT_JEV_URL
 	};
 }
-function detail(text) {
+function detail(text, redact) {
 	const body = json(text);
 	if (!isRecord(body)) return undefined;
 	const error = body["error"];
 	const why = body["detail"] ?? (isRecord(error) ? error["message"] : undefined);
 	if (why === undefined) return undefined;
-	return typeof why === "string" ? why : JSON.stringify(why);
+	return typeof why === "string" ? redact(why) : JSON.stringify(why, (_k, v) => typeof v === "string" ? redact(v) : v);
 }
 function isUnit(v) {
 	return typeof v === "number" && Number.isFinite(v) && v >= 0 && v <= 1;
@@ -436,7 +436,7 @@ async function ask($, tool, state, questions, env, timeoutMs, signal) {
 		if (res === "timeout") return fail(tool, `timeout after ${timeoutMs}ms`);
 		if (res === "aborted") return fail(tool, "the call was abandoned");
 		if (!res.ok) {
-			const why = detail(res.text);
+			const why = detail(res.text, redact);
 			let text = why === undefined ? "" : redact(why).trim();
 			if (text.length > MAX_DETAIL) {
 				text = text.slice(0, MAX_DETAIL);
@@ -469,7 +469,7 @@ async function registerOne($, st, type) {
 			...SPECS[type]
 		});
 		const tool = r?.tool;
-		if (tool?.startsWith("mcp__") && tool.endsWith(`__${type}`)) st.names.set(tool, type);
+		if (typeof tool === "string" && tool.startsWith("mcp__") && tool.endsWith(`__${type}`)) st.names.set(tool, type);
 		st.missing.delete(type);
 	} catch (err) {
 		const n = (st.failures.get(type) ?? 0) + 1;
@@ -528,7 +528,11 @@ export function register(on, options) {
 		const type = names.get(e.tool);
 		if (type === undefined) return next(e);
 		try {
-			if (st.missing.size > 0) await ensureTools($, st, REGISTER_WAIT_MS);
+			if (st.missing.size > 0) {
+				try {
+					await ensureTools($, st, REGISTER_WAIT_MS);
+				} catch {}
+			}
 			const input = parseInput(type, e);
 			if (typeof input === "string") return fail(type, input);
 			const [key, base, jevUrl, model] = (await Promise.all([
