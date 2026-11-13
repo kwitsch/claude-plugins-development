@@ -178,14 +178,20 @@ function message(err) {
 }
 function hide(text, url, placeholder) {
 	let href = url;
+	try {
+		href = new URL(url).href;
+	} catch {}
+	return text.replaceAll(href, placeholder).replaceAll(url, placeholder);
+}
+function hideHost(text, url) {
 	let host = "";
 	try {
-		const u = new URL(url);
-		href = u.href;
-		host = u.hostname;
-	} catch {}
-	const t = text.replaceAll(href, placeholder).replaceAll(url, placeholder);
-	return host ? t.replaceAll(host, "<host>") : t;
+		host = new URL(url).hostname;
+	} catch {
+		return text;
+	}
+	if (!host) return text;
+	return text.replace(new RegExp(`(?<![\\w.-])${host.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\w-])`, "gi"), "<host>");
 }
 function isText(v) {
 	return typeof v === "string" && v.trim() !== "";
@@ -366,7 +372,7 @@ async function askHaiku($, tool, state, questions, timeoutMs, signal) {
 		const r = await Promise.race([reply, aborted]);
 		if (r === "aborted") return fail(tool, "the call was abandoned");
 		if (!r.isAnswered) return fail(tool, `fallback: ${r.reason}`);
-		const body = json(r.text.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, ""));
+		const body = json(r.text.trim().replace(/^```(?:json)?\s*/i, "").replace(/```$/, ""));
 		const answers = isRecord(body) ? body["answers"] : undefined;
 		const list = [];
 		for (const [i, q] of questions.entries()) {
@@ -392,7 +398,7 @@ async function ask($, tool, state, questions, env, timeoutMs, signal) {
 	const redact = (text) => {
 		let t = env.jevUrl ? hide(text, target.url, "<JEV_URL>") : env.base ? hide(text, target.url, "<TYPESAFE_BASE_URL>/v1/systemone") : text;
 		if (key && key.length >= 6) t = t.replaceAll(key, "<TYPESAFE_API_KEY>");
-		return t;
+		return env.jevUrl || env.base ? hideHost(t, target.url) : t;
 	};
 	let timer;
 	let onAbort;

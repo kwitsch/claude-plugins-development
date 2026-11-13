@@ -419,17 +419,32 @@ function message(err: unknown): string {
  */
 function hide(text: string, url: string, placeholder: string): string {
   let href = url;
-  let host = "";
   try {
-    const u = new URL(url);
-    href = u.href;
-    host = u.hostname;
+    href = new URL(url).href;
   } catch {
     // The engine quotes a URL it cannot parse as given.
   }
-  const t = text.replaceAll(href, placeholder).replaceAll(url, placeholder);
-  // A DNS failure quotes the bare host (`getaddrinfo ENOTFOUND <host>`, live on 2.1.325), which may be private too.
-  return host ? t.replaceAll(host, "<host>") : t;
+  return text.replaceAll(href, placeholder).replaceAll(url, placeholder);
+}
+
+/**
+ * Replaces the bare host of a URL in an error text. A DNS failure quotes only the host (`getaddrinfo ENOTFOUND <host>`,
+ * live on 2.1.325), which may be private too. Only whole host names are replaced, ignoring case: the host `jev` must
+ * not turn `jev-latest` or `110.0.0.5` into something else.
+ *
+ * @param text - The text.
+ * @param url - The endpoint URL; one that does not parse changes nothing.
+ * @returns The text with the host as `<host>`.
+ */
+function hideHost(text: string, url: string): string {
+  let host = "";
+  try {
+    host = new URL(url).hostname;
+  } catch {
+    return text;
+  }
+  if (!host) return text;
+  return text.replace(new RegExp(`(?<![\\w.-])${host.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\w-])`, "gi"), "<host>");
 }
 
 /**
@@ -654,7 +669,7 @@ async function askHaiku($: Engine, tool: ToolName, state: string, questions: Que
     const r = await Promise.race([reply, aborted]);
     if (r === "aborted") return fail(tool, "the call was abandoned");
     if (!r.isAnswered) return fail(tool, `fallback: ${r.reason}`);
-    const body = json(r.text.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, ""));
+    const body = json(r.text.trim().replace(/^```(?:json)?\s*/i, "").replace(/```$/, ""));
     const answers = isRecord(body) ? body["answers"] : undefined;
     const list: Record<string, unknown>[] = [];
     for (const [i, q] of questions.entries()) {
@@ -696,9 +711,10 @@ async function ask($: Engine, tool: ToolName, state: string, questions: Question
   // Text that reaches the model (a fetch error, an error body a server may echo the request into) must not carry the endpoint
   // or the key: a runtime quotes a header value it rejects (a newline or a non-Latin1 character in the key), whole.
   const redact = (text: string): string => {
+    // In this order: the URL first (it may contain the key), the key before the host (a key may contain the host text).
     let t = env.jevUrl ? hide(text, target.url, "<JEV_URL>") : env.base ? hide(text, target.url, "<TYPESAFE_BASE_URL>/v1/systemone") : text;
     if (key && key.length >= 6) t = t.replaceAll(key, "<TYPESAFE_API_KEY>"); // not a short key: it would match ordinary words
-    return t;
+    return env.jevUrl || env.base ? hideHost(t, target.url) : t;
   };
   let timer: { cancel(): void } | undefined;
   let onAbort: (() => void) | undefined;

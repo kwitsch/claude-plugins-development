@@ -709,6 +709,29 @@ it("a DNS error that quotes the bare host is redacted", async () => {
   expect(r.deny).toContain("ENOTFOUND <host>");
 });
 
+// D5: the redaction order and reach: a key that contains the host text, and a host that is part of ordinary words.
+it("redaction: a key containing the host is replaced whole, a host inside other words is kept", async () => {
+  const key = "sk-jev-9f8e7d6c5b4a";
+  const { run } = await direct({
+    env: { get: async (n: string) => (n === "JEV_URL" ? "https://jev/v1/systemone" : n === "TYPESAFE_API_KEY" ? key : undefined) },
+    http: { fetch: () => Promise.resolve({ status: 400, ok: false, headers: {}, text: JSON.stringify({ detail: `bad token Bearer ${key} for model 'jev-latest' on 110.0.0.5, host jev` }) }) },
+    tool: { register: async (s: { name: string }) => ({ tool: TOOL(s.name) }) },
+  });
+  const r = await run("noul");
+  expect(r.deny).toBe("noul: HTTP 400: bad token Bearer <TYPESAFE_API_KEY> for model 'jev-latest' on 110.0.0.5, host <host>");
+});
+
+// The Haiku reply cleanup must not take quadratic time on a long whitespace run.
+test("a Haiku reply with a long whitespace run is cleaned in linear time", async ($, on) => {
+  const pad = " ".repeat(80_000);
+  haiku(on, () => said(`{"answers":{"answer":{"type":"noul","noul":0.5}${pad}}}`));
+  mock.env(on, {});
+  const t0 = Date.now();
+  const r = await call($, "noul");
+  expect(r.result).toBeDefined();
+  expect(Date.now() - t0).toBeLessThan(1000);
+});
+
 // D2: an error body a server fills with the request URL is redacted like a fetch error.
 it("an error body that echoes the endpoint is redacted", async () => {
   const url = "https://private.example/tenant-42/systemone?token=SECRET";
