@@ -37,6 +37,8 @@ export interface FormatPreInput {
 
 /** Arguments of MCP tool `bash_started` (PreToolUse `Bash` hook). */
 export interface BashStartedInput {
+  /** Template: `${cwd}`. */
+  cwd?: string;
   /** Template: `${agent_id}`. */
   agent_id?: string;
   /** Template: `${session_id}`. */

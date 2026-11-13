@@ -1416,6 +1416,27 @@ test("bash_finished on a slow file system: a file inside a changed git submodule
   assert.equal(readFileSync(path.join(repo, "mod/s.ts"), "utf8"), "s2\n");
 });
 
+test("bash_started starts the (slow) watch-list read, so bash_finished does not wait for it", { timeout: 20_000 }, async () => {
+  symlinkSync(spawnSync("sh", ["-c", "command -v sleep"], { encoding: "utf8" }).stdout.trim(), path.join(bin, "sleep"));
+  // a slow dprint file-paths (1.5 s), like the first listing on a 9P mount
+  writeFileSync(
+    path.join(bin, "dprint"),
+    ["#!/usr/bin/env bash", `if [ "$1" = "file-paths" ]; then sleep 1.5; printf '%s\\n' "$PWD/a.ts"; exit 0; fi`, `exec node "${path.join(tmp, "stub-lsp.mjs")}" ok`, ""].join("\n"),
+  );
+  chmodSync(path.join(bin, "dprint"), 0o755);
+  const s = startServer();
+  const a = path.join(repo, "a.ts");
+  const t0 = Date.now();
+  await s.tool("bash_started", { cwd: repo, ...SESSION, tool_use_id: "P" });
+  assert.ok(Date.now() - t0 < 1000, "bash_started does not wait for the listing");
+  writeFileSync(a, "x  \n");
+  await new Promise((r) => setTimeout(r, 1800)); // the Bash call runs while the list is read
+  const t1 = Date.now();
+  const r = await s.tool("bash_finished", { cwd: repo, ...SESSION, tool_use_id: "P" });
+  assert.ok(Date.now() - t1 < 800, "the list was ready: " + (Date.now() - t1));
+  assert.match(r.hookSpecificOutput.additionalContext, /"a\.ts"/);
+});
+
 test("overlapping Bash calls of one session keep their own start times (tool_use_id)", async () => {
   stubDprint();
   const s = startServer();

@@ -38,7 +38,7 @@ export async function dprintFilePaths(cwd: string): Promise<string[]> {
     (await promisify(execFile)(...dprintArgv(cmd, [sub]), {
       cwd,
       encoding: "utf8",
-      timeout: 10_000,
+      timeout: 25_000, // 11 s measured for 1500 files on a 9P mount; stays below the 30 s of the hooks that wait for it
       maxBuffer: 16 * 1024 * 1024,
     })).stdout;
   let out: string;

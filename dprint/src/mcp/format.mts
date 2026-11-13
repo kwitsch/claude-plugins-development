@@ -329,7 +329,10 @@ const BASH_START_TTL_MS = 60 * 60 * 1000;
  * shortcut: files created after the first read are missing until a cwd change clears the cache (the same
  * limit as the FileChanged watch list; `DPRINT_WATCH_DIRECTORIES=1` fixes the watch list, not this cache).
  */
-const watchCache = new Map<string, Array<{ fp: string; real: string }>>();
+const watchCache = new Map<string, { list: Promise<Array<{ fp: string; real: string }>>; at: number; failed: boolean }>();
+
+/** A failed watch-list read (dprint failing or timing out) is retried after this long. */
+const WATCH_RETRY_MS = 60_000;
 
 /**
  * Record a cwd override for the payload's session or subagent.
@@ -746,11 +749,19 @@ function bashKey(args: BashStartedInput & BashFinishedInput): string {
 /**
  * PreToolUse `Bash` hook: remember when the Bash call started.
  *
- * @param args - Hook input: `session_id`, `agent_id` and `tool_use_id`.
+ * @param args - Hook input: `cwd`, `session_id`, `agent_id` and `tool_use_id`.
  * @returns `{}`.
  */
 export function bashStarted(args: BashStartedInput = {}): HookResult {
   const now = Date.now();
+  // start reading the watch list now, so the first listing (11 s for 1500 files on a 9P mount) runs during the Bash
+  // call and not inside bash_finished
+  try {
+    const sc = scopeOf(args);
+    if (sc && findConfig(sc.root) !== null) void cachedWatchList(sc);
+  } catch {
+    // fail open
+  }
   // a call that never finished (interrupted, killed) leaves its entry behind: drop entries older than an hour
   for (const [key, at] of bashStart) if (now - at > BASH_START_TTL_MS) bashStart.delete(key);
   bashStart.set(bashKey(args), now);
@@ -761,23 +772,28 @@ export function bashStarted(args: BashStartedInput = {}): HookResult {
  * The in-scope files dprint formats in a cwd, cached per root.
  *
  * @param sc - Scope of the hook call.
- * @returns The files; `[]` (also cached, so a failing dprint cannot stall every Bash call) on a dprint failure.
+ * @returns The files; `[]` on a dprint failure (cached for {@link WATCH_RETRY_MS}, so a failing dprint cannot stall
+ * every Bash call). The read is shared: a call while it runs gets the same promise.
  */
 async function cachedWatchList(sc: Scope): Promise<Array<{ fp: string; real: string }>> {
-  let list = watchCache.get(sc.root);
-  if (!list) {
-    list = [];
+  const hit = watchCache.get(sc.root);
+  if (hit && !(hit.failed && Date.now() - hit.at > WATCH_RETRY_MS)) return hit.list;
+  const entry = { at: Date.now(), failed: false, list: Promise.resolve<Array<{ fp: string; real: string }>>([]) };
+  entry.list = (async () => {
+    const list: Array<{ fp: string; real: string }> = [];
     try {
       for (const p of await dprintFilePaths(sc.root)) {
         const s = inScope(sc, p);
         if (s) list.push(s);
       }
     } catch (e) {
+      entry.failed = true; // an empty list for a minute, so a failing dprint cannot stall every Bash call
       process.stderr.write(`[dprint-hooks] watch list failed: ${errText(e)}\n`);
     }
-    watchCache.set(sc.root, list);
-  }
-  return list;
+    return list;
+  })();
+  watchCache.set(sc.root, entry);
+  return entry.list;
 }
 
 /**
@@ -847,14 +863,17 @@ async function gitChanged(root: string): Promise<((real: string) => boolean) | n
     ]);
     const base = top.stdout.trim();
     if (!base) return null;
+    // compared case-insensitively: on a Windows drive mounted by 9P git's toplevel keeps the casing of the cwd as
+    // entered and the status the casing of the index, while the file system itself ignores case (measured on /mnt/c);
+    // on a case-sensitive file system a file differing only in case is a harmless extra candidate
     const entries = new Set<string>();
     for (const entry of status.stdout.split("\0")) {
       if (entry.length < 4) continue; // "XY path"
-      entries.add(path.join(base, entry.slice(3)).replace(/\/+$/, "")); // an untracked directory ends in a slash
+      entries.add(path.join(base, entry.slice(3)).replace(/\/+$/, "").toLowerCase()); // an untracked directory ends in a slash
     }
     // the file itself, or a directory or submodule above it (up to the toplevel) is listed
     return (real) => {
-      for (let p = real; p.length > base.length; p = path.dirname(p)) if (entries.has(p)) return true;
+      for (let p = real; p.length > base.length; p = path.dirname(p)) if (entries.has(p.toLowerCase())) return true;
       return false;
     };
   } catch {
