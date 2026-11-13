@@ -1124,6 +1124,18 @@ it("a secret used as an object key in an error reason is redacted, the host plac
   expect((await plain.run("noul")).deny).toBe("noul: HTTP 401: cannot reach <host>");
 });
 
+// A numeric key echoed as a JSON number is redacted too (numbers are not strings, the replacer must look at them).
+it("a numeric key echoed as a JSON number in an error reason is redacted", async () => {
+  const { run } = await direct({
+    env: { get: async (n: string) => (n === "JEV_URL" ? "https://host/x" : n === "TYPESAFE_API_KEY" ? "12345678" : undefined) },
+    http: { fetch: () => Promise.resolve({ status: 400, ok: false, headers: {}, text: JSON.stringify({ detail: { token: 12345678, list: [912345678] } }) }) },
+    tool: { register: async (s: { name: string }) => ({ tool: TOOL(s.name) }) },
+  });
+  const r = await run("noul");
+  expect(r.deny).not.toContain("12345678");
+  expect(r.deny).toContain("<TYPESAFE_API_KEY>");
+});
+
 // A registration answer without a string tool name is a registration, not a failure.
 it("a registration answering a non-string tool is not retried", async () => {
   const tries: string[] = [];

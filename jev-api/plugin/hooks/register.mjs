@@ -297,7 +297,7 @@ function detail(text, redact) {
 	const error = body["error"];
 	const why = body["detail"] ?? (isRecord(error) ? error["message"] : undefined);
 	if (why === undefined) return undefined;
-	const clean = (v) => typeof v === "string" ? redact(v) : isRecord(v) ? Object.fromEntries(Object.entries(v).map(([k, x]) => [redact(k), x])) : v;
+	const clean = (v) => typeof v === "string" ? redact(v) : typeof v === "number" && redact(String(v)) !== String(v) ? redact(String(v)) : isRecord(v) ? Object.fromEntries(Object.entries(v).map(([k, x]) => [redact(k), x])) : v;
 	return typeof why === "string" ? redact(why) : JSON.stringify(why, (_k, v) => clean(v));
 }
 function isUnit(v) {

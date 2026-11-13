@@ -562,8 +562,8 @@ function detail(text: string, redact: (s: string) => string): string | undefined
   const error = body["error"];
   const why = body["detail"] ?? (isRecord(error) ? error["message"] : undefined);
   if (why === undefined) return undefined;
-  // Redacted per string (values and keys) before the JSON text is made: JSON escapes quotes and backslashes, a secret containing one would no longer match.
-  const clean = (v: unknown): unknown => (typeof v === "string" ? redact(v) : isRecord(v) ? Object.fromEntries(Object.entries(v).map(([k, x]) => [redact(k), x])) : v);
+  // Redacted per string, number (a numeric key echoed as a JSON number) and object key before the JSON text is made: JSON escapes quotes and backslashes, a secret containing one would no longer match.
+  const clean = (v: unknown): unknown => (typeof v === "string" ? redact(v) : typeof v === "number" && redact(String(v)) !== String(v) ? redact(String(v)) : isRecord(v) ? Object.fromEntries(Object.entries(v).map(([k, x]) => [redact(k), x])) : v);
   return typeof why === "string" ? redact(why) : JSON.stringify(why, (_k, v: unknown) => clean(v));
 }
 
