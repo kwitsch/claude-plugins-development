@@ -101,6 +101,14 @@ describe("jev-solver", () => {
     }
   });
 
+  it("decisions due at the same moment are bundled in one batch call", () => {
+    assert.match(read("skills/solve/decide.reference.md"), /\*\*Batch first\.\*\*/);
+    assert.match(read("skills/solve/SKILL.md"), /task-ambiguity question in the same call/);
+    for (const r of ["design", "receive-review", "request-review", "finish"]) {
+      assert.match(read(`skills/solve/${r}.reference.md`), /`batch`/, r);
+    }
+  });
+
   it("solve dispatches the plugin-namespaced decider agent", () => {
     assert.match(read("skills/solve/SKILL.md"), /subagent_type: jev-solver:decider/);
   });

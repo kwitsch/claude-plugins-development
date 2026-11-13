@@ -48,9 +48,9 @@ questions:
     criteria: [S: a few lines in one place, M: one component, L: several components, XL: cross-cutting or architectural]
 ```
 
-With `--size`, send only the choice question. The score is fractional: round to the nearest level. Apply the confidence rule of [decide](decide.reference.md) to the track; if it is low or the call fails (any error, no configuration), triage with your own reasoning using the same criteria and say so in one line.
+Put the task-ambiguity question in the same call for the `feature` and `bugfix` tracks it can apply to (`noul`: is the task text too ambiguous to start?; its answer counts only when the track is `feature` or `bugfix`). With `--size`, leave out the score question. The score is fractional: round to the nearest level. Apply the confidence rule of [decide](decide.reference.md) to the track; if it is low or the call fails (any error, no configuration), triage with your own reasoning using the same criteria and say so in one line.
 
-When the track is `feature` or `bugfix`, ask jev-api (`noul`, [decide](decide.reference.md)) whether the task text is too ambiguous to start; only a confident yes goes to the user via `AskUserQuestion` (headless: decider), and own reasoning only replaces a low-confidence answer.
+When the track is `feature` or `bugfix`, the ambiguity answer of the triage call applies ([decide](decide.reference.md) rules); only a confident yes goes to the user via `AskUserQuestion` (headless: decider), and own reasoning only replaces a low-confidence answer.
 
 ## 2. Worktree and work branch
 

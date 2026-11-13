@@ -13,6 +13,8 @@
 
 `state` is the text the question is about (the relevant task, spec or code excerpt), `instructions` is the question. The tools take text only: paste what matters.
 
+**Batch first.** Decisions that fall due at the same moment go into one `mcp__jev-api__batch` call (`state` once, one question each; refer to items by number in `state`), not one call per decision: all candidate questions of a step, all findings of a review, all points of a feedback, a size plus a yes/no about the same task. Use a single tool only for one lone decision. The accepting rules below apply per answer.
+
 ## Accepting the answer
 
 - `choice`: accept when `confidence` is at least the plugin option `confidence` (default 0.6).
@@ -25,7 +27,7 @@
 | Where                                                    | Tool     | Question and `state`                                                                 |
 | -------------------------------------------------------- | -------- | ------------------------------------------------------------------------------------ |
 | `solve` triage                                           | `batch`  | track (choice) and size (score) of the task text                                     |
-| `solve` task ambiguity                                   | `noul`   | is the task too ambiguous to start? Only a confident yes goes to the user            |
+| `solve` task ambiguity (in the triage batch)              | `batch`  | is the task too ambiguous to start? Only a confident yes goes to the user            |
 | `solve` invalid `--size`                                 | `score`  | size of the task text, as in the triage                                              |
 | `solve` bugfix turns out to be a feature                 | `noul`   | does the root cause call for new behaviour or design?                                |
 | `design` clarifying question                             | `noul`   | do the code and sensible defaults already answer it? Only a confident no is asked    |
