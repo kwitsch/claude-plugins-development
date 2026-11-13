@@ -370,11 +370,12 @@ function isOptionalString(v: unknown): v is string | undefined {
  * Parses JSON without throwing.
  *
  * @param text - The raw text.
+ * @param reviver - Optional `JSON.parse` reviver; its third argument carries a primitive's source text where the engine supports it.
  * @returns The parsed value, or undefined when the text is not JSON (valid JSON never parses to undefined).
  */
-function json(text: string): unknown {
+function json(text: string, reviver?: (key: string, value: unknown, context?: { source?: string }) => unknown): unknown {
   try {
-    return JSON.parse(text) as unknown;
+    return JSON.parse(text, reviver) as unknown;
   } catch {
     return undefined;
   }
@@ -557,7 +558,8 @@ function endpoint(jev: string | undefined, base: string | undefined): { ok: true
  * @returns The reason redacted (a string as is, anything else JSON-stringified), or undefined when there is none.
  */
 function detail(text: string, redact: (s: string) => string): string | undefined {
-  const body = json(text);
+  // A number is matched on its source text: parsing rounds 20 digits to 17 and drops `.0` and `e0`, so a numeric key would no longer match.
+  const body = json(text, (_k, v, c) => (typeof v === "number" && c?.source !== undefined && redact(c.source) !== c.source ? c.source : v));
   if (!isRecord(body)) return undefined;
   const error = body["error"];
   const why = body["detail"] ?? (isRecord(error) ? error["message"] : undefined);

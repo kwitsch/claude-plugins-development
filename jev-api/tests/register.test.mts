@@ -1136,6 +1136,19 @@ it("a numeric key echoed as a JSON number in an error reason is redacted", async
   expect(r.deny).toContain("<TYPESAFE_API_KEY>");
 });
 
+// JSON.parse rounds a 20-digit number and drops `.0` and `e0`: the key is matched on the number's source text.
+it("a numeric key echoed with more digits than a double holds, or as 123456.0, is redacted", async () => {
+  for (const [key, spelled] of [["12345678901234567890", "12345678901234567890"], ["123456.0", "123456.0"], ["1234567e0", "1234567e0"]]) {
+    const { run } = await direct({
+      env: { get: async (n: string) => (n === "JEV_URL" ? "https://host/x" : n === "TYPESAFE_API_KEY" ? key : undefined) },
+      http: { fetch: () => Promise.resolve({ status: 400, ok: false, headers: {}, text: `{"detail":{"key":${spelled}}}` }) },
+      tool: { register: async (s: { name: string }) => ({ tool: TOOL(s.name) }) },
+    });
+    const r = await run("noul");
+    expect(r.deny).toBe("noul: HTTP 400: {\"key\":\"<TYPESAFE_API_KEY>\"}");
+  }
+});
+
 // A registration answer without a string tool name is a registration, not a failure.
 it("a registration answering a non-string tool is not retried", async () => {
   const tries: string[] = [];

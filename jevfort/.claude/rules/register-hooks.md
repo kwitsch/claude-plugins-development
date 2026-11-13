@@ -30,7 +30,7 @@ the shapes below: `inline-headroom/docs/claude-code-verification.md`.
 - Jev is asked only through the jev-api plugin's tool `mcp__jev-api__batch`: `askJev` raises one
   `$.tool.call({ tool: "mcp__jev-api__batch", state, questions, timeout: apiTimeoutS })` (`state` is `JSON.stringify` text, `questions` the
   `Question` objects in id order, `timeout` in seconds equal to the budget, 14 s just under 15 s on the Haiku path), raced against the budget (`TIMEOUT_MS` 4 s, `COMPACT_TIMEOUT_MS` 9 s for the compaction ranking, `HAIKU_TIMEOUT_MS` 15 s without Jev access); a `{ deny }`, `isError`, a rejection, a result that is not
-  a JSON array with one answer of the asked type per question, or the timeout fails the whole `askJev` (`{ ok: false }`,
+  a JSON array with one answer per question that has the asked type and the fields jevfort reads (`isAnswer`), or the timeout fails the whole `askJev` (`{ ok: false }`,
   never a throw). The engine
   member is typed `tool.call(input): Promise<ToolResult>`; there is no `$.http` use.
 - Readiness guard: every hook except `session.start`, `session.end`, `session.compact`, the `/jev` `command.run` and

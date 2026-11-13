@@ -60,6 +60,30 @@ export function missingJevTools(names: readonly string[]): string[] {
 }
 
 /**
+ * Whether a number is finite.
+ *
+ * @param v - Any value.
+ * @returns True for a finite number.
+ */
+const finite = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);
+
+/**
+ * Whether a batch answer has the asked type and the fields jevfort reads from it.
+ *
+ * @param a - One entry of jev-api's answer array.
+ * @param type - The asked question type.
+ * @returns True when the answer can be used without further checks.
+ */
+export function isAnswer(a: unknown, type: Question["type"]): a is Answer {
+  if (typeof a !== "object" || a === null || (a as { type?: unknown }).type !== type) return false;
+  const r = a as Record<string, unknown>;
+  if (type === "noul") return finite(r["noul"]);
+  const p = r["probabilities"];
+  if (!finite(r["confidence"]) || typeof p !== "object" || p === null || !Object.values(p).every(finite)) return false;
+  return type === "choice" ? typeof r["choice"] === "string" : finite(r["score"]);
+}
+
+/**
  * The `noul` probability of answer `id`.
  *
  * @param answers - A request's answers.

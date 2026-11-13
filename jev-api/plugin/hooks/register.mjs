@@ -161,9 +161,9 @@ function isRecord(v) {
 function isOptionalString(v) {
 	return v === undefined || typeof v === "string";
 }
-function json(text) {
+function json(text, reviver) {
 	try {
-		return JSON.parse(text);
+		return JSON.parse(text, reviver);
 	} catch {
 		return undefined;
 	}
@@ -292,7 +292,7 @@ function endpoint(jev, base) {
 	};
 }
 function detail(text, redact) {
-	const body = json(text);
+	const body = json(text, (_k, v, c) => typeof v === "number" && c?.source !== undefined && redact(c.source) !== c.source ? c.source : v);
 	if (!isRecord(body)) return undefined;
 	const error = body["error"];
 	const why = body["detail"] ?? (isRecord(error) ? error["message"] : undefined);

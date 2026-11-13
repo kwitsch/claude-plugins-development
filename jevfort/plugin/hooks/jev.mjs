@@ -11,6 +11,15 @@ export const JEV_TOOLS = [JEV_BATCH];
 export function missingJevTools(names) {
 	return JEV_TOOLS.filter((t) => !names.includes(t));
 }
+const finite = (v) => typeof v === "number" && Number.isFinite(v);
+export function isAnswer(a, type) {
+	if (typeof a !== "object" || a === null || a.type !== type) return false;
+	const r = a;
+	if (type === "noul") return finite(r["noul"]);
+	const p = r["probabilities"];
+	if (!finite(r["confidence"]) || typeof p !== "object" || p === null || !Object.values(p).every(finite)) return false;
+	return type === "choice" ? typeof r["choice"] === "string" : finite(r["score"]);
+}
 export function noul(answers, id) {
 	const a = answers[id];
 	return a?.type === "noul" ? a.noul : undefined;

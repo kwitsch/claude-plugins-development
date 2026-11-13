@@ -313,7 +313,19 @@ test("One wrong answer discards the other answers of the same decision", async (
 
   await drain($.turn.step(step));
   expect(seen[0]).toMatchObject({ effort: "high" });
-  expect(await runJev($, "")).toContain("unavailable: batch: no noul answer for questions[1]");
+  expect(await runJev($, "")).toContain("unavailable: batch: no valid noul answer for questions[1]");
+});
+
+test("An answer whose fields jevfort reads are missing or mistyped fails the decision instead of crashing a hook", async ($, on) => {
+  const seen: unknown[] = [];
+  // A choice without probabilities and a noul given as text: both would throw inside the hooks (or read "1" as >= 0.95).
+  const bad: Record<string, Record<string, unknown>> = { next_action: { type: "choice", choice: "claude", confidence: 0.9 }, mechanical: { type: "noul", noul: "1" } };
+  setup(on, { messages: [user("what does this project do?")], jev: (q) => bad[q.id] ?? (q.id === "effort" ? scored(0.2) : undefined) });
+  claudeBeneath(on, seen);
+
+  await drain($.turn.step(step));
+  expect(seen[0]).toMatchObject({ effort: "high" });
+  expect(await runJev($, "")).toMatch(/unavailable: batch: no valid (noul|choice) answer for questions\[\d+\]/);
 });
 
 test("Core's error result for the batch call fails the decision with a batch: prefix", async ($, on) => {
@@ -329,7 +341,7 @@ test("Core's error result for the batch call fails the decision with a batch: pr
   expect(await runJev($, "")).toContain(`unavailable: batch: ${error}`);
 });
 
-for (const [name, answer, error] of [["of another type", mech(0.5), "batch: no score answer for questions[0]"], ["that is not JSON", "<html>", "batch: result is not JSON"], ["with too few answers", "[]", "batch: expected 2 answers"]] as const) {
+for (const [name, answer, error] of [["of another type", mech(0.5), "batch: no valid score answer for questions[0]"], ["that is not JSON", "<html>", "batch: result is not JSON"], ["with too few answers", "[]", "batch: expected 2 answers"]] as const) {
   test(`A jev-api result ${name} fails the decision`, async ($, on) => {
     const seen: unknown[] = [];
     setup(on, { messages: [user("what does this project do?")], jev: (q) => (q.id === "effort" ? answer : undefined) });
