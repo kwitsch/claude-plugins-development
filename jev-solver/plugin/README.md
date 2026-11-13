@@ -20,7 +20,7 @@ The `jev-api` plugin (declared as dependency) with `TYPESAFE_API_KEY`, `TYPESAFE
 | `request-review` | Reviews a change; depth depends on size                                       |
 | `receive-review` | Handles review feedback with verification                                     |
 | `verify`         | Evidence before any success claim                                             |
-| `worktree`       | Separate work branch or worktree                                              |
+| `worktree`       | Own worktree on a `feat/` or `fix/` branch, entered by `solve` for every task |
 | `finish`         | Wraps up a finished branch                                                    |
 
 ## Tracks
@@ -29,7 +29,7 @@ The `jev-api` plugin (declared as dependency) with `TYPESAFE_API_KEY`, `TYPESAFE
 | ------- | ---------------------------------------------------------------------- |
 | tiny    | Implement directly, light review of the diff                           |
 | feature | design, plan, execute, verify; review depth grows with size (M, L, XL) |
-| bugfix  | Own work branch, debug, failing test, one fix, verify, review          |
+| bugfix  | `fix/` branch, debug, failing test, one fix, verify, review          |
 
 ## Options
 

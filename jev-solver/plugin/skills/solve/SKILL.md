@@ -29,7 +29,18 @@ The score is fractional: round to the nearest level. Apply the confidence rule o
 
 When the track is `feature` or `bugfix` and the task text is ambiguous, ask the user via `AskUserQuestion` first. Never ask as plain text.
 
-## 2. Tracks
+## 2. Worktree and work branch
+
+Always, for every track, right after triage and before any spec, plan, debugging or edit:
+
+1. **Branch name.** Derive it from the task now: prefix `fix/` for the bugfix track, `feat/` for tiny and feature, then a short kebab-case slug of at most 40 characters (`fix/login-timeout`, `feat/retry-config`). Follow the repo's branch conventions if CLAUDE.md names any; the prefix stays.
+2. **Enter a worktree.** Call `EnterWorktree` (load it via ToolSearch if deferred) with the slug as its name. Skip only when the session already is in a linked worktree (`jev-solver:worktree` step 1); never nest.
+3. **Switch to the work branch.** In the worktree, `git switch -c <branch>` (the harness names its own branch, for example `worktree-<name>`); in an already-linked worktree whose branch has no commits of its own, do the same. A branch that already has its own commits stays.
+4. Report branch and worktree path in one line, then continue. The same slug names the scratchpad directory below.
+
+Details and baseline: `jev-solver:worktree`.
+
+## 3. Tracks
 
 ### tiny
 
@@ -54,7 +65,7 @@ Findings are handled with `jev-solver:receive-review`. Then `jev-solver:finish`.
 
 ### bugfix
 
-Own work branch first (`jev-solver:worktree`), then `jev-solver:debug` (root cause, failing test, one fix), `jev-solver:verify`, `jev-solver:request-review` (S, M: read your own diff; L and above: one review of the final diff; findings via `jev-solver:receive-review`), `jev-solver:finish`. No spec or plan, unless the root cause shows the fix is really a feature: then switch to the feature track and say so.
+On its `fix/` work branch (step 2): `jev-solver:debug` (root cause, failing test, one fix), `jev-solver:verify`, `jev-solver:request-review` (S, M: read your own diff; L and above: one review of the final diff; findings via `jev-solver:receive-review`), `jev-solver:finish`. No spec or plan, unless the root cause shows the fix is really a feature: then switch to the feature track and say so.
 
 ## Documents
 

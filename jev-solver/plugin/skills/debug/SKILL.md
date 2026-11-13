@@ -7,7 +7,7 @@ description: Finds the root cause of a bug, failing test or unexpected behaviour
 
 No fix before the root cause is known.
 
-0. **Own branch.** Work on a separate branch or worktree (`jev-solver:worktree`), never on `main`.
+0. **Own branch.** Work in a worktree on a `fix/` branch (`jev-solver:solve` sets it up, else `jev-solver:worktree`), never on `main`.
 1. **Reproduce.** Get the failure reliably, with the exact error text and the smallest steps. If you cannot reproduce it, gather more data instead of guessing.
 2. **Investigate.** Read the full error and stack trace. Check what changed recently (`git log`, `git diff`). Trace the bad value backwards to where it first goes wrong. In a graphmind project use `/gm-fn` (callers and callees) and `/gm-impact`; with several components, add a log or print at each boundary and find which one breaks.
 3. **Compare.** Find similar working code in the project and list every difference to the failing code.
