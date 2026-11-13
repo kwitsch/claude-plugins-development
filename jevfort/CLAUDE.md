@@ -32,9 +32,9 @@ subagents load it via ToolSearch), no skills, agents, command hooks or MCP serve
   the `estimate_effort` handling and the Jev-free cache countdown, Haiku compaction and auto-compact (next bullet)
   passes through untouched (also the scratchpad-write allow) and `/jev` says why.
   `estimate_effort` is never registered in a session that was never ready; a failed registration is retried by the next
-  listing, a registered one is not registered again until the next `session.start` (there is no unregister), so `tool.call` answers and `tool.check` approves it before the readiness guard (while inactive it
-  answers its `defaultEffort`, source `fallback`).
-- Effort band: a `ui.render` hook on `AbovePrompt` (terminal and desktop only) draws `low medium high xhigh max` in one
+  listing, a registered one is not registered again until the next `session.start` (there is no unregister), so `tool.call` answers and `tool.check` approves it before the readiness guard (while the batch tool is really missing it
+  answers its `defaultEffort`, source `fallback`; an inactive state from a failed listing still asks Jev).
+- Effort band: a `ui.render` hook on `AbovePrompt` (terminal and desktop only) draws the efforts from `minEffort` to `maxEffort` (plus the session effort or the chosen one when outside that range) in one
   row: the main loop's session effort (step-0 `e.effort`) bold, the effort jevfort chose for the current main-loop
   turn (estimate of any source, or the held Haiku/Fable estimate) blue, the rest dim, then a `Jev auto: on/off`
   Button. Hidden with `routing: "off"`, while inactive or before the session baseline, and while a survey holds the

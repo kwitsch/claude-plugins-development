@@ -24,7 +24,7 @@ Without jev-api's batch tool in a session (for example denied by a permission ru
 | `/jev`            | Status: routing (`(effort auto off)` while the effort band's Auto button pauses the effort choice), thresholds, decision counts, the last 10 decisions (` (pass)` marks one that changed nothing) |
 | `/jev report`     | Markdown report: steps Jev took, turns answered without Claude, agreement with Claude step by step, take-threshold table, routing, done check, classifier, subagent types, compaction             |
 | `/jev candidates` | The options Jev is offered at step 0 for the last prompt                                                                                                                                          |
-| `/jev export`     | Writes the log to `<cwd>/.jev/decisions.jsonl`                                                                                                                                                    |
+| `/jev export`     | Writes the log to a new file `<cwd>/.jev/decisions-<time>.jsonl` (never over an existing one)                                                                                                     |
 | `/jev clear`      | Clears the log and the counters                                                                                                                                                                   |
 
 ## Effort band
@@ -75,7 +75,7 @@ The result is JSON `{"effort": "<level>", "source": "jev" | "mechanical" | "fall
 | `minEffort`          | `low`    | Lowest effort the effort estimate may pick; also the effort of a purely mechanical turn                                                                                                                                                             |
 | `maxEffort`          | `xhigh`  | Highest effort the effort estimate may pick                                                                                                                                                                                                         |
 
-Write, Edit and NotebookEdit calls into this session's scratchpad directory are allowed in every permission mode; a settings deny or ask rule still wins (only a mode's own ask becomes allow). Paths containing `..` are never allowed. Bash commands that write there are not covered. Every other permission verdict is Claude Code's own.
+Write, Edit and NotebookEdit calls into this session's scratchpad directory are allowed in every permission mode; a settings deny or ask rule still wins (only a mode's own ask becomes allow). Paths containing `..` are never allowed. Bash commands that write there are not covered. Steps Jev takes itself (`takeSteps`) are allowed over any ask rule, a settings ask rule included; a deny rule still wins. Every other permission verdict is Claude Code's own.
 
 ## What is sent
 

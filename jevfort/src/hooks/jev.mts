@@ -6,6 +6,9 @@
  * @packageDocumentation
  */
 
+/** The longest error text `askJev` returns (and so the log and `/jev` hold), in characters: an error body of megabytes must not be stored whole. */
+export const MAX_ERROR = 1000;
+
 /** The local budget of one `askJev` (its one batch call) before Claude Code's own behaviour wins, in ms. */
 export const TIMEOUT_MS = 4000;
 

@@ -810,7 +810,7 @@ test("Effort routing does not ask Jev the difficulty question", async ($, on) =>
 const ESTIMATE = { tool: "mcp__jevfort__estimate_effort", model: "opus", defaultEffort: "high", minEffort: "low", maxEffort: "xhigh", prompt: "add a retry to the HTTP client" };
 const estimateCall = async ($: Runner, input: Record<string, unknown> = {}) => (await $.tool.call({ ...ESTIMATE, ...input })) as { result?: string; isError?: boolean; deny?: string };
 
-test("estimate_effort returns Jev's estimate with the model bias", async ($, on) => {
+test("estimate_effort returns Jev's estimate", async ($, on) => {
   const { sent } = setup(on, { messages: [], jev: byId({ effort: scored(1.6), mechanical: mech(0.1) }) });
   expect(await estimateCall($)).toEqual({ result: JSON.stringify({ effort: "medium", source: "jev" }) });
   expect(sent.map((q) => [q.id, q.type])).toEqual([["effort", "score"], ["mechanical", "noul"]]);
@@ -832,6 +832,42 @@ test("A null script in the project's package.json does not stop the turn's routi
   expect(seen[0]).toMatchObject({ effort: "low" });
 });
 
+test("A failing store does not fail estimate_effort or a turn step", async ($, on) => {
+  on("store.set", () => ({ deny: "store over 4 MiB of JSON text" }));
+  const seen: unknown[] = [];
+  setup(on, { messages: [user("what does this project do?")], jev: byId({ effort: scored(1.6), mechanical: mech(0.1) }) });
+  claudeBeneath(on, seen);
+  expect(await estimateCall($)).toEqual({ result: JSON.stringify({ effort: "medium", source: "jev" }) });
+  await drain($.turn.step(step));
+  expect(seen).toHaveLength(1);
+});
+
+test("An error text of megabytes is cut before the log and /jev hold it", async ($, on) => {
+  setup(on, { messages: [user("what does this project do?")], jev: () => undefined });
+  on("tool.call", (_$, e, next) => (e.tool === JEV_BATCH ? { value: { result: "x".repeat(500_000), isError: true } } : next(e)));
+  claudeBeneath(on, []);
+  await drain($.turn.step(step));
+  expect((await runJev($, "")).length).toBeLessThan(5000);
+});
+
+test("/jev export writes a new file and never an existing one (a symlink would be followed)", async ($, on) => {
+  setup(on, { messages: [], jev: () => undefined });
+  const written: string[] = [];
+  on("fs.write", (_$, e) => (written.push(String(e.path)), { value: undefined }));
+  expect(await runJev($, "export")).toMatch(/wrote \d+ entries to \/proj\/\.jev\/decisions-\d+\.jsonl/);
+  expect(written).toHaveLength(1);
+  expect(written[0]).toMatch(/^\/proj\/\.jev\/decisions-\d+\.jsonl$/);
+});
+
+test("/jev export writes nothing when the target exists", async ($, on) => {
+  on("fs.exists", () => ({ value: true }));
+  setup(on, { messages: [], jev: () => undefined });
+  const written: string[] = [];
+  on("fs.write", (_$, e) => (written.push(String(e.path)), { value: undefined }));
+  expect(await runJev($, "export")).toContain("exists, nothing written");
+  expect(written).toHaveLength(0);
+});
+
 test("estimate_effort rejects invalid input without asking Jev", async ($, on) => {
   const { sent } = setup(on, { messages: [], jev: byId({ effort: scored(1.6) }) });
   expect(await estimateCall($, { model: "gpt" })).toEqual({ deny: "estimate_effort: model must be one of haiku, sonnet, opus, fable" });
@@ -846,7 +882,7 @@ test("estimate_effort estimates on every call, also for haiku", async ($, on) =>
   expect(ids(sent)).toEqual(["effort", "mechanical", "effort", "mechanical"]);
 });
 
-// Turn-start effort estimate: Jev's effort score plus the session model's bias, within minEffort..maxEffort.
+// Turn-start effort estimate: Jev's effort score within minEffort..maxEffort.
 test("A mechanical turn runs at minEffort even on a hard score", async ($, on) => {
   const seen: { effort?: string }[] = [];
   setup(on, { messages: [user("rename foo to bar in src/a.ts")], jev: byId({ difficulty: easy, effort: scored(2.9), mechanical: mech(0.97) }) });

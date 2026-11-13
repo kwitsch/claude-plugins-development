@@ -54,7 +54,7 @@ the shapes below: `inline-headroom/docs/claude-code-verification.md`.
   `next(e)` (jev-api registers its tools in its own `session.start`) or at a later turn's listing. There is no
   unregister and a registered tool that no hook answers fails, so the unmatched `tool.call` hook answers
   `mcp__jevfort__estimate_effort` before the readiness guard and never calls `next(e)`: `{ result }` (the JSON
-  estimate; while inactive `askJev` fails and it is `defaultEffort` with source `fallback`) or, on invalid input,
+  estimate; while the batch tool is really missing `askJev` fails and it is `defaultEffort` with source `fallback` (an inactive state caused by a failed listing still asks Jev)) or, on invalid input,
   `{ deny: "estimate_effort: <reason>" }` without a Jev request (a hook's own `isError` is dropped: the model sees a normal result, live on 2.1.325); `tool.check` approves it before the guard (a settings deny still
   wins). Calls are logged as kind `estimate`.
 - Effort band: the `ui.render` hook with matcher `{ component: "AbovePrompt" }` draws `Box`/`Text`/`Button` from

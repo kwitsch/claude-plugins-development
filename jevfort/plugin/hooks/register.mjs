@@ -3,7 +3,7 @@ import { CACHE_TTL, cacheColor, cacheLabel, minutesLeft, nextTtl } from "./cache
 import { absolute, AUTH_TOOL, bash, BUILTIN_COMMANDS, clipScript, coversStep, dedupeSkills, isSafeToOffer, MAX_READS, mentionedPaths, quotedTerms, relevant, SAFE_MAKE, SAFE_SCRIPT, sameCall, SKILL_BLOCKLIST_KEY } from "./candidates.mjs";
 import { COMPACT_MAX_TOKENS, COMPACT_MODEL, COMPACT_SYSTEM, compactInstructions, compactItems, haikuTranscript, RELEVANCE } from "./compact.mjs";
 import { clip, splitTurn, summarize, toolCalls } from "./context.mjs";
-import { choice, COMPACT_API_TIMEOUT_S, COMPACT_TIMEOUT_MS, HAIKU_API_TIMEOUT_S, HAIKU_TIMEOUT_MS, isAnswer, JEV_API_TIMEOUT_S, JEV_BATCH, JEV_TOOL_PREFIX, JEV_TOOLS, MAX_CHOICE_OPTIONS, missingJevTools, noul, score, TIMEOUT_MS } from "./jev.mjs";
+import { choice, COMPACT_API_TIMEOUT_S, COMPACT_TIMEOUT_MS, HAIKU_API_TIMEOUT_S, HAIKU_TIMEOUT_MS, isAnswer, JEV_API_TIMEOUT_S, JEV_BATCH, JEV_TOOL_PREFIX, JEV_TOOLS, MAX_CHOICE_OPTIONS, MAX_ERROR, missingJevTools, noul, score, TIMEOUT_MS } from "./jev.mjs";
 import { LOG_KEY, MAX_ENTRIES, recentDecisions, remember, statsKey } from "./log.mjs";
 import { bestAction, bounds, difficultyQuestion, doneQuestion, EFFORT_ORDER, effortQuestion, ESTIMATE_SPEC, ESTIMATE_TOOL, estimateEffort, EVERY_TURN_MODELS, inBandRange, inScratchpad, isEffort, lowerModel, mechanicalQuestion, modelFamily, nextActionQuestion, parseEstimateInput, pickCandidate, route, shouldContinue, singleActionQuestion } from "./policy.mjs";
 import { hints, NONE, promptQuestions } from "./prompt.mjs";
@@ -29,7 +29,10 @@ const asText = (v) => String(v);
 async function askJev($, state, questions, slow = false) {
 	const startedAt = await $.clock.now();
 	const done = async (r) => ({
-		...r,
+		...r.ok ? r : {
+			ok: false,
+			error: clip(r.error, MAX_ERROR)
+		},
 		ms: await $.clock.now() - startedAt
 	});
 	const [key, base, jevUrl] = await Promise.all([
@@ -241,12 +244,16 @@ async function record($, d) {
 		});
 	});
 	storeQueue = run.catch(() => undefined);
-	await run;
+	await storeQueue;
 	if (d.kind !== "outcome" && d.kind !== "turn") void $.ui.status(`jev: ${d.text}`.slice(0, 80));
 }
 async function clearLog($) {
-	await $.store.set(LOG_KEY, []);
-	await $.store.set("stats", {});
+	const run = storeQueue.then(async () => {
+		await $.store.set(LOG_KEY, []);
+		await $.store.set("stats", {});
+	});
+	storeQueue = run.catch(() => undefined);
+	await run;
 }
 async function readTurn($, agentId) {
 	const messages = await $.session.messages(agentId ? { agentId } : {});
@@ -745,8 +752,9 @@ export const register = (on, options) => {
 		}
 		if (arg === "export") {
 			const log = await readLog($);
-			const path = `${await $.session.cwd()}/.jev/decisions.jsonl`;
+			const path = `${await $.session.cwd()}/.jev/decisions-${await $.clock.now()}.jsonl`;
 			try {
+				if (await $.fs.exists(path)) return { text: `Jev pilot: ${path} exists, nothing written` };
 				await $.fs.write(path, log.map((entry) => JSON.stringify(entry)).join("\n") + "\n");
 				return { text: `Jev pilot: wrote ${log.length} entries to ${path}` };
 			} catch (err) {

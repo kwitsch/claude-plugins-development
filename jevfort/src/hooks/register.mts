@@ -21,7 +21,7 @@ import type { Candidate } from "./candidates.mjs";
 import { COMPACT_MAX_TOKENS, COMPACT_MODEL, COMPACT_SYSTEM, compactInstructions, compactItems, haikuTranscript, RELEVANCE } from "./compact.mjs";
 import { clip, splitTurn, summarize, toolCalls } from "./context.mjs";
 import type { SessionMessage, ToolUse, TurnContext } from "./context.mjs";
-import { choice, COMPACT_API_TIMEOUT_S, COMPACT_TIMEOUT_MS, HAIKU_API_TIMEOUT_S, HAIKU_TIMEOUT_MS, isAnswer, JEV_API_TIMEOUT_S, JEV_BATCH, JEV_TOOL_PREFIX, JEV_TOOLS, MAX_CHOICE_OPTIONS, missingJevTools, noul, score, TIMEOUT_MS } from "./jev.mjs";
+import { choice, COMPACT_API_TIMEOUT_S, COMPACT_TIMEOUT_MS, HAIKU_API_TIMEOUT_S, HAIKU_TIMEOUT_MS, isAnswer, JEV_API_TIMEOUT_S, JEV_BATCH, JEV_TOOL_PREFIX, JEV_TOOLS, MAX_CHOICE_OPTIONS, MAX_ERROR, missingJevTools, noul, score, TIMEOUT_MS } from "./jev.mjs";
 import type { Answer, ChoiceAnswer, JevResult, Question } from "./jev.mjs";
 import { LOG_KEY, MAX_ENTRIES, recentDecisions, remember, statsKey } from "./log.mjs";
 import type { Entry } from "./log.mjs";
@@ -204,7 +204,7 @@ const asText = (v: unknown): string => String(v);
  */
 async function askJev($: Engine, state: unknown, questions: Record<string, Question>, slow = false): Promise<JevResult> {
   const startedAt = await $.clock.now();
-  const done = async (r: { ok: true; answers: Record<string, Answer> } | { ok: false; error: string }): Promise<JevResult> => ({ ...r, ms: (await $.clock.now()) - startedAt });
+  const done = async (r: { ok: true; answers: Record<string, Answer> } | { ok: false; error: string }): Promise<JevResult> => ({ ...(r.ok ? r : { ok: false as const, error: clip(r.error, MAX_ERROR) }), ms: (await $.clock.now()) - startedAt });
 
   // Without Jev access jev-api answers through Haiku, which needs a longer budget (jev-api reads the same three variables).
   const [key, base, jevUrl] = await Promise.all([$.env.get("TYPESAFE_API_KEY"), $.env.get("TYPESAFE_BASE_URL"), $.env.get("JEV_URL")]).catch(() => [undefined, undefined, undefined]);
@@ -488,7 +488,8 @@ async function record($: Engine, d: Omit<Entry, "at">): Promise<void> {
     await $.store.set("stats", { ...tally, [key]: (tally[key] ?? 0) + 1 });
   });
   storeQueue = run.catch(() => undefined);
-  await run;
+  // A failing store (over its 4 MiB cap, a full disk) must not fail a hook: this runs after Claude's step too, and the engine rethrows a hook's error after the request ran.
+  await storeQueue;
 
   if (d.kind !== "outcome" && d.kind !== "turn") void $.ui.status(`jev: ${d.text}`.slice(0, 80));
 }
@@ -499,8 +500,13 @@ async function record($: Engine, d: Omit<Entry, "at">): Promise<void> {
  * @param $ - Engine interface.
  */
 async function clearLog($: Engine): Promise<void> {
-  await $.store.set(LOG_KEY, []);
-  await $.store.set("stats", {});
+  // In the same queue as record(): one still in flight would otherwise write the cleared log back.
+  const run = storeQueue.then(async () => {
+    await $.store.set(LOG_KEY, []);
+    await $.store.set("stats", {});
+  });
+  storeQueue = run.catch(() => undefined);
+  await run;
 }
 
 /**
@@ -1105,8 +1111,10 @@ export const register = (on: On, options: Options): void => {
     }
     if (arg === "export") {
       const log = await readLog($);
-      const path = `${await $.session.cwd()}/.jev/decisions.jsonl`;
+      // A new file per export: $.fs.write follows symlinks (live, 2.1.325), so a committed `.jev/decisions.jsonl` symlink would make an overwrite land outside the cwd.
+      const path = `${await $.session.cwd()}/.jev/decisions-${await $.clock.now()}.jsonl`;
       try {
+        if (await $.fs.exists(path)) return { text: `Jev pilot: ${path} exists, nothing written` };
         await $.fs.write(path, log.map((entry) => JSON.stringify(entry)).join("\n") + "\n");
         return { text: `Jev pilot: wrote ${log.length} entries to ${path}` };
       } catch (err) {
