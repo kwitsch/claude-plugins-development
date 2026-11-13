@@ -91,6 +91,16 @@ describe("jev-solver", () => {
     assert.match(pr, /gh pr ready/);
   });
 
+  it("jev-api comes first for every decision, with a catalogue in decide", () => {
+    assert.match(read("skills/solve/SKILL.md"), /jev-api first/);
+    const decide = read("skills/solve/decide.reference.md");
+    assert.match(decide, /jev-api first/);
+    assert.match(decide, /## Catalogue: where jev-api decides/);
+    for (const where of ["design", "plan", "execute", "request-review", "receive-review", "worktree", "pr", "finish"]) {
+      assert.ok(decide.includes(`\`${where}\``), where);
+    }
+  });
+
   it("solve dispatches the plugin-namespaced decider agent", () => {
     assert.match(read("skills/solve/SKILL.md"), /subagent_type: jev-solver:decider/);
   });

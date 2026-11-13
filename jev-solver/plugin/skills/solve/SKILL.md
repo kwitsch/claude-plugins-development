@@ -7,12 +7,14 @@ description: Single entry point for any coding task (change, feature, refactor, 
 
 Entry point and the only skill of this plugin. The phases are reference files next to this one; open one (Read) only when its row in the decision matrix applies. Do not start work before the triage below.
 
+**jev-api first.** In this skill and all its references, a decision that fits options, a rating or yes/no is put to the jev-api tools before own reasoning; own reasoning only on low confidence or a failed call. The catalogue is at the end of [decide](decide.reference.md).
+
 ## 0. Arguments
 
 Strip these flags from the task text before anything else; the rest is the task.
 
 - `--headless`: no question goes to the user. See [Questions and --headless](#questions-and---headless).
-- `--size=<value>`: `S`, `M`, `L` or `XL` (case-insensitive). That value is the size; the size question of the triage is skipped. Any other value is not guessed: ask for the size through `AskUserQuestion` (options S, M, L, XL; headless: decider) after triage, and use the answer.
+- `--size=<value>`: `S`, `M`, `L` or `XL` (case-insensitive). That value is the size; the size question of the triage is skipped. Any other value is not guessed: rate the size of the task with the `score` of the triage ([decide](decide.reference.md)) and use it; if that gives no usable answer, ask for the size through `AskUserQuestion` (options S, M, L, XL; headless: decider) after triage, and use the answer.
 
 ## Questions and --headless
 
@@ -48,7 +50,7 @@ questions:
 
 With `--size`, send only the choice question. The score is fractional: round to the nearest level. Apply the confidence rule of [decide](decide.reference.md) to the track; if it is low or the call fails (any error, no configuration), triage with your own reasoning using the same criteria and say so in one line.
 
-When the track is `feature` or `bugfix` and the task text is ambiguous, ask via `AskUserQuestion` first (headless: decider).
+When the track is `feature` or `bugfix`, ask jev-api (`noul`, [decide](decide.reference.md)) whether the task text is too ambiguous to start; only a confident yes goes to the user via `AskUserQuestion` (headless: decider), and own reasoning only replaces a low-confidence answer.
 
 ## 2. Worktree and work branch
 
@@ -116,7 +118,7 @@ Findings are handled with [Receive review](receive-review.reference.md). Then th
 
 ### bugfix
 
-On its `fix/` work branch (step 2): [Debug](debug.reference.md) (root cause, failing test, one fix), [Verify](verify.reference.md), [Request review](request-review.reference.md) (S, M: read your own diff; L and above: one review of the final diff; findings via [Receive review](receive-review.reference.md)), the final `/code-review`, [Finish](finish.reference.md). No spec or plan, unless the root cause shows the fix is really a feature: then switch to the feature track and say so.
+On its `fix/` work branch (step 2): [Debug](debug.reference.md) (root cause, failing test, one fix), [Verify](verify.reference.md), [Request review](request-review.reference.md) (S, M: read your own diff; L and above: one review of the final diff; findings via [Receive review](receive-review.reference.md)), the final `/code-review`, [Finish](finish.reference.md). No spec or plan, unless the root cause shows the fix is really a feature (`noul` via [decide](decide.reference.md)): then switch to the feature track and say so.
 
 ### Final code review (feature and bugfix, never tiny)
 

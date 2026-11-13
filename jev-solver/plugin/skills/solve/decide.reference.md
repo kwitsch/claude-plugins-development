@@ -1,6 +1,6 @@
 # decide
 
-Use for a direction decision that has defined options or a rating scale, never for a decision that belongs to the user (approvals, destructive or outward-facing actions): those go to the user via `AskUserQuestion` (with `--headless`: to the `decider` agent, see [SKILL.md](SKILL.md#questions-and---headless)).
+**jev-api first.** Every decision in `solve` and its references that can be put as options, a rating or a yes/no goes to the jev-api tools before any own reasoning. Own reasoning replaces the answer only when its confidence is low or the call fails (see below). Use it for every decision in the catalogue at the end of this file, never for a decision that belongs to the user (approvals, destructive or outward-facing actions): those go to the user via `AskUserQuestion` (with `--headless`: to the `decider` agent, see [SKILL.md](SKILL.md#questions-and---headless)).
 
 ## Which tool
 
@@ -19,5 +19,27 @@ Use for a direction decision that has defined options or a rating scale, never f
 - `noul`: accept when the probability is at least that value or at most 1 minus it; in between, decide yourself.
 - `score`: accept the rounded level; treat a low `confidence` like above.
 - Any error result (starts with the tool name and a colon, for example `choice:`), missing configuration, or a timeout: decide with your own reasoning using the same criteria. Say in one line that jev-api gave no usable answer; do not retry in a loop.
+
+## Catalogue: where jev-api decides
+
+| Where                                                    | Tool     | Question and `state`                                                                 |
+| -------------------------------------------------------- | -------- | ------------------------------------------------------------------------------------ |
+| `solve` triage                                           | `batch`  | track (choice) and size (score) of the task text                                     |
+| `solve` task ambiguity                                   | `noul`   | is the task too ambiguous to start? Only a confident yes goes to the user            |
+| `solve` invalid `--size`                                 | `score`  | size of the task text, as in the triage                                              |
+| `solve` bugfix turns out to be a feature                 | `noul`   | does the root cause call for new behaviour or design?                                |
+| `design` clarifying question                             | `noul`   | do the code and sensible defaults already answer it? Only a confident no is asked    |
+| `design` approaches, `plan` orderings or strategies      | `choice` | the named options with their trade-offs                                              |
+| `plan` size check                                        | `score`  | size of the plan (skipped with `--size`); a higher size than the triage wins         |
+| `execute` unclear or wrong step, plan gap                | `noul`   | is the step really unclear or wrong? Only a confident yes stops and asks             |
+| `debug` several plausible causes                         | `choice` | the causes (the evidence still decides)                                              |
+| `request-review` severity of each finding                | `score`  | note, should fix, blocking                                                           |
+| `receive-review` unclear point, correct point, taste     | `noul`, `choice` | is the point unclear? is it correct (state: point and code excerpt)? taste options |
+| `worktree` uncommitted changes in the way, red baseline  | `noul`   | do they block the task? are the failures unrelated to it?                            |
+| `pr` rebase or merge, unclear conflict hunk              | `choice` | the repo's convention first; otherwise rebase or merge; keep ours, theirs or both    |
+| `pr` failing check                                       | `noul`   | flaky or environmental rather than caused by the change?                             |
+| `finish` memory worth saving                             | `noul`   | is it lasting and useful in a later session?                                         |
+
+Not decided here, always the user's (headless: decider): approvals of design, spec and plan, discarding, merging, turning off tests, and what to do after three failed fixes.
 
 Record a decision that matters (what, why) in one line in the spec or plan, and save lasting ones with `graphmind memory add --type decision` when graphmind is available.
