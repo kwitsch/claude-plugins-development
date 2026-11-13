@@ -12,7 +12,7 @@ The user's request for this skill is the opt-in for the Workflow tool (load `wor
 
 ## Start: worktree and branch
 
-If the session is not already in a linked git worktree, `EnterWorktree` (ToolSearch if deferred) named `perf-<plugin>`, then `git switch -c perf/<plugin>-<YYYY-MM-DD>` (one branch and one draft PR for the whole run). Never nest. Note the worktree's absolute path and today's date: both go into the workflow `args`.
+First action, before reading anything: check whether the session already is in a linked git worktree (`git rev-parse --git-dir` ends in `/worktrees/<name>`, or `--git-common-dir` differs from `--git-dir`). If not, call `EnterWorktree` (load it via ToolSearch if deferred) with `name: "perf-<plugin>"` to switch into a new one, then `git switch -c perf/<plugin>-<YYYY-MM-DD>` (one branch and one draft PR for the whole run). In an existing linked worktree only create that branch when the current one has no commits of its own. Never nest. Note the worktree's absolute path and today's date: both go into the workflow `args`.
 
 ## Step 1: open tasks to jobs
 
