@@ -695,9 +695,15 @@ async function formatOnDisk(sc: Scope, s: { fp: string; real: string }, signal?:
  * @returns A PostToolUse/PreToolUse/UserPromptSubmit output with plain facts (no instructions to the system).
  */
 function notice(args: { cwd?: string; agent_id?: string; session_id?: string }, event: string, files: string[]): HookResult {
-  const root = scopeOf(args)?.root;
+  const sc = scopeOf(args);
+  // relative to the real root: dprint prints physical paths, so under a symlinked cwd the lexical root would give "../.."
   // quoted: a file name may hold newlines or text that reads like an instruction
-  const rel = files.map((p) => JSON.stringify(root ? path.relative(root, p) : p)).join(", ");
+  const name = (p: string): string => {
+    if (!sc) return p;
+    const under = path.relative(sc.realRoot, p);
+    return under !== "" && !under.startsWith("..") && !path.isAbsolute(under) ? under : path.relative(sc.root, p);
+  };
+  const rel = files.map((p) => JSON.stringify(name(p))).join(", ");
   return {
     hookSpecificOutput: {
       hookEventName: event,
@@ -775,8 +781,8 @@ export function bashStarted(args: BashStartedInput = {}): HookResult {
  * The in-scope files dprint formats in a cwd, cached per root.
  *
  * @param sc - Scope of the hook call.
- * @returns The files; `[]` on a dprint failure (cached for {@link WATCH_RETRY_MS}, so a failing dprint cannot stall
- * every Bash call). The read is shared: a call while it runs gets the same promise.
+ * @returns The files; `[]` on a dprint failure or when there are none (cached for {@link WATCH_RETRY_MS}, so a
+ * failing or missing dprint cannot stall every Bash call, and one installed later is picked up). The read is shared: a call while it runs gets the same promise.
  */
 async function cachedWatchList(sc: Scope): Promise<Array<{ fp: string; real: string }>> {
   const hit = watchCache.get(sc.root);
@@ -789,6 +795,7 @@ async function cachedWatchList(sc: Scope): Promise<Array<{ fp: string; real: str
         const s = inScope(sc, p);
         if (s) list.push(s);
       }
+      if (list.length === 0) entry.failed = true; // dprint missing, no files or above the limit: look again in a minute
     } catch (e) {
       entry.failed = true; // an empty list for a minute, so a failing dprint cannot stall every Bash call
       process.stderr.write(`[dprint-hooks] watch list failed: ${errText(e)}\n`);

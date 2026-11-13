@@ -214,3 +214,11 @@ Observed, no new finding:
 - The unformatted 7490-line Edit wastes ~0.6 s per Edit and returns `{}` (F08; the plugin README tells users to run `/dprint:dprint fmt` once on such files).
 - Server RSS climbs from 55 to ~90-110 MB within a session of 200 KB payloads and a large cached watch list and does not shrink; the measured spawn penalty is below 1 ms (F12 accepted this).
 - The format_pre `dprint lsp` child holds ~104 MB after a 200 KB document until the 2 min idle exit (F04 by design).
+
+## Live validation (real `claude -p` sessions, Claude Code 2.1.323, plugin 0.13.2)
+
+- Write (unformatted content), Edit (also with an empty `new_string`) and a Bash command that rewrites a watched file: all formatted and reported, in a repo on ext4 and in a repo whose working directory is on the 9P mount `/mnt/c` (WSL2).
+- A Bash command that exits non-zero (`PostToolUseFailure`): the file is formatted and the notice arrives.
+- Skill `/dprint:dprint check` (exit 20, files untouched) and `/dprint:dprint fmt` (exit 0, files formatted).
+- FileChanged smoke test of the watch list (files vs directories): see `tasks/F24-watch-list-static-per-file.md`.
+- Not run live: the `init` flow (it asks questions and installs software; its scripts are covered by the contract tests).

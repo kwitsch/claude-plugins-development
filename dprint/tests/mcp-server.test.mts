@@ -1500,6 +1500,17 @@ test("file_changed: a file swapped for a symlink to an outside file while dprint
   assert.equal(readFileSync(outside, "utf8"), "x  \n");
 });
 
+test("notice names are relative to the real root: a symlinked cwd gives no '../' prefix", async () => {
+  stubDprint();
+  const link = path.join(tmp, "link");
+  symlinkSync(repo, link);
+  const s = startServer();
+  await s.tool("bash_started", { cwd: link, ...SESSION, tool_use_id: "N" });
+  writeFileSync(path.join(repo, "a.ts"), "x  \n");
+  const r = await s.tool("bash_finished", { cwd: link, ...SESSION, tool_use_id: "N" });
+  assert.match(r.hookSpecificOutput.additionalContext, /: "a\.ts"\./);
+});
+
 test("hooks.json: bash_started carries cwd and scratchpad_dir (it starts the watch-list read)", () => {
   const hooks = JSON.parse(readFileSync(path.join(PLUGIN, "hooks/hooks.json"), "utf8")).hooks;
   const h = hooks.PreToolUse.filter((g) => g.matcher === "Bash").flatMap((g) => g.hooks).find((x) => x.tool === "bash_started");
