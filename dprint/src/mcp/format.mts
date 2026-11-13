@@ -327,7 +327,7 @@ const BASH_START_TTL_MS = 60 * 60 * 1000;
  *
  * @remarks
  * shortcut: files created after the first read are missing until a cwd change clears the cache (the same
- * limit as the FileChanged watch list), upgrade with F24.
+ * limit as the FileChanged watch list; `DPRINT_WATCH_DIRECTORIES=1` fixes the watch list, not this cache).
  */
 const watchCache = new Map<string, Array<{ fp: string; real: string }>>();
 
@@ -867,10 +867,10 @@ async function gitChanged(root: string): Promise<((real: string) => boolean) | n
  *
  * @remarks
  * FileChanged fires only after the Bash call ended, so its tool output shows the unformatted state. Every file of
- * the (cached) watch list with an mtime after the {@link bashStarted} time (minus 1 s for coarse file systems) goes
- * through {@link formatOnDisk}; on a file system with slow stats ({@link statsAreSlow}) only the files git reports as
- * changed ({@link gitChanged}) are stat-ed.
- * false positives end at its digest and git checks. {@link fileChanged} later sees the
+ * the (cached) watch list with an mtime after the {@link bashStarted} time (minus 1 s for coarse file systems, 5 s on
+ * file systems with slow stats, whose mtimes lag the clock) goes through {@link formatOnDisk}; on such a file system
+ * ({@link statsAreSlow}) only the files git reports as changed ({@link gitChanged}) are stat-ed. False positives end
+ * at its digest and git checks. {@link fileChanged} later sees the
  * recorded digest and stays silent, so nothing is formatted or reported twice. Does nothing without a preceding
  * `bash_started`, a dprint config or a watch list.
  *
