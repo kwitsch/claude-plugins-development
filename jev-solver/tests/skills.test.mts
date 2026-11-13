@@ -66,6 +66,11 @@ describe("jev-solver", () => {
     }
   });
 
+  it("file-related questions get a bullet-point summary first, skipped when headless", () => {
+    assert.match(read("skills/solve/SKILL.md"), /summary in bullet points[\s\S]*skipped with `--headless`/);
+    assert.match(read("skills/solve/design.reference.md"), /bullet-point summary[^\n]*`--headless`/);
+  });
+
   it("solve dispatches the plugin-namespaced decider agent", () => {
     assert.match(read("skills/solve/SKILL.md"), /subagent_type: jev-solver:decider/);
   });

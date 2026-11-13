@@ -18,6 +18,8 @@ Strip these flags from the task text before anything else; the rest is the task.
 
 Every question to the user goes through `AskUserQuestion`, never as plain text. This holds for this file and for every reference.
 
+Before an `AskUserQuestion` that concerns a file (design, spec, plan, review notes), first print the file's content to the user as a summary in bullet points, with the file's full absolute path. Then ask. The summary is skipped with `--headless`: the decider reads the file itself.
+
 With `--headless`, `AskUserQuestion` is never called. Instead, for each question spawn the `decider` agent (`subagent_type: jev-solver:decider`, the plugin-namespaced name; continue the same agent with `SendMessage` while it still runs) and brief it with:
 
 - the question and the options that `AskUserQuestion` would have shown (label and description, the recommended one first),
