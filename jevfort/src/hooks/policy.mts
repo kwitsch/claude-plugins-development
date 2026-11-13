@@ -364,7 +364,8 @@ export function shouldContinue(done: number | undefined, threshold = 0.15): bool
  * @returns Whether the path is a file below the session's scratchpad; any `..` segment rejects it.
  */
 export function inScratchpad(file: string, sessionId: string, roots: readonly string[]): boolean {
-  if (!file.startsWith("/") || !sessionId) return false;
+  // A backslash is a separator and a leading `//` a network path to Win32: both could leave the scratchpad after the lexical check.
+  if (!file.startsWith("/") || file.startsWith("//") || file.includes("\\") || !sessionId) return false;
   const segs = file.split("/");
   if (segs.includes("..")) return false;
   const path = `/${segs.filter((seg) => seg !== "" && seg !== ".").join("/")}`;

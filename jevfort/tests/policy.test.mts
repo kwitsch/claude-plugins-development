@@ -6,6 +6,12 @@ import { bounds, effortLevel, estimateEffort, inScratchpad, isEffort, modelFamil
 const ROOTS = ["/tmp"];
 const SP = "/tmp/claude-1000/-proj/sid-1/scratchpad";
 
+test("inScratchpad rejects Win32 escapes: a backslash separator and a leading //", () => {
+  assert.equal(inScratchpad(`${SP}/..\\..\\x`, "sid-1", ROOTS), false);
+  assert.equal(inScratchpad(`/${SP}/x`, "sid-1", ROOTS), false);
+  assert.equal(inScratchpad(`${SP}/a\\b`, "sid-1", ROOTS), false);
+});
+
 test("inScratchpad accepts a file inside this session's scratchpad", () => {
   assert.equal(inScratchpad(`${SP}/notes.md`, "sid-1", ROOTS), true);
   assert.equal(inScratchpad(`${SP}/a/b/c.txt`, "sid-1", ROOTS), true);

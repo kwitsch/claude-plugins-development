@@ -125,7 +125,7 @@ async function cacheTick($, autoCompactPercent) {
 	if (turnRunning || autoCompactPercent <= 0 || minutes !== 0 || coldCompacted) return;
 	const expires = cacheExpires;
 	const percent = (await $.session.usage()).context.percent ?? 0;
-	if (percent < autoCompactPercent || coldCompacted || turnRunning || cacheExpires !== expires) return;
+	if (!Number.isFinite(percent) || percent < autoCompactPercent || coldCompacted || turnRunning || cacheExpires !== expires) return;
 	coldCompacted = true;
 	await $.command.run({
 		command: "compact",

@@ -314,7 +314,8 @@ async function cacheTick($: Engine, autoCompactPercent: number): Promise<void> {
   const percent = (await $.session.usage()).context.percent ?? 0;
   // The await yields: a tick that overlapped, a turn that started, a response that refreshed the cache (`cacheExpires`
   // moved) or a session reset (zeroed it) makes this decision stale, so the state is read again.
-  if (percent < autoCompactPercent || coldCompacted || turnRunning || cacheExpires !== expires) return;
+  // A non-finite fill (0/0, an empty window) is no fill: `NaN < x` is false and would compact.
+  if (!Number.isFinite(percent) || percent < autoCompactPercent || coldCompacted || turnRunning || cacheExpires !== expires) return;
   coldCompacted = true;
   // The app's own /compact, run as if typed: queued until the session is idle, resolved once it ran. A compaction that
   // stands zeroes `cacheExpires` itself (the session.compact hook). A refusal (a Stop, DISABLE_COMPACT) is said in the
