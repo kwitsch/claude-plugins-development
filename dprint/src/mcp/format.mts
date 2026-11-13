@@ -319,8 +319,11 @@ const takeNotices = (k: string): Set<string> => {
 /** Start time (ms) of the running Bash call per {@link bashKey}, set by {@link bashStarted}. */
 const bashStart = new Map<string, number>();
 
-/** How long a {@link bashStart} entry of a Bash call that never reported back is kept. */
-const BASH_START_TTL_MS = 60 * 60 * 1000;
+/** Whether stats are slow on the file system of a cwd (see {@link statsAreSlow}), judged once per root. */
+const slowRoots = new Map<string, boolean>();
+
+/** How long a {@link bashStart} entry of a Bash call that never reported back is kept (longer than any Bash call runs). */
+const BASH_START_TTL_MS = 24 * 60 * 60 * 1000;
 
 /**
  * In-scope watch list per effective cwd, read lazily by {@link cachedWatchList}.
@@ -351,7 +354,10 @@ function setCwd(
     if (cwd) cwdOverrides.set(key, cwd);
     else cwdOverrides.delete(key);
   }
-  if (cwd) watchCache.delete(cwd); // entering a directory re-reads its list on the next bash_finished
+  if (cwd) {
+    watchCache.delete(cwd); // entering a directory re-reads its list on the next bash_finished
+    slowRoots.delete(cwd);
+  }
   return {};
 }
 
@@ -698,6 +704,12 @@ function notice(args: { cwd?: string; agent_id?: string; session_id?: string }, 
   const sc = scopeOf(args);
   // relative to the real root: dprint prints physical paths, so under a symlinked cwd the lexical root would give "../.."
   // quoted: a file name may hold newlines or text that reads like an instruction
+  /**
+   * Display name of a file: relative to the real root, else to the lexical root.
+   *
+   * @param p - Absolute path as dprint printed it.
+   * @returns The relative name (unquoted).
+   */
   const name = (p: string): string => {
     if (!sc) return p;
     const under = path.relative(sc.realRoot, p);
@@ -771,7 +783,7 @@ export function bashStarted(args: BashStartedInput = {}): HookResult {
   } catch {
     // fail open
   }
-  // a call that never finished (interrupted, killed) leaves its entry behind: drop entries older than an hour
+  // a call that never finished (interrupted, killed) leaves its entry behind: drop entries older than a day
   for (const [key, at] of bashStart) if (now - at > BASH_START_TTL_MS) bashStart.delete(key);
   bashStart.set(bashKey(args), now);
   return {};
@@ -920,7 +932,12 @@ export async function bashFinished(args: BashFinishedInput = {}, signal?: AbortS
       (f) => scratch === null || !(f.real === scratch || f.real.startsWith(scratch + path.sep)),
     );
     // on a slow file system stat only what git reports as changed; otherwise (and without git) every file is checked
-    const slow = statsAreSlow(list);
+    // the verdict is a property of the file system: measured once per root (an empty list says nothing)
+    let slow = slowRoots.get(sc.root);
+    if (slow === undefined) {
+      slow = statsAreSlow(list);
+      if (list.length > 0) slowRoots.set(sc.root, slow);
+    }
     // git only pays off for a long list (a short one is cheap to stat even on 9P); a negative override forces it
     const changed = slow && (list.length >= STAT_SAMPLE || SLOW_STAT_MS < 0) ? await gitChanged(sc.root) : null;
     const slack = slow ? MTIME_SLACK_MS.slow : MTIME_SLACK_MS.fast;

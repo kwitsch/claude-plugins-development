@@ -8,7 +8,7 @@ area: dprint/src/skills/dprint/find-config.mts (findConfig), dprint/src/mcp/form
 
 ## Status
 
-Done in 0.12.1: `findConfig` caches found configs per start directory and re-checks them with one `existsSync`; `null` is never cached, so a config created mid-session counts at once. The `realish` cache was not added (symlink safety).
+Done in 0.12.1: `findConfig` caches a config found in the start directory itself and re-checks it with one `existsSync`; `null` and ancestor hits are never cached (since 0.13.2: a nearer config created later must be seen), so a config created mid-session counts at once. The `realish` cache was not added (symlink safety).
 
 ## Problem
 

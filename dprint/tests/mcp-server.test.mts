@@ -492,6 +492,16 @@ test("chunked lsp frames (split header, near-1-MiB body) are reassembled byte-ex
   assert.equal(out.hookSpecificOutput.updatedInput.content, "line of text\n".repeat(55_000));
 });
 
+test("findConfig: a nearer config is seen at once even when an ancestor config was found before", () => {
+  const top = path.join(tmp, "fcn");
+  const sub = path.join(top, "pkg");
+  mkdirSync(sub, { recursive: true });
+  writeFileSync(path.join(top, "dprint.json"), "{}");
+  assert.deepEqual(findConfig(sub), { dir: top, name: "dprint.json" });
+  writeFileSync(path.join(sub, "dprint.json"), "{}");
+  assert.deepEqual(findConfig(sub), { dir: sub, name: "dprint.json" });
+});
+
 test("findConfig: a cached config stops counting once deleted, a new one counts at once", () => {
   const dir = path.join(tmp, "fc");
   mkdirSync(dir);
@@ -1524,6 +1534,57 @@ test("notice names: a file called '..foo.ts' below a symlinked cwd keeps its pla
   writeFileSync(path.join(repo, "..foo.ts"), "x  \n");
   const r = await s.tool("bash_finished", { cwd: link, ...SESSION, tool_use_id: "D" });
   assert.match(r.hookSpecificOutput.additionalContext, /: "\.\.foo\.ts"\./);
+});
+
+test("Edit property (seeded fuzz): whatever format_pre returns, applying it like Claude Code formats exactly like the intended edit", { timeout: 60_000 }, async () => {
+  stubDprint();
+  const s = startServer();
+  // mulberry32: deterministic, so a failure reproduces
+  let seed = 20261113;
+  const rnd = () => {
+    seed = (seed + 0x6d2b79f5) | 0;
+    let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+  const pick = <T,>(xs: T[]): T => xs[Math.floor(rnd() * xs.length)];
+  const fmt = (t: string) => t.split("\n").map((l) => l.replace(/[ \t]+$/, "")).join("\n").replace(/\n*$/, "\n"); // the stub's formatter
+  // Claude Code's Edit: an empty new_string also removes the line break after old_string; a non-unique match needs replace_all
+  const apply = (o: string, old: string, neu: string, all: boolean): string | null => {
+    if (neu === "" && !old.endsWith("\n") && o.includes(old + "\n")) old += "\n";
+    const n = o.split(old).length - 1;
+    if (old === "" || n === 0 || (n > 1 && !all)) return null;
+    return all ? o.split(old).join(neu) : o.replace(old, () => neu);
+  };
+  const words = ["a", "bb", "x y", "{", "}", "if (z) {", "return 1;", "// c", "", "\t t", "ü"];
+  let returned = 0;
+  for (let i = 0; i < 150; i++) {
+    const nLines = 1 + Math.floor(rnd() * 12);
+    const lines = Array.from({ length: nLines }, () => pick(words) + pick(["", " ", "  ", "\t"]));
+    const crlf = rnd() < 0.15;
+    const original = lines.join("\n") + pick(["\n", "\n", "", "\n\n"]);
+    const file = path.join(repo, `fz${i}.ts`);
+    writeFileSync(file, crlf ? original.replaceAll("\n", "\r\n") : original);
+    const o = original; // Claude matches against the LF view
+    const li = Math.floor(rnd() * lines.length);
+    const line = lines[li];
+    const from = Math.floor(rnd() * (line.length + 1));
+    const to = from + Math.floor(rnd() * (line.length - from + 1));
+    let old = rnd() < 0.3 ? lines.slice(li, li + 2).join("\n") : line.slice(from, to);
+    if (rnd() < 0.2) old += "\n";
+    const neu = pick(["", "", "q", "q  ", "  q\n", "r\ns  ", pick(words)]);
+    const all = rnd() < 0.3;
+    const intended = apply(o, old, neu, all);
+    if (intended === null) continue;
+    const out = await s.call({ cwd: repo, tool_name: "Edit", tool_input: { file_path: file, old_string: old, new_string: neu, replace_all: all ? "true" : "false" } });
+    const u = out.hookSpecificOutput?.updatedInput as Record<string, string> | undefined;
+    if (!u) continue; // fail open: Claude Code applies the original input
+    returned++;
+    const got = apply(o, u.old_string, u.new_string, false);
+    assert.notEqual(got, null, JSON.stringify({ i, original, old, neu, all, u }));
+    assert.equal(fmt(got as string), fmt(intended), JSON.stringify({ i, original, old, neu, all, u }));
+  }
+  assert.ok(returned > 20, "the property was exercised: " + returned);
 });
 
 test("hooks.json: bash_started carries cwd and scratchpad_dir (it starts the watch-list read)", () => {

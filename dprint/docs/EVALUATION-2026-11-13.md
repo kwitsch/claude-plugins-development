@@ -222,3 +222,10 @@ Observed, no new finding:
 - Skill `/dprint:dprint check` (exit 20, files untouched) and `/dprint:dprint fmt` (exit 0, files formatted).
 - FileChanged smoke test of the watch list (files vs directories): see `tasks/F24-watch-list-static-per-file.md`.
 - Not run live: the `init` flow (it asks questions and installs software; its scripts are covered by the contract tests).
+
+## Assurance beyond reviews
+
+- The repository's own gate `/code-review high` ran on the whole branch at the end: no confirmed defect; its notes led to three changes in 0.13.2 (Bash start entries are kept for a day instead of an hour, the stat verdict of a file system is measured once per cwd, `findConfig` caches only exact-directory hits so a nearer config is never hidden).
+- A seeded randomized test (150 random files and Edits, CRLF files, empty and multi-line `new_string`, `replace_all`) checks the central invariant of `format_pre`: whatever it returns, applying it the way Claude Code's Edit does formats exactly like the intended edit; fail open otherwise. It is deterministic, so a failure reproduces.
+- Fifteen independent reviewer rounds, each finding verified by a repro; the findings and fixes are listed under "Bug hunt".
+- None of this proves the absence of bugs: the rounds kept finding smaller issues up to the end, and the live checks cover the main flows only.

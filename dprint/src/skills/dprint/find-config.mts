@@ -22,10 +22,10 @@ export type FoundConfig = {
  * @remarks
  * This is the format gate's own rule, not dprint's: `dprint lsp` resolves its config per file by itself and does
  * not stop at the git root, so a config above the root still applies to a started lsp but never opens the gate.
- * A found config is cached per directory and re-checked with one `existsSync` (a stat is expensive on 9P mounts);
- * `null` is never cached, so a config created mid-session, e.g. by `dprint`, is seen at once. The uncached walk is
- * bounded by the git root. A config that appears closer to `dir` than a cached ancestor config is not seen until
- * that cached config disappears.
+ * A config found in `dir` itself is cached and re-checked with one `existsSync` (a stat is expensive on 9P
+ * mounts). Nothing else is cached: `null`, so a config created mid-session, e.g. by `dprint`, is seen at once, and a
+ * config found in an ancestor, so a nearer one created later is seen at once too. The uncached walk is bounded by
+ * the git root.
  *
  * @param dir - Directory to start from.
  * @returns The config found, or `null` when none exists up to that root (the filesystem root outside git).
@@ -38,7 +38,7 @@ export function findConfig(dir: string): FoundConfig | null {
     cache.delete(key);
   }
   const found = walk(key);
-  if (found !== null) {
+  if (found !== null && found.dir === key) {
     if (cache.size >= 64) cache.clear(); // bounded: one entry per distinct start directory
     cache.set(key, found);
   }
