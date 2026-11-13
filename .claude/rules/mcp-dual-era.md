@@ -30,6 +30,10 @@ server unless marked _static_ (read from the binary) or _spec_ (modelcontextprot
   fresh copy was; the invalidation is unknown. A server that must stay reachable therefore keeps answering `initialize`.
 - `mcp_tool` hooks work over the modern era (the hook call arrives as a normal `tools/call` with the envelope).
 
+## Types
+
+Use the official types, not hand-written shapes or `unknown`: `@modelcontextprotocol/server` (2.x, Apache-2.0) as a **devDependency** of the plugin, `import type` only (`Tool`, `ServerCapabilities`, `Implementation`, `DiscoverResult`, `ListToolsResult`, `CallToolResult`, `JSONRPCRequest`, `JSONRPCResultResponse`, `JSONRPCErrorResponse`, `TaskStatus`, `CreateTaskResult`, `GetTaskResult`, ...). The build erases type imports, so `plugin/` stays zero-dependency (runtime exports such as `PROTOCOL_VERSION_META_KEY` or the `ProtocolErrorCode` enum are not imported: copy the literal). Its result types omit wire-only fields (`resultType`, `ttlMs`, `cacheScope`): add those in the era wrapper, as dprint's `reply` does. `@modelcontextprotocol/sdk` 1.x has no 2026-07-28 types and `@modelcontextprotocol/types` does not exist (checked 2026-11-13); `@modelcontextprotocol/core` exports zod schemas only. Request input stays loosely typed at the trust boundary (`RpcRequest`), checked field by field.
+
 ## Server design
 
 - One tool table, one handler per method; the era only changes the envelope. A request is modern when

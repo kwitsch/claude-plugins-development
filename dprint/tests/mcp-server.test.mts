@@ -1,5 +1,6 @@
 // End-to-end tests: spawn the built plugin/mcp/server.mjs with an isolated PATH (bash + node + a stub
 // `dprint`) and HOME; the stub speaks Content-Length JSON-RPC like `dprint lsp`.
+import type { JSONRPCErrorResponse } from "@modelcontextprotocol/server";
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, statSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
@@ -257,14 +258,24 @@ test("2026-07-28: tools/list and tools/call carry the modern envelope, the handl
 test("2026-07-28: an unsupported version answers -32022 with the supported list; unknown methods -32601", async () => {
   const s = startServer();
   const bad = await s.rpc("tools/list", { _meta: { ...MODERN_META, "io.modelcontextprotocol/protocolVersion": "1900-01-01" } });
-  const err = (bad as unknown as { error: { code: number; data: unknown } }).error;
+  const err = (bad as unknown as JSONRPCErrorResponse).error;
   assert.equal(err.code, -32022);
   assert.deepEqual(err.data, { supported: ["2026-07-28"], requested: "1900-01-01" });
   const malformed = await s.rpc("tools/list", { _meta: { ...MODERN_META, "io.modelcontextprotocol/protocolVersion": 20260728 } });
   assert.equal((malformed as unknown as { error: { code: number } }).error.code, -32022);
   const unknown = await s.rpc("resources/list", { _meta: MODERN_META });
-  assert.equal((unknown as unknown as { error: { code: number } }).error.code, -32601);
+  assert.equal((unknown as unknown as JSONRPCErrorResponse).error.code, -32601);
   assert.equal((await s.rpc("ping", { _meta: MODERN_META })).result.resultType, "complete");
+});
+
+test("a request without an id is a notification: no answer, in either era", async () => {
+  const s = startServer();
+  const child = servers.at(-1);
+  child?.stdin?.write(JSON.stringify({ jsonrpc: "2.0", method: "tools/list" }) + "\n");
+  child?.stdin?.write(JSON.stringify({ jsonrpc: "2.0", method: "tools/list", params: { _meta: MODERN_META } }) + "\n");
+  child?.stdin?.write(JSON.stringify({ jsonrpc: "2.0", method: "tools/list", params: { _meta: { ...MODERN_META, "io.modelcontextprotocol/protocolVersion": "1900-01-01" } } }) + "\n");
+  // the next answer on stdout is the one to this ping: nothing was written for the id-less messages before it
+  assert.equal((await s.rpc("ping", {})).id, 1);
 });
 
 test("excluded and out-of-root paths are never formatted", async () => {

@@ -18,6 +18,7 @@
     "lint": "node scripts/hooks.mts --check"
   },
   "devDependencies": {
+    "@modelcontextprotocol/server": "2.4.0",
     "claude-engine-vitest": "workspace:*"
   },
   "claudePlugin": {}
