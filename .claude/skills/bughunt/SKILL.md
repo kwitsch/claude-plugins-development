@@ -8,6 +8,10 @@ argument-hint: "<plugin-name> [areas...]"
 
 Worked out on the dprint plugin (16 rounds, about 40 confirmed defects). The method matters more than the number of rounds.
 
+## Start: worktree
+
+Before anything else check whether the session already is in a linked git worktree (`git rev-parse --git-dir` ends in `/worktrees/<name>` or `git rev-parse --git-common-dir` differs from `--git-dir`). If not, call `EnterWorktree` (load it via ToolSearch if deferred) with a name like `bughunt-<plugin>` and switch to a `fix/<plugin>-bughunt` branch; never nest. A pure review request stays read-only, but the reviewers' scratch files and the checkout still belong in the worktree, not in the user's checkout.
+
 ## Round
 
 1. **Split the plugin into areas** (protocol/server, core logic, scripts/skills, hooks wiring + docs). One read-only reviewer per area, run in parallel (`Agent`, `subagent_type: general-purpose`, `model: opus`, effort high).
@@ -23,6 +27,14 @@ Worked out on the dprint plugin (16 rounds, about 40 confirmed defects). The met
 - **Docs audit**: every number, default, limit, env var and event name in README, rules and docs must match the source.
 - **Live checks** with the `live-verify` skill for the flows the tests cannot cover.
 - **Final gate**: the repository's `/code-review high` on the whole branch, then CI green on the head commit (`gh pr checks`).
+
+## Close: learnings
+
+At the end of the hunt, before the final report, check what the hunt taught that holds beyond this plugin:
+
+1. List the confirmed defect classes and the Claude Code / tool behaviours you verified (compare with `.claude/rules/hook-file-safety.md`, `.claude/rules/claude-code-hook-facts.md`, `.claude/rules/plugin-docs-tasks.md` and the other rules and skills).
+2. For each, decide: new general fact or defect class, correction of an existing rule or skill, or plugin-specific (stays in the plugin's `docs/` and rules). Only what other plugins of this repository can use, written generally (no plugin names in the rule text except as the source), goes into `.claude/rules/*.md` (with `paths:`) or `.claude/skills/`.
+3. Apply the additions and corrections in the same PR, say in one line which rules or skills changed (or that nothing new qualified).
 
 ## What to claim
 
