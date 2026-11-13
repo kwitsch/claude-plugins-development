@@ -2,11 +2,11 @@
 // shipped dprint-plugins.json. Isolated PATH (only node + git), HOME and git repo per test.
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { beforeEach, test } from "vitest";
+import { afterEach, beforeEach, test } from "vitest";
 
 const DIR = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -42,6 +42,8 @@ beforeEach(() => {
     env: { PATH: bin, HOME: home },
   });
 });
+
+afterEach(() => rmSync(tmp, { recursive: true, force: true }));
 
 /** create repo/<rel> (and its parent dirs) with the given content */
 function write(rel, text = "") {

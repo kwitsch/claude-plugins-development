@@ -12,7 +12,7 @@ area: dprint/src/mcp/format.mts (fileChanged, client, MAX_CLIENTS, MAX_CHANGED_B
 
 Done in 0.13.0: `DprintLsp` stops its child after 2 min idle (`IDLE_MS`, constructor option `idleMs`; the timer is armed when the format queue drains and cleared by the next format; the next format respawns). Test: "idle lsp child exits after idleMs and the next format respawns it".
 
-Partial (release dprint 0.8.0). Done: `fileChanged` skips files above `MAX_CHANGED_BYTES` (1 MiB) with one stderr line, using `statSync` before any read, and reads the file only after a FileChanged slot is held (waiting events keep no text alive). Not done: the RSS high-water of a `dprint lsp` child after a large Write/Edit document (no child recycling, no idle dispose). At most `MAX_CLIENTS` = 8 children live (LRU eviction in `client`, pre-existing).
+Earlier state: Partial (release dprint 0.8.0). Done: `fileChanged` skips files above `MAX_CHANGED_BYTES` (1 MiB) with one stderr line, using `statSync` before any read, and reads the file only after a FileChanged slot is held (waiting events keep no text alive). Not done: the RSS high-water of a `dprint lsp` child after a large Write/Edit document (no child recycling, no idle dispose). At most `MAX_CLIENTS` = 8 children live (LRU eviction in `client`, pre-existing).
 
 ## Problem
 

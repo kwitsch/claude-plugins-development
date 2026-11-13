@@ -104,6 +104,7 @@ beforeEach(() => {
 
 afterEach(() => {
   while (servers.length) servers.pop()?.kill();
+  rmSync(tmp, { recursive: true, force: true });
 });
 
 /**
@@ -752,8 +753,10 @@ test("close() while the dprint lookup runs: the format rejects and no child is s
   chmodSync(npx, 0o755);
   const oldPath = process.env.PATH;
   const oldHome = process.env.HOME;
+  const oldInstall = process.env.DPRINT_INSTALL;
   process.env.PATH = bin;
   process.env.HOME = home; // not the real ~/.dprint/bin
+  delete process.env.DPRINT_INSTALL;
   const lsp = new DprintLsp({ cwd: repo });
   try {
     const f = lsp.format(pathToFileURL(path.join(repo, "a.ts")).href, "x   \n");
@@ -766,7 +769,63 @@ test("close() while the dprint lookup runs: the format rejects and no child is s
     lsp.dispose();
     process.env.PATH = oldPath;
     process.env.HOME = oldHome;
+    if (oldInstall === undefined) delete process.env.DPRINT_INSTALL;
+    else process.env.DPRINT_INSTALL = oldInstall;
   }
+});
+
+test("a closed client fails every format at once and never spawns", async () => {
+  const log = loggingDprint();
+  const oldPath = process.env.PATH;
+  process.env.PATH = bin;
+  const lsp = new DprintLsp({ cwd: repo });
+  try {
+    lsp.close();
+    await assert.rejects(lsp.format(pathToFileURL(path.join(repo, "a.ts")).href, "x   \n"), /closed/);
+    assert.equal(spawns(log), 0);
+  } finally {
+    process.env.PATH = oldPath;
+  }
+});
+
+test("initialize always answers the version this server speaks, never the client's", async () => {
+  const s = startServer();
+  for (const v of ["1999-01-01", "2026-07-28", 42]) {
+    const init = await s.rpc("initialize", { protocolVersion: v, capabilities: {}, clientInfo: { name: "test", version: "0" } });
+    assert.equal((init.result as unknown as { protocolVersion: string }).protocolVersion, "2025-11-25", String(v));
+  }
+});
+
+test("hooks.json: the Bash hooks carry tool_use_id and bash_finished also runs on PostToolUseFailure", () => {
+  const hooks = JSON.parse(readFileSync(path.join(PLUGIN, "hooks/hooks.json"), "utf8")).hooks;
+  const bash = (event: string, tool: string) =>
+    hooks[event]
+      .filter((g) => g.matcher === "Bash")
+      .flatMap((g) => g.hooks)
+      .find((h) => h.tool === tool);
+  for (const [event, tool] of [["PreToolUse", "bash_started"], ["PostToolUse", "bash_finished"], ["PostToolUseFailure", "bash_finished"]]) {
+    const h = bash(event, tool);
+    assert.ok(h, `${event} ${tool}`);
+    assert.equal(h.input.tool_use_id, "${tool_use_id}", `${event} ${tool}`);
+  }
+  assert.equal(bash("PostToolUseFailure", "bash_finished").input.hook_event_name, "${hook_event_name}");
+});
+
+test("bash_finished reports the reformat of a file_changed that is still running (race)", async () => {
+  stubDprint();
+  const s = startServer();
+  const a = path.join(repo, "a.ts");
+  await s.tool("bash_started", SESSION);
+  writeFileSync(a, "x  \n");
+  const [, r] = await Promise.all([
+    s.tool("file_changed", { cwd: repo, file_path: a, event: "change", ...SESSION }),
+    s.tool("bash_finished", { cwd: repo, ...SESSION }),
+  ]);
+  const later = await s.tool("drain_notices", { hook_event_name: "PreToolUse", cwd: repo, ...SESSION });
+  // the reformat is reported exactly once: in the Bash result, or (if file_changed queued it after the drain) later
+  const inBash = JSON.stringify(r).includes("a.ts");
+  const inLater = JSON.stringify(later).includes("a.ts");
+  assert.ok(inBash !== inLater, JSON.stringify({ r, later }));
 });
 
 test("at most 8 dprint lsp children: the least recently used cwd is evicted and respawned", async () => {
@@ -797,9 +856,9 @@ test("Write and Edit above 1 MiB pass through unformatted without spawning dprin
     {},
   );
   const file = path.join(repo, "e.ts");
-  writeFileSync(file, big);
+  writeFileSync(file, big + "UNIQUE-MARK   \n");
   assert.deepEqual(
-    await s.call({ cwd: repo, tool_name: "Edit", tool_input: { file_path: file, old_string: "x   \nx", new_string: "y" } }),
+    await s.call({ cwd: repo, tool_name: "Edit", tool_input: { file_path: file, old_string: "UNIQUE-MARK", new_string: "y" } }),
     {},
   );
   assert.equal(spawns(log), 0);

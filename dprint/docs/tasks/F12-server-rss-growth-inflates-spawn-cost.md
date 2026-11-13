@@ -12,7 +12,7 @@ area: dprint/src/mcp/format.mts (fileChanged, MAX_CHANGED_BYTES, formatPre), dpr
 
 Done in 0.13.0: `formatPre` skips Write content and Edit targets (file size plus new_string) above `MAX_CHANGED_BYTES` (1 MiB) before any git or lsp spawn (`overCap`, shared with `formatOnDisk`); the document passes through unformatted. The double serialization in server.mts is required by the dual-era rule and stays. Test: "Write and Edit above 1 MiB pass through unformatted without spawning dprint lsp".
 
-Partial. Mitigated: `fileChanged` skips files above `MAX_CHANGED_BYTES` (1 MiB, stderr line) and the FileChanged spawn count per event dropped from two git spawns to one (F13). NOT addressed: multi-MB Write/Edit payloads in `formatPre`, double serialization in server.mts, send/receive buffer churn.
+Earlier state: Partial. Mitigated: `fileChanged` skips files above `MAX_CHANGED_BYTES` (1 MiB, stderr line) and the FileChanged spawn count per event dropped from two git spawns to one (F13). NOT addressed: multi-MB Write/Edit payloads in `formatPre`, double serialization in server.mts, send/receive buffer churn.
 
 ## Problem
 

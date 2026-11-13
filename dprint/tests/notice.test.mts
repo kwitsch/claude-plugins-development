@@ -83,9 +83,11 @@ interface SetupOptions {
   bins?: string[];
   /** A tool's output as the engine hands it back in the chain's `{ result }`; default: the plain next result. */
   toolResult?: (e: Record<string, unknown>) => unknown;
+  /** DPRINT_INSTALL (default unset). */
+  install?: string;
 }
 
-function setup($, on, { cwd = "", exists, run = () => OK, home = HOME, path: pathVar = PATH_DIRS, bins = [PATH_DPRINT], toolResult = () => NEXT }: SetupOptions = {}) {
+function setup($, on, { cwd = "", exists, run = () => OK, home = HOME, path: pathVar = PATH_DIRS, bins = [PATH_DPRINT], toolResult = () => NEXT, install }: SetupOptions = {}) {
   const exist = exists ?? ((p) => ({ value: p === HOME || bins.includes(p) || existsSync(p) }));
   const toasts: { text: string; timeoutMs?: number }[] = [];
   const runs: { argv: string[]; init: Record<string, unknown> }[] = [];
@@ -95,7 +97,7 @@ function setup($, on, { cwd = "", exists, run = () => OK, home = HOME, path: pat
   on("env.get", (_$, e) => {
     envGets.push(e.name);
     if (typeof home === "object" && home) return home;
-    const value = e.name === "HOME" ? (home ?? undefined) : e.name === "PATH" ? (pathVar ?? undefined) : undefined;
+    const value = e.name === "HOME" ? (home ?? undefined) : e.name === "PATH" ? (pathVar ?? undefined) : e.name === "DPRINT_INSTALL" ? install : undefined;
     return { value };
   });
   on("process.run", (_$, e) => {
@@ -460,4 +462,24 @@ test("worktree tool output in the engine's { result } shape: ExitWorktree checks
   vi.setSystemTime(T0 + 16_000);
   await fire("tool.call", { tool: "EnterWorktree" });
   assert.deepEqual(toasts.map((t) => t.text), [toastText(restored, COULD_NOT_START), toastText(entered, COULD_NOT_START)]);
+});
+
+test("DPRINT_INSTALL/bin/dprint is the fallback when set (and ~/.dprint/bin is then not looked at)", async ($, on) => {
+  const dir = withConfig(repo());
+  const install = "/opt/dprint-install/";
+  const probed: string[] = [];
+  const { fire, runs, toasts } = setup($, on, {
+    cwd: dir,
+    install,
+    bins: [],
+    exists: (p) => {
+      probed.push(p);
+      return { value: p === HOME || p === "/opt/dprint-install/bin/dprint" || existsSync(p) };
+    },
+    run: () => OK,
+  });
+  await fire("session.start", {});
+  assert.deepEqual(runs.map((r) => r.argv), [["/opt/dprint-install/bin/dprint", "--version"]]);
+  assert.equal(toasts.length, 0);
+  assert.ok(!probed.includes(`${HOME}/.dprint/bin/dprint`), probed.join(","));
 });

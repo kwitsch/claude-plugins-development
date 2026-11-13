@@ -18,11 +18,11 @@ Legend: `[x]` finished (done, or closed without code: status `closed` in the tas
 - [x] [F16](tasks/F16-lineof-quadratic-replace-all.md) One-pass line counter for replace_all offsets
 - [x] [F17](tasks/F17-trim-widening-quadratic.md) Cap trimToEdit uniqueness widening
 - [x] [F19](tasks/F19-stale-stdout-after-dispose-race.md) Ignore stdout of a replaced dprint child
-- [x] [F18](tasks/F18-lsp-ondata-quadratic-concat.md) Linear frame accumulation in DprintLsp.onData `open` priority:low
-- [x] [F25](tasks/F25-watch-paths-sessionstart-cost.md) Cut watch-paths SessionStart/CwdChanged cost on large repos `open` priority:low
-- [x] [F27](tasks/F27-stat-heavy-guards-on-9p.md) Cache findConfig results to cut stat latency on 9P repos `open` priority:low
-- [x] [F09](tasks/F09-dprint-lsp-heavy-change-cost.md) dprint lsp formatting cost scales with the amount of change (dprint-side) `docs-only` priority:low
-- [x] [F10](tasks/F10-edit-no-change-full-document-format.md) Even a no-change TS Edit formats the whole document (dprint-side sizing) `docs-only` priority:low
+- [x] [F18](tasks/F18-lsp-ondata-quadratic-concat.md) Linear frame accumulation in DprintLsp.onData
+- [x] [F25](tasks/F25-watch-paths-sessionstart-cost.md) Cut watch-paths SessionStart/CwdChanged cost on large repos
+- [x] [F27](tasks/F27-stat-heavy-guards-on-9p.md) Cache findConfig results to cut stat latency on 9P repos
+- [x] [F09](tasks/F09-dprint-lsp-heavy-change-cost.md) dprint lsp formatting cost scales with the amount of change (dprint-side)
+- [x] [F10](tasks/F10-edit-no-change-full-document-format.md) Even a no-change TS Edit formats the whole document (dprint-side sizing)
 - [x] [F04](tasks/F04-lsp-child-rss-high-water.md) Bound dprint lsp child memory for large documents
 - [x] [F12](tasks/F12-server-rss-growth-inflates-spawn-cost.md) Bound MCP server RSS growth from multi-MB payloads
 

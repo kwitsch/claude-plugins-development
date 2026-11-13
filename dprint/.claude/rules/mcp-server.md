@@ -41,7 +41,7 @@ sources; this rule records behaviour and constraints only.
   (see the hook-inputs rule).
 - `lsp.mts`: `dprint lsp` client: one lazily spawned child per cwd, Content-Length JSON-RPC, a request timeout
   (constructor option `timeoutMs`, tests only), a cooldown after a request timeout during which formats of that
-  document fail at once, a per-client pause before `findDprint` is retried after dprint was not found, stdout of a
+  document fail at once, an idle exit (`idleMs`, 2 min: the child is stopped, the next format respawns it), `close()` (eviction/shutdown: later formats fail instead of spawning), a per-client pause before `findDprint` is retried after dprint was not found, stdout of a
   replaced child ignored, respawn after a crash, `applyTextEdits`.
 - `watch-list.mts`: `dprintFilePaths` (`dprint file-paths` + `WATCH_LIMIT`), shared by `watch-paths.mts` and
   `bashFinished`.
@@ -56,13 +56,13 @@ sources; this rule records behaviour and constraints only.
   inside the real cwd, not excluded, not inside `scratchpad_dir`; dangling links rejected); universal-format's path
   exclusions apply. One `DprintLsp` per cwd; the least recently used child is disposed past the child cap.
 - `fileWritten` records Edit/Write content per real path, as a SHA-256 digest, only where a config exists.
-- `fileChanged` formats a watched file whole on disk unless it is out of scope, has a lone CR (CRLF files are
+- `fileChanged` formats a watched file whole on disk unless it is out of scope, has a lone CR or mixed CRLF/LF endings (pure CRLF files are
   formatted on their LF view), equals the recorded content, is gitignored, or is tracked and unchanged against the git
-  index. One `git --no-optional-locks status --porcelain --untracked-files=normal --ignored=matching` decides: `!!` or
+  index. One `git --literal-pathspecs --no-optional-locks status --porcelain --untracked-files=normal --ignored=matching` decides: `!!` or
   empty output skips; a git failure means format. It uses its own `dprint lsp`, runs a bounded number of events at once
   (git + dprint), queues a bounded number more and drops beyond that with a stderr line, and skips oversized files.
 - `formatPre`: config gate first (`{}` and no `dprint lsp` spawn unless `findConfig` finds a config in the effective
-  cwd or an ancestor), then the gitignore check (`git check-ignore`; Write/Edit skip ignored files). Write: whole-file
+  cwd or an ancestor), then the size guard (Write content or Edit target + new_string above `MAX_CHANGED_BYTES`, 1 MiB: `{}`, no spawn), then the gitignore check (`git check-ignore`; Write/Edit skip ignored files). Write: whole-file
   `formatting`; Edit: whole-file `formatting` of the edited text.
 - `lineDiff` and `trimToEdit`: keep only hunks touching the edit, widen `old_string` until it is unique (bounded
   single-line widening steps, then one jump to the widest span). Accepted only if the trimmed file formats like the
@@ -70,4 +70,4 @@ sources; this rule records behaviour and constraints only.
   files are trimmed on their LF view.
 - `formatOnDisk` is the shared core of `fileChanged` (queues the file for `drainNotices`) and `bashFinished` (reports
   directly; it formats every cached watch-list file with mtime > `bash_started` − 1 s, so the Bash result is not
-  stale; the digest in `written` makes the later FileChanged a no-op). All three are keyed by `overrideKey`.
+  stale; the digest in `written` makes the later FileChanged a no-op). FileChanged, `file_written` and `drain_notices` are keyed by `overrideKey`, the Bash start by `bashKey` (`overrideKey` plus `tool_use_id`, so overlapping Bash calls keep their own start; entries older than an hour are dropped).

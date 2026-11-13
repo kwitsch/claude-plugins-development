@@ -2,11 +2,11 @@
 // Isolated PATH (only bash + node) and HOME per test; dprint is stubbed.
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { beforeEach, test } from "vitest";
+import { afterEach, beforeEach, test } from "vitest";
 
 const PLUGIN = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../plugin");
 const SCRIPT = path.join(PLUGIN, "skills/dprint/check-dprint.mjs");
@@ -14,9 +14,9 @@ const SCRIPT = path.join(PLUGIN, "skills/dprint/check-dprint.mjs");
 const SOURCE = path.resolve(PLUGIN, "../src/skills/dprint/check-dprint.mts");
 const MIN = /^const MIN_VERSION = "([0-9.]+)";$/m.exec(readFileSync(SOURCE, "utf8"))?.[1];
 
-let bin, home;
+let tmp, bin, home;
 beforeEach(() => {
-  const tmp = mkdtempSync(path.join(tmpdir(), "dprint-test-"));
+  tmp = mkdtempSync(path.join(tmpdir(), "dprint-test-"));
   bin = path.join(tmp, "bin");
   home = path.join(tmp, "home");
   mkdirSync(bin);
@@ -26,6 +26,8 @@ beforeEach(() => {
     if (src) symlinkSync(src, path.join(bin, t));
   }
 });
+
+afterEach(() => rmSync(tmp, { recursive: true, force: true }));
 
 function stub(file, ...lines) {
   writeFileSync(file, ["#!/usr/bin/env bash", ...lines, ""].join("\n"));
