@@ -1,5 +1,6 @@
 // End-to-end tests: spawn the built plugin/mcp/server.mjs with an isolated PATH (bash + node + a stub
 // `dprint`) and HOME; the stub speaks Content-Length JSON-RPC like `dprint lsp`.
+import type { JSONRPCErrorResponse } from "@modelcontextprotocol/server";
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, statSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
@@ -73,7 +74,7 @@ interface RpcReply {
   /** The request id. */
   id: number;
   /** The result (initialize, tools/list or tools/call fields). */
-  result: { serverInfo?: unknown; tools: { name: string }[]; structuredContent: ToolOut };
+  result: { serverInfo?: unknown; tools: { name: string }[]; structuredContent: ToolOut; resultType?: string };
 }
 
 const servers: ReturnType<typeof spawn>[] = [];
@@ -151,10 +152,13 @@ function startServer(opts: { cwd?: string; env?: Record<string, string> } = {}) 
     stdio: ["pipe", "pipe", "pipe"],
   });
   servers.push(child);
-  child.stderr.resume();
+  let stderr = "";
+  child.stderr.on("data", (d) => (stderr += d));
+  const answered = new Set<number>();
   const waiting = new Map<number, (msg: RpcReply) => void>();
   createInterface({ input: child.stdout }).on("line", (line) => {
     const msg = JSON.parse(line) as RpcReply; // throws (fails the run) if stdout carries anything but JSON-RPC
+    answered.add(msg.id);
     waiting.get(msg.id)?.(msg);
     waiting.delete(msg.id);
   });
@@ -171,7 +175,9 @@ function startServer(opts: { cwd?: string; env?: Record<string, string> } = {}) 
     (await rpc("tools/call", { name, arguments: args })).result
       .structuredContent;
   const call = (args) => tool("format_pre", args);
-  return { rpc, call, tool };
+  /** Write one raw JSON-RPC message (no answer awaited). */
+  const raw = (msg: object) => child.stdin.write(JSON.stringify({ jsonrpc: "2.0", ...msg }) + "\n");
+  return { rpc, call, tool, raw, answered, stderr: () => stderr };
 }
 
 const lines = (n) => Array.from({ length: n }, (_, i) => `l${i}`);
@@ -215,6 +221,82 @@ test("initialize reports dprint-hooks with the manifest version; tools/list has 
       "drain_notices",
     ],
   );
+});
+
+/** The `_meta` envelope every 2026-07-28 request carries. */
+const MODERN_META = {
+  "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+  "io.modelcontextprotocol/clientInfo": { name: "test", version: "0" },
+  "io.modelcontextprotocol/clientCapabilities": {},
+};
+
+test("2026-07-28: server/discover answers without initialize and names the versions, capabilities and serverInfo", async () => {
+  const s = startServer();
+  const r = (await s.rpc("server/discover", { _meta: MODERN_META })).result as Record<string, unknown>;
+  const manifest = JSON.parse(readFileSync(path.join(PLUGIN, ".claude-plugin/plugin.json"), "utf8"));
+  assert.equal(r.resultType, "complete");
+  assert.deepEqual(r.supportedVersions, ["2026-07-28"]);
+  assert.deepEqual(r.capabilities, { tools: {} });
+  assert.deepEqual(r._meta, { "io.modelcontextprotocol/serverInfo": { name: "dprint-hooks", version: manifest.version } });
+  assert.equal(typeof r.ttlMs, "number");
+  assert.equal(r.cacheScope, "public");
+});
+
+test("2026-07-28: tools/list and tools/call carry the modern envelope, the handler result is the legacy one", async () => {
+  stubDprint();
+  const s = startServer();
+  const legacy = (await s.rpc("tools/list", {})).result as Record<string, unknown>;
+  assert.equal("resultType" in legacy, false);
+  const list = (await s.rpc("tools/list", { _meta: MODERN_META })).result as unknown as { tools: unknown[] } & Record<string, unknown>;
+  assert.equal(list.resultType, "complete");
+  assert.equal(typeof list.ttlMs, "number");
+  assert.equal(list.cacheScope, "public");
+  assert.deepEqual(list.tools, (legacy as typeof list).tools);
+  const file = path.join(repo, "a.ts");
+  const args = { cwd: repo, agent_id: "", session_id: "s", scratchpad_dir: "", tool_name: "Write", tool_input: { file_path: file, content: "x  \n" } };
+  const modern = (await s.rpc("tools/call", { name: "format_pre", arguments: args, _meta: MODERN_META })).result as Record<string, unknown>;
+  assert.equal(modern.resultType, "complete");
+  assert.deepEqual(modern.structuredContent, await s.tool("format_pre", args));
+  assert.deepEqual(JSON.parse((modern.content as { text: string }[])[0].text), modern.structuredContent);
+});
+
+test("2026-07-28: an unsupported version answers -32022 with the supported list; unknown methods -32601", async () => {
+  const s = startServer();
+  const bad = await s.rpc("tools/list", { _meta: { ...MODERN_META, "io.modelcontextprotocol/protocolVersion": "1900-01-01" } });
+  const err = (bad as unknown as JSONRPCErrorResponse).error;
+  assert.equal(err.code, -32022);
+  assert.deepEqual(err.data, { supported: ["2026-07-28"], requested: "1900-01-01" });
+  const malformed = await s.rpc("tools/list", { _meta: { ...MODERN_META, "io.modelcontextprotocol/protocolVersion": 20260728 } });
+  assert.equal((malformed as unknown as { error: { code: number } }).error.code, -32022);
+  const unknown = await s.rpc("resources/list", { _meta: MODERN_META });
+  assert.equal((unknown as unknown as JSONRPCErrorResponse).error.code, -32601);
+  assert.equal((await s.rpc("ping", { _meta: MODERN_META })).result.resultType, "complete");
+});
+
+test("a request without an id is a notification: no answer, in either era", async () => {
+  const s = startServer();
+  const child = servers.at(-1);
+  child?.stdin?.write(JSON.stringify({ jsonrpc: "2.0", method: "tools/list" }) + "\n");
+  child?.stdin?.write(JSON.stringify({ jsonrpc: "2.0", method: "tools/list", params: { _meta: MODERN_META } }) + "\n");
+  child?.stdin?.write(JSON.stringify({ jsonrpc: "2.0", method: "tools/list", params: { _meta: { ...MODERN_META, "io.modelcontextprotocol/protocolVersion": "1900-01-01" } } }) + "\n");
+  // the next answer on stdout is the one to this ping: nothing was written for the id-less messages before it
+  assert.equal((await s.rpc("ping", {})).id, 1);
+});
+
+test("notifications/cancelled stops waiting for the call and sends no answer for it", async () => {
+  stubDprint("hang"); // the format never answers, so the call is in flight until the 30 s request timeout
+  const s = startServer();
+  const args = { cwd: repo, agent_id: "", session_id: "s", scratchpad_dir: "", tool_name: "Write", tool_input: { file_path: path.join(repo, "a.ts"), content: "x  \n" } };
+  s.raw({ id: 99, method: "tools/call", params: { name: "format_pre", arguments: args } });
+  await new Promise((r) => setTimeout(r, 400));
+  s.raw({ method: "notifications/cancelled", params: { requestId: 99, reason: "test" } });
+  await s.rpc("ping", {}); // the loop is alive and answers on
+  for (let i = 0; i < 40 && !s.stderr().includes("cancelled tools/call 99"); i++) await new Promise((r) => setTimeout(r, 50));
+  assert.match(s.stderr(), /cancelled tools\/call 99/);
+  assert.equal(s.answered.has(99), false);
+  // a cancel for an unknown or finished id is ignored
+  s.raw({ method: "notifications/cancelled", params: { requestId: 12345 } });
+  assert.deepEqual((await s.rpc("ping", {})).result, {});
 });
 
 test("excluded and out-of-root paths are never formatted", async () => {
