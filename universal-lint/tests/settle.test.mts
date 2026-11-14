@@ -128,6 +128,18 @@ test("gateFinding: keepParseErrors=false drops a parse error the predicate rejec
   assert.equal(gateFinding(parse, () => false, "/p/a.sh", false), null);
 });
 
+/** The built plugin is typed by inference from its default (`true`): the string mode needs a cast. */
+const DROP = "drop" as unknown as boolean;
+
+test("gateFinding: keepParseErrors='drop' drops an own-file parse error on any line, keeps the rest", () => {
+  const parse = { tool: "shellcheck", target: "a.sh", base: "/p", text: "a.sh:3:1: error: Couldn't parse this. [SC1073]" };
+  assert.equal(gateFinding(parse, () => true, "/p/a.sh", DROP), null);
+  const mixed = { ...parse, text: `${parse.text}\na.sh:5:1: note: y-marker [SC2086]` };
+  assert.match(gateFinding(mixed, () => true, "/p/a.sh", DROP)?.text ?? "", /y-marker/);
+  const foreign = { ...parse, text: "b.sh:3:1: error: Couldn't parse this. [SC1073]" };
+  assert.ok(gateFinding(foreign, () => true, "/p/a.sh", DROP));
+});
+
 // ---- journal and supersession -------------------------------------------------------------------------------------
 
 /** Scratch root of this file's journal tests, removed when the file finishes. */

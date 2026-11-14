@@ -1087,7 +1087,9 @@ export function gateFinding(finding, ranges, resolved, keepParseErrors = true) {
 		const preambleParse = PARSE_ERROR_RE.test(out.join("\n"));
 		starts.forEach((start, n) => {
 			const seg = lines.slice(start, starts[n + 1] ?? lines.length);
-			if (kinds[start] === "miss" && !(keepParseErrors && (preambleParse || PARSE_ERROR_RE.test(seg.join("\n"))))) return;
+			const parse = preambleParse || PARSE_ERROR_RE.test(seg.join("\n"));
+			if (keepParseErrors === "drop" && parse && kinds[start] !== "foreign") return;
+			if (kinds[start] === "miss" && !(keepParseErrors === true && parse)) return;
 			out.push(...seg);
 			any = true;
 		});
@@ -1182,7 +1184,7 @@ export async function settleFindings(findings, resolved, rec, d0, d1) {
 	};
 	try {
 		return findings.flatMap((f) => {
-			const g = gateFinding(f, survives, resolved, false);
+			const g = gateFinding(f, survives, resolved, "drop");
 			return g ? [g] : [];
 		});
 	} catch {

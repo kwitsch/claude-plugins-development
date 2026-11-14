@@ -1995,12 +1995,13 @@ const PARSE_ERROR_RE = /pars(?:e|ing) error|syntax ?error|unexpected (?:token|en
  * @param ranges - Inclusive 0-based edited line ranges, null when every line counts as edited, or a predicate on the
  *   0-based line that says whether a diagnostic located there is kept (the settle window's "line survives" test).
  * @param resolved - Absolute path of the edited file.
- * @param keepParseErrors - Keep an own-file parse error that misses `ranges` (default). The settle window turns it off:
- *   a parse error on a line a later edit rewrote must not survive.
+ * @param keepParseErrors - `true` (default): keep an own-file parse error that misses `ranges`. `false`: treat it like any
+ *   diagnostic. `"drop"`: drop an own-file parse error on any line (the settle window with a later edit: that edit's
+ *   own lint reports a parse error that persists, and its cause may be on another line than the error).
  * @returns The finding with only the kept text, `finding` itself when no line is located (unknown format, fail open),
  *   or null when nothing reportable remains.
  */
-export function gateFinding(finding: Finding, ranges: Array<[number, number]> | null | ((line0: number) => boolean), resolved: string, keepParseErrors = true): Finding | null {
+export function gateFinding(finding: Finding, ranges: Array<[number, number]> | null | ((line0: number) => boolean), resolved: string, keepParseErrors: boolean | "drop" = true): Finding | null {
   const seen = new Map<string, boolean>();
   /** Memoized `existsSync` for this call (the filesystem is stable within one call). */
   const exists = (abs: string): boolean => {
@@ -2046,7 +2047,9 @@ export function gateFinding(finding: Finding, ranges: Array<[number, number]> | 
     const preambleParse = PARSE_ERROR_RE.test(out.join("\n"));
     starts.forEach((start, n) => {
       const seg = lines.slice(start, starts[n + 1] ?? lines.length);
-      if (kinds[start] === "miss" && !(keepParseErrors && (preambleParse || PARSE_ERROR_RE.test(seg.join("\n"))))) return;
+      const parse = preambleParse || PARSE_ERROR_RE.test(seg.join("\n"));
+      if (keepParseErrors === "drop" && parse && kinds[start] !== "foreign") return;
+      if (kinds[start] === "miss" && !(keepParseErrors === true && parse)) return;
       out.push(...seg);
       any = true;
     });
@@ -2222,7 +2225,7 @@ export async function settleFindings(findings: Finding[], resolved: string, rec:
   };
   try {
     return findings.flatMap((f) => {
-      const g = gateFinding(f, survives, resolved, false);
+      const g = gateFinding(f, survives, resolved, "drop");
       return g ? [g] : [];
     });
   } catch {

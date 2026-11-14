@@ -189,3 +189,43 @@ test("a FileChanged lint does not hold its slot while the findings settle", asyn
   assert.equal(ran.status, 2);
   assert.match(ran.stderr, /line2-marker/);
 });
+
+test("a later edit that fixed the cause of a held parse error on another line: the parse error is not reported", async () => {
+  const s = setup();
+  s.setFindings("a.sh:4:1: error: Couldn't find end of string [SC1009]\n");
+  const first = start(s.e, s.findings, payload(s.file, s.e.cwd, { toolName: "Edit", toolResponse: EDIT_L4 }), { UNIVERSAL_LINT_SETTLE_MS: "2000" });
+  await intoHold(s.e);
+  writeFileSync(s.file, SH4_FIXED);
+  s.setFindings("");
+  const second = await start(s.e, s.findings, payload(s.file, s.e.cwd, { toolName: "Edit", toolResponse: EDIT_L2 }), {});
+  const firstRan = await first;
+  assert.equal(second.status, 0);
+  assert.equal(firstRan.status, 0);
+  assert.equal(firstRan.stderr, "");
+});
+
+test("a later edit elsewhere that leaves the parse error: the later lint reports it, the held one is dropped", async () => {
+  const s = setup();
+  s.setFindings("a.sh:4:1: error: Couldn't find end of string [SC1009]\n");
+  const first = start(s.e, s.findings, payload(s.file, s.e.cwd, { toolName: "Edit", toolResponse: EDIT_L4 }), { UNIVERSAL_LINT_SETTLE_MS: "2000" });
+  await intoHold(s.e);
+  writeFileSync(s.file, SH4_FIXED);
+  const second = await start(s.e, s.findings, payload(s.file, s.e.cwd, { toolName: "Edit", toolResponse: EDIT_L2 }), {});
+  const firstRan = await first;
+  assert.equal(second.status, 2);
+  assert.match(second.stderr, /SC1009/);
+  assert.equal(firstRan.status, 0);
+});
+
+test("a later edit after a non-parse finding on another line: that finding is still reported", async () => {
+  const s = setup();
+  s.setFindings("a.sh:4:6: note: line4-marker [SC2086]\n");
+  const first = start(s.e, s.findings, payload(s.file, s.e.cwd, { toolName: "Edit", toolResponse: EDIT_L4 }), { UNIVERSAL_LINT_SETTLE_MS: "2000" });
+  await intoHold(s.e);
+  writeFileSync(s.file, SH4_FIXED);
+  s.setFindings("");
+  await start(s.e, s.findings, payload(s.file, s.e.cwd, { toolName: "Edit", toolResponse: EDIT_L2 }), {});
+  const firstRan = await first;
+  assert.equal(firstRan.status, 2);
+  assert.match(firstRan.stderr, /line4-marker/);
+});

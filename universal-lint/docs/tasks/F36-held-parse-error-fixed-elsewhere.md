@@ -1,14 +1,14 @@
 ---
 id: F36
 title: A held parse error is reported although a later edit fixed its cause on another line
-status: open
+status: done
 priority: low
 area: bug - universal-lint/src/hooks/lint-file.mts (settleFindings, gateFinding, PARSE_ERROR_RE)
 ---
 
 ## Status
 
-Open. Documented since 0.16.0 as residual (9) of `.claude/rules/hook-design.md` "Settle window (F34)" ("Open (found by the final code review, not fixed)") with a candidate fix but no task; reproduced by [EVALUATION-2026-11-14](../EVALUATION-2026-11-14.md) "Bug hunt".
+Done, shipped in 0.16.1. Earlier state: open. Documented since 0.16.0 as residual (9) of `.claude/rules/hook-design.md` "Settle window (F34)" ("Open (found by the final code review, not fixed)") with a candidate fix but no task; reproduced by [EVALUATION-2026-11-14](../EVALUATION-2026-11-14.md) "Bug hunt".
 
 ## Problem
 
@@ -34,6 +34,10 @@ The candidate from hook-design.md: when at least one later journal record exists
 Residuals unchanged: a later lint that dies, times out or finds no tool loses the earlier parse error (F34 residual (2), accepted by the request). Not in scope: the second half of residual (9), a late FileChanged echo journaling a whole-file edit, which loses nothing (the FileChanged lint re-reports).
 
 ## Verification
+
+Result: `gateFinding`'s `keepParseErrors` is `boolean | "drop"`; `settleFindings` passes `"drop"`. Tests: `settle.test.mts` ("keepParseErrors='drop'") and `settle-process.test.mts` (fixed elsewhere: exit 0; cause left: the later lint reports it, the held one is dropped; non-parse finding on another line kept). The process test and the unit test failed before the fix.
+
+Plan was:
 
 - `tests/settle-process.test.mts`: the repro above exits 0 (no wake); a later edit that does not fix the parse error still gets it reported (by the later lint); an edit after a non-parse own-line finding on another line still keeps that finding.
 - Unit tests in `tests/settle.test.mts` for the new mode of `gateFinding`.
