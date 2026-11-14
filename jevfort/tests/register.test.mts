@@ -1725,6 +1725,22 @@ test("The band shows the session effort bold and Jev's choice blue", async ($, o
   await ui.unmount();
 });
 
+test("The band draws a held Haiku effort blue on a later turn", async ($, on) => {
+  const { clock } = setup(on, { messages: [user("what does this project do?")], jev: inOrder({ effort: scored(1.6) }, { effort: scored(2.9) }) });
+  claudeBeneath(on, []);
+  sessionStubs(on);
+  on("turn.complete", () => ({ text: "" }));
+  await $.session.start(START);
+  const ui = await $.ui.mount(BAND);
+  await drain($.turn.step(turnStep("t1", "claude-haiku-5-5", "high")));
+  await $.turn.complete(answered("t1", "It is a todo app."));
+  await drain($.turn.step(turnStep("t2", "claude-haiku-5-5", "high")));
+  await clock.settle();
+  expect(await levelProps(ui, "high")).toEqual({ bold: true });
+  expect(await levelProps(ui, "medium")).toEqual({ color: "blue" });
+  await ui.unmount();
+});
+
 // A subagent's step 0 (estimated, or a held Haiku turn) leaves the main loop's bold and blue levels alone.
 for (const model of ["claude-opus-5-5", "claude-haiku-5-5"]) {
   test(`A subagent's step 0 leaves the main loop's band (${model})`, async ($, on) => {
