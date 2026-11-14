@@ -1674,6 +1674,7 @@ test("The band shows the session effort bold and Jev's choice blue", async ($, o
   const { clock } = setup(on, { messages: [user("what does this project do?")], jev: byId({ effort: easy }) });
   claudeBeneath(on, []);
   sessionStubs(on);
+  on("session.end", async () => ({}));
   await $.session.start(START);
   const ui = await $.ui.mount(BAND);
   // Before the first turn every level is dim and only the button is live.
@@ -1687,6 +1688,11 @@ test("The band shows the session effort bold and Jev's choice blue", async ($, o
   expect(await levelProps(ui, "high")).toEqual({ bold: true });
   expect(await levelProps(ui, "low")).toEqual({ color: "blue" });
   for (const level of ["medium", "xhigh"]) expect(await levelProps(ui, level)).toEqual({ dimColor: true });
+
+  // /clear (session.end) drops the previous chat's efforts from the band.
+  await $.session.end({ reason: "clear", sessionId: SID, resume: { id: SID } });
+  await clock.settle();
+  for (const level of ["low", "medium", "high", "xhigh"]) expect(await levelProps(ui, level)).toEqual({ dimColor: true });
   await ui.unmount();
 });
 

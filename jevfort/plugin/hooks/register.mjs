@@ -175,7 +175,10 @@ function resetCache($) {
 	lastResponseAt = undefined;
 	coldCompacted = false;
 	compactQueued = false;
-	showMinutes($, null);
+	shownMinutes = null;
+	try {
+		$.ui.invalidate("ui.render");
+	} catch {}
 }
 async function cacheTick($, autoCompactPercent) {
 	if (cacheExpires <= 0 && shownMinutes === null) return;

@@ -382,7 +382,7 @@ function showMinutes($: Engine, minutes: number | null): void {
 
 /**
  * Starts the countdown over: a conversation that just began (or a new session) has no warm cache and nothing of the
- * old one stays on screen.
+ * old one stays on screen. Always redraws the band: its callers have just forgotten the old conversation's efforts too.
  *
  * @param $ - Engine interface.
  */
@@ -392,7 +392,10 @@ function resetCache($: Engine): void {
   lastResponseAt = undefined;
   coldCompacted = false;
   compactQueued = false;
-  showMinutes($, null);
+  shownMinutes = null;
+  try {
+    $.ui.invalidate("ui.render");
+  } catch { /* no mounted render site */ }
 }
 
 /**
