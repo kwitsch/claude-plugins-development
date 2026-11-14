@@ -2378,10 +2378,9 @@ function journalTail(rec: EditRecord | null): string | null {
  * @remarks
  * Coordinates: the finding's lines are those of the file as the linter read it, whose digest is `d0`. The reference
  * is the last journal record with `digest === d0`; only the records after it are later edits. A file that changed
- * during the lint (`d0 !== d1`), no matching record, no later record, two later records with one digest (a hook read
- * the file after a later edit landed, so the file order of the records may not be the edit order), a later record with
- * hunks whose `before` is not the digest of the record before it (an unjournaled change in between: its hunks are in
- * other coordinates), a missing or
+ * during the lint (`d0 !== d1`), no matching record, no later record, a later record with hunks whose `before` is not
+ * the digest of the record before it (an unjournaled change in between, or records journaled out of edit order: its
+ * hunks are in other coordinates), a missing or
  * unreadable journal or record all mean "cannot tell":the findings are returned as they are (fail open, reported). Nothing is held when there is
  * nothing to report, no own record, or nothing the filter could drop (foreign or unlocated findings only).
  *
@@ -2415,8 +2414,6 @@ export async function settleFindings(findings: Finding[], resolved: string, rec:
       if (r.digest === d0) at = i;
     });
     if (at === -1 || at === recs.length - 1) return findings;
-    // A hook journaled after a later edit landed (two later records hold one digest): file order may not be edit order.
-    if (new Set(recs.slice(at + 1).map((r) => r.digest)).size < recs.length - at - 1) return findings;
     // Hunks are in the coordinates of the content they were cut from: a change nobody journaled breaks the chain.
     for (let i = at + 1; i < recs.length; i++) if (recs[i].hunks !== null && recs[i].before !== recs[i - 1].digest) return findings;
     later = recs.slice(at + 1).map((r) => r.hunks);

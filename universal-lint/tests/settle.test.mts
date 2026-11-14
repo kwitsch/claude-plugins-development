@@ -314,6 +314,15 @@ test("settleFindings: a later whole-file edit drops the own-file diagnostics, fo
   assert.match(out[0].text, /plain summary/);
 });
 
+test("settleFindings: two later whole-file writes with one digest still drop the finding (order does not matter)", async () => {
+  const w = world();
+  const { rec, d0 } = await lay(w, [
+    { content: "rewritten\n", hunks: null },
+    { content: "rewritten\n", hunks: null },
+  ]);
+  assert.deepEqual(await settleFindings([found(w.proj, [3])], w.file, rec, d0, d0), []);
+});
+
 test("settleFindings: a partial later edit leaves foreign diagnostics alone too", async () => {
   const w = world();
   const extra = ["/other/b.ts:1:1 error elsewhere-marker"];

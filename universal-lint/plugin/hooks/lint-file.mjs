@@ -1285,7 +1285,6 @@ export async function settleFindings(findings, resolved, rec, d0, d1) {
 			if (r.digest === d0) at = i;
 		});
 		if (at === -1 || at === recs.length - 1) return findings;
-		if (new Set(recs.slice(at + 1).map((r) => r.digest)).size < recs.length - at - 1) return findings;
 		for (let i = at + 1; i < recs.length; i++) if (recs[i].hunks !== null && recs[i].before !== recs[i - 1].digest) return findings;
 		later = recs.slice(at + 1).map((r) => r.hunks);
 	} catch {
