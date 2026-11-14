@@ -240,7 +240,7 @@ const POSITIONAL: Record<string, string[] | undefined> = {
   "audio.speak": ["text", "..."],
   "ui.toast": ["text", "..."],
   "ui.status": ["text"],
-  "ui.log": ["text"],
+  "ui.log": ["text", "..."],
   "ui.notice": ["tool_use_id", "text"],
   "ui.invalidate": ["event"],
   "fs.read": ["path"],

@@ -1048,11 +1048,14 @@ test("Effort routing does not ask Jev the difficulty question", async ($, on) =>
 // The debug log (`$.ui.log`) names the effort chosen for a turn: the only line jevfort logs.
 test("The chosen effort is written to the debug log, with its source and score", async ($, on) => {
   const logged: string[] = [];
-  on("ui.log", (_$, e) => (logged.push(String(e.text)), { value: undefined }));
+  const to: unknown[] = [];
+  on("ui.log", (_$, e) => (logged.push(String(e.text)), to.push(e.to), { value: undefined }));
   setup(on, { messages: [user("migrate the whole app to TypeScript")], jev: byId({ effort: scored(2.9), mechanical: mech(0.1) }) });
   claudeBeneath(on, []);
   await drain($.turn.step({ ...step, effort: "medium" }));
   expect(logged).toEqual(["effort claude-opus-5-5: session medium → xhigh · jev (score 2.90)"]);
+  // `to` defaults to "transcript", a visible system row on every estimated turn.
+  expect(to).toEqual(["debug"]);
 });
 
 // $.ui.log returns undefined in the real engine (and the kit): a `.catch` on it threw and skipped the whole step hook.
