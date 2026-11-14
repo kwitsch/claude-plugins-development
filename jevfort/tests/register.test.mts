@@ -732,6 +732,17 @@ test("The done check skips subagent turns", async ($, on) => {
   expect(submitted).toHaveLength(0);
 });
 
+// Esc, an API error or a refusal is no answer to judge: the done check must not send Claude back.
+for (const reason of ["aborted", "error", "refusal"]) {
+  test(`The done check skips turns ending with reason ${reason}`, async ($, on) => {
+    const { sent } = setup(on, { messages: [user("rename foo to bar in all files")], jev: unfinished });
+    const submitted = followUps(on);
+    await $.turn.complete({ ...answered("t1", "I renamed it in one file."), reason });
+    for (let i = 0; i < 20; i++) await Promise.resolve();
+    expect({ done: ids(sent).filter((x) => x === "done").length, submitted: submitted.length }).toEqual({ done: 0, submitted: 0 });
+  });
+}
+
 // Jev's own calls skip auto mode's classifier: the mod approves them itself, but a settings deny rule beneath still wins.
 for (const [beneath, expected] of [["ask", "allow"], ["deny", "deny"]] as const) {
   test(`A call Jev made itself is approved over "${beneath}" → ${expected}`, { options: { takeOnlyForBypass: false } }, async ($, on) => {
