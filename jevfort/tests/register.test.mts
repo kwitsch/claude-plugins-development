@@ -1076,6 +1076,21 @@ test("The debug log says when Jev gave no effort, and says nothing with routing 
   expect(logged).toEqual(["effort claude-opus-5-5: session high → unchanged · jev unavailable (batch: HTTP 503)"]);
 });
 
+test("The debug log names a held Haiku effort and a subagent's step", async ($, on) => {
+  const logged: string[] = [];
+  on("ui.log", (_$, e) => (logged.push(String(e.text)), { value: undefined }));
+  setup(on, { messages: [user("what does this project do?")], jev: inOrder({ effort: scored(1.6) }, { effort: scored(2.9) }) });
+  claudeBeneath(on, []);
+  await drain($.turn.step({ turnId: "t1", index: 0, model: "claude-haiku-5-5", effort: "high", messageCount: 1 }));
+  await drain($.turn.step({ turnId: "t2", index: 0, model: "claude-haiku-5-5", effort: "high", messageCount: 1 }));
+  await drain($.turn.step({ ...step, agentId: "a1" }));
+  expect(logged).toEqual([
+    "effort claude-haiku-5-5: session high → medium · jev (score 1.60)",
+    "effort claude-haiku-5-5: session high → medium · held",
+    "effort (agent a1) claude-opus-5-5: session high → xhigh · jev (score 2.90)",
+  ]);
+});
+
 test("routing: false writes no effort line to the debug log", { options: { routing: false } }, async ($, on) => {
   const logged: string[] = [];
   on("ui.log", (_$, e) => (logged.push(String(e.text)), { value: undefined }));
