@@ -240,3 +240,13 @@ test.each(["a.js", "..lib/a.js"])("lint-files.mjs finds a project-local linter f
   assert.match(r.stdout, /eslint found issues/, r.stdout);
   assert.equal(e.lines().filter((l) => l.startsWith("eslint ")).length, 1);
 });
+
+test("lint-files.mjs keeps a leading space in a listed name (git prints ' lead.sh' as is)", () => {
+  const e = makeEnv();
+  e.recStub("shellcheck", 1);
+  e.file(" lead.sh", "echo $1\n");
+  const r = driver(e, [" lead.sh"], " lead.sh:1:6: note: x [SC2086]");
+  assert.equal(r.status, 0);
+  assert.match(r.stdout, /SC2086/, r.stdout);
+  assert.equal(e.lines().filter((l) => l.startsWith("shellcheck ")).length, 1);
+});

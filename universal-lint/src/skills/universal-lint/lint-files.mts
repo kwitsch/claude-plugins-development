@@ -39,11 +39,11 @@ try {
   // stale or unreadable PWD: keep the real cwd
 }
 
-/** The listed paths, one per non-blank line. */
+/** The listed paths, one per non-blank line; only the line terminator is cut (a name may start or end with a space). */
 const paths = readFileSync(listFile, "utf8")
   .split("\n")
-  .map((line) => line.trim())
-  .filter((line) => line.length > 0);
+  .map((line) => line.replace(/\r$/, ""))
+  .filter((line) => line.trim().length > 0);
 
 /** The real cwd: `cwd` differs from it only for a symlinked `$PWD` root. */
 const real = process.cwd();
