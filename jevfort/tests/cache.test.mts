@@ -253,6 +253,24 @@ for (const [percent, option, runs] of [[70, 60, 1], [50, 60, 0], [90, 0, 0], [Nu
   });
 }
 
+test("a repeated session.start (reload) replaces the cache tick instead of adding a second one", async ($, on) => {
+  let reads = 0;
+  // Registered before chatSetup, so it runs above its answer: counts every fill read.
+  on("session.usage", (_$, e, next) => {
+    reads++;
+    return next(e);
+  });
+  // 50% stays below autoCompactPercent 60: every cold tick reads the fill, none compacts.
+  const { clock } = chatSetup(on, 50);
+  await $.session.start(START);
+  await $.session.start(START);
+  await respond($);
+  await clock.advance(CACHE_TTL["1h"] + 1_000);
+  const before = reads;
+  await clock.advance(15_000);
+  expect(reads - before).toBe(1);
+});
+
 test("a response that lands while the cold tick reads the clock keeps the warm chat from being compacted", async ($, on) => {
   let armed = false;
   // Registered before mock.clock, so it runs above it: one-shot, the tick's own clock read runs a whole turn.
