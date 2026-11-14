@@ -1377,10 +1377,9 @@ export const register = (on: On, options: Options): void => {
         return { text: buildReport(await readLog($), takeThreshold) };
       }
       if (arg === "candidates") {
-        // Exactly what Jev is offered at step 0 for the last prompt.
+        // Exactly what Jev is offered at step 0 for the last prompt: step 0 sees no steps or calls yet.
         const ctx = await readTurn($);
-        const calls = ctx ? toolCalls(ctx.steps) : [];
-        const list = await buildCandidates($, ctx?.request ?? "", ctx?.steps ?? [], calls, 0);
+        const list = await buildCandidates($, ctx?.request ?? "", [], [], 0);
         const kind = (c: Candidate) => (c.tool === "Skill" ? "Skills" : c.tool === "ToolSearch" ? "Tools to load" : c.tool === "Read" ? "File reads" : "Commands");
         const groups = new Map<string, Candidate[]>();
         for (const c of list) groups.set(kind(c), [...(groups.get(kind(c)) ?? []), c]);

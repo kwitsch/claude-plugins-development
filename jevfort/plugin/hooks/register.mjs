@@ -926,8 +926,7 @@ export const register = (on, options) => {
 			}
 			if (arg === "candidates") {
 				const ctx = await readTurn($);
-				const calls = ctx ? toolCalls(ctx.steps) : [];
-				const list = await buildCandidates($, ctx?.request ?? "", ctx?.steps ?? [], calls, 0);
+				const list = await buildCandidates($, ctx?.request ?? "", [], [], 0);
 				const kind = (c) => c.tool === "Skill" ? "Skills" : c.tool === "ToolSearch" ? "Tools to load" : c.tool === "Read" ? "File reads" : "Commands";
 				const groups = new Map();
 				for (const c of list) groups.set(kind(c), [...groups.get(kind(c)) ?? [], c]);

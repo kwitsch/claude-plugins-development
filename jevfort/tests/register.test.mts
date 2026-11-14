@@ -1321,6 +1321,23 @@ test("A package.json saved with a UTF-8 BOM still offers its scripts", async ($,
   expect(await runJev($, "candidates")).toContain("npm test");
 });
 
+test("/jev candidates lists the step-0 options, not the ones the rest of the turn found", async ($, on) => {
+  const id = "toolu_read";
+  setup(on, {
+    messages: [
+      user("explain src/app.ts"),
+      { role: "assistant", text: "", toolUses: [{ tool_use_id: id, tool: "Read", input: { file_path: `${CWD}/src/app.ts` }, text: "import './util'; see src/util.ts" }] },
+      { role: "user", text: "", toolUses: [], toolResults: [{ tool_use_id: id, text: "see src/util.ts", isError: false }] },
+      { role: "assistant", text: "It wires src/util.ts in.", toolUses: [] },
+    ],
+    files: [`${CWD}/src/app.ts`, `${CWD}/src/util.ts`],
+    jev: () => undefined,
+  });
+  const out = await runJev($, "candidates");
+  expect(out).toContain("`read src/app.ts`");
+  expect(out).not.toContain("src/util.ts");
+});
+
 test("A failing store does not fail estimate_effort or a turn step", async ($, on) => {
   on("store.set", () => ({ deny: "store over 4 MiB of JSON text" }));
   const seen: unknown[] = [];
