@@ -19,7 +19,7 @@ subagents load it via ToolSearch), no skills, agents, command hooks or MCP serve
 - jev-api is a declared plugin dependency (`claudePlugin.dependencies: ["jev-api"]` in `package.json`, copied into
   `plugin.json`; bare name, no version range): Claude Code keeps jevfort disabled while jev-api is missing or disabled.
   At runtime `jevMissing($)` looks the batch tool up in `$.tool.list()` once per turn: the listing (`jevTools`) is
-  shared by the turn's hooks (with the whole listing `toolListing`, which step 0 offers its deferred tools from, the offerable skills `skillList` of step 0, and `haikuPath`; `dropTurnReads`) and dropped at every main-loop `turn.complete` (subagent completions keep it; Claude Code 2.1.322 has no tool-list-changed
+  shared by the turn's hooks (with the whole listing `toolListing`, which step 0 offers its deferred tools from, the offerable skills `skillList` of step 0, and `haikuPath`; `dropTurnReads`) and dropped at every main-loop `turn.complete` and after a main-loop `session.compact` between turns (subagent completions keep it; Claude Code 2.1.322 has no tool-list-changed
   event), so jev-api appearing or going away takes effect from the next turn; `session.start` lists again after
   `next(e)` as the session's baseline; a failed or malformed listing counts as all missing. `jevApply` applies a
   changed listing once (`jevState` holds the last applied one and stays unset until the baseline, so a listing beneath

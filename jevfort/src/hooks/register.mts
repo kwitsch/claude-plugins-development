@@ -971,6 +971,8 @@ export const register = (on: On, options: Options): void => {
   on("session.compact", async function onCompact($: Engine, e: CompactEvent, next: Next<CompactEvent, unknown>): Promise<unknown> {
     if (e.agentId) return next(e);
     const ranked = jevRanking ? await withJevRanking($, e) : e;
+    // A compaction between turns read the env and tool listing: the next turn reads them afresh (a mid-turn one keeps the turn's).
+    if (!turnRunning) dropTurnReads();
     // The rest of the chain (Claude Code's own compaction). Whoever writes the summary, the next request rewrites the
     // whole cache, so the countdown restarts at the next response: but only once a compaction stands, not for a
     // precompute (it installs nothing) nor one that a hook beneath vetoes.

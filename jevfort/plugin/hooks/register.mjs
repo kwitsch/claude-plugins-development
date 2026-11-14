@@ -572,6 +572,7 @@ export const register = (on, options) => {
 	on("session.compact", async function onCompact($, e, next) {
 		if (e.agentId) return next(e);
 		const ranked = jevRanking ? await withJevRanking($, e) : e;
+		if (!turnRunning) dropTurnReads();
 		const passOn = async () => {
 			const r = await next(ranked);
 			if (e.trigger !== "precompute" && r?.skip === undefined) {
