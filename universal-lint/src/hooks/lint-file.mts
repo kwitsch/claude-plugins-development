@@ -2892,7 +2892,7 @@ export async function fileChangedHandler(args: PostToolUseHookInput): Promise<Ho
     // settle window, also when the git gate then skips the lint (a restore to committed content leaves no stale finding).
     const rec = recordEdit(s.fp, s.real, null);
     try {
-      const status = execFileSync("git", ["--no-optional-locks", "status", "--porcelain", "--untracked-files=normal", "--ignored=matching", "--", s.fp], {
+      const status = execFileSync("git", ["--no-optional-locks", "--literal-pathspecs", "status", "--porcelain", "--untracked-files=normal", "--ignored=matching", "--", s.fp], {
         cwd: path.dirname(s.fp),
         encoding: "utf8",
         timeout: GIT_TIMEOUT_MS,

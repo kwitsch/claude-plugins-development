@@ -226,6 +226,18 @@ test("FileChanged: skips unchanged, ignored, unlink, outside-cwd, escaping/dangl
   assert.deepEqual(e.lines(), []);
 });
 
+test("FileChanged: a glob-like name unchanged against HEAD is skipped while a file it would match is modified", () => {
+  const e = makeEnv();
+  e.recStub("shellcheck", 1);
+  const glob = e.file("[ab].sh", "echo g\n");
+  const a = e.file("a.sh", "echo a\n");
+  gitInit(e);
+  writeFileSync(a, "echo $1\n");
+  const r = changed(e, glob);
+  assert.equal(r.status, 0);
+  assert.deepEqual(e.lines(), []);
+});
+
 test("FileChanged: skipped while the content matches the Write/Edit digest, linted after a further change", () => {
   const e = makeEnv();
   e.recStub("shellcheck", 1);

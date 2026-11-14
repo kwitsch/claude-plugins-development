@@ -1580,6 +1580,7 @@ export async function fileChangedHandler(args) {
 		try {
 			const status = execFileSync("git", [
 				"--no-optional-locks",
+				"--literal-pathspecs",
 				"status",
 				"--porcelain",
 				"--untracked-files=normal",
