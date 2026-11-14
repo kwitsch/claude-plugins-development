@@ -26,8 +26,12 @@ plugin's own tested hook logic through a colocated driver — no new linting log
    - "files changed in PR <N>" → run `gh auth status` first (it exits non-zero for both a
      missing PR and a dead token, so auth is checked before the diff), then
      `gh pr diff <N> --name-only`;
-   - "files changed on this branch / in the working tree" → `git diff --relative --name-only <base>...HEAD`
-     or `git status --porcelain`;
+   - "files changed on this branch / in the working tree" →
+     `git -c core.quotePath=false diff --relative --name-only <base>...HEAD`
+     or `git -c core.quotePath=false status --porcelain` (without it git prints non-ASCII names as
+     quoted octal escapes, which the driver drops as missing files); a path git still wraps in double
+     quotes (it contains a quote, a backslash or a control character) must be unquoted before it
+     goes into the list;
    - `gh pr diff` and `git status --porcelain` print repo-root-relative paths, but the driver
      resolves each path against the cwd: put `$(git rev-parse --show-toplevel)/` in front of each
      of their paths (absolute) before writing the list;

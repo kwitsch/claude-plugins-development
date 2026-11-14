@@ -41,7 +41,8 @@ test("SKILL.md points at the reference doc and invokes the driver via the litera
 });
 
 test("SKILL.md makes repo-root-relative git/gh paths resolvable from a subdirectory cwd", () => {
-  assert.ok(skillMd.includes("git diff --relative --name-only"));
+  assert.ok(skillMd.includes("git -c core.quotePath=false diff --relative --name-only"));
+  assert.ok(skillMd.includes("git -c core.quotePath=false status --porcelain"));
   assert.ok(skillMd.includes("$(git rev-parse --show-toplevel)/"));
   assert.doesNotMatch(skillMd, /git diff --name-only/);
 });
