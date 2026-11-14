@@ -868,6 +868,21 @@ test("/jev export writes nothing when the target exists", async ($, on) => {
   expect(written).toHaveLength(0);
 });
 
+test("With takeOnlyForBypass a confident skill pick is not taken by Jev (the skill would never run) and gets the hint", async ($, on) => {
+  const seen: unknown[] = [];
+  setup(on, {
+    messages: [user("write the release notes for this version")],
+    jev: byId({
+      next_action: { type: "choice", choice: "skill write-release-notes", probabilities: { "skill write-release-notes": 0.93, claude: 0.07 }, confidence: 0.9 },
+      single_action: mech(0.9),
+    }),
+  });
+  on("command.list", () => ({ value: [{ name: "write-release-notes", description: "Write release notes from the git log", source: "user" }] }));
+  claudeBeneath(on, seen);
+  await drain($.turn.step(step));
+  expect(seen).toHaveLength(1);
+});
+
 test("estimate_effort rejects invalid input without asking Jev", async ($, on) => {
   const { sent } = setup(on, { messages: [], jev: byId({ effort: scored(1.6) }) });
   expect(await estimateCall($, { model: "gpt" })).toEqual({ deny: "estimate_effort: model must be one of haiku, sonnet, opus, fable" });

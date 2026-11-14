@@ -587,7 +587,7 @@ export const register = (on, options) => {
 			name: skillAnswer.choice,
 			p: skillAnswer.probabilities[skillAnswer.choice] ?? 0
 		} : undefined;
-		const added = hints(kind?.choice, needsPlan, skill, takeThreshold);
+		const added = hints(kind?.choice, needsPlan, skill, takeSteps && !takeOnlyForBypass ? takeThreshold : Number.POSITIVE_INFINITY);
 		await record($, {
 			kind: "classify",
 			applied: added.length > 0,
@@ -1058,7 +1058,8 @@ export const register = (on, options) => {
 		const answer = choice(r.answers, "next_action");
 		const best = bestAction(answer);
 		const singleAction = noul(r.answers, "single_action") ?? 0;
-		const pick = takeOnlyForBypass && singleAction < SINGLE_ACTION ? undefined : pickCandidate(answer, candidates, takeThreshold);
+		const picked = pickCandidate(answer, candidates, takeThreshold);
+		const pick = takeOnlyForBypass && (singleAction < SINGLE_ACTION || picked?.tool !== "Read" && picked?.tool !== "Bash") ? undefined : picked;
 		if (answer) {
 			const p = answer.probabilities[answer.choice] ?? 0;
 			await record($, {
@@ -1083,7 +1084,7 @@ export const register = (on, options) => {
 			turn.taken += 1;
 			const id = `toolu_jev_${crypto.randomUUID().replace(/-/g, "")}`;
 			ownCalls.add(id);
-			if (singleAction >= SINGLE_ACTION) {
+			if (singleAction >= SINGLE_ACTION && (pick.tool === "Read" || pick.tool === "Bash")) {
 				turn.bypassId = id;
 				turn.bypassAction = pick.key;
 			}

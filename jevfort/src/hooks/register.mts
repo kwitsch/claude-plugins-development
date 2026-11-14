@@ -929,7 +929,8 @@ export const register = (on: On, options: Options): void => {
     const needsPlan = noul(r.answers, "needs_plan");
     const skillAnswer = choice(r.answers, "skill");
     const skill = skillAnswer ? { name: skillAnswer.choice, p: skillAnswer.probabilities[skillAnswer.choice] ?? 0 } : undefined;
-    const added = hints(kind?.choice, needsPlan, skill, takeThreshold);
+    // A confident skill is left to step 0 only where step 0 can take it: takeSteps on and not takeOnlyForBypass.
+    const added = hints(kind?.choice, needsPlan, skill, takeSteps && !takeOnlyForBypass ? takeThreshold : Number.POSITIVE_INFINITY);
 
     await record($, {
       kind: "classify",
@@ -1370,7 +1371,9 @@ export const register = (on: On, options: Options): void => {
     const answer = choice(r.answers, "next_action");
     const best = bestAction(answer);
     const singleAction = noul(r.answers, "single_action") ?? 0;
-    const pick = takeOnlyForBypass && singleAction < SINGLE_ACTION ? undefined : pickCandidate(answer, candidates, takeThreshold);
+    const picked = pickCandidate(answer, candidates, takeThreshold);
+    // takeOnlyForBypass: only a read-only Read or Bash that is the whole prompt; a skill or tool load run by Jev would end the turn on a summary of "Launching skill".
+    const pick = takeOnlyForBypass && (singleAction < SINGLE_ACTION || (picked?.tool !== "Read" && picked?.tool !== "Bash")) ? undefined : picked;
     if (answer) {
       const p = answer.probabilities[answer.choice] ?? 0;
       await record($, {
@@ -1396,7 +1399,7 @@ export const register = (on: On, options: Options): void => {
       turn.taken += 1;
       const id = `toolu_jev_${crypto.randomUUID().replace(/-/g, "")}`;
       ownCalls.add(id);
-      if (singleAction >= SINGLE_ACTION) {
+      if (singleAction >= SINGLE_ACTION && (pick.tool === "Read" || pick.tool === "Bash")) {
         turn.bypassId = id;
         turn.bypassAction = pick.key;
       }
