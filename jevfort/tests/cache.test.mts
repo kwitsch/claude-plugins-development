@@ -154,6 +154,18 @@ test("a summary that used all of Haiku's tokens was cut off: Claude Code compact
   expect(r.messages).toBeUndefined();
 });
 
+test("a Haiku summary of 200 characters or fewer falls through to Claude Code", async ($, on) => {
+  haikuSetup(on, "S".repeat(150));
+  let beneath = 0;
+  on("session.compact", () => {
+    beneath++;
+    return { skip: "test" };
+  });
+  const r = (await $.session.compact({ trigger: "manual", messages: MESSAGES })) as { messages?: unknown };
+  expect(beneath).toBe(1);
+  expect(r.messages).toBeUndefined();
+});
+
 test("a precompute is skipped while Haiku compacts", async ($, on) => {
   const asked = haikuSetup(on, "S".repeat(300));
   const r = (await $.session.compact({ trigger: "precompute", messages: MESSAGES })) as { skip?: string };
