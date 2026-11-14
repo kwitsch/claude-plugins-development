@@ -183,9 +183,11 @@ function resetCache($) {
 async function cacheTick($, autoCompactPercent) {
 	if (cacheExpires <= 0 && shownMinutes === null) return;
 	const expires = cacheExpires;
-	const minutes = minutesLeft(expires, await $.clock.now());
+	const now = await $.clock.now();
+	if (cacheExpires !== expires) return;
+	const minutes = minutesLeft(expires, now);
 	showMinutes($, minutes);
-	if (turnRunning || autoCompactPercent <= 0 || minutes !== 0 || coldCompacted || cacheExpires !== expires) return;
+	if (turnRunning || autoCompactPercent <= 0 || minutes !== 0 || coldCompacted) return;
 	const percent = (await $.session.usage()).context.percent ?? 0;
 	if (!Number.isFinite(percent) || percent < autoCompactPercent || coldCompacted || turnRunning || cacheExpires !== expires) return;
 	coldCompacted = true;

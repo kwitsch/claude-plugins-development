@@ -291,6 +291,40 @@ test("a response that lands while the cold tick reads the clock keeps the warm c
   expect(state.compacts).toBe(0);
 });
 
+// The tick's clock read yields: a response or a /clear landing then has drawn the fresh countdown, the tick must not redraw the old one.
+for (
+  const [what, before, after, warmFor, during] of [
+    ["a response on a cold cache", " cache cold", " cache 59m", CACHE_TTL["1h"] + 60_000, respond],
+    ["a /clear on a warm cache", " cache 49m", undefined, 10 * 60_000, async ($) => {
+      await $.session.end({ reason: "clear", sessionId: "s1", resume: { id: "s1" } });
+    }],
+  ] as const
+) {
+  test(`${what} during the tick's clock read keeps the fresh countdown on the band`, async ($, on) => {
+    let armed = false;
+    // Registered before mock.clock, so it runs above it: one-shot, on the tick's own clock read.
+    on("clock.now", async (_$, e, next) => {
+      if (armed) {
+        armed = false;
+        await during($);
+      }
+      return next(e);
+    });
+    const { clock } = chatSetup(on, 10);
+    on("ui.render", () => BENEATH);
+    await $.session.start(START);
+    const ui = await $.ui.mount(BAND);
+    await respond($);
+    await clock.advance(warmFor);
+    expect(await label(ui)).toBe(before);
+    armed = true;
+    await clock.advance(15_000);
+    expect(armed).toBe(false);
+    expect(await label(ui)).toBe(after);
+    await ui.unmount();
+  });
+}
+
 // The cold tick's fill read yields: whatever happens while it is pending must be judged again after it.
 for (
   const [what, reads, runs, during] of [
