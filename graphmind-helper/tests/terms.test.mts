@@ -44,6 +44,16 @@ test("fit keeps whole blocks, cuts the one that overflows, and reports the lines
   assert.equal(big.whole.size, 0);
 });
 
+test("fit counts the lines of a cut block shown before the cut as whole, not the cut one", () => {
+  const lines = Array.from({ length: 20 }, (_, i) => `★ aaaaaaa${i} [decision] ${"x".repeat(40)}`);
+  const out = fit("", [{ title: "Priority", lines }], 500);
+  assert.match(out.text, /cut to fit the hook output limit/);
+  const shown = lines.filter((l) => out.text.includes(`${l}\n`));
+  assert.ok(shown.length > 0 && shown.length < lines.length);
+  assert.deepEqual([...out.whole], shown);
+  assert.ok(!out.whole.has(lines[shown.length]));
+});
+
 test("fit puts a title-less block in as plain text", () => {
   assert.equal(fit("H\n", [{ title: "", lines: ["footer line"] }]).text, "H\nfooter line\n\n");
 });

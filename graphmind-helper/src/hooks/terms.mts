@@ -137,7 +137,8 @@ export type Fitted = {
 
 /**
  * Puts blocks into a message of at most `max` characters: a block that fits goes in whole, one that does not is cut
- * (when more than 300 characters are left) and marked, later blocks that do not fit are dropped.
+ * (when more than 300 characters are left) and marked, later blocks that do not fit are dropped. The lines of a cut
+ * block that were shown before the cut count as whole.
  *
  * @param head - Text the message starts with.
  * @param blocks - The blocks in priority order; empty ones are skipped.
@@ -156,7 +157,11 @@ export function fit(head: string, blocks: Block[], max: number = MAX_CHARS): Fit
       text += block;
       for (const l of b.lines) whole.add(l);
     } else if (room > 300) {
-      text += `${block.slice(0, room - 60)}\n[graphmind: cut to fit the hook output limit]\n`;
+      const kept = block.slice(0, room - 60);
+      // only lines ended by a newline inside the cut made it in whole; the last, partial one did not
+      const shown = new Set(kept.slice(0, kept.lastIndexOf("\n")).split("\n"));
+      for (const l of b.lines) if (shown.has(l)) whole.add(l);
+      text += `${kept}\n[graphmind: cut to fit the hook output limit]\n`;
     }
   }
   return { text, whole };
