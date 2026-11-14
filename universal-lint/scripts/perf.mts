@@ -91,7 +91,7 @@ function makeFixtures(dir: string): Case[] {
   git(dir, "commit", "-q", "-m", "fixture");
   const repo = execFileSync("git", ["rev-parse", "--show-toplevel"], { cwd: ROOT, encoding: "utf8" }).trim();
   /** PostToolUse payload for fixture file `f`. */
-  const post = (tool: string, f: string, extra: Record<string, unknown> = {}): object => ({ hook_event_name: "PostToolUse", tool_name: tool, tool_input: { file_path: join(dir, f) }, tool_response: { success: true, ...extra }, cwd: dir });
+  const post = (tool: string, f: string, extra: Record<string, unknown> = {}): object => ({ hook_event_name: "PostToolUse", tool_name: tool, tool_input: { file_path: join(dir, f), content: tool === "Write" ? files[f] : undefined }, tool_response: { success: true, ...extra }, cwd: dir });
   /** FileChanged payload for fixture file `f`. */
   const changed = (event: string, f: string): object => ({ hook_event_name: "FileChanged", event, file_path: join(dir, f), cwd: dir });
   /** SessionStart payload for `cwd`. */

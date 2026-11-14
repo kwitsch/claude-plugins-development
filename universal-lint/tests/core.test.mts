@@ -170,7 +170,7 @@ test("json extension -> linter never invoked (deliberately uncovered)", () => {
   assert.deepEqual(e.lines(), []);
 });
 
-test("PostToolUse records the on-disk content digest under CLAUDE_PLUGIN_DATA/written", () => {
+test("PostToolUse records the written content digest under CLAUDE_PLUGIN_DATA/written", () => {
   const e = makeEnv();
   const f = e.file("a.sh", "echo hi\n");
   assert.equal(e.run(f).status, 0);
@@ -205,9 +205,19 @@ test.each([["Edit", "tool_response", "originalFile"], ["Write", "tool_input", "c
   const f = e.file("a.sh", "echo hi\n");
   const p = JSON.parse(payload(f, e.cwd, { toolName })) as Record<string, Record<string, unknown>>;
   p[holder][key] = PAD;
+  // the Edit turns the padding into the file's content, so the payload carries what was written
+  if (toolName === "Edit") p.tool_response.structuredPatch = [{ oldStart: 1, oldLines: 1, newStart: 1, newLines: 1, lines: [`-${PAD}`, "\\ No newline at end of file", "+echo hi"] }];
   assert.equal(await runLate(e.childEnv(), JSON.stringify(p)), 0);
   assert.ok(e.lines().some((l) => l.startsWith("shellcheck ")));
-  assert.ok(existsSync(path.join(e.data, "written", hashPath(realpathSync(f)))));
+  assert.equal(readFileSync(path.join(e.data, "written", hashPath(realpathSync(f))), "utf8"), createHash("sha256").update(toolName === "Edit" ? "echo hi\n" : PAD).digest("base64"));
+});
+
+test("PostToolUse Edit records the digest of what the Edit wrote, not of a later write already on disk", () => {
+  const e = makeEnv();
+  const f = e.file("a.sh", "echo A\necho b\necho $d\n"); // the Edit wrote line 1, another writer then line 3
+  const patch = [{ oldStart: 1, oldLines: 1, newStart: 1, newLines: 1, lines: ["-echo a", "+echo A"] }];
+  assert.equal(e.run(f, { toolName: "Edit", toolResponse: { originalFile: "echo a\necho b\necho d\n", structuredPatch: patch } }).status, 0);
+  assert.equal(readFileSync(path.join(e.data, "written", hashPath(realpathSync(f))), "utf8"), createHash("sha256").update("echo A\necho b\necho d\n").digest("base64"));
 });
 
 test("PostToolUse with success false records no digest", () => {

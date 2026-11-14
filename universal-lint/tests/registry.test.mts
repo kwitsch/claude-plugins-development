@@ -7,7 +7,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSy
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "vitest";
-import { acquireSlot, buildArgv, classifyCheckstyleOutput, classifyExit, coalesceProjectCheck, configExists, editRanges, FILE_CHANGED_SLOTS, gateFinding, hashPath, hasProjectMarkdownlintConfig, hasProjectYamllintConfig, isExcludedPath, isToolAvailable, lintFileHandler, lintFilesHandler, looksLikeSolutionStyleTsconfig, oxlintConfigTypeChecks, recordWritten, REGISTRY, resolveCargoManifest, resolveCheckstyleConfig, resolveLintTarget, resolveOxlintConfig, resolveTsconfig, scopedTarget, stripTrailingCommas, truncate, tsBuildInfoPathFor, tscOutputHasSourceDiagnostic, WATCH_LIMIT } from "../plugin/hooks/lint-file.mjs";
+import { acquireSlot, buildArgv, classifyCheckstyleOutput, classifyExit, coalesceProjectCheck, configExists, editRanges, FILE_CHANGED_SLOTS, gateFinding, hashPath, hasProjectMarkdownlintConfig, hasProjectYamllintConfig, isExcludedPath, isToolAvailable, lintFileHandler, lintFilesHandler, looksLikeSolutionStyleTsconfig, oxlintConfigTypeChecks, recordWritten, REGISTRY, resolveCargoManifest, resolveCheckstyleConfig, resolveLintTarget, resolveOxlintConfig, resolveTsconfig, scopedTarget, stripTrailingCommas, truncate, tsBuildInfoPathFor, tscOutputHasSourceDiagnostic, WATCH_LIMIT, writtenContent } from "../plugin/hooks/lint-file.mjs";
 
 // The handler tests below call lintFileHandler in this process: report findings at once, no settle window (F34).
 process.env.UNIVERSAL_LINT_SETTLE_MS = "0";
@@ -1198,21 +1198,37 @@ test("resolveLintTarget: null for a file inside the payload scratchpad_dir", () 
   assert.equal(resolveLintTarget(mockResolveArgs(dir, "s/e.sh")), path.join(dir, "s", "e.sh"));
 });
 
-test("recordWritten: stores the SHA-256 base64 of the file bytes at CLAUDE_PLUGIN_DATA/written/<hashPath(real)>", () => {
+test("recordWritten: stores the SHA-256 base64 of the given content at CLAUDE_PLUGIN_DATA/written/<hashPath(real)>, null removes it", () => {
   const dir = mkdtempSync(path.join(tmpdir(), "ul-rw-"));
   const data = path.join(dir, "data");
   const fp = path.join(dir, "a.sh");
-  writeFileSync(fp, "echo hi\n");
+  writeFileSync(fp, "echo other\n");
   const real = realpathSync(fp);
+  const digest = path.join(data, "written", hashPath(real));
   const prev = process.env.CLAUDE_PLUGIN_DATA;
   process.env.CLAUDE_PLUGIN_DATA = data;
   try {
-    recordWritten(fp, real);
+    recordWritten(real, "echo hi\n");
+    assert.equal(readFileSync(digest, "utf8"), createHash("sha256").update("echo hi\n").digest("base64"));
+    recordWritten(real, null);
+    assert.equal(existsSync(digest), false);
   } finally {
     if (prev === undefined) delete process.env.CLAUDE_PLUGIN_DATA;
     else process.env.CLAUDE_PLUGIN_DATA = prev;
   }
-  assert.equal(readFileSync(path.join(data, "written", hashPath(real)), "utf8"), createHash("sha256").update("echo hi\n").digest("base64"));
+});
+
+test("writtenContent: Write content; Edit hunks applied to originalFile (insertion, deletion, `\\ No newline`); null without them", () => {
+  const edit = (originalFile: unknown, structuredPatch: unknown) => writtenContent({ tool_name: "Edit", tool_response: { originalFile, structuredPatch } });
+  assert.equal(writtenContent({ tool_name: "Write", tool_input: { content: "x\n" } }), "x\n");
+  assert.equal(writtenContent({ tool_name: "Write", tool_input: {} }), null);
+  assert.equal(edit("a\nb\nc\nd\n", [{ oldStart: 2, oldLines: 1, lines: ["-b", "+B"] }, { oldStart: 4, oldLines: 0, lines: ["+e"] }]), "a\nB\nc\nd\ne\n");
+  assert.equal(edit("a\nb\nc\n", [{ oldStart: 1, oldLines: 2, lines: [" a", "-b"] }]), "a\nc\n");
+  assert.equal(edit("a\nb", [{ oldStart: 2, oldLines: 1, lines: ["-b", "\\ No newline at end of file", "+c", "\\ No newline at end of file"] }]), "a\nc");
+  assert.equal(edit("a\nb", [{ oldStart: 2, oldLines: 1, lines: ["-b", "\\ No newline at end of file", "+c"] }]), "a\nc\n");
+  assert.equal(edit("", [{ oldStart: 0, oldLines: 0, lines: ["+x"] }]), "x\n");
+  assert.equal(edit("a\n", [{ oldStart: 5, oldLines: 1, lines: ["-z"] }]), null);
+  assert.equal(edit(undefined, []), null);
 });
 
 test("WATCH_LIMIT is 5000", () => {

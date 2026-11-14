@@ -165,7 +165,8 @@ test("FileChanged outside Write/Edit supersedes a held finding", async () => {
 test("the FileChanged echo of a Write/Edit is no later edit: it records nothing and the finding is reported", async () => {
   const s = setup();
   s.setFindings(FINDING_L2);
-  const first = start(s.e, s.findings, payload(s.file, s.e.cwd, { toolName: "Edit", toolResponse: EDIT_L2 }), { UNIVERSAL_LINT_SETTLE_MS: "1500" });
+  writeFileSync(s.file, SH4_FIXED); // what EDIT_L2 writes, so the recorded digest matches the echo
+  const first = start(s.e, s.findings, payload(s.file, s.e.cwd, { toolName: "Edit", toolResponse: { ...EDIT_L2, originalFile: SH4 } }), { UNIVERSAL_LINT_SETTLE_MS: "1500" });
   await intoHold(s.e);
   const before = journal(s.e);
   const echo = await start(s.e, s.findings, JSON.stringify({ hook_event_name: "FileChanged", cwd: s.e.cwd, file_path: s.file, event: "change" }), {});

@@ -80,9 +80,18 @@ export interface LintEnv {
  * @param filePath - Written file.
  * @param cwd - Payload cwd.
  * @param opts - Run options; `toolName` and `toolResponse` shape the payload.
- * @returns The JSON text.
+ * @returns The JSON text; a Write carries the file's current text as `tool_input.content`, as Claude Code's does.
  */
-export const payload = (filePath: string, cwd: string, opts: RunOptions = {}): string => JSON.stringify({ hook_event_name: "PostToolUse", tool_name: opts.toolName ?? "Write", tool_input: { file_path: filePath }, tool_response: { success: true, ...opts.toolResponse }, cwd });
+export const payload = (filePath: string, cwd: string, opts: RunOptions = {}): string => {
+  const tool = opts.toolName ?? "Write";
+  let content: string | undefined;
+  try {
+    if (tool === "Write") content = readFileSync(path.resolve(cwd, filePath), "utf8");
+  } catch {
+    // no such file: the payload carries no content
+  }
+  return JSON.stringify({ hook_event_name: "PostToolUse", tool_name: tool, tool_input: { file_path: filePath, content }, tool_response: { success: true, ...opts.toolResponse }, cwd });
+};
 
 /**
  * Build a HookRun from the exit status and raw stderr.

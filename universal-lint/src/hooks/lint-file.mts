@@ -204,8 +204,8 @@ interface PostToolUseHookInput {
   new_cwd?: unknown;
   /** Name of the tool that fired the hook (`Write` or `Edit`). */
   tool_name?: unknown;
-  /** The tool's input; `file_path` names the written file. Absent for non-tool events. */
-  tool_input?: { file_path?: unknown };
+  /** The tool's input; `file_path` names the written file, `content` is what a Write wrote. Absent for non-tool events. */
+  tool_input?: { file_path?: unknown; content?: unknown };
   /** The tool's result; `success: false` marks a failed Write/Edit, `structuredPatch` holds the Edit tool's diff hunks, `originalFile` the content they apply to. */
   tool_response?: { success?: boolean; structuredPatch?: unknown; originalFile?: unknown };
   [key: string]: unknown;
@@ -2173,19 +2173,58 @@ function fileDigest(fp: string): string {
 }
 
 /**
- * Record the on-disk content digest of a Write/Edit target, atomically (temp file + renameSync), so a FileChanged
- * process can skip the file while its content still matches. One file per real path: concurrent hook processes need
- * no locking. Fails open silently (cost: one duplicate lint, never a lost one).
+ * The content a Write/Edit left at its target as the tool reports it: Write's `tool_input.content`, or an Edit's
+ * `tool_response.structuredPatch` applied to its `originalFile`. Never read from disk: another writer may already have
+ * changed the file when the hook runs.
  *
- * @param fp - Lexical path of the written file (read for the digest).
- * @param real - Real path of the written file (the digest key).
+ * @param args - The PostToolUse hook payload.
+ * @returns The content, or null when the payload does not carry it (or the patch does not fit `originalFile`).
  */
-export function recordWritten(fp: string, real: string): void {
+export function writtenContent(args: PostToolUseHookInput): string | null {
+  if (args?.tool_name === "Write") return typeof args.tool_input?.content === "string" ? args.tool_input.content : null;
+  const original = args?.tool_response?.originalFile;
+  const patch = args?.tool_response?.structuredPatch;
+  if (args?.tool_name !== "Edit" || typeof original !== "string" || !Array.isArray(patch)) return null;
+  const src = original.match(/[^\n]*\n|[^\n]+$/g) ?? []; // lines with their own terminator
+  let out = "";
+  let i = 0;
+  for (const h of patch as Array<{ oldStart?: unknown; lines?: unknown }>) {
+    if (typeof h?.oldStart !== "number" || !Array.isArray(h.lines) || !h.lines.every((l) => typeof l === "string")) return null;
+    const lines = h.lines;
+    const old = lines.filter((l) => l[0] === " " || l[0] === "-").length;
+    const start = old === 0 ? h.oldStart : h.oldStart - 1; // a hunk without old lines names the line before it
+    if (start < i || start + old > src.length) return null;
+    out += src.slice(i, start).join("");
+    i = start;
+    lines.forEach((l, k) => {
+      if (l[0] === " ") out += src[i++];
+      else if (l[0] === "-") i++;
+      // a `\ No newline at end of file` marker after an added line: the file ends without a newline
+      else if (l[0] === "+") out += l.slice(1) + (lines[k + 1]?.startsWith("\\") ? "" : "\n");
+    });
+  }
+  return out + src.slice(i).join("");
+}
+
+/**
+ * Record the digest of the content a Write/Edit produced (`writtenContent`), atomically (temp file + renameSync), so a
+ * FileChanged process can skip the file while its content still matches. Not the disk: a write by another program that
+ * lands before the hook runs must still differ. Without content the old digest is removed. One file per real path:
+ * concurrent hook processes need no locking. Fails open silently (cost: one duplicate lint, never a lost one).
+ *
+ * @param real - Real path of the written file (the digest key).
+ * @param content - The content the tool wrote, or null when unknown.
+ */
+export function recordWritten(real: string, content: string | null): void {
   try {
     const file = writtenDigestPath(real);
+    if (content === null) {
+      rmSync(file, { force: true });
+      return;
+    }
     mkdirSync(path.dirname(file), { recursive: true });
     const tmp = `${file}.${process.pid}.tmp`;
-    writeFileSync(tmp, fileDigest(fp));
+    writeFileSync(tmp, createHash("sha256").update(content).digest("base64"));
     renameSync(tmp, file);
   } catch {
     // fail open: a missing digest costs one duplicate lint
@@ -2197,9 +2236,10 @@ export function recordWritten(fp: string, real: string): void {
  * within milliseconds. Never throws.
  *
  * @param s - The `postToolScope` result, or null.
+ * @param args - The PostToolUse hook payload (source of the written content).
  */
-function recordWrittenFor(s: { fp: string; real: string } | null): void {
-  if (s) recordWritten(s.fp, s.real);
+function recordWrittenFor(s: { fp: string; real: string } | null, args: PostToolUseHookInput): void {
+  if (s) recordWritten(s.real, writtenContent(args));
 }
 
 /**
@@ -2953,7 +2993,7 @@ async function main(): Promise<void> {
     if (ev === "FileChanged") ctx = (await fileChangedHandler(input)).hookSpecificOutput?.additionalContext;
     else {
       const scoped = postToolScope(input);
-      recordWrittenFor(scoped);
+      recordWrittenFor(scoped, input);
       ctx = (await lintFileHandler(input, scoped)).hookSpecificOutput?.additionalContext;
     }
     if (ctx) {

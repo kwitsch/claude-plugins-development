@@ -241,6 +241,19 @@ test("FileChanged: skipped while the content matches the Write/Edit digest, lint
   assert.equal(e.lines().length, 2);
 });
 
+test("FileChanged: a write by another program that landed before the Edit's hook ran is still linted", () => {
+  const e = makeEnv();
+  e.recStub("shellcheck", 1);
+  const a = e.file("a.sh", "echo a\necho b\n");
+  gitInit(e);
+  writeFileSync(a, "echo A\necho $2\n"); // the Edit changed line 1, a formatter/editor then line 2, all before the hook
+  const patch = [{ oldStart: 1, oldLines: 1, newStart: 1, newLines: 1, lines: ["-echo a", "+echo A"] }];
+  e.run(a, { toolName: "Edit", toolResponse: { originalFile: "echo a\necho b\n", structuredPatch: patch } });
+  const before = e.lines().length;
+  assert.equal(changed(e, a).status, 2);
+  assert.equal(e.lines().length, before + 1);
+});
+
 test("FileChanged: outside a git repo the file is linted (git failure means lint)", () => {
   const e = makeEnv();
   e.recStub("shellcheck", 1);

@@ -1171,17 +1171,45 @@ function writtenDigestPath(real) {
 function fileDigest(fp) {
 	return createHash("sha256").update(readFileSync(fp)).digest("base64");
 }
-export function recordWritten(fp, real) {
+export function writtenContent(args) {
+	if (args?.tool_name === "Write") return typeof args.tool_input?.content === "string" ? args.tool_input.content : null;
+	const original = args?.tool_response?.originalFile;
+	const patch = args?.tool_response?.structuredPatch;
+	if (args?.tool_name !== "Edit" || typeof original !== "string" || !Array.isArray(patch)) return null;
+	const src = original.match(/[^\n]*\n|[^\n]+$/g) ?? [];
+	let out = "";
+	let i = 0;
+	for (const h of patch) {
+		if (typeof h?.oldStart !== "number" || !Array.isArray(h.lines) || !h.lines.every((l) => typeof l === "string")) return null;
+		const lines = h.lines;
+		const old = lines.filter((l) => l[0] === " " || l[0] === "-").length;
+		const start = old === 0 ? h.oldStart : h.oldStart - 1;
+		if (start < i || start + old > src.length) return null;
+		out += src.slice(i, start).join("");
+		i = start;
+		lines.forEach((l, k) => {
+			if (l[0] === " ") out += src[i++];
+			else if (l[0] === "-") i++;
+			else if (l[0] === "+") out += l.slice(1) + (lines[k + 1]?.startsWith("\\") ? "" : "\n");
+		});
+	}
+	return out + src.slice(i).join("");
+}
+export function recordWritten(real, content) {
 	try {
 		const file = writtenDigestPath(real);
+		if (content === null) {
+			rmSync(file, { force: true });
+			return;
+		}
 		mkdirSync(path.dirname(file), { recursive: true });
 		const tmp = `${file}.${process.pid}.tmp`;
-		writeFileSync(tmp, fileDigest(fp));
+		writeFileSync(tmp, createHash("sha256").update(content).digest("base64"));
 		renameSync(tmp, file);
 	} catch {}
 }
-function recordWrittenFor(s) {
-	if (s) recordWritten(s.fp, s.real);
+function recordWrittenFor(s, args) {
+	if (s) recordWritten(s.real, writtenContent(args));
 }
 function digestOrNull(fp) {
 	try {
@@ -1665,7 +1693,7 @@ async function main() {
 		if (ev === "FileChanged") ctx = (await fileChangedHandler(input)).hookSpecificOutput?.additionalContext;
 		else {
 			const scoped = postToolScope(input);
-			recordWrittenFor(scoped);
+			recordWrittenFor(scoped, input);
 			ctx = (await lintFileHandler(input, scoped)).hookSpecificOutput?.additionalContext;
 		}
 		if (ctx) {
