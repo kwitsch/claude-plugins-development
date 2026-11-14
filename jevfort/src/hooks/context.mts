@@ -55,13 +55,26 @@ export type TurnContext = {
 export type StepSummary = { assistant?: string; tool?: string; input?: string; result?: string; isError?: true };
 
 /**
+ * The first `n` UTF-16 units of `text`, without a high surrogate left by the cut (a split astral character renders as U+FFFD).
+ *
+ * @param text - The text.
+ * @param n - The length kept.
+ * @returns The cut text.
+ */
+export const head = (text: string, n: number): string => text.slice(0, n).replace(/[\uD800-\uDBFF]$/, "");
+
+/**
  * `text` cut to `max` characters with a note of what was dropped.
  *
  * @param text - The text.
  * @param max - The maximum length kept.
  * @returns The text, clipped when longer than `max`.
  */
-export const clip = (text: string, max: number): string => text.length > max ? `${text.slice(0, max)}… [${text.length - max} more chars]` : text;
+export const clip = (text: string, max: number): string => {
+  if (text.length <= max) return text;
+  const kept = head(text, max);
+  return `${kept}… [${text.length - kept.length} more chars]`;
+};
 
 /**
  * Rows the person didn't type as a request: `!` shell runs, slash-command output, and the engine's notices
@@ -165,17 +178,21 @@ export function toolCalls(steps: readonly SessionMessage[]): ToolUse[] {
  */
 export function summarize(steps: readonly SessionMessage[], limit = 8): StepSummary[] {
   const out: StepSummary[] = [];
-  for (const m of steps) {
+  // From the end, so a long turn costs `limit` entries, not its whole length.
+  for (let i = steps.length - 1; i >= 0 && out.length < limit; i--) {
+    const m = steps[i];
     if (m.role !== "assistant") continue;
-    if (m.text.trim()) out.push({ assistant: clip(m.text, 400) });
+    const row: StepSummary[] = [];
+    if (m.text.trim()) row.push({ assistant: clip(m.text, 400) });
     for (const use of m.toolUses) {
-      out.push({
+      row.push({
         tool: use.tool,
         input: clip(JSON.stringify(use.input), 300),
         ...(use.text !== undefined ? { result: clip(use.text, 400) } : {}),
         ...(use.isError ? { isError: true as const } : {}),
       });
     }
+    out.unshift(...row);
   }
   return out.slice(-limit);
 }

@@ -1,9 +1,9 @@
 // Pure logic of the built plugin/hooks/{candidates,report,context,policy}.mjs: upstream jev-pilot tests/candidates.test.ts.
 import { expect, test } from "vitest";
-import { commandKey, coversStep, dedupeSkills, isSafeToOffer, mentionedPaths, quotedTerms, relevant, words } from "../plugin/hooks/candidates.mjs";
-import { splitTurn } from "../plugin/hooks/context.mjs";
+import { commandKey, coversStep, dedupeSkills, isSafeScript, isSafeToOffer, mentionedPaths, quotedTerms, relevant, SAFE_MAKE, sameCall, words } from "../plugin/hooks/candidates.mjs";
+import { clip, splitTurn, summarize } from "../plugin/hooks/context.mjs";
 import { route } from "../plugin/hooks/policy.mjs";
-import { buildReport, when } from "../plugin/hooks/report.mjs";
+import { buildReport, escapePipes, verdict, when } from "../plugin/hooks/report.mjs";
 
 test("quoted terms become searches, file names do not", () => {
   expect(quotedTerms("where is `useAuth` used? and \"TODO: fix\" in `src/app.ts`")).toEqual(["useAuth", "TODO: fix"]);
@@ -14,9 +14,51 @@ test("paths with extensions are found in text", () => {
   expect(mentionedPaths(["look at src/app.ts and ./README.md, not v1.2 or https://x.io/a.js"])).toEqual(["src/app.ts", "./README.md"]);
 });
 
+test("a path at the end of a sentence is found", () => {
+  for (const s of ["explain src/app.ts.", "what is in src/app.ts?", "src/app.ts!", "see (src/app.ts)."]) expect(mentionedPaths([s])).toEqual(["src/app.ts"]);
+});
+
+test("the report verdict follows the take threshold, agreement and Claude's own pick", () => {
+  const e = (data: Record<string, unknown>) => ({ at: 0, kind: "compare" as const, applied: false, text: "", data: { best: "read a", ...data } });
+  expect(verdict(e({ bestP: 0.9, agree: true }), 0.85)).toBe("match");
+  expect(verdict(e({ bestP: 0.9, agree: false }), 0.85)).toBe("differ");
+  expect(verdict(e({ bestP: 0.5, claudeUsedCandidate: true }), 0.85)).toBe("missed");
+  expect(verdict(e({ bestP: 0.5 }), 0.85)).toBe("both-claude");
+  expect(verdict(e({ bestP: 0.9, agree: true }), 0.95)).toBe("both-claude");
+});
+
 test("an empty log gives a hint, not a crash", () => {
   expect(buildReport([], 0.85)).toContain("the log is empty");
   expect(buildReport([], 0.85)).not.toContain("shadow");
+});
+
+test("cutting text never splits an emoji into a lone surrogate", () => {
+  const request = `${"x".repeat(38)}🚀 rest of request`;
+  const report = buildReport([{ at: 0, kind: "compare", applied: false, text: "", data: { request, best: "read:a", bestP: 0.9, agree: true } }], 0.85);
+  expect(report).toContain(`| ${"x".repeat(38)}… |`);
+  expect(clip(request, 39)).toBe(`${"x".repeat(38)}… [${request.length - 38} more chars]`);
+});
+
+test("a backslash before a pipe in a cell does not split the table row", () => {
+  const report = buildReport([{ at: 0, kind: "compare", applied: false, text: "", data: { request: "find a\\|b", best: "run:git status", bestP: 0.3, claudeSummary: "Bash: grep -rn 'foo\\|bar' src", claudeUsedCandidate: false } }], 0.85);
+  const row = report.split("\n").find((l) => l.includes("grep"));
+  // unescaped pipe = preceded by an even number of backslashes
+  expect(row?.match(/(?<!\\)(?:\\\\)*\|/g)).toHaveLength(7);
+  expect(escapePipes("a\\|b")).toBe("a\\\\\\|b");
+});
+
+test("the report header shows the first entry in local time, like the rows", () => {
+  const tz = process.env.TZ;
+  process.env.TZ = "Europe/Berlin";
+  try {
+    const at = Date.UTC(2026, 10, 14, 9, 0);
+    const report = buildReport([{ at, kind: "compare", applied: false, text: "", turnId: "t1", data: { request: "x", best: "read a", bestP: 0.5 } }], 0.9);
+    expect(report).toContain("since 2026-11-14 10:00 ");
+    expect(report).toContain("| 10:00 |");
+  } finally {
+    if (tz === undefined) delete process.env.TZ;
+    else process.env.TZ = tz;
+  }
 });
 
 test("shell output and slash-command rows are not taken as the request", () => {
@@ -45,6 +87,7 @@ test("temp, task-output and Claude config paths are never offered for reading", 
   expect(isSafeToOffer("/private/tmp/claude-503/-Users-x/abc/tasks/a889.output")).toBe(false);
   expect(isSafeToOffer("/tmp/jev-gate-test/notes.txt")).toBe(false);
   expect(isSafeToOffer("/Users/nimf/.claude/settings.json")).toBe(false);
+  expect(isSafeToOffer("/var/folders/ab/T/claude/notes.txt")).toBe(false);
   expect(isSafeToOffer("/Users/nimf/Work/jev-demo/todo-app/todo.js")).toBe(true);
 });
 
@@ -53,6 +96,35 @@ test("a project inside a temp dir can still be read; its transcripts cannot", ()
   expect(isSafeToOffer(`${cwd}/todo.js`, cwd)).toBe(true);
   expect(isSafeToOffer(`${cwd}/tasks/a1.output`, cwd)).toBe(false);
   expect(isSafeToOffer("/private/tmp/other/notes.txt", cwd)).toBe(false);
+});
+
+test("a `..` path is never offered, neither by the scanner nor by the safety check", () => {
+  expect(mentionedPaths(["read ../.aws/config.json and a/../b.ts"])).toEqual([]);
+  expect(isSafeToOffer("/proj/../.aws/config.json", "/proj")).toBe(false);
+  expect(isSafeToOffer("/proj/a/..", "/proj")).toBe(false);
+  expect(isSafeToOffer("/proj/a..b/c.ts", "/proj")).toBe(true);
+});
+
+test("Claude's config and credentials are never offered, also with cwd at $HOME", () => {
+  expect(isSafeToOffer("/home/u/.claude/.credentials.json", "/home/u")).toBe(false);
+  expect(isSafeToOffer("/home/u/.claude/settings.json", "/home/u")).toBe(false);
+  expect(isSafeToOffer("/home/u/.claude.json", "/home/u")).toBe(false);
+  expect(isSafeToOffer("/home/u/.claude.json", "/home/u/proj")).toBe(false);
+  expect(isSafeToOffer("/home/u/.claude/projects/-home-u/memory/MEMORY.md", "/home/u")).toBe(false);
+  expect(isSafeToOffer("/home/u/.claude/settings.local.json", "/home/u")).toBe(false);
+  expect(isSafeToOffer("/home/u/.claude/settings.json.bak", "/home/u")).toBe(false);
+  expect(isSafeToOffer("/home/u/.CLAUDE.json", "/home/u")).toBe(false);
+  expect(isSafeToOffer("/home/u/.CLAUDE.json", "/home/u/proj")).toBe(false);
+  expect(isSafeToOffer("/home/u/.Claude/settings.json", "/home/u")).toBe(false);
+  expect(isSafeToOffer("/home/u/.claude/Settings.json", "/home/u")).toBe(false);
+  expect(isSafeToOffer("/home/u/.Claude/projects/x/memory/MEMORY.md", "/home/u")).toBe(false);
+  expect(isSafeToOffer("/home/u/proj/tasks/a1.OUTPUT", "/home/u/proj")).toBe(false);
+  expect(isSafeToOffer("/home/u/notes/a.JSONL")).toBe(false);
+  expect(isSafeToOffer("/home/u/.claude/settings.local.json.bak", "/home/u")).toBe(false);
+  expect(isSafeToOffer("/home/u/.claude/.credentials.json~", "/home/u")).toBe(false);
+  expect(isSafeToOffer("/home/u/.claude.json.backup", "/home/u")).toBe(false);
+  expect(isSafeToOffer("/home/u/.claude/CLAUDE.md", "/home/u/proj")).toBe(false);
+  expect(isSafeToOffer("/home/u/notes.md", "/home/u")).toBe(true);
 });
 
 test("task notifications and reminders are not taken as the request", () => {
@@ -76,15 +148,32 @@ test("a skill listed under two names is offered once, unprefixed", () => {
   expect(dedupeSkills(SKILLS).map((s) => s.name)).toEqual(["youtube-metadata", "pdf", "i-have-adhd:i-have-adhd", "chrome-browser"]);
 });
 
+test("two plugins' skills sharing a base name are both kept", () => {
+  const skills = [
+    { name: "git-tools:review", description: "Review a pull request diff for correctness bugs" },
+    { name: "docs-kit:review", description: "Proofread markdown documentation for typos and grammar" },
+  ];
+  expect(dedupeSkills(skills).map((s) => s.name)).toEqual(["git-tools:review", "docs-kit:review"]);
+});
+
 test("relevant scores a name word 2 (once, also when the description repeats it), a description word 1, and stays fast on a pasted log", () => {
   const items = [{ name: "pdf-merge", description: "merge pdf files" }, { name: "other", description: "merge things into one" }];
   expect(relevant("merge pdf", items).map((i) => i.name)).toEqual(["pdf-merge"]);
-  // 300 items against 2 MB of distinct words took 1.7 s when the loop ran over the prompt's words.
+  // A scores 2 (description repeats the name word), B 3; counting "pdf" twice ties them 3:3 and keeps A first.
+  const order = [{ name: "pdf", description: "pdf", id: "A" }, { name: "pdf", description: "merge", id: "B" }];
+  expect(relevant("merge pdf", order).map((i) => i.id)).toEqual(["B", "A"]);
+  // 300 items against 2 MB of distinct words took ~10x the prompt's own split when the loop ran over the prompt's words.
+  // Relative to relevant(prompt, []) (only words(prompt)), so CPU load slows both sides alike; best of 3 against noise.
   const many = Array.from({ length: 300 }, (_, i) => ({ name: `tool-${i}`, description: `does thing ${i} with files` }));
-  const log = Array.from({ length: 200_000 }, (_, i) => `req${i.toString(36)}x`).join(" ");
-  const t = performance.now();
-  relevant(`look at this log ${log}`, many);
-  expect(performance.now() - t).toBeLessThan(800);
+  const prompt = `look at this log ${Array.from({ length: 200_000 }, (_, i) => `req${i.toString(36)}x`).join(" ")}`;
+  const best = (items: typeof many) =>
+    Math.min(...[0, 1, 2].map(() => {
+      const t = performance.now();
+      relevant(prompt, items);
+      return performance.now() - t;
+    }));
+  const base = best([]);
+  expect(best(many)).toBeLessThan(3 * base);
 });
 
 test("a slash command that started a turn is the request, a local command is not", () => {
@@ -132,13 +221,80 @@ test("the report counts a step-0 request once and shows the effort score under t
   expect(report).toContain("avg effort score 2.50");
 });
 
+test("the report counts a turn that lowered the model and raised the effort as one applied route", () => {
+  const report = buildReport([{ at: 1, kind: "route", applied: true, text: "route", turnId: "t1", data: { score: 0.5, confidence: 0.9, effort: "high", lowered: true, raised: true } }], 0.85);
+  expect(report).toContain("1 lowered, 1 raised, 1 applied |");
+});
+
+test("the report counts summary rows, the newest 15 steps, the take threshold and the routing rows", () => {
+  const e = (kind: string, applied: boolean, data: Record<string, unknown> = {}) => ({ at: 1, kind, applied, text: kind, data });
+  const c = (i: number, data: Record<string, unknown>) => ({ ...e("compare", false, { request: `ask ${i}`, best: "read a", ...data }), at: 1 + i });
+  const log = [
+    e("take", true),
+    e("take", false),
+    e("outcome", true, { isError: true }),
+    e("outcome", true, { isError: false }),
+    e("bypass", true),
+    e("bypass", false),
+    c(0, { bestP: 0.95, agree: true }),
+    c(1, { bestP: 0.9, agree: false, claude: ["Read", "Grep", "Read"] }),
+    c(2, { bestP: 0.6, agree: true, claudeUsedCandidate: true }),
+    ...Array.from({ length: 13 }, (_, i) => c(3 + i, { bestP: 0.5 })),
+    e("done", true, { continued: true }),
+    e("done", false, { continued: true }),
+    e("done", true, { continued: false }),
+    e("classify", true, { kind: "code", hints: 1 }),
+    e("classify", true, { kind: "code", hints: 0 }),
+    e("classify", false, { kind: "question", hints: 2 }),
+    e("agent", true, { switched: true, agree: false }),
+    e("agent", false, { switched: false, agree: true }),
+    e("agent", false, { switched: true }),
+    e("compact", true, { items: 10, keep: 3, drop: 4 }),
+    e("compact", true, { items: 5, keep: 1, drop: 2 }),
+    e("turn", false, { reason: "aborted" }),
+    e("turn", false, { reason: "answer" }),
+  ];
+  const report = buildReport(log, 0.85);
+  expect(report).toContain("| Steps Jev took itself | **1** (≈ 1 Claude requests saved, 1 failed) |");
+  expect(report).toContain("| Turns answered without Claude | **1** (Jev's action + Haiku summary) |");
+  expect(report).toContain("| Agreement with Claude | **14 / 16** (88%) |");
+  expect(report).toContain("### Jev vs Claude, step by step (last 15)");
+  expect(report).not.toContain("| ask 0 |");
+  expect(report).toContain("| ask 15 |");
+  expect(report).toContain("| ask 1 | read a | 0.90 | Read ×2, Grep | ✗ differ |");
+  expect(report).toContain("| ask 2 | leave to Claude _(best: read a)_ | 0.60 | replied | ⚠ missed |");
+  for (const row of ["| 0.60 | 3 | 67% | `███████░░░` |", "| 0.70 | 2 | 50% | `█████░░░░░` |", "| **0.85 ← current** | 2 | 50% |", "| 0.90 | 2 | 50% |", "| 0.95 | 1 | 100% | `██████████` |"]) {
+    expect(report).toContain(row);
+  }
+  expect(report).toContain("| Done check | 3 stops | 2 unfinished, 1 sent back |");
+  expect(report).toContain("| Prompt classifier | 3 prompts | 2 code · 1 question · 2 hinted, 1 applied |");
+  expect(report).toContain("| Subagent type | 3 spawns | 1 agreed with Claude · 2 switched, 1 applied |");
+  expect(report).toContain("| Compaction | 2 runs | 15 results scored · 4 kept in detail · 6 marked droppable |");
+  expect(report).toContain("_1 interrupted turn(s)._");
+});
+
 test("only skills related to the prompt are offered", () => {
   const skills = dedupeSkills(SKILLS);
   expect(relevant("can you show me the full list", skills)).toEqual([]);
   expect(relevant("run the tests", skills)).toEqual([]);
+  // two stopwords ("run", "the") alone would reach the score of 2
+  expect(relevant("run the tests", [{ name: "deploy", description: "Run the deploy pipeline" }])).toEqual([]);
   expect(relevant("write youtube titles for my video", skills).map((s) => s.name)).toEqual(["youtube-metadata"]);
   expect(relevant("merge these two pdfs", skills).map((s) => s.name)).toEqual(["pdf"]);
   expect(relevant("open the page in chrome", skills).map((s) => s.name)).toEqual(["chrome-browser"]);
+});
+
+test("sameCall compares each tool by the argument that matters", () => {
+  const call = (tool: string, input: Record<string, unknown>) => ({ tool, input });
+  expect(sameCall(call("Read", { file_path: "/a" }), call("Read", { file_path: "/a" }))).toBe(true);
+  expect(sameCall(call("Read", { file_path: "/a" }), call("Read", { file_path: "/b" }))).toBe(false);
+  expect(sameCall(call("Skill", { skill: "pdf" }), call("Skill", { skill: "pdf" }))).toBe(true);
+  expect(sameCall(call("Skill", { skill: "pdf" }), call("Skill", { skill: "docx" }))).toBe(false);
+  expect(sameCall(call("ToolSearch", { query: "slack" }), call("ToolSearch", { query: "slack" }))).toBe(true);
+  expect(sameCall(call("ToolSearch", { query: "slack" }), call("ToolSearch", { query: "gmail" }))).toBe(false);
+  expect(sameCall(call("Bash", { command: "npm test " }), call("Bash", { command: "npm test" }))).toBe(true);
+  expect(sameCall(call("Bash", { command: "npm test" }), call("Bash", { command: "npm run build" }))).toBe(false);
+  expect(sameCall(call("Read", { file_path: "/a" }), call("Skill", { skill: "/a" }))).toBe(false);
 });
 
 test("commands compare by what they run, not how the output is filtered", () => {
@@ -148,6 +304,10 @@ test("commands compare by what they run, not how the output is filtered", () => 
   expect(commandKey("git log --oneline -5")).toBe(commandKey("git log --oneline -n 15"));
   expect(commandKey("npm run lint")).not.toBe(commandKey("npm run build"));
   expect(commandKey("git diff")).not.toBe(commandKey("git status --short && git diff --stat"));
+  // Cases the 2-word cap does not hide: order, flags, pipe tail.
+  expect(commandKey("git diff; git status")).toBe(commandKey("git status && git diff"));
+  expect(commandKey("ls -la")).toBe(commandKey("ls"));
+  expect(commandKey("ls | wc -l")).toBe(commandKey("ls"));
 });
 
 test("a step matches only when Jev's one action would replace all of it", () => {
@@ -169,4 +329,71 @@ test("route: in model mode trivial goes to Haiku and routine to Sonnet; effort m
 
 test("words keeps umlauts whole instead of splitting at them", () => {
   expect([...words("ändere die Größe")]).toEqual(expect.arrayContaining(["änder", "größ"]));
+});
+
+test("words keeps combining marks inside words (NFD umlauts, Devanagari vowel signs)", () => {
+  const skills = [{ name: "übersetzung", description: "Prüfe Übersetzungen gründlich" }];
+  const nfd = "Übersetzung gründlich prüfen".normalize("NFD");
+  expect([...words(nfd)]).toEqual(["übersetzung", "gründlich", "prüfen"]);
+  expect(relevant(nfd, skills).map((s) => s.name)).toEqual(["übersetzung"]);
+  expect([...words("हिन्दी अनुवाद जाँचें")]).toEqual(["हिन्दी", "अनुवाद", "जाँचें"]);
+  expect(relevant("हिन्दी अनुवाद जाँचें", [{ name: "anuvad", description: "हिन्दी अनुवाद जाँचें" }]).map((s) => s.name)).toEqual(["anuvad"]);
+});
+
+test("mentionedPaths extends the turn's set, so only new rows need scanning", () => {
+  const seen = new Set<string>();
+  expect(mentionedPaths(["see a/one.ts"], seen)).toEqual(["a/one.ts"]);
+  expect(mentionedPaths(["and b/two.ts, a/one.ts"], seen)).toEqual(["a/one.ts", "b/two.ts"]);
+});
+
+test("summarize walks from the end: same last entries, old rows are never serialized", () => {
+  const poison = {
+    toJSON: () => {
+      throw new Error("old row serialized");
+    },
+  };
+  const row = (n: number, input: unknown = { n }) => ({ role: "assistant" as const, text: `t${n}`, toolUses: [{ tool: "Read", input: input as Record<string, unknown>, text: `r${n}` }] });
+  const steps = [row(0, poison), row(1, poison), ...Array.from({ length: 5 }, (_, i) => row(i + 2))];
+  const out = summarize(steps);
+  expect(out).toHaveLength(8);
+  expect(out[0]).toEqual({ assistant: "t3" });
+  expect(out[7]).toEqual({ tool: "Read", input: "{\"n\":6}", result: "r6" });
+  expect(summarize(steps.slice(2, 4))).toHaveLength(4);
+});
+
+test("summarize keeps the README size caps: last 8 entries, inputs 300 and results 400 chars, isError kept", () => {
+  const big = "x".repeat(5000);
+  const wide = (n: number) => ({
+    role: "assistant" as const,
+    text: `t${n}`,
+    toolUses: [
+      { tool: "Read", input: { big }, text: big },
+      { tool: "Bash", input: { big }, text: big, isError: true },
+      { tool: "Grep", input: { big }, text: big },
+    ],
+  });
+  const small = { role: "assistant" as const, text: "s", toolUses: [{ tool: "Read", input: {}, text: "r" }] };
+  // 4 + 2 + 4 entries from the end: the loop overshoots 8, only the slice trims it.
+  const out = summarize([wide(0), small, wide(1)]);
+  expect(out).toHaveLength(8);
+  expect(out[0]).toMatchObject({ tool: "Bash" });
+  const note = (s: string) => /… \[\d+ more chars\]$/.exec(s)?.[0].length ?? 0;
+  const tools = out.filter((e) => "tool" in e) as { input: string; result?: string; isError?: true }[];
+  for (const e of tools.filter((t) => t.input.length > 2)) {
+    expect(note(e.input)).toBeGreaterThan(0);
+    expect(e.input.length).toBeLessThanOrEqual(300 + note(e.input));
+    expect(note(e.result!)).toBeGreaterThan(0);
+    expect(e.result!.length).toBeLessThanOrEqual(400 + note(e.result!));
+  }
+  expect(tools.filter((t) => t.isError)).toHaveLength(2);
+});
+
+test("SAFE_MAKE takes only whole safe Makefile target names", () => {
+  for (const t of ["test", "tests", "check", "lint", "build", "typecheck"]) expect(SAFE_MAKE.test(t), t).toBe(true);
+  for (const t of ["lint-fix", "test-update", "build-and-push", "testwatch", "deploy", "pre-test"]) expect(SAFE_MAKE.test(t), t).toBe(false);
+});
+
+test("isSafeScript refuses scripts that rewrite files or never exit", () => {
+  for (const n of ["lint:fix", "lint:write", "lint:prettier:fix", "test:update", "test:u", "test:update-snapshots", "test:watch", "test:dev", "test:watchAll", "lint:autofix", "lint:fixAll", "lint:eslint_fix", "test:e2e:ui", "test:UI", "test:open", "test:debug", "test:updateSnapshot", "lint:CSSFix", "test:E2EWatch"]) expect(isSafeScript(n), n).toBe(false);
+  for (const n of ["test", "lint", "build", "test:unit", "lint:types", "test:e2e", "test:unit:ci", "type-check", "test:typesOnly"]) expect(isSafeScript(n), n).toBe(true);
 });

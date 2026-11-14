@@ -20,10 +20,24 @@ export type Candidate = {
 
 /** How many file reads a turn may be offered. */
 export const MAX_READS = 8;
+/** How many mentioned paths one candidate build may stat that the turn has not statted yet (missing paths do not count towards {@link MAX_READS}). */
+export const MAX_STATS = 16;
 /** How many quoted-term searches a turn may be offered. */
 const MAX_SEARCHES = 3;
-/** package.json script names safe to run unasked. */
-export const SAFE_SCRIPT = /^(test|tests|lint|build|typecheck|type-check|check|test:[\w:-]+|lint:[\w:-]+)$/;
+/** package.json script names that may run unasked if no word of them is in {@link UNSAFE_WORD}. */
+const SCRIPT_HEAD = /^(?:test|tests|lint|build|typecheck|type-check|check|test:[\w:-]+|lint:[\w:-]+)$/;
+/** Script name words (lowercased) that rewrite files (`fix`, `autofix`, `update`, `u`) or never exit (`watch`, `dev`, `ui`, `open`, `debug`). */
+const UNSAFE_WORD = /^(?:(?:auto)?fix|write|format|update|u|watch|dev|serve|ui|open|debug)$/;
+
+/**
+ * Whether a package.json script is safe to run unasked.
+ *
+ * @param name - The script name.
+ * @returns True for an allowlisted name none of whose words (split at `:`, `-`, `_` and camelCase humps, also after an acronym run as in `CSSFix`) is in {@link UNSAFE_WORD}.
+ */
+export function isSafeScript(name: string): boolean {
+  return SCRIPT_HEAD.test(name) && !name.split(/[:_-]|(?<=[a-z\d])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])/).some((w) => UNSAFE_WORD.test(w.toLowerCase()));
+}
 /**
  * Built-in CLI commands the command list can report as user commands but the Skill tool refuses (`/diff` did).
  * Failed skills are also blocklisted at run time.
@@ -39,8 +53,8 @@ export const SKILL_BLOCKLIST_KEY = "skillBlocklist";
 
 /** Makefile targets safe to run unasked. */
 export const SAFE_MAKE = /^(test|tests|check|lint|build|typecheck)$/;
-/** Paths like src/app.ts, ./README.md, /abs/x.json: something with a file extension. */
-const PATH = /(?:^|[\s`'"([])((?:~|\.{1,2})?\/?[\w@.-]+(?:\/[\w@.-]+)*\.[A-Za-z][A-Za-z0-9]{0,7})(?=$|[\s`'"),:;\]])/g;
+/** Paths like src/app.ts, ./README.md, /abs/x.json: something with a file extension, also at a sentence end (`src/app.ts.`, `src/app.ts?`). */
+const PATH = /(?:^|[\s`'"([])((?:~|\.{1,2})?\/?[\w@.-]+(?:\/[\w@.-]+)*\.[A-Za-z][A-Za-z0-9]{0,7})(?=[.?!]*(?:$|[\s`'"),:;\]]))/g;
 /** Terms the user quoted: `useAuth`, "TODO: fix". */
 const QUOTED = /`([^`\n]{3,60})`|"([^"\n]{3,60})"/g;
 
@@ -48,10 +62,10 @@ const QUOTED = /`([^`\n]{3,60})`|"([^"\n]{3,60})"/g;
  * File paths mentioned in `texts`, deduplicated, without versions, URLs and `..` paths.
  *
  * @param texts - The request and the turn's texts.
- * @returns The paths as written.
+ * @param seen - Paths found by earlier calls of the turn, extended here (a fresh set by default).
+ * @returns The paths as written, the earlier ones first.
  */
-export function mentionedPaths(texts: readonly string[]): string[] {
-  const seen = new Set<string>();
+export function mentionedPaths(texts: readonly string[], seen: Set<string> = new Set()): string[] {
   for (const text of texts) {
     for (const m of text.matchAll(PATH)) {
       const p = m[1];
@@ -81,29 +95,37 @@ export function quotedTerms(text: string): string[] {
  * Never offered for reading: Claude Code's temp and task folders (a subagent's `.output` file is its whole
  * transcript and floods the context), system temp dirs, and Claude's own config tree.
  */
-const UNSAFE_PATH = /(^|\/)(tmp|private\/tmp|private\/var\/folders|var\/folders)\/|\/\.claude\/|\/tasks\/[^/]+\.output$|\.output$|\.jsonl$/;
+const UNSAFE_PATH = /(^|\/)(tmp|private\/tmp|private\/var\/folders|var\/folders)\/|\/\.claude\/|\/tasks\/[^/]+\.output$|\.output$|\.jsonl$/i;
 /**
  * Inside the project only transcripts are refused, so a project that lives in a temp dir (a scratch copy, a
  * benchmark) can still be read.
  */
-const TRANSCRIPT = /\/tasks\/[^/]+\.output$|\.output$|\.jsonl$/;
+const TRANSCRIPT = /\/tasks\/[^/]+\.output$|\.output$|\.jsonl$/i;
 /**
- * Whether a file may be offered as a Read candidate.
+ * Claude's own config and credentials (`~/.claude.json` with MCP env values, the OAuth token file, settings,
+ * project memory), refused wherever the cwd is, also when the project is `$HOME` itself. Suffixed copies
+ * (`settings.json.bak`, `.claude.json~`) hold the same secrets and are refused too. All three patterns ignore case:
+ * on APFS, Windows and WSL `/mnt/c` any capitalisation (`.CLAUDE.json`) opens the same file.
+ */
+const CLAUDE_CONFIG = /\/\.claude\.json(?:$|[.~-])|\/\.claude\/(?:projects\/|(?:\.credentials|settings(?:\.local)?)\.json(?:$|[.~-]))/i;
+/**
+ * Whether a file may be offered as a Read candidate: never one with a `..` segment, which can leave the project
+ * while still starting with the cwd.
  *
  * @param file - The absolute path.
  * @param cwd - The project directory.
  * @returns Whether it is safe to offer.
  */
-export const isSafeToOffer = (file: string, cwd?: string): boolean => (cwd && file.startsWith(`${cwd}/`) ? !TRANSCRIPT.test(file) : !UNSAFE_PATH.test(file));
+export const isSafeToOffer = (file: string, cwd?: string): boolean => !/(^|\/)\.\.(\/|$)/.test(file) && !CLAUDE_CONFIG.test(file) && (cwd && file.startsWith(`${cwd}/`) ? !TRANSCRIPT.test(file) : !UNSAFE_PATH.test(file));
 
 /**
- * `p` as an absolute path under `cwd`.
+ * `p` as an absolute path under `cwd`, with `.` segments removed, so spellings of one file compare equal.
  *
  * @param cwd - The project directory.
  * @param p - A path as written.
  * @returns The absolute path.
  */
-export const absolute = (cwd: string, p: string): string => (p.startsWith("/") ? p : `${cwd}/${p.replace(/^\.\//, "")}`);
+export const absolute = (cwd: string, p: string): string => (p.startsWith("/") ? p : `${cwd}/${p}`).replace(/\/(?:\.\/)+/g, "/");
 
 /** A tool call, for comparison. */
 type Call = { tool: string; input: Record<string, unknown> };
@@ -207,14 +229,15 @@ const STOPWORDS = new Set(
 );
 
 /**
- * Lowercase content words, light-stemmed so changes/changed/change match.
+ * Lowercase content words, light-stemmed so changes/changed/change match. NFC-normalized and split only at
+ * characters that are no letter, combining mark or digit, so NFD umlauts and vowel signs stay inside their words.
  *
  * @param text - Any text.
  * @returns The content words.
  */
 export function words(text: string): Set<string> {
   const out = new Set<string>();
-  for (const w of text.toLowerCase().split(/[^\p{L}\p{N}]+/u)) {
+  for (const w of text.normalize("NFC").toLowerCase().split(/[^\p{L}\p{M}\p{N}]+/u)) {
     if (w.length < 3 || STOPWORDS.has(w) || /^\d+$/.test(w)) continue;
     const stem = w.replace(/(ing|ed|es|e|s)$/, "");
     out.add(stem.length >= 3 && !w.endsWith("ss") ? stem : w);
@@ -253,13 +276,19 @@ export function relevant<T extends { name: string; description: string }>(prompt
 /**
  * One entry per skill: `anthropic-skills:pdf` and `pdf`, or `youtube-metadata` and
  * `youtube-plugin:youtube-metadata`, are the same skill listed twice. The unprefixed name wins.
+ * A prefixed name collapses only onto a listed unprefixed one: `git-tools:review` and `docs-kit:review`
+ * are different skills and both stay.
  *
  * @typeParam T - A named item.
  * @param skills - The listed skills.
  * @returns The skills without duplicates.
  */
 export function dedupeSkills<T extends { name: string }>(skills: readonly T[]): T[] {
-  const base = (n: string) => n.slice(n.lastIndexOf(":") + 1);
+  const bare = new Set(skills.filter((s) => !s.name.includes(":")).map((s) => s.name));
+  const base = (n: string) => {
+    const b = n.slice(n.lastIndexOf(":") + 1);
+    return bare.has(b) ? b : n;
+  };
   const byBase = new Map<string, T>();
   for (const s of skills) {
     const kept = byBase.get(base(s.name));

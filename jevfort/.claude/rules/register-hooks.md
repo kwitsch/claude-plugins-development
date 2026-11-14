@@ -55,8 +55,8 @@ the shapes below: `inline-headroom/docs/claude-code-verification.md`.
   unregister and a registered tool that no hook answers fails, so the unmatched `tool.call` hook answers
   `mcp__jevfort__estimate_effort` before the readiness guard and never calls `next(e)`: `{ result }` (the JSON
   estimate; while the batch tool is really missing `askJev` fails and it is `defaultEffort` with source `fallback` (an inactive state caused by a failed listing still asks Jev)) or, on invalid input,
-  `{ deny: "estimate_effort: <reason>" }` without a Jev request (a hook's own `isError` is dropped: the model sees a normal result, live on 2.1.325); `tool.check` approves it before the guard (a settings deny still
-  wins). Calls are logged as kind `estimate`.
+  `{ deny: "estimate_effort: <reason>" }` without a Jev request (a hook's own `isError` is dropped: the model sees a normal result, live on 2.1.325); `tool.check` approves it before the guard (a settings deny or ask
+  rule still wins). Calls are logged as kind `estimate`.
 - Effort band: the `ui.render` hook with matcher `{ component: "AbovePrompt" }` draws `Box`/`Text`/`Button` from
   `$.ui.resolve(e)` (detached factories) out of the closure state `band` (written at main-loop step 0 in `turn.step`:
   `configured` = step-0 `e.effort`, `chosen` = the estimate or held effort) and `autoOff` (flipped by the Button
@@ -89,8 +89,8 @@ core routes `$.mcp.call` through `$.tool.call` and its permission check, althoug
 plugin's own hooks see a call it raises only while one of its hooks runs; a call raised after the hook returned (an
 unawaited chain, a `$.clock.every` callback) skips them, so in `default` mode the user gets a permission dialog per
 call and a headless session denies it. jevfort uses `$.store`, `$.tool.call` (jev-api's batch tool) and `$.fs`, and every
-`askJev` is awaited in-frame except the step measurement of `turn.step`: its `$.tool.call` is raised in-frame before `next`, and after Claude's step it is awaited for at most `MEASURE_GRACE_MS` (250 ms); a later answer is dropped unrecorded (its closing `$.clock.now()` then runs out of frame, caught). Every
-`record(...)` is awaited inside its hook for the same reason.
+`askJev` is awaited in-frame except the step measurement of `turn.step`: its `$.tool.call` is raised in-frame before `next`, and after Claude's step it is awaited for at most `MEASURE_GRACE_MS` (250 ms); a later answer is dropped unrecorded (its closing `$.clock.now()` then runs out of frame, caught). `record(...)` only buffers;
+its store writes run in `flushLog`, awaited in-frame by `turn.complete`, `session.end` and the `/jev` command for the same reason.
 
 ## Tests: the jev-api fake
 

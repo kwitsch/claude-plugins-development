@@ -58,7 +58,12 @@ function base(on: On, jev: (q: Asked) => Record<string, unknown>, messages: Msg[
 pureTest("hints: a mid-confidence skill and a large task get hints; a confident skill is left to step 0", () => {
   expect(hints("task", 0.9, { name: "aws-diagrams", p: 0.7 }, 0.85)).toHaveLength(2);
   expect(hints("question", 0.9, { name: "aws-diagrams", p: 0.95 }, 0.85)).toHaveLength(0);
-  expect(hints("task", 0.2, { name: "none", p: 0.9 }, 0.85)).toHaveLength(0);
+  // Under takeOnlyForBypass the threshold is infinite, so only the name guard keeps `none` hint-free.
+  expect(hints("question", 0, { name: "none", p: 0.7 }, Number.POSITIVE_INFINITY)).toEqual([]);
+  expect(hints("question", 0, { name: "deploy-docs", p: 0.7 }, Number.POSITIVE_INFINITY)).toHaveLength(1);
+  // Below SKILL_HINT (0.6) and PLAN_HINT (0.85): no hint.
+  expect(hints("question", 0, { name: "deploy-docs", p: 0.5 }, Number.POSITIVE_INFINITY)).toEqual([]);
+  expect(hints("task", 0.8, undefined, Number.POSITIVE_INFINITY)).toEqual([]);
 });
 
 test("The prompt classifier adds a hint only Claude reads", async ($, on) => {
@@ -75,9 +80,9 @@ test("The prompt classifier adds a hint only Claude reads", async ($, on) => {
     seen = e.context as readonly string[] | undefined;
     return { text: e.text };
   });
-  await $.prompt.submit({ text: "rewrite the storage layer to use IndexedDB and sync across tabs", wait: false, origin: { kind: "composer" } });
+  await $.prompt.submit({ text: "rewrite the storage layer to draw aws diagrams and build the constructor", wait: false, origin: { kind: "composer" } });
   expect(seen?.join("\n") ?? "").toContain("plan");
-  // The batch's question types in order; the skill options are the listed skills plus `none`.
+  // The batch's question types in order; the skill options are the related skills (best first) plus `none`.
   expect(sent.map((q) => q.type)).toEqual(["choice", "noul", "choice"]);
   expect(Object.keys(sent[2].criteria as object)).toEqual(["none", "aws-diagrams", "constructor"]);
 });
@@ -99,21 +104,64 @@ test("A confident skill keeps its hint where step 0 cannot take it (takeOnlyForB
   expect(seen?.join("\n") ?? "").toContain("the skill \"aws-diagrams\"");
 });
 
-test("The classifier offers at most 255 skill options, none first, each name once", async ($, on) => {
+test("A skill Jev answers that was never offered gets no hint", async ($, on) => {
+  const answers: Record<string, Record<string, unknown>> = {
+    kind: { type: "choice", choice: "task", probabilities: { task: 0.9, question: 0.1 }, confidence: 0.8 },
+    needs_plan: { type: "noul", noul: 0.1 },
+    skill: { type: "choice", choice: "deploy-prod", probabilities: { "deploy-prod": 0.7, none: 0.3 }, confidence: 0.9 },
+  };
+  const sent = base(on, (q) => answers[PROMPT_IDS.get(q.instructions) ?? ""]);
+  on("command.list", () => ({ value: [{ name: "aws-diagrams", description: "Draw AWS diagrams", source: "plugin" }] }));
+  let seen: readonly string[] | undefined;
+  on("prompt.submit", (_$, e) => {
+    seen = e.context as readonly string[] | undefined;
+    return { text: e.text };
+  });
+  await $.prompt.submit({ text: "draw the aws diagram of the storage layer", wait: false, origin: { kind: "composer" } });
+  expect(Object.keys(sent[2].criteria as object)).toEqual(["none", "aws-diagrams"]);
+  expect(seen?.join("\n") ?? "").not.toContain("deploy-prod");
+});
+
+test("The classifier offers only the related skills (at most 8, deduped), none first; no related skill, no skill question", async ($, on) => {
   // Only the questions sent matter here, not the answers.
   const sent = base(on, () => ({}));
-  const skills = Array.from({ length: 300 }, (_, i) => ({ name: `skill-${i}`, description: `Skill ${i}`, source: "user" }));
-  on("command.list", () => ({ value: [skills[0], ...skills] }));
+  const filler = Array.from({ length: 300 }, (_, i) => ({ name: `helper-${i}`, description: `Helper number ${i}`, source: "user" }));
+  const migrate = Array.from({ length: 12 }, (_, i) => ({ name: `migrate-${i}`, description: `Variant ${i}`, source: "plugin" }));
+  const best = { name: "db-migrate", description: "Migrate the database schema", source: "user" };
+  on("command.list", () => ({ value: [...filler, { ...best, name: "tools:db-migrate", source: "plugin" }, ...migrate, best] }));
   on("prompt.submit", (_$, e) => ({ text: e.text }));
-  await $.prompt.submit({ text: "rewrite the storage layer", wait: false, origin: { kind: "composer" } });
+  await $.prompt.submit({ text: "migrate the database schema to v2", wait: false, origin: { kind: "composer" } });
   const options = Object.keys(sent[2].criteria as object);
-  expect(options).toHaveLength(255);
-  expect(options.slice(0, 3)).toEqual(["none", "skill-0", "skill-1"]);
-  expect(options.at(-1)).toBe("skill-253");
+  expect(options).toHaveLength(9);
+  expect(options.slice(0, 2)).toEqual(["none", "db-migrate"]);
+  expect(options).not.toContain("tools:db-migrate");
+  sent.length = 0;
+  await $.prompt.submit({ text: "rewrite the storage layer", wait: false, origin: { kind: "composer" } });
+  expect(sent.map((q) => q.type)).toEqual(["choice", "noul"]);
+});
+
+/** A listed skill whose name is the classifier's no-skill option. */
+const SKILL_NONE = { name: "none", description: "Deploy the docs site to staging", source: "user" };
+
+test("A listed skill named none never replaces the no-skill option", async ($, on) => {
+  const sent = base(on, () => ({}));
+  on("command.list", () => ({ value: [SKILL_NONE, { name: "deploy-docs", description: "Deploy the docs site", source: "plugin" }] }));
+  on("prompt.submit", (_$, e) => ({ text: e.text }));
+  await $.prompt.submit({ text: "deploy the docs site", wait: false, origin: { kind: "composer" } });
+  expect(sent[2].criteria).toEqual({ none: "No listed skill is meant for this request", "deploy-docs": "Deploy the docs site" });
+});
+
+test("With only a skill named none related, no skill question", async ($, on) => {
+  const sent = base(on, () => ({}));
+  on("command.list", () => ({ value: [SKILL_NONE] }));
+  on("prompt.submit", (_$, e) => ({ text: e.text }));
+  await $.prompt.submit({ text: "deploy the docs site", wait: false, origin: { kind: "composer" } });
+  expect(sent.map((q) => q.type)).toEqual(["choice", "noul"]);
 });
 
 test("A general-purpose subagent is switched only when Jev is confident; an explicit type is kept", async ($, on) => {
-  const sent = base(on, () => ({ type: "choice", choice: "Explore", probabilities: { Explore: 0.92, "general-purpose": 0.08 }, confidence: 0.85 }));
+  let p = 0.92;
+  const sent = base(on, () => ({ type: "choice", choice: "Explore", probabilities: { Explore: p, "general-purpose": 1 - p }, confidence: 0.85 }));
   on("agent.offer", () => ({ isOffered: true }));
   const spawned: unknown[] = [];
   on("tool.call", (_$, e) => {
@@ -125,10 +173,30 @@ test("A general-purpose subagent is switched only when Jev is confident; an expl
 
   await $.tool.call({ tool: "Agent", description: "find usages", prompt: "Find every caller of addTodo", tool_use_id: "a1" });
   await $.tool.call({ tool: "Agent", description: "plan", prompt: "Find every caller of addTodo", subagent_type: "Plan", tool_use_id: "a2" });
-  expect(spawned).toEqual(["Explore", "Plan"]);
+  // "claude" means no specific type, so it is switched too.
+  await $.tool.call({ tool: "Agent", description: "find usages", prompt: "Find every caller of addTodo", subagent_type: "claude", tool_use_id: "a3" });
+  // Below SWITCH_AT (0.85) the general-purpose call is kept.
+  p = 0.6;
+  await $.tool.call({ tool: "Agent", description: "find usages", prompt: "Find every caller of addTodo", tool_use_id: "a4" });
+  expect(spawned).toEqual(["Explore", "Plan", "Explore", undefined]);
   // The offered agent types are the options of one choice call per Agent call.
-  expect(sent.map((q) => q.type)).toEqual(["choice", "choice"]);
+  expect(sent.map((q) => q.type)).toEqual(["choice", "choice", "choice", "choice"]);
   expect(sent[0].criteria).toEqual({ "general-purpose": "General tasks", Explore: "Read-only codebase search" });
+});
+
+test("agentTypes: false never asks Jev about an Agent call and keeps its type", { options: { agentTypes: false } }, async ($, on) => {
+  const sent = base(on, () => ({ type: "choice", choice: "Explore", probabilities: { Explore: 0.95, "general-purpose": 0.05 }, confidence: 0.9 }));
+  on("agent.offer", () => ({ isOffered: true }));
+  const spawned: unknown[] = [];
+  on("tool.call", (_$, e) => {
+    spawned.push(e.subagent_type);
+    return { result: undefined };
+  });
+  await $.agent.offer({ agent: "general-purpose", description: "General tasks", source: "built-in" });
+  await $.agent.offer({ agent: "Explore", description: "Read-only codebase search", source: "built-in" });
+  await $.tool.call({ tool: "Agent", description: "find usages", prompt: "Find every caller of addTodo", tool_use_id: "a1" });
+  expect(sent).toHaveLength(0);
+  expect(spawned).toEqual([undefined]);
 });
 
 test("An agent type a hook beneath withholds is not one of Jev's options", async ($, on) => {
@@ -139,6 +207,27 @@ test("An agent type a hook beneath withholds is not one of Jev's options", async
   await $.agent.offer({ agent: "Explore", description: "Read-only codebase search", source: "built-in" });
   await $.agent.offer({ agent: "lab:runner", description: "Runner only", source: "plugin" });
   await $.tool.call({ tool: "Agent", description: "find usages", prompt: "Find every caller of addTodo", tool_use_id: "a1" });
+  expect(Object.keys(sent[0].criteria as object)).toEqual(["general-purpose", "Explore"]);
+});
+
+test("An agent type no longer offered in a later turn is not a switch target", async ($, on) => {
+  const sent = base(on, () => ({ type: "choice", choice: "lab:runner", probabilities: { "lab:runner": 0.95, "general-purpose": 0.05 }, confidence: 0.9 }));
+  on("agent.offer", () => ({ isOffered: true }));
+  const spawned: unknown[] = [];
+  on("tool.call", (_$, e) => {
+    spawned.push(e.subagent_type);
+    return { result: undefined };
+  });
+  on("turn.complete", () => ({}));
+  await $.agent.offer({ agent: "general-purpose", description: "General tasks", source: "built-in" });
+  await $.agent.offer({ agent: "Explore", description: "Read-only codebase search", source: "built-in" });
+  await $.agent.offer({ agent: "lab:runner", description: "Runs a spec", source: "plugin" });
+  await $.turn.complete({ turnId: "t1", reason: "aborted" });
+  // The next turn's listing, after the lab plugin was unloaded.
+  await $.agent.offer({ agent: "general-purpose", description: "General tasks", source: "built-in" });
+  await $.agent.offer({ agent: "Explore", description: "Read-only codebase search", source: "built-in" });
+  await $.tool.call({ tool: "Agent", description: "run", prompt: "Run the spec", subagent_type: "general-purpose", tool_use_id: "a1" });
+  expect(spawned).toEqual(["general-purpose"]);
   expect(Object.keys(sent[0].criteria as object)).toEqual(["general-purpose", "Explore"]);
 });
 
@@ -162,6 +251,18 @@ pureTest("Compaction instructions keep relevant results and mark stale ones", ()
   expect(text).toContain("dropped: Bash ls.");
 });
 
+pureTest("compactItems keeps the newest 30 results, results cut at 500 and command labels at 80 characters", () => {
+  const uses = Array.from({ length: 35 }, (_, i) => ({ tool_use_id: `t${i + 1}`, tool: "Bash", input: { command: "x".repeat(200) }, text: "r".repeat(2000) }));
+  const items = compactItems([{ role: "assistant", text: "", toolUses: uses }]);
+  expect(items).toHaveLength(30);
+  expect(items[0].id).toBe("t6");
+  expect(items[29].id).toBe("t35");
+  for (const i of items) {
+    expect(i.result).toBe(`${"r".repeat(500)}… [1500 more chars]`);
+    expect(i.label).toBe(`Bash ${"x".repeat(80)}… [120 more chars]`);
+  }
+});
+
 test("session.compact passes the ranking to the summarizer", async ($, on) => {
   const messages: Msg[] = [
     { role: "user", text: "fix the failing date test", toolUses: [] },
@@ -181,6 +282,43 @@ test("session.compact passes the ranking to the summarizer", async ($, on) => {
   await $.session.compact({ trigger: "manual", messages });
   expect(instructions).toContain("Keep exact details (paths, errors, decisions, values) from: Bash step a.");
   expect(sent.map((q) => q.type)).toEqual(["score", "score", "score"]);
+});
+
+test("compaction: false sends no ranking call and no ranking instructions", { options: { compaction: false } }, async ($, on) => {
+  const messages: Msg[] = [
+    { role: "user", text: "fix the failing date test", toolUses: [] },
+    // Three results: the fewest withJevRanking ranks.
+    { role: "assistant", text: "", toolUses: ["a", "b", "c"].map((x, i) => ({ tool_use_id: `t${i}`, tool: "Bash", input: { command: `step ${x}` }, text: x })) },
+  ];
+  const sent = base(on, () => ({ type: "score", score: 2.8, probabilities: {}, confidence: 0.8 }));
+  let instructions: unknown;
+  on("session.compact", (_$, e) => {
+    instructions = e.instructions;
+    return { skip: "test" };
+  });
+  await $.session.compact({ trigger: "manual", messages });
+  expect(sent).toHaveLength(0);
+  expect(instructions).toBeUndefined();
+});
+
+test("session.compact scores relevance against the user's request, not jevfort's done follow-up", async ($, on) => {
+  const done = "Jev: the user's request doesn't look finished yet. Continue with what remains. If it is actually complete, say so in one line.";
+  const messages: Msg[] = [
+    { role: "user", text: "fix the failing date test", toolUses: [] },
+    {
+      role: "assistant",
+      text: "",
+      toolUses: ["a", "b", "c"].map((x, i) => ({ tool_use_id: `t${i}`, tool: "Bash", input: { command: `step ${x}` }, text: x })),
+    },
+    { role: "assistant", text: "Done.", toolUses: [] },
+    { role: "user", text: `The jevfort plugin sent a message:\n${done}\n\nThis is how plugins talk to you.`, toolUses: [] },
+    { role: "assistant", text: "Continuing.", toolUses: [] },
+  ];
+  const sent = base(on, () => ({ type: "score", score: 1.5, probabilities: {}, confidence: 0.8 }));
+  on("session.compact", () => ({ skip: "test" }));
+  await $.session.compact({ trigger: "manual", messages });
+  expect(sent).toHaveLength(3);
+  expect((JSON.parse(sent[0].state) as { request: string }).request).toBe("fix the failing date test");
 });
 
 test("session.compact waits longer for Jev than an interactive call, and tells jev-api so", async ($, on) => {

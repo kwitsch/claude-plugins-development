@@ -154,6 +154,30 @@ test("a summary that used all of Haiku's tokens was cut off: Claude Code compact
   expect(r.messages).toBeUndefined();
 });
 
+test("a Haiku summary of 200 characters or fewer falls through to Claude Code", async ($, on) => {
+  haikuSetup(on, "S".repeat(150));
+  let beneath = 0;
+  on("session.compact", () => {
+    beneath++;
+    return { skip: "test" };
+  });
+  const r = (await $.session.compact({ trigger: "manual", messages: MESSAGES })) as { messages?: unknown };
+  expect(beneath).toBe(1);
+  expect(r.messages).toBeUndefined();
+});
+
+test("a subagent's compaction is left to Claude Code", async ($, on) => {
+  const asked = haikuSetup(on, "S".repeat(300));
+  let beneath = 0;
+  on("session.compact", () => {
+    beneath++;
+    return { skip: "test" };
+  });
+  await $.session.compact({ trigger: "auto", agentId: "a1", messages: MESSAGES });
+  expect(asked).toHaveLength(0);
+  expect(beneath).toBe(1);
+});
+
 test("a precompute is skipped while Haiku compacts", async ($, on) => {
   const asked = haikuSetup(on, "S".repeat(300));
   const r = (await $.session.compact({ trigger: "precompute", messages: MESSAGES })) as { skip?: string };
@@ -181,13 +205,13 @@ async function respond($: Parameters<Parameters<typeof test>[2]>[0]) {
  * @param on - The test's `on`.
  * @param percent - What `$.session.usage()` reports as the context fill.
  * @param run - Answers a `/compact` run: `{ value }` resolves it, `{ deny }` refuses it, a pending promise queues it.
- * @returns The clock, the `/compact` run count and the status lines said.
+ * @returns The clock, the state (`/compact` run count; `hold` true keeps each `$.session.usage()` pending in `held` until called) and the status lines said.
  */
 function chatSetup(on: Parameters<typeof mock.clock>[0], percent: number, run: () => unknown = () => ({ value: undefined })) {
   mock.store(on, {});
   const clock = mock.clock(on);
   const status: string[] = [];
-  const state = { compacts: 0 };
+  const state = { compacts: 0, hold: false, held: [] as Array<() => void> };
   on("session.cwd", () => ({ value: "/proj" }));
   on("ui.status", (_$, e) => {
     status.push(String(e.text));
@@ -202,7 +226,10 @@ function chatSetup(on: Parameters<typeof mock.clock>[0], percent: number, run: (
     yield { kind: "stop", stopReason: "end_turn", usage: usage1h };
     return { turnId: e.turnId, index: e.index, answer: "ok", toolUses: [], stopReason: "end_turn", usage: usage1h };
   });
-  on("session.usage", () => ({ value: { context: { tokens: 1, window: 100, percent } } }));
+  on("session.usage", () => {
+    const answer = { value: { context: { tokens: 1, window: 100, percent } } };
+    return state.hold ? new Promise((resolve) => state.held.push(() => resolve(answer))) : answer;
+  });
   on("command.run", (_$, e, next) => {
     if (e.command !== "compact") return next(e);
     state.compacts++;
@@ -225,6 +252,132 @@ for (const [percent, option, runs] of [[70, 60, 1], [50, 60, 0], [90, 0, 0], [Nu
     expect(state.compacts).toBe(runs);
   });
 }
+
+test("a response after an auto-compact opens a new cold period that compacts again", async ($, on) => {
+  const { clock, state } = chatSetup(on, 70);
+  await $.session.start(START);
+  await respond($);
+  await clock.advance(CACHE_TTL["1h"] + 60_000);
+  expect(state.compacts).toBe(1);
+  await respond($);
+  await clock.advance(30 * 60_000);
+  expect(state.compacts).toBe(1);
+  await clock.advance(CACHE_TTL["1h"]);
+  expect(state.compacts).toBe(2);
+});
+
+test("a repeated session.start (reload) replaces the cache tick instead of adding a second one", async ($, on) => {
+  let reads = 0;
+  // Registered before chatSetup, so it runs above its answer: counts every fill read.
+  on("session.usage", (_$, e, next) => {
+    reads++;
+    return next(e);
+  });
+  // 50% stays below autoCompactPercent 60: every cold tick reads the fill, none compacts.
+  const { clock } = chatSetup(on, 50);
+  await $.session.start(START);
+  await $.session.start(START);
+  await respond($);
+  await clock.advance(CACHE_TTL["1h"] + 1_000);
+  const before = reads;
+  await clock.advance(15_000);
+  expect(reads - before).toBe(1);
+});
+
+test("a response that lands while the cold tick reads the clock keeps the warm chat from being compacted", async ($, on) => {
+  let armed = false;
+  // Registered before mock.clock, so it runs above it: one-shot, the tick's own clock read runs a whole turn.
+  on("clock.now", async (_$, e, next) => {
+    if (armed) {
+      armed = false;
+      await respond($);
+    }
+    return next(e);
+  });
+  const { clock, state } = chatSetup(on, 70);
+  await $.session.start(START);
+  await respond($);
+  await clock.advance(CACHE_TTL["1h"] - 5_000);
+  armed = true;
+  await clock.advance(10_000);
+  expect(armed).toBe(false);
+  expect(state.compacts).toBe(0);
+});
+
+// The tick's clock read yields: a response or a /clear landing then has drawn the fresh countdown, the tick must not redraw the old one.
+for (
+  const [what, before, after, warmFor, during] of [
+    ["a response on a cold cache", " cache cold", " cache 59m", CACHE_TTL["1h"] + 60_000, respond],
+    ["a /clear on a warm cache", " cache 49m", undefined, 10 * 60_000, async ($) => {
+      await $.session.end({ reason: "clear", sessionId: "s1", resume: { id: "s1" } });
+    }],
+  ] as const
+) {
+  test(`${what} during the tick's clock read keeps the fresh countdown on the band`, async ($, on) => {
+    let armed = false;
+    // Registered before mock.clock, so it runs above it: one-shot, on the tick's own clock read.
+    on("clock.now", async (_$, e, next) => {
+      if (armed) {
+        armed = false;
+        await during($);
+      }
+      return next(e);
+    });
+    const { clock } = chatSetup(on, 10);
+    on("ui.render", () => BENEATH);
+    await $.session.start(START);
+    const ui = await $.ui.mount(BAND);
+    await respond($);
+    await clock.advance(warmFor);
+    expect(await label(ui)).toBe(before);
+    armed = true;
+    await clock.advance(15_000);
+    expect(armed).toBe(false);
+    expect(await label(ui)).toBe(after);
+    await ui.unmount();
+  });
+}
+
+// The cold tick's fill read yields: whatever happens while it is pending must be judged again after it.
+for (
+  const [what, reads, runs, during] of [
+    ["two more cold ticks overlap it", 3, 1, async (_$, clock) => {
+      await clock.advance(15_000);
+      await clock.advance(15_000);
+    }],
+    ["a main-loop turn starts", 1, 0, async ($) => {
+      await $.turn.step({ turnId: "t2", index: 0, model: "claude-haiku-5-5", effort: "high", messageCount: 1 }).next();
+    }],
+    ["the session is reset (/clear)", 1, 0, async ($) => {
+      await $.session.end({ reason: "clear", sessionId: "s1", resume: { id: "s1" } });
+    }],
+  ] as const
+) {
+  test(`auto-compact runs /compact ${runs}x when ${what} during the cold tick's fill read`, async ($, on) => {
+    const { clock, state } = chatSetup(on, 70);
+    await $.session.start(START);
+    // turn.complete reads the fill too: hold only the reads after it.
+    await respond($);
+    state.hold = true;
+    await clock.advance(CACHE_TTL["1h"] + 1_000);
+    await during($, clock);
+    expect(state.held.length).toBe(reads);
+    for (const release of state.held.splice(0)) release();
+    await clock.settle();
+    expect(state.compacts).toBe(runs);
+  });
+}
+
+test("a background subagent's step does not hold off auto-compact", async ($, on) => {
+  const { clock, state } = chatSetup(on, 70);
+  await $.session.start(START);
+  await respond($);
+  // A background agent: no main-loop turn.complete ever follows its step.
+  await $.turn.step({ turnId: "s1", index: 0, model: "claude-opus-5-5", effort: "high", messageCount: 1, agentId: "a1" }).next();
+  await clock.advance(CACHE_TTL["1h"] + 60_000);
+  await clock.advance(60_000);
+  expect(state.compacts).toBe(1);
+});
 
 test("a /compact still queued behind the session is not issued again by the next ticks", async ($, on) => {
   // The engine keeps a plugin's `command.run` pending until the command ran: only the flag stops a repeat.
@@ -269,6 +422,22 @@ test("a precompute or a vetoed compaction leaves the countdown, a compaction tha
   await $.session.compact({ trigger: "manual", messages: MESSAGES });
   await clock.advance(30_000);
   expect(await label(ui)).toBeUndefined();
+  await ui.unmount();
+});
+
+test("a precompute that Claude Code's own compaction answers leaves the countdown", { options: { haikuCompact: false } }, async ($, on) => {
+  const { clock } = chatSetup(on, 70);
+  on("session.compact", () => ({ messages: [] }));
+  on("model.complete", () => ({ value: { isAnswered: false, reason: "down" } }));
+  on("ui.render", () => BENEATH);
+  await $.session.start(START);
+  const ui = await $.ui.mount(BAND);
+  await respond($);
+  await clock.advance(30_000);
+  expect(await label(ui)).toMatch(/^ cache \d+m$/);
+  await $.session.compact({ trigger: "precompute", messages: MESSAGES });
+  await clock.advance(30_000);
+  expect(await label(ui)).toMatch(/^ cache \d+m$/);
   await ui.unmount();
 });
 

@@ -17,12 +17,12 @@ subagents load it via ToolSearch), no skills, agents, command hooks or MCP serve
   `askJev` raises one `$.tool.call` with all questions of the decision (one System One request, needs jev-api >= 0.2.0),
   with a 4 s budget per `askJev` (`TIMEOUT_MS`; a compaction ranking, off the interactive path, gets 9 s, below the engine's 10 s per hook, `COMPACT_TIMEOUT_MS`: System One answers a batch question by question, 30 compaction-sized questions took 4.1 to 5.1 s), all or nothing. Every call gives jev-api a `timeout` equal to its budget (on the Haiku path 14 s, just under its 15 s; seconds, `JEV_API_TIMEOUT_S` 4, `COMPACT_API_TIMEOUT_S` 9), so jev-api stops waiting when jevfort does, not after its default 20 s
   (the HTTP request itself cannot be aborted and runs on until it settles or the engine's 30 s cap). jevfort makes no network request and reads no
-  endpoint or key: those are jev-api's environment (with none of the three set jev-api answers through Haiku, so `askJev` reads them through `$.env.get` and uses a 15 s budget, `HAIKU_TIMEOUT_MS`, and `timeout: 14`, instead of 4 s and 4) (`TYPESAFE_API_KEY`, `TYPESAFE_BASE_URL`, `JEV_URL`,
+  endpoint or key: those are jev-api's environment (with none of the three set jev-api answers through Haiku, so `askJev` reads them through `$.env.get`, once per turn (`haikuPath`, dropped with `jevTools`; a settings `env` change counts from the next turn), and uses a 15 s budget, `HAIKU_TIMEOUT_MS`, and `timeout: 14`, instead of 4 s and 4) (`TYPESAFE_API_KEY`, `TYPESAFE_BASE_URL`, `JEV_URL`,
   `TYPESAFE_DEFAULT_MODEL`). No `userConfig` entry for any of it.
 - jev-api is a declared plugin dependency (`claudePlugin.dependencies: ["jev-api"]` in `package.json`, copied into
   `plugin.json`; bare name, no version range): Claude Code keeps jevfort disabled while jev-api is missing or disabled.
   At runtime `jevMissing($)` looks the batch tool up in `$.tool.list()` once per turn: the listing (`jevTools`) is
-  shared by the turn's hooks and dropped at every main-loop `turn.complete` (subagent completions keep it; Claude Code 2.1.322 has no tool-list-changed
+  shared by the turn's hooks (with the whole listing `toolListing`, which step 0 offers its deferred tools from, the offerable skills `skillList` of the classifier and step 0, and `haikuPath`; `dropTurnReads`) and dropped at every main-loop `turn.complete` and after a `/jev` run between turns (subagent completions keep it; Claude Code 2.1.322 has no tool-list-changed
   event), so jev-api appearing or going away takes effect from the next turn; `session.start` lists again after
   `next(e)` as the session's baseline; a failed or malformed listing counts as all missing. `jevApply` applies a
   changed listing once (`jevState` holds the last applied one and stays unset until the baseline, so a listing beneath
@@ -90,7 +90,7 @@ subagents load it via ToolSearch), no skills, agents, command hooks or MCP serve
   and sends one framed follow-up message (`DONE_PROMPT`) through `$.prompt.submit`, because `cc-plugin-sec-default`
   skips user-tier `classic.Stop` hooks. The unfinished answer stays visible. Background Bash work is not detected,
   only subagents (`$.agent.list()`, waiting = any status but `completed`, `failed`, `killed`, `idle`). The follow-up is
-  recognised by `origin: { kind: "plugin", name: "jevfort" }` in `prompt.submit`, not by its text; a user's own prompt (`origin.kind` `composer`, not meta) clears the
+  recognised by `origin: { kind: "plugin", name: "jevfort" }` in `prompt.submit`, not by its text; a user's own prompt submitted while idle (`origin.kind` `composer`, not meta, no `turnId`) clears the
   exemption of the next turn, meta prompts keep it. A rejected follow-up is logged by the next `turn.complete`.
 - Effort routing: the turn's effort comes from the effort estimate (`estimateEffort` in `policy.mts`, shared with the
   `estimate_effort` tool; its two questions go out with the other step-0 questions in the same batch call), not from upstream's difficulty->effort
@@ -102,15 +102,18 @@ subagents load it via ToolSearch), no skills, agents, command hooks or MCP serve
   linear, `EFFORT_CUTS` 1.05/1.9/2.5/3.1 land on 0.5/1.5/2.5/3.5, the last cut is provisional), rounded, clamped. There is no model bias (removed in 0.9.0 by user decision: it was
   never validated and shifted the calibrated cuts per model); the tool's `model` input stays for callers and is ignored by
   the rule. The cuts are for `d1-3b`; the Haiku fallback of jev-api is not calibrated either. `route` and `estimate` log entries carry `effortScore` and `effortConfidence` to recalibrate from real turns.
-  `tests/effort-fixture.test.mts` pins the acceptance numbers (A1 to A5). `words()` in `candidates.mts` splits at
-  `[^\p{L}\p{N}]` so umlauts survive; German prompts still share few words with English skill descriptions.
+  `tests/effort-fixture.test.mts` pins the acceptance numbers (A1 to A5). `words()` in `candidates.mts` normalizes to NFC and splits at
+  `[^\p{L}\p{M}\p{N}]` so umlauts (also NFD-typed) and vowel signs survive; German prompts still share few words with English skill descriptions.
+  The prompt classifier's `skill` question (`skillOptions`, 0.11.0, F01) offers only `relevant(request, dedupeSkills(...))` (at most 8) plus
+  `none`, and is left out when no listed skill is related: System One costs ~32 ms per option, and every listed skill crossed the 4 s budget
+  (and tripped `jevPause`) from ~120 skills. A related skill without a shared word (German prompt) gets no classifier hint.
   Opus/Sonnet sessions are estimated every turn; Haiku/Fable sessions only on each loop's first turn, whose estimate is
   then held while the session effort is unchanged. A model switch starts a new first turn. Bounds: options
   `minEffort`/`maxEffort`; invalid or inverted values fall back to `low`/`xhigh` with a logged error at session start.
 
 ## Known limit: session.compact is bypassed (Claude Code 2.1.325)
 
-The built-in `cc-plugin-sec-default` passes `session.compact` on past every user-tier hook (debug log: `jevfort: session.compact bypassed by cc-plugin-sec-default (tier user); beneath runs`, and `its session.compact hook was skipped`), as it does for `prompt.compose`, `prompt.section`, `prompt.context` and `classic.Stop` (for `tool.check` only a re-dispatch notice appears, the verdict stays allow: inline-headroom/docs/claude-code-verification.md). So the Jev ranking, the Haiku compaction and the `cacheExpires = 0` reset after a compaction do not run until that changes; core compacts on its own. Seen live with a manual `/compact` in `claude -p`; an interactive session and an auto-compaction were not tried. Nothing in this plugin can get past a prepend-tier hook; the code and its tests stay as they are (the kit runs the hook).
+The built-in `cc-plugin-sec-default` passes `session.compact` on past every user-tier hook (debug log: `jevfort: session.compact bypassed by cc-plugin-sec-default (tier user); beneath runs`, and `its session.compact hook was skipped`), as it does for `prompt.compose`, `prompt.section`, `prompt.context` and `classic.Stop` (for `tool.check` only a re-dispatch notice appears, the verdict stays allow: inline-headroom/docs/claude-code-verification.md). So the Jev ranking, the Haiku compaction and the `cacheExpires = 0` reset after a compaction do not run until that changes; core compacts on its own. The context-fill compaction's `compactQueued` is also cleared when its `$.command.run("compact")` resolves (it resolves once the compaction ran), so a later full turn end compacts again. Seen live with a manual `/compact` in `claude -p`; an interactive session and an auto-compaction were not tried. Nothing in this plugin can get past a prepend-tier hook; the code and its tests stay as they are (the kit runs the hook).
 
 ## Pause after a timeout
 
@@ -122,7 +125,7 @@ The built-in `cc-plugin-sec-default` passes `session.compact` on past every user
 
 ## Known limit: several sessions share one log
 
-`record()` reads and writes the whole `log` and `stats` values and is serialized only inside one process: two Claude processes on the same plugin store can overwrite each other's entries, so `/jev` counts and `/jev report` undercount while several sessions run at once. Behaviour is unaffected. A per-session key merged at read time would fix it; not done.
+`record()` buffers decisions in memory and `flushLog` (in-frame at `turn.complete`, `session.end` and `/jev`; F06, 0.11.0) reads and writes the whole `log` and `stats` values once per flush, serialized only inside one process (a process that dies before a flush loses its pending decisions): two Claude processes on the same plugin store can overwrite each other's entries, so `/jev` counts and `/jev report` undercount while several sessions run at once. Behaviour is unaffected. A per-session key merged at read time would fix it; not done.
 
 ## Known limit: a hook above refusing a core read
 

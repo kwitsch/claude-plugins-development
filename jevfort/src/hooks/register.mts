@@ -16,19 +16,19 @@
 import { GENERAL, SWITCH_AT } from "./agents.mjs";
 import { CACHE_TTL, cacheColor, cacheLabel, minutesLeft, nextTtl } from "./cache.mjs";
 import type { CacheTtl } from "./cache.mjs";
-import { absolute, AUTH_TOOL, bash, BUILTIN_COMMANDS, clipScript, coversStep, dedupeSkills, isSafeToOffer, MAX_READS, mentionedPaths, quotedTerms, relevant, SAFE_MAKE, SAFE_SCRIPT, sameCall, SKILL_BLOCKLIST_KEY } from "./candidates.mjs";
+import { absolute, AUTH_TOOL, bash, BUILTIN_COMMANDS, clipScript, coversStep, dedupeSkills, isSafeScript, isSafeToOffer, MAX_READS, MAX_STATS, mentionedPaths, quotedTerms, relevant, SAFE_MAKE, sameCall, SKILL_BLOCKLIST_KEY } from "./candidates.mjs";
 import type { Candidate } from "./candidates.mjs";
 import { COMPACT_MAX_TOKENS, COMPACT_MODEL, COMPACT_SYSTEM, compactInstructions, compactItems, haikuTranscript, RELEVANCE } from "./compact.mjs";
-import { clip, splitTurn, summarize, toolCalls } from "./context.mjs";
+import { clip, head, splitTurn, summarize, toolCalls } from "./context.mjs";
 import type { SessionMessage, ToolUse, TurnContext } from "./context.mjs";
 import { choice, COMPACT_API_TIMEOUT_S, COMPACT_TIMEOUT_MS, HAIKU_API_TIMEOUT_S, HAIKU_TIMEOUT_MS, isAnswer, JEV_API_TIMEOUT_S, JEV_BATCH, JEV_TOOL_PREFIX, JEV_TOOLS, MAX_CHOICE_OPTIONS, MAX_ERROR, MAX_PAUSE_MS, MEASURE_GRACE_MS, missingJevTools, noul, PAUSE_MS, score, TIMEOUT_MS } from "./jev.mjs";
 import type { Answer, ChoiceAnswer, JevResult, Question } from "./jev.mjs";
-import { LOG_KEY, MAX_ENTRIES, recentDecisions, remember, statsKey } from "./log.mjs";
+import { forgetRecent, LOG_KEY, MAX_ENTRIES, recentDecisions, remember, statsKey } from "./log.mjs";
 import type { Entry } from "./log.mjs";
 import { bestAction, bounds, difficultyQuestion, doneQuestion, EFFORT_ORDER, effortQuestion, ESTIMATE_SPEC, ESTIMATE_TOOL, estimateEffort, EVERY_TURN_MODELS, inBandRange, inScratchpad, isEffort, lowerModel, mechanicalQuestion, modelFamily, nextActionQuestion, parseEstimateInput, pickCandidate, route, shouldContinue, singleActionQuestion, taskEndQuestion } from "./policy.mjs";
 import type { Effort, EstimateBounds, EstimateModel, Route } from "./policy.mjs";
 import { hints, NONE, promptQuestions } from "./prompt.mjs";
-import { buildReport } from "./report.mjs";
+import { buildReport, escapePipes } from "./report.mjs";
 import { SUMMARY_MODEL, SYSTEM } from "./summarize.mjs";
 import type { ModelUsage, Summary } from "./summarize.mjs";
 
@@ -43,7 +43,8 @@ type Engine = {
   /** Time. */
   clock: {
     now(): Promise<number>;
-    sleep(ms: number): Promise<unknown>;
+    /** Calls `fn` once after `ms` unless cancelled (the budget races cancel it: `sleep` has no cancel and stays pending). */
+    after(ms: number, fn: () => void): { cancel(): void };
     /** Calls `fn` every `ms` until cancelled; the engine does not wait for `fn`, so a slow call overlaps the next. */
     every(ms: number, fn: () => void): { cancel(): void };
   };
@@ -62,7 +63,7 @@ type Engine = {
   /** Filesystem. */
   fs: {
     exists(path: string): Promise<boolean>;
-    stat(path: string): Promise<{ kind: string; size: number }>;
+    stat(path: string): Promise<{ kind: string; size: number; isLink?: boolean }>;
     read(path: string): Promise<string>;
     write(path: string, text: string): Promise<unknown>;
   };
@@ -131,8 +132,8 @@ type ToolResult = { deny?: unknown; isError?: boolean } & Record<string, unknown
 type Check = { tool: string; tool_use_id?: string; agentId?: string; input?: unknown } & Record<string, unknown>;
 /** A `tool.check` result; `rule` is the settings rule that decided, absent for a tool's own check. */
 type Verdict = { decision: string; reason?: string; rule?: string } & Record<string, unknown>;
-/** A `prompt.submit` event; `origin` says who sent it (`{ kind: "plugin", name }` for another plugin's `$.prompt.submit`). */
-type PromptEvent = { command?: unknown; isMeta?: boolean; text: string; context?: readonly string[]; origin?: { kind?: string; name?: string } } & Record<string, unknown>;
+/** A `prompt.submit` event; `origin` says who sent it (`{ kind: "plugin", name }` for another plugin's `$.prompt.submit`), `turnId` the running turn for a prompt typed mid-turn (absent while idle). */
+type PromptEvent = { command?: unknown; isMeta?: boolean; text: string; context?: readonly string[]; origin?: { kind?: string; name?: string }; turnId?: string } & Record<string, unknown>;
 /** An `agent.offer` event. */
 type OfferEvent = { agent: string; description: string } & Record<string, unknown>;
 /** A `session.compact` event. */
@@ -143,6 +144,34 @@ type RenderEvent = { props: { isErrored?: boolean; text: string } } & Record<str
 type BandEvent = { props: { hasSurvey: boolean } } & Record<string, unknown>;
 /** A `turn.complete` event. */
 type TurnEnd = { turnId: string; reason?: string; agentId?: string; answer?: string } & Record<string, unknown>;
+/** What `buildCandidates` already scanned for paths this turn: the request text, `steps` rows, and the calls by index. */
+type PathScan = {
+  /** The request the scan belongs to; unset before the first scan. */
+  request?: string;
+  /** How many `steps` rows were scanned. */
+  steps: number;
+  /** Indexes of the calls whose result text was scanned. */
+  calls: Set<number>;
+  /** The paths found so far, as written. */
+  paths: Set<string>;
+};
+/** An empty path scan. */
+const newScan = (): PathScan => ({ steps: 0, calls: new Set(), paths: new Set() });
+/** A turn's `$.fs.stat` results by absolute path (`undefined`: missing or refused). */
+type StatCache = Map<string, { kind: string; size: number; isLink?: boolean } | undefined>;
+/** What one turn's `buildCandidates` calls share (dropped with the turn): stat results, the path scan, the cwd and the project's commands. */
+type TurnCache = {
+  /** Stat results by absolute path. */
+  statted: StatCache;
+  /** The path scan. */
+  scan: PathScan;
+  /** The cwd of the last build. */
+  cwd?: string;
+  /** The project's commands for `cwd`. */
+  project?: Candidate[];
+};
+/** An empty turn cache. */
+const newCache = (): TurnCache => ({ statted: new Map(), scan: newScan() });
 /** A `command.run` event. */
 type CommandEvent = { args: string } & Record<string, unknown>;
 /** The `on` the engine passes to `register`, one overload per hooked event. */
@@ -172,8 +201,25 @@ const CACHE_TICK_MS = 15_000;
 const MAX_TAKES_PER_TURN = 3;
 /** The file tools whose writes into the session scratchpad are always allowed. */
 const WRITE_TOOLS = new Set(["Edit", "Write", "NotebookEdit"]);
+
+/**
+ * Tells whether `tool.check` must return Claude Code's verdict unchanged: a deny, an allow (rewording it makes the
+ * security plugin warn the user) or an ask from a settings rule (`rule` set). Only a mode's bare ask may become allow.
+ *
+ * @param base - The verdict of the hooks beneath.
+ * @returns `true` when jevfort must not loosen it.
+ */
+function settled(base: Verdict): boolean {
+  return base.decision === "deny" || base.decision === "allow" || (base.decision === "ask" && base.rule !== undefined);
+}
 /** From this `single_action` probability on, a taken step bypasses the whole turn. */
 const SINGLE_ACTION = 0.8;
+/**
+ * Claude Code's error texts (2.1.325) for a call that never ran: rejected or denied by the user, a rule or a hook.
+ * A bypass take refused this way goes back to Claude, which carries the user's feedback or tries another way; a
+ * failed run (non-zero exit) does not match and is still summarized.
+ */
+const REFUSED = /^(The user doesn't want to proceed with this tool use|Permission for this tool use was denied|Permission to use .*has been denied|Hook '[^']*' blocked)/s;
 /** This plugin's name: the `origin.name` of the prompts it submits itself. */
 const PLUGIN_NAME = "jevfort";
 /** The done check's follow-up message. */
@@ -237,8 +283,8 @@ async function askJev($: Engine, state: unknown, questions: Record<string, Quest
   // No `ms`: nothing was sent, so the report must not count it as a Jev call.
   if (startedAt < jevPause.until) return { ok: false, error: `paused for ${Math.ceil((jevPause.until - startedAt) / 1000)} s after a timeout (${jevPause.error})` };
   // Without Jev access jev-api answers through Haiku, which needs a longer budget (jev-api reads the same three variables).
-  const [key, base, jevUrl] = await Promise.all([$.env.get("TYPESAFE_API_KEY"), $.env.get("TYPESAFE_BASE_URL"), $.env.get("JEV_URL")]).catch(() => [undefined, undefined, undefined]);
-  const haiku = ![key, base, jevUrl].some((v) => v?.trim());
+  // Read once per turn (`haikuPath`): a settings `env` change takes effect from the next turn.
+  const haiku = await (haikuPath ??= Promise.all([$.env.get("TYPESAFE_API_KEY"), $.env.get("TYPESAFE_BASE_URL"), $.env.get("JEV_URL")]).then((vals) => !vals.some((v) => v?.trim()), () => true));
   const budgetMs = haiku ? HAIKU_TIMEOUT_MS : slow ? COMPACT_TIMEOUT_MS : TIMEOUT_MS;
   const apiTimeoutS = haiku ? HAIKU_API_TIMEOUT_S : slow ? COMPACT_API_TIMEOUT_S : JEV_API_TIMEOUT_S;
   const entries = Object.entries(questions);
@@ -264,10 +310,10 @@ async function askJev($: Engine, state: unknown, questions: Record<string, Quest
   })();
   // A call abandoned at the timeout must not raise an unhandled rejection.
   call.catch(() => undefined);
-  const timeout = $.clock.sleep(budgetMs).then(() => undefined);
+  const timer = deadline($, budgetMs);
 
   try {
-    const answers = await Promise.race([call, timeout]);
+    const answers = await Promise.race([call, timer.elapsed]);
     if (!answers) {
       // Only a timeout pauses (a refused or failing endpoint answers fast and costs nothing).
       pauseAfterTimeout(startedAt, budgetMs, `timeout after ${budgetMs}ms`);
@@ -282,11 +328,42 @@ async function askJev($: Engine, state: unknown, questions: Record<string, Quest
     const timedOut = API_TIMEOUT.exec(error);
     if (timedOut) pauseAfterTimeout(startedAt, budgetMs, timedOut[0]);
     return done({ ok: false, error });
+  } finally {
+    timer.cancel();
   }
+}
+
+/**
+ * A cancellable budget for `Promise.race` (`$.clock.sleep` has no cancel and would stay pending after the race settled).
+ *
+ * @param $ - Engine interface.
+ * @param ms - The budget.
+ * @returns `elapsed` resolves with `undefined` after `ms` (rejects only when `$.clock.after` throws; a timer the engine refuses later never fires, so `elapsed` stays pending), `cancel` stops the timer.
+ */
+function deadline($: Engine, ms: number): { elapsed: Promise<undefined>; cancel(): void } {
+  let timer: { cancel(): void } | undefined;
+  const elapsed = new Promise<undefined>((resolve) => {
+    timer = $.clock.after(ms, () => resolve(undefined));
+  });
+  return { elapsed, cancel: () => timer?.cancel() };
 }
 
 /** This turn's jev-api listing, shared by concurrent hooks; dropped at every main-loop `turn.complete` and at `session.start`. */
 let jevTools: Promise<string[]> | undefined;
+/** The whole `$.tool.list()` answer behind `jevTools`: step 0 offers its deferred tools without a second listing. */
+let toolListing: Promise<ToolInfo[]> | undefined;
+/** This turn's offerable skills (listed, not built in, not blocklisted, deduped), shared by the classifier and step 0; dropped with `jevTools` and by a new block. */
+let skillList: Promise<CommandInfo[]> | undefined;
+/** This turn's "none of jev-api's three env values is set, Haiku answers" decision; dropped with `jevTools`. */
+let haikuPath: Promise<boolean> | undefined;
+
+/** Drops the per-turn engine reads shared across hooks: at every main-loop `turn.complete`, at `session.start`'s baseline and after a `/jev` between turns. */
+function dropTurnReads(): void {
+  jevTools = undefined;
+  toolListing = undefined;
+  skillList = undefined;
+  haikuPath = undefined;
+}
 /** The missing tools of the last applied listing joined by ", " ("" = ready); undefined until `session.start` set the session's baseline. */
 let jevState: string | undefined;
 /** Whether `estimate_effort` is registered in this session; a failed registration is retried by the next listing. */
@@ -329,7 +406,7 @@ function showMinutes($: Engine, minutes: number | null): void {
 
 /**
  * Starts the countdown over: a conversation that just began (or a new session) has no warm cache and nothing of the
- * old one stays on screen.
+ * old one stays on screen. Always redraws the band: its callers have just forgotten the old conversation's efforts too.
  *
  * @param $ - Engine interface.
  */
@@ -339,7 +416,10 @@ function resetCache($: Engine): void {
   lastResponseAt = undefined;
   coldCompacted = false;
   compactQueued = false;
-  showMinutes($, null);
+  shownMinutes = null;
+  try {
+    $.ui.invalidate("ui.render");
+  } catch { /* no mounted render site */ }
 }
 
 /**
@@ -352,10 +432,14 @@ function resetCache($: Engine): void {
 async function cacheTick($: Engine, autoCompactPercent: number): Promise<void> {
   // No response seen and nothing drawn: no engine call.
   if (cacheExpires <= 0 && shownMinutes === null) return;
-  const minutes = minutesLeft(cacheExpires, await $.clock.now());
+  // Read once before the clock await: the minutes and the staleness check below must judge the same expiry.
+  const expires = cacheExpires;
+  const now = await $.clock.now();
+  // A response or a reset during the await moved the expiry and drew the fresh countdown itself.
+  if (cacheExpires !== expires) return;
+  const minutes = minutesLeft(expires, now);
   showMinutes($, minutes);
   if (turnRunning || autoCompactPercent <= 0 || minutes !== 0 || coldCompacted) return;
-  const expires = cacheExpires;
   const percent = (await $.session.usage()).context.percent ?? 0;
   // The await yields: a tick that overlapped, a turn that started, a response that refreshed the cache (`cacheExpires`
   // moved) or a session reset (zeroed it) makes this decision stale, so the state is read again.
@@ -409,7 +493,7 @@ async function withJevRanking($: Engine, e: CompactEvent): Promise<CompactEvent>
   const items = compactItems(e.messages);
   if (items.length < 3) return e;
 
-  const request = splitTurn(e.messages)?.request ?? "";
+  const request = turnOf([...e.messages])?.request ?? "";
   const questions: Record<string, Question> = {};
   items.forEach((it, i) => {
     questions[`item_${i}`] = {
@@ -449,7 +533,7 @@ async function withJevRanking($: Engine, e: CompactEvent): Promise<CompactEvent>
  * @returns The missing full tool names, empty when jevfort can ask Jev.
  */
 function jevMissing($: Engine): Promise<string[]> {
-  return (jevTools ??= $.tool.list()
+  return (jevTools ??= (toolListing = $.tool.list())
     .then((t) => missingJevTools(t.map((x) => x.name)))
     .catch(() => [...JEV_TOOLS])
     .then(async (missing) => {
@@ -511,11 +595,17 @@ async function readLog($: Engine): Promise<Entry[]> {
 async function stats($: Engine): Promise<Record<string, number>> {
   return ((await $.store.get("stats")) as Record<string, number> | undefined) ?? {};
 }
-/** Tail of the queue that serializes record()'s store writes. */
+/** Tail of the queue that serializes flushLog()'s store writes. */
 let storeQueue: Promise<void> = Promise.resolve();
+/**
+ * Decisions recorded since the last {@link flushLog}, oldest first.
+ *
+ * @remarks shortcut: unbounded between flushes (every turn.complete flushes), cap it if one turn can record thousands.
+ */
+const pending: Entry[] = [];
 
 /**
- * Logs a decision: this session's buffer, the capped store log, the counters, and the status line.
+ * Logs a decision: this session's buffer, the pending store entries ({@link flushLog} writes them), and the status line.
  *
  * @param $ - Engine interface.
  * @param d - The decision without its time.
@@ -523,30 +613,44 @@ let storeQueue: Promise<void> = Promise.resolve();
 async function record($: Engine, d: Omit<Entry, "at">): Promise<void> {
   const entry: Entry = { ...d, at: await $.clock.now().catch(() => Date.now()) };
   remember(entry);
-
-  // Serialized: parallel hooks would otherwise read the same log and tally and lose each other's writes.
-  const run = storeQueue.then(async () => {
-    const log = await readLog($);
-    await $.store.set(LOG_KEY, [...log, entry].slice(-MAX_ENTRIES));
-
-    const tally = await stats($);
-    const key = statsKey(d);
-    await $.store.set("stats", { ...tally, [key]: (tally[key] ?? 0) + 1 });
-  });
-  storeQueue = run.catch(() => undefined);
-  // A failing store (over its 4 MiB cap, a full disk) must not fail a hook: this runs after Claude's step too, and the engine rethrows a hook's error after the request ran.
-  await storeQueue;
-
-  if (d.kind !== "outcome" && d.kind !== "turn") void $.ui.status(`jev: ${d.text}`.slice(0, 80));
+  pending.push(entry);
+  if (d.kind !== "outcome" && d.kind !== "turn") void $.ui.status(head(`jev: ${d.text}`, 80));
 }
 
 /**
- * Empties the log and the counters.
+ * Writes the pending decisions into the capped store log and the counters: one read and one write of each per call.
+ * Called in-frame from `turn.complete`, `session.end` and `/jev`; a hook that never completes loses its own entries.
+ * With nothing pending it still waits for the flushes already queued, so a store read after it sees their entries.
+ *
+ * @param $ - Engine interface.
+ */
+async function flushLog($: Engine): Promise<void> {
+  // Nothing of its own: still wait for another hook's flush, /jev reads the store next.
+  if (!pending.length) return storeQueue;
+  const entries = pending.splice(0);
+  // Serialized: parallel hooks would otherwise read the same log and tally and lose each other's writes.
+  const run = storeQueue.then(async () => {
+    const log = await readLog($);
+    await $.store.set(LOG_KEY, [...log, ...entries].slice(-MAX_ENTRIES));
+
+    const tally = await stats($);
+    for (const key of entries.map(statsKey)) tally[key] = (tally[key] ?? 0) + 1;
+    await $.store.set("stats", tally);
+  });
+  storeQueue = run.catch(() => undefined);
+  // A failing store (over its 4 MiB cap, a full disk) must not fail a hook: the entries are dropped, as one record() used to drop its own.
+  await storeQueue;
+}
+
+/**
+ * Empties the log, the counters and the pending decisions.
  *
  * @param $ - Engine interface.
  */
 async function clearLog($: Engine): Promise<void> {
-  // In the same queue as record(): one still in flight would otherwise write the cleared log back.
+  pending.length = 0;
+  forgetRecent();
+  // In the same queue as flushLog(): one still in flight would otherwise write the cleared log back.
   const run = storeQueue.then(async () => {
     await $.store.set(LOG_KEY, []);
     await $.store.set("stats", {});
@@ -563,7 +667,16 @@ async function clearLog($: Engine): Promise<void> {
  * @returns The request and the steps so far, or `undefined` without a request.
  */
 async function readTurn($: Engine, agentId?: string): Promise<TurnContext | undefined> {
-  const messages = await $.session.messages(agentId ? { agentId } : {});
+  return turnOf(await $.session.messages(agentId ? { agentId } : {}));
+}
+
+/**
+ * The current turn of a transcript already read.
+ *
+ * @param messages - What `$.session.messages` answered.
+ * @returns The request and the steps so far, or `undefined` without a request.
+ */
+function turnOf(messages: SessionMessage[] | undefined): TurnContext | undefined {
   if (!Array.isArray(messages)) return undefined;
   // Jev's own done follow-up is not the user's request.
   // shortcut: SessionMessage has no origin marker, so the synthetic message is matched by its exact text; a user sending exactly that text loses that one message from the scored request.
@@ -576,15 +689,14 @@ async function readTurn($: Engine, agentId?: string): Promise<TurnContext | unde
 /**
  * The end of the assistant's last reply, so short follow-ups are judged in context.
  *
- * @param $ - Engine interface.
- * @returns The last 800 characters of the reply, or `undefined`.
+ * @param messages - The main loop's transcript as `$.session.messages` answered it (the caller's one read per hook).
+ * @returns The last 800 characters of the reply (a low surrogate left by the cut dropped), or `undefined`.
  */
-async function previousReply($: Engine): Promise<string | undefined> {
-  const messages = await $.session.messages({}).catch(() => undefined);
+function previousReply(messages: SessionMessage[] | undefined): string | undefined {
   if (!Array.isArray(messages)) return undefined;
   for (let i = messages.length - 1; i >= 0; i--) {
     const m = messages[i];
-    if (m.role === "assistant" && m.text.trim()) return m.text.length > 800 ? `…${m.text.slice(-800)}` : m.text;
+    if (m.role === "assistant" && m.text.trim()) return m.text.length > 800 ? `…${m.text.slice(-800).replace(/^[\uDC00-\uDFFF]/, "")}` : m.text;
   }
   return undefined;
 }
@@ -597,10 +709,64 @@ async function previousReply($: Engine): Promise<string | undefined> {
  * @returns `pnpm`, `yarn`, `bun` or `npm`.
  */
 async function packageRunner($: Engine, cwd: string): Promise<string> {
-  for (const [file, runner] of [["pnpm-lock.yaml", "pnpm"], ["yarn.lock", "yarn"], ["bun.lockb", "bun"], ["bun.lock", "bun"]] as const) {
-    if (await $.fs.exists(`${cwd}/${file}`).catch(() => false)) return runner;
+  const locks = [["pnpm-lock.yaml", "pnpm"], ["yarn.lock", "yarn"], ["bun.lockb", "bun"], ["bun.lock", "bun"]] as const;
+  const found = await Promise.all(locks.map(([file]) => $.fs.exists(`${cwd}/${file}`).catch(() => false)));
+  return locks.find((_, i) => found[i])?.[1] ?? "npm";
+}
+
+/**
+ * The project's read-only git commands, safe scripts, Makefile targets and test runners; the probes run in parallel.
+ *
+ * @param $ - Engine interface.
+ * @param cwd - The project directory.
+ * @returns The candidates, in the order git, scripts, make, cargo, go, pytest.
+ */
+async function projectCommands($: Engine, cwd: string): Promise<Candidate[]> {
+  const out: Candidate[] = [];
+  const has = (file: string) => $.fs.exists(`${cwd}/${file}`).catch(() => false);
+  const read = (file: string) => $.fs.read(`${cwd}/${file}`).catch(() => undefined);
+  const [git, pkg, makefile, cargo, gomod, pytestIni, conftest, pyproject] = await Promise.all([has(".git"), read("package.json"), read("Makefile"), has("Cargo.toml"), has("go.mod"), has("pytest.ini"), has("conftest.py"), read("pyproject.toml")]);
+
+  // Read-only git commands.
+  if (git) {
+    // One "what changed" option: status and diff --stat as two options split Jev's probability (0.75/0.24 live); merged it reaches 0.93.
+    out.push(bash("git status --short && git diff --stat", "Show what changed: which files are modified, staged or untracked, with a per-file count of changed lines"));
+    out.push(bash("git diff", "Show the full line-by-line diff of unstaged changes"));
+    out.push(bash("git log --oneline -n 15", "Show the 15 most recent commits"));
   }
-  return "npm";
+
+  // The project's own safe scripts and test runners.
+  if (typeof pkg === "string") {
+    let scripts: Record<string, string> = {};
+    try {
+      scripts = (JSON.parse(pkg.replace(/^\uFEFF/, "")) as { scripts?: Record<string, string> }).scripts ?? {};
+    } catch {
+      // a malformed package.json offers no scripts
+    }
+    const runner = await packageRunner($, cwd);
+    for (const name of Object.keys(scripts).filter((n) => isSafeScript(n) && typeof scripts[n] === "string")) {
+      const command = name === "test" ? `${runner} test` : `${runner} run ${name}`;
+      out.push(bash(command, `Run the project's "${name}" script (${clipScript(scripts[name])})`));
+    }
+  }
+  if (typeof makefile === "string") {
+    const targets = new Set([...makefile.matchAll(/^([A-Za-z][\w-]*):(?!=)/gm)].map((m) => m[1]));
+    for (const t of [...targets].filter((t) => SAFE_MAKE.test(t))) out.push(bash(`make ${t}`, `Run the Makefile's "${t}" target`));
+  }
+  if (cargo) {
+    out.push(bash("cargo test", "Run the Rust tests"));
+    out.push(bash("cargo check", "Type-check the Rust project"));
+    out.push(bash("cargo clippy", "Lint the Rust project"));
+  }
+  if (gomod) {
+    out.push(bash("go test ./...", "Run the Go tests"));
+    out.push(bash("go vet ./...", "Vet the Go code"));
+    out.push(bash("go build ./...", "Build the Go packages"));
+  }
+  if (pytestIni || conftest || /\[tool\.pytest/.test(String(pyproject ?? ""))) {
+    out.push(bash("python -m pytest -q", "Run the Python tests"));
+  }
+  return out;
 }
 
 /**
@@ -612,25 +778,56 @@ async function packageRunner($: Engine, cwd: string): Promise<string> {
  * @param steps - The turn's steps so far.
  * @param calls - The turn's tool calls so far.
  * @param stepIndex - The step within the turn.
+ * @param cache - The turn's shared reads, filled here (a fresh one by default, so nothing outlives the turn): the stat
+ * results by absolute path (at most `MAX_STATS` new paths per call), the path scan (only new rows are scanned; a new request
+ * row or a shorter step list, as after a mid-turn compaction or a delivered message, starts a new scan), the cwd
+ * (read again every call) and the project's commands (dropped when the cwd changed).
  * @returns At most `MAX_CHOICE_OPTIONS - 1` candidates (one of jev-api's choice options is `claude`).
  */
-async function buildCandidates($: Engine, request: string, steps: readonly SessionMessage[], calls: readonly ToolUse[], stepIndex: number): Promise<Candidate[]> {
+async function buildCandidates($: Engine, request: string, steps: readonly SessionMessage[], calls: readonly ToolUse[], stepIndex: number, cache: TurnCache = newCache()): Promise<Candidate[]> {
+  const { statted } = cache;
+  // Read every step: a carried-over `cd` or EnterWorktree moves the cwd mid-turn, and the project commands with it.
   const cwd = await $.session.cwd();
+  if (cache.cwd !== cwd) {
+    cache.cwd = cwd;
+    cache.project = undefined;
+  }
   const out: Candidate[] = [];
-  const has = (file: string) => $.fs.exists(`${cwd}/${file}`).catch(() => false);
 
   // Files named in the request or the turn's text/tool output, not yet read this turn.
-  const texts = [request, ...steps.map((m) => m.text), ...calls.map((c) => c.text ?? "")];
-  const alreadyRead = new Set(calls.filter((c) => c.tool === "Read").map((c) => String(c.input.file_path)));
+  // Rows are final once seen, except a call's result, which may arrive a step later: calls count once they have text.
+  // A new request row or fewer steps (a mid-turn compaction, a delivered message) is a new transcript: scan it again.
+  if (cache.scan.request !== undefined && (cache.scan.request !== request || steps.length < cache.scan.steps)) cache.scan = newScan();
+  const { scan } = cache;
+  const texts = scan.request === undefined ? [request] : [];
+  scan.request = request;
+  for (; scan.steps < steps.length; scan.steps++) texts.push(steps[scan.steps].text);
+  calls.forEach((c, i) => {
+    if (c.text === undefined || scan.calls.has(i)) return;
+    scan.calls.add(i);
+    texts.push(c.text);
+  });
+  const alreadyRead = new Set(calls.filter((c) => c.tool === "Read").map((c) => absolute(cwd, String(c.input.file_path))));
+  // Files offered in this build: one Read candidate per file, whatever spelling named it.
+  const offered = new Set<string>();
   let reads = 0;
-  for (const p of mentionedPaths(texts)) {
+  let probes = 0;
+  for (const p of mentionedPaths(texts, scan.paths)) {
     if (reads >= MAX_READS) break;
     if (p.startsWith("~")) continue;
     const file = absolute(cwd, p);
-    if (alreadyRead.has(file) || !isSafeToOffer(file, cwd)) continue;
-    const stat = await $.fs.stat(file).catch(() => undefined);
-    if (stat?.kind !== "file" || stat.size > 2_000_000) continue;
+    if (offered.has(file) || alreadyRead.has(file) || !isSafeToOffer(file, cwd)) continue;
+    if (!statted.has(file)) {
+      // Past the budget only paths statted by an earlier step are still offered.
+      if (probes >= MAX_STATS) continue;
+      probes += 1;
+      statted.set(file, await $.fs.stat(file).catch(() => undefined));
+    }
+    const stat = statted.get(file);
+    // A symlink may lead outside the project: never offer one.
+    if (stat?.kind !== "file" || stat.isLink || stat.size > 2_000_000) continue;
     out.push({ key: `read ${p}`, description: `Read the file ${p}`, tool: "Read", input: { file_path: file } });
+    offered.add(file);
     reads += 1;
   }
 
@@ -639,55 +836,12 @@ async function buildCandidates($: Engine, request: string, steps: readonly Sessi
     out.push(bash(`grep -rnF --exclude-dir=node_modules --exclude-dir=.git -- '${term}' .`, `Search the project for the text "${term}"`));
   }
 
-  // Read-only git commands.
-  if (await has(".git")) {
-    // One "what changed" option: status and diff --stat as two options split Jev's probability (0.75/0.24 live); merged it reaches 0.93.
-    out.push(bash("git status --short && git diff --stat", "Show what changed: which files are modified, staged or untracked, with a per-file count of changed lines"));
-    out.push(bash("git diff", "Show the full line-by-line diff of unstaged changes"));
-    out.push(bash("git log --oneline -n 15", "Show the 15 most recent commits"));
-  }
-
-  // The project's own safe scripts and test runners.
-  const pkg = await $.fs.read(`${cwd}/package.json`).catch(() => undefined);
-  if (typeof pkg === "string") {
-    let scripts: Record<string, string> = {};
-    try {
-      scripts = (JSON.parse(pkg) as { scripts?: Record<string, string> }).scripts ?? {};
-    } catch {
-      // a malformed package.json offers no scripts
-    }
-    const runner = await packageRunner($, cwd);
-    for (const name of Object.keys(scripts).filter((n) => SAFE_SCRIPT.test(n) && typeof scripts[n] === "string")) {
-      const command = name === "test" ? `${runner} test` : `${runner} run ${name}`;
-      out.push(bash(command, `Run the project's "${name}" script (${clipScript(scripts[name])})`));
-    }
-  }
-  const makefile = await $.fs.read(`${cwd}/Makefile`).catch(() => undefined);
-  if (typeof makefile === "string") {
-    const targets = new Set([...makefile.matchAll(/^([A-Za-z][\w-]*):(?!=)/gm)].map((m) => m[1]));
-    for (const t of [...targets].filter((t) => SAFE_MAKE.test(t))) out.push(bash(`make ${t}`, `Run the Makefile's "${t}" target`));
-  }
-  if (await has("Cargo.toml")) {
-    out.push(bash("cargo test", "Run the Rust tests"));
-    out.push(bash("cargo check", "Type-check the Rust project"));
-    out.push(bash("cargo clippy", "Lint the Rust project"));
-  }
-  if (await has("go.mod")) {
-    out.push(bash("go test ./...", "Run the Go tests"));
-    out.push(bash("go vet ./...", "Vet the Go code"));
-    out.push(bash("go build ./...", "Build the Go packages"));
-  }
-  if ((await has("pytest.ini")) || (await has("conftest.py")) || /\[tool\.pytest/.test(String(await $.fs.read(`${cwd}/pyproject.toml`).catch(() => "")))) {
-    out.push(bash("python -m pytest -q", "Run the Python tests"));
-  }
+  // The project's git commands, scripts and test runners: probed once per turn and cwd (a file created later counts next turn).
+  out.push(...(cache.project ??= await projectCommands($, cwd)));
 
   // First move of a turn only: a skill to invoke, or a deferred tool to load.
   if (stepIndex === 0) {
-    const commands = await $.command.list().catch(() => []);
-    const blocked = new Set(((await $.store.get(SKILL_BLOCKLIST_KEY).catch(() => undefined)) as string[] | undefined) ?? []);
-    const allSkills = dedupeSkills(
-      commands.filter((c) => (c.source === "plugin" || c.source === "user") && c.name !== "jev" && !BUILTIN_COMMANDS.has(c.name) && !blocked.has(c.name)),
-    );
+    const allSkills = await offerableSkills($);
     // Every skill when the prompt is about skills; otherwise only related ones.
     const skills = /\bskills?\b/i.test(request) ? allSkills : relevant(request, allSkills);
     for (const c of skills) {
@@ -695,7 +849,7 @@ async function buildCandidates($: Engine, request: string, steps: readonly Sessi
     }
     const loaded = new Set(calls.filter((c) => c.tool === "ToolSearch").map((c) => String(c.input.query)));
     // jev-api's tools are jevfort's own Jev back end, never a tool for Claude to load.
-    const tools = (await $.tool.list().catch(() => [])).filter((t) => t.mcp && !AUTH_TOOL.test(t.name) && !t.name.startsWith(JEV_TOOL_PREFIX) && !loaded.has(`select:${t.name}`));
+    const tools = (await (toolListing ?? $.tool.list()).catch(() => [])).filter((t) => t.mcp && !AUTH_TOOL.test(t.name) && !t.name.startsWith(JEV_TOOL_PREFIX) && !loaded.has(`select:${t.name}`));
     for (const t of relevant(request, tools)) {
       out.push({ key: `load ${t.name}`, description: `Load the tool ${t.name}: ${clipScript(t.description)}`, tool: "ToolSearch", input: { query: `select:${t.name}`, max_results: 1 } });
     }
@@ -728,26 +882,36 @@ async function summarizeResult($: Engine, request: string, action: string, outpu
 }
 
 /**
- * The skill options of the prompt classifier: `none` plus each listed plugin or user skill that is not built in or
- * blocklisted, once per name and in listing order, at most `MAX_CHOICE_OPTIONS` options in all (jev-api's choice
- * limit).
+ * The plugin and user skills Jev may offer: listed, not built in, not `jev`, not blocklisted, deduped. Read once per turn
+ * (`skillList`), shared by the classifier and step 0; never rejects.
  *
  * @param $ - Engine interface.
- * @returns The options, or `undefined` when no skill is listed.
+ * @returns The skills.
  */
-async function skillOptions($: Engine): Promise<Record<string, string> | undefined> {
-  const commands = await $.command.list().catch(() => []);
-  const blocked = new Set(((await $.store.get(SKILL_BLOCKLIST_KEY).catch(() => undefined)) as string[] | undefined) ?? []);
+function offerableSkills($: Engine): Promise<CommandInfo[]> {
+  return (skillList ??= (async () => {
+    const commands = await $.command.list().catch(() => []);
+    const blocked = new Set(((await $.store.get(SKILL_BLOCKLIST_KEY).catch(() => undefined)) as string[] | undefined) ?? []);
+    return dedupeSkills(commands.filter((c) => (c.source === "plugin" || c.source === "user") && c.name !== "jev" && !BUILTIN_COMMANDS.has(c.name) && !blocked.has(c.name)));
+  })());
+}
+
+/**
+ * The skill options of the prompt classifier: `none` plus the listed plugin or user skills that are not built in or
+ * blocklisted and share words with the request (`relevant`, at most 8, best first, after `dedupeSkills`). System One's
+ * latency grows ~32 ms per option: every listed skill crossed the 4 s budget from ~120 skills (F01).
+ *
+ * @param $ - Engine interface.
+ * @param request - The prompt.
+ * @returns The options, or `undefined` when no listed skill is related.
+ */
+async function skillOptions($: Engine, request: string): Promise<Record<string, string> | undefined> {
+  // A skill named `none` would overwrite the no-skill option and read as "no skill" in `hints`.
+  const skills = relevant(request, await offerableSkills($)).filter((c) => c.name !== NONE);
+  if (!skills.length) return undefined;
   const criteria: Record<string, string> = { [NONE]: "No listed skill is meant for this request" };
-  for (const c of commands) {
-    // shortcut: past jev-api's choice limit later skills are left out; rank them if users hit it.
-    if (Object.keys(criteria).length >= MAX_CHOICE_OPTIONS) break;
-    // Own keys only: `in` would also see Object.prototype members, dropping a skill named `constructor` or `toString`.
-    if ((c.source === "plugin" || c.source === "user") && c.name !== "jev" && !BUILTIN_COMMANDS.has(c.name) && !blocked.has(c.name) && !Object.hasOwn(criteria, c.name)) {
-      criteria[c.name] = clip(c.description, 160);
-    }
-  }
-  return Object.keys(criteria).length > 1 ? criteria : undefined;
+  for (const c of skills) criteria[c.name] = clip(c.description, 160);
+  return criteria;
 }
 
 /**
@@ -763,7 +927,7 @@ function summarizeCalls(calls: readonly { tool: string; input: Record<string, un
     const target = typeof c.input.file_path === "string"
       ? c.input.file_path.split("/").pop()
       : typeof c.input.command === "string"
-      ? c.input.command.replace(/\s+/g, " ").slice(0, 30)
+      ? head(c.input.command.replace(/\s+/g, " "), 30)
       : typeof c.input.skill === "string"
       ? c.input.skill
       : "";
@@ -824,6 +988,7 @@ async function blockSkill($: Engine, name: string): Promise<void> {
   try {
     const list = ((await $.store.get(SKILL_BLOCKLIST_KEY)) as string[] | undefined) ?? [];
     if (!list.includes(name)) await $.store.set(SKILL_BLOCKLIST_KEY, [...list, name]);
+    skillList = undefined;
   } catch {
     // A failing store (over its cap, a full disk) must not fail the tool call hook after the call ran.
   }
@@ -843,21 +1008,24 @@ async function blockSkill($: Engine, name: string): Promise<void> {
  * @param continued - The done check just sent Claude back: the task is not finished.
  * @param fromPercent - Context fill from which a task end compacts; 0 is off.
  * @param forcePercent - Context fill from which any turn end compacts; 0 is off.
+ * @param asked - The task-end answer the done check already got in its merged request (`end` undefined: no usable
+ * answer, no compaction); absent, the task end is asked here.
  */
-async function contextCompact($: Engine, e: TurnEnd, ready: boolean, continued: boolean, fromPercent: number, forcePercent: number): Promise<void> {
+async function contextCompact($: Engine, e: TurnEnd, ready: boolean, continued: boolean, fromPercent: number, forcePercent: number, asked?: { end: number | undefined }): Promise<void> {
   if (e.agentId !== undefined || compactQueued || (fromPercent <= 0 && forcePercent <= 0)) return;
-  // A non-finite fill (0/0, an empty window) is no fill: `Infinity >= x` would force a compaction.
-  const reported = (await $.session.usage().catch(() => undefined))?.context.percent ?? 0;
-  const percent = Number.isFinite(reported) ? reported : 0;
+  const percent = await fillPercent($);
   const forced = forcePercent > 0 && percent >= forcePercent;
   if (!forced && (fromPercent <= 0 || percent < fromPercent || !ready || continued || e.reason !== "answer")) return;
   let text = `${percent.toFixed(0)}% full, forced`;
   if (!forced) {
-    const ctx = await readTurn($);
-    if (!ctx) return;
-    const r = await askJev($, { request: clip(ctx.request, 3000), final_message: clip(e.answer ?? "", 2000), recent: summarize(ctx.steps) }, { end: taskEndQuestion });
-    if (!r.ok) return;
-    const end = noul(r.answers, "end");
+    let end = asked?.end;
+    if (!asked) {
+      const ctx = await readTurn($);
+      if (!ctx) return;
+      const r = await askJev($, { request: clip(ctx.request, 3000), final_message: clip(e.answer ?? "", 2000), recent: summarize(ctx.steps) }, { end: taskEndQuestion });
+      if (!r.ok) return;
+      end = noul(r.answers, "end");
+    }
     if (end === undefined || end < 0.5) return;
     text = `${percent.toFixed(0)}% full, task ended (p=${end.toFixed(2)})`;
   }
@@ -865,11 +1033,25 @@ async function contextCompact($: Engine, e: TurnEnd, ready: boolean, continued: 
   if (compactQueued) return;
   compactQueued = true;
   await record($, { kind: "autocompact", applied: true, text, data: { percent, forced } }).catch(() => undefined);
-  // Not awaited: it resolves only once the compaction ran, after this turn ended. No `$` call in the rejection handler.
-  $.command.run({ command: "compact", args: "" }).catch((err: unknown) => {
+  // Not awaited: it resolves only once the compaction ran, after this turn ended. No `$` call in the handlers. The
+  // resolve clears the flag too: cc-plugin-sec-default bypasses the session.compact hook that would (2.1.325).
+  $.command.run({ command: "compact", args: "" }).then(() => {
+    compactQueued = false;
+  }, (err: unknown) => {
     compactQueued = false;
     lostCompact = String(err);
   });
+}
+
+/**
+ * The context fill in percent; a non-finite fill (0/0, an empty window) is no fill: `Infinity >= x` would force a compaction.
+ *
+ * @param $ - Engine interface.
+ * @returns The fill, 0 when unreadable or not finite.
+ */
+async function fillPercent($: Engine): Promise<number> {
+  const reported = (await $.session.usage().catch(() => undefined))?.context.percent ?? 0;
+  return Number.isFinite(reported) ? reported : 0;
 }
 
 /**
@@ -881,27 +1063,29 @@ async function contextCompact($: Engine, e: TurnEnd, ready: boolean, continued: 
  * @param $ - Engine interface.
  * @param e - The `turn.complete` event.
  * @param threshold - The `doneThreshold`: below this `done` probability the request counts as unfinished.
- * @returns Whether to send Claude back with a follow-up message.
+ * @param withEnd - Ask the task-end question in the same request (the turn end is due for a compaction judgement).
+ * @returns Whether to send Claude back with a follow-up message, and the task-end answer when it was asked (`end` undefined: asked, no usable answer).
  */
-async function checkDone($: Engine, e: TurnEnd, threshold: number): Promise<boolean> {
+async function checkDone($: Engine, e: TurnEnd, threshold: number, withEnd: boolean): Promise<{ unfinished: boolean; asked?: { end: number | undefined } }> {
   // Waiting on background work (a subagent) is not stopping early: that work will wake the session when it finishes.
   // shortcut: background Bash commands are not exposed to $ (only subagents are), so waiting on one still triggers a follow-up; upgrade when the engine lists background tasks.
   const agents = await $.agent.list().catch(() => undefined);
-  if (!agents) return false;
+  if (!agents) return { unfinished: false };
   const waitingOn = agents.filter((a) => !FINISHED.has(a.status)).length;
   if (waitingOn > 0) {
     await record($, { kind: "done", applied: false, text: `skipped: waiting on ${waitingOn} background task(s)`, data: { skipped: "background", continued: false } });
-    return false;
+    return { unfinished: false };
   }
 
   const ctx = await readTurn($);
-  if (!ctx) return false;
+  if (!ctx) return { unfinished: false };
   const r = await askJev(
     $,
     { request: clip(ctx.request, 3000), final_message: clip(e.answer ?? "", 2000), recent: summarize(ctx.steps) },
-    { done: doneQuestion },
+    withEnd ? { done: doneQuestion, end: taskEndQuestion } : { done: doneQuestion },
   );
-  if (!r.ok) return false;
+  // All or nothing: a failed merged call answers neither question, as two failed calls did.
+  if (!r.ok) return { unfinished: false, asked: withEnd ? { end: undefined } : undefined };
   const done = noul(r.answers, "done");
   const unfinished = shouldContinue(done, threshold);
   await record($, {
@@ -911,7 +1095,7 @@ async function checkDone($: Engine, e: TurnEnd, threshold: number): Promise<bool
     ms: r.ms,
     data: { p: done, continued: unfinished },
   });
-  return unfinished;
+  return { unfinished, asked: withEnd ? { end: noul(r.answers, "end") } : undefined };
 }
 
 /**
@@ -1010,6 +1194,8 @@ export const register = (on: On, options: Options): void => {
   let followUpEpoch = 0;
   // Why the last follow-up failed to submit: its rejection arrives after the hook frame ended, so it is logged by the next turn.complete.
   let lostFollowUp: string | undefined;
+  // Bumped at every main-loop turn.complete: the turn an agent type was last offered in (Jev's agent-switch options).
+  let agentTurn = 0;
   // Phase 3: classify each prompt as it is sent and, when Jev is confident, add a short hint only Claude reads.
   // This one hook also notes Jev's own done follow-up passing through, which arms the exemption.
   on("prompt.submit", async function onPromptSubmit($: Engine, e: PromptEvent, next: Next<PromptEvent, unknown>): Promise<unknown> {
@@ -1019,18 +1205,21 @@ export const register = (on: On, options: Options): void => {
       donePending = true;
       return next(e);
     }
-    if (e.origin?.kind === "composer" && !e.isMeta) donePending = false;
+    // Only a prompt submitted while idle (no `turnId`): one typed during the follow-up turn must not re-open that turn to a second check.
+    if (e.origin?.kind === "composer" && !e.isMeta && e.turnId === undefined) donePending = false;
     // A finished background task arrives as origin `task-notification` (not flagged meta): nothing to classify.
     if (options.classify === false || e.command || e.isMeta || e.origin?.kind === "task-notification" || e.text.trim().length < 3) return next(e);
 
-    const questions = promptQuestions(await skillOptions($));
-    const previous = await previousReply($);
+    const skillCriteria = await skillOptions($, e.text);
+    const questions = promptQuestions(skillCriteria);
+    const previous = previousReply(await $.session.messages({}).catch(() => undefined));
     const r = await askJev($, { request: clip(e.text, 3000), ...(previous ? { previous_reply: previous } : {}) }, questions);
     if (!r.ok) return next(e);
     const kind = choice(r.answers, "kind");
     const needsPlan = noul(r.answers, "needs_plan");
     const skillAnswer = choice(r.answers, "skill");
-    const skill = skillAnswer ? { name: skillAnswer.choice, p: skillAnswer.probabilities[skillAnswer.choice] ?? 0 } : undefined;
+    // An answer outside the offered options (blocklisted, built in, made up) is no hint: jev-api checks only its Haiku answers.
+    const skill = skillAnswer && skillCriteria && Object.hasOwn(skillCriteria, skillAnswer.choice) ? { name: skillAnswer.choice, p: skillAnswer.probabilities[skillAnswer.choice] ?? 0 } : undefined;
     // A confident skill is left to step 0 only where step 0 can take it: takeSteps on and not takeOnlyForBypass.
     const added = hints(kind?.choice, needsPlan, skill, takeSteps && !takeOnlyForBypass ? takeThreshold : Number.POSITIVE_INFINITY);
 
@@ -1047,26 +1236,30 @@ export const register = (on: On, options: Options): void => {
 
   // Phase 3: when Claude starts a general-purpose subagent, Jev may pick a more specialised agent type.
   if (options.agentTypes !== false) {
-    // Agent types as the engine offers them to the model, with their descriptions.
-    const offered = new Map<string, string>();
+    // Agent types as the engine offers them to the model, with their descriptions and the main-loop turn of the offer.
+    const offered = new Map<string, { description: string; turn: number }>();
 
     on("agent.offer", async function onAgentOffer($: Engine, e: OfferEvent, next: Next<OfferEvent, unknown>): Promise<unknown> {
       if ((await jevMissing($)).length) return next(e);
       const r = await next(e);
       // Only types the model is really offered are Jev's options: a hook beneath may withhold one, and its dispatch is then refused.
       if ((r as { isOffered?: boolean } | undefined)?.isOffered === false) offered.delete(e.agent);
-      else offered.set(e.agent, e.description);
+      else offered.set(e.agent, { description: e.description, turn: agentTurn });
       return r;
     });
 
     on("tool.call", { tool: "Agent" }, async function onAgentCall($: Engine, e: AgentCall, next: Next<AgentCall, ToolResult>): Promise<ToolResult> {
       if ((await jevMissing($)).length) return next(e);
       const claudeType = e.subagent_type ?? "";
+      // The engine offers its whole agent listing anew every turn: a type missing from the latest listing is gone
+      // (its plugin unloaded, its agent file removed) and must not become a switch target.
+      const latest = Math.max(...[...offered.values()].map((o) => o.turn));
+      for (const [name, o] of offered) if (o.turn < latest) offered.delete(name);
       if (offered.size < 2 || claudeType === "fork") return next(e);
 
       const criteria: Record<string, string> = {};
       // shortcut: past jev-api's choice limit later-offered agent types are left out; rank them if users hit it.
-      for (const [name, description] of [...offered].slice(0, MAX_CHOICE_OPTIONS)) criteria[name] = clip(description, 200);
+      for (const [name, o] of [...offered].slice(0, MAX_CHOICE_OPTIONS)) criteria[name] = clip(o.description, 200);
       const r = await askJev(
         $,
         { task: clip(e.prompt, 3000), description: e.description },
@@ -1076,7 +1269,8 @@ export const register = (on: On, options: Options): void => {
       const answer = choice(r.answers, "agent_type");
       if (!answer) return next(e);
       const p = answer.probabilities[answer.choice] ?? 0;
-      const canSwitch = GENERAL.has(claudeType) && !GENERAL.has(answer.choice) && p >= SWITCH_AT;
+      // Only to a type Jev was offered: an answer outside `criteria` may name one that is gone.
+      const canSwitch = GENERAL.has(claudeType) && !GENERAL.has(answer.choice) && Object.hasOwn(criteria, answer.choice) && p >= SWITCH_AT;
       await record($, {
         kind: "agent",
         applied: canSwitch,
@@ -1141,18 +1335,24 @@ export const register = (on: On, options: Options): void => {
     };
   });
 
-  // Per-turn state: the difficulty route, the effort sent on every step of the turn, Jev's takes and the bypass.
-  const turns = new Map<string, { route?: Route; effort?: Effort; taken: number; bypassId?: string; bypassAction?: string }>();
+  // Per-turn state: the difficulty route, the effort sent on every step of the turn, Jev's takes, the bypass and the
+  // stat results of mentioned paths (dropped with the turn, so a file created later is offered in the next turn).
+  const turns = new Map<string, { route?: Route; effort?: Effort; taken: number; bypassId?: string; bypassAction?: string; cache: TurnCache }>();
   // What each loop's first turn (key `agentId`, `""` for the main loop) saw and estimated: the session model's family,
   // the session effort (`from`) and the estimate (unset when none was made or Jev failed). Drives the Haiku/Fable hold.
   const firstTurns = new Map<string, { family?: EstimateModel; from: unknown; effort?: Effort }>();
   // Calls Jev made itself: `tool.check` approves them, their commands come from a vetted list.
   const ownCalls = new Set<string>();
-  /** Forgets what belongs to one conversation: its first-turn estimates, the band and the Auto switch. */
+  // The scratchpad lookups, resolved once per conversation: /clear and an in-process /resume give the session a new id
+  // and with it a new scratchpad directory.
+  let scratchpad: { roots: string[]; sid: string } | undefined;
+  /** Forgets what belongs to one conversation: its first-turn estimates, the band, the Auto switch, the scratchpad lookups and the `/jev` recent list. */
   const forgetConversation = (): void => {
     firstTurns.clear();
+    forgetRecent();
     band = {};
     autoOff = false;
+    scratchpad = undefined;
   };
   on("session.start", async function onSessionStart($: Engine, e: unknown, next: Next<unknown, unknown>): Promise<unknown> {
     // A new session (a start, a reload) gets its own first-turn estimate, an empty band, Auto on and a fresh cache
@@ -1177,8 +1377,10 @@ export const register = (on: On, options: Options): void => {
     const result = await next(e);
     // The session's baseline, listed only now: a jevfort hook raised inside `next(e)` (another plugin's session.start
     // making a tool call) may have cached a listing from before jev-api registered. Logs inactive or registers estimate_effort.
-    jevTools = undefined;
+    dropTurnReads();
     await jevApply($, await jevMissing($));
+    // MCP servers may still be connecting: the first step 0 lists the deferred tools itself.
+    toolListing = undefined;
     return result;
   });
 
@@ -1190,75 +1392,85 @@ export const register = (on: On, options: Options): void => {
     sessionEpoch += 1; // /clear raises only session.end (no session.start follows)
     forgetConversation();
     resetCache($);
+    await flushLog($);
     return next(e);
   });
 
   on("command.run", { command: "jev" }, async function onJevCommand($: Engine, e: CommandEvent): Promise<{ text: string }> {
-    const arg = e.args.trim();
-    if (arg === "report") {
-      return { text: buildReport(await readLog($), takeThreshold) };
-    }
-    if (arg === "candidates") {
-      // Exactly what Jev is offered at step 0 for the last prompt.
-      const ctx = await readTurn($);
-      const calls = ctx ? toolCalls(ctx.steps) : [];
-      const list = await buildCandidates($, ctx?.request ?? "", ctx?.steps ?? [], calls, 0);
-      const kind = (c: Candidate) => (c.tool === "Skill" ? "Skills" : c.tool === "ToolSearch" ? "Tools to load" : c.tool === "Read" ? "File reads" : "Commands");
-      const groups = new Map<string, Candidate[]>();
-      for (const c of list) groups.set(kind(c), [...(groups.get(kind(c)) ?? []), c]);
-      const sections = [...groups].map(
-        ([name, items]) =>
-          `### ${name} (${items.length})\n\n| Option | Description |\n|---|---|\n`
-          + items.map((c) => `| \`${c.key.replace(/\|/g, "\\|")}\` | ${c.description.replace(/\|/g, "\\|").replace(/\s+/g, " ")} |`).join("\n"),
-      );
+    // /jev runs between turns too: what it listed must not stand in for the next turn's own listing (mid-turn it stays the turn's).
+    try {
+      const arg = e.args.trim();
+      await flushLog($); // report, export and the counters read the store
+      if (arg === "report") {
+        return { text: buildReport(await readLog($), takeThreshold) };
+      }
+      if (arg === "candidates") {
+        // Exactly what Jev is offered at step 0 for the last prompt: step 0 sees no steps or calls yet.
+        const ctx = await readTurn($);
+        const list = await buildCandidates($, ctx?.request ?? "", [], [], 0);
+        const kind = (c: Candidate) => (c.tool === "Skill" ? "Skills" : c.tool === "ToolSearch" ? "Tools to load" : c.tool === "Read" ? "File reads" : "Commands");
+        const groups = new Map<string, Candidate[]>();
+        for (const c of list) groups.set(kind(c), [...(groups.get(kind(c)) ?? []), c]);
+        const sections = [...groups].map(
+          ([name, items]) =>
+            `### ${name} (${items.length})\n\n| Option | Description |\n|---|---|\n`
+            + items.map((c) => `| \`${escapePipes(c.key)}\` | ${escapePipes(c.description).replace(/\s+/g, " ")} |`).join("\n"),
+        );
+        return {
+          text: [
+            `## Jev candidates: ${list.length + 1} options`,
+            `_For the last prompt: "${clip(ctx?.request ?? "(none)", 60)}". Plus \`claude\`: leave the step to Claude._`,
+            ...sections,
+          ].join("\n\n"),
+        };
+      }
+      if (arg === "clear") {
+        await clearLog($);
+        return { text: "Jev pilot: log cleared." };
+      }
+      if (arg === "export") {
+        const log = await readLog($);
+        // A new file per export: $.fs.write follows symlinks (live, 2.1.325), so a committed `.jev/decisions.jsonl` symlink would make an overwrite land outside the cwd.
+        const path = `${await $.session.cwd()}/.jev/decisions-${await $.clock.now().catch(() => Date.now())}.jsonl`;
+        try {
+          if (await $.fs.exists(path)) return { text: `Jev pilot: ${path} exists, nothing written` };
+          await $.fs.write(path, log.map((entry) => JSON.stringify(entry)).join("\n") + "\n");
+          return { text: `Jev pilot: wrote ${log.length} entries to ${path}` };
+        } catch (err) {
+          return { text: `Jev pilot: could not write ${path}: ${err instanceof Error ? err.message : String(err)}` };
+        }
+      }
+      const missing = await jevMissing($);
+      const counts = Object.entries(await stats($).catch(() => ({ unreadable: 1 }))).map(([k, v]) => `${k}=${v}`).join(", ") || "none yet";
+      const lines = recentDecisions()
+        .slice(-10)
+        .map((d) => `- ${d.kind}${d.applied ? "" : " (pass)"}: ${d.text}${d.ms !== undefined ? ` [${Math.round(d.ms)}ms]` : ""}`);
       return {
         text: [
-          `## Jev candidates: ${list.length + 1} options`,
-          `_For the last prompt: "${clip(ctx?.request ?? "(none)", 60)}". Plus \`claude\`: leave the step to Claude._`,
-          ...sections,
-        ].join("\n\n"),
+          ...(missing.length ? [`Jev pilot: inactive, the jev-api tools are missing (${missing.join(", ")}). jevfort needs jev-api 0.2.0 or later and no permissions.deny rule matching its tools; it looks again at the next turn.`] : []),
+          `Jev pilot: routing ${routing}${autoOff ? " (effort auto off)" : ""}, take steps ${takeSteps} (p ≥ ${takeThreshold}), done check ${doneCheck}, subagents ${subagents}`,
+          `Decisions (all sessions): ${counts}`,
+          lines.length ? `Recent:\n${lines.join("\n")}` : "No decisions this session yet.",
+          "Full analysis: /jev report",
+        ].join("\n"),
       };
+    } finally {
+      if (!turnRunning) dropTurnReads();
     }
-    if (arg === "clear") {
-      await clearLog($);
-      return { text: "Jev pilot: log cleared." };
-    }
-    if (arg === "export") {
-      const log = await readLog($);
-      // A new file per export: $.fs.write follows symlinks (live, 2.1.325), so a committed `.jev/decisions.jsonl` symlink would make an overwrite land outside the cwd.
-      const path = `${await $.session.cwd()}/.jev/decisions-${await $.clock.now().catch(() => Date.now())}.jsonl`;
-      try {
-        if (await $.fs.exists(path)) return { text: `Jev pilot: ${path} exists, nothing written` };
-        await $.fs.write(path, log.map((entry) => JSON.stringify(entry)).join("\n") + "\n");
-        return { text: `Jev pilot: wrote ${log.length} entries to ${path}` };
-      } catch (err) {
-        return { text: `Jev pilot: could not write ${path}: ${err instanceof Error ? err.message : String(err)}` };
-      }
-    }
-    const missing = await jevMissing($);
-    const counts = Object.entries(await stats($).catch(() => ({ unreadable: 1 }))).map(([k, v]) => `${k}=${v}`).join(", ") || "none yet";
-    const lines = recentDecisions()
-      .slice(-10)
-      .map((d) => `- ${d.kind}${d.applied ? "" : " (pass)"}: ${d.text}${d.ms !== undefined ? ` [${Math.round(d.ms)}ms]` : ""}`);
-    return {
-      text: [
-        ...(missing.length ? [`Jev pilot: inactive, the jev-api tools are missing (${missing.join(", ")}). jevfort needs jev-api 0.2.0 or later and no permissions.deny rule matching its tools; it looks again at the next turn.`] : []),
-        `Jev pilot: routing ${routing}${autoOff ? " (effort auto off)" : ""}, take steps ${takeSteps} (p ≥ ${takeThreshold}), done check ${doneCheck}, subagents ${subagents}`,
-        `Decisions (all sessions): ${counts}`,
-        lines.length ? `Recent:\n${lines.join("\n")}` : "No decisions this session yet.",
-        "Full analysis: /jev report",
-      ].join("\n"),
-    };
   });
 
   on("turn.complete", async function onTurnComplete($: Engine, e: TurnEnd, next: Next<TurnEnd, unknown>): Promise<unknown> {
-    if (e.agentId === undefined) turnRunning = false;
+    if (e.agentId === undefined) {
+      turnRunning = false;
+      agentTurn += 1;
+    }
     const missing = await jevMissing($);
     // No engine event reports a changed tool list: the next main-loop turn's first hook lists the jev-api tools again
     // (a subagent's completion does not drop it, so a mid-turn listing glitch cannot flap the band).
-    if (e.agentId === undefined) jevTools = undefined;
+    if (e.agentId === undefined) dropTurnReads();
     if (missing.length) {
       await contextCompact($, e, false, false, taskCompactPercent, forceCompactPercent).catch(() => undefined);
+      await flushLog($);
       return next(e);
     }
     turns.delete(e.turnId);
@@ -1274,6 +1486,7 @@ export const register = (on: On, options: Options): void => {
       lostCompact = undefined;
     }
     let continued = false;
+    let asked: { end: number | undefined } | undefined;
     // Done check: runs here because cc-plugin-sec-default passes classic.Stop on past every user-tier hook.
     if (e.agentId === undefined) {
       const exempt = donePending;
@@ -1282,7 +1495,12 @@ export const register = (on: On, options: Options): void => {
         try {
           // Read before the await: a /clear that arrives during the check must make the follow-up stale.
           const epoch = sessionEpoch;
-          if (await checkDone($, e, doneThreshold)) {
+          // Due at the same fill the compaction judges a task end from (never forced: that asks nothing).
+          const fill = taskCompactPercent > 0 && !compactQueued ? await fillPercent($) : 0;
+          const withEnd = taskCompactPercent > 0 && fill >= taskCompactPercent && !(forceCompactPercent > 0 && fill >= forceCompactPercent);
+          const done = await checkDone($, e, doneThreshold, withEnd);
+          asked = done.asked;
+          if (done.unfinished) {
             continued = true;
             // Not awaited: it resolves only once the new turn starts, which waits for this turn to end. No `$` call in the
             // rejection handler: it runs after this frame, so the next turn.complete logs the error in-frame.
@@ -1297,7 +1515,10 @@ export const register = (on: On, options: Options): void => {
         }
       }
     }
-    await contextCompact($, e, true, continued, taskCompactPercent, forceCompactPercent).catch((err: unknown) => record($, { kind: "error", applied: false, text: `context compaction check failed: ${String(err)}` }).catch(() => undefined));
+    await contextCompact($, e, true, continued, taskCompactPercent, forceCompactPercent, asked).catch((err: unknown) => record($, { kind: "error", applied: false, text: `context compaction check failed: ${String(err)}` }).catch(() => undefined));
+    await flushLog($); // the turn's decisions, written once instead of per decision (F06)
+    // The done check above re-read the env: drop it again so the next turn reads the settings `env` afresh.
+    if (e.agentId === undefined) haikuPath = undefined;
     return next(e);
   });
 
@@ -1345,10 +1566,12 @@ export const register = (on: On, options: Options): void => {
     if ((await jevMissing($)).length) return yield* next(e);
     if (e.agentId && !subagents) return yield* next(e);
 
-    const turn = turns.get(e.turnId) ?? { taken: 0 };
+    const turn = turns.get(e.turnId) ?? { taken: 0, cache: newCache() };
     turns.set(e.turnId, turn);
 
-    const ctx = await readTurn($, e.agentId);
+    // One transcript read per step: the turn and, at main-loop step 0, the previous reply.
+    const messages = await $.session.messages(e.agentId ? { agentId: e.agentId } : {});
+    const ctx = turnOf(messages);
     if (!ctx) return yield* next(e);
     const calls = toolCalls(ctx.steps);
     const last = calls.at(-1);
@@ -1359,7 +1582,7 @@ export const register = (on: On, options: Options): void => {
       const id = turn.bypassId;
       turn.bypassId = undefined;
       const done = calls.find((c) => c.tool_use_id === id);
-      if (done?.text !== undefined) {
+      if (done?.text !== undefined && !(done.isError && REFUSED.test(done.text))) {
         const s = await summarizeResult($, ctx.request, turn.bypassAction ?? done.tool, done.text);
         await record($, {
           kind: "bypass",
@@ -1381,7 +1604,7 @@ export const register = (on: On, options: Options): void => {
     let candidates: Candidate[] = [];
     // Not on a slash-command turn: its skill text is not in the transcript, so Jev (and the Haiku summary) would answer the bare command and the skill never runs.
     if (takeSteps && !ctx.command && turn.taken < MAX_TAKES_PER_TURN && (!takeOnlyForBypass || (bypass && e.index === 0 && !e.agentId))) {
-      candidates = (await buildCandidates($, ctx.request, ctx.steps, calls, e.index)).filter((c) => !(last && sameCall(last, { tool: c.tool, input: c.input })));
+      candidates = (await buildCandidates($, ctx.request, ctx.steps, calls, e.index, turn.cache)).filter((c) => !(last && sameCall(last, { tool: c.tool, input: c.input })));
       if (candidates.length) questions.next_action = nextActionQuestion(candidates);
     }
     // Step 0: the difficulty (only for model routing) and the effort estimate, or a Haiku/Fable turn's held first-turn
@@ -1439,15 +1662,20 @@ export const register = (on: On, options: Options): void => {
       let measured: Candidate[] = [];
       // Not on a slash-command turn either: Jev would be compared on the bare command, whose skill text it cannot see.
       if (measureSteps && takeSteps && !ctx.command && e.index > 0 && !e.agentId) {
-        measured = (await buildCandidates($, ctx.request, ctx.steps, calls, e.index)).filter((c) => !(last && sameCall(last, { tool: c.tool, input: c.input })));
+        measured = (await buildCandidates($, ctx.request, ctx.steps, calls, e.index, turn.cache)).filter((c) => !(last && sameCall(last, { tool: c.tool, input: c.input })));
         if (measured.length) {
-          measure = askJev($, { request: clip(ctx.request, 4000), recent: summarize(ctx.steps), cwd: await $.session.cwd() }, { next_action: nextActionQuestion(measured) });
+          measure = askJev($, { request: clip(ctx.request, 4000), recent: summarize(ctx.steps), cwd: turn.cache.cwd ??= await $.session.cwd() }, { next_action: nextActionQuestion(measured) });
         }
       }
       const claudeResult = yield* next(routed(e));
       // Claude's step is done: wait only a moment for the measurement (it only logs; a late one is not recorded), never the rest of its budget.
-      // A refused clock must not fail the step whose result is already in: the measurement is dropped.
-      const measureResult = await Promise.race([measure, $.clock.sleep(MEASURE_GRACE_MS).then(() => undefined, () => undefined)]);
+      // A throwing clock must not fail the step whose result is already in: the measurement is dropped. No measurement, no timer.
+      let measureResult: JevResult | undefined;
+      if (measure) {
+        const grace = deadline($, MEASURE_GRACE_MS);
+        measureResult = await Promise.race([measure, grace.elapsed]).catch(() => undefined);
+        grace.cancel();
+      }
       const measureAnswer = measureResult?.ok ? choice(measureResult.answers, "next_action") : undefined;
       if (measureAnswer) await recordCompare($, e.turnId, e.index, ctx.request, measureAnswer, measured, claudeResult.toolUses, true);
       return claudeResult;
@@ -1455,12 +1683,12 @@ export const register = (on: On, options: Options): void => {
 
     // A short follow-up ("yes", "do it") is only rated with confidence when Jev sees what it answers: 0.0–0.2
     // without, 0.5–0.8 with.
-    const previous = e.index === 0 && !e.agentId ? await previousReply($) : undefined;
+    const previous = e.index === 0 && !e.agentId ? previousReply(messages) : undefined;
     const state = {
       request: clip(ctx.request, 4000),
       ...(previous ? { previous_reply: previous } : {}),
       recent: summarize(ctx.steps),
-      cwd: await $.session.cwd(),
+      cwd: turn.cache.cwd ??= await $.session.cwd(),
     };
     const r = await askJev($, state, questions);
     if (!r.ok) {
@@ -1545,28 +1773,27 @@ export const register = (on: On, options: Options): void => {
     return result;
   });
 
-  // The scratchpad lookups, resolved once: neither the temp roots nor the session id change within a session.
-  let scratchpad: { roots: string[]; sid: string } | undefined;
   // Permission check: approves Jev's own vetted calls and writes into this session's scratchpad; every other verdict stays Claude Code's.
   on("tool.check", async function onToolCheck($: Engine, e: Check, next: Next<Check, Verdict>): Promise<Verdict> {
-    // The estimate tool is answered by the tool.call hook, also while inactive, so there is nothing to prompt for. A settings deny rule still wins.
+    // The estimate tool is answered by the tool.call hook, also while inactive, so there is nothing to prompt for. A settings deny or ask rule
+    // still wins; an existing allow is returned unchanged (rewording it makes the security plugin warn the user).
     if (e.tool === ESTIMATE_TOOL) {
       const base = await next(e);
-      return base.decision !== "deny" ? { ...base, decision: "allow", reason: "jevfort: estimate_effort is answered locally" } : base;
+      return settled(base) ? base : { ...base, decision: "allow", reason: "jevfort: estimate_effort is answered locally" };
     }
     if ((await jevMissing($)).length) return next(e);
     const base = await next(e);
     // Jev's own calls come from the vetted candidate list: approve them so auto mode's classifier doesn't refuse
-    // them. This and the scratchpad branch are the only places jevfort loosens Claude Code's verdict. A settings deny rule still wins.
+    // them. This and the scratchpad branch are the only places jevfort loosens Claude Code's verdict. A settings deny or ask rule still wins.
     if (e.tool_use_id && ownCalls.has(e.tool_use_id)) {
-      // Already allowed (a settings rule): leave it, rewording an allow rule makes the security plugin warn the user.
-      if (base.decision === "deny" || base.decision === "allow") return base;
+      // Claude Code already allows in-project reads: its ask on a Read means the path resolves outside the working directories.
+      if (settled(base) || e.tool === "Read") return base;
       return { ...base, decision: "allow", reason: "Jev pilot: vetted action from its read-only/project-script list" };
     }
     const input = (e.input ?? {}) as Record<string, unknown>;
     // Writes into this session's scratchpad are allowed in every permission mode.
     // A mode's ask becomes allow; a settings deny or ask rule (`rule` set) still wins.
-    if (WRITE_TOOLS.has(e.tool) && base.decision !== "deny" && base.decision !== "allow" && !(base.decision === "ask" && base.rule !== undefined)) {
+    if (WRITE_TOOLS.has(e.tool) && !settled(base)) {
       scratchpad ??= {
         roots: [await $.env.get("CLAUDE_CODE_TMPDIR"), await $.env.get("TMPDIR"), "/tmp"].filter((r): r is string => Boolean(r)),
         sid: await $.session.id(),

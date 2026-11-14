@@ -71,6 +71,7 @@ const LENSES = [
   'interactions between earlier fixes and regressions they introduced',
   'TOCTOU, races and symlink swaps',
   'caches keyed too coarsely, stale state, resource leaks',
+  'per-turn or per-session caches and buffers added for speed: every event that must drop or flush them',
   'slow or unusual file systems, odd file names and encodings',
   'fail-open paths and missing error handling at trust boundaries',
   'docs, README and rules contradicting the code; tests that cannot fail',

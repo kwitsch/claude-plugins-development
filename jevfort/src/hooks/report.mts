@@ -4,6 +4,7 @@
  *
  * @packageDocumentation
  */
+import { head } from "./context.mjs";
 import type { Entry } from "./log.mjs";
 
 /** The take thresholds the threshold table shows. */
@@ -41,6 +42,13 @@ const str = (v: unknown): string | undefined => (typeof v === "string" ? v : und
  */
 const p2 = (v: number | undefined): string => (v === undefined ? "—" : v.toFixed(2));
 /**
+ * Escapes pipes for a GFM table cell; backslashes right before a pipe are doubled, else `\|` becomes `\\|`, an escaped backslash plus a column separator.
+ *
+ * @param s - The text.
+ * @returns The text with every pipe escaped.
+ */
+export const escapePipes = (s: string): string => s.replace(/(\\*)\|/g, "$1$1\\|");
+/**
  * A table cell: one line, pipes escaped, cut to `max`.
  *
  * @param s - The text.
@@ -48,8 +56,8 @@ const p2 = (v: number | undefined): string => (v === undefined ? "—" : v.toFix
  * @returns The cell text.
  */
 const cell = (s: string, max = 48): string => {
-  const one = s.replace(/\s+/g, " ").replace(/\|/g, "\\|").trim();
-  return one.length > max ? `${one.slice(0, max - 1)}…` : one;
+  const one = escapePipes(s.replace(/\s+/g, " ")).trim();
+  return one.length > max ? `${head(one, max - 1)}…` : one;
 };
 /**
  * A text bar of `n` of `of`.
@@ -142,7 +150,9 @@ export function buildReport(log: readonly Entry[], threshold: number): string {
   if (!log.length) return "**Jev pilot report:** the log is empty. Use Claude for a while and run `/jev report` again.";
   const of = (kind: Entry["kind"]) => log.filter((e) => e.kind === kind);
   const out: string[] = [];
-  const since = new Date(log[0].at).toISOString().slice(0, 16).replace("T", " ");
+  // Local time, like the table rows (`when`).
+  const first = new Date(log[0].at);
+  const since = `${day(first)} ${pad(first.getHours())}:${pad(first.getMinutes())}`;
 
   const takes = of("take");
   const taken = takes.filter((e) => e.applied);
@@ -209,7 +219,7 @@ export function buildReport(log: readonly Entry[], threshold: number): string {
   out.push("", "### Routing and done check");
   out.push("| Decision | Checked | Result |");
   out.push("|---|---|---|");
-  out.push(`| Effort routing | ${routes.length} turns | ${scores.length || !effortScores.length ? `avg difficulty ${scores.length ? avgOf(scores) : "—"} (0 trivial … 3 hard)` : `avg effort score ${avgOf(effortScores)} (0 mechanical … 4 hardest)`} · ${lowered.length} lowered, ${raised.length} raised, ${[...lowered, ...raised].filter((e) => e.applied).length} applied |`);
+  out.push(`| Effort routing | ${routes.length} turns | ${scores.length || !effortScores.length ? `avg difficulty ${scores.length ? avgOf(scores) : "—"} (0 trivial … 3 hard)` : `avg effort score ${avgOf(effortScores)} (0 mechanical … 4 hardest)`} · ${lowered.length} lowered, ${raised.length} raised, ${new Set([...lowered, ...raised].filter((e) => e.applied)).size} applied |`);
   out.push(`| Done check | ${dones.length} stops | ${continued.length} unfinished, ${continued.filter((e) => e.applied).length} sent back |`);
   const classified = of("classify");
   if (classified.length) {
