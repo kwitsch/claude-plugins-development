@@ -50,13 +50,10 @@ async function askJev($, state, questions, slow = false) {
 		at: 0,
 		error: ""
 	});
-	const done = async (r) => ({
-		...r.ok ? r : {
-			ok: false,
-			error: clip(r.error, MAX_ERROR)
-		},
-		ms: await $.clock.now().catch(() => Date.now()) - startedAt
-	});
+	const done = (r) => r.ok ? r : {
+		ok: false,
+		error: clip(r.error, MAX_ERROR)
+	};
 	if (startedAt < jevPause.until) return {
 		ok: false,
 		error: `paused for ${Math.ceil((jevPause.until - startedAt) / 1e3)} s after a timeout (${jevPause.error})`
