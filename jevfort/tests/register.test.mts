@@ -901,8 +901,32 @@ test("Built-in commands are never offered as skills, and a skill that fails is b
   expect(offered[1] ?? []).not.toContain("skill changelog");
 });
 
+test("A skill listed only after turn 1 is offered at turn 2's step 0 (the skill list is dropped at turn end)", async ($, on) => {
+  const offered: string[][] = [];
+  setup(on, {
+    messages: [user("summarize the recent changes")],
+    jev: (q) => {
+      if (q.id === "next_action") offered.push(Object.keys(q.criteria as object));
+      return undefined;
+    },
+  });
+  let skills: { name: string; description: string; source: string }[] = [];
+  on("command.list", () => ({ value: skills }));
+  claudeBeneath(on, []);
+  followUps(on);
+
+  await drain($.turn.step(step));
+  expect(offered[0] ?? []).not.toContain("skill changelog");
+  await $.turn.complete(answered("t1", "Nothing changed."));
+  skills = [{ name: "changelog", description: "Summarize recent changes", source: "plugin" }];
+
+  const before = offered.length;
+  await drain($.turn.step({ ...step, turnId: "t2" }));
+  expect(offered[before] ?? []).toContain("skill changelog");
+});
+
 // F13: a prompt that says "skill" offered every listed skill at step 0 (255 options with 300 skills, a timeout).
-test('A prompt that says "skill" offers at most 8 related skills at step 0', async ($, on) => {
+test("A prompt that says \"skill\" offers at most 8 related skills at step 0", async ($, on) => {
   const offered: string[][] = [];
   setup(on, {
     messages: [user("update the release notes skill")],
