@@ -553,7 +553,20 @@ test("hasProjectMarkdownlintConfig: nothing found -> false", () => {
 test("buildArgv: yamllint gets -d line-length-disable override when no project .yamllint exists", () => {
   const yamllint = REGISTRY.yaml.chain[0];
   const dir = mkdtempSync(path.join(tmpdir(), "ul-yl-"));
-  assert.deepEqual(buildArgv(yamllint, path.join(dir, "a.yaml"), dir), ["-d", "{extends: default, rules: {line-length: disable}}", path.join(dir, "a.yaml")]);
+  // Isolate from the developer's own ~/.yamllint, ~/.config/yamllint/config and YAMLLINT_CONFIG_FILE.
+  const keys = ["HOME", "XDG_CONFIG_HOME", "YAMLLINT_CONFIG_FILE"] as const;
+  const prev = keys.map((k) => process.env[k]);
+  process.env.HOME = mkdtempSync(path.join(tmpdir(), "ul-yl-home-"));
+  delete process.env.XDG_CONFIG_HOME;
+  delete process.env.YAMLLINT_CONFIG_FILE;
+  try {
+    assert.deepEqual(buildArgv(yamllint, path.join(dir, "a.yaml"), dir), ["-d", "{extends: default, rules: {line-length: disable}}", path.join(dir, "a.yaml")]);
+  } finally {
+    keys.forEach((k, i) => {
+      if (prev[i] === undefined) delete process.env[k];
+      else process.env[k] = prev[i];
+    });
+  }
 });
 
 test("buildArgv: yamllint runs bare when a project .yamllint exists", () => {
