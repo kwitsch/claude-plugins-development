@@ -880,7 +880,7 @@ function chainOutcome(tool, result) {
 		text
 	};
 }
-async function runChainLint(lang, resolved, cwd, rel, coalesce = false) {
+async function runChainLint(lang, resolved, cwd, rel, coalesce = false, session = "") {
 	const none = NO_CHAIN;
 	const plan = planChainLint(lang, resolved, cwd);
 	if (!plan) return none;
@@ -892,7 +892,7 @@ async function runChainLint(lang, resolved, cwd, rel, coalesce = false) {
 		return ran.result;
 	};
 	const key = coalesce ? tool.targetsDir ? hashPath(`${tool.name}:${path.dirname(resolved)}`) : manifest ? hashPath(`${tool.name}:${manifest}`) : null : null;
-	const result = key ? await coalesceProjectCheck(key, resolved, timeout, spawnTool) : await spawnTool();
+	const result = key ? await coalesceProjectCheck(key, resolved, timeout, spawnTool, session) : await spawnTool();
 	const outcome = chainOutcome(tool, result);
 	if (!outcome) return none;
 	const target = chainTarget(tool, manifest, cwd, resolved);
@@ -915,7 +915,7 @@ export function tscOutputHasSourceDiagnostic(text) {
 	const plain = text.replace(ANSI_SGR_RE, "");
 	return TSC_SOURCE_DIAGNOSTIC_RE.test(plain);
 }
-async function runTypeCheck(resolved, cwd, coalesce = false) {
+async function runTypeCheck(resolved, cwd, coalesce = false, session = "") {
 	const tsconfigPath = resolveTsconfig(path.dirname(resolved), cwd);
 	if (!tsconfigPath) return null;
 	const cachePath = tsBuildInfoPathFor(tsconfigPath);
@@ -935,7 +935,7 @@ async function runTypeCheck(resolved, cwd, coalesce = false) {
 		"-p",
 		tsconfigPath
 	], buildSpawnOpts(cwd, TSC_SPAWN_TIMEOUT_MS));
-	const result = coalesce ? await coalesceProjectCheck(hashPath(`tsc:${tsconfigPath}`), resolved, TSC_SPAWN_TIMEOUT_MS, spawnTsc) : await spawnTsc();
+	const result = coalesce ? await coalesceProjectCheck(hashPath(`tsc:${tsconfigPath}`), resolved, TSC_SPAWN_TIMEOUT_MS, spawnTsc, session) : await spawnTsc();
 	if (!result || result.error || result.signal) return null;
 	if (classifyExit("tsc", result.status) !== "issues") return null;
 	const text = `${result.stdout ?? ""}\n${result.stderr ?? ""}`;
@@ -1324,20 +1324,20 @@ const NO_CHAIN = {
 function tscNeeded(typeCheckEligible, oxlintConfig, chainRan) {
 	return typeCheckEligible && !(oxlintConfig !== null && chainRan && oxlintConfigTypeChecks(oxlintConfig));
 }
-async function lintResolved(resolved, cwd, ranges, hookEventName) {
+async function lintResolved(resolved, cwd, ranges, hookEventName, session = "") {
 	const rel = path.relative(cwd, resolved);
 	const coalesce = hookEventName === "FileChanged";
 	const ext = path.extname(resolved).toLowerCase();
 	const typeCheckEligible = TYPE_CHECK_EXTS.has(ext);
 	const { entry, oxlintConfig } = chainEntryFor(resolved, cwd);
-	const chainP = entry ? runChainLint(entry, resolved, cwd, rel, coalesce) : Promise.resolve(NO_CHAIN);
+	const chainP = entry ? runChainLint(entry, resolved, cwd, rel, coalesce, session) : Promise.resolve(NO_CHAIN);
 	let chain;
 	let tsResult = null;
 	if (tscNeeded(typeCheckEligible, oxlintConfig, true)) {
-		[chain, tsResult] = await Promise.all([chainP, runTypeCheck(resolved, cwd, coalesce)]);
+		[chain, tsResult] = await Promise.all([chainP, runTypeCheck(resolved, cwd, coalesce, session)]);
 	} else {
 		chain = await chainP;
-		if (tscNeeded(typeCheckEligible, oxlintConfig, chain.ran)) tsResult = await runTypeCheck(resolved, cwd, coalesce);
+		if (tscNeeded(typeCheckEligible, oxlintConfig, chain.ran)) tsResult = await runTypeCheck(resolved, cwd, coalesce, session);
 	}
 	const findings = [];
 	if (chain.finding) findings.push(chain.finding);
@@ -1504,10 +1504,10 @@ export function acquireSlot(untilMs) {
 		sleep100();
 	}
 }
-export async function coalesceProjectCheck(key, file, reserveMs, run) {
+export async function coalesceProjectCheck(key, file, reserveMs, run, session = "") {
 	const dir = path.resolve(process.env.CLAUDE_PLUGIN_DATA || tmpdir(), "fc-locks");
 	const lock = path.join(dir, `${key}.lock`);
-	const last = path.join(dir, `${key}.last`);
+	const last = path.join(dir, `${key}-${hashPath(session)}.last`);
 	let changed;
 	try {
 		changed = statSync(file).ctimeMs;
@@ -1603,7 +1603,7 @@ export async function fileChangedHandler(args) {
 		try {
 			d0 = digestOrNull(s.fp);
 			const t0 = journalTail(rec);
-			kept = await lintResolved(s.fp, cwd, null, "FileChanged");
+			kept = await lintResolved(s.fp, cwd, null, "FileChanged", typeof args.session_id === "string" ? args.session_id : "");
 			if (kept.length > 0 && journalTail(rec) === t0) d1 = digestOrNull(s.fp);
 		} finally {
 			try {

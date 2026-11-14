@@ -196,6 +196,8 @@ interface PostToolUseHookInput {
   hook_event_name?: unknown;
   /** The session scratchpad directory; files inside it are out of scope. */
   scratchpad_dir?: unknown;
+  /** The Claude Code session; FileChanged keys the project-check coverage stamp by it (`coalesceProjectCheck`). */
+  session_id?: unknown;
   /** FileChanged: the changed file. */
   file_path?: unknown;
   /** FileChanged: `"change"`, `"add"` or `"unlink"`. */
@@ -1676,8 +1678,9 @@ function chainOutcome(tool: LintTool, result: SpawnSyncReturns<string> | null): 
  * @returns `ran`: a tool ran to a clean or issues verdict (false on no tool, guard
  *   failure, spawn error/signal or skip verdict); `finding`: the issues, else null. `{ ran: false, finding: null }`
  *   also when `coalesceProjectCheck` skipped the run (a completed run already covers the file).
+ * @param session - FileChanged: the payload's session id, passed to `coalesceProjectCheck`.
  */
-async function runChainLint(lang: LangEntry, resolved: string, cwd: string, rel: string, coalesce = false): Promise<ChainResult> {
+async function runChainLint(lang: LangEntry, resolved: string, cwd: string, rel: string, coalesce = false, session = ""): Promise<ChainResult> {
   const none = NO_CHAIN;
   const plan = planChainLint(lang, resolved, cwd);
   if (!plan) return none;
@@ -1690,7 +1693,7 @@ async function runChainLint(lang: LangEntry, resolved: string, cwd: string, rel:
   };
   // Directory- and crate-scoped tools check the whole package/crate: one run per FileChanged burst covers every file.
   const key = coalesce ? (tool.targetsDir ? hashPath(`${tool.name}:${path.dirname(resolved)}`) : manifest ? hashPath(`${tool.name}:${manifest}`) : null) : null;
-  const result = key ? await coalesceProjectCheck(key, resolved, timeout, spawnTool) : await spawnTool();
+  const result = key ? await coalesceProjectCheck(key, resolved, timeout, spawnTool, session) : await spawnTool();
   const outcome = chainOutcome(tool, result);
   if (!outcome) return none;
 
@@ -1750,8 +1753,9 @@ export function tscOutputHasSourceDiagnostic(text: string): boolean {
  * @param coalesce - FileChanged: run tsc through `coalesceProjectCheck`, once per burst and tsconfig.
  * @returns The finding, or null (also when `coalesceProjectCheck` skipped the run because a completed run covers the
  *   file).
+ * @param session - FileChanged: the payload's session id, passed to `coalesceProjectCheck`.
  */
-async function runTypeCheck(resolved: string, cwd: string, coalesce = false): Promise<Finding | null> {
+async function runTypeCheck(resolved: string, cwd: string, coalesce = false, session = ""): Promise<Finding | null> {
   const tsconfigPath = resolveTsconfig(path.dirname(resolved), cwd);
   if (!tsconfigPath) return null;
 
@@ -1770,7 +1774,7 @@ async function runTypeCheck(resolved: string, cwd: string, coalesce = false): Pr
   const bin = onPath("tsc") ? "tsc" : existsSync(localTsc) ? localTsc : null;
   if (!bin) return null;
   const spawnTsc = (): Promise<SpawnSyncReturns<string>> => spawnGroup(bin, ["--noEmit", "--incremental", "--tsBuildInfoFile", cachePath, "-p", tsconfigPath], buildSpawnOpts(cwd, TSC_SPAWN_TIMEOUT_MS));
-  const result = coalesce ? await coalesceProjectCheck(hashPath(`tsc:${tsconfigPath}`), resolved, TSC_SPAWN_TIMEOUT_MS, spawnTsc) : await spawnTsc();
+  const result = coalesce ? await coalesceProjectCheck(hashPath(`tsc:${tsconfigPath}`), resolved, TSC_SPAWN_TIMEOUT_MS, spawnTsc, session) : await spawnTsc();
   if (!result || result.error || result.signal) return null;
   if (classifyExit("tsc", result.status) !== "issues") return null;
 
@@ -2452,25 +2456,26 @@ function tscNeeded(typeCheckEligible: boolean, oxlintConfig: string | null, chai
  * @param cwd - Payload cwd (spawn cwd and config search root).
  * @param ranges - Edited line ranges, or null when the whole file counts.
  * @param hookEventName - The event name; `"FileChanged"` also enables `coalesceProjectCheck` for the whole-project check.
+ * @param session - FileChanged: the payload's session id, which keys `coalesceProjectCheck`'s coverage stamp.
  * @returns The gated findings (empty when clean, skipped or all outside the edit).
  */
-async function lintResolved(resolved: string, cwd: string, ranges: Array<[number, number]> | null, hookEventName: string): Promise<Finding[]> {
+async function lintResolved(resolved: string, cwd: string, ranges: Array<[number, number]> | null, hookEventName: string, session = ""): Promise<Finding[]> {
   const rel = path.relative(cwd, resolved);
   const coalesce = hookEventName === "FileChanged";
   const ext = path.extname(resolved).toLowerCase();
   const typeCheckEligible = TYPE_CHECK_EXTS.has(ext);
   const { entry, oxlintConfig } = chainEntryFor(resolved, cwd);
 
-  const chainP: Promise<ChainResult> = entry ? runChainLint(entry, resolved, cwd, rel, coalesce) : Promise.resolve(NO_CHAIN);
+  const chainP: Promise<ChainResult> = entry ? runChainLint(entry, resolved, cwd, rel, coalesce, session) : Promise.resolve(NO_CHAIN);
   let chain: ChainResult;
   let tsResult: Finding | null = null;
   // tsc needed even when the chain runs fine (no oxlint typeCheck config): start it at once.
   if (tscNeeded(typeCheckEligible, oxlintConfig, true)) {
     // tsc does not depend on the chain outcome: run both at once (each keeps its own timeout).
-    [chain, tsResult] = await Promise.all([chainP, runTypeCheck(resolved, cwd, coalesce)]);
+    [chain, tsResult] = await Promise.all([chainP, runTypeCheck(resolved, cwd, coalesce, session)]);
   } else {
     chain = await chainP;
-    if (tscNeeded(typeCheckEligible, oxlintConfig, chain.ran)) tsResult = await runTypeCheck(resolved, cwd, coalesce);
+    if (tscNeeded(typeCheckEligible, oxlintConfig, chain.ran)) tsResult = await runTypeCheck(resolved, cwd, coalesce, session);
   }
   const findings: Finding[] = [];
   if (chain.finding) findings.push(chain.finding);
@@ -2747,9 +2752,11 @@ export function acquireSlot(untilMs: number): string | null {
 /**
  * Run a whole-project check (`tsc -p`, `go vet <dir>`, `cargo ... --manifest-path`) once per FileChanged burst and
  * project. State under `${CLAUDE_PLUGIN_DATA || tmpdir()}/fc-locks/`: `<key>.lock` (exclusive `wx` create holding
- * this pid, reclaimed per `slotStale`) and `<key>.last` (`Date.now()` taken before the spawn of the last run that
+ * this pid, reclaimed per `slotStale`; shared by all sessions, so their runs stay serialised) and
+ * `<key>-<hashPath(session)>.last` (`Date.now()` taken before the spawn of the last run of this session that
  * completed without error or signal). Skips (returns null) when `.last` is newer than `file`'s ctime and not in the
- * future: a completed run started after the file's last change, so its process reported this file's findings.
+ * future: a completed run started after the file's last change, so its process reported this file's findings to this
+ * session (the data dir is shared by every session, and another session's report never reaches this one).
  * Otherwise claims the lock, re-checking `.last` every 100 ms (async `setTimeout` from `node:timers/promises`, so a
  * concurrent chain child keeps being read; under `lintResolved`'s concurrent branch this wait overlaps that child) while a live holder runs, until process
  * uptime reaches `FILE_CHANGED_BUDGET_MS - reserveMs`, after which it runs unlocked; after a claim it re-checks `.last`
@@ -2760,12 +2767,13 @@ export function acquireSlot(untilMs: number): string | null {
  * @param file - The changed file (its ctime decides whether the last completed run covers it).
  * @param reserveMs - The check's spawn timeout; the lock wait stops this long before `FILE_CHANGED_BUDGET_MS`.
  * @param run - Spawns the check (async, a `spawnGroup` result).
- * @returns `run`'s result, or null when a completed run already covers `file`.
+ * @param session - The FileChanged payload's session id (empty when missing): the coverage stamp is per session.
+ * @returns `run`'s result, or null when a completed run of this session already covers `file`.
  */
-export async function coalesceProjectCheck(key: string, file: string, reserveMs: number, run: () => Promise<SpawnSyncReturns<string>>): Promise<SpawnSyncReturns<string> | null> {
+export async function coalesceProjectCheck(key: string, file: string, reserveMs: number, run: () => Promise<SpawnSyncReturns<string>>, session = ""): Promise<SpawnSyncReturns<string> | null> {
   const dir = path.resolve(process.env.CLAUDE_PLUGIN_DATA || tmpdir(), "fc-locks");
   const lock = path.join(dir, `${key}.lock`);
-  const last = path.join(dir, `${key}.last`);
+  const last = path.join(dir, `${key}-${hashPath(session)}.last`);
   let changed: number;
   try {
     // statSync: a symlinked file's target is what the check reads; ctime: copies can preserve an old mtime.
@@ -2881,7 +2889,7 @@ export async function fileChangedHandler(args: PostToolUseHookInput): Promise<Ho
     try {
       d0 = digestOrNull(s.fp);
       const t0 = journalTail(rec);
-      kept = await lintResolved(s.fp, cwd, null, "FileChanged");
+      kept = await lintResolved(s.fp, cwd, null, "FileChanged", typeof args.session_id === "string" ? args.session_id : "");
       // only a held finding needs the second digest; a record journaled during the lint (A->B->A) counts as a change
       if (kept.length > 0 && journalTail(rec) === t0) d1 = digestOrNull(s.fp);
     } finally {

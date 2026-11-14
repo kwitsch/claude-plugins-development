@@ -388,10 +388,11 @@ test.each([
  *
  * @param dataDir - Plugin data dir.
  * @param key - Project key passed to coalesceProjectCheck.
- * @param ext - `.lock` (the claim) or `.last` (the last completed run's start stamp).
+ * @param ext - `.lock` (the claim, shared by all sessions) or `.last` (the session's last completed run's start stamp).
+ * @param session - Session id the `.last` stamp belongs to.
  * @returns The file path.
  */
-const lockPath = (dataDir: string, key: string, ext: ".lock" | ".last") => path.join(path.resolve(dataDir), "fc-locks", `${key}${ext}`);
+const lockPath = (dataDir: string, key: string, ext: ".lock" | ".last", session = "") => path.join(path.resolve(dataDir), "fc-locks", ext === ".lock" ? `${key}.lock` : `${key}-${hashPath(session)}.last`);
 
 /**
  * Block this thread for `ms` milliseconds (no `sleep` binary needed).
@@ -444,6 +445,20 @@ test("coalesceProjectCheck: without a stamp it runs once, stamps the run's start
     const t = Number(readFileSync(lockPath(dataDir, "k7", ".last"), "utf8"));
     assert.ok(t >= before && t <= Date.now(), `stamp ${t} not within [${before}, now]`);
     assert.equal(existsSync(lockPath(dataDir, "k7", ".lock")), false);
+  });
+});
+
+test("coalesceProjectCheck: the coverage stamp is per session: another session runs again, the same session is covered", async () => {
+  await withDataDir(async (dataDir) => {
+    const file = path.join(dataDir, "a.ts");
+    writeFileSync(file, "export const a = 1;\n");
+    waitMs(20); // file timestamps use the coarse kernel clock, up to one tick behind Date.now()
+    const { run, calls } = stubRun();
+    assert.equal((await coalesceProjectCheck("k11", file, 45000, run, "s1"))?.status, 0);
+    assert.equal((await coalesceProjectCheck("k11", file, 45000, run, "s2"))?.status, 0);
+    assert.equal(calls.n, 2);
+    assert.equal(await coalesceProjectCheck("k11", file, 45000, run, "s1"), null);
+    assert.equal(calls.n, 2);
   });
 });
 
