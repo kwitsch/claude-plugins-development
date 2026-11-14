@@ -1,16 +1,25 @@
 ---
 id: F02
 title: Jev latency follows the request size; full clips cost ~3 s before the first token and 1.7 s per done check
-status: open
+status: closed
 priority: medium
-area: jevfort/src/hooks/register.mts (onPromptSubmit, onTurnStep, checkDone, contextCompact, previousReply), jevfort/src/hooks/context.mts (summarize, clip)
+area: jevfort/src/hooks/register.mts (turn.step state, contextCompact, previousReply), jevfort/src/hooks/context.mts (summarize, clip)
 ---
 
 ## Status
 
-Open. Found in the performance analysis of 2026-11-14 ([../EVALUATION-2026-11-14.md](../EVALUATION-2026-11-14.md)), plugin 0.10.1.
+Closed 2026-11-14 as a measurement record, no code change (user decision, shipped state 0.12.0). Reason: shortening the states would change the effort calibration (`EFFORT_CUTS`, `MECHANICAL_FROM` were measured on today's states) and the calibration prompts are not in the repository, so the accuracy cost cannot be measured; the ~0.16 ms per byte figure stays as the record.
 
-Re-measured on 0.11.0 ([../EVALUATION-2026-11-14-2.md](../EVALUATION-2026-11-14-2.md)), still open: with every clip full the classifier takes 1100 ms (F01 cut its skill options) and step 0 1548 ms, 2.65 s before the first token; the turn end with done check and task end in one batch (F03) 1771 ms, the step-k measurement 1695 ms. A 4-step turn's done check 644 ms, step 0 617 ms, measurement 729 ms. The ~0.16 ms per byte model still holds.
+Earlier state: open. Found in the performance analysis of 2026-11-14 ([../EVALUATION-2026-11-14.md](../EVALUATION-2026-11-14.md)), plugin 0.10.1.
+
+Note (0.12.0): the done check, the prompt classifier and the step-k measurement (`measureSteps`) are gone; the task-end question is its own request. The figures below for them are history. Re-measured on 0.11.0 ([../EVALUATION-2026-11-14-2.md](../EVALUATION-2026-11-14-2.md)), still open: with every clip full the classifier takes 1100 ms (F01 cut its skill options) and step 0 1548 ms, 2.65 s before the first token; the turn end with done check and task end in one batch (F03) 1771 ms, the step-k measurement 1695 ms. A 4-step turn's done check 644 ms, step 0 617 ms, measurement 729 ms. The ~0.16 ms per byte model still holds.
+
+Checked against 0.12.0 (2026-11-14), still open, waiting for a user decision; no code changed. What is left of the task:
+
+- One request before the first token: the `turn.step` hook's step-0 batch (effort + mechanical, plus `next_action` with take-steps) with the state `request` (`clip(ctx.request, 4000)`), `previous_reply` (800), `recent` (`summarize(ctx.steps)`, empty at step 0 of a fresh turn) and `cwd`. With take-steps (default on, `takeOnlyForBypass` decides where) later steps send the same state with a full `recent`.
+- The task-end question in `contextCompact`, only at >= `taskCompactPercent` fill and `reason: "answer"`: `clip(ctx.request, 3000)`, `final_message` 2000, `recent`.
+- No change is free: the step-0 state is what the effort rule was calibrated on (`EFFORT_CUTS`, `MECHANICAL_FROM`), and `next_action` and the task-end question read `recent`. `tests/fixtures/effort-scores.json` holds only the recorded scores, not the 60 prompts, so approach 3 (re-run A1-A5 with shorter states) cannot run from this repository; the prompts would have to be recovered or a new prompt set measured. Trimming `recent` for the task end (approach 1) saves at most ~0.5 s on a rare path (high context fill) without an accuracy measurement either.
+- Decision needed (user, or a decision agent with the prompt set): whether to accept an unmeasured accuracy risk for ~0.16 ms per byte, or to close F02 as a measurement record. Without the calibration prompts the recommendation is to leave the states as they are.
 
 ## Problem
 
@@ -20,7 +29,7 @@ System One's latency is about a 45 ms floor plus ~0.16 ms per byte of the reques
 - 4-step turn with 2 KB tool results (state 3.1 KB): done check 659 ms, task end 664 ms, step-k measurement 771 ms; classifier (20 skills) 848-885 ms plus step 0 616 ms = ~1.5 s before the first token.
 - Every clip full: classifier 1442 ms + step 0 1570 ms = ~3.0 s before the first token; done check 1706 ms, task end 1708 ms, measurement 1689 ms.
 
-The step-k measurement (`measureSteps`, default on) adds one such request per main-loop step; it is off the critical path, but on a serial endpoint a measurement still running delays the done check behind it.
+The step-k measurement (removed in 0.12.0) added one such request per main-loop step; it was off the critical path, but on a serial endpoint a measurement still running delayed the next request behind it.
 
 ## Evidence
 

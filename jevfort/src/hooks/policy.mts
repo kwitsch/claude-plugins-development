@@ -42,31 +42,6 @@ export const singleActionQuestion: Question = {
   },
 };
 
-/** The difficulty levels, index 0–3. */
-export const DIFFICULTY_LEVELS = [
-  "Trivial: a lookup, running a known command, or a short factual answer",
-  "Routine: a small, well-specified change or explanation in one place",
-  "Substantial: changes across several files, debugging with an unclear cause, or design choices",
-  "Hard: architecture, subtle concurrency or security issues, or a large ambiguous task",
-];
-
-/** How much reasoning the request needs. */
-export const difficultyQuestion: Question = {
-  type: "score",
-  instructions: "How much reasoning does an AI coding assistant need to fully handle the user request in `request`? When `previous_reply` is present, `request` answers the assistant's previous reply: judge a short follow-up like 'yes' or 'do it' by the work it approves or asks about there.",
-  criteria: DIFFICULTY_LEVELS,
-};
-
-/** Whether the assistant finished the request when it stopped. */
-export const doneQuestion: Question = {
-  type: "noul",
-  instructions: "An AI coding assistant just stopped. Did it fully finish the user's request in `request`, judging from `final_message` and `recent`?",
-  criteria: {
-    true: "Finished, or stopped for a good reason: it needs an answer only the user can give, or it reports a real blocker",
-    false: "Stopped partway: steps it said it would do are not done, it asks permission to continue work it could just do, or the request is only partly handled",
-  },
-};
-
 /** Whether the turn that just ended closed a task (a good moment to compact) or only reached an intermediate result. */
 export const taskEndQuestion: Question = {
   type: "noul",
@@ -76,21 +51,6 @@ export const taskEndQuestion: Question = {
     false: "An intermediate result: work continues, a step is reported, a question awaits the user's answer or more steps of the same task are expected",
   },
 };
-
-/**
- * The most likely option other than claude, with its probability.
- *
- * @param answer - The next-action answer.
- * @returns The best listed action, or `undefined` without an answer or options.
- */
-export function bestAction(answer: ChoiceAnswer | undefined): { key: string; p: number } | undefined {
-  if (!answer) return undefined;
-  let best: { key: string; p: number } | undefined;
-  for (const [key, p] of Object.entries(answer.probabilities)) {
-    if (key !== CLAUDE && (!best || p > best.p)) best = { key, p };
-  }
-  return best;
-}
 
 /**
  * Which candidate Jev takes, or undefined to let Claude decide.
@@ -130,8 +90,6 @@ export const ESTIMATE_MODELS: readonly EstimateModel[] = ["haiku", "sonnet", "op
  * turn only and then held, so a later change of effort does not rewrite the prompt cache.
  */
 export const EVERY_TURN_MODELS: readonly EstimateModel[] = ["sonnet", "opus"];
-/** Below this confidence a Jev difficulty answer is not used ({@link route}); the effort score has no such threshold. */
-export const MIN_CONFIDENCE = 0.5;
 /** From this probability on, a prompt counts as purely mechanical (measured 2026-11-13: 0.8 sent 16 of 24 medium prompts to minEffort). */
 export const MECHANICAL_FROM = 0.95;
 /** Score cut points between low|medium|high|xhigh|max, measured on 120 labelled prompts (2026-11-13, d1-3b). The last one is provisional. */
@@ -305,64 +263,6 @@ export const ESTIMATE_SPEC = {
     required: ["model", "defaultEffort", "minEffort", "maxEffort", "prompt"],
   },
 };
-
-/** A turn's routing: the difficulty score and, in model mode, the model to use. */
-export type Route = { level: number; model?: string };
-
-/**
- * Cut points on Jev's 0–3 difficulty score. Tuned on effortless's 75 hand-labelled prompts: 57% of picks
- * acceptable with low < 0.75 and lowering only, 91% with these cuts and raising big jobs to high.
- */
-export const LOW_BELOW = 1.0;
-/** Scores from here on are big jobs. */
-export const HIGH_FROM = 1.8;
-
-/**
- * The difficulty route: in model mode trivial → Haiku and routine → Sonnet, big jobs keep the model; effort mode only
- * carries the score. The turn's effort comes from {@link estimateEffort}.
- *
- * @param answer - The difficulty answer.
- * @param mode - Whether to also pick a cheaper model.
- * @returns The route, or `undefined` below {@link MIN_CONFIDENCE}.
- */
-export function route(answer: ScoreAnswer | undefined, mode: "effort" | "model"): Route | undefined {
-  if (!answer || answer.confidence < MIN_CONFIDENCE) return undefined;
-  const level = answer.score;
-  if (mode === "effort" || level >= HIGH_FROM) return { level };
-  return { level, model: level < LOW_BELOW ? "claude-haiku-5-5" : "claude-sonnet-5-5" };
-}
-
-/**
- * The price tier of a model id: 0 Haiku, 1 Sonnet, 2 Opus/Fable, -1 unknown.
- *
- * @param model - The model id.
- * @returns The tier.
- */
-const MODEL_TIER = (model: string): number => (/haiku/.test(model) ? 0 : /sonnet/.test(model) ? 1 : /opus|fable/.test(model) ? 2 : -1);
-
-/**
- * The target model only when it is a cheaper tier than the current one.
- *
- * @param current - The step's model.
- * @param target - The route's model.
- * @returns The model to send, or `undefined` to leave it.
- */
-export function lowerModel(current: string, target: string | undefined): string | undefined {
-  if (!target) return undefined;
-  const c = MODEL_TIER(current);
-  return c > MODEL_TIER(target) ? target : undefined;
-}
-
-/**
- * Whether the done check sends Claude back.
- *
- * @param done - The finished probability.
- * @param threshold - Below this the work is unfinished.
- * @returns Whether to continue.
- */
-export function shouldContinue(done: number | undefined, threshold = 0.15): boolean {
-  return done !== undefined && done < threshold;
-}
 
 /**
  * Whether a file lies inside this session's scratchpad directory, `<root>/claude-<digits>/<project slug>/<session id>/scratchpad/<at least one segment>`.

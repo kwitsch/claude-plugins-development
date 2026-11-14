@@ -6,7 +6,7 @@ import { CACHE_TTL, cacheColor, cacheLabel, cacheTtlOf, minutesLeft, nextTtl } f
 import { COMPACT_MAX_TOKENS, compactTranscript, haikuTranscript } from "../plugin/hooks/compact.mjs";
 
 /** Options passed to the kit: effort routing, compaction and Haiku compaction on, auto-compact at 60%. */
-const DEFAULTS = { routing: "effort", compaction: true, haikuCompact: true, autoCompactPercent: 60 };
+const DEFAULTS = { routing: true, compaction: true, haikuCompact: true, autoCompactPercent: 60 };
 /** Test kit bound to the built `plugin/hooks/register.mjs`. */
 const { test, mock } = createKit({ module: new URL("../plugin/hooks/register.mjs", import.meta.url), plugin: "jevfort", options: DEFAULTS });
 
@@ -114,21 +114,6 @@ test("session.compact is written by Haiku, with the user's note, without jev-api
   expect(asked[0]).toContain("claude-haiku-5-5|");
   expect(asked[0]).toContain("keep the paths");
   expect(r.messages[0].text).toContain("S".repeat(300));
-  // One compaction counts once, under its own log kind (not as a second Jev-ranking run).
-  const status = (await $.command.run({ command: "jev", args: "" })) as { text: string };
-  expect(status.text).toContain("summary=1");
-  expect(status.text).not.toContain("compact=");
-});
-
-test("a failing log write does not throw away the Haiku summary", async ($, on) => {
-  on("store.get", () => ({ value: undefined }));
-  on("store.set", () => ({ deny: "disk full" }));
-  on("clock.now", () => ({ value: 0 }));
-  on("ui.status", () => ({ value: undefined }));
-  on("tool.list", () => ({ value: [] }));
-  on("model.complete", () => ({ value: { isAnswered: true, text: "S".repeat(300), usage: { input_tokens: 1, output_tokens: 1 } } }));
-  const r = (await $.session.compact({ trigger: "manual", messages: MESSAGES })) as { messages?: { text: string }[] };
-  expect(r.messages?.[0].text).toContain("S".repeat(300));
 });
 
 test("session.compact falls through to Claude Code when Haiku fails", async ($, on) => {
@@ -205,20 +190,15 @@ async function respond($: Parameters<Parameters<typeof test>[2]>[0]) {
  * @param on - The test's `on`.
  * @param percent - What `$.session.usage()` reports as the context fill.
  * @param run - Answers a `/compact` run: `{ value }` resolves it, `{ deny }` refuses it, a pending promise queues it.
- * @returns The clock, the state (`/compact` run count; `hold` true keeps each `$.session.usage()` pending in `held` until called) and the status lines said.
+ * @returns The clock, the state (`/compact` run count; `hold` true keeps each `$.session.usage()` pending in `held` until called).
  */
 function chatSetup(on: Parameters<typeof mock.clock>[0], percent: number, run: () => unknown = () => ({ value: undefined })) {
   mock.store(on, {});
   const clock = mock.clock(on);
-  const status: string[] = [];
   const state = { compacts: 0, hold: false, held: [] as Array<() => void> };
   on("session.cwd", () => ({ value: "/proj" }));
-  on("ui.status", (_$, e) => {
-    status.push(String(e.text));
-    return { value: undefined };
-  });
+  on("ui.status", () => ({ value: undefined }));
   on("tool.list", () => ({ value: [] }));
-  on("command.register", () => ({ value: undefined }));
   on("session.start", async () => ({}));
   on("session.end", async () => ({}));
   on("turn.complete", async () => ({}));
@@ -235,7 +215,7 @@ function chatSetup(on: Parameters<typeof mock.clock>[0], percent: number, run: (
     state.compacts++;
     return run();
   });
-  return { clock, state, status };
+  return { clock, state };
 }
 
 for (const [percent, option, runs] of [[70, 60, 1], [50, 60, 0], [90, 0, 0], [Number.NaN, 60, 0], [Number.POSITIVE_INFINITY, 60, 0]] as const) {
@@ -379,6 +359,33 @@ test("a background subagent's step does not hold off auto-compact", async ($, on
   expect(state.compacts).toBe(1);
 });
 
+test("a subagent's response leaves the main loop's cache countdown alone", async ($, on) => {
+  const { clock } = chatSetup(on, 10);
+  on("ui.render", () => BENEATH);
+  await $.session.start(START);
+  const ui = await $.ui.mount(BAND);
+  await respond($);
+  await clock.advance(30 * 60_000);
+  expect(await label(ui)).toBe(" cache 29m");
+  const stream = $.turn.step({ turnId: "s1", index: 0, model: "claude-opus-5-5", effort: "high", messageCount: 1, agentId: "a1" });
+  while (!(await stream.next()).done);
+  await clock.advance(15_000);
+  expect(await label(ui)).toBe(" cache 29m");
+  await ui.unmount();
+});
+
+test("a subagent's turn end leaves a running main-loop turn running: no auto-compact mid-turn", async ($, on) => {
+  const { clock, state } = chatSetup(on, 70);
+  await $.session.start(START);
+  await respond($);
+  await clock.advance(CACHE_TTL["1h"] - 60_000);
+  // A main-loop turn starts its step and is still running.
+  await $.turn.step({ turnId: "t2", index: 0, model: "claude-opus-5-5", effort: "high", messageCount: 1 }).next();
+  await $.turn.complete({ turnId: "a-t1", agentId: "a1", reason: "answer", answer: "ok", durationMs: 1 });
+  await clock.advance(5 * 60_000);
+  expect(state.compacts).toBe(0);
+});
+
 test("a /compact still queued behind the session is not issued again by the next ticks", async ($, on) => {
   // The engine keeps a plugin's `command.run` pending until the command ran: only the flag stops a repeat.
   const { clock, state } = chatSetup(on, 70, () => new Promise(() => {}));
@@ -389,14 +396,13 @@ test("a /compact still queued behind the session is not issued again by the next
   expect(state.compacts).toBe(1);
 });
 
-test("a refused /compact is said in the status line and not tried again in the same cold period", async ($, on) => {
-  const { clock, state, status } = chatSetup(on, 70, () => ({ deny: "no command named /compact" }));
+test("a refused /compact is not tried again in the same cold period", async ($, on) => {
+  const { clock, state } = chatSetup(on, 70, () => ({ deny: "no command named /compact" }));
   await $.session.start(START);
   await respond($);
   await clock.advance(CACHE_TTL["1h"] + 60_000);
   await clock.advance(10 * 60_000);
   expect(state.compacts).toBe(1);
-  expect(status.filter((s) => s.startsWith("jev: auto-compact failed"))).toHaveLength(1);
 });
 
 test("a precompute or a vetoed compaction leaves the countdown, a compaction that stands clears it", async ($, on) => {
@@ -425,6 +431,43 @@ test("a precompute or a vetoed compaction leaves the countdown, a compaction tha
   await ui.unmount();
 });
 
+test("a Haiku-written compaction clears the countdown, and the old cold period does not compact the new chat", async ($, on) => {
+  const { clock, state } = chatSetup(on, 70);
+  on("model.complete", () => ({ value: { isAnswered: true, text: "S".repeat(300), usage: { input_tokens: 1, output_tokens: 1 } } }));
+  on("ui.render", () => BENEATH);
+  await $.session.start(START);
+  const ui = await $.ui.mount(BAND);
+  await respond($);
+  await clock.advance(30_000);
+  expect(await label(ui)).toMatch(/^ cache \d+m$/);
+  const r = (await $.session.compact({ trigger: "manual", messages: MESSAGES })) as { messages?: unknown[] };
+  expect(r.messages).toHaveLength(1);
+  await clock.advance(30_000);
+  expect(await label(ui)).toBeUndefined();
+  await clock.advance(CACHE_TTL["1h"]);
+  expect(state.compacts).toBe(0);
+  await ui.unmount();
+});
+
+// A context-fill /compact still queued (its command.run pending) is done once a compaction stands: the next turn end may queue again.
+for (const [path, options, answer] of [["Haiku", {}, "S".repeat(300)], ["Claude Code", { haikuCompact: false }, undefined]] as const) {
+  test(`a compaction that stands (${path}) lets the next forced turn end queue /compact again`, { options }, async ($, on) => {
+    // 96% is above forceCompactPercent 95: every turn end compacts, Jev or not.
+    const { state } = chatSetup(on, 96, () => new Promise(() => {}));
+    on("session.compact", () => ({ messages: [] }));
+    on("model.complete", () => ({ value: answer === undefined ? { isAnswered: false, reason: "down" } : { isAnswered: true, text: answer, usage: { input_tokens: 1, output_tokens: 1 } } }));
+    await $.session.start(START);
+    await respond($);
+    expect(state.compacts).toBe(1);
+    // Still queued: the next turn end does not queue a second one.
+    await respond($);
+    expect(state.compacts).toBe(1);
+    await $.session.compact({ trigger: "manual", messages: MESSAGES });
+    await respond($);
+    expect(state.compacts).toBe(2);
+  });
+}
+
 test("a precompute that Claude Code's own compaction answers leaves the countdown", { options: { haikuCompact: false } }, async ($, on) => {
   const { clock } = chatSetup(on, 70);
   on("session.compact", () => ({ messages: [] }));
@@ -441,7 +484,7 @@ test("a precompute that Claude Code's own compaction answers leaves the countdow
   await ui.unmount();
 });
 
-test("the countdown sits above another plugin's band while the effort row is hidden", { options: { routing: "off" } }, async ($, on) => {
+test("the countdown sits above another plugin's band while the effort row is hidden", { options: { routing: false } }, async ($, on) => {
   const { clock } = chatSetup(on, 10);
   on("ui.render", () => BENEATH);
   await $.session.start(START);
@@ -467,6 +510,22 @@ test("a /clear (session.end, no session.start follows) starts the countdown over
   await clock.settle();
   expect(await label(ui)).toBeUndefined();
   // The old chat's cold period does not compact the new one.
+  await clock.advance(CACHE_TTL["1h"] + 120_000);
+  expect(state.compacts).toBe(0);
+  await ui.unmount();
+});
+
+test("a session.start (reload) after a response starts the countdown over", async ($, on) => {
+  const { clock, state } = chatSetup(on, 70);
+  on("ui.render", () => BENEATH);
+  await $.session.start(START);
+  const ui = await $.ui.mount(BAND);
+  await respond($);
+  await clock.settle();
+  expect(await label(ui)).toBe(" cache 59m");
+  await $.session.start(START);
+  await clock.settle();
+  expect(await label(ui)).toBeUndefined();
   await clock.advance(CACHE_TTL["1h"] + 120_000);
   expect(state.compacts).toBe(0);
   await ui.unmount();

@@ -4,25 +4,20 @@
 // Jev is the jev-api plugin's batch tool: a fake `tool.call` answers `mcp__jev-api__batch` question by question.
 import { createKit } from "claude-engine-vitest";
 import type { On } from "claude-engine-vitest";
-import { expect, test as pureTest } from "vitest";
+import { expect } from "vitest";
 import { JEV_BATCH, JEV_TOOL_PREFIX } from "../plugin/hooks/jev.mjs";
-import { statsKey } from "../plugin/hooks/log.mjs";
-import { difficultyQuestion, doneQuestion, effortQuestion, mechanicalQuestion, nextActionQuestion, singleActionQuestion, taskEndQuestion } from "../plugin/hooks/policy.mjs";
+import { effortQuestion, mechanicalQuestion, nextActionQuestion, singleActionQuestion, taskEndQuestion } from "../plugin/hooks/policy.mjs";
 
 // The manifest defaults (jevfort/package.json claudePlugin.userConfig): the kit does not fill userConfig defaults.
 const DEFAULTS = {
-  routing: "effort",
+  routing: true,
   takeSteps: true,
-  doneCheck: true,
   takeThreshold: 0.85,
   subagents: true,
-  doneThreshold: 0.15,
   bypass: true,
-  classify: true,
   agentTypes: true,
   compaction: true,
   takeOnlyForBypass: true,
-  measureSteps: true,
   minEffort: "low",
   maxEffort: "xhigh",
 };
@@ -35,16 +30,12 @@ const SID = "sid-1";
 const JEV_TOOLS = [{ name: JEV_BATCH, description: "Ask Jev several questions", mcp: true }];
 /** jev-api 0.1's tools, which lack the batch tool. */
 const SINGLE_TOOLS = ["noul", "choice", "score"].map((t) => ({ name: JEV_TOOL_PREFIX + t, description: `Ask Jev a ${t} question`, mcp: true }));
-/** The first line of /jev while the batch tool is missing. */
-const INACTIVE = "Jev pilot: inactive, the jev-api tools are missing (mcp__jev-api__batch). jevfort needs jev-api 0.2.0 or later and no permissions.deny rule matching its tools; it looks again at the next turn.";
 /** The question id each instructions text belongs to (batch questions carry no id; the fake finds it by the text). */
 const QUESTION_IDS = new Map<string, string>([
   [nextActionQuestion([]).instructions, "next_action"],
   [singleActionQuestion.instructions, "single_action"],
-  [difficultyQuestion.instructions, "difficulty"],
   [effortQuestion.instructions, "effort"],
   [mechanicalQuestion.instructions, "mechanical"],
-  [doneQuestion.instructions, "done"],
   [taskEndQuestion.instructions, "end"],
 ]);
 /** What the fake answers a question the test's `jev` leaves open, by type: not true, leave it to Claude, an unconfident score. */
@@ -66,7 +57,7 @@ type Runner = Parameters<Parameters<typeof test>[2]>[0];
 // Answers every call the mod makes on `$`. The batch tool is listed and answered from `jev`; a mod's `$.tool.call`
 // resolves to the stub's `value`: the tool result `{ result }`, or `{ deny }` as the real engine resolves a deny (a bare
 // `{ deny }` stub answer would make the kit reject instead). Other tools go on to the test's own `tool.call` stub.
-function setup(on: On, opts: { messages: Msg[]; jev: Jev; cwd?: () => string; files?: string[]; links?: string[]; packageJson?: object | string; env?: Record<string, string>; agents?: { status: string }[]; store?: Record<string, unknown>; tools?: { name: string; description: string; mcp: boolean }[] | null }) {
+function setup(on: On, opts: { messages: Msg[]; jev: Jev; cwd?: () => string; files?: string[]; links?: string[]; packageJson?: object | string; env?: Record<string, string>; store?: Record<string, unknown>; existsDenied?: boolean; locks?: string[]; sizes?: Record<string, number>; tools?: { name: string; description: string; mcp: boolean }[] | null }) {
   const sent: Asked[] = [];
   let batchCalls = 0;
   let reads = 0;
@@ -80,15 +71,15 @@ function setup(on: On, opts: { messages: Msg[]; jev: Jev; cwd?: () => string; fi
   });
   on("session.cwd", () => ({ value: opts.cwd?.() ?? CWD }));
   on("session.id", () => ({ value: SID }));
-  on("fs.exists", (_$, e) => ({ value: Boolean(opts.packageJson) && e.path === `${CWD}/package.json` }));
+  // `existsDenied` refuses every `fs.exists` probe, as a hook above or the engine may; `locks` are the project's lock files.
+  on("fs.exists", (_$, e) => (opts.existsDenied ? { deny: "EACCES" } : { value: (Boolean(opts.packageJson) && e.path === `${CWD}/package.json`) || (opts.locks ?? []).some((f) => e.path === `${CWD}/${f}`) }));
   on("fs.stat", (_$, e) => {
     statted.push(String(e.path));
     const isLink = (opts.links ?? []).includes(String(e.path));
-    return isLink || (opts.files ?? []).includes(String(e.path)) ? { value: { kind: "file", size: 100, mtimeMs: 0, isLink } } : { deny: "ENOENT" };
+    return isLink || (opts.files ?? []).includes(String(e.path)) ? { value: { kind: "file", size: opts.sizes?.[String(e.path)] ?? 100, mtimeMs: 0, isLink } } : { deny: "ENOENT" };
   });
   on("fs.read", (_$, e) => (opts.packageJson && e.path === `${CWD}/package.json` ? { value: typeof opts.packageJson === "string" ? opts.packageJson : JSON.stringify(opts.packageJson) } : { deny: "ENOENT" }));
   on("ui.status", () => ({ value: undefined }));
-  on("agent.list", () => ({ value: opts.agents ?? [] }));
   // `tools: null` makes the listing fail.
   on("tool.list", () => (opts.tools === null ? { deny: "tool.list failed" } : { value: opts.tools ?? JEV_TOOLS }));
   on("tool.call", async (_$, e, next) => {
@@ -110,7 +101,7 @@ function setup(on: On, opts: { messages: Msg[]; jev: Jev; cwd?: () => string; fi
   return { sent, clock, statted, calls: () => batchCalls, reads: () => reads };
 }
 
-// Stubs beneath the done check: the turn's end, and the follow-up messages the mod submits (their texts).
+// Stubs beneath the mod: the turn's end, and the prompts submitted through it (their texts).
 function followUps(on: On) {
   const submitted: string[] = [];
   on("turn.complete", () => ({ text: "" }));
@@ -187,22 +178,19 @@ function claudeBeneath(on: On, seen: unknown[]) {
 
 const toolId = (chunks: Chunk[]) => (chunks.find((c) => c.kind === "tool")?.id as string | undefined) ?? "";
 
-const runJev = async ($: Runner, args: string) => String(((await $.command.run({ command: "jev", args, origin: { kind: "composer" }, presentation: { isFullscreen: false, columns: 80 } })) as { text?: string }).text ?? "");
-
 const decision = async ($: Runner, input: Record<string, unknown>) => ((await $.tool.check(input)) as { decision?: string }).decision;
 
 /** The `session.start` input of every test that starts a session. */
 const START = { cwd: CWD, surface: "terminal", isInteractive: true };
 
 /**
- * The stubs `session.start` needs beneath jevfort: `/jev` registration, `estimate_effort` registration, the event's end.
+ * The stubs `session.start` needs beneath jevfort: `estimate_effort` registration, the event's end.
  *
  * @param on - The test's `on`.
  * @returns The names passed to `$.tool.register`, in call order.
  */
 function sessionStubs(on: On) {
   const registered: unknown[] = [];
-  on("command.register", async () => ({ value: undefined }));
   on("tool.register", async (_$, e) => {
     registered.push(e.name);
     return { value: { tool: "mcp__jevfort__estimate_effort" } };
@@ -240,7 +228,6 @@ test("Jev takes a confident Read step without asking Claude", { options: { takeO
     files: [`${CWD}/src/app.ts`],
     jev: byId({
       next_action: { type: "choice", choice: "read src/app.ts", probabilities: { "read src/app.ts": 0.95, claude: 0.05 }, confidence: 0.9 },
-      difficulty: easy,
     }),
   });
   claudeBeneath(on, seen);
@@ -258,7 +245,6 @@ test("An unsure Jev hands the step to Claude, with effort lowered for an easy tu
     files: [`${CWD}/src/app.ts`],
     jev: byId({
       next_action: { type: "choice", choice: "read src/app.ts", probabilities: { "read src/app.ts": 0.6, claude: 0.4 }, confidence: 0.3 },
-      difficulty: easy,
       effort: easy,
     }),
   });
@@ -286,49 +272,12 @@ test("takeSteps: false never offers Jev a next action, so a confident Read goes 
 
 test("subagents: false leaves a subagent step to Claude without asking Jev", { options: { subagents: false } }, async ($, on) => {
   const seen: unknown[] = [];
-  const { calls } = setup(on, { messages: [user("what does this project do?")], jev: byId({ difficulty: easy, effort: easy }) });
+  const { calls } = setup(on, { messages: [user("what does this project do?")], jev: byId({ effort: easy }) });
   claudeBeneath(on, seen);
 
   await drain($.turn.step({ ...step, agentId: "a1" }));
   expect(calls()).toBe(0);
   expect(seen[0]).toMatchObject({ effort: "high", model: "claude-opus-5-5" });
-});
-
-test("model routing moves a trivial turn to Haiku", { options: { routing: "model" } }, async ($, on) => {
-  const seen: unknown[] = [];
-  setup(on, { messages: [user("hi, what time zone is UTC+2?")], jev: byId({ difficulty: easy, effort: easy }) });
-  claudeBeneath(on, seen);
-
-  await drain($.turn.step(step));
-  expect(seen[0]).toMatchObject({ effort: "low", model: "claude-haiku-5-5" });
-});
-
-test("a step model routing lowered to Haiku leaves the countdown of the chat's own cache", { options: { routing: "model" } }, async ($, on) => {
-  let difficulty: Record<string, unknown> = scored(3);
-  const { clock } = setup(on, { messages: [user("what does this project do?")], jev: (q) => (q.id === "difficulty" ? difficulty : undefined) });
-  const seen: { model: string }[] = [];
-  const usage = { input_tokens: 5, output_tokens: 5, cache_read_input_tokens: 0, cache_creation_input_tokens: 900 };
-  on("turn.step", async function*(_$, e) {
-    seen.push(e as { model: string });
-    yield { kind: "stop", stopReason: "end_turn", usage };
-    return { turnId: e.turnId, index: e.index, answer: "ok", toolUses: [], stopReason: "end_turn", usage };
-  });
-  sessionStubs(on);
-  await $.session.start(START);
-  const ui = await $.ui.mount(BAND);
-  const label = async () => ((await ui.find({ type: "Text", text: /cache/ })) as { children?: unknown[] } | undefined)?.children?.[0];
-  // A response on the chat's own model starts the countdown.
-  await drain($.turn.step(step));
-  expect(seen.at(-1)?.model).toBe("claude-opus-5-5");
-  await clock.advance(59 * 60_000 + 30_000);
-  expect(await label()).toBe(" cache <1m");
-  // A trivial step sent to Haiku writes Haiku's cache, not the Opus one: the Opus countdown still runs out.
-  difficulty = easy;
-  await drain($.turn.step({ ...step, turnId: "t2" }));
-  expect(seen.at(-1)?.model).toBe("claude-haiku-5-5");
-  await clock.advance(60_000);
-  expect(await label()).toBe(" cache cold");
-  await ui.unmount();
 });
 
 test("When Jev is unreachable the step goes to Claude unchanged", async ($, on) => {
@@ -369,7 +318,16 @@ test("A jev-api deny leaves the step to Claude and is logged with its text", asy
 
   await drain($.turn.step(step));
   expect(seen[0]).toMatchObject({ effort: "high", model: "claude-opus-5-5" });
-  expect(await runJev($, "")).toContain("error (pass): unavailable: batch: HTTP 503");
+});
+
+test("jevfort writes no status line: a failed decision, an estimate and a take say nothing in `$.ui.status`", async ($, on) => {
+  const said: unknown[] = [];
+  // Ahead of setup's stub, so it sees every call.
+  on("ui.status", (_$, e) => (said.push(e.text), { value: undefined }));
+  setup(on, { messages: [user("what does this project do?")], jev: () => 503 });
+  claudeBeneath(on, []);
+  await drain($.turn.step(step));
+  expect(said).toEqual([]);
 });
 
 test("One wrong answer discards the other answers of the same decision", async ($, on) => {
@@ -380,13 +338,12 @@ test("One wrong answer discards the other answers of the same decision", async (
 
   await drain($.turn.step(step));
   expect(seen[0]).toMatchObject({ effort: "high" });
-  expect(await runJev($, "")).toContain("unavailable: batch: no valid noul answer for questions[1]");
 });
 
 // One malformed answer per case, every other answer valid, so only the field under test can fail the decision.
 const choiceOk = { type: "choice", choice: "claude", probabilities: { claude: 1 }, confidence: 0.9 };
 for (
-  const [name, id, answer, error] of [
+  const [name, id, answer, _error] of [
     ["a choice without probabilities", "next_action", { type: "choice", choice: "claude", confidence: 0.9 }, "no valid choice answer for questions[0]"],
     ["a choice with a non-finite probability", "next_action", { ...choiceOk, probabilities: { claude: "1" } }, "no valid choice answer for questions[0]"],
     ["a choice without confidence", "next_action", { type: "choice", choice: "claude", probabilities: { claude: 1 } }, "no valid choice answer for questions[0]"],
@@ -397,15 +354,13 @@ for (
 ) {
   test(`An answer with ${name} fails the decision instead of crashing a hook`, async ($, on) => {
     const seen: unknown[] = [];
-    // Each would throw inside the hooks (bestAction, pickCandidate) or read "1" as >= 0.95.
+    // Each would throw inside the hooks (pickCandidate) or read "1" as >= 0.95.
     // A readable file makes step 0 ask next_action (questions[0]) ahead of effort and mechanical.
     setup(on, { messages: [user("what does src/app.ts export?")], files: [`${CWD}/src/app.ts`], jev: (q) => (q.id === id ? answer : q.id === "effort" ? scored(0.2) : undefined) });
     claudeBeneath(on, seen);
 
     await drain($.turn.step(step));
     expect(seen[0]).toMatchObject({ effort: "high" });
-    // The newest /jev row: the recent list is module state, so an older case's identical row must not satisfy this one.
-    expect((await runJev($, "")).split("\n").filter((l) => l.startsWith("- ")).at(-1)).toContain(`unavailable: batch: ${error}`);
   });
 }
 
@@ -419,10 +374,9 @@ test("Core's error result for the batch call fails the decision with a batch: pr
 
   await drain($.turn.step(step));
   expect(seen[0]).toMatchObject({ effort: "high" });
-  expect(await runJev($, "")).toContain(`unavailable: batch: ${error}`);
 });
 
-for (const [name, answer, error] of [["of another type", mech(0.5), "batch: no valid score answer for questions[0]"], ["that is not JSON", "<html>", "batch: result is not JSON"], ["with too few answers", "[]", "batch: expected 2 answers"]] as const) {
+for (const [name, answer, _error] of [["of another type", mech(0.5), "batch: no valid score answer for questions[0]"], ["that is not JSON", "<html>", "batch: result is not JSON"], ["with too few answers", "[]", "batch: expected 2 answers"]] as const) {
   test(`A jev-api result ${name} fails the decision`, async ($, on) => {
     const seen: unknown[] = [];
     setup(on, { messages: [user("what does this project do?")], jev: (q) => (q.id === "effort" ? answer : undefined) });
@@ -430,7 +384,6 @@ for (const [name, answer, error] of [["of another type", mech(0.5), "batch: no v
 
     await drain($.turn.step(step));
     expect(seen[0]).toMatchObject({ effort: "high" });
-    expect(await runJev($, "")).toContain(`unavailable: ${error}`);
   });
 }
 
@@ -465,7 +418,6 @@ test("Jev calls that do not answer within 4000 ms time out and Claude takes the 
   await run;
   expect(ids(sent)).toEqual(["effort", "mechanical"]);
   expect(seen[0]).toMatchObject({ effort: "high", model: "claude-opus-5-5" });
-  expect(await runJev($, "")).toContain("unavailable: timeout after 4000ms");
 });
 
 test("After a timeout Jev is not asked again for 30 s, then once more", async ($, on) => {
@@ -480,7 +432,6 @@ test("After a timeout Jev is not asked again for 30 s, then once more", async ($
   // Within the pause nothing is sent.
   await drain($.turn.step(step));
   expect(calls()).toBe(1);
-  expect(await runJev($, "")).toContain("paused for");
   // After it, one probe goes out.
   await clock.advance(30_000);
   run = drain($.turn.step(step));
@@ -583,7 +534,6 @@ for (const [name, deny, env] of [["a jev-api timeout answered before jevfort's o
     // Within the pause nothing is sent.
     await drain($.turn.step(step));
     expect(calls()).toBe(1);
-    expect(await runJev($, "")).toContain("paused for");
   });
 }
 
@@ -594,31 +544,6 @@ test("a fast failure that is no timeout pauses nothing", async ($, on) => {
   await drain($.turn.step(step));
   await drain($.turn.step(step));
   expect(calls()).toBe(2);
-});
-
-test("a /clear (session.end) drops the done follow-up that was submitted before it", async ($, on) => {
-  setup(on, { messages: [], jev: () => undefined });
-  on("session.end", () => ({}));
-  on("prompt.submit", (_$, e) => ({ text: e.text }));
-  await $.session.end({ reason: "clear", sessionId: "s1", resume: { id: "s1" } });
-  const r = await $.prompt.submit({ text: FOLLOW_UP, wait: false, origin: { kind: "plugin", name: "jevfort" } });
-  expect(JSON.stringify(r)).toContain("conversation was cleared");
-});
-
-test("a /clear during the done check drops the follow-up the check queues", { options: { classify: false } }, async ($, on) => {
-  let release = () => {};
-  const gate = new Promise<void>((resolve) => (release = resolve));
-  const { sent, clock } = setup(on, { messages: [user("rename foo to bar in all files")], jev: (q) => gate.then(() => (q.id === "done" ? { type: "noul", noul: 0.04 } : undefined)) as Promise<never> });
-  const submitted = followUps(on);
-  on("session.end", () => ({}));
-  const turn = $.turn.complete(answered("t1", "Half done."));
-  while (!ids(sent).includes("done")) await clock.advance(0);
-  await $.session.end({ reason: "clear", sessionId: "s1", resume: { id: "s1" } });
-  release();
-  await turn;
-  await expect.poll(() => submitted.length).toBe(1);
-  const r = await ownSubmit($, submitted[0]);
-  expect(JSON.stringify(r)).toContain("conversation was cleared");
 });
 
 test("without any Jev variable (Haiku answers in jev-api) the budget is 15000 ms", async ($, on) => {
@@ -633,167 +558,19 @@ test("without any Jev variable (Haiku answers in jev-api) the budget is 15000 ms
   await clock.advance(1);
   await run;
   expect(seen).toHaveLength(1);
-  expect(await runJev($, "")).toContain("unavailable: timeout after 15000ms");
 });
 
-// What the engine does for a plugin's own `$.prompt.submit`: the hooks see it stamped with the plugin as origin (the kit stamps none).
-const FOLLOW_UP = "Jev: the user's request doesn't look finished yet. Continue with what remains. If it is actually complete, say so in one line.";
-const ownSubmit = ($: Runner, text = FOLLOW_UP) => $.prompt.submit({ text, wait: false, origin: { kind: "plugin", name: "jevfort" } });
 const userSubmit = ($: Runner, text: string) => $.prompt.submit({ text, wait: false, origin: { kind: "composer" } });
-// A Jev that finds the request unfinished.
-const unfinished = byId({ done: { type: "noul", noul: 0.04 } });
 
-test("The done check sends Claude back once when work is unfinished", { options: { classify: false } }, async ($, on) => {
-  const { sent } = setup(on, { messages: [user("rename foo to bar in all files")], jev: unfinished });
-  const submitted = followUps(on);
-
-  await $.turn.complete(answered("t1", "I renamed it in one file. Want me to do the rest?"));
-  await expect.poll(() => submitted.length).toBe(1);
-  expect(submitted[0]).toContain("doesn't look finished yet");
-  expect(sent.map((q) => [q.id, q.type])).toEqual([["done", "noul"]]);
-
-  // The follow-up turn is exempt: no second Jev call, no second follow-up.
-  await ownSubmit($);
-  await $.turn.complete(answered("t2", "Done."));
-  expect(sent).toHaveLength(1);
-  expect(submitted).toHaveLength(2);
-
-  // The exemption is used up: the next turn is checked again.
-  await $.turn.complete(answered("t3", "Done."));
-  expect(sent).toHaveLength(2);
+test("A submitted prompt is not classified: no Jev request, the prompt goes on unchanged", async ($, on) => {
+  const { sent, calls } = setup(on, { messages: [], jev: () => undefined });
+  const seen: string[] = [];
+  on("prompt.submit", (_$, e) => (seen.push(String(e.text)), { value: {} }));
+  await userSubmit($, "rewrite the storage layer to use IndexedDB");
+  expect(sent).toEqual([]);
+  expect(calls()).toBe(0);
+  expect(seen).toEqual(["rewrite the storage layer to use IndexedDB"]);
 });
-
-test("doneThreshold: 0.3 sends Claude back at a done probability of 0.2, which the 0.15 default lets pass", { options: { classify: false, doneThreshold: 0.3 } }, async ($, on) => {
-  setup(on, { messages: [user("rename foo to bar in all files")], jev: byId({ done: { type: "noul", noul: 0.2 } }) });
-  const submitted = followUps(on);
-
-  await $.turn.complete(answered("t1", "I renamed it in one file. Want me to do the rest?"));
-  await expect.poll(() => submitted.length).toBe(1);
-  expect(submitted[0]).toContain("doesn't look finished yet");
-});
-
-test("doneCheck: false asks no done question and sends no follow-up for an unfinished answer", { options: { classify: false, doneCheck: false } }, async ($, on) => {
-  const { sent } = setup(on, { messages: [user("rename foo to bar in all files")], jev: unfinished });
-  const submitted = followUps(on);
-
-  await $.turn.complete(answered("t1", "I renamed it in one file. Want me to do the rest?"));
-  expect(ids(sent)).not.toContain("done");
-  expect(submitted).toHaveLength(0);
-});
-
-test("A user pasting the follow-up text neither arms nor consumes the exemption", { options: { classify: false } }, async ($, on) => {
-  const { sent } = setup(on, { messages: [user("rename foo to bar in all files")], jev: unfinished });
-  followUps(on);
-  await userSubmit($, FOLLOW_UP);
-  await $.turn.complete(answered("t1", "One file only."));
-  expect(sent).toHaveLength(1);
-});
-
-test("A user turn between the follow-up and its turn clears the exemption", { options: { classify: false } }, async ($, on) => {
-  const { sent } = setup(on, { messages: [user("rename foo to bar in all files")], jev: unfinished });
-  followUps(on);
-  await ownSubmit($);
-  await userSubmit($, "actually, also rename baz");
-  await $.turn.complete(answered("t1", "Renamed."));
-  expect(sent).toHaveLength(1);
-});
-
-test("A prompt typed during the follow-up turn keeps that turn exempt", { options: { classify: false } }, async ($, on) => {
-  const { sent } = setup(on, { messages: [user("rename foo to bar in all files")], jev: unfinished });
-  const submitted = followUps(on);
-  await $.turn.complete(answered("t1", "I renamed it in one file. Want me to do the rest?"));
-  await expect.poll(() => submitted.length).toBe(1);
-  await ownSubmit($);
-  // Typed while t2 runs: prompt.submit fires at Enter with the running turn's id.
-  await $.prompt.submit({ text: "also update the docs afterwards", wait: true, turnId: "t2", origin: { kind: "composer" } });
-  await $.turn.complete(answered("t2", "Renamed in two more files."));
-  for (let i = 0; i < 20; i++) await Promise.resolve();
-  // One done question; the submits are the one follow-up, the test's ownSubmit and the typed prompt (no second follow-up).
-  expect({ doneCalls: ids(sent).filter((x) => x === "done").length, submits: submitted.length }).toEqual({ doneCalls: 1, submits: 3 });
-});
-
-test("A follow-up that failed to submit exempts nothing", { options: { classify: false } }, async ($, on) => {
-  let release = () => {};
-  const gate = new Promise<void>((resolve) => (release = resolve));
-  const { sent, clock } = setup(on, { messages: [user("rename foo to bar in all files")], jev: (q) => gate.then(() => unfinished(q)) as Promise<never> });
-  on("turn.complete", () => ({ text: "" }));
-  // As the engine: jevfort's hook sees its own follow-up stamped with its origin (arming the exemption), then a hook beneath refuses it.
-  on("prompt.submit", (_$, e) => {
-    if ((e as { origin?: unknown }).origin === undefined) throw new Error("rejected");
-    return { value: {} };
-  });
-  const t1 = $.turn.complete(answered("t1", "One file only."));
-  while (!ids(sent).includes("done")) await clock.advance(0);
-  await ownSubmit($); // the kit stamps no origin, so arm the exemption as the stamped follow-up would
-  release();
-  await t1;
-  for (let i = 0; i < 20; i++) await clock.advance(0);
-  // The submit was rejected, so the next turn is checked again, and logs the lost follow-up in its own frame.
-  await $.turn.complete(answered("t2", "Still one file."));
-  expect(ids(sent)).toEqual(["done", "done"]);
-  expect(await runJev($, "")).toContain("done follow-up not sent");
-});
-
-test("A meta prompt between the follow-up and its turn keeps the exemption", { options: { classify: false } }, async ($, on) => {
-  const { sent } = setup(on, { messages: [user("rename foo to bar in all files")], jev: unfinished });
-  followUps(on);
-  await ownSubmit($);
-  await $.prompt.submit({ text: "<task-notification>done</task-notification>", wait: false, isMeta: true, origin: { kind: "system" } });
-  await $.turn.complete(answered("t1", "Done."));
-  expect(sent).toHaveLength(0);
-});
-
-test("A user message quoting the follow-up text stays the scored request", { options: { classify: false } }, async ($, on) => {
-  const { sent } = setup(on, { messages: [user(`${FOLLOW_UP} Also rename baz.`)], jev: byId({ done: { type: "noul", noul: 0.9 } }) });
-  followUps(on);
-  await $.turn.complete(answered("t1", "Renamed."));
-  expect(stateOf(sent, 0).request).toContain("rename baz");
-});
-
-test("The done follow-up as the engine stores it (wrapped) is not the request of its own turn", { options: { classify: false } }, async ($, on) => {
-  const wrapped = `The jevfort plugin sent a message:\n${FOLLOW_UP}\n\nThis is how Claude Code surfaces a prompt a plugin submits between turns — it starts this turn in the user's place. Address the message above.`;
-  const { sent } = setup(on, { messages: [user("rename foo to bar in all files"), { role: "assistant", text: "One file.", toolUses: [] }, user(wrapped)], jev: byId({ done: { type: "noul", noul: 0.9 } }) });
-  followUps(on);
-  await $.turn.complete(answered("t1", "Renamed."));
-  expect(stateOf(sent, 0).request).toBe("rename foo to bar in all files");
-});
-
-test("A finished background task (origin task-notification) is not classified", async ($, on) => {
-  const { sent } = setup(on, { messages: [], jev: () => undefined });
-  on("prompt.submit", (_$, e) => ({ text: e.text }));
-  await $.prompt.submit({ text: "<task-notification>task done, please look at the output of the build</task-notification>", wait: false, origin: { kind: "task-notification" } });
-  expect(sent).toHaveLength(0);
-});
-
-for (const [status, asked] of [["completed", 1], ["failed", 1], ["killed", 1], ["idle", 1], ["running", 0], ["pending", 0], ["starting", 0]] as const) {
-  // classify off: the kit runs the unawaited follow-up's prompt.submit (unstamped, so classified) before the assertion.
-  test(`The done check with a ${status} subagent asks Jev ${asked} time(s)`, { options: { classify: false } }, async ($, on) => {
-    const { sent } = setup(on, { messages: [user("rename foo to bar in all files")], jev: unfinished, agents: [{ status }] });
-    followUps(on);
-    await $.turn.complete(answered("t1", "One file only."));
-    expect(sent).toHaveLength(asked);
-  });
-}
-
-test("The done check skips subagent turns", async ($, on) => {
-  const { sent } = setup(on, { messages: [user("rename foo to bar in all files")], jev: unfinished });
-  const submitted = followUps(on);
-
-  await $.turn.complete(answered("t1", "I renamed it in one file.", { agentId: "a1" }));
-  expect(sent).toHaveLength(0);
-  expect(submitted).toHaveLength(0);
-});
-
-// Esc, an API error or a refusal is no answer to judge: the done check must not send Claude back.
-for (const reason of ["aborted", "error", "refusal"]) {
-  test(`The done check skips turns ending with reason ${reason}`, async ($, on) => {
-    const { sent } = setup(on, { messages: [user("rename foo to bar in all files")], jev: unfinished });
-    const submitted = followUps(on);
-    await $.turn.complete({ ...answered("t1", "I renamed it in one file."), reason });
-    for (let i = 0; i < 20; i++) await Promise.resolve();
-    expect({ done: ids(sent).filter((x) => x === "done").length, submitted: submitted.length }).toEqual({ done: 0, submitted: 0 });
-  });
-}
 
 // Jev's own calls skip auto mode's classifier: the mod approves them itself, but a settings deny rule beneath still wins.
 for (const [beneath, expected] of [["ask", "allow"], ["deny", "deny"]] as const) {
@@ -803,7 +580,6 @@ for (const [beneath, expected] of [["ask", "allow"], ["deny", "deny"]] as const)
       packageJson: { scripts: { test: "node --test" } },
       jev: byId({
         next_action: { type: "choice", choice: "run npm test", probabilities: { "run npm test": 0.97, claude: 0.03 }, confidence: 0.95 },
-        difficulty: easy,
       }),
     });
     claudeBeneath(on, []);
@@ -824,7 +600,7 @@ for (const [beneath, expected] of [["ask", "allow"], ["deny", "deny"]] as const)
 test("A Read Jev made itself keeps Claude Code's ask", { options: { takeOnlyForBypass: false } }, async ($, on) => {
   setup(on, {
     messages: [user("what does src/app.ts export?")],
-    jev: byId({ next_action: { type: "choice", choice: "read src/app.ts", probabilities: { "read src/app.ts": 0.97, claude: 0.03 }, confidence: 0.95 }, difficulty: easy }),
+    jev: byId({ next_action: { type: "choice", choice: "read src/app.ts", probabilities: { "read src/app.ts": 0.97, claude: 0.03 }, confidence: 0.95 } }),
     files: [`${CWD}/src/app.ts`],
   });
   claudeBeneath(on, []);
@@ -837,18 +613,32 @@ test("A Read Jev made itself keeps Claude Code's ask", { options: { takeOnlyForB
 test("A symlinked file is never offered as a Read candidate", { options: { takeOnlyForBypass: false } }, async ($, on) => {
   setup(on, {
     messages: [user("what is in notes.txt?")],
-    jev: byId({ next_action: { type: "choice", choice: "read notes.txt", probabilities: { "read notes.txt": 0.97, claude: 0.03 }, confidence: 0.95 }, difficulty: easy }),
+    jev: byId({ next_action: { type: "choice", choice: "read notes.txt", probabilities: { "read notes.txt": 0.97, claude: 0.03 }, confidence: 0.95 } }),
     links: [`${CWD}/notes.txt`],
   });
   claudeBeneath(on, []);
   expect(toolId((await drain($.turn.step(step))).chunks)).toBe("");
 });
 
+// The 2 MB cap: a file of exactly 2,000,000 bytes is still offered, a larger one is not, even with a confident pick.
+for (const [size, offered] of [[2_000_000, true], [2_000_001, false], [5_000_000, false]] as const) {
+  test(`A ${size}-byte file is ${offered ? "" : "never "}offered as a Read candidate`, { options: { takeOnlyForBypass: false } }, async ($, on) => {
+    setup(on, {
+      messages: [user("what is in big.log?")],
+      jev: byId({ next_action: { type: "choice", choice: "read big.log", probabilities: { "read big.log": 0.97, claude: 0.03 }, confidence: 0.95 } }),
+      files: [`${CWD}/big.log`],
+      sizes: { [`${CWD}/big.log`]: size },
+    });
+    claudeBeneath(on, []);
+    expect(toolId((await drain($.turn.step(step))).chunks) !== "").toBe(offered);
+  });
+}
+
 // An allow that a settings rule already gave stays as it is: rewording it makes the security plugin warn the user.
 test("A call Jev made itself keeps a settings allow verdict untouched", { options: { takeOnlyForBypass: false } }, async ($, on) => {
   setup(on, {
     messages: [user("what does src/app.ts export?")],
-    jev: byId({ next_action: { type: "choice", choice: "read src/app.ts", probabilities: { "read src/app.ts": 0.97, claude: 0.03 }, confidence: 0.95 }, difficulty: easy }),
+    jev: byId({ next_action: { type: "choice", choice: "read src/app.ts", probabilities: { "read src/app.ts": 0.97, claude: 0.03 }, confidence: 0.95 } }),
     files: [`${CWD}/src/app.ts`],
   });
   claudeBeneath(on, []);
@@ -861,7 +651,7 @@ test("A call Jev made itself keeps a settings allow verdict untouched", { option
 test("A settings ask rule beats the allow for a call Jev made itself", { options: { takeOnlyForBypass: false } }, async ($, on) => {
   setup(on, {
     messages: [user("what does src/app.ts export?")],
-    jev: byId({ next_action: { type: "choice", choice: "read src/app.ts", probabilities: { "read src/app.ts": 0.97, claude: 0.03 }, confidence: 0.95 }, difficulty: easy }),
+    jev: byId({ next_action: { type: "choice", choice: "read src/app.ts", probabilities: { "read src/app.ts": 0.97, claude: 0.03 }, confidence: 0.95 } }),
     files: [`${CWD}/src/app.ts`],
   });
   claudeBeneath(on, []);
@@ -885,118 +675,11 @@ test("A turn started by a slash command is left to Claude (no take, no bypass)",
   expect(seen).toHaveLength(1);
 });
 
-test("A later step of a slash-command turn is not measured against Jev either", async ($, on) => {
-  const command = "<command-message>read-file</command-message>\n<command-name>/read-file</command-name>\n<command-args>src/app.ts</command-args>";
-  const { calls } = setup(on, {
-    messages: [user("Thanks!"), { role: "assistant", text: "ok", toolUses: [] }, user(command)],
-    jev: byId({ next_action: { type: "choice", choice: "read src/app.ts", probabilities: { "read src/app.ts": 0.97, claude: 0.03 }, confidence: 0.95 } }),
-    files: [`${CWD}/src/app.ts`],
-  });
-  claudeBeneath(on, []);
-  await drain($.turn.step({ ...step, index: 4 }));
-  expect(calls()).toBe(0);
-  expect(await runJev($, "report")).not.toContain("Agreement with Claude");
-});
-
-// Phase 2: every decision is logged, and Claude's own call is compared with Jev's.
-test("Inside a longer turn Jev's measured top action is compared with Claude's call and reported as agreement", async ($, on) => {
-  setup(on, {
-    messages: [user("what does src/app.ts export?")],
-    files: [`${CWD}/src/app.ts`],
-    jev: byId({
-      next_action: { type: "choice", choice: "read src/app.ts", probabilities: { "read src/app.ts": 0.92, claude: 0.08 }, confidence: 0.9 },
-    }),
-  });
-  on("turn.step", async function*(_$, e) {
-    yield { kind: "tool", index: 0, id: "toolu_c1", name: "Read" };
-    yield { kind: "input", index: 0, json: JSON.stringify({ file_path: `${CWD}/src/app.ts` }) };
-    yield { kind: "stop", stopReason: "tool_use", usage: null };
-    return { turnId: e.turnId, index: e.index, answer: "", toolUses: [{ name: "Read", input: { file_path: `${CWD}/src/app.ts` } }], stopReason: "tool_use", usage: null };
-  });
-
-  // A later step of the turn: Jev is asked in parallel (measureSteps) and never takes the step.
-  await drain($.turn.step({ ...step, index: 4 }));
-  const report = await runJev($, "report");
-  expect(report).toContain("| Agreement with Claude | **1 / 1** (100%) |");
-  expect(report).toMatch(/\| \d\d:\d\d \| what does src\/app\.ts export\? \| read src\/app\.ts \| 0\.92 \| Read app\.ts \| ✓ same \|/);
-  expect(report).toContain("| **0.85 ← current** | 1 | 100% |");
-  expect(report).not.toContain("shadow");
-});
-
-test("measureSteps: false sends no Jev call for a later step of the turn", { options: { measureSteps: false } }, async ($, on) => {
-  const seen: unknown[] = [];
-  const { calls } = setup(on, {
-    messages: [user("what does src/app.ts export?")],
-    files: [`${CWD}/src/app.ts`],
-    jev: byId({ next_action: { type: "choice", choice: "read src/app.ts", probabilities: { "read src/app.ts": 0.92, claude: 0.08 }, confidence: 0.9 } }),
-  });
-  claudeBeneath(on, seen);
-
-  await drain($.turn.step({ ...step, index: 4 }));
-  expect(calls()).toBe(0);
-  expect(seen).toHaveLength(1);
-});
-
-test("Claude's Bash command cut at 30 chars never leaves a lone surrogate in the report", async ($, on) => {
-  setup(on, {
-    messages: [user("what does src/app.ts export?")],
-    files: [`${CWD}/src/app.ts`],
-    jev: byId({ next_action: { type: "choice", choice: "read src/app.ts", probabilities: { "read src/app.ts": 0.92, claude: 0.08 }, confidence: 0.9 } }),
-  });
-  // The emoji starts at code unit 29, so the 30-unit cut lands between its surrogates.
-  const cmd = "echo aaaaaaaaaaaaaaaaaaaaaaaa\u{1F389} done";
-  on("turn.step", async function*(_$, e) {
-    yield { kind: "stop", stopReason: "tool_use", usage: null };
-    return { turnId: e.turnId, index: e.index, answer: "", toolUses: [{ name: "Bash", input: { command: cmd } }], stopReason: "tool_use", usage: null };
-  });
-  await drain($.turn.step({ ...step, index: 4 }));
-  const report = await runJev($, "report");
-  expect(report).toContain("| Bash echo aaaaaaaaaaaaaaaaaaaaaaaa | ✗ differ |");
-  expect(report).not.toMatch(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/);
-});
-
-test("An answered step measurement leaves no timer pending, the 250 ms grace timer included", async ($, on) => {
-  const started: number[] = [];
-  let cancelled = 0;
-  on("clock.after", (_$, e, next) => {
-    started.push(Number(e.ms));
-    next.signal.addEventListener("abort", () => cancelled++, { once: true });
-    return next(e);
-  });
-  const { clock, sent } = setup(on, {
-    messages: [user("what does src/app.ts export?")],
-    files: [`${CWD}/src/app.ts`],
-    jev: byId({ next_action: { type: "choice", choice: "read src/app.ts", probabilities: { "read src/app.ts": 0.92, claude: 0.08 }, confidence: 0.9 } }),
-  });
-  claudeBeneath(on, []);
-
-  await drain($.turn.step({ ...step, index: 1 }));
-  await clock.advance(0);
-  expect(ids(sent)).toEqual(["next_action"]);
-  expect(started).toContain(250);
-  expect(cancelled).toBe(started.length);
-});
-
-test("Passes are logged too: a \"claude\" pick, an unchanged route", { options: { routing: "model" } }, async ($, on) => {
-  setup(on, {
-    messages: [user("refactor the auth module to use JWT")],
-    files: [],
-    jev: byId({ difficulty: { type: "score", score: 2.6, probabilities: { "0": 0, "1": 0.05, "2": 0.3, "3": 0.65 }, confidence: 0.6 } }),
-  });
-  claudeBeneath(on, []);
-
-  await drain($.turn.step(step));
-  const report = await runJev($, "report");
-  expect(report).toContain("| Effort routing | 1 turns | avg difficulty 2.60");
-  expect(report).not.toContain("| Gate |");
-});
-
 test("Jev can pick a skill on the first step of a turn", { options: { takeOnlyForBypass: false } }, async ($, on) => {
   setup(on, {
     messages: [user("write the release notes for this version")],
     jev: byId({
       next_action: { type: "choice", choice: "skill write-release-notes", probabilities: { "skill write-release-notes": 0.93, claude: 0.07 }, confidence: 0.9 },
-      difficulty: easy,
     }),
   });
   on("command.list", () => ({
@@ -1111,7 +794,6 @@ for (const [single, expectBypass] of [[0.95, true], [0.3, false]] as const) {
       packageJson: { scripts: { test: "node --test" } },
       jev: byId({
         next_action: { type: "choice", choice: "run npm test", probabilities: { "run npm test": 0.95, claude: 0.05 }, confidence: 0.9 },
-        difficulty: easy,
         single_action: { type: "noul", noul: single },
       }),
     });
@@ -1146,8 +828,6 @@ for (const [single, expectBypass] of [[0.95, true], [0.3, false]] as const) {
     expect(seen).toHaveLength(0);
     expect(second.chunks).toContainEqual({ kind: "text", index: 0, text: "All 3 tests passed." });
     expect(asked[0]).toContain("# pass 3");
-    const report = await runJev($, "report");
-    expect(report).toContain("| Turns answered without Claude | **1**");
   });
 }
 
@@ -1184,7 +864,6 @@ for (
       packageJson: { scripts: { test: "node --test" } },
       jev: byId({
         next_action: { type: "choice", choice: "run npm test", probabilities: { "run npm test": 0.95, claude: 0.05 }, confidence: 0.9 },
-        difficulty: easy,
         single_action: { type: "noul", noul: 0.95 },
       }),
     });
@@ -1211,17 +890,16 @@ test("Built-in commands are never offered as skills, and a skill that fails is b
   setup(on, {
     messages: [user("summarize the recent changes")],
     jev: (q) => {
-      if (q.id !== "next_action") return q.id === "difficulty" ? easy : undefined;
+      if (q.id !== "next_action") return undefined;
       offered.push(Object.keys(q.criteria as object));
       return { type: "choice", choice: "skill changelog", probabilities: { "skill changelog": 0.95, claude: 0.05 }, confidence: 0.9 };
     },
   });
   on("command.list", () => ({
     value: [
-      // All share the prompt's words, so only the name/source filters can drop the first three.
+      // All share the prompt's words, so only the name/source filters can drop the first two.
       { name: "diff", description: "Summarize recent changes", source: "user" },
       { name: "recap", description: "Summarize recent changes", source: "mcp" },
-      { name: "jev", description: "Summarize recent changes", source: "plugin" },
       { name: "changelog", description: "Summarize recent changes", source: "plugin" },
     ],
   }));
@@ -1231,12 +909,54 @@ test("Built-in commands are never offered as skills, and a skill that fails is b
   const { chunks } = await drain($.turn.step(step));
   expect(offered[0]).not.toContain("skill diff");
   expect(offered[0]).not.toContain("skill recap");
-  expect(offered[0]).not.toContain("skill jev");
   expect(offered[0]).toContain("skill changelog");
   await $.tool.call({ tool: "Skill", skill: "changelog", tool_use_id: toolId(chunks) });
 
   await drain($.turn.step({ ...step, turnId: "t2" }));
   expect(offered[1] ?? []).not.toContain("skill changelog");
+});
+
+test("A skill listed only after turn 1 is offered at turn 2's step 0 (the skill list is dropped at turn end)", async ($, on) => {
+  const offered: string[][] = [];
+  setup(on, {
+    messages: [user("summarize the recent changes")],
+    jev: (q) => {
+      if (q.id === "next_action") offered.push(Object.keys(q.criteria as object));
+      return undefined;
+    },
+  });
+  let skills: { name: string; description: string; source: string }[] = [];
+  on("command.list", () => ({ value: skills }));
+  claudeBeneath(on, []);
+  followUps(on);
+
+  await drain($.turn.step(step));
+  expect(offered[0] ?? []).not.toContain("skill changelog");
+  await $.turn.complete(answered("t1", "Nothing changed."));
+  skills = [{ name: "changelog", description: "Summarize recent changes", source: "plugin" }];
+
+  const before = offered.length;
+  await drain($.turn.step({ ...step, turnId: "t2" }));
+  expect(offered[before] ?? []).toContain("skill changelog");
+});
+
+// F13: a prompt that says "skill" offered every listed skill at step 0 (255 options with 300 skills, a timeout).
+test("A prompt that says \"skill\" offers at most 8 related skills at step 0", async ($, on) => {
+  const offered: string[][] = [];
+  setup(on, {
+    messages: [user("update the release notes skill")],
+    jev: (q) => {
+      if (q.id === "next_action") offered.push(Object.keys(q.criteria as object));
+      return undefined;
+    },
+  });
+  on("command.list", () => ({ value: Array.from({ length: 300 }, (_, i) => ({ name: `notes-${i}`, description: "Write release notes", source: "plugin" })) }));
+  claudeBeneath(on, []);
+
+  await drain($.turn.step(step));
+  const skills = (offered[0] ?? []).filter((k) => k.startsWith("skill "));
+  expect(skills.length).toBeGreaterThan(0);
+  expect(skills.length).toBeLessThanOrEqual(8);
 });
 
 for (
@@ -1250,7 +970,7 @@ for (
     setup(on, {
       messages: [user("summarize the recent changes")],
       jev: (q) => {
-        if (q.id !== "next_action") return q.id === "difficulty" ? easy : undefined;
+        if (q.id !== "next_action") return undefined;
         offered.push(Object.keys(q.criteria as object));
         return { type: "choice", choice: "skill changelog", probabilities: { "skill changelog": 0.95, claude: 0.05 }, confidence: 0.9 };
       },
@@ -1262,27 +982,12 @@ for (
     const { chunks } = await drain($.turn.step(step));
     expect(offered[0]).toContain("skill changelog");
     await $.tool.call({ tool: "Skill", skill: "changelog", tool_use_id: toolId(chunks) }).catch(() => undefined);
-    expect(await runJev($, "")).toContain(`Skill ${blocked ? "failed" : "ok"}`);
 
     await drain($.turn.step({ ...step, turnId: "t2" }));
     if (blocked) expect(offered[1] ?? []).not.toContain("skill changelog");
     else expect(offered[1]).toContain("skill changelog");
   });
 }
-
-test("The done check stays quiet while background work is running", async ($, on) => {
-  const { sent } = setup(on, {
-    messages: [user("find every localStorage use with a subagent")],
-    jev: byId({ done: { type: "noul", noul: 0.02 } }),
-    agents: [{ status: "running" }],
-  });
-  const submitted = followUps(on);
-
-  await $.turn.complete(answered("t1", "The subagent is running; I will report back."));
-  expect(sent).toHaveLength(0);
-  expect(submitted).toHaveLength(0);
-  expect(await runJev($, "")).toContain("skipped: waiting on 1 background task(s)");
-});
 
 test("By default Jev takes no steps inside a longer turn", async ($, on) => {
   const seen: unknown[] = [];
@@ -1291,21 +996,20 @@ test("By default Jev takes no steps inside a longer turn", async ($, on) => {
     packageJson: { scripts: { test: "node --test" } },
     jev: byId({
       next_action: { type: "choice", choice: "run npm test", probabilities: { "run npm test": 0.97, claude: 0.03 }, confidence: 0.95 },
-      difficulty: easy,
       single_action: { type: "noul", noul: 0.95 },
     }),
   });
   claudeBeneath(on, seen);
-  // A later step of the turn: Jev is only asked in parallel, to measure.
+  // A later step of the turn: Jev is not asked at all.
   const { chunks } = await drain($.turn.step({ ...step, index: 4 }));
   expect(toolId(chunks)).toBe("");
   expect(seen).toHaveLength(1);
-  expect(ids(sent)).toEqual(["next_action"]);
+  expect(ids(sent)).toEqual([]);
 });
 
 test("Effort lowered at step 0 holds for the later steps of the turn", async ($, on) => {
   const seen: { effort?: string }[] = [];
-  setup(on, { messages: [user("what does this project do?")], jev: byId({ difficulty: easy, effort: easy }) });
+  setup(on, { messages: [user("what does this project do?")], jev: byId({ effort: easy }) });
   claudeBeneath(on, seen);
   await drain($.turn.step(step));
   await drain($.turn.step({ ...step, index: 1 }));
@@ -1315,7 +1019,7 @@ test("Effort lowered at step 0 holds for the later steps of the turn", async ($,
 test("Effort routing sees the reply a short follow-up answers", async ($, on) => {
   const { sent } = setup(on, {
     messages: [user("add a sync layer"), { role: "assistant", text: "Here is the plan: 1. … Want me to build it?", toolUses: [] }, user("yes")],
-    jev: byId({ difficulty: easy }),
+    jev: byId({}),
   });
   claudeBeneath(on, []);
   await drain($.turn.step(step));
@@ -1327,7 +1031,7 @@ test("Effort routing sees the reply a short follow-up answers", async ($, on) =>
 test("A long previous reply cut at an emoji stays well-formed", async ($, on) => {
   const { sent } = setup(on, {
     messages: [user("add a sync layer"), { role: "assistant", text: "🚀" + "x".repeat(799), toolUses: [] }, user("yes")],
-    jev: byId({ difficulty: easy }),
+    jev: byId({}),
   });
   claudeBeneath(on, []);
   await drain($.turn.step(step));
@@ -1339,22 +1043,17 @@ test("A long previous reply cut at an emoji stays well-formed", async ($, on) =>
 test("A big job asked at medium effort runs at xhigh, on an older Opus id too", async ($, on) => {
   const seen: { effort?: string }[] = [];
   const hard = { type: "score", score: 2.9, probabilities: {}, confidence: 0.95 };
-  setup(on, { messages: [user("migrate the whole app to TypeScript")], jev: byId({ difficulty: hard, effort: hard }) });
+  setup(on, { messages: [user("migrate the whole app to TypeScript")], jev: byId({ effort: hard }) });
   claudeBeneath(on, seen);
   await drain($.turn.step({ ...step, effort: "medium" }));
   await drain($.turn.step({ ...step, turnId: "t2", model: "claude-opus-5", effort: "medium" }));
   expect(seen.map((s) => s.effort)).toEqual(["xhigh", "xhigh"]);
 });
 
-test("There is no mode: a stored legacy mode is ignored and /jev off is no command", async ($, on) => {
+test("There is no mode: a stored legacy mode is ignored", async ($, on) => {
   const seen: unknown[] = [];
-  const { sent } = setup(on, { messages: [user("what does this project do?")], jev: byId({ difficulty: easy }), store: { mode: "off" } });
+  const { sent } = setup(on, { messages: [user("what does this project do?")], jev: byId({}), store: { mode: "off" } });
   claudeBeneath(on, seen);
-  const status = await runJev($, "off");
-  expect(status).toContain("Jev pilot: routing");
-  expect(status).not.toContain("Jev pilot mode");
-  // Only the first line: the recent-decisions list is module state shared across tests and may mention a model.
-  expect(status.split("\n")[0]).not.toContain("mode");
   await drain($.turn.step(step));
   // One decision: its two questions went to jev-api.
   expect(ids(sent)).toEqual(["effort", "mechanical"]);
@@ -1365,7 +1064,6 @@ test("There is no mode: a stored legacy mode is ignored and /jev off is no comma
 test("session.start registers estimate_effort", async ($, on) => {
   setup(on, { messages: [], jev: () => undefined });
   const registered: Record<string, unknown>[] = [];
-  on("command.register", async () => ({ value: undefined }));
   on("tool.register", async (_$, e) => {
     registered.push(e);
     return { value: { tool: "mcp__jevfort__estimate_effort" } };
@@ -1379,20 +1077,77 @@ test("session.start registers estimate_effort", async ($, on) => {
   });
 });
 
-test("Inverted effort bounds are logged as an error at session start", { options: { minEffort: "high", maxEffort: "low" } }, async ($, on) => {
-  setup(on, { messages: [], jev: () => undefined });
-  on("command.register", async () => ({ value: undefined }));
-  on("tool.register", async () => ({ value: { tool: "mcp__jevfort__estimate_effort" } }));
-  on("session.start", async () => ({}));
-  await $.session.start({ cwd: CWD, surface: "terminal", isInteractive: true });
-  expect(await runJev($, "report")).toContain("1 errors");
-});
-
 test("Effort routing does not ask Jev the difficulty question", async ($, on) => {
   const { sent } = setup(on, { messages: [user("what does this project do?")], jev: byId({ effort: scored(1.6) }) });
   claudeBeneath(on, []);
   await drain($.turn.step(step));
   expect(ids(sent)).toEqual(["effort", "mechanical"]);
+});
+
+// The debug log (`$.ui.log`) names the effort chosen for a turn: the only line jevfort logs.
+test("The chosen effort is written to the debug log, with its source and score", async ($, on) => {
+  const logged: string[] = [];
+  const to: unknown[] = [];
+  on("ui.log", (_$, e) => (logged.push(String(e.text)), to.push(e.to), { value: undefined }));
+  setup(on, { messages: [user("migrate the whole app to TypeScript")], jev: byId({ effort: scored(2.9), mechanical: mech(0.1) }) });
+  claudeBeneath(on, []);
+  await drain($.turn.step({ ...step, effort: "medium" }));
+  expect(logged).toEqual(["effort claude-opus-5-5: session medium → xhigh · jev (score 2.90)"]);
+  // `to` defaults to "transcript", a visible system row on every estimated turn.
+  expect(to).toEqual(["debug"]);
+});
+
+// $.ui.log returns undefined in the real engine (and the kit): a `.catch` on it threw and skipped the whole step hook.
+test("Writing the debug line does not cost the step its routed effort", async ($, on) => {
+  const seen: { effort?: string }[] = [];
+  setup(on, { messages: [user("migrate the whole app to TypeScript")], jev: byId({ effort: scored(2.9), mechanical: mech(0.1) }) });
+  claudeBeneath(on, seen);
+  await drain($.turn.step({ ...step, effort: "medium" }));
+  expect(seen.map((e) => e.effort)).toEqual(["xhigh"]);
+});
+
+test("The debug log says when Jev gave no effort", async ($, on) => {
+  const logged: string[] = [];
+  on("ui.log", (_$, e) => (logged.push(String(e.text)), { value: undefined }));
+  setup(on, { messages: [user("what does this project do?")], jev: () => 503 });
+  claudeBeneath(on, []);
+  await drain($.turn.step(step));
+  expect(logged).toEqual(["effort claude-opus-5-5: session high → unchanged · jev unavailable (batch: HTTP 503)"]);
+});
+
+test("The debug log names a held Haiku effort and a subagent's step", async ($, on) => {
+  const logged: string[] = [];
+  on("ui.log", (_$, e) => (logged.push(String(e.text)), { value: undefined }));
+  setup(on, { messages: [user("what does this project do?")], jev: inOrder({ effort: scored(1.6) }, { effort: scored(2.9) }) });
+  claudeBeneath(on, []);
+  await drain($.turn.step({ turnId: "t1", index: 0, model: "claude-haiku-5-5", effort: "high", messageCount: 1 }));
+  await drain($.turn.step({ turnId: "t2", index: 0, model: "claude-haiku-5-5", effort: "high", messageCount: 1 }));
+  await drain($.turn.step({ ...step, agentId: "a1" }));
+  expect(logged).toEqual([
+    "effort claude-haiku-5-5: session high → medium · jev (score 1.60)",
+    "effort claude-haiku-5-5: session high → medium · held",
+    "effort (agent a1) claude-opus-5-5: session high → xhigh · jev (score 2.90)",
+  ]);
+});
+
+test("routing: false writes no effort line to the debug log", { options: { routing: false } }, async ($, on) => {
+  const logged: string[] = [];
+  on("ui.log", (_$, e) => (logged.push(String(e.text)), { value: undefined }));
+  setup(on, { messages: [user("migrate the whole app to TypeScript")], jev: byId({ effort: scored(2.9), mechanical: mech(0.1) }) });
+  claudeBeneath(on, []);
+  await drain($.turn.step(step));
+  expect(logged).toEqual([]);
+});
+
+// The failed-ask branch: a take ask (next_action) still goes out with routing off, and its failure logs nothing.
+test("routing: false writes no 'jev unavailable' line when a take ask fails", { options: { routing: false } }, async ($, on) => {
+  const logged: string[] = [];
+  on("ui.log", (_$, e) => (logged.push(String(e.text)), { value: undefined }));
+  const { sent } = setup(on, { messages: [user("what does src/app.ts export?")], files: [`${CWD}/src/app.ts`], jev: () => 503 });
+  claudeBeneath(on, []);
+  await drain($.turn.step(step));
+  expect(ids(sent)).toContain("next_action");
+  expect(logged).toEqual([]);
 });
 
 const ESTIMATE = { tool: "mcp__jevfort__estimate_effort", model: "opus", defaultEffort: "high", minEffort: "low", maxEffort: "xhigh", prompt: "add a retry to the HTTP client" };
@@ -1419,10 +1174,18 @@ test("A settings ask rule beats the estimate_effort allow", async ($, on) => {
   expect(await decision($, { tool: ESTIMATE.tool, input: {}, tool_use_id: "toolu_1" })).toBe("ask");
 });
 
+test("A refused fs.exists probe does not stop the turn's routing", async ($, on) => {
+  const seen: unknown[] = [];
+  setup(on, { messages: [user("run the tests please")], packageJson: { scripts: { test: "node --test" } }, existsDenied: true, jev: byId({ effort: easy }) });
+  claudeBeneath(on, seen);
+
+  await drain($.turn.step(step));
+  expect(seen[0]).toMatchObject({ effort: "low" });
+});
+
 test("estimate_effort falls back to defaultEffort when Jev is unreachable", async ($, on) => {
   setup(on, { messages: [], jev: () => 401 });
   expect(await estimateCall($)).toEqual({ result: JSON.stringify({ effort: "high", source: "fallback" }) });
-  expect(await runJev($, "")).toContain("estimate (pass): opus: high (fallback, batch: HTTP 401)");
 });
 
 test("A null script in the project's package.json does not stop the turn's routing", async ($, on) => {
@@ -1435,26 +1198,20 @@ test("A null script in the project's package.json does not stop the turn's routi
 });
 
 test("A package.json saved with a UTF-8 BOM still offers its scripts", async ($, on) => {
-  setup(on, { messages: [user("run the tests")], packageJson: `\uFEFF${JSON.stringify({ scripts: { test: "vitest run" } })}`, jev: () => undefined });
-  expect(await runJev($, "candidates")).toContain("npm test");
+  const { sent } = setup(on, { messages: [user("run the tests")], packageJson: `\uFEFF${JSON.stringify({ scripts: { test: "vitest run" } })}`, jev: () => undefined });
+  claudeBeneath(on, []);
+  await drain($.turn.step(step));
+  expect(Object.keys(sent.find((q) => q.id === "next_action")?.criteria ?? {})).toContain("run npm test");
 });
 
-test("/jev candidates lists the step-0 options, not the ones the rest of the turn found", async ($, on) => {
-  const id = "toolu_read";
-  setup(on, {
-    messages: [
-      user("explain src/app.ts"),
-      { role: "assistant", text: "", toolUses: [{ tool_use_id: id, tool: "Read", input: { file_path: `${CWD}/src/app.ts` }, text: "import './util'; see src/util.ts" }] },
-      { role: "user", text: "", toolUses: [], toolResults: [{ tool_use_id: id, text: "see src/util.ts", isError: false }] },
-      { role: "assistant", text: "It wires src/util.ts in.", toolUses: [] },
-    ],
-    files: [`${CWD}/src/app.ts`, `${CWD}/src/util.ts`],
-    jev: () => undefined,
+for (const [lock, runner] of [["pnpm-lock.yaml", "pnpm"], ["yarn.lock", "yarn"], ["bun.lockb", "bun"], ["bun.lock", "bun"], [undefined, "npm"]] as const) {
+  test(`${lock ?? "No lock file"} offers the test script as ${runner} test`, async ($, on) => {
+    const { sent } = setup(on, { messages: [user("run the tests")], packageJson: { scripts: { test: "vitest" } }, locks: lock ? [lock] : [], jev: () => undefined });
+    claudeBeneath(on, []);
+    await drain($.turn.step(step));
+    expect(Object.keys(sent.find((q) => q.id === "next_action")?.criteria ?? {})).toContain(`run ${runner} test`);
   });
-  const out = await runJev($, "candidates");
-  expect(out).toContain("`read src/app.ts`");
-  expect(out).not.toContain("src/util.ts");
-});
+}
 
 test("A failing store does not fail estimate_effort or a turn step", async ($, on) => {
   on("store.set", () => ({ deny: "store over 4 MiB of JSON text" }));
@@ -1464,34 +1221,6 @@ test("A failing store does not fail estimate_effort or a turn step", async ($, o
   expect(await estimateCall($)).toEqual({ result: JSON.stringify({ effort: "medium", source: "jev" }) });
   await drain($.turn.step(step));
   expect(seen).toHaveLength(1);
-});
-
-test("An error text of megabytes is cut before the log and /jev hold it", async ($, on) => {
-  setup(on, { messages: [user("what does this project do?")], jev: () => ({ __deny: "x".repeat(500_000) }) });
-  claudeBeneath(on, []);
-  await drain($.turn.step(step));
-  const status = await runJev($, "");
-  expect(status).toContain("unavailable: xxx");
-  expect(status).toContain("more chars]");
-  expect(status.length).toBeLessThan(5000);
-});
-
-test("/jev export writes a new file and never an existing one (a symlink would be followed)", async ($, on) => {
-  setup(on, { messages: [], jev: () => undefined });
-  const written: string[] = [];
-  on("fs.write", (_$, e) => (written.push(String(e.path)), { value: undefined }));
-  expect(await runJev($, "export")).toMatch(/wrote \d+ entries to \/proj\/\.jev\/decisions-\d+\.jsonl/);
-  expect(written).toHaveLength(1);
-  expect(written[0]).toMatch(/^\/proj\/\.jev\/decisions-\d+\.jsonl$/);
-});
-
-test("/jev export writes nothing when the target exists", async ($, on) => {
-  on("fs.exists", () => ({ value: true }));
-  setup(on, { messages: [], jev: () => undefined });
-  const written: string[] = [];
-  on("fs.write", (_$, e) => (written.push(String(e.path)), { value: undefined }));
-  expect(await runJev($, "export")).toContain("exists, nothing written");
-  expect(written).toHaveLength(0);
 });
 
 test("With takeOnlyForBypass a confident skill pick is not taken by Jev (the skill would never run)", async ($, on) => {
@@ -1519,12 +1248,6 @@ test("A refused clock read fails neither estimate_effort nor a turn step", async
   expect(seen).toHaveLength(1);
 });
 
-test("/jev status still answers when the counters cannot be read", async ($, on) => {
-  on("store.get", () => ({ deny: "EACCES" }));
-  setup(on, { messages: [], jev: () => undefined });
-  expect(await runJev($, "")).toContain("Decisions (all sessions): unreadable=1");
-});
-
 test("A turn's mentioned paths are statted at most 16 per step and each once per turn", async ($, on) => {
   const missing = Array.from({ length: 100 }, (_, i) => `src/gone${i}.ts`);
   const { statted } = setup(on, { messages: [user(`fix the build, tsc says: ${missing.join(" ")}`)], jev: () => undefined });
@@ -1537,7 +1260,17 @@ test("A turn's mentioned paths are statted at most 16 per step and each once per
   expect(new Set(statted).size).toBe(statted.length);
 });
 
-test("A file statted by an earlier step is still offered after 16 new paths used up the stat budget", async ($, on) => {
+test("turn.complete drops the turn's state: a path statted in the turn is statted again by a later turn with the same id", async ($, on) => {
+  const { statted } = setup(on, { messages: [user("fix src/gone.ts")], jev: () => undefined });
+  claudeBeneath(on, []);
+  followUps(on);
+  await drain($.turn.step(step));
+  await $.turn.complete(answered("t1", "Done."));
+  await drain($.turn.step(step));
+  expect(statted.filter((p) => p === `${CWD}/src/gone.ts`)).toHaveLength(2);
+});
+
+test("A file statted by an earlier step is still offered after 16 new paths used up the stat budget", { options: { takeOnlyForBypass: false } }, async ($, on) => {
   const missing = Array.from({ length: 20 }, (_, i) => `src/gone${i}.ts`);
   const messages: Msg[] = [user("fix src/a.ts")];
   const { sent } = setup(on, { messages, files: [`${CWD}/src/a.ts`], jev: () => undefined });
@@ -1551,7 +1284,7 @@ test("A file statted by an earlier step is still offered after 16 new paths used
   expect(Object.keys(last?.criteria ?? {})).toContain("read src/a.ts");
 });
 
-test("After a mid-turn compaction the path scan starts over and offers a newly named file", async ($, on) => {
+test("After a mid-turn compaction the path scan starts over and offers a newly named file", { options: { takeOnlyForBypass: false } }, async ($, on) => {
   const bash = (id: string, out: string): Msg[] => [
     { role: "assistant", text: "", toolUses: [{ tool_use_id: id, tool: "Bash", input: { command: "true" }, text: out }] },
     { role: "user", text: "", toolUses: [], toolResults: [{ tool_use_id: id, text: out, isError: false }] },
@@ -1567,7 +1300,7 @@ test("After a mid-turn compaction the path scan starts over and offers a newly n
   expect(Object.keys(last?.criteria ?? {})).toContain("read src/new.ts");
 });
 
-test("The path scan starts over when the transcript has fewer steps under the same request row", async ($, on) => {
+test("The path scan starts over when the transcript has fewer steps under the same request row", { options: { takeOnlyForBypass: false } }, async ($, on) => {
   const said = (text: string): Msg => ({ role: "assistant", text, toolUses: [] });
   const messages: Msg[] = [user("tidy up the helpers"), said("one"), said("two"), said("three")];
   const { sent } = setup(on, { messages, files: [`${CWD}/src/new.ts`], jev: () => undefined });
@@ -1578,6 +1311,18 @@ test("The path scan starts over when the transcript has fewer steps under the sa
   await drain($.turn.step({ ...step, index: 2 }));
   const last = sent.filter((q) => q.id === "next_action").at(-1);
   expect(Object.keys(last?.criteria ?? {})).toContain("read src/new.ts");
+});
+
+test("The path scan starts over on a message delivered mid-turn without fewer steps", { options: { takeOnlyForBypass: false } }, async ($, on) => {
+  const messages: Msg[] = [user("hello there")];
+  const { sent } = setup(on, { messages, files: [`${CWD}/src/late.ts`], jev: () => undefined });
+  claudeBeneath(on, []);
+  await drain($.turn.step(step));
+  // A new request row with no step rows after it: the step count does not shrink.
+  messages.push(user("also check src/late.ts"));
+  await drain($.turn.step({ ...step, index: 1 }));
+  const last = sent.filter((q) => q.id === "next_action").at(-1);
+  expect(Object.keys(last?.criteria ?? {})).toContain("read src/late.ts");
 });
 
 test("A mid-turn cd moves a later step's Read candidate to the new cwd", { options: { takeOnlyForBypass: false } }, async ($, on) => {
@@ -1597,7 +1342,22 @@ test("A mid-turn cd moves a later step's Read candidate to the new cwd", { optio
   expect(chunks).toContainEqual({ kind: "input", index: 0, json: JSON.stringify({ file_path: `${CWD}/sub/src/b.ts` }) });
 });
 
-test("A call's result that arrives a step later is still scanned for file paths", async ($, on) => {
+test("A mid-turn cd away from the package.json drops its scripts", { options: { takeOnlyForBypass: false } }, async ($, on) => {
+  let cwd = CWD;
+  const { sent } = setup(on, { messages: [user("run the tests")], cwd: () => cwd, packageJson: { scripts: { test: "vitest run" } }, jev: () => undefined });
+  claudeBeneath(on, []);
+  await drain($.turn.step(step));
+  expect(Object.keys(sent.filter((q) => q.id === "next_action").at(-1)?.criteria ?? {})).toContain("run npm test");
+  // A carried-over `cd sub` moves the cwd to a directory without a package.json.
+  cwd = `${CWD}/sub`;
+  const before = sent.length;
+  await drain($.turn.step({ ...step, index: 1 }));
+  // Without candidates step 1 asks no next_action at all; with the stale scripts it would offer `run npm test`.
+  const offered = sent.slice(before).filter((q) => q.id === "next_action").flatMap((q) => Object.keys(q.criteria ?? {}));
+  expect(offered).not.toContain("run npm test");
+});
+
+test("A call's result that arrives a step later is still scanned for file paths", { options: { takeOnlyForBypass: false } }, async ($, on) => {
   const call: { tool_use_id: string; tool: string; input: Record<string, unknown>; text?: string } = { tool_use_id: "c1", tool: "Bash", input: { command: "tsc" } };
   const messages: Msg[] = [user("fix the build"), { role: "assistant", text: "", toolUses: [call] }];
   const { sent } = setup(on, { messages, files: [`${CWD}/src/x.ts`], jev: () => undefined });
@@ -1610,7 +1370,7 @@ test("A call's result that arrives a step later is still scanned for file paths"
   expect(Object.keys(last?.criteria ?? {})).toContain("read src/x.ts");
 });
 
-test("One file under several spellings is one Read candidate", async ($, on) => {
+test("One file under several spellings is one Read candidate", { options: { takeOnlyForBypass: false } }, async ($, on) => {
   const out = "./src/app.ts:3:export const useAuth = 1\n/proj/src/app.ts:4: x";
   const messages: Msg[] = [
     user("where is useAuth used? start with src/app.ts"),
@@ -1624,7 +1384,7 @@ test("One file under several spellings is one Read candidate", async ($, on) => 
   expect(Object.keys(last?.criteria ?? {}).filter((k) => k.startsWith("read "))).toEqual(["read src/app.ts"]);
 });
 
-test("A file the turn already read is not offered again under another spelling", async ($, on) => {
+test("A file the turn already read is not offered again under another spelling", { options: { takeOnlyForBypass: false } }, async ($, on) => {
   const messages: Msg[] = [
     user("check src/./app.ts"),
     { role: "assistant", text: "", toolUses: [{ tool_use_id: "r1", tool: "Read", input: { file_path: "src/app.ts" }, text: "1\texport const a = 1" }] },
@@ -1638,18 +1398,6 @@ test("A file the turn already read is not offered again under another spelling",
   await drain($.turn.step({ ...step, index: 2, messageCount: 5 }));
   const last = sent.filter((q) => q.id === "next_action").at(-1);
   expect(Object.keys(last?.criteria ?? {}).filter((k) => k.startsWith("read "))).toEqual([]);
-});
-
-test("A finished step does not wait for a slow step measurement", async ($, on) => {
-  const seen: unknown[] = [];
-  const { sent, clock } = setup(on, { messages: [user("what does src/app.ts export?")], files: ["/proj/src/app.ts"], jev: () => new Promise<never>(() => {}) });
-  claudeBeneath(on, seen);
-  const run = drain($.turn.step({ ...step, index: 4 }));
-  while (sent.length < 1) await clock.advance(0);
-  // The measurement has 4000 ms; the step is let go after 250 ms.
-  await clock.advance(250);
-  await run;
-  expect(seen).toHaveLength(1);
 });
 
 test("estimate_effort rejects invalid input without asking Jev", async ($, on) => {
@@ -1669,31 +1417,15 @@ test("estimate_effort estimates on every call, also for haiku", async ($, on) =>
 // Turn-start effort estimate: Jev's effort score within minEffort..maxEffort.
 test("A mechanical turn runs at minEffort even on a hard score", async ($, on) => {
   const seen: { effort?: string }[] = [];
-  setup(on, { messages: [user("rename foo to bar in src/a.ts")], jev: byId({ difficulty: easy, effort: scored(2.9), mechanical: mech(0.97) }) });
+  setup(on, { messages: [user("rename foo to bar in src/a.ts")], jev: byId({ effort: scored(2.9), mechanical: mech(0.97) }) });
   claudeBeneath(on, seen);
   await drain($.turn.step(step));
   expect(seen.map((s) => s.effort)).toEqual(["low"]);
 });
 
-// Effort score logging: the effort score and its confidence are logged, to recalibrate the cut points from real turns.
-test("route and estimate log entries carry effortScore and effortConfidence", async ($, on) => {
-  // Registered before setup so it answers `store.set` ahead of the in-memory store; each write then holds one new entry.
-  const log: { kind: string; data?: Record<string, unknown> }[] = [];
-  on("store.set", (_$, e) => (e.key === "log" && log.push(...(e.value as typeof log)), { value: undefined }));
-  setup(on, { messages: [user("what does src/app.ts export?")], jev: byId({ difficulty: easy, effort: scored(1.6, 0.3), mechanical: mech(0.1) }) });
-  claudeBeneath(on, []);
-  await drain($.turn.step(step));
-  await estimateCall($, { model: "opus" });
-  await runJev($, "report"); // writes the pending decisions
-  for (const kind of ["route", "estimate"]) {
-    const entry = log.find((l) => l.kind === kind);
-    expect(entry?.data).toMatchObject({ effortScore: 1.6, effortConfidence: 0.3 });
-  }
-});
-
 test("maxEffort caps a confident hard estimate", { options: { maxEffort: "medium" } }, async ($, on) => {
   const seen: { effort?: string }[] = [];
-  setup(on, { messages: [user("migrate the whole app to TypeScript")], jev: byId({ difficulty: easy, effort: scored(2.9) }) });
+  setup(on, { messages: [user("migrate the whole app to TypeScript")], jev: byId({ effort: scored(2.9) }) });
   claudeBeneath(on, seen);
   await drain($.turn.step(step));
   expect(seen.map((s) => s.effort)).toEqual(["medium"]);
@@ -1701,7 +1433,7 @@ test("maxEffort caps a confident hard estimate", { options: { maxEffort: "medium
 
 test("minEffort raises a confident easy estimate", { options: { minEffort: "medium" } }, async ($, on) => {
   const seen: { effort?: string }[] = [];
-  setup(on, { messages: [user("what does this project do?")], jev: byId({ difficulty: easy, effort: scored(0.2) }) });
+  setup(on, { messages: [user("what does this project do?")], jev: byId({ effort: scored(0.2) }) });
   claudeBeneath(on, seen);
   await drain($.turn.step(step));
   expect(seen.map((s) => s.effort)).toEqual(["medium"]);
@@ -1709,7 +1441,7 @@ test("minEffort raises a confident easy estimate", { options: { minEffort: "medi
 
 test("An inverted minEffort/maxEffort config falls back to low..xhigh", { options: { minEffort: "max", maxEffort: "low" } }, async ($, on) => {
   const seen: { effort?: string }[] = [];
-  setup(on, { messages: [user("migrate the whole app to TypeScript")], jev: byId({ difficulty: easy, effort: scored(2.9) }) });
+  setup(on, { messages: [user("migrate the whole app to TypeScript")], jev: byId({ effort: scored(2.9) }) });
   claudeBeneath(on, seen);
   await drain($.turn.step(step));
   expect(seen.map((s) => s.effort)).toEqual(["xhigh"]);
@@ -1721,7 +1453,7 @@ const turnStep = (turnId: string, model: string, effort: string) => ({ turnId, i
 for (const model of ["claude-opus-5-5", "claude-sonnet-5-5"]) {
   test(`On ${model} every turn is estimated`, async ($, on) => {
     const seen: { effort?: string }[] = [];
-    const { sent } = setup(on, { messages: [user("what does this project do?")], jev: inOrder({ difficulty: easy, effort: scored(0.2) }, { difficulty: easy, effort: scored(2.9) }) });
+    const { sent } = setup(on, { messages: [user("what does this project do?")], jev: inOrder({ effort: scored(0.2) }, { effort: scored(2.9) }) });
     claudeBeneath(on, seen);
     await drain($.turn.step(turnStep("t1", model, "high")));
     await drain($.turn.step(turnStep("t2", model, "high")));
@@ -1734,7 +1466,7 @@ for (const model of ["claude-haiku-5-5", "claude-fable-5"]) {
   const estimated = "medium";
   test(`On ${model} only the first turn is estimated and later turns hold it`, async ($, on) => {
     const seen: { effort?: string }[] = [];
-    const { sent } = setup(on, { messages: [user("what does this project do?")], jev: inOrder({ difficulty: easy, effort: scored(1.6) }, { difficulty: easy, effort: scored(2.9) }) });
+    const { sent } = setup(on, { messages: [user("what does this project do?")], jev: inOrder({ effort: scored(1.6) }, { effort: scored(2.9) }) });
     claudeBeneath(on, seen);
     await drain($.turn.step(turnStep("t1", model, "high")));
     await drain($.turn.step(turnStep("t2", model, "high")));
@@ -1744,21 +1476,35 @@ for (const model of ["claude-haiku-5-5", "claude-fable-5"]) {
   });
 }
 
+for (const row of ["", "[Request interrupted by user]"]) {
+  test(`A held Haiku effort also applies to a turn without a request (${JSON.stringify(row)})`, async ($, on) => {
+    const seen: { effort?: string }[] = [];
+    const messages = [user("what does this project do?")];
+    const { sent } = setup(on, { messages, jev: inOrder({ effort: scored(1.6) }, { effort: scored(2.9) }) });
+    claudeBeneath(on, seen);
+    await drain($.turn.step(turnStep("t1", "claude-haiku-5-5", "high")));
+    messages.push({ role: "assistant", text: "done", toolUses: [] }, user(row));
+    await drain($.turn.step(turnStep("t2", "claude-haiku-5-5", "high")));
+    await drain($.turn.step({ ...turnStep("t2", "claude-haiku-5-5", "high"), index: 1 }));
+    expect(ids(sent)).toEqual(["effort", "mechanical"]);
+    expect(seen.map((s) => s.effort)).toEqual(["medium", "medium", "medium"]);
+  });
+}
+
 test("A held Haiku effort still applies when Jev fails on a later turn", async ($, on) => {
   const seen: { effort?: string }[] = [];
   // A named file gives the held t2 a step-0 question, so its 401 reaches the failure branch.
-  const { sent } = setup(on, { messages: [user("explain src/app.ts")], files: [`${CWD}/src/app.ts`], jev: inOrder({ difficulty: easy, effort: scored(1.6) }, 401) });
+  const { sent } = setup(on, { messages: [user("explain src/app.ts")], files: [`${CWD}/src/app.ts`], jev: inOrder({ effort: scored(1.6) }, 401) });
   claudeBeneath(on, seen);
   await drain($.turn.step(turnStep("t1", "claude-haiku-5-5", "high")));
   await drain($.turn.step(turnStep("t2", "claude-haiku-5-5", "high")));
   expect(new Set(sent.map((q) => q.call))).toEqual(new Set([0, 1]));
-  expect(await runJev($, "")).toContain("unavailable");
   expect(seen.map((s) => s.effort)).toEqual(["medium", "medium"]);
 });
 
 test("A changed session effort ends the Haiku hold", async ($, on) => {
   const seen: { effort?: string }[] = [];
-  const { sent } = setup(on, { messages: [user("what does this project do?")], jev: inOrder({ difficulty: easy, effort: scored(2.5) }, { difficulty: easy, effort: scored(0.2) }) });
+  const { sent } = setup(on, { messages: [user("what does this project do?")], jev: inOrder({ effort: scored(2.5) }, { effort: scored(0.2) }) });
   claudeBeneath(on, seen);
   await drain($.turn.step(turnStep("t1", "claude-haiku-5-5", "high")));
   await drain($.turn.step(turnStep("t2", "claude-haiku-5-5", "medium")));
@@ -1768,7 +1514,7 @@ test("A changed session effort ends the Haiku hold", async ($, on) => {
 
 test("A failed first Haiku turn is not re-asked and later turns keep the session effort", async ($, on) => {
   const seen: { effort?: string }[] = [];
-  const { sent } = setup(on, { messages: [user("what does this project do?")], jev: inOrder(401, { difficulty: easy, effort: scored(0.2) }) });
+  const { sent } = setup(on, { messages: [user("what does this project do?")], jev: inOrder(401, { effort: scored(0.2) }) });
   claudeBeneath(on, seen);
   await drain($.turn.step(turnStep("t1", "claude-haiku-5-5", "high")));
   await drain($.turn.step(turnStep("t2", "claude-haiku-5-5", "high")));
@@ -1778,7 +1524,7 @@ test("A failed first Haiku turn is not re-asked and later turns keep the session
 
 test("A switch from Opus to Haiku starts a new first turn with its own estimate", async ($, on) => {
   const seen: { effort?: string }[] = [];
-  const { sent } = setup(on, { messages: [user("what does this project do?")], jev: inOrder({ difficulty: easy, effort: scored(0.2) }, { difficulty: easy, effort: scored(1.6) }) });
+  const { sent } = setup(on, { messages: [user("what does this project do?")], jev: inOrder({ effort: scored(0.2) }, { effort: scored(1.6) }) });
   claudeBeneath(on, seen);
   await drain($.turn.step(turnStep("t1", "claude-opus-5-5", "high")));
   await drain($.turn.step(turnStep("t2", "claude-haiku-5-5", "high")));
@@ -1789,7 +1535,7 @@ test("A switch from Opus to Haiku starts a new first turn with its own estimate"
 
 test("A /clear (session.end) starts a new Haiku first turn with its own estimate", async ($, on) => {
   const seen: { effort?: string }[] = [];
-  const { sent } = setup(on, { messages: [user("what does this project do?")], jev: inOrder({ difficulty: easy, effort: scored(1.6) }, { difficulty: easy, effort: scored(2.9) }) });
+  const { sent } = setup(on, { messages: [user("what does this project do?")], jev: inOrder({ effort: scored(1.6) }, { effort: scored(2.9) }) });
   on("session.end", () => ({}));
   claudeBeneath(on, seen);
   await drain($.turn.step(turnStep("t1", "claude-haiku-5-5", "high")));
@@ -1800,18 +1546,17 @@ test("A /clear (session.end) starts a new Haiku first turn with its own estimate
 });
 
 // Self-disable: without jev-api's batch tool in the listing (here jev-api 0.1's three tools), every hook but /jev passes through untouched.
-test("Without a jev-api tool jevfort is inactive: every hook passes through and /jev says why", async ($, on) => {
+test("Without a jev-api tool jevfort is inactive: every hook passes through", async ($, on) => {
   const seen: unknown[] = [];
   const { sent } = setup(on, {
     messages: [user("what does src/app.ts export?")],
     files: [`${CWD}/src/app.ts`],
     tools: SINGLE_TOOLS,
-    jev: unfinished,
+    jev: byId({}),
   });
   claudeBeneath(on, seen);
   const submitted = followUps(on);
   const registered: unknown[] = [];
-  on("command.register", async () => ({ value: undefined }));
   on("tool.register", async (_$, e) => {
     registered.push(e);
     return { value: { tool: "mcp__jevfort__estimate_effort" } };
@@ -1842,10 +1587,6 @@ test("Without a jev-api tool jevfort is inactive: every hook passes through and 
   expect(await $.tool.call({ tool: "Agent", description: "find usages", prompt: "Find every caller of addTodo", tool_use_id: "a1" })).toEqual({ result: "beneath" });
   await $.session.compact({ trigger: "manual", messages: [user("fix the failing date test"), { role: "assistant", text: "", toolUses: ["a", "b", "c"].map((x, i) => ({ tool_use_id: `t${i}`, tool: "Bash", input: { command: `step ${x}` }, text: x })) }] });
   expect(sent).toHaveLength(0);
-
-  const status = await runJev($, "");
-  expect(status.startsWith(`${INACTIVE}\nJev pilot: routing effort`)).toBe(true);
-  expect(status).toContain("error (pass): inactive: jev-api tools missing (mcp__jev-api__batch)");
 });
 
 test("A tool listing that fails counts as all jev-api tools missing", async ($, on) => {
@@ -1856,7 +1597,6 @@ test("A tool listing that fails counts as all jev-api tools missing", async ($, 
   await drain($.turn.step(step));
   expect(seen).toEqual([step]);
   expect(sent).toHaveLength(0);
-  expect((await runJev($, "")).split("\n")[0]).toBe(INACTIVE);
 });
 
 test("jev-api registering batch inside session.start's next(e) makes jevfort active, also after a lookup in between", async ($, on) => {
@@ -1864,7 +1604,6 @@ test("jev-api registering batch inside session.start's next(e) makes jevfort act
   const { sent } = setup(on, { messages: [user("what does this project do?")], tools, jev: byId({ effort: easy }) });
   claudeBeneath(on, []);
   const registered: unknown[] = [];
-  on("command.register", async () => ({ value: undefined }));
   on("tool.register", async (_$, e) => {
     registered.push(e.name);
     return { value: { tool: "mcp__jevfort__estimate_effort" } };
@@ -1883,10 +1622,9 @@ test("jev-api registering batch inside session.start's next(e) makes jevfort act
   await drain($.turn.step(step));
   expect(ids(sent)).toEqual(["effort", "mechanical"]);
   // The listing raised beneath next(e) (before jev-api registered) applied nothing: no inactive error was logged.
-  expect(await runJev($, "report")).toContain("· 0 errors |");
 });
 
-test("The jev-api lookup is repeated after each turn", { options: { doneCheck: false } }, async ($, on) => {
+test("The jev-api lookup is repeated after each turn", async ($, on) => {
   const seen: { effort?: string }[] = [];
   const tools: typeof JEV_TOOLS = [];
   const { sent } = setup(on, { messages: [user("what does this project do?")], tools, jev: byId({ effort: easy }) });
@@ -1915,12 +1653,10 @@ test("The jev-api lookup is repeated after each turn", { options: { doneCheck: f
   expect(sent).toHaveLength(2);
   expect(registered).toEqual(["estimate_effort"]);
   expect(seen.map((s) => s.effort)).toEqual(["high", "high", "low", "high"]);
-  expect((await runJev($, "")).split("\n")[0]).toBe(INACTIVE);
   // Two inactive errors: one at session start, one at the change.
-  expect(await runJev($, "report")).toContain("· 2 errors |");
 });
 
-test("estimate_effort is not registered again when jev-api goes away and comes back", { options: { doneCheck: false } }, async ($, on) => {
+test("estimate_effort is not registered again when jev-api goes away and comes back", async ($, on) => {
   const tools: typeof JEV_TOOLS = [...JEV_TOOLS];
   setup(on, { messages: [user("what does this project do?")], tools, jev: byId({ effort: easy }) });
   claudeBeneath(on, []);
@@ -1938,7 +1674,7 @@ test("estimate_effort is not registered again when jev-api goes away and comes b
   expect(registered).toEqual(["estimate_effort"]);
 });
 
-test("/jev between turns does not carry its listing into the next turn", { options: { doneCheck: false } }, async ($, on) => {
+test("/jev between turns does not carry its listing into the next turn", async ($, on) => {
   const tools: typeof JEV_TOOLS = [];
   const { sent } = setup(on, { messages: [user("what does this project do?")], tools, jev: byId({ effort: easy }) });
   claudeBeneath(on, []);
@@ -1949,19 +1685,17 @@ test("/jev between turns does not carry its listing into the next turn", { optio
   await drain($.turn.step(step));
   await $.turn.complete(answered("t1", "It is a todo app."));
   // The user runs /jev, reads "it looks again at the next turn" and enables jev-api.
-  expect((await runJev($, "")).split("\n")[0]).toBe(INACTIVE);
   tools.push(...JEV_TOOLS);
   await drain($.turn.step({ ...step, turnId: "t2" }));
   expect(ids(sent)).toEqual(["effort", "mechanical"]);
   expect(registered).toEqual(["estimate_effort"]);
 });
 
-test("A failed estimate_effort registration is retried by the next turn's listing, then not repeated", { options: { doneCheck: false } }, async ($, on) => {
+test("A failed estimate_effort registration is retried by the next turn's listing, then not repeated", async ($, on) => {
   setup(on, { messages: [user("what does this project do?")], jev: byId({ effort: easy }) });
   claudeBeneath(on, []);
   followUps(on);
   const attempts: unknown[] = [];
-  on("command.register", async () => ({ value: undefined }));
   on("tool.register", async (_$, e) => {
     attempts.push(e.name);
     if (attempts.length === 1) throw new Error("transient");
@@ -1979,7 +1713,7 @@ test("A failed estimate_effort registration is retried by the next turn's listin
   expect(attempts).toHaveLength(2);
 });
 
-test("A subagent's turn.complete does not drop the jev-api listing", { options: { doneCheck: false } }, async ($, on) => {
+test("A subagent's turn.complete does not drop the jev-api listing", async ($, on) => {
   const tools: typeof JEV_TOOLS = [];
   const { sent } = setup(on, { messages: [user("what does this project do?")], tools, jev: byId({ effort: easy }) });
   claudeBeneath(on, []);
@@ -1988,8 +1722,10 @@ test("A subagent's turn.complete does not drop the jev-api listing", { options: 
 
   await $.session.start(START);
   tools.push(...JEV_TOOLS);
-  await $.turn.complete(answered("s1", "Found it.", { agentId: "a1" }));
   await drain($.turn.step({ ...step, turnId: "t2" }));
+  await $.turn.complete(answered("s1", "Found it.", { agentId: "a1" }));
+  // Another subagent of the same main-loop turn still sees the turn's listing (no jev-api): it asks nothing.
+  await drain($.turn.step({ ...step, turnId: "s2", agentId: "a2" }));
   expect(sent).toHaveLength(0);
   await $.turn.complete(answered("t2", "It is a todo app."));
   await drain($.turn.step({ ...step, turnId: "t3" }));
@@ -2019,6 +1755,63 @@ test("The band shows the session effort bold and Jev's choice blue", async ($, o
   await $.session.end({ reason: "clear", sessionId: SID, resume: { id: SID } });
   await clock.settle();
   for (const level of ["low", "medium", "high", "xhigh"]) expect(await levelProps(ui, level)).toEqual({ dimColor: true });
+  await ui.unmount();
+});
+
+test("The band draws a held Haiku effort blue on a later turn", async ($, on) => {
+  const { clock } = setup(on, { messages: [user("what does this project do?")], jev: inOrder({ effort: scored(1.6) }, { effort: scored(2.9) }) });
+  claudeBeneath(on, []);
+  sessionStubs(on);
+  on("turn.complete", () => ({ text: "" }));
+  await $.session.start(START);
+  const ui = await $.ui.mount(BAND);
+  await drain($.turn.step(turnStep("t1", "claude-haiku-5-5", "high")));
+  await $.turn.complete(answered("t1", "It is a todo app."));
+  await drain($.turn.step(turnStep("t2", "claude-haiku-5-5", "high")));
+  await clock.settle();
+  expect(await levelProps(ui, "high")).toEqual({ bold: true });
+  expect(await levelProps(ui, "medium")).toEqual({ color: "blue" });
+  await ui.unmount();
+});
+
+// A subagent's step 0 (estimated, or a held Haiku turn) leaves the main loop's bold and blue levels alone.
+for (const model of ["claude-opus-5-5", "claude-haiku-5-5"]) {
+  test(`A subagent's step 0 leaves the main loop's band (${model})`, async ($, on) => {
+    const { clock } = setup(on, { messages: [user("what does this project do?")], jev: inOrder({ effort: easy }, { effort: scored(2.9) }) });
+    claudeBeneath(on, []);
+    sessionStubs(on);
+    await $.session.start(START);
+    const ui = await $.ui.mount(BAND);
+    await drain($.turn.step(step));
+    await drain($.turn.step({ ...step, turnId: "a-t1", agentId: "a1", model, effort: "medium" }));
+    // On Haiku the subagent's second turn holds its first estimate (xhigh).
+    await drain($.turn.step({ ...step, turnId: "a-t2", agentId: "a1", model, effort: "medium" }));
+    await clock.settle();
+    expect(await levelProps(ui, "low")).toEqual({ color: "blue" });
+    expect(await levelProps(ui, "high")).toEqual({ bold: true });
+    for (const level of ["medium", "xhigh"]) expect(await levelProps(ui, level)).toEqual({ dimColor: true });
+    await ui.unmount();
+  });
+}
+
+test("A main-loop turn without a request clears the last turn's choice from the band", async ($, on) => {
+  const messages = [user("what does this project do?")];
+  const { clock } = setup(on, { messages, jev: byId({ effort: easy }) });
+  claudeBeneath(on, []);
+  sessionStubs(on);
+  await $.session.start(START);
+  const ui = await $.ui.mount(BAND);
+  await drain($.turn.step(step));
+  await clock.settle();
+  expect(await levelProps(ui, "low")).toEqual({ color: "blue" });
+
+  // An image-only prompt: an empty user row, no request; the session effort changed to medium.
+  messages.push({ role: "assistant", text: "done", toolUses: [] }, user(""));
+  await drain($.turn.step({ ...step, turnId: "t2", effort: "medium" }));
+  await clock.settle();
+  expect(await levelProps(ui, "low")).toEqual({ dimColor: true });
+  expect(await levelProps(ui, "high")).toEqual({ dimColor: true });
+  expect(await levelProps(ui, "medium")).toEqual({ bold: true });
   await ui.unmount();
 });
 
@@ -2056,7 +1849,6 @@ test("The Auto button turns the effort choice off until pressed again", async ($
   expect(seen.map((s) => s.effort)).toEqual(["high"]);
   expect(await levelProps(ui, "high")).toEqual({ bold: true });
   expect(await levelProps(ui, "low")).toEqual({ dimColor: true });
-  expect(await runJev($, "")).toContain("Jev pilot: routing effort (effort auto off), take steps");
 
   await ui.press({ key: "auto" });
   await clock.settle();
@@ -2064,7 +1856,6 @@ test("The Auto button turns the effort choice off until pressed again", async ($
   await drain($.turn.step(turnStep("t2", "claude-opus-5-5", "high")));
   expect(ids(sent)).toEqual(["effort", "mechanical"]);
   expect(seen.map((s) => s.effort)).toEqual(["high", "low"]);
-  expect(await runJev($, "")).not.toContain("(effort auto off)");
 
   // A new session turns Auto back on.
   await ui.press({ key: "auto" });
@@ -2073,6 +1864,32 @@ test("The Auto button turns the effort choice off until pressed again", async ($
   await $.session.start(START);
   await clock.settle();
   expect(await autoLabel(ui)).toBe("Jev auto: on");
+  await ui.unmount();
+});
+
+test("Auto pressed off while step 0 waits for Jev keeps the session effort", async ($, on) => {
+  const seen: { effort?: string }[] = [];
+  let release!: () => void;
+  const gate = new Promise<void>((r) => (release = r));
+  const { sent, clock } = setup(on, { messages: [user("what does this project do?")], jev: (async (q: Asked) => (await gate, q.id === "effort" ? easy : undefined)) as never });
+  claudeBeneath(on, seen);
+  sessionStubs(on);
+  const logged: string[] = [];
+  on("ui.log", (_$, e) => (logged.push(String(e.text)), { value: undefined }));
+  await $.session.start(START);
+  const ui = await $.ui.mount(BAND);
+
+  const run = drain($.turn.step(turnStep("t1", "claude-opus-5-5", "high")));
+  for (let i = 0; i < 50 && sent.length === 0; i++) await clock.settle();
+  expect(ids(sent)).toEqual(["effort", "mechanical"]);
+  await ui.press({ key: "auto" });
+  release();
+  await run;
+  await clock.settle();
+  expect(seen.map((s) => s.effort)).toEqual(["high"]);
+  expect(logged).toEqual(["effort claude-opus-5-5: session high → unchanged · jev (score 0.20) · auto off"]);
+  expect(await levelProps(ui, "low")).toEqual({ dimColor: true });
+  expect(await autoLabel(ui)).toBe("Jev auto: off");
   await ui.unmount();
 });
 
@@ -2104,7 +1921,7 @@ test("The band passes while a survey holds it", async ($, on) => {
   await ui.unmount();
 });
 
-test("With routing off the band passes", { options: { routing: "off" } }, async ($, on) => {
+test("With routing off the band passes", { options: { routing: false } }, async ($, on) => {
   setup(on, { messages: [], jev: () => undefined });
   sessionStubs(on);
   on("ui.render", () => BENEATH);
@@ -2115,30 +1932,42 @@ test("With routing off the band passes", { options: { routing: "off" } }, async 
   await ui.unmount();
 });
 
-test("With routing off step 0 asks no effort questions and keeps Claude's effort", { options: { routing: "off" } }, async ($, on) => {
+test("With routing off step 0 asks no effort questions and keeps Claude's effort", { options: { routing: false } }, async ($, on) => {
   const seen: { effort?: string }[] = [];
-  const { sent } = setup(on, { messages: [user("migrate the whole app to TypeScript")], jev: byId({ difficulty: easy, effort: scored(2.9), mechanical: mech(0.1) }) });
+  const { sent } = setup(on, { messages: [user("migrate the whole app to TypeScript")], jev: byId({ effort: scored(2.9), mechanical: mech(0.1) }) });
   claudeBeneath(on, seen);
   await drain($.turn.step(step));
-  expect(ids(sent).filter((id) => ["effort", "mechanical", "difficulty"].includes(id))).toEqual([]);
+  expect(ids(sent).filter((id) => ["effort", "mechanical"].includes(id))).toEqual([]);
   expect(seen.map((s) => s.effort)).toEqual(["high"]);
 });
 
-// JJ tests (round 7a).
-test("the done check's jev-api call gets the interactive 4 s timeout", { options: { classify: false } }, async ($, on) => {
-  const { sent } = setup(on, { messages: [user("rename foo to bar in all files")], jev: unfinished, env: { TYPESAFE_API_KEY: "k" } });
-  followUps(on);
-  await $.turn.complete(answered("t1", "I renamed it in one file."));
-  expect(sent.map((q) => q.timeout)).toEqual([4]);
+// routing is a boolean: only an explicit false turns effort routing off, every other value is the default (on).
+for (const value of ["model", "off", "effort", "false", "", 0, null]) {
+  test(`routing ${JSON.stringify(value)} is not false: step 0 estimates the effort`, { options: { routing: value } }, async ($, on) => {
+    const seen: { effort?: string }[] = [];
+    const { sent } = setup(on, { messages: [user("migrate the whole app to TypeScript")], jev: byId({ effort: scored(2.9), mechanical: mech(0.1) }) });
+    claudeBeneath(on, seen);
+    await drain($.turn.step({ ...step, effort: "medium" }));
+    expect(ids(sent).filter((id) => ["effort", "mechanical"].includes(id))).toEqual(["effort", "mechanical"]);
+    expect(seen.map((x) => x.effort)).toEqual(["xhigh"]);
+  });
+}
+
+test("routing: false still answers estimate_effort", { options: { routing: false } }, async ($, on) => {
+  setup(on, { messages: [], jev: byId({ effort: scored(2.9), mechanical: mech(0.1) }) });
+  sessionStubs(on);
+  await $.session.start(START);
+  expect(await estimateCall($)).toEqual({ result: JSON.stringify({ effort: "xhigh", source: "jev" }) });
 });
 
-test("the prompt classifier's jev-api call gets the interactive 4 s timeout", async ($, on) => {
-  const { sent } = setup(on, { messages: [user("x")], jev: () => undefined, env: { TYPESAFE_API_KEY: "k" } });
-  on("command.list", () => ({ value: [] }));
-  on("prompt.submit", (_$, e) => ({ text: e.text }));
-  await $.prompt.submit({ text: "fix the failing date test", wait: false, origin: { kind: "composer" } });
-  expect(sent.length).toBeGreaterThan(0);
-  expect(sent.every((q) => q.timeout === 4)).toBe(true);
+test("There is no done check: an unfinished-looking answer asks Jev nothing and submits no follow-up", async ($, on) => {
+  const { sent, calls } = setup(on, { messages: [user("rename foo to bar in all files")], jev: byId({ done: { type: "noul", noul: 0.01 } }) });
+  const submitted = followUps(on);
+  on("session.usage", () => ({ value: { context: { percent: 10 } } }));
+  await $.turn.complete(answered("t1", "I renamed it in one file. Want me to do the rest?"));
+  expect(sent).toEqual([]);
+  expect(calls()).toBe(0);
+  expect(submitted).toEqual([]);
 });
 
 test("a blank Jev variable counts as unset, as in jev-api: Haiku budget and timeout 14", async ($, on) => {
@@ -2150,23 +1979,68 @@ test("a blank Jev variable counts as unset, as in jev-api: Haiku budget and time
   expect(sent.every((q) => q.timeout === 14)).toBe(true);
 });
 
-test("a settings env change between turns counts from the next turn, also after the done check read the env", async ($, on) => {
+test("a settings env change between turns counts from the next turn, also after the task-end check read the env", async ($, on) => {
   const env: Record<string, string> = {};
   const { sent } = setup(on, { messages: [user("what does this project do?"), { role: "assistant", text: "It does X.", toolUses: [] }], jev: () => undefined, env });
   on("command.list", () => ({ value: [] }));
-  on("session.usage", () => ({ value: { context: { percent: 10 } } }));
+  on("session.usage", () => ({ value: { context: { percent: 85 } } }));
   on("turn.complete", () => ({}));
-  on("prompt.submit", () => ({ value: {} }));
+  claudeBeneath(on, []);
   await $.turn.complete(answered("t1", "It does X."));
   expect(sent.at(-1)?.timeout).toBe(14);
   env.JEV_URL = "https://jev.example/x";
-  await $.prompt.submit({ text: "fix the failing date test", wait: false, origin: { kind: "composer" } });
+  // The next turn's step 0, not another turn end: every main-loop turn end re-reads the env itself.
+  await drain($.turn.step({ ...step, turnId: "t2" }));
   expect(sent.at(-1)?.timeout).toBe(4);
 });
 
+test("a /compact between turns drops its env read and listing: a later settings env change counts from the next turn", async ($, on) => {
+  const env: Record<string, string> = {};
+  const { sent } = setup(on, { messages: [user("what does this project do?"), { role: "assistant", text: "It does X.", toolUses: [] }], jev: () => undefined, env });
+  on("command.list", () => ({ value: [] }));
+  on("turn.complete", () => ({}));
+  on("model.complete", () => ({ value: { isAnswered: false, reason: "down" } }));
+  on("session.compact", () => ({}));
+  claudeBeneath(on, []);
+  await $.turn.complete(answered("t1", "It does X."));
+  const before = sent.length;
+  const row = (id: string) => ({ role: "assistant" as const, text: "", toolUses: [{ tool_use_id: id, tool: "Bash", input: { command: `ls ${id}` }, text: `out ${id}` }] });
+  await $.session.compact({ trigger: "manual", messages: [user("fix the date bug"), row("a"), row("b"), row("c"), { role: "assistant", text: "done", toolUses: [] }] });
+  // The ranking ran on the Haiku path (no Jev variable set yet).
+  expect(sent.slice(before).length).toBeGreaterThan(0);
+  expect(sent.at(-1)?.timeout).toBe(14);
+  env.JEV_URL = "https://jev.example/x";
+  const ranked = sent.length;
+  await drain($.turn.step({ ...step, turnId: "t2" }));
+  expect(sent.length).toBeGreaterThan(ranked);
+  expect(sent.at(-1)?.timeout).toBe(4);
+});
+
+test("the task-end check's tool listing is dropped too: the next turn lists again and sees jev-api gone", async ($, on) => {
+  const tools = [...JEV_TOOLS];
+  let lists = 0;
+  on("tool.list", (_$, e, next) => {
+    lists++;
+    return next(e);
+  });
+  const { calls } = setup(on, { messages: [user("what does this project do?"), { role: "assistant", text: "It does X.", toolUses: [] }], jev: () => undefined, tools });
+  on("command.list", () => ({ value: [] }));
+  on("session.usage", () => ({ value: { context: { percent: 85 } } }));
+  on("turn.complete", () => ({}));
+  claudeBeneath(on, []);
+  await $.turn.complete(answered("t1", "It does X."));
+  const before = { lists, calls: calls() };
+  expect(before.calls).toBe(1);
+  // Between turns jev-api goes away: the next turn's step 0 must list again and ask nothing.
+  tools.length = 0;
+  await drain($.turn.step({ ...step, turnId: "t2" }));
+  expect(lists).toBeGreaterThan(before.lists);
+  expect(calls()).toBe(before.calls);
+});
+
 // Context-fill compaction: from taskCompactPercent the first judged task end compacts, from forceCompactPercent any turn end does.
-const finished = byId({ done: { type: "noul", noul: 0.9 }, end: { type: "noul", noul: 0.9 } });
-const intermediate = byId({ done: { type: "noul", noul: 0.9 }, end: { type: "noul", noul: 0.1 } });
+const finished = byId({ end: { type: "noul", noul: 0.9 } });
+const intermediate = byId({ end: { type: "noul", noul: 0.1 } });
 
 /** Stubs `/compact` and the context fill (`state.percent`, writable); returns the `/compact` run count. `pending`: `/compact` stays queued (never runs). */
 function compactStubs(on: On, percent: number, pending = false) {
@@ -2181,7 +2055,7 @@ function compactStubs(on: On, percent: number, pending = false) {
 }
 
 for (const [percent, jev, runs, label] of [[85, finished, 1, "a task end"], [85, intermediate, 0, "an intermediate result"], [70, finished, 0, "a task end below 80%"], [96, intermediate, 1, "an intermediate result at 95%"]] as const) {
-  test(`Context at ${percent}% after ${label}: /compact runs ${runs}x`, { options: { classify: false } }, async ($, on) => {
+  test(`Context at ${percent}% after ${label}: /compact runs ${runs}x`, async ($, on) => {
     setup(on, { messages: [user("rename foo to bar")], jev });
     followUps(on);
     const state = compactStubs(on, percent);
@@ -2199,7 +2073,7 @@ for (
     [{ forceCompactPercent: 90 }, 90, intermediate, 1],
   ] as const
 ) {
-  test(`Context at ${percent}% with ${JSON.stringify(options)}: /compact runs ${runs}x`, { options: { classify: false, ...options } }, async ($, on) => {
+  test(`Context at ${percent}% with ${JSON.stringify(options)}: /compact runs ${runs}x`, { options: { ...options } }, async ($, on) => {
     setup(on, { messages: [user("rename foo to bar")], jev });
     followUps(on);
     const state = compactStubs(on, percent);
@@ -2208,20 +2082,20 @@ for (
   });
 }
 
-// F03: the done check and the task end share one request and one transcript read.
-for (const [percent, ids] of [[85, ["done", "end"]], [30, ["done"]]] as const) {
-  test(`Turn end at ${percent}% fill: one batch call (${ids.join("+")}), one transcript read`, { options: { classify: false } }, async ($, on) => {
+// The task-end judgement is its own request with one transcript read, and only from the task-end fill.
+for (const [percent, ids] of [[85, ["end"]], [30, []]] as const) {
+  test(`Turn end at ${percent}% fill: ${ids.length} batch call(s), ${ids.length} transcript read(s)`, async ($, on) => {
     const { sent, calls, reads } = setup(on, { messages: [user("rename foo to bar")], jev: finished });
     followUps(on);
     compactStubs(on, percent);
     await $.turn.complete(answered("t1", "Done."));
     expect(sent.map((q) => q.id)).toEqual(ids);
-    expect(calls()).toBe(1);
-    expect(reads()).toBe(1);
+    expect(calls()).toBe(ids.length);
+    expect(reads()).toBe(ids.length);
   });
 }
 
-test("A failed done+end call at 85% fill sends no second request and queues no compaction", { options: { classify: false } }, async ($, on) => {
+test("A failed task-end call at 85% fill sends no second request and queues no compaction", async ($, on) => {
   const { calls } = setup(on, { messages: [user("rename foo to bar")], jev: () => ({ __deny: "batch: HTTP 503" }) });
   followUps(on);
   const state = compactStubs(on, 85);
@@ -2230,7 +2104,16 @@ test("A failed done+end call at 85% fill sends no second request and queues no c
   expect(state.compacts).toBe(0);
 });
 
-test("A subagent's turn end at 96% fill runs no /compact", { options: { classify: false } }, async ($, on) => {
+test("Turn end at 96% fill asks no question and still compacts", async ($, on) => {
+  const { sent } = setup(on, { messages: [user("rename foo to bar")], jev: intermediate });
+  followUps(on);
+  const state = compactStubs(on, 96);
+  await $.turn.complete(answered("t1", "Done."));
+  expect(sent.map((q) => q.id)).toEqual([]);
+  expect(state.compacts).toBe(1);
+});
+
+test("A subagent's turn end at 96% fill runs no /compact", async ($, on) => {
   setup(on, { messages: [user("rename foo to bar")], jev: intermediate });
   followUps(on);
   const state = compactStubs(on, 96);
@@ -2238,7 +2121,7 @@ test("A subagent's turn end at 96% fill runs no /compact", { options: { classify
   expect(state.compacts).toBe(0);
 });
 
-test("An aborted main-loop turn at 85% fill asks no end question and runs no /compact", { options: { classify: false } }, async ($, on) => {
+test("An aborted main-loop turn at 85% fill asks no end question and runs no /compact", async ($, on) => {
   const { sent } = setup(on, { messages: [user("rename foo to bar")], jev: finished });
   followUps(on);
   const state = compactStubs(on, 85);
@@ -2247,7 +2130,7 @@ test("An aborted main-loop turn at 85% fill asks no end question and runs no /co
   expect(state.compacts).toBe(0);
 });
 
-test("Two concurrent turn ends at 96% fill queue /compact once", { options: { classify: false } }, async ($, on) => {
+test("Two concurrent turn ends at 96% fill queue /compact once", async ($, on) => {
   setup(on, { messages: [user("rename foo to bar")], jev: intermediate });
   followUps(on);
   const state = compactStubs(on, 96, true);
@@ -2255,17 +2138,8 @@ test("Two concurrent turn ends at 96% fill queue /compact once", { options: { cl
   expect(state.compacts).toBe(1);
 });
 
-test("Turn end at 96% fill asks only the done question and still compacts", { options: { classify: false } }, async ($, on) => {
-  const { sent } = setup(on, { messages: [user("rename foo to bar")], jev: intermediate });
-  followUps(on);
-  const state = compactStubs(on, 96);
-  await $.turn.complete(answered("t1", "Done."));
-  expect(sent.map((q) => q.id)).toEqual(["done"]);
-  expect(state.compacts).toBe(1);
-});
-
 // F07: facts that do not change within a turn are read from the engine once per turn.
-test("A turn reads the project, env and lists once, the cwd once per step and the transcript once per hook", async ($, on) => {
+test("A turn reads the project, env and lists once, the cwd once at step 0 and the transcript once per hook", async ($, on) => {
   const ops: Record<string, number> = {};
   for (const ev of ["env.get", "fs.exists", "fs.read", "session.cwd", "session.messages", "command.list", "tool.list", "store.get"]) {
     on(ev, (_$, e, next) => {
@@ -2276,9 +2150,7 @@ test("A turn reads the project, env and lists once, the cwd once per step and th
   }
   setup(on, { messages: [user("what does src/app.ts export?")], files: [`${CWD}/src/app.ts`], packageJson: { scripts: { test: "vitest" } }, jev: () => undefined, env: { TYPESAFE_API_KEY: "k" } });
   on("command.list", () => ({ value: [{ name: "export-check", description: "Check what a module exports", source: "user" }] }));
-  on("prompt.submit", () => ({ value: {} }));
   claudeBeneath(on, []);
-  await $.prompt.submit({ text: "what does src/app.ts export?", wait: false, origin: { kind: "composer" } });
   const perHook: Record<string, number>[] = [];
   let before = { ...ops };
   for (const index of [0, 1, 2]) {
@@ -2288,28 +2160,18 @@ test("A turn reads the project, env and lists once, the cwd once per step and th
   }
   // Step 0 reads the transcript once (no second read for the previous reply).
   expect(perHook[0]["session.messages"]).toBe(1);
-  // Later steps probe no project file and read the cwd once (a mid-turn `cd` can move it).
+  // Later steps ask Jev nothing by default: they probe no project file and read no cwd.
   for (const k of [1, 2]) for (const ev of ["fs.exists", "fs.read"]) expect(perHook[k][ev] ?? 0).toBe(0);
-  for (const k of [1, 2]) expect(perHook[k]["session.cwd"]).toBe(1);
-  // Once per turn: the three env values, the command list, the skill blocklist, the tool listing; the cwd once per step.
+  for (const k of [1, 2]) expect(perHook[k]["session.cwd"] ?? 0).toBe(0);
+  // Once per turn: the three env values, the command list, the skill blocklist, the tool listing; the cwd once, at step 0.
   expect(ops["env.get"]).toBe(3);
   expect(ops["command.list"]).toBe(1);
   expect(ops["store.get skillBlocklist"]).toBe(1);
   expect(ops["tool.list"]).toBe(1);
-  expect(ops["session.cwd"]).toBe(3);
+  expect(ops["session.cwd"]).toBe(1);
 });
 
-test("A done follow-up at 85% fill queues no compaction", { options: { classify: false } }, async ($, on) => {
-  const { calls } = setup(on, { messages: [user("rename foo to bar")], jev: byId({ done: { type: "noul", noul: 0 }, end: { type: "noul", noul: 0.9 } }) });
-  const submitted = followUps(on);
-  const state = compactStubs(on, 85);
-  await $.turn.complete(answered("t1", "Half done."));
-  expect(submitted).toHaveLength(1);
-  expect(state.compacts).toBe(0);
-  expect(calls()).toBe(1);
-});
-
-test("Context compaction is queued once while it waits to run", { options: { classify: false } }, async ($, on) => {
+test("Context compaction is queued once while it waits to run", async ($, on) => {
   setup(on, { messages: [user("rename foo to bar")], jev: finished });
   followUps(on);
   const state = compactStubs(on, 85, true);
@@ -2319,7 +2181,7 @@ test("Context compaction is queued once while it waits to run", { options: { cla
 });
 
 // The live engine (2.1.325) bypasses jevfort's session.compact hook: the ran /compact itself must re-arm the next one.
-test("A /compact that ran without the session.compact hook lets a later high fill compact again", { options: { classify: false } }, async ($, on) => {
+test("A /compact that ran without the session.compact hook lets a later high fill compact again", async ($, on) => {
   const { clock } = setup(on, { messages: [user("rename foo to bar")], jev: intermediate });
   followUps(on);
   const state = compactStubs(on, 96);
@@ -2332,7 +2194,7 @@ test("A /compact that ran without the session.compact hook lets a later high fil
   expect(state.compacts).toBe(2);
 });
 
-test("A refused /compact lets a later high fill compact again and is logged", { options: { classify: false } }, async ($, on) => {
+test("A refused /compact lets a later high fill compact again", async ($, on) => {
   const { clock } = setup(on, { messages: [user("rename foo to bar")], jev: intermediate });
   followUps(on);
   let compacts = 0;
@@ -2346,156 +2208,40 @@ test("A refused /compact lets a later high fill compact again and is logged", { 
   await clock.advance(0);
   await $.turn.complete(answered("t2", "Done."));
   expect(compacts).toBe(2);
-  expect(await runJev($, "")).toContain("context compaction refused");
 });
 
-// F06: decisions are buffered and the log and the counters are written once per turn, not once per decision.
-test("A 6-step turn writes the log and the counters once, and /jev export still holds every decision", async ($, on) => {
-  const sets: string[] = [];
-  on("store.set", (_$, e, next) => (sets.push(String(e.key)), next(e)));
-  setup(on, { messages: [user("what does src/app.ts export?")], files: [`${CWD}/src/app.ts`], jev: finished });
-  followUps(on);
+test("A background subagent that completes between turns drops its env read before the next main turn", async ($, on) => {
+  const env: Record<string, string> = {};
+  const { sent } = setup(on, { messages: [user("what does this project do?"), { role: "assistant", text: "It does X.", toolUses: [] }], jev: () => undefined, env });
+  on("command.list", () => ({ value: [] }));
+  on("turn.complete", () => ({}));
   claudeBeneath(on, []);
-  let written = "";
-  on("fs.write", (_$, e) => ((written = String(e.text)), { value: undefined }));
-  await $.prompt.submit({ text: "what does src/app.ts export?", wait: false, origin: { kind: "composer" } });
-  for (const index of [0, 1, 2, 3, 4, 5]) await drain($.turn.step({ ...step, index }));
-  expect(sets).toEqual([]);
-  await $.turn.complete(answered("t1", "Done."));
-  expect(sets.filter((k) => k === "log")).toHaveLength(1);
-  expect(sets.filter((k) => k === "stats")).toHaveLength(1);
-  expect(await runJev($, "export")).toMatch(/wrote \d+ entries/);
-  const kinds = written.trim().split("\n").map((l) => (JSON.parse(l) as { kind: string }).kind);
-  expect(kinds).toContain("classify");
-  expect(kinds).toContain("route");
-  expect(kinds.filter((k) => k === "compare")).toHaveLength(6);
-  expect(kinds).toContain("done");
-  expect(await runJev($, "")).toMatch(/compare(:pass)?=6/);
+  await $.turn.complete(answered("t1", "It does X."));
+  // No Jev variable: the subagent asks on the Haiku path.
+  await drain($.turn.step({ ...step, turnId: "bg-t1", agentId: "bg" }));
+  expect(sent.at(-1)?.timeout).toBe(14);
+  await $.turn.complete(answered("bg-t1", "Found it.", { agentId: "bg" }));
+  env.JEV_URL = "https://jev.example/x";
+  const before = sent.length;
+  await drain($.turn.step({ ...step, turnId: "t2" }));
+  expect(sent.length).toBeGreaterThan(before);
+  expect(sent.at(-1)?.timeout).toBe(4);
 });
 
-test("session.end writes the decisions recorded outside a turn", { options: { minEffort: "high", maxEffort: "low" } }, async ($, on) => {
-  const logs: { kind: string; text: string }[][] = [];
-  on("store.set", (_$, e, next) => (e.key === "log" && logs.push(e.value as { kind: string; text: string }[]), next(e)));
-  setup(on, { messages: [], jev: () => undefined });
-  on("command.register", async () => ({ value: undefined }));
-  on("tool.register", async () => ({ value: { tool: "mcp__jevfort__estimate_effort" } }));
-  on("session.start", async () => ({}));
-  on("session.end", async () => ({}));
-  await $.session.start({ cwd: CWD, surface: "terminal", isInteractive: true });
-  expect(logs).toEqual([]);
-  await $.session.end({ reason: "clear", sessionId: SID, resume: { id: SID } });
-  expect(logs).toHaveLength(1);
-  expect(logs[0]).toContainEqual(expect.objectContaining({ kind: "error", text: expect.stringContaining("invalid effort bounds") }));
-});
-
-test("A flush onto a full log keeps the last 1000 entries, the new decision last", async ($, on) => {
-  const full = Array.from({ length: 1000 }, (_, i) => ({ kind: "turn", text: `old ${i}` }));
-  const logs: { kind: string; text: string }[][] = [];
-  on("store.get", (_$, e, next) => (e.key === "log" ? { value: full } : next(e)));
-  on("store.set", (_$, e, next) => (e.key === "log" && logs.push(e.value as { kind: string; text: string }[]), next(e)));
-  setup(on, { messages: [user("what does src/app.ts export?")], files: [`${CWD}/src/app.ts`], jev: finished });
-  followUps(on);
-  await $.turn.complete(answered("t1", "Done."));
-  expect(logs).toHaveLength(1);
-  expect(logs[0]).toHaveLength(1000);
-  expect(logs[0][0].text).not.toBe("old 0");
-  expect(logs[0].at(-1)).not.toMatchObject({ text: "old 999" });
-});
-
-/** A `store.get("log")` stub above `mock.store` that reads first and then waits for `release()`: the read goes stale while a write is in flight. */
-function gatedLog(on: On, logs: unknown[][]) {
-  let release = () => {};
-  const gate = new Promise<void>((r) => (release = r));
-  on("store.get", async (_$, e, next) => {
-    const r = await next(e);
-    if (e.key === "log") await gate;
-    return r;
-  });
-  on("store.set", (_$, e, next) => (e.key === "log" && logs.push(e.value as unknown[]), next(e)));
-  return { release, settle: () => new Promise((r) => setTimeout(r, 20)) };
-}
-
-/** Lets `session.start`/`session.end` and their registrations pass. */
-const lifecycle = (on: On) => {
-  on("command.register", async () => ({ value: undefined }));
-  on("tool.register", async () => ({ value: { tool: "mcp__jevfort__estimate_effort" } }));
-  on("session.start", async () => ({}));
-  on("session.end", async () => ({}));
-};
-
-test("/jev clear waits for an in-flight flush instead of having it write the log back", { options: { minEffort: "high", maxEffort: "low" } }, async ($, on) => {
-  const logs: unknown[][] = [];
-  const g = gatedLog(on, logs);
-  setup(on, { messages: [], jev: () => undefined });
-  lifecycle(on);
-  await $.session.start({ cwd: CWD, surface: "terminal", isInteractive: true });
-  const end = $.session.end({ reason: "clear", sessionId: SID, resume: { id: SID } });
-  await g.settle();
-  const cleared = runJev($, "clear");
-  await g.settle();
-  g.release();
-  await end;
-  expect(await cleared).toBe("Jev pilot: log cleared.");
-  expect(logs.at(-1)).toEqual([]);
-});
-
-test("/jev clear and /clear (session.end) empty the /jev Recent list", { options: { minEffort: "high", maxEffort: "low" } }, async ($, on) => {
-  setup(on, { messages: [], jev: () => undefined });
-  lifecycle(on);
-  await $.session.start({ cwd: CWD, surface: "terminal", isInteractive: true });
-  expect(await runJev($, "")).toContain("invalid effort bounds");
-  await runJev($, "clear");
-  expect(await runJev($, "")).toContain("No decisions this session yet.");
-  await $.session.start({ cwd: CWD, surface: "terminal", isInteractive: true });
-  expect(await runJev($, "")).toContain("invalid effort bounds");
-  await $.session.end({ reason: "clear", sessionId: SID, resume: { id: SID } });
-  expect(await runJev($, "")).toContain("No decisions this session yet.");
-});
-
-test("A flush started while another is in flight keeps both flushes' entries", { options: { minEffort: "high", maxEffort: "low" } }, async ($, on) => {
-  const logs: unknown[][] = [];
-  const g = gatedLog(on, logs);
-  setup(on, { messages: [], jev: () => undefined });
-  lifecycle(on);
-  await $.session.start({ cwd: CWD, surface: "terminal", isInteractive: true });
-  const end = $.session.end({ reason: "clear", sessionId: SID, resume: { id: SID } });
-  await g.settle();
-  await $.session.start({ cwd: CWD, surface: "terminal", isInteractive: true });
-  const status = runJev($, "");
-  await g.settle();
-  g.release();
-  await end;
-  await status;
-  expect(logs.at(-1)).toHaveLength(2);
-});
-
-test("/jev export with nothing pending waits for another hook's flush still in flight", { options: { minEffort: "high", maxEffort: "low" } }, async ($, on) => {
-  const g = gatedLog(on, []);
-  setup(on, { messages: [], jev: () => undefined });
-  lifecycle(on);
-  on("fs.write", () => ({ value: undefined }));
-  await $.session.start({ cwd: CWD, surface: "terminal", isInteractive: true });
-  const end = $.session.end({ reason: "clear", sessionId: SID, resume: { id: SID } });
-  await g.settle();
-  const exported = runJev($, "export");
-  await g.settle();
-  g.release();
-  await end;
-  expect(await exported).toMatch(/wrote 1 entries/);
-});
-
-test("An inactive turn.complete writes the decisions pending from the turn", async ($, on) => {
-  const sets: string[] = [];
-  on("store.set", (_$, e, next) => (sets.push(String(e.key)), next(e)));
-  setup(on, { messages: [user("rename foo to bar")], tools: SINGLE_TOOLS, jev: () => undefined });
-  followUps(on);
-  expect(await estimateCall($)).toEqual({ result: JSON.stringify({ effort: "high", source: "fallback" }) });
-  expect(sets).toEqual([]);
-  await $.turn.complete(answered("t1", "Done."));
-  expect(sets.filter((k) => k === "log")).toHaveLength(1);
-});
-
-pureTest("statsKey counts a passed decision apart from an acted one", () => {
-  expect(statsKey({ kind: "take", applied: true })).toBe("take");
-  expect(statsKey({ kind: "take", applied: false })).toBe("take:pass");
+test("A background subagent's step between turns does not carry its env read into the next main turn", async ($, on) => {
+  const env: Record<string, string> = {};
+  const { sent } = setup(on, { messages: [user("what does this project do?"), { role: "assistant", text: "It does X.", toolUses: [] }], jev: () => undefined, env });
+  on("command.list", () => ({ value: [] }));
+  on("turn.complete", () => ({}));
+  claudeBeneath(on, []);
+  await drain($.turn.step({ ...step, turnId: "t1" }));
+  await $.turn.complete(answered("t1", "It does X."));
+  // A background agent started in t1 runs on after t1 ended, without completing before t2; no Jev variable: Haiku path.
+  await drain($.turn.step({ ...step, turnId: "bg1", agentId: "bg" }));
+  expect(sent.at(-1)?.timeout).toBe(14);
+  env.JEV_URL = "https://jev.example/x";
+  const before = sent.length;
+  await drain($.turn.step({ ...step, turnId: "t2" }));
+  expect(sent.length).toBeGreaterThan(before);
+  expect(sent.at(-1)?.timeout).toBe(4);
 });

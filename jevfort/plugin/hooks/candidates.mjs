@@ -1,3 +1,4 @@
+import { head } from "./context.mjs";
 export const MAX_READS = 8;
 export const MAX_STATS = 16;
 const MAX_SEARCHES = 3;
@@ -13,8 +14,11 @@ const PATH = /(?:^|[\s`'"([])((?:~|\.{1,2})?\/?[\w@.-]+(?:\/[\w@.-]+)*\.[A-Za-z]
 const QUOTED = /`([^`\n]{3,60})`|"([^"\n]{3,60})"/g;
 export function mentionedPaths(texts, seen = new Set()) {
 	for (const text of texts) {
+		const spans = [...text.matchAll(QUOTED)].map((q) => [q.index, q.index + q[0].length]);
 		for (const m of text.matchAll(PATH)) {
 			const p = m[1];
+			const start = m.index + m[0].length - p.length;
+			if (spans.some(([a, b]) => start > a && start < b && /^\S+\s+$/.test(text.slice(a + 1, start)))) continue;
 			if (/^\d/.test(p) || /^https?:/.test(p) || p.includes("..")) continue;
 			seen.add(p);
 		}
@@ -41,27 +45,6 @@ export function sameCall(a, b) {
 	if (a.tool === "Skill") return a.input.skill === b.input.skill;
 	if (a.tool === "ToolSearch") return a.input.query === b.input.query;
 	return false;
-}
-export function commandKey(command) {
-	const parts = new Set();
-	for (const raw of command.split(/&&|\|\||;|\n/)) {
-		const seg = raw.split(/(?<!\|)\|(?!\|)/)[0].replace(/\d?>&\d|\d?>\s*\/dev\/null/g, "").trim();
-		if (!seg || /^(cd|echo|printf|set|export)\b/.test(seg)) continue;
-		const tokens = seg.split(/\s+/);
-		const words = [tokens[0], ...tokens.slice(1).filter((t) => /^[a-z][\w:-]*$/.test(t))];
-		parts.add(words.slice(0, words[1] === "run" || words[1] === "exec" ? 3 : 2).join(" "));
-	}
-	return [...parts].sort().join("|");
-}
-export function equivalentCall(a, b) {
-	if (sameCall(a, b)) return true;
-	if (a.tool !== "Bash" || b.tool !== "Bash") return false;
-	const ka = commandKey(commandOf(a));
-	return ka !== "" && ka === commandKey(commandOf(b));
-}
-const commandOf = (c) => typeof c.input.command === "string" ? c.input.command : "";
-export function coversStep(claude, jev) {
-	return claude.length === 1 && equivalentCall(claude[0], jev);
 }
 export const bash = (command, description) => ({
 	key: `run ${command}`,
@@ -113,4 +96,4 @@ export function dedupeSkills(skills) {
 	}
 	return skills.filter((s) => byBase.get(base(s.name)) === s);
 }
-export const clipScript = (s) => s.length > 80 ? `${s.slice(0, 80)}…` : s;
+export const clipScript = (s) => s.length > 80 ? `${head(s, 80)}…` : s;

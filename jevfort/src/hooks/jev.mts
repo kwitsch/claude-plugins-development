@@ -12,10 +12,7 @@ export const PAUSE_MS = 30_000;
 /** The longest pause after repeated timeouts of Jev, in ms. */
 export const MAX_PAUSE_MS = 600_000;
 
-/** How long a finished step waits for the parallel step measurement, in ms: it only feeds the log. */
-export const MEASURE_GRACE_MS = 250;
-
-/** The longest error text `askJev` returns (and so the log and `/jev` hold), in characters: an error body of megabytes must not be stored whole. */
+/** The longest error text `askJev` returns (and so the answer holds), in characters: an error body of megabytes must not be stored whole. */
 export const MAX_ERROR = 1000;
 
 /** The local budget of one `askJev` (its one batch call) before Claude Code's own behaviour wins, in ms. */
@@ -36,8 +33,8 @@ export type ScoreAnswer = { type: "score"; score: number; probabilities: Record<
 /** Any answer. */
 export type Answer = NoulAnswer | ChoiceAnswer | ScoreAnswer;
 
-/** What one `askJev` came back with, and how long it took. */
-export type JevResult = { ok: true; answers: Record<string, Answer>; ms: number } | { ok: false; error: string; ms?: number };
+/** What one `askJev` came back with. */
+export type JevResult = { ok: true; answers: Record<string, Answer> } | { ok: false; error: string };
 
 /** The most options jev-api accepts in one `choice` question. */
 export const MAX_CHOICE_OPTIONS = 255;

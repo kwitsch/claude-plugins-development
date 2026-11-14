@@ -5,6 +5,7 @@
  *
  * @packageDocumentation
  */
+import { head } from "./context.mjs";
 
 /** One action Jev may take. */
 export type Candidate = {
@@ -67,8 +68,14 @@ const QUOTED = /`([^`\n]{3,60})`|"([^"\n]{3,60})"/g;
  */
 export function mentionedPaths(texts: readonly string[], seen: Set<string> = new Set()): string[] {
   for (const text of texts) {
+    const spans = [...text.matchAll(QUOTED)].map((q) => [q.index, q.index + q[0].length] as const);
     for (const m of text.matchAll(PATH)) {
       const p = m[1];
+      const start = m.index + m[0].length - p.length;
+      // A match that follows exactly one word inside a quoted span is the tail of a name with a space (`"docs/my notes.md"`),
+      // not a path of its own; a longer quote (`"fix the bug in src/app.ts"`) still names its path.
+      // shortcut: `"fix src/app.ts"` (one word, then a path) is skipped too, an ambiguous case; refine if users quote that.
+      if (spans.some(([a, b]) => start > a && start < b && /^\S+\s+$/.test(text.slice(a + 1, start)))) continue;
       if (/^\d/.test(p) || /^https?:/.test(p) || p.includes("..")) continue;
       seen.add(p);
     }
@@ -144,60 +151,6 @@ export function sameCall(a: Call, b: Call): boolean {
   if (a.tool === "Skill") return a.input.skill === b.input.skill;
   if (a.tool === "ToolSearch") return a.input.query === b.input.query;
   return false;
-}
-
-/**
- * What a shell command does, for comparison: each `&&`/`;`/newline part, cut at its first pipe (`| tail`,
- * `| grep` only filter the output), without redirections, `cd` and `echo`, reduced to its command words (flags,
- * paths and numbers dropped). `git status; git diff --stat 2>&1 | head` and `git status --short && git diff --stat`
- * both give `git diff|git status`.
- *
- * @param command - The shell command.
- * @returns The sorted command words joined by `|`.
- */
-export function commandKey(command: string): string {
-  const parts = new Set<string>();
-  for (const raw of command.split(/&&|\|\||;|\n/)) {
-    const seg = raw.split(/(?<!\|)\|(?!\|)/)[0].replace(/\d?>&\d|\d?>\s*\/dev\/null/g, "").trim();
-    if (!seg || /^(cd|echo|printf|set|export)\b/.test(seg)) continue;
-    const tokens = seg.split(/\s+/);
-    const words = [tokens[0], ...tokens.slice(1).filter((t) => /^[a-z][\w:-]*$/.test(t))];
-    parts.add(words.slice(0, words[1] === "run" || words[1] === "exec" ? 3 : 2).join(" "));
-  }
-  return [...parts].sort().join("|");
-}
-
-/**
- * Same action: identical, or for shell commands the same `commandKey`.
- *
- * @param a - One call.
- * @param b - The other.
- * @returns Whether they are equivalent.
- */
-export function equivalentCall(a: Call, b: Call): boolean {
-  if (sameCall(a, b)) return true;
-  if (a.tool !== "Bash" || b.tool !== "Bash") return false;
-  const ka = commandKey(commandOf(a));
-  return ka !== "" && ka === commandKey(commandOf(b));
-}
-
-/**
- * The shell command of a Bash call, or `""` when its input has none as text.
- *
- * @param c - A Bash call.
- * @returns The command text.
- */
-const commandOf = (c: Call): string => (typeof c.input.command === "string" ? c.input.command : "");
-
-/**
- * Jev's action would have replaced Claude's whole step: one call, equivalent.
- *
- * @param claude - Claude's calls in the step.
- * @param jev - Jev's action.
- * @returns Whether Jev's action covers the step.
- */
-export function coversStep(claude: readonly Call[], jev: Call): boolean {
-  return claude.length === 1 && equivalentCall(claude[0], jev);
 }
 
 /**
@@ -303,4 +256,4 @@ export function dedupeSkills<T extends { name: string }>(skills: readonly T[]): 
  * @param s - The text.
  * @returns The clipped text.
  */
-export const clipScript = (s: string): string => (s.length > 80 ? `${s.slice(0, 80)}…` : s);
+export const clipScript = (s: string): string => (s.length > 80 ? `${head(s, 80)}…` : s);
