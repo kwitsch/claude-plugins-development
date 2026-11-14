@@ -2275,7 +2275,8 @@ function digestOrNull(fp: string): string | null {
 
 /**
  * Whether the file holds a line break that the Edit's `structuredPatch` (jsdiff: `\n` and `\r\n` only) does not count
- * but a linter may (tsc: U+2028/U+2029, eslint: those and a lone `\r`, markdownlint: a lone `\r`). Then the linter's
+ * but a linter may (tsc: U+2028/U+2029, eslint: those and a lone `\r`, markdownlint: a lone `\r`, yamllint: U+0085
+ * NEL and the others via PyYAML marks). Then the linter's
  * line numbers and the patch's differ below it, so neither the edit-range gate nor the settle window can place a
  * finding.
  *
@@ -2284,7 +2285,7 @@ function digestOrNull(fp: string): string | null {
  */
 function hasForeignLineBreak(fp: string): boolean {
   try {
-    return /\r(?!\n)|[\u2028\u2029]/.test(readFileSync(fp, "utf8"));
+    return /\r(?!\n)|[\u0085\u2028\u2029]/.test(readFileSync(fp, "utf8"));
   } catch {
     return true;
   }

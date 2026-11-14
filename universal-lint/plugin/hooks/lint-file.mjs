@@ -1223,7 +1223,7 @@ function digestOrNull(fp) {
 }
 function hasForeignLineBreak(fp) {
 	try {
-		return /\r(?!\n)|[\u2028\u2029]/.test(readFileSync(fp, "utf8"));
+		return /\r(?!\n)|[\u0085\u2028\u2029]/.test(readFileSync(fp, "utf8"));
 	} catch {
 		return true;
 	}

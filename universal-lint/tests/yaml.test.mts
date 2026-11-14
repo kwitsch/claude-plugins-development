@@ -55,3 +55,14 @@ test("yaml: project .yamllint present -> no -d override, yamllint runs bare", ()
   assert.ok(!e.lines().some((l) => l.includes("line-length: disable")));
   assert.ok(e.lines().some((l) => l.includes(`yamllint ${f}`)));
 });
+
+test("yaml Edit: a U+0085 (NEL) above the edit shifts yamllint's lines past the patch's -> reported whole-file, exit 2", () => {
+  const e = makeEnv();
+  e.recStub("yamllint", 1);
+  const l2 = "s: \"x\u0085y\"";
+  const a = e.file("a.yaml", `a: 1\n${l2}\nb: 1\nb: 2\n`);
+  const patch = [{ oldStart: 1, oldLines: 4, newStart: 1, newLines: 4, lines: [" a: 1", ` ${l2}`, " b: 1", "-c: 2", "+b: 2"] }];
+  const r = e.run(a, { toolName: "Edit", toolResponse: { structuredPatch: patch }, out: "a.yaml:5:1: [error] duplication of key \"b\" in mapping (key-duplicates)" });
+  assert.equal(r.status, 2);
+  assert.match(r.ctx, /key-duplicates/);
+});
