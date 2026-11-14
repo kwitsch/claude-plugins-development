@@ -1,7 +1,7 @@
 // The built MCP wrapper, run as a process with a fake `graphmind` on PATH and a temp HOME.
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -41,12 +41,13 @@ afterEach(() => rmSync(root, { recursive: true, force: true }));
  *
  * @param noBinary - Leave the fake off PATH.
  * @param extraEnv - Further environment variables.
+ * @param cwd - Working directory.
  * @returns Process result and the fake's call log.
  */
-function runWrapper(noBinary = false, extraEnv: NodeJS.ProcessEnv = {}) {
+function runWrapper(noBinary = false, extraEnv: NodeJS.ProcessEnv = {}, cwd = proj) {
   const log = join(root, "calls.log");
   const r = spawnSync(process.execPath, [MCP], {
-    cwd: proj,
+    cwd,
     encoding: "utf8",
     env: { HOME: home, PATH: `${noBinary ? "" : `${fakeBin}:`}/usr/bin:/bin`, FAKE_LOG: log, FAKE_REGISTERED: join(root, "registered"), ...extraEnv },
     timeout: 20_000,
@@ -62,6 +63,15 @@ test("in an unregistered git repo the wrapper runs init --skip-build, a backgrou
   assert.equal(lines.at(-1), "mcp");
   await new Promise((done) => setTimeout(done, 300));
   assert.match(readFileSync(join(root, "calls.log"), "utf8"), /^build$/m);
+});
+
+test("started in a repo subdirectory the wrapper registers and builds the work tree root", async () => {
+  mkdirSync(join(proj, "sub"));
+  const realProj = realpathSync(proj);
+  writeFileSync(join(fakeBin, "graphmind"), FAKE.replace('echo "$@" >> "$FAKE_LOG"', 'echo "$@ $PWD" >> "$FAKE_LOG"'));
+  assert.match(runWrapper(false, {}, join(proj, "sub")).calls, new RegExp(`^init --skip-build ${realProj}$`, "m"));
+  await new Promise((done) => setTimeout(done, 300));
+  assert.match(readFileSync(join(root, "calls.log"), "utf8"), new RegExp(`^build ${realProj}$`, "m"));
 });
 
 test("with the setup's server in ~/.claude.json the wrapper still inits but does not serve", () => {
@@ -111,8 +121,8 @@ test("a directory or non-executable graphmind earlier on PATH does not shadow th
 
 test("without the binary the wrapper exits 1; home and non-git folders are not indexable", () => {
   assert.equal(runWrapper(true).r.status, 1);
-  assert.equal(indexable(root), false);
-  assert.equal(indexable(proj), true);
+  assert.equal(indexable(root), undefined);
+  assert.equal(indexable(proj), proj);
 });
 
 test("a dotfiles repo in a symlinked HOME does not make a plain folder below it indexable", () => {
@@ -122,7 +132,7 @@ test("a dotfiles repo in a symlinked HOME does not make a plain folder below it 
   const saved = process.env.HOME;
   process.env.HOME = join(root, "linkhome");
   try {
-    assert.equal(indexable(join(home, "notes", "sub")), false);
+    assert.equal(indexable(join(home, "notes", "sub")), undefined);
   } finally {
     process.env.HOME = saved;
   }

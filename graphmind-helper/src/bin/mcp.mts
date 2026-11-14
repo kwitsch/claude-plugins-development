@@ -21,19 +21,19 @@ function real(p: string): string {
 }
 
 /**
- * Whether `dir` is a git work tree root or inside one (a `.git` entry in it or an ancestor) and not the home directory.
+ * The git work tree root `dir` is or lies inside (a `.git` entry in it or an ancestor) and not the home directory.
  *
  * @param dir - Absolute directory.
- * @returns True when init may index it.
+ * @returns The work tree root init may index, or undefined.
  */
-export function indexable(dir: string): boolean {
+export function indexable(dir: string): string | undefined {
   // Real paths on both sides: a symlinked HOME (FreeBSD /home -> /usr/home) would never equal the real cwd.
   const home = real(homedir());
   for (let d = real(dir);; d = resolve(d, "..")) {
     // A dotfiles repo at $HOME must not make every folder below it indexable.
-    if (d === home) return false;
-    if (existsSync(join(d, ".git"))) return true;
-    if (resolve(d, "..") === d) return false;
+    if (d === home) return undefined;
+    if (existsSync(join(d, ".git"))) return d;
+    if (resolve(d, "..") === d) return undefined;
   }
 }
 
@@ -47,11 +47,13 @@ function main(): void {
   const cwd = process.cwd();
   // Checked before init: init adds its own project entry to .claude.json, which this session has not loaded.
   const setupPresent = setupMcpPresent();
-  if (indexable(cwd) && !registered(bin)) {
+  const root = indexable(cwd);
+  if (root && !registered(bin)) {
     // Registration and git hooks are fast; the graph build of a large repo could outlast the MCP startup timeout.
-    const init = spawnSync(bin, ["init", "--skip-build"], { cwd, stdio: ["ignore", "ignore", "inherit"], timeout: 30_000 });
+    // The work tree root, not a subdirectory the session started in: init would register only that part of the repo.
+    const init = spawnSync(bin, ["init", "--skip-build"], { cwd: root, stdio: ["ignore", "ignore", "inherit"], timeout: 30_000 });
     // The no-op error listener: an unhandled spawn 'error' (EACCES) would crash the wrapper before it serves.
-    if (init.status === 0) spawn(bin, ["build"], { cwd, detached: true, stdio: "ignore" }).on("error", () => {}).unref();
+    if (init.status === 0) spawn(bin, ["build"], { cwd: root, detached: true, stdio: "ignore" }).on("error", () => {}).unref();
   }
   // The user's own `graphmind setup` server (same tools) stays the one in use.
   if (setupPresent) process.exit(0);
