@@ -683,6 +683,28 @@ test("Inside a longer turn Jev's measured top action is compared with Claude's c
   expect(report).not.toContain("shadow");
 });
 
+test("An answered step measurement leaves no timer pending, the 250 ms grace timer included", async ($, on) => {
+  const started: number[] = [];
+  let cancelled = 0;
+  on("clock.after", (_$, e, next) => {
+    started.push(Number(e.ms));
+    next.signal.addEventListener("abort", () => cancelled++, { once: true });
+    return next(e);
+  });
+  const { clock, sent } = setup(on, {
+    messages: [user("what does src/app.ts export?")],
+    files: [`${CWD}/src/app.ts`],
+    jev: byId({ next_action: { type: "choice", choice: "read src/app.ts", probabilities: { "read src/app.ts": 0.92, claude: 0.08 }, confidence: 0.9 } }),
+  });
+  claudeBeneath(on, []);
+
+  await drain($.turn.step({ ...step, index: 1 }));
+  await clock.advance(0);
+  expect(ids(sent)).toEqual(["next_action"]);
+  expect(started).toContain(250);
+  expect(cancelled).toBe(started.length);
+});
+
 test("Passes are logged too: a \"claude\" pick, an unchanged route", { options: { routing: "model" } }, async ($, on) => {
   setup(on, {
     messages: [user("refactor the auth module to use JWT")],
