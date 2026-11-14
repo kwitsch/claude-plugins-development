@@ -325,6 +325,22 @@ test("a precompute or a vetoed compaction leaves the countdown, a compaction tha
   await ui.unmount();
 });
 
+test("a precompute that Claude Code's own compaction answers leaves the countdown", { options: { haikuCompact: false } }, async ($, on) => {
+  const { clock } = chatSetup(on, 70);
+  on("session.compact", () => ({ messages: [] }));
+  on("model.complete", () => ({ value: { isAnswered: false, reason: "down" } }));
+  on("ui.render", () => BENEATH);
+  await $.session.start(START);
+  const ui = await $.ui.mount(BAND);
+  await respond($);
+  await clock.advance(30_000);
+  expect(await label(ui)).toMatch(/^ cache \d+m$/);
+  await $.session.compact({ trigger: "precompute", messages: MESSAGES });
+  await clock.advance(30_000);
+  expect(await label(ui)).toMatch(/^ cache \d+m$/);
+  await ui.unmount();
+});
+
 test("the countdown sits above another plugin's band while the effort row is hidden", { options: { routing: "off" } }, async ($, on) => {
   const { clock } = chatSetup(on, 10);
   on("ui.render", () => BENEATH);
