@@ -151,9 +151,10 @@ async function recallFor($, prompt) {
 		briefing ? callText($, tools.memoryList, cwd, { limit: 5 }) : undefined
 	]);
 	const priority = listing(priorityRaw);
+	const skip = new Set([...state.shown, ...priority.map((l) => entryId(l) ?? "")]);
 	const found = search ? [{
 		title: "[graphmind memory] Relevant:",
-		lines: listing(memoryRaw).filter((l) => !l.startsWith("!")).slice(0, 5)
+		lines: listing(memoryRaw).filter((l) => !l.startsWith("!") && !skip.has(entryId(l) ?? "")).slice(0, 5)
 	}, {
 		title: "[graphmind code] Relevant symbols:",
 		lines: (code ?? "").split("\n").slice(0, 30)

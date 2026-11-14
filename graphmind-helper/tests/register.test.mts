@@ -24,6 +24,8 @@ type World = {
   settings?: string;
   /** `gm_status` fails (project not registered). */
   unregistered?: boolean;
+  /** Output of `graphmind memory search`. */
+  search?: string;
 };
 
 /**
@@ -48,7 +50,7 @@ function setup(on: Parameters<typeof mock.clock>[0], w: World = {}) {
   on("process.run", (_$, e) => {
     const argv = [...(e.argv as string[])];
     runs.push(argv);
-    const out = argv[1] === "memory" && argv[2] === "list" ? ">> p\n★ aaaaaaaa [decision] always use X\n" : argv[2] === "search" ? "bbbbbbbb [pattern] about foo_bar\n" : "";
+    const out = argv[1] === "memory" && argv[2] === "list" ? ">> p\n★ aaaaaaaa [decision] always use X\n" : argv[2] === "search" ? (w.search ?? "bbbbbbbb [pattern] about foo_bar\n") : "";
     return { value: { exitCode: 0, stdout: out, stderr: "" } };
   });
   on("ui.toast", (_$, e) => {
@@ -121,6 +123,20 @@ test("the first prompt gets the briefing and the recall, a later one only recall
   expect(second).not.toMatch(/Project indexed and ready/);
   // aaaaaaaa was shown in the briefing: not offered again.
   expect(second).not.toMatch(/always use X/);
+});
+
+test("a memory search hit that is a priority entry is not shown again", async ($, on) => {
+  // Real CLI shape (graphmind 0.3.7): the search lists the priority entry without its star.
+  const { prompts } = setup(on, { search: ">> 2 result(s):\n\n  aaaaaaaa [decision] always use X (tags: x)\n  bbbbbbbb [pattern] about foo_bar\n" });
+  await $.session.start({ source: "startup" });
+  await prompt($, "please explain the always rule");
+  const first = (prompts[0].context ?? []).join("\n");
+  expect(first.match(/always use X/g)).toHaveLength(1);
+  expect(first).toMatch(/about foo_bar/);
+  await prompt($, "another prompt about always rule usage");
+  const second = (prompts[1].context ?? []).join("\n");
+  expect(second).not.toMatch(/always use X/);
+  expect(second).toMatch(/about foo_bar/);
 });
 
 test("every tenth prompt carries the save reminder", async ($, on) => {

@@ -311,9 +311,11 @@ async function recallFor($: Engine, prompt: string): Promise<string[]> {
     briefing ? callText($, tools.memoryList, cwd, { limit: 5 }) : undefined,
   ]);
   const priority = listing(priorityRaw);
+  // A search hit that is a priority entry is already shown or offered in the priority block (the setup's drop_shown).
+  const skip = new Set([...state.shown, ...priority.map((l) => entryId(l) ?? "")]);
   const found: Block[] = search
     ? [
-      { title: "[graphmind memory] Relevant:", lines: listing(memoryRaw).filter((l) => !l.startsWith("!")).slice(0, 5) },
+      { title: "[graphmind memory] Relevant:", lines: listing(memoryRaw).filter((l) => !l.startsWith("!") && !skip.has(entryId(l) ?? "")).slice(0, 5) },
       { title: "[graphmind code] Relevant symbols:", lines: (code ?? "").split("\n").slice(0, 30) },
     ]
     : [];
