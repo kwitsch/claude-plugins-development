@@ -40,7 +40,7 @@ Recommendation: 1 now (no decision needed), 3 as a decision; 2 only if the featu
 
 ## Verification
 
-- Kit test (`tests/register.test.mts`): with the defaults, step 0's `next_action` criteria hold no `skill ` or `load ` key while related skills and deferred tools are listed; with `takeOnlyForBypass: false` they do. Fails on 0.12.0 (the keys are offered).
+- Kit test (`tests/register.test.mts`): with the defaults, step 0's `next_action` criteria hold no key that starts with the word `skill` or `load` while related skills and deferred tools are listed; with `takeOnlyForBypass: false` they do. Fails on 0.12.0 (the keys are offered).
 - Every decision edge keeps its test (`takeThreshold`, `SINGLE_ACTION`, the Read/Bash rule).
 - In a new dated evaluation: the step-0 body and the real System One median with the defaults against `takeSteps: false` on the same state.
 
