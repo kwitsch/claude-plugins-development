@@ -108,7 +108,8 @@ function bundleLib(compiled: Map<string, string>): { members: string[]; entries:
     // all imports of helpers become one import from lib.mjs, in the place of the first
     const taken: string[] = [];
     let first = true;
-    const rewritten = code.replace(SIBLING_IMPORT, (m, names: string, name: string) => {
+    // a dropped import takes its line break along, so no blank line is left and literals stay untouched
+    const rewritten = code.replace(new RegExp(`${SIBLING_IMPORT.source}\\n?`, "gm"), (m, names: string, name: string) => {
       if (!byName.has(name)) return m;
       for (const n of names.split(",").map((s) => s.trim()).filter(Boolean)) {
         taken.push(n);
@@ -116,10 +117,10 @@ function bundleLib(compiled: Map<string, string>): { members: string[]; entries:
       }
       if (!first) return "";
       first = false;
-      return "\u0000lib\u0000";
+      return m.endsWith("\n") ? "\u0000lib\u0000\n" : "\u0000lib\u0000";
     });
     checkLeftover(f, rewritten);
-    entries.set(f, rewritten.replace("\u0000lib\u0000", () => `import { ${taken.sort().join(", ")} } from "./lib.mjs";`).replace(/\n{3,}/g, "\n\n"));
+    entries.set(f, rewritten.replace("\u0000lib\u0000", () => `import { ${taken.sort().join(", ")} } from "./lib.mjs";`));
   }
   const text = ordered.map((f) => (bodies.get(f) ?? "").replace(/^export\s+(?=(?:async\s+)?(?:function|const|let|class)\b)/gm, "")).join("\n");
   if (/^export\s/m.test(text)) fail("a helper exports something other than a declaration");
