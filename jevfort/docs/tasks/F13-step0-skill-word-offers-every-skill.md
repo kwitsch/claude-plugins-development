@@ -1,14 +1,16 @@
 ---
 id: F13
 title: A prompt that says "skill" makes step 0 offer every listed skill; from ~130 skills step 0 times out and pauses Jev
-status: open
+status: done
 priority: high
 area: jevfort/src/hooks/register.mts (buildCandidates, offerableSkills, onTurnStep), jevfort/src/hooks/candidates.mts (relevant, MAX_RELATED, STOPWORDS)
 ---
 
 ## Status
 
-Open. Found in the performance analysis after the worklist ([../EVALUATION-2026-11-14-2.md](../EVALUATION-2026-11-14-2.md)), plugin 0.11.0. The code path is unchanged since the port (`ca6b468`), so the real decision log of the installed 0.10.1 applies.
+Done in 0.12.0 (approach 1). `buildCandidates` at step 0 always offers `relevant(request, offerableSkills($))`, at most 8 related skills, whether or not the prompt says "skill". Approach 2 (no skill candidates under `takeOnlyForBypass`) was not done: it needs a decision and loses the `take` calibration rows.
+
+Earlier state: Open. Found in the performance analysis after the worklist ([../EVALUATION-2026-11-14-2.md](../EVALUATION-2026-11-14-2.md)), plugin 0.11.0. The code path is unchanged since the port (`ca6b468`), so the real decision log of the installed 0.10.1 applies.
 
 ## Problem
 
@@ -51,6 +53,11 @@ Cheapest first:
 Recommendation: 1 now; 2 only after a decision.
 
 ## Verification
+
+- `tests/register.test.mts`, 'A prompt that says "skill" offers at most 8 related skills at step 0': 300 listed skills sharing the words "release notes", prompt "update the release notes skill"; step 0's `next_action` criteria hold 1 to 8 skill options. Fails without the fix (254 skill options), passes with it. `pnpm lint` clean, `pnpm --filter jevfort test` 249 of 249.
+- Not re-measured against the real endpoint (no new dated evaluation): with at most 8 skill options the step-0 request is bounded at the default prompt's size (3.3 KB, ~0.6 s in the earlier measurement, estimated), whatever is installed.
+
+Planned before the fix:
 
 - Kit test (`tests/phase3.test.mts` or `tests/register.test.mts`): 300 listed skills and a request containing "skill": step 0's `next_action` criteria hold at most 8 skill options; fails on 0.11.0 (255 options).
 - Re-measure in a new dated evaluation (`real5.mjs`-style): step 0 with a "skill" prompt at 50 / 100 / 254 skills, expected ~0.6-0.8 s and no timeout.
