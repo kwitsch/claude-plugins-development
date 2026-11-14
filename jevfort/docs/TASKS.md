@@ -1,6 +1,6 @@
 # jevfort performance tasks
 
-Source: performance analysis of jevfort 0.10.1 (with jev-api 0.3.2) on 2026-11-14, numbers in [EVALUATION-2026-11-14.md](EVALUATION-2026-11-14.md). One document per finding in `tasks/`; read it before working on the task. Re-analysis after the worklist (0.11.0, F13 and F14): [EVALUATION-2026-11-14-2.md](EVALUATION-2026-11-14-2.md). Proven = measured in the harness or against the real endpoint, or shown by the code; estimated = a derived figure (engine costs, 9P), marked as such in each task.
+Source: performance analysis of jevfort 0.10.1 (with jev-api 0.3.2) on 2026-11-14, numbers in [EVALUATION-2026-11-14.md](EVALUATION-2026-11-14.md). One document per finding in `tasks/`; read it before working on the task. Re-analysis after the worklist (0.11.0, F13 and F14): [EVALUATION-2026-11-14-2.md](EVALUATION-2026-11-14-2.md). Re-analysis after the option removal (0.12.0, F15 and F16): [EVALUATION-2026-11-14-3.md](EVALUATION-2026-11-14-3.md). Proven = measured in the harness or against the real endpoint, or shown by the code; estimated = a derived figure (engine costs, 9P), marked as such in each task.
 
 Legend: `[x]` finished (done, or closed without code: status `closed` in the task document). `[ ]` not finished; tag = `open` (not started), `partial`, `docs-only` (no code change intended; the remaining action is a documentation sentence).
 
@@ -18,6 +18,8 @@ Legend: `[x]` finished (done, or closed without code: status `closed` in the tas
 ## Remaining
 
 - [ ] [F14](tasks/F14-agent-type-choice-latency.md) `partial` medium (0.12.0 skips the ask for a specific type): the agent-type choice still waits ~1.15 s (real median, 103 calls) before a general Agent dispatch and switched none; a smaller request or dropping the feature needs a decision
+- [ ] [F15](tasks/F15-step0-take-questions-cost.md) `open` medium: step 0's take questions double the main-loop step-0 request (+1.7 KB, +240-285 ms real before the first token, +476 ms with full clips, +16 engine ops) and took 0 of 189 real step-0 asks under the current rule; offering only Read/Bash under `takeOnlyForBypass` needs no decision, dropping or opting out of the take path does
+- [ ] [F16](tasks/F16-step-k-unused-transcript-read.md) `open` low: every step k > 0 reads and splits the whole transcript, which with the defaults only the bypass follow-up step uses (8 of 10 reads per turn unused; 3-9.5 ms per step with a cloned 1.3-10 MB transcript in the harness)
 
 ## Closed without code (measurement records, decided 2026-11-14)
 
@@ -34,4 +36,6 @@ Legend: `[x]` finished (done, or closed without code: status `closed` in the tas
 - F04 and F05 touch `buildCandidates` and the per-step state; a per-turn cache keyed by `turnId` (cleared at `turn.complete`) serves both and F07's project probes.
 - F06 must keep every store call in a hook frame (`.claude/rules/register-hooks.md`, "Storage calls must run in-frame") and the known limit "several sessions share one log" (CLAUDE.md).
 - F13 is F01's failure at step 0 (an option per installed skill); approach 1 is F01's fix. Do F13 first. F14 and F13 both grow with the installation (skills, agent types).
+- 0.12.0 removed the classifier (F01), the done check (F03's merged batch now carries only the task end) and the decision log (F06): those fixes have no code left; their task documents stay as the record.
+- F15 and F14 are the two Jev asks that cost latency on every turn or dispatch without a measured benefit; F16 is a leftover of the removed step measurement. F15 approach 1 and F16 both touch `onTurnStep` before the step-0 batch: they can ship together.
 - Not covered here: the compaction ranking budget and the hook bypass of `session.compact` (jev-api F19, `../../jev-api/docs/tasks/F19-jevfort-compaction-wait-and-hook-budget.md`).
