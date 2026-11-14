@@ -2161,6 +2161,21 @@ test("A flush started while another is in flight keeps both flushes' entries", {
   expect(logs.at(-1)).toHaveLength(2);
 });
 
+test("/jev export with nothing pending waits for another hook's flush still in flight", { options: { minEffort: "high", maxEffort: "low" } }, async ($, on) => {
+  const g = gatedLog(on, []);
+  setup(on, { messages: [], jev: () => undefined });
+  lifecycle(on);
+  on("fs.write", () => ({ value: undefined }));
+  await $.session.start({ cwd: CWD, surface: "terminal", isInteractive: true });
+  const end = $.session.end({ reason: "clear", sessionId: SID, resume: { id: SID } });
+  await g.settle();
+  const exported = runJev($, "export");
+  await g.settle();
+  g.release();
+  await end;
+  expect(await exported).toMatch(/wrote 1 entries/);
+});
+
 test("An inactive turn.complete writes the decisions pending from the turn", async ($, on) => {
   const sets: string[] = [];
   on("store.set", (_$, e, next) => (sets.push(String(e.key)), next(e)));

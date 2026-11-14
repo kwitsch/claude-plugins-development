@@ -596,11 +596,13 @@ async function record($: Engine, d: Omit<Entry, "at">): Promise<void> {
 /**
  * Writes the pending decisions into the capped store log and the counters: one read and one write of each per call.
  * Called in-frame from `turn.complete`, `session.end` and `/jev`; a hook that never completes loses its own entries.
+ * With nothing pending it still waits for the flushes already queued, so a store read after it sees their entries.
  *
  * @param $ - Engine interface.
  */
 async function flushLog($: Engine): Promise<void> {
-  if (!pending.length) return;
+  // Nothing of its own: still wait for another hook's flush, /jev reads the store next.
+  if (!pending.length) return storeQueue;
   const entries = pending.splice(0);
   // Serialized: parallel hooks would otherwise read the same log and tally and lose each other's writes.
   const run = storeQueue.then(async () => {

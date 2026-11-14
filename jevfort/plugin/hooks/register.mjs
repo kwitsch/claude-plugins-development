@@ -302,7 +302,7 @@ async function record($, d) {
 	if (d.kind !== "outcome" && d.kind !== "turn") void $.ui.status(`jev: ${d.text}`.slice(0, 80));
 }
 async function flushLog($) {
-	if (!pending.length) return;
+	if (!pending.length) return storeQueue;
 	const entries = pending.splice(0);
 	const run = storeQueue.then(async () => {
 		const log = await readLog($);
