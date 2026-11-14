@@ -275,7 +275,8 @@ test("a later edit after a non-parse finding on another line: that finding is st
   assert.match(firstRan.stderr, /line4-marker/);
 });
 
-test("an edit and its exact undo while the linter runs (A->B->A): the held finding is reported, not lost", async () => {
+/** An edit and its exact undo while the linter of the first hook (`first` builds its payload) runs; asserts it reports the finding. */
+async function editAndUndoDuringLint(first: (file: string, cwd: string) => string): Promise<void> {
   const e = makeEnv();
   // stub shellcheck: log `run`, wait READ_DELAY, read the file, log `read <delay>`, wait POST_DELAY, report each `echo $1` line
   const js = path.join(path.dirname(e.record), "stub.mjs");
@@ -299,7 +300,7 @@ test("an edit and its exact undo while the linter runs (A->B->A): the held findi
   const B = `x\n${A}`;
   const file = e.file("a.sh", A);
   const edit = (structuredPatch: unknown, originalFile: string) => payload(file, e.cwd, { toolName: "Edit", toolResponse: { structuredPatch, originalFile } });
-  const first = start(e, "", payload(file, e.cwd), { UNIVERSAL_LINT_SETTLE_MS: "3000", READ_DELAY: "1500", POST_DELAY: "2500" });
+  const firstRun = start(e, "", first(file, e.cwd), { UNIVERSAL_LINT_SETTLE_MS: "3000", READ_DELAY: "1500", POST_DELAY: "2500" });
   await expect.poll(() => e.lines().length, { interval: 20, timeout: 10_000 }).toBeGreaterThanOrEqual(1);
   // B inserts a line at the top before the linter reads: it reads B and reports `echo $1` on line 3
   writeFileSync(file, B);
@@ -312,10 +313,15 @@ test("an edit and its exact undo while the linter runs (A->B->A): the held findi
   // D rewrites line 3 of A (`echo b`), which is not where the error is
   writeFileSync(file, "echo a\necho $1\necho 'b'\necho c\n");
   assert.equal((await start(e, "", edit([{ oldStart: 1, oldLines: 4, newStart: 1, newLines: 4, lines: [" echo a", " echo $1", "-echo b", "+echo 'b'", " echo c"] }], A), {})).status, 0);
-  const firstRan = await first;
+  const firstRan = await firstRun;
   assert.equal(firstRan.status, 2);
   assert.match(firstRan.stderr, /aba-marker/);
-});
+}
+
+test("an edit and its exact undo while the linter runs (A->B->A): the held finding is reported, not lost", () => editAndUndoDuringLint((file, cwd) => payload(file, cwd)));
+
+test("an edit and its exact undo while a FileChanged lint runs (A->B->A): the held finding is reported, not lost", () =>
+  editAndUndoDuringLint((file, cwd) => JSON.stringify({ hook_event_name: "FileChanged", cwd, file_path: file, event: "change" })));
 
 test("a change nobody journaled between the held lint and a later Edit: the held finding is reported, not lost", async () => {
   const s = setup();
