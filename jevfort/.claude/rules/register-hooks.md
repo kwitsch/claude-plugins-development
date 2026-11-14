@@ -61,7 +61,7 @@ the shapes below: `inline-headroom/docs/claude-code-verification.md`.
   `jevState !== ""`; then the hook draws only the cache countdown (above `await next(e)`, in a column Box, so another
   plugin's band beneath survives) or, without a countdown, passes; it always passes while `e.props.hasSurvey`.
   `onPress` only flips the flag and calls `$.ui.invalidate` (no storage call; it runs after the frame, so a throw sets `bandStale` and the next applied listing redraws). While `autoOff`,
-  the step-0 effort block (first-turn record, estimate, hold) is skipped.
+  the step-0 effort block (first-turn record, estimate, hold) is skipped; the flag is read again after Jev's answer, so a press during the wait keeps the session effort and the band's choice.
 - Cache countdown / auto-compact / Haiku compaction (see `CLAUDE.md`): `turn.step` wraps `next` in `cacheWatch`
   (passes chunks, reads the result's `usage` in a try/catch), `turn.complete` clears `turnRunning` before its readiness
   guard, the `session.compact` hook is registered whatever `compaction` says (only the Jev ranking honours it: a

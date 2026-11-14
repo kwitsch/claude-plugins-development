@@ -1221,12 +1221,15 @@ export const register = (on: On, options: Options): void => {
       const mechanical = noul(r.answers, "mechanical");
       const effortAnswer = score(r.answers, "effort");
       const est = estimateEffort(effortAnswer, mechanical, estimate);
-      turn.effort = est.effort !== e.effort ? est.effort : undefined;
       if (firstTurn) firstTurn.effort = est.effort;
       debugEffort($, e, `${est.source}${effortAnswer ? ` (score ${effortAnswer.score.toFixed(2)})` : ""}`, est.effort);
-      if (!e.agentId) {
-        band.chosen = est.effort;
-        $.ui.invalidate("ui.render");
+      // Re-read after the await: Auto pressed off while Jev answered keeps this turn at the session effort.
+      if (!autoOff) {
+        turn.effort = est.effort !== e.effort ? est.effort : undefined;
+        if (!e.agentId) {
+          band.chosen = est.effort;
+          $.ui.invalidate("ui.render");
+        }
       }
     }
 
