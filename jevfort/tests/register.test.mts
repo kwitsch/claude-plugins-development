@@ -574,16 +574,24 @@ test("A user turn between the follow-up and its turn clears the exemption", { op
 });
 
 test("A follow-up that failed to submit exempts nothing", { options: { classify: false } }, async ($, on) => {
-  const { sent } = setup(on, { messages: [user("rename foo to bar in all files")], jev: unfinished });
+  let release = () => {};
+  const gate = new Promise<void>((resolve) => (release = resolve));
+  const { sent, clock } = setup(on, { messages: [user("rename foo to bar in all files")], jev: (q) => gate.then(() => unfinished(q)) as Promise<never> });
   on("turn.complete", () => ({ text: "" }));
-  on("prompt.submit", () => {
-    throw new Error("rejected");
+  // As the engine: jevfort's hook sees its own follow-up stamped with its origin (arming the exemption), then a hook beneath refuses it.
+  on("prompt.submit", (_$, e) => {
+    if ((e as { origin?: unknown }).origin === undefined) throw new Error("rejected");
+    return { value: {} };
   });
-  await $.turn.complete(answered("t1", "One file only."));
-  await expect.poll(() => sent.length).toBe(1);
+  const t1 = $.turn.complete(answered("t1", "One file only."));
+  while (!ids(sent).includes("done")) await clock.advance(0);
+  await ownSubmit($); // the kit stamps no origin, so arm the exemption as the stamped follow-up would
+  release();
+  await t1;
+  for (let i = 0; i < 20; i++) await clock.advance(0);
   // The submit was rejected, so the next turn is checked again, and logs the lost follow-up in its own frame.
   await $.turn.complete(answered("t2", "Still one file."));
-  expect(sent).toHaveLength(2);
+  expect(ids(sent)).toEqual(["done", "done"]);
   expect(await runJev($, "")).toContain("done follow-up not sent");
 });
 
