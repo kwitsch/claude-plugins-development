@@ -1,3 +1,4 @@
+import { head } from "./context.mjs";
 export const MAX_READS = 8;
 export const MAX_STATS = 16;
 const MAX_SEARCHES = 3;
@@ -95,4 +96,4 @@ export function dedupeSkills(skills) {
 	}
 	return skills.filter((s) => byBase.get(base(s.name)) === s);
 }
-export const clipScript = (s) => s.length > 80 ? `${s.slice(0, 80).replace(/[\uD800-\uDBFF]$/, "")}…` : s;
+export const clipScript = (s) => s.length > 80 ? `${head(s, 80)}…` : s;

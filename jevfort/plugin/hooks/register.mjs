@@ -647,14 +647,14 @@ export const register = (on, options) => {
 			agentTurn += 1;
 		}
 		const missing = await jevMissing($);
-		if (e.agentId === undefined || !turnRunning) dropTurnReads();
+		if (!turnRunning) dropTurnReads();
 		if (missing.length) {
 			await contextCompact($, e, false, taskCompactPercent, forceCompactPercent).catch(() => undefined);
 			return next(e);
 		}
 		turns.delete(e.turnId);
 		await contextCompact($, e, true, taskCompactPercent, forceCompactPercent).catch(() => undefined);
-		if (e.agentId === undefined || !turnRunning) dropTurnReads();
+		if (!turnRunning) dropTurnReads();
 		return next(e);
 	});
 	on("tool.call", async function onToolCall($, e, next) {
