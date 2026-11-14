@@ -545,7 +545,7 @@ export const register = (on, options) => {
 			const claudeType = e.subagent_type ?? "";
 			const latest = Math.max(...[...offered.values()].map((o) => o.turn));
 			for (const [name, o] of offered) if (o.turn < latest) offered.delete(name);
-			if (offered.size < 2 || claudeType === "fork") return next(e);
+			if (offered.size < 2 || !GENERAL.has(claudeType)) return next(e);
 			const criteria = {};
 			for (const [name, o] of [...offered].slice(0, MAX_CHOICE_OPTIONS)) criteria[name] = clip(o.description, 200);
 			const r = await askJev($, {
