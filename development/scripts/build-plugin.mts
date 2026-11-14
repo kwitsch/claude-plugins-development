@@ -41,7 +41,7 @@ const SIBLING_IMPORT = /^import\s*\{([^}]*)\}\s*from\s*"\.\/([\w-]+)\.mjs";?[ \t
  * Bundles the helper modules of `plugin/hooks` into one module without a bundler. A helper is any hooks module that
  * `plugin/hooks/hooks.json` does not list; the listed entry modules stay separate files (Claude Code reads them) and
  * import what they need from `./lib.mjs` instead of the helpers. Works on type-stripped code and relies on what the
- * sources guarantee, all of it checked here: helpers import each other by `./name.mjs` with named imports only, their
+ * sources guarantee, all of it checked here: helpers import each other by `./name.mjs` with named imports only (no `as`), their
  * top-level names are unique across helpers (they were one file once), and they keep no state at module level that
  * a test kit reload could miss.
  *
@@ -58,6 +58,12 @@ function bundleLib(compiled: Map<string, string>): { members: string[]; entries:
     console.error(`bundleHooksLib: ${msg}`);
     return process.exit(1);
   };
+  /** Fails on an import of a helper that the named-import rewrite left in place (namespace, default or side-effect). */
+  const checkLeftover = (f: string, code: string): void => {
+    for (const m of code.matchAll(/^import\b.*["']\.\/([\w-]+)\.mjs["']/gm)) {
+      if (byName.has(m[1])) fail(`${path.relative(ROOT, f)} imports ./${m[1]}.mjs other than by named imports`);
+    }
+  };
   // the helpers in dependency order (a helper after the helpers it imports), the other imports (node:) hoisted
   const ordered: string[] = [];
   const hoisted = new Set<string>();
@@ -69,12 +75,15 @@ function bundleLib(compiled: Map<string, string>): { members: string[]; entries:
     visiting.add(f);
     const code = compiled.get(f) ?? "";
     const deps: string[] = [];
-    const body = code.replace(SIBLING_IMPORT, (_m, _names: string, name: string) => {
+    const body = code.replace(SIBLING_IMPORT, (_m, names: string, name: string) => {
       const dep = byName.get(name);
       if (!dep) fail(`${path.relative(ROOT, f)} imports ./${name}.mjs, which is not a helper`);
       else deps.push(dep);
+      // the import line is dropped, so an alias would leave its local name unbound
+      if (/\sas\s/.test(names)) fail(`${path.relative(ROOT, f)} renames an import of ./${name}.mjs with \`as\``);
       return "";
     });
+    checkLeftover(f, body);
     for (const line of body.split("\n")) if (/^import[\s{*"']/.test(line)) hoisted.add(line.trim());
     bodies.set(f, body.split("\n").filter((l) => !/^import[\s{*"']/.test(l)).join("\n"));
     for (const d of deps) visit(d);
@@ -109,6 +118,7 @@ function bundleLib(compiled: Map<string, string>): { members: string[]; entries:
       first = false;
       return "\u0000lib\u0000";
     });
+    checkLeftover(f, rewritten);
     entries.set(f, rewritten.replace("\u0000lib\u0000", () => `import { ${taken.sort().join(", ")} } from "./lib.mjs";`).replace(/\n{3,}/g, "\n\n"));
   }
   const text = ordered.map((f) => (bodies.get(f) ?? "").replace(/^export\s+(?=(?:async\s+)?(?:function|const|let|class)\b)/gm, "")).join("\n");
