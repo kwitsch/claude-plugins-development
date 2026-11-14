@@ -110,7 +110,8 @@ Between about 21k and 32767 tokens a timeout is certain, whatever the client's s
 
 - **Over-limit requests queue.** With a 16k-token request running (18.3 s), an over-limit request sent 1.5 s later got its 400 after 16.8 s, only when the big one finished. Two tiny requests sent at the same time took 6.8 s each instead of 0.06 s.
 - **The rejection costs tokenisation time.** On an idle endpoint: 250 KB 0.5 s, 2 MB 3.7 s, 8 MB 15.6 s, 32 MB 43 s (about 2 s per MB).
-- **An abandoned request keeps running.** A 16k-token request abandoned by the client after 2 s: a tiny request sent 0.3 s later still took 3.5 s (idle: 0.06 s).
+- **Re-measured 2026-11-15** (endpoint server changed; prose, `claude -p` not involved, one machine): the context limit is unchanged (a prompt of 32768 tokens is refused with `n_ctx` 32768 and `n_prompt_tokens` 32768 in 68 ms, 32767 passes in 38.2 s; the empty request costs 25 tokens plus one per `€`, so the 26 stays); characters per token (8000 characters, `usage.input_tokens` minus 26): prose 4.92, JSON 2.95, code-ish 2.82, hex 1.74, CJK 1.80 (a sentence repeated), `€` 1.00; the latency fit holds, measured/model 0.91 to 1.02 over 1k to 27k tokens (981 tok 0.72 s, 3.8k 2.7 s, 7.6k 5.9 s, 11.4k 9.4 s, 15.2k 13.7 s, 19.1k 18.3 s, 22.9k 23.5 s, 26.8k 29.3 s), so the model and its margin of 1.3 stay conservative. **The refusal of an oversized prompt is now cheap**: 0.25 MB in 47 ms, 2 MB 277 ms, 8 MB 1.16 s, 32 MB 5.7 s (about 0.18 s per MB; earlier about 2 s per MB), and a refusal sent 0.3 s after a running 4k request still waited for it (2.4 s).
+- **An abandoned request keeps running.** A 16k-token request abandoned by the client after 2 s: a tiny request sent 0.3 s later still took 3.5 s (idle: 0.06 s). Re-measured 2026-11-15: a closed request now holds the endpoint for only about 1 s (0.9 to 1.3 s), see F22.
 
 ## Code locations
 

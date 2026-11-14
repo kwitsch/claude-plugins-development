@@ -64,7 +64,11 @@ const BASE: Record<string, Record<string, unknown>> = {
   score: { instructions: "Rate the sentiment", state: "Hello there!", criteria: ["negative", "neutral", "positive"] },
 };
 
-const call = ($: Runner, type: string, input: Record<string, unknown> = {}) => $.tool.call({ tool: TOOL(type), ...BASE[type], ...input }) as Promise<{ result?: string; deny?: string }>;
+// An HTTP error status is taken over by Haiku; most tests have no Haiku, so its failure text is cut off to compare the HTTP error alone.
+const call = async ($: Runner, type: string, input: Record<string, unknown> = {}) => {
+  const r = (await $.tool.call({ tool: TOOL(type), ...BASE[type], ...input })) as { result?: string; deny?: string };
+  return r.deny === undefined ? r : { ...r, deny: r.deny.replace(/; fallback: [\s\S]*$/, "") };
+};
 
 // Errors are a `deny`: the model reads it as an error result (core drops a hook's own isError).
 // Without any env var (blank counts as unset) Haiku, through `$.model.complete`, answers instead of System One.
@@ -167,10 +171,20 @@ test("the Haiku fallback still validates input first", async ($, on) => {
   expect(asked).toHaveLength(0);
 });
 
-test("a configured Jev that fails is an error, not a Haiku fallback", async ($, on) => {
+test("a configured Jev that answers with an HTTP error is taken over by Haiku, within the timeout that is left", async ($, on) => {
   setup(on, { env: { JEV_URL: "https://jev.example/v1/systemone" }, reply: httpReply(500, "{}") });
+  const asked = haiku(on, () => said(JSON.stringify({ answers: { answer: HAIKU_ANSWERS["noul"] } })));
+  expect(JSON.parse((await call($, "noul", { timeout: 20 })).result ?? "null")).toEqual(CALIBRATED["noul"]);
+  expect(asked).toHaveLength(1);
+  const ms = Number(asked[0]?.["timeoutMs"]);
+  expect(ms).toBeLessThanOrEqual(20_000);
+  expect(ms).toBeGreaterThan(0);
+});
+
+test("a configured Jev that fails without an HTTP status stays an error", async ($, on) => {
+  setup(on, { env: { JEV_URL: "https://jev.example/v1/systemone" }, reply: () => ({ deny: "ECONNREFUSED" }) });
   const asked = haiku(on, () => said("{}"));
-  expect((await call($, "noul")).deny).toMatch(/^noul: HTTP 500/);
+  expect((await call($, "noul")).deny).toMatch(/^noul: /);
   expect(asked).toHaveLength(0);
 });
 
@@ -562,7 +576,11 @@ async function direct(overrides: Record<string, unknown>) {
     clock: { after: () => ({ cancel() {} }) },
     ...overrides,
   };
-  const run = (type: string, signal: unknown = new AbortController().signal) => hooks.get("tool.call")?.($, { tool: TOOL(type), ...BASE[type] }, Object.assign(async () => ({}), { signal })) as Promise<{ result?: string; deny?: string }>;
+  // an HTTP error is taken over by Haiku, which these hand-made engines lack: its failure text is cut off
+  const run = async (type: string, signal: unknown = new AbortController().signal) => {
+    const r = (await hooks.get("tool.call")?.($, { tool: TOOL(type), ...BASE[type] }, Object.assign(async () => ({}), { signal }))) as { result?: string; deny?: string };
+    return r.deny === undefined ? r : { ...r, deny: r.deny.replace(/; fallback: [\s\S]*$/, "") };
+  };
   return { run, fetched, hooks, $ };
 }
 

@@ -58,6 +58,17 @@ test("a module outside the bundle that imports a helper fails the build", () => 
   assert.match(r.stderr, /bin\/tool\.mjs imports plugin\/hooks\/a\.mjs, which is bundled into lib\.mjs/);
 });
 
+test("a helper's import from outside hooks/ stays in lib.mjs with its path, in front of the code", () => {
+  const r = build({
+    "a.mts": `import { shared } from "../shared/x.mjs";\nexport const one = shared + 1;\n`,
+    "../shared/x.mts": `export const shared = 1;\n`,
+    "register.mts": `import { one } from "./a.mjs";\nexport function register(on: unknown): number { return one; }\n`,
+  });
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.lib, /^import\s*\{\s*shared\s*\}\s*from\s*["']\.\.\/shared\/x\.mjs["']/);
+  assert.doesNotMatch(r.entry, /shared\/x\.mjs/);
+});
+
 test("named helper imports still build", () => {
   const r = build({ "a.mts": A, "b.mts": `import { one } from "./a.mjs";\nexport const two = (): number => one + 1;\n`, "register.mts": REGISTER });
   assert.equal(r.status, 0, r.stderr);

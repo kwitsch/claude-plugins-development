@@ -5,7 +5,7 @@
  */
 
 import type { Engine, ToolName, ToolResult } from "./types.mjs";
-import { fail, isRecord, json, MAX_TIMEOUT_S } from "./util.mjs";
+import { fail, isRecord, MAX_TIMEOUT_S } from "./util.mjs";
 
 /** The context window of System One in tokens (`n_ctx`, measured live 2026-11-14: a prompt of this many tokens is refused, one less passes). The server's own `n_ctx` replaces it once a rejection reports it. */
 export const DEFAULT_CONTEXT_TOKENS = 32768;
@@ -39,9 +39,6 @@ export const STORE_WAIT_MS = 1000;
 
 /** Tokens kept free below the limit when a state is cut or a size is named (the estimate is a ratio, not a tokenizer). */
 export const CUT_MARGIN_TOKENS = 64;
-
-/** The `error.type` System One answers a prompt over its context window with (HTTP 400). */
-export const CONTEXT_ERROR = "exceed_context_size_error";
 
 /** The reject test assumes at most this many times the learned characters per token, never less than {@link DEFAULT_DENSITY} (capped at {@link MAX_DENSITY}): a call is refused before sending only when even this optimistic estimate does not fit. */
 export const OPTIMISTIC_FACTOR = 2;
@@ -217,23 +214,6 @@ export function cutState(state: string, keep: number): string {
  */
 export function stateForBudget(budget: number, density: number, questionsChars: number): number {
   return Math.max(0, Math.floor((budget - PROMPT_OVERHEAD_TOKENS - CUT_MARGIN_TOKENS) * density) - questionsChars);
-}
-
-/**
- * Reads System One's refusal of a prompt over its context window: HTTP 400, `error.type` `exceed_context_size_error`,
- * with the exact token count of the prompt and the context size as whole numbers.
- *
- * @param text - The raw response body.
- * @returns The refused prompt's tokens and the server's context window, or undefined for any other body.
- */
-export function contextRefusal(text: string): { tokens: number; nctx: number } | undefined {
-  const body = json(text);
-  const error = isRecord(body) ? body["error"] : undefined;
-  if (!isRecord(error) || error["type"] !== CONTEXT_ERROR) return undefined;
-  const tokens = error["n_prompt_tokens"];
-  const nctx = error["n_ctx"];
-  if (typeof tokens !== "number" || typeof nctx !== "number" || !Number.isInteger(tokens) || !Number.isInteger(nctx) || nctx < 2 || tokens < nctx) return undefined;
-  return { tokens, nctx };
 }
 
 /**

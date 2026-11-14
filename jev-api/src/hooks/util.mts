@@ -1,5 +1,5 @@
 /**
- * Small shared helpers: type guards, JSON parsing, tool errors, text redaction and the request's question keys.
+ * Small shared helpers: type guards, JSON parsing, tool errors, timeouts and the request's question keys.
  *
  * @packageDocumentation
  */
@@ -108,49 +108,6 @@ export function message(err: unknown): string {
   } catch {
     return "unknown error"; // a null-prototype object, or one whose toString throws
   }
-}
-
-/**
- * Replaces a URL in an error text, as the URL parser spells it and as given, with a placeholder.
- *
- * @param text - The error text.
- * @param url - The URL to hide.
- * @param placeholder - What stands in its place.
- * @returns The text without the URL.
- */
-export function hide(text: string, url: string, placeholder: string): string {
-  let href = url;
-  try {
-    href = new URL(url).href;
-  } catch {
-    // The engine quotes a URL it cannot parse as given.
-  }
-  return text.replaceAll(href, placeholder).replaceAll(url, placeholder);
-}
-
-/**
- * Replaces the bare host of a URL in an error text. A DNS failure quotes only the host (`getaddrinfo ENOTFOUND <host>`,
- * live on 2.1.325), which may be private too. Only whole host names are replaced, ignoring case: the host `jev` must
- * not turn `jev-latest` or `api.jev`, nor the host `10.0.0.5` turn `110.0.0.5`, into something else.
- *
- * @param text - The text.
- * @param url - The endpoint URL; one that does not parse changes nothing.
- * @returns The text with the host as `<host>`.
- */
-export function hideHost(text: string, url: string): string {
-  let host = "";
-  try {
-    host = new URL(url).hostname;
-  } catch {
-    return text;
-  }
-  if (!host) return text;
-  // An IPv6 host comes with brackets, an error text quotes the bare address.
-  let t = text;
-  for (const h of new Set([host, host.replace(/^\[(.*)\]$/, "$1")])) {
-    t = t.replace(new RegExp(`(?<![\\w.-])${h.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\w-])`, "gi"), "<host>");
-  }
-  return t;
 }
 
 /**
