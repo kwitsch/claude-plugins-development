@@ -17,6 +17,11 @@ test("the tail of a quoted path with a space is not offered as another file", ()
   expect(mentionedPaths(["see `my notes.md` and \"src/app.ts\""])).toEqual(["src/app.ts"]);
 });
 
+test("a path inside a longer quoted phrase is still found", () => {
+  expect(mentionedPaths(["\"fix the bug in src/app.ts\""])).toEqual(["src/app.ts"]);
+  expect(mentionedPaths(["`cat the file src/app.ts`"])).toEqual(["src/app.ts"]);
+});
+
 test("a path at the end of a sentence is found", () => {
   for (const s of ["explain src/app.ts.", "what is in src/app.ts?", "src/app.ts!", "see (src/app.ts)."]) expect(mentionedPaths([s])).toEqual(["src/app.ts"]);
 });

@@ -18,7 +18,7 @@ export function mentionedPaths(texts, seen = new Set()) {
 		for (const m of text.matchAll(PATH)) {
 			const p = m[1];
 			const start = m.index + m[0].length - p.length;
-			if (spans.some(([a, b]) => start > a && start < b && /\s/.test(text.slice(a + 1, start)))) continue;
+			if (spans.some(([a, b]) => start > a && start < b && /^\S+\s+$/.test(text.slice(a + 1, start)))) continue;
 			if (/^\d/.test(p) || /^https?:/.test(p) || p.includes("..")) continue;
 			seen.add(p);
 		}

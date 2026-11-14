@@ -251,9 +251,8 @@ async function askJev($: Engine, state: unknown, questions: Record<string, Quest
   // A refused clock read must not throw out of askJev (its caller may be past `next`): the wall clock stands in.
   const startedAt = await $.clock.now().catch(() => Date.now());
   if (startedAt < jevPause.at) Object.assign(jevPause, { until: 0, ms: 0, at: 0, error: "" });
-  const done = async (r: { ok: true; answers: Record<string, Answer> } | { ok: false; error: string }): Promise<JevResult> => ({ ...(r.ok ? r : { ok: false as const, error: clip(r.error, MAX_ERROR) }), ms: (await $.clock.now().catch(() => Date.now())) - startedAt });
+  const done = (r: JevResult): JevResult => (r.ok ? r : { ok: false, error: clip(r.error, MAX_ERROR) });
 
-  // No `ms`: nothing was sent, so the report must not count it as a Jev call.
   if (startedAt < jevPause.until) return { ok: false, error: `paused for ${Math.ceil((jevPause.until - startedAt) / 1000)} s after a timeout (${jevPause.error})` };
   // Without Jev access jev-api answers through Haiku, which needs a longer budget (jev-api reads the same three variables).
   // Read once per turn (`haikuPath`): a settings `env` change takes effect from the next turn.
