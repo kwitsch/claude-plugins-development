@@ -16,7 +16,7 @@
  */
 
 import { readFileSync, realpathSync } from "node:fs";
-import { isAbsolute, resolve } from "node:path";
+import { isAbsolute, join, relative, resolve } from "node:path";
 import { lintFilesHandler } from "../../hooks/lint-file.mjs";
 
 /** The list file named on the command line. */
@@ -45,10 +45,26 @@ const paths = readFileSync(listFile, "utf8")
   .map((line) => line.trim())
   .filter((line) => line.length > 0);
 
+/** The real cwd: `cwd` differs from it only for a symlinked `$PWD` root. */
+const real = process.cwd();
+
+/**
+ * Resolves a listed path against the root and spells a path under the real cwd (e.g. `git rev-parse --show-toplevel`
+ * output) through the symlinked root, which would otherwise reject it as outside and miss its project-local bin.
+ *
+ * @param p - A listed path, absolute or root-relative.
+ * @returns The absolute path, under `cwd` when it lies under the real cwd.
+ */
+function abs(p: string): string {
+  const a = resolve(cwd, p);
+  const rel = relative(real, a);
+  return cwd !== real && !rel.startsWith("..") && !isAbsolute(rel) ? join(cwd, rel) : a;
+}
+
 /** One findings block per tool run; empty on any throw or rejection (fail open, matching the hook). */
 let blocks: string[];
 try {
-  blocks = await lintFilesHandler(cwd, paths.map((p) => resolve(cwd, p)));
+  blocks = await lintFilesHandler(cwd, paths.map(abs));
 } catch {
   blocks = [];
 }

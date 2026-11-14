@@ -1,7 +1,7 @@
 // The /universal-lint:universal-lint skill (SKILL.md + lint-files.mjs); ported from test/universal-lint/skill.bats.
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { chmodSync, existsSync, readdirSync, readFileSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, readdirSync, readFileSync, realpathSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "vitest";
 import { DRIVER, makeEnv } from "./support/lint-hook.mts";
@@ -222,4 +222,20 @@ test("lint-files.mjs finds a project-local linter through a symlinked cwd ($PWD 
   assert.equal(r.status, 0);
   assert.match(r.stdout, /oxlint found issues/, r.stdout);
   assert.equal(e.lines().filter((l) => l.startsWith("oxlint ")).length, 1);
+});
+
+test("lint-files.mjs finds a project-local linter for a real-path entry through a symlinked cwd (git toplevel prefix)", () => {
+  const e = makeEnv();
+  const link = path.join(path.dirname(e.cwd), "link");
+  symlinkSync(e.cwd, link);
+  e.file("eslint.config.js", "export default [];\n");
+  const real = e.file("a.js", "var x = 1;\n");
+  const bin = e.file("node_modules/.bin/eslint", "#!/usr/bin/env bash\nprintf 'eslint %s\\n' \"$*\" >> \"$RECORD\"\necho 'a.js:1:5 error no-var'\nexit 1\n");
+  chmodSync(bin, 0o755);
+  const list = path.join(path.dirname(e.cwd), "list");
+  writeFileSync(list, realpathSync(real) + "\n");
+  const r = spawnSync(process.execPath, [DRIVER, list], { cwd: link, env: { ...e.childEnv(), PWD: link }, encoding: "utf8" });
+  assert.equal(r.status, 0);
+  assert.match(r.stdout, /eslint found issues/, r.stdout);
+  assert.equal(e.lines().filter((l) => l.startsWith("eslint ")).length, 1);
 });
