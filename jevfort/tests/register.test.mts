@@ -1287,6 +1287,21 @@ test("A mid-turn cd moves a later step's Read candidate to the new cwd", { optio
   expect(chunks).toContainEqual({ kind: "input", index: 0, json: JSON.stringify({ file_path: `${CWD}/sub/src/b.ts` }) });
 });
 
+test("A mid-turn cd away from the package.json drops its scripts", { options: { takeOnlyForBypass: false } }, async ($, on) => {
+  let cwd = CWD;
+  const { sent } = setup(on, { messages: [user("run the tests")], cwd: () => cwd, packageJson: { scripts: { test: "vitest run" } }, jev: () => undefined });
+  claudeBeneath(on, []);
+  await drain($.turn.step(step));
+  expect(Object.keys(sent.filter((q) => q.id === "next_action").at(-1)?.criteria ?? {})).toContain("run npm test");
+  // A carried-over `cd sub` moves the cwd to a directory without a package.json.
+  cwd = `${CWD}/sub`;
+  const before = sent.length;
+  await drain($.turn.step({ ...step, index: 1 }));
+  // Without candidates step 1 asks no next_action at all; with the stale scripts it would offer `run npm test`.
+  const offered = sent.slice(before).filter((q) => q.id === "next_action").flatMap((q) => Object.keys(q.criteria ?? {}));
+  expect(offered).not.toContain("run npm test");
+});
+
 test("A call's result that arrives a step later is still scanned for file paths", { options: { takeOnlyForBypass: false } }, async ($, on) => {
   const call: { tool_use_id: string; tool: string; input: Record<string, unknown>; text?: string } = { tool_use_id: "c1", tool: "Bash", input: { command: "tsc" } };
   const messages: Msg[] = [user("fix the build"), { role: "assistant", text: "", toolUses: [call] }];
