@@ -26,8 +26,11 @@ plugin's own tested hook logic through a colocated driver — no new linting log
    - "files changed in PR <N>" → run `gh auth status` first (it exits non-zero for both a
      missing PR and a dead token, so auth is checked before the diff), then
      `gh pr diff <N> --name-only`;
-   - "files changed on this branch / in the working tree" → `git diff --name-only <base>...HEAD`
+   - "files changed on this branch / in the working tree" → `git diff --relative --name-only <base>...HEAD`
      or `git status --porcelain`;
+   - `gh pr diff` and `git status --porcelain` print repo-root-relative paths, but the driver
+     resolves each path against the cwd: put `$(git rev-parse --show-toplevel)/` in front of each
+     of their paths (absolute) before writing the list;
    - empty or genuinely ambiguous `$file_scope` → ask with `AskUserQuestion` (offer 2-3 example
      scopes as options; the real answer arrives via "Other"). Never guess a scope.
 

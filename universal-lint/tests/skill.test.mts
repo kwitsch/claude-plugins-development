@@ -40,6 +40,12 @@ test("SKILL.md points at the reference doc and invokes the driver via the litera
   assert.ok(skillMd.includes("${CLAUDE_SKILL_DIR}/lint-files.mjs"));
 });
 
+test("SKILL.md makes repo-root-relative git/gh paths resolvable from a subdirectory cwd", () => {
+  assert.ok(skillMd.includes("git diff --relative --name-only"));
+  assert.ok(skillMd.includes("$(git rev-parse --show-toplevel)/"));
+  assert.doesNotMatch(skillMd, /git diff --name-only/);
+});
+
 test("SKILL.md never writes the exclamation-mark-then-backtick injection sequence", () => {
   assert.ok(!skillMd.includes("!" + "`"));
 });
