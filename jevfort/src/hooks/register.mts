@@ -21,7 +21,7 @@ import type { Candidate } from "./candidates.mjs";
 import { COMPACT_MAX_TOKENS, COMPACT_MODEL, COMPACT_SYSTEM, compactInstructions, compactItems, haikuTranscript, RELEVANCE } from "./compact.mjs";
 import { clip, splitTurn, summarize, toolCalls } from "./context.mjs";
 import type { SessionMessage, ToolUse, TurnContext } from "./context.mjs";
-import { choice, HAIKU_API_TIMEOUT_S, HAIKU_TIMEOUT_MS, JEV_API_TIMEOUT_S, JEV_BATCH, JEV_TOOL_PREFIX, JEV_TOOLS, MAX_CHOICE_OPTIONS, missingJevTools, noul, score, TIMEOUT_MS } from "./jev.mjs";
+import { choice, COMPACT_API_TIMEOUT_S, COMPACT_TIMEOUT_MS, HAIKU_API_TIMEOUT_S, HAIKU_TIMEOUT_MS, isAnswer, JEV_API_TIMEOUT_S, JEV_BATCH, JEV_TOOL_PREFIX, JEV_TOOLS, MAX_CHOICE_OPTIONS, MAX_ERROR, MAX_PAUSE_MS, MEASURE_GRACE_MS, missingJevTools, noul, PAUSE_MS, score, TIMEOUT_MS } from "./jev.mjs";
 import type { Answer, ChoiceAnswer, JevResult, Question } from "./jev.mjs";
 import { LOG_KEY, MAX_ENTRIES, recentDecisions, remember, statsKey } from "./log.mjs";
 import type { Entry } from "./log.mjs";
@@ -191,27 +191,59 @@ const FINISHED = new Set(["completed", "failed", "killed", "idle"]);
 const asText = (v: unknown): string => String(v);
 
 /**
+ * Jev did not answer in time: no new request is sent until `until` (a dead endpoint would otherwise cost the full budget
+ * at every prompt and step). `ms` is the pause that follows the next timeout, `at` the time of the last one (a clock that
+ * went back, as in a new session, ends the pause).
+ */
+const jevPause = { until: 0, ms: 0, at: 0, error: "" };
+
+/** jev-api's own timeout text (`timeout after 4000ms`, with Haiku answering `fallback: timeout after 14000ms`): it reaches `askJev` as an error when jev-api's clock ends before jevfort's, as Haiku's 14 s does before the 15 s budget. */
+const API_TIMEOUT = /\btimeout after \d+ms\b/;
+
+/**
+ * Starts the pause after a timeout of Jev, or doubles it. Only a call that started after the previous pause lengthens
+ * it: parallel calls of one outage time out together and count once.
+ *
+ * @param startedAt - When the timed-out call started.
+ * @param budgetMs - The call's budget.
+ * @param error - The timeout text `/jev` shows while the pause lasts.
+ */
+function pauseAfterTimeout(startedAt: number, budgetMs: number, error: string): void {
+  if (startedAt < jevPause.until) return;
+  jevPause.ms = jevPause.ms ? Math.min(jevPause.ms * 2, MAX_PAUSE_MS) : PAUSE_MS;
+  jevPause.until = startedAt + budgetMs + jevPause.ms;
+  jevPause.at = startedAt;
+  jevPause.error = error;
+}
+
+/**
  * Asks Jev through the jev-api plugin's `batch` tool; never throws. All questions go out in one `$.tool.call` (one
- * System One request) inside the calling hook's frame, raced against `TIMEOUT_MS`. All or nothing: a failed call, a
+ * System One request) inside the calling hook's frame, raced against its budget (`TIMEOUT_MS`, `COMPACT_TIMEOUT_MS` for the compaction ranking, `HAIKU_TIMEOUT_MS` while Haiku answers). All or nothing: a failed call, a
  * timeout or a wrong answer is `{ ok: false }`, so callers fall back to Claude Code's own behaviour. A call still
  * running when the budget ends is ignored.
  *
  * @param $ - Engine interface.
  * @param state - The facts the questions are about; sent as JSON text.
  * @param questions - The questions by id.
+ * @param slow - The call is off the interactive path (a compaction ranking): it gets the longer {@link COMPACT_TIMEOUT_MS} budget.
  * @returns The answers, or the error, with the time taken.
  */
-async function askJev($: Engine, state: unknown, questions: Record<string, Question>): Promise<JevResult> {
-  const startedAt = await $.clock.now();
-  const done = async (r: { ok: true; answers: Record<string, Answer> } | { ok: false; error: string }): Promise<JevResult> => ({ ...r, ms: (await $.clock.now()) - startedAt });
+async function askJev($: Engine, state: unknown, questions: Record<string, Question>, slow = false): Promise<JevResult> {
+  // A refused clock read must not throw out of askJev (its caller may be past `next`): the wall clock stands in.
+  const startedAt = await $.clock.now().catch(() => Date.now());
+  if (startedAt < jevPause.at) Object.assign(jevPause, { until: 0, ms: 0, at: 0, error: "" });
+  const done = async (r: { ok: true; answers: Record<string, Answer> } | { ok: false; error: string }): Promise<JevResult> => ({ ...(r.ok ? r : { ok: false as const, error: clip(r.error, MAX_ERROR) }), ms: (await $.clock.now().catch(() => Date.now())) - startedAt });
 
+  // No `ms`: nothing was sent, so the report must not count it as a Jev call.
+  if (startedAt < jevPause.until) return { ok: false, error: `paused for ${Math.ceil((jevPause.until - startedAt) / 1000)} s after a timeout (${jevPause.error})` };
   // Without Jev access jev-api answers through Haiku, which needs a longer budget (jev-api reads the same three variables).
   const [key, base, jevUrl] = await Promise.all([$.env.get("TYPESAFE_API_KEY"), $.env.get("TYPESAFE_BASE_URL"), $.env.get("JEV_URL")]).catch(() => [undefined, undefined, undefined]);
   const haiku = ![key, base, jevUrl].some((v) => v?.trim());
-  const budgetMs = haiku ? HAIKU_TIMEOUT_MS : TIMEOUT_MS;
+  const budgetMs = haiku ? HAIKU_TIMEOUT_MS : slow ? COMPACT_TIMEOUT_MS : TIMEOUT_MS;
+  const apiTimeoutS = haiku ? HAIKU_API_TIMEOUT_S : slow ? COMPACT_API_TIMEOUT_S : JEV_API_TIMEOUT_S;
   const entries = Object.entries(questions);
   const call = (async (): Promise<Record<string, Answer>> => {
-    const r = await $.tool.call({ tool: JEV_BATCH, state: JSON.stringify(state), questions: entries.map(([, q]) => q), timeout: haiku ? HAIKU_API_TIMEOUT_S : JEV_API_TIMEOUT_S });
+    const r = await $.tool.call({ tool: JEV_BATCH, state: JSON.stringify(state), questions: entries.map(([, q]) => q), timeout: apiTimeoutS });
     // jev-api's deny text already starts with `batch:`.
     if (r.deny !== undefined) throw new Error(asText(r.deny));
     // Core's error result (no hook answered) has no `batch:` prefix; a structured one is serialized, not printed as `[object Object]`.
@@ -225,8 +257,8 @@ async function askJev($: Engine, state: unknown, questions: Record<string, Quest
     if (!Array.isArray(list) || list.length !== entries.length) throw new Error(`batch: expected ${entries.length} answers`);
     // The answers come in question order.
     return Object.fromEntries(entries.map(([id, q], i) => {
-      const answer = list[i] as Answer | null;
-      if (answer?.type !== q.type) throw new Error(`batch: no ${q.type} answer for questions[${i}]`);
+      const answer: unknown = list[i];
+      if (!isAnswer(answer, q.type)) throw new Error(`batch: no valid ${q.type} answer for questions[${i}]`);
       return [id, answer];
     }));
   })();
@@ -236,10 +268,20 @@ async function askJev($: Engine, state: unknown, questions: Record<string, Quest
 
   try {
     const answers = await Promise.race([call, timeout]);
-    if (!answers) return done({ ok: false, error: `timeout after ${budgetMs}ms` });
+    if (!answers) {
+      // Only a timeout pauses (a refused or failing endpoint answers fast and costs nothing).
+      pauseAfterTimeout(startedAt, budgetMs, `timeout after ${budgetMs}ms`);
+      return done({ ok: false, error: `timeout after ${budgetMs}ms` });
+    }
+    jevPause.ms = 0;
+    jevPause.until = 0;
     return done({ ok: true, answers });
   } catch (err) {
-    return done({ ok: false, error: err instanceof Error ? err.message : String(err) });
+    const error = err instanceof Error ? err.message : String(err);
+    // jev-api's own timeout, answered before jevfort's clock ran out, is a timeout too.
+    const timedOut = API_TIMEOUT.exec(error);
+    if (timedOut) pauseAfterTimeout(startedAt, budgetMs, timedOut[0]);
+    return done({ ok: false, error });
   }
 }
 
@@ -317,7 +359,8 @@ async function cacheTick($: Engine, autoCompactPercent: number): Promise<void> {
   const percent = (await $.session.usage()).context.percent ?? 0;
   // The await yields: a tick that overlapped, a turn that started, a response that refreshed the cache (`cacheExpires`
   // moved) or a session reset (zeroed it) makes this decision stale, so the state is read again.
-  if (percent < autoCompactPercent || coldCompacted || turnRunning || cacheExpires !== expires) return;
+  // A non-finite fill (0/0, an empty window) is no fill: `NaN < x` is false and would compact.
+  if (!Number.isFinite(percent) || percent < autoCompactPercent || coldCompacted || turnRunning || cacheExpires !== expires) return;
   coldCompacted = true;
   // The app's own /compact, run as if typed: queued until the session is idle, resolved once it ran. A compaction that
   // stands zeroes `cacheExpires` itself (the session.compact hook). A refusal (a Stop, DISABLE_COMPACT) is said in the
@@ -375,7 +418,7 @@ async function withJevRanking($: Engine, e: CompactEvent): Promise<CompactEvent>
       criteria: RELEVANCE,
     };
   });
-  const r = await askJev($, { request: clip(request, 2000), item_count: items.length }, questions);
+  const r = await askJev($, { request: clip(request, 2000), item_count: items.length }, questions, true);
   if (!r.ok) return e;
   const scores = items.map((_, i) => score(r.answers, `item_${i}`)?.score);
   const added = compactInstructions(items, scores);
@@ -478,7 +521,7 @@ let storeQueue: Promise<void> = Promise.resolve();
  * @param d - The decision without its time.
  */
 async function record($: Engine, d: Omit<Entry, "at">): Promise<void> {
-  const entry: Entry = { ...d, at: await $.clock.now() };
+  const entry: Entry = { ...d, at: await $.clock.now().catch(() => Date.now()) };
   remember(entry);
 
   // Serialized: parallel hooks would otherwise read the same log and tally and lose each other's writes.
@@ -491,7 +534,8 @@ async function record($: Engine, d: Omit<Entry, "at">): Promise<void> {
     await $.store.set("stats", { ...tally, [key]: (tally[key] ?? 0) + 1 });
   });
   storeQueue = run.catch(() => undefined);
-  await run;
+  // A failing store (over its 4 MiB cap, a full disk) must not fail a hook: this runs after Claude's step too, and the engine rethrows a hook's error after the request ran.
+  await storeQueue;
 
   if (d.kind !== "outcome" && d.kind !== "turn") void $.ui.status(`jev: ${d.text}`.slice(0, 80));
 }
@@ -502,8 +546,13 @@ async function record($: Engine, d: Omit<Entry, "at">): Promise<void> {
  * @param $ - Engine interface.
  */
 async function clearLog($: Engine): Promise<void> {
-  await $.store.set(LOG_KEY, []);
-  await $.store.set("stats", {});
+  // In the same queue as record(): one still in flight would otherwise write the cleared log back.
+  const run = storeQueue.then(async () => {
+    await $.store.set(LOG_KEY, []);
+    await $.store.set("stats", {});
+  });
+  storeQueue = run.catch(() => undefined);
+  await run;
 }
 
 /**
@@ -518,7 +567,10 @@ async function readTurn($: Engine, agentId?: string): Promise<TurnContext | unde
   if (!Array.isArray(messages)) return undefined;
   // Jev's own done follow-up is not the user's request.
   // shortcut: SessionMessage has no origin marker, so the synthetic message is matched by its exact text; a user sending exactly that text loses that one message from the scored request.
-  return splitTurn(messages.filter((m) => !(m.role === "user" && m.text.trim() === DONE_PROMPT)));
+  // The follow-up as stored: the engine wraps a plugin's submitted prompt ("The <plugin> plugin sent a message:\n<text>\n\nThis is how ...").
+  /** Whether a trimmed user row is jevfort's own done follow-up, bare or as the engine wraps it. */
+  const own = (t: string) => t === DONE_PROMPT || t.startsWith(`The ${PLUGIN_NAME} plugin sent a message:\n${DONE_PROMPT}\n`);
+  return splitTurn(messages.filter((m) => !(m.role === "user" && own(m.text.trim()))));
 }
 
 /**
@@ -605,7 +657,7 @@ async function buildCandidates($: Engine, request: string, steps: readonly Sessi
       // a malformed package.json offers no scripts
     }
     const runner = await packageRunner($, cwd);
-    for (const name of Object.keys(scripts).filter((n) => SAFE_SCRIPT.test(n))) {
+    for (const name of Object.keys(scripts).filter((n) => SAFE_SCRIPT.test(n) && typeof scripts[n] === "string")) {
       const command = name === "test" ? `${runner} test` : `${runner} run ${name}`;
       out.push(bash(command, `Run the project's "${name}" script (${clipScript(scripts[name])})`));
     }
@@ -769,8 +821,12 @@ async function recordCompare($: Engine, turnId: string, step: number, request: s
  * @param name - The skill.
  */
 async function blockSkill($: Engine, name: string): Promise<void> {
-  const list = ((await $.store.get(SKILL_BLOCKLIST_KEY)) as string[] | undefined) ?? [];
-  if (!list.includes(name)) await $.store.set(SKILL_BLOCKLIST_KEY, [...list, name]);
+  try {
+    const list = ((await $.store.get(SKILL_BLOCKLIST_KEY)) as string[] | undefined) ?? [];
+    if (!list.includes(name)) await $.store.set(SKILL_BLOCKLIST_KEY, [...list, name]);
+  } catch {
+    // A failing store (over its cap, a full disk) must not fail the tool call hook after the call ran.
+  }
 }
 
 /**
@@ -790,7 +846,9 @@ async function blockSkill($: Engine, name: string): Promise<void> {
  */
 async function contextCompact($: Engine, e: TurnEnd, ready: boolean, continued: boolean, fromPercent: number, forcePercent: number): Promise<void> {
   if (e.agentId !== undefined || compactQueued || (fromPercent <= 0 && forcePercent <= 0)) return;
-  const percent = (await $.session.usage().catch(() => undefined))?.context.percent ?? 0;
+  // A non-finite fill (0/0, an empty window) is no fill: `Infinity >= x` would force a compaction.
+  const reported = (await $.session.usage().catch(() => undefined))?.context.percent ?? 0;
+  const percent = Number.isFinite(reported) ? reported : 0;
   const forced = forcePercent > 0 && percent >= forcePercent;
   if (!forced && (fromPercent <= 0 || percent < fromPercent || !ready || continued || e.reason !== "answer")) return;
   let text = `${percent.toFixed(0)}% full, forced`;
@@ -947,6 +1005,9 @@ export const register = (on: On, options: Options): void => {
   // user turn neither consumes nor inherits it, a user pasting the follow-up text triggers nothing, and a meta prompt in
   // between (a background-task notification) does not re-open the follow-up turn to a second check. A hot reload forgets it: at worst one more follow-up.
   let donePending = false;
+  // Bumped at every session.start and session.end: a done follow-up submitted before a /clear must not land in the new conversation.
+  let sessionEpoch = 0;
+  let followUpEpoch = 0;
   // Why the last follow-up failed to submit: its rejection arrives after the hook frame ended, so it is logged by the next turn.complete.
   let lostFollowUp: string | undefined;
   // Phase 3: classify each prompt as it is sent and, when Jev is confident, add a short hint only Claude reads.
@@ -954,11 +1015,13 @@ export const register = (on: On, options: Options): void => {
   on("prompt.submit", async function onPromptSubmit($: Engine, e: PromptEvent, next: Next<PromptEvent, unknown>): Promise<unknown> {
     if ((await jevMissing($)).length) return next(e);
     if (e.origin?.kind === "plugin" && e.origin.name === PLUGIN_NAME) {
+      if (followUpEpoch !== sessionEpoch) return { drop: "jevfort: done follow-up dropped, the conversation was cleared" };
       donePending = true;
       return next(e);
     }
     if (e.origin?.kind === "composer" && !e.isMeta) donePending = false;
-    if (options.classify === false || e.command || e.isMeta || e.text.trim().length < 3) return next(e);
+    // A finished background task arrives as origin `task-notification` (not flagged meta): nothing to classify.
+    if (options.classify === false || e.command || e.isMeta || e.origin?.kind === "task-notification" || e.text.trim().length < 3) return next(e);
 
     const questions = promptQuestions(await skillOptions($));
     const previous = await previousReply($);
@@ -968,7 +1031,8 @@ export const register = (on: On, options: Options): void => {
     const needsPlan = noul(r.answers, "needs_plan");
     const skillAnswer = choice(r.answers, "skill");
     const skill = skillAnswer ? { name: skillAnswer.choice, p: skillAnswer.probabilities[skillAnswer.choice] ?? 0 } : undefined;
-    const added = hints(kind?.choice, needsPlan, skill, takeThreshold);
+    // A confident skill is left to step 0 only where step 0 can take it: takeSteps on and not takeOnlyForBypass.
+    const added = hints(kind?.choice, needsPlan, skill, takeSteps && !takeOnlyForBypass ? takeThreshold : Number.POSITIVE_INFINITY);
 
     await record($, {
       kind: "classify",
@@ -988,8 +1052,11 @@ export const register = (on: On, options: Options): void => {
 
     on("agent.offer", async function onAgentOffer($: Engine, e: OfferEvent, next: Next<OfferEvent, unknown>): Promise<unknown> {
       if ((await jevMissing($)).length) return next(e);
-      offered.set(e.agent, e.description);
-      return next(e);
+      const r = await next(e);
+      // Only types the model is really offered are Jev's options: a hook beneath may withhold one, and its dispatch is then refused.
+      if ((r as { isOffered?: boolean } | undefined)?.isOffered === false) offered.delete(e.agent);
+      else offered.set(e.agent, e.description);
+      return r;
     });
 
     on("tool.call", { tool: "Agent" }, async function onAgentCall($: Engine, e: AgentCall, next: Next<AgentCall, ToolResult>): Promise<ToolResult> {
@@ -1090,6 +1157,7 @@ export const register = (on: On, options: Options): void => {
   on("session.start", async function onSessionStart($: Engine, e: unknown, next: Next<unknown, unknown>): Promise<unknown> {
     // A new session (a start, a reload) gets its own first-turn estimate, an empty band, Auto on and a fresh cache
     // countdown; session.end does the same for /clear and /resume, where no session.start follows.
+    sessionEpoch += 1;
     forgetConversation();
     resetCache($);
     // Until the baseline below, a listing raised beneath `next(e)` (before jev-api registered) applies nothing.
@@ -1100,10 +1168,11 @@ export const register = (on: On, options: Options): void => {
     cacheTimer?.cancel();
     cacheTimer = $.clock.every(CACHE_TICK_MS, () => void cacheTick($, autoCompactPercent).catch(() => undefined));
     if (badRange) await record($, { kind: "error", applied: false, text: `invalid effort bounds (${badRange}): using low..xhigh` }).catch(() => undefined);
+    // Refused: the rest of the session start (baseline, estimate_effort, the band) must still run.
     await $.command.register({
       name: "jev",
       description: "Jev pilot: status, /jev report, /jev candidates, /jev export, /jev clear",
-    });
+    }).catch((err: unknown) => record($, { kind: "error", applied: false, text: `/jev not registered: ${err instanceof Error ? err.message : String(err)}` }).catch(() => undefined));
     // After `next(e)`: jev-api registers its tools in its own session.start, which may run beneath this hook.
     const result = await next(e);
     // The session's baseline, listed only now: a jevfort hook raised inside `next(e)` (another plugin's session.start
@@ -1118,6 +1187,7 @@ export const register = (on: On, options: Options): void => {
    * first-turn estimates, band and Auto switch end here.
    */
   on("session.end", async function onSessionEnd($: Engine, e: unknown, next: Next<unknown, unknown>): Promise<unknown> {
+    sessionEpoch += 1; // /clear raises only session.end (no session.start follows)
     forgetConversation();
     resetCache($);
     return next(e);
@@ -1155,8 +1225,10 @@ export const register = (on: On, options: Options): void => {
     }
     if (arg === "export") {
       const log = await readLog($);
-      const path = `${await $.session.cwd()}/.jev/decisions.jsonl`;
+      // A new file per export: $.fs.write follows symlinks (live, 2.1.325), so a committed `.jev/decisions.jsonl` symlink would make an overwrite land outside the cwd.
+      const path = `${await $.session.cwd()}/.jev/decisions-${await $.clock.now().catch(() => Date.now())}.jsonl`;
       try {
+        if (await $.fs.exists(path)) return { text: `Jev pilot: ${path} exists, nothing written` };
         await $.fs.write(path, log.map((entry) => JSON.stringify(entry)).join("\n") + "\n");
         return { text: `Jev pilot: wrote ${log.length} entries to ${path}` };
       } catch (err) {
@@ -1164,7 +1236,7 @@ export const register = (on: On, options: Options): void => {
       }
     }
     const missing = await jevMissing($);
-    const counts = Object.entries(await stats($)).map(([k, v]) => `${k}=${v}`).join(", ") || "none yet";
+    const counts = Object.entries(await stats($).catch(() => ({ unreadable: 1 }))).map(([k, v]) => `${k}=${v}`).join(", ") || "none yet";
     const lines = recentDecisions()
       .slice(-10)
       .map((d) => `- ${d.kind}${d.applied ? "" : " (pass)"}: ${d.text}${d.ms !== undefined ? ` [${Math.round(d.ms)}ms]` : ""}`);
@@ -1208,10 +1280,13 @@ export const register = (on: On, options: Options): void => {
       donePending = false;
       if (doneCheck && !exempt && e.reason === "answer") {
         try {
+          // Read before the await: a /clear that arrives during the check must make the follow-up stale.
+          const epoch = sessionEpoch;
           if (await checkDone($, e, doneThreshold)) {
             continued = true;
             // Not awaited: it resolves only once the new turn starts, which waits for this turn to end. No `$` call in the
             // rejection handler: it runs after this frame, so the next turn.complete logs the error in-frame.
+            followUpEpoch = epoch;
             $.prompt.submit({ text: DONE_PROMPT }).catch((err: unknown) => {
               donePending = false;
               lostFollowUp = String(err);
@@ -1232,7 +1307,7 @@ export const register = (on: On, options: Options): void => {
   on("tool.call", async function onToolCall($: Engine, e: ToolCall, next: Next<ToolCall, ToolResult>): Promise<ToolResult> {
     if (e.tool === ESTIMATE_TOOL) {
       const input = parseEstimateInput(e);
-      if (typeof input === "string") return { isError: true, result: `estimate_effort: ${input}` };
+      if (typeof input === "string") return { deny: `estimate_effort: ${input}` }; // a hook's own isError never reaches the model (live, 2.1.325); a deny does, as an error
       const r = await askJev($, { request: clip(input.prompt, 4000) }, { effort: effortQuestion, mechanical: mechanicalQuestion });
       const effortAnswer = r.ok ? score(r.answers, "effort") : undefined;
       const est = estimateEffort(effortAnswer, r.ok ? noul(r.answers, "mechanical") : undefined, input);
@@ -1304,7 +1379,8 @@ export const register = (on: On, options: Options): void => {
 
     const questions: Record<string, Question> = {};
     let candidates: Candidate[] = [];
-    if (takeSteps && turn.taken < MAX_TAKES_PER_TURN && (!takeOnlyForBypass || (bypass && e.index === 0 && !e.agentId))) {
+    // Not on a slash-command turn: its skill text is not in the transcript, so Jev (and the Haiku summary) would answer the bare command and the skill never runs.
+    if (takeSteps && !ctx.command && turn.taken < MAX_TAKES_PER_TURN && (!takeOnlyForBypass || (bypass && e.index === 0 && !e.agentId))) {
       candidates = (await buildCandidates($, ctx.request, ctx.steps, calls, e.index)).filter((c) => !(last && sameCall(last, { tool: c.tool, input: c.input })));
       if (candidates.length) questions.next_action = nextActionQuestion(candidates);
     }
@@ -1358,17 +1434,20 @@ export const register = (on: On, options: Options): void => {
 
     if (!Object.keys(questions).length) {
       // Inside a longer turn Jev doesn't take steps, but is asked in parallel with Claude which action it would
-      // take, so the take threshold can be measured without adding a delay.
+      // take, so the take threshold can be measured adding at most MEASURE_GRACE_MS of delay after the step.
       let measure: Promise<JevResult> | undefined;
       let measured: Candidate[] = [];
-      if (measureSteps && takeSteps && e.index > 0 && !e.agentId) {
+      // Not on a slash-command turn either: Jev would be compared on the bare command, whose skill text it cannot see.
+      if (measureSteps && takeSteps && !ctx.command && e.index > 0 && !e.agentId) {
         measured = (await buildCandidates($, ctx.request, ctx.steps, calls, e.index)).filter((c) => !(last && sameCall(last, { tool: c.tool, input: c.input })));
         if (measured.length) {
           measure = askJev($, { request: clip(ctx.request, 4000), recent: summarize(ctx.steps), cwd: await $.session.cwd() }, { next_action: nextActionQuestion(measured) });
         }
       }
       const claudeResult = yield* next(routed(e));
-      const measureResult = await measure;
+      // Claude's step is done: wait only a moment for the measurement (it only logs; a late one is not recorded), never the rest of its budget.
+      // A refused clock must not fail the step whose result is already in: the measurement is dropped.
+      const measureResult = await Promise.race([measure, $.clock.sleep(MEASURE_GRACE_MS).then(() => undefined, () => undefined)]);
       const measureAnswer = measureResult?.ok ? choice(measureResult.answers, "next_action") : undefined;
       if (measureAnswer) await recordCompare($, e.turnId, e.index, ctx.request, measureAnswer, measured, claudeResult.toolUses, true);
       return claudeResult;
@@ -1421,7 +1500,9 @@ export const register = (on: On, options: Options): void => {
     const answer = choice(r.answers, "next_action");
     const best = bestAction(answer);
     const singleAction = noul(r.answers, "single_action") ?? 0;
-    const pick = takeOnlyForBypass && singleAction < SINGLE_ACTION ? undefined : pickCandidate(answer, candidates, takeThreshold);
+    const picked = pickCandidate(answer, candidates, takeThreshold);
+    // takeOnlyForBypass: only a read-only Read or Bash that is the whole prompt; a skill or tool load run by Jev would end the turn on a summary of "Launching skill".
+    const pick = takeOnlyForBypass && (singleAction < SINGLE_ACTION || (picked?.tool !== "Read" && picked?.tool !== "Bash")) ? undefined : picked;
     if (answer) {
       const p = answer.probabilities[answer.choice] ?? 0;
       await record($, {
@@ -1447,7 +1528,7 @@ export const register = (on: On, options: Options): void => {
       turn.taken += 1;
       const id = `toolu_jev_${crypto.randomUUID().replace(/-/g, "")}`;
       ownCalls.add(id);
-      if (singleAction >= SINGLE_ACTION) {
+      if (singleAction >= SINGLE_ACTION && (pick.tool === "Read" || pick.tool === "Bash")) {
         turn.bypassId = id;
         turn.bypassAction = pick.key;
       }
@@ -1478,13 +1559,14 @@ export const register = (on: On, options: Options): void => {
     // Jev's own calls come from the vetted candidate list: approve them so auto mode's classifier doesn't refuse
     // them. This and the scratchpad branch are the only places jevfort loosens Claude Code's verdict. A settings deny rule still wins.
     if (e.tool_use_id && ownCalls.has(e.tool_use_id)) {
-      if (base.decision === "deny") return base;
+      // Already allowed (a settings rule): leave it, rewording an allow rule makes the security plugin warn the user.
+      if (base.decision === "deny" || base.decision === "allow") return base;
       return { ...base, decision: "allow", reason: "Jev pilot: vetted action from its read-only/project-script list" };
     }
     const input = (e.input ?? {}) as Record<string, unknown>;
     // Writes into this session's scratchpad are allowed in every permission mode.
     // A mode's ask becomes allow; a settings deny or ask rule (`rule` set) still wins.
-    if (WRITE_TOOLS.has(e.tool) && base.decision !== "deny" && !(base.decision === "ask" && base.rule !== undefined)) {
+    if (WRITE_TOOLS.has(e.tool) && base.decision !== "deny" && base.decision !== "allow" && !(base.decision === "ask" && base.rule !== undefined)) {
       scratchpad ??= {
         roots: [await $.env.get("CLAUDE_CODE_TMPDIR"), await $.env.get("TMPDIR"), "/tmp"].filter((r): r is string => Boolean(r)),
         sid: await $.session.id(),

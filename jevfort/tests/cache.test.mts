@@ -211,7 +211,7 @@ function chatSetup(on: Parameters<typeof mock.clock>[0], percent: number, run: (
   return { clock, state, status };
 }
 
-for (const [percent, option, runs] of [[70, 60, 1], [50, 60, 0], [90, 0, 0]] as const) {
+for (const [percent, option, runs] of [[70, 60, 1], [50, 60, 0], [90, 0, 0], [Number.NaN, 60, 0], [Number.POSITIVE_INFINITY, 60, 0]] as const) {
   test(`auto-compact at ${percent}% with autoCompactPercent ${option} runs /compact ${runs}x once the cache is cold`, { options: { autoCompactPercent: option } }, async ($, on) => {
     const { clock, state } = chatSetup(on, percent);
     await $.session.start(START);

@@ -82,6 +82,23 @@ test("The prompt classifier adds a hint only Claude reads", async ($, on) => {
   expect(Object.keys(sent[2].criteria as object)).toEqual(["none", "aws-diagrams", "constructor"]);
 });
 
+test("A confident skill keeps its hint where step 0 cannot take it (takeOnlyForBypass is on by default)", async ($, on) => {
+  const answers: Record<string, Record<string, unknown>> = {
+    kind: { type: "choice", choice: "task", probabilities: { task: 0.9, question: 0.1 }, confidence: 0.8 },
+    needs_plan: { type: "noul", noul: 0.1 },
+    skill: { type: "choice", choice: "aws-diagrams", probabilities: { "aws-diagrams": 0.95, none: 0.05 }, confidence: 0.9 },
+  };
+  base(on, (q) => answers[PROMPT_IDS.get(q.instructions) ?? ""]);
+  on("command.list", () => ({ value: [{ name: "aws-diagrams", description: "Draw AWS diagrams", source: "plugin" }] }));
+  let seen: readonly string[] | undefined;
+  on("prompt.submit", (_$, e) => {
+    seen = e.context as readonly string[] | undefined;
+    return { text: e.text };
+  });
+  await $.prompt.submit({ text: "draw the aws diagram of the storage layer", wait: false, origin: { kind: "composer" } });
+  expect(seen?.join("\n") ?? "").toContain("the skill \"aws-diagrams\"");
+});
+
 test("The classifier offers at most 255 skill options, none first, each name once", async ($, on) => {
   // Only the questions sent matter here, not the answers.
   const sent = base(on, () => ({}));
@@ -112,6 +129,17 @@ test("A general-purpose subagent is switched only when Jev is confident; an expl
   // The offered agent types are the options of one choice call per Agent call.
   expect(sent.map((q) => q.type)).toEqual(["choice", "choice"]);
   expect(sent[0].criteria).toEqual({ "general-purpose": "General tasks", Explore: "Read-only codebase search" });
+});
+
+test("An agent type a hook beneath withholds is not one of Jev's options", async ($, on) => {
+  const sent = base(on, () => ({ type: "choice", choice: "Explore", probabilities: { Explore: 0.92, "general-purpose": 0.08 }, confidence: 0.85 }));
+  on("agent.offer", (_$, e) => ({ isOffered: e.agent !== "lab:runner" }));
+  on("tool.call", () => ({ result: undefined }));
+  await $.agent.offer({ agent: "general-purpose", description: "General tasks", source: "built-in" });
+  await $.agent.offer({ agent: "Explore", description: "Read-only codebase search", source: "built-in" });
+  await $.agent.offer({ agent: "lab:runner", description: "Runner only", source: "plugin" });
+  await $.tool.call({ tool: "Agent", description: "find usages", prompt: "Find every caller of addTodo", tool_use_id: "a1" });
+  expect(Object.keys(sent[0].criteria as object)).toEqual(["general-purpose", "Explore"]);
 });
 
 pureTest("Compaction instructions keep relevant results and mark stale ones", () => {
@@ -155,6 +183,43 @@ test("session.compact passes the ranking to the summarizer", async ($, on) => {
   expect(sent.map((q) => q.type)).toEqual(["score", "score", "score"]);
 });
 
+test("session.compact waits longer for Jev than an interactive call, and tells jev-api so", async ($, on) => {
+  const messages: Msg[] = [
+    { role: "user", text: "fix the failing date test", toolUses: [] },
+    {
+      role: "assistant",
+      text: "",
+      toolUses: ["a", "b", "c"].map((x, i) => ({ tool_use_id: `t${i}`, tool: "Bash", input: { command: `step ${x}` }, text: x })),
+    },
+  ];
+  mock.store(on, {});
+  mock.env(on, { TYPESAFE_API_KEY: "k" }); // Jev configured: System One answers, not Haiku
+  const clock = mock.clock(on);
+  on("session.cwd", () => ({ value: CWD }));
+  on("session.messages", () => ({ value: messages }));
+  on("ui.status", () => ({ value: undefined }));
+  on("tool.list", () => ({ value: JEV_TOOLS }));
+  let apiTimeout: unknown;
+  on("tool.call", async (_$, e, next) => {
+    if (e.tool !== JEV_BATCH) return next(e);
+    apiTimeout = e.timeout;
+    await _$.clock.sleep(4500); // longer than the interactive 4 s budget
+    const asked = e.questions as { instructions: string }[];
+    return { value: { result: JSON.stringify(asked.map((q) => ({ type: "score", score: q.instructions.includes("Call: Bash step a.") ? 2.8 : 0.3, probabilities: {}, confidence: 0.8 }))) } };
+  });
+  let instructions = "";
+  on("session.compact", (_$, e) => {
+    instructions = typeof e.instructions === "string" ? e.instructions : "";
+    return { skip: "test" };
+  });
+  const done = $.session.compact({ trigger: "manual", messages });
+  while (apiTimeout === undefined) await clock.advance(0); // until the batch call is under way
+  await clock.advance(4600);
+  await done;
+  expect(apiTimeout).toBe(9);
+  expect(instructions).toContain("Keep exact details (paths, errors, decisions, values) from: Bash step a.");
+});
+
 test("A short follow-up is classified with the previous reply as context", async ($, on) => {
   const answers: Record<string, Record<string, unknown>> = {
     kind: { type: "choice", choice: "task", probabilities: { task: 1 }, confidence: 1 },
@@ -170,3 +235,39 @@ test("A short follow-up is classified with the previous reply as context", async
   expect(String(sentStates[0]?.previous_reply)).toContain("Want me to fix that?");
   expect(sentStates[0]?.request).toBe("fix it");
 });
+
+// JJ: the compaction ranking's budget and jev-api timeout, with Jev configured and while Haiku answers.
+for (const [label, env, ms, s] of [["Jev", { TYPESAFE_API_KEY: "k" }, 9000, 9], ["Haiku", {}, 15_000, 14]] as const) {
+  test(`JJ session.compact gives a ${label} ranking ${ms} ms and jev-api ${s} s`, async ($, on) => {
+    const messages: Msg[] = [
+      { role: "user", text: "fix the failing date test", toolUses: [] },
+      { role: "assistant", text: "", toolUses: ["a", "b", "c"].map((x, i) => ({ tool_use_id: `t${i}`, tool: "Bash", input: { command: `step ${x}` }, text: x })) },
+    ];
+    mock.store(on, {});
+    mock.env(on, env);
+    const clock = mock.clock(on);
+    on("session.cwd", () => ({ value: CWD }));
+    on("session.messages", () => ({ value: messages }));
+    on("ui.status", () => ({ value: undefined }));
+    on("tool.list", () => ({ value: JEV_TOOLS }));
+    let apiTimeout: unknown;
+    on("tool.call", (_$, e, next) => {
+      if (e.tool !== JEV_BATCH) return next(e);
+      apiTimeout = e.timeout;
+      return new Promise<never>(() => {});
+    });
+    let compacted = false;
+    on("session.compact", () => {
+      compacted = true;
+      return { skip: "test" };
+    });
+    const done = $.session.compact({ trigger: "manual", messages });
+    while (apiTimeout === undefined) await clock.advance(0);
+    await clock.advance(ms - 1);
+    expect(compacted).toBe(false);
+    await clock.advance(1);
+    await done;
+    expect(compacted).toBe(true);
+    expect(apiTimeout).toBe(s);
+  });
+}

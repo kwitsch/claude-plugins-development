@@ -89,6 +89,9 @@ function setup(on: On, opts: { messages: Msg[]; jev: Jev; files?: string[]; pack
     const asked = (e.questions as { type: string; instructions: string; criteria?: unknown }[]).map((b): Asked => ({ ...b, id: QUESTION_IDS.get(b.instructions) ?? b.instructions, state: String(e.state), timeout: e.timeout, call }));
     sent.push(...asked);
     const answers = await Promise.all(asked.map(async (q) => opts.jev(q)));
+    // `{ __deny: text }` makes the batch deny with that text (an error body of any size).
+    const denied = answers.find((a) => typeof a === "object" && a !== null && "__deny" in a) as { __deny: string } | undefined;
+    if (denied) return { value: { deny: denied.__deny } };
     const status = answers.find((a) => typeof a === "number");
     if (status !== undefined) return { value: { deny: `batch: HTTP ${status}` } };
     const raw = answers.find((a) => typeof a === "string");
@@ -282,8 +285,8 @@ test("A turn-start decision sends its questions in one jev-api batch call", asyn
 
   await drain($.turn.step(step));
   expect(calls()).toBe(1);
-  // Every jev-api call gives jev-api a 5 s HTTP timeout (14 s while Haiku answers because no Jev variable is set).
-  expect(sent.every((q) => q.timeout === 5)).toBe(true);
+  // Every interactive jev-api call gives jev-api an HTTP timeout equal to the 4 s askJev budget (14 s while Haiku answers because no Jev variable is set).
+  expect(sent.every((q) => q.timeout === 4)).toBe(true);
   expect(sent.map((q) => [q.id, q.type])).toEqual([
     ["next_action", "choice"],
     ["effort", "score"],
@@ -314,7 +317,19 @@ test("One wrong answer discards the other answers of the same decision", async (
 
   await drain($.turn.step(step));
   expect(seen[0]).toMatchObject({ effort: "high" });
-  expect(await runJev($, "")).toContain("unavailable: batch: no noul answer for questions[1]");
+  expect(await runJev($, "")).toContain("unavailable: batch: no valid noul answer for questions[1]");
+});
+
+test("An answer whose fields jevfort reads are missing or mistyped fails the decision instead of crashing a hook", async ($, on) => {
+  const seen: unknown[] = [];
+  // A choice without probabilities and a noul given as text: both would throw inside the hooks (or read "1" as >= 0.95).
+  const bad: Record<string, Record<string, unknown>> = { next_action: { type: "choice", choice: "claude", confidence: 0.9 }, mechanical: { type: "noul", noul: "1" } };
+  setup(on, { messages: [user("what does this project do?")], jev: (q) => bad[q.id] ?? (q.id === "effort" ? scored(0.2) : undefined) });
+  claudeBeneath(on, seen);
+
+  await drain($.turn.step(step));
+  expect(seen[0]).toMatchObject({ effort: "high" });
+  expect(await runJev($, "")).toMatch(/unavailable: batch: no valid (noul|choice) answer for questions\[\d+\]/);
 });
 
 test("Core's error result for the batch call fails the decision with a batch: prefix", async ($, on) => {
@@ -330,7 +345,7 @@ test("Core's error result for the batch call fails the decision with a batch: pr
   expect(await runJev($, "")).toContain(`unavailable: batch: ${error}`);
 });
 
-for (const [name, answer, error] of [["of another type", mech(0.5), "batch: no score answer for questions[0]"], ["that is not JSON", "<html>", "batch: result is not JSON"], ["with too few answers", "[]", "batch: expected 2 answers"]] as const) {
+for (const [name, answer, error] of [["of another type", mech(0.5), "batch: no valid score answer for questions[0]"], ["that is not JSON", "<html>", "batch: result is not JSON"], ["with too few answers", "[]", "batch: expected 2 answers"]] as const) {
   test(`A jev-api result ${name} fails the decision`, async ($, on) => {
     const seen: unknown[] = [];
     setup(on, { messages: [user("what does this project do?")], jev: (q) => (q.id === "effort" ? answer : undefined) });
@@ -357,6 +372,75 @@ test("Jev calls that do not answer within 4000 ms time out and Claude takes the 
   expect(ids(sent)).toEqual(["effort", "mechanical"]);
   expect(seen[0]).toMatchObject({ effort: "high", model: "claude-opus-5-5" });
   expect(await runJev($, "")).toContain("unavailable: timeout after 4000ms");
+});
+
+test("After a timeout Jev is not asked again for 30 s, then once more; a timeout doubles the pause", async ($, on) => {
+  const seen: unknown[] = [];
+  const { clock, calls } = setup(on, { messages: [user("what does this project do?")], jev: () => new Promise<never>(() => {}), env: { JEV_URL: "https://jev.example/x" } });
+  claudeBeneath(on, seen);
+  let run = drain($.turn.step(step));
+  while (calls() < 1) await clock.advance(0);
+  await clock.advance(4000);
+  await run;
+  expect(calls()).toBe(1);
+  // Within the pause nothing is sent.
+  await drain($.turn.step(step));
+  expect(calls()).toBe(1);
+  expect(await runJev($, "")).toContain("paused for");
+  // After it, one probe goes out.
+  await clock.advance(30_000);
+  run = drain($.turn.step(step));
+  while (calls() < 2) await clock.advance(0);
+  await clock.advance(4000);
+  await run;
+  expect(calls()).toBe(2);
+});
+
+test("Parallel calls that time out in one outage lengthen the pause once", async ($, on) => {
+  const { clock, calls } = setup(on, { messages: [], jev: () => new Promise<never>(() => {}), env: { JEV_URL: "https://jev.example/x" } });
+  const estimates = [$.tool.call({ ...ESTIMATE }), $.tool.call({ ...ESTIMATE })];
+  while (calls() < 2) await clock.advance(0);
+  await clock.advance(4000);
+  await Promise.all(estimates);
+  // One 30 s pause, not 30 s doubled by the second timeout: 31 s later a call goes out again.
+  await clock.advance(31_000);
+  const again = $.tool.call({ ...ESTIMATE });
+  while (calls() < 3) await clock.advance(0);
+  await clock.advance(4000);
+  await again;
+  expect(calls()).toBe(3);
+});
+
+for (const [name, deny, env] of [["a jev-api timeout answered before jevfort's own", "batch: timeout after 4000ms", { JEV_URL: "https://jev.example/x" }], ["a Haiku timeout (14 s, before the 15 s budget)", "batch: fallback: timeout after 14000ms", {}]] as const) {
+  test(`${name} pauses Jev like the local timeout`, async ($, on) => {
+    const seen: unknown[] = [];
+    const { calls } = setup(on, { messages: [user("what does this project do?")], jev: () => ({ __deny: deny }), env });
+    claudeBeneath(on, seen);
+    await drain($.turn.step(step));
+    expect(calls()).toBe(1);
+    // Within the pause nothing is sent.
+    await drain($.turn.step(step));
+    expect(calls()).toBe(1);
+    expect(await runJev($, "")).toContain("paused for");
+  });
+}
+
+test("a fast failure that is no timeout pauses nothing", async ($, on) => {
+  const seen: unknown[] = [];
+  const { calls } = setup(on, { messages: [user("what does this project do?")], jev: () => ({ __deny: "batch: HTTP 503" }), env: { JEV_URL: "https://jev.example/x" } });
+  claudeBeneath(on, seen);
+  await drain($.turn.step(step));
+  await drain($.turn.step(step));
+  expect(calls()).toBe(2);
+});
+
+test("a /clear (session.end) drops the done follow-up that was submitted before it", async ($, on) => {
+  setup(on, { messages: [], jev: () => undefined });
+  on("session.end", () => ({}));
+  on("prompt.submit", (_$, e) => ({ text: e.text }));
+  await $.session.end({ reason: "clear", sessionId: "s1", resume: { id: "s1" } });
+  const r = await $.prompt.submit({ text: FOLLOW_UP, wait: false, origin: { kind: "plugin", name: "jevfort" } });
+  expect(JSON.stringify(r)).toContain("conversation was cleared");
 });
 
 test("without any Jev variable (Haiku answers in jev-api) the budget is 15000 ms", async ($, on) => {
@@ -448,6 +532,21 @@ test("A user message quoting the follow-up text stays the scored request", { opt
   expect(stateOf(sent, 0).request).toContain("rename baz");
 });
 
+test("The done follow-up as the engine stores it (wrapped) is not the request of its own turn", { options: { classify: false } }, async ($, on) => {
+  const wrapped = `The jevfort plugin sent a message:\n${FOLLOW_UP}\n\nThis is how Claude Code surfaces a prompt a plugin submits between turns — it starts this turn in the user's place. Address the message above.`;
+  const { sent } = setup(on, { messages: [user("rename foo to bar in all files"), { role: "assistant", text: "One file.", toolUses: [] }, user(wrapped)], jev: byId({ done: { type: "noul", noul: 0.9 } }) });
+  followUps(on);
+  await $.turn.complete(answered("t1", "Renamed."));
+  expect(stateOf(sent, 0).request).toBe("rename foo to bar in all files");
+});
+
+test("A finished background task (origin task-notification) is not classified", async ($, on) => {
+  const { sent } = setup(on, { messages: [], jev: () => undefined });
+  on("prompt.submit", (_$, e) => ({ text: e.text }));
+  await $.prompt.submit({ text: "<task-notification>task done, please look at the output of the build</task-notification>", wait: false, origin: { kind: "task-notification" } });
+  expect(sent).toHaveLength(0);
+});
+
 for (const [status, asked] of [["completed", 1], ["failed", 1], ["killed", 1], ["idle", 1], ["running", 0], ["pending", 0], ["starting", 0]] as const) {
   test(`The done check with a ${status} subagent asks Jev ${asked} time(s)`, async ($, on) => {
     const { sent } = setup(on, { messages: [user("rename foo to bar in all files")], jev: unfinished, agents: [{ status }] });
@@ -490,6 +589,48 @@ for (const [beneath, expected] of [["ask", "allow"], ["deny", "deny"]] as const)
     expect(await decision($, { tool: "Read", input: { file_path: `${CWD}/src/app.ts` }, tool_use_id: "toolu_claude" })).toBe(beneath);
   });
 }
+
+// An allow that a settings rule already gave stays as it is: rewording it makes the security plugin warn the user.
+test("A call Jev made itself keeps a settings allow verdict untouched", { options: { takeOnlyForBypass: false } }, async ($, on) => {
+  setup(on, {
+    messages: [user("what does src/app.ts export?")],
+    jev: byId({ next_action: { type: "choice", choice: "read src/app.ts", probabilities: { "read src/app.ts": 0.97, claude: 0.03 }, confidence: 0.95 }, difficulty: easy }),
+    files: [`${CWD}/src/app.ts`],
+  });
+  claudeBeneath(on, []);
+  const base = { decision: "allow", rule: "Read(/proj/**)", reason: "settings rule" };
+  on("tool.check", () => base);
+  const id = toolId((await drain($.turn.step(step))).chunks);
+  expect(await $.tool.check({ tool: "Read", input: { file_path: `${CWD}/src/app.ts` }, tool_use_id: id })).toEqual(base);
+});
+
+// A slash command's skill text is not in the transcript: Jev must not take a step or bypass the turn on the bare command.
+test("A turn started by a slash command is left to Claude (no take, no bypass)", async ($, on) => {
+  const seen: unknown[] = [];
+  const command = "<command-message>read-file</command-message>\n<command-name>/read-file</command-name>\n<command-args>src/app.ts</command-args>";
+  setup(on, {
+    messages: [user("Thanks!"), { role: "assistant", text: "ok", toolUses: [] }, user(command)],
+    jev: byId({ next_action: { type: "choice", choice: "read src/app.ts", probabilities: { "read src/app.ts": 0.97, claude: 0.03 }, confidence: 0.95 }, single_action: mech(0.95) }),
+    files: [`${CWD}/src/app.ts`],
+  });
+  claudeBeneath(on, seen);
+  const { chunks } = await drain($.turn.step(step));
+  expect(toolId(chunks)).toBe("");
+  expect(seen).toHaveLength(1);
+});
+
+test("A later step of a slash-command turn is not measured against Jev either", async ($, on) => {
+  const command = "<command-message>read-file</command-message>\n<command-name>/read-file</command-name>\n<command-args>src/app.ts</command-args>";
+  const { calls } = setup(on, {
+    messages: [user("Thanks!"), { role: "assistant", text: "ok", toolUses: [] }, user(command)],
+    jev: byId({ next_action: { type: "choice", choice: "read src/app.ts", probabilities: { "read src/app.ts": 0.97, claude: 0.03 }, confidence: 0.95 } }),
+    files: [`${CWD}/src/app.ts`],
+  });
+  claudeBeneath(on, []);
+  await drain($.turn.step({ ...step, index: 4 }));
+  expect(calls()).toBe(0);
+  expect(await runJev($, "report")).not.toContain("Agreement with Claude");
+});
 
 // Phase 2: every decision is logged, and Claude's own call is compared with Jev's.
 test("Inside a longer turn Jev's measured top action is compared with Claude's call and reported as agreement", async ($, on) => {
@@ -797,9 +938,9 @@ test("Effort routing does not ask Jev the difficulty question", async ($, on) =>
 });
 
 const ESTIMATE = { tool: "mcp__jevfort__estimate_effort", model: "opus", defaultEffort: "high", minEffort: "low", maxEffort: "xhigh", prompt: "add a retry to the HTTP client" };
-const estimateCall = async ($: Runner, input: Record<string, unknown> = {}) => (await $.tool.call({ ...ESTIMATE, ...input })) as { result?: string; isError?: boolean };
+const estimateCall = async ($: Runner, input: Record<string, unknown> = {}) => (await $.tool.call({ ...ESTIMATE, ...input })) as { result?: string; isError?: boolean; deny?: string };
 
-test("estimate_effort returns Jev's estimate with the model bias", async ($, on) => {
+test("estimate_effort returns Jev's estimate", async ($, on) => {
   const { sent } = setup(on, { messages: [], jev: byId({ effort: scored(1.6), mechanical: mech(0.1) }) });
   expect(await estimateCall($)).toEqual({ result: JSON.stringify({ effort: "medium", source: "jev" }) });
   expect(sent.map((q) => [q.id, q.type])).toEqual([["effort", "score"], ["mechanical", "noul"]]);
@@ -812,10 +953,112 @@ test("estimate_effort falls back to defaultEffort when Jev is unreachable", asyn
   expect(await runJev($, "")).toContain("estimate (pass): opus: high (fallback, batch: HTTP 401)");
 });
 
+test("A null script in the project's package.json does not stop the turn's routing", async ($, on) => {
+  const seen: unknown[] = [];
+  setup(on, { messages: [user("run the tests please")], packageJson: { scripts: { test: null } }, jev: byId({ effort: easy }) });
+  claudeBeneath(on, seen);
+
+  await drain($.turn.step(step));
+  expect(seen[0]).toMatchObject({ effort: "low" });
+});
+
+test("A failing store does not fail estimate_effort or a turn step", async ($, on) => {
+  on("store.set", () => ({ deny: "store over 4 MiB of JSON text" }));
+  const seen: unknown[] = [];
+  setup(on, { messages: [user("what does this project do?")], jev: byId({ effort: scored(1.6), mechanical: mech(0.1) }) });
+  claudeBeneath(on, seen);
+  expect(await estimateCall($)).toEqual({ result: JSON.stringify({ effort: "medium", source: "jev" }) });
+  await drain($.turn.step(step));
+  expect(seen).toHaveLength(1);
+});
+
+test("An error text of megabytes is cut before the log and /jev hold it", async ($, on) => {
+  setup(on, { messages: [user("what does this project do?")], jev: () => ({ __deny: "x".repeat(500_000) }) });
+  claudeBeneath(on, []);
+  await drain($.turn.step(step));
+  const status = await runJev($, "");
+  expect(status).toContain("unavailable: xxx");
+  expect(status).toContain("more chars]");
+  expect(status.length).toBeLessThan(5000);
+});
+
+test("/jev export writes a new file and never an existing one (a symlink would be followed)", async ($, on) => {
+  setup(on, { messages: [], jev: () => undefined });
+  const written: string[] = [];
+  on("fs.write", (_$, e) => (written.push(String(e.path)), { value: undefined }));
+  expect(await runJev($, "export")).toMatch(/wrote \d+ entries to \/proj\/\.jev\/decisions-\d+\.jsonl/);
+  expect(written).toHaveLength(1);
+  expect(written[0]).toMatch(/^\/proj\/\.jev\/decisions-\d+\.jsonl$/);
+});
+
+test("/jev export writes nothing when the target exists", async ($, on) => {
+  on("fs.exists", () => ({ value: true }));
+  setup(on, { messages: [], jev: () => undefined });
+  const written: string[] = [];
+  on("fs.write", (_$, e) => (written.push(String(e.path)), { value: undefined }));
+  expect(await runJev($, "export")).toContain("exists, nothing written");
+  expect(written).toHaveLength(0);
+});
+
+test("With takeOnlyForBypass a confident skill pick is not taken by Jev (the skill would never run)", async ($, on) => {
+  const seen: unknown[] = [];
+  setup(on, {
+    messages: [user("write the release notes for this version")],
+    jev: byId({
+      next_action: { type: "choice", choice: "skill write-release-notes", probabilities: { "skill write-release-notes": 0.93, claude: 0.07 }, confidence: 0.9 },
+      single_action: mech(0.9),
+    }),
+  });
+  on("command.list", () => ({ value: [{ name: "write-release-notes", description: "Write release notes from the git log", source: "user" }] }));
+  claudeBeneath(on, seen);
+  await drain($.turn.step(step));
+  expect(seen).toHaveLength(1);
+});
+
+test("A refused clock read fails neither estimate_effort nor a turn step", async ($, on) => {
+  on("clock.now", () => ({ deny: "clock refused" }));
+  const seen: unknown[] = [];
+  setup(on, { messages: [user("what does this project do?")], jev: byId({ effort: scored(1.6), mechanical: mech(0.1) }) });
+  claudeBeneath(on, seen);
+  expect(await estimateCall($)).toEqual({ result: JSON.stringify({ effort: "medium", source: "jev" }) });
+  await drain($.turn.step(step));
+  expect(seen).toHaveLength(1);
+});
+
+test("/jev status still answers when the counters cannot be read", async ($, on) => {
+  on("store.get", () => ({ deny: "EACCES" }));
+  setup(on, { messages: [], jev: () => undefined });
+  expect(await runJev($, "")).toContain("Decisions (all sessions): unreadable=1");
+});
+
+test("A finished step does not wait for a slow step measurement", async ($, on) => {
+  const seen: unknown[] = [];
+  const { sent, clock } = setup(on, { messages: [user("what does src/app.ts export?")], files: ["/proj/src/app.ts"], jev: () => new Promise<never>(() => {}) });
+  claudeBeneath(on, seen);
+  const run = drain($.turn.step({ ...step, index: 4 }));
+  while (sent.length < 1) await clock.advance(0);
+  // The measurement has 4000 ms; the step is let go after 250 ms.
+  await clock.advance(250);
+  await run;
+  expect(seen).toHaveLength(1);
+});
+
+test("An answer with a mistyped choice or score field fails the decision", async ($, on) => {
+  const seen: unknown[] = [];
+  const bad: Record<string, Record<string, unknown>> = {
+    next_action: { type: "choice", choice: 5, probabilities: { claude: 1 }, confidence: 0.9 },
+    effort: { type: "score", score: "x", probabilities: {}, confidence: 0.9 },
+  };
+  setup(on, { messages: [user("what does this project do?")], jev: (q) => bad[q.id] });
+  claudeBeneath(on, seen);
+  await drain($.turn.step(step));
+  expect(await runJev($, "")).toMatch(/unavailable: batch: no valid (choice|score) answer/);
+});
+
 test("estimate_effort rejects invalid input without asking Jev", async ($, on) => {
   const { sent } = setup(on, { messages: [], jev: byId({ effort: scored(1.6) }) });
-  expect(await estimateCall($, { model: "gpt" })).toEqual({ isError: true, result: "estimate_effort: model must be one of haiku, sonnet, opus, fable" });
-  expect(await estimateCall($, { minEffort: "high", maxEffort: "low" })).toEqual({ isError: true, result: "estimate_effort: minEffort must not be above maxEffort" });
+  expect(await estimateCall($, { model: "gpt" })).toEqual({ deny: "estimate_effort: model must be one of haiku, sonnet, opus, fable" });
+  expect(await estimateCall($, { minEffort: "high", maxEffort: "low" })).toEqual({ deny: "estimate_effort: minEffort must not be above maxEffort" });
   expect(sent).toHaveLength(0);
 });
 
@@ -826,7 +1069,7 @@ test("estimate_effort estimates on every call, also for haiku", async ($, on) =>
   expect(ids(sent)).toEqual(["effort", "mechanical", "effort", "mechanical"]);
 });
 
-// Turn-start effort estimate: Jev's effort score plus the session model's bias, within minEffort..maxEffort.
+// Turn-start effort estimate: Jev's effort score within minEffort..maxEffort.
 test("A mechanical turn runs at minEffort even on a hard score", async ($, on) => {
   const seen: { effort?: string }[] = [];
   setup(on, { messages: [user("rename foo to bar in src/a.ts")], jev: byId({ difficulty: easy, effort: scored(2.9), mechanical: mech(0.97) }) });
@@ -1215,6 +1458,32 @@ test("With routing off the band passes", { options: { routing: "off" } }, async 
   expect(await ui.find({ type: "Text", text: "beneath" })).toBeDefined();
   expect(await autoLabel(ui)).toBeUndefined();
   await ui.unmount();
+});
+
+// JJ tests (round 7a).
+test("the done check's jev-api call gets the interactive 4 s timeout", { options: { classify: false } }, async ($, on) => {
+  const { sent } = setup(on, { messages: [user("rename foo to bar in all files")], jev: unfinished, env: { TYPESAFE_API_KEY: "k" } });
+  followUps(on);
+  await $.turn.complete(answered("t1", "I renamed it in one file."));
+  expect(sent.map((q) => q.timeout)).toEqual([4]);
+});
+
+test("the prompt classifier's jev-api call gets the interactive 4 s timeout", async ($, on) => {
+  const { sent } = setup(on, { messages: [user("x")], jev: () => undefined, env: { TYPESAFE_API_KEY: "k" } });
+  on("command.list", () => ({ value: [] }));
+  on("prompt.submit", (_$, e) => ({ text: e.text }));
+  await $.prompt.submit({ text: "fix the failing date test", wait: false, origin: { kind: "composer" } });
+  expect(sent.length).toBeGreaterThan(0);
+  expect(sent.every((q) => q.timeout === 4)).toBe(true);
+});
+
+test("a blank Jev variable counts as unset, as in jev-api: Haiku budget and timeout 14", async ($, on) => {
+  const seen: unknown[] = [];
+  const { sent } = setup(on, { messages: [user("what does this project do?")], jev: () => undefined, env: { TYPESAFE_API_KEY: "  ", JEV_URL: " " } });
+  claudeBeneath(on, seen);
+  await drain($.turn.step(step));
+  expect(sent.length).toBeGreaterThan(0);
+  expect(sent.every((q) => q.timeout === 14)).toBe(true);
 });
 
 // Context-fill compaction: from taskCompactPercent the first judged task end compacts, from forceCompactPercent any turn end does.
