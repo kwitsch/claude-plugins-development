@@ -1069,6 +1069,22 @@ test("A turn's mentioned paths are statted at most 16 per step and each once per
   expect(new Set(statted).size).toBe(statted.length);
 });
 
+test("After a mid-turn compaction the path scan starts over and offers a newly named file", async ($, on) => {
+  const bash = (id: string, out: string): Msg[] => [
+    { role: "assistant", text: "", toolUses: [{ tool_use_id: id, tool: "Bash", input: { command: "true" }, text: out }] },
+    { role: "user", text: "", toolUses: [], toolResults: [{ tool_use_id: id, text: out, isError: false }] },
+  ];
+  const messages: Msg[] = [user("fix the build"), ...bash("c1", "nothing"), ...bash("c2", "nothing"), ...bash("c3", "nothing")];
+  const { sent } = setup(on, { messages, files: [`${CWD}/src/new.ts`], jev: () => undefined });
+  claudeBeneath(on, []);
+  await drain($.turn.step({ ...step, index: 3 }));
+  // Auto-compaction between two steps of the same turn: the transcript now starts with the summary row.
+  messages.splice(0, messages.length, user("This session is being continued from a previous conversation that ran out of context. Summary: fix the build."), ...bash("c4", "error TS2304 in src/new.ts"));
+  await drain($.turn.step({ ...step, index: 4 }));
+  const last = sent.filter((q) => q.id === "next_action").at(-1);
+  expect(Object.keys(last?.criteria ?? {})).toContain("read src/new.ts");
+});
+
 test("A finished step does not wait for a slow step measurement", async ($, on) => {
   const seen: unknown[] = [];
   const { sent, clock } = setup(on, { messages: [user("what does src/app.ts export?")], files: ["/proj/src/app.ts"], jev: () => new Promise<never>(() => {}) });

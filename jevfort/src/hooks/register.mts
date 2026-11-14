@@ -144,10 +144,10 @@ type RenderEvent = { props: { isErrored?: boolean; text: string } } & Record<str
 type BandEvent = { props: { hasSurvey: boolean } } & Record<string, unknown>;
 /** A `turn.complete` event. */
 type TurnEnd = { turnId: string; reason?: string; agentId?: string; answer?: string } & Record<string, unknown>;
-/** What `buildCandidates` already scanned for paths this turn: the request, `steps` rows, and the calls by index. */
-type PathScan = { request: boolean; steps: number; calls: Set<number>; paths: Set<string> };
+/** What `buildCandidates` already scanned for paths this turn: the request text, `steps` rows, and the calls by index. */
+type PathScan = { request?: string; steps: number; calls: Set<number>; paths: Set<string> };
 /** An empty path scan. */
-const newScan = (): PathScan => ({ request: false, steps: 0, calls: new Set(), paths: new Set() });
+const newScan = (): PathScan => ({ steps: 0, calls: new Set(), paths: new Set() });
 /** A turn's `$.fs.stat` results by absolute path (`undefined`: missing or refused). */
 type StatCache = Map<string, { kind: string; size: number } | undefined>;
 /** What one turn's `buildCandidates` calls share (dropped with the turn): stat results, the path scan, the cwd and the project's commands. */
@@ -739,14 +739,17 @@ async function projectCommands($: Engine, cwd: string): Promise<Candidate[]> {
  * @returns At most `MAX_CHOICE_OPTIONS - 1` candidates (one of jev-api's choice options is `claude`).
  */
 async function buildCandidates($: Engine, request: string, steps: readonly SessionMessage[], calls: readonly ToolUse[], stepIndex: number, cache: TurnCache = newCache()): Promise<Candidate[]> {
-  const { statted, scan } = cache;
+  const { statted } = cache;
   const cwd = (cache.cwd ??= await $.session.cwd());
   const out: Candidate[] = [];
 
   // Files named in the request or the turn's text/tool output, not yet read this turn.
   // Rows are final once seen, except a call's result, which may arrive a step later: calls count once they have text.
-  const texts = scan.request ? [] : [request];
-  scan.request = true;
+  // A new request row or fewer steps (a mid-turn compaction, a delivered message) is a new transcript: scan it again.
+  if (cache.scan.request !== undefined && (cache.scan.request !== request || steps.length < cache.scan.steps)) cache.scan = newScan();
+  const { scan } = cache;
+  const texts = scan.request === undefined ? [request] : [];
+  scan.request = request;
   for (; scan.steps < steps.length; scan.steps++) texts.push(steps[scan.steps].text);
   calls.forEach((c, i) => {
     if (c.text === undefined || scan.calls.has(i)) return;

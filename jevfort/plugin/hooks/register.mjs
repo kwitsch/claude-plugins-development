@@ -10,7 +10,6 @@ import { hints, NONE, promptQuestions } from "./prompt.mjs";
 import { buildReport } from "./report.mjs";
 import { SUMMARY_MODEL, SYSTEM } from "./summarize.mjs";
 const newScan = () => ({
-	request: false,
 	steps: 0,
 	calls: new Set(),
 	paths: new Set()
@@ -392,11 +391,13 @@ async function projectCommands($, cwd) {
 	return out;
 }
 async function buildCandidates($, request, steps, calls, stepIndex, cache = newCache()) {
-	const { statted, scan } = cache;
+	const { statted } = cache;
 	const cwd = cache.cwd ??= await $.session.cwd();
 	const out = [];
-	const texts = scan.request ? [] : [request];
-	scan.request = true;
+	if (cache.scan.request !== undefined && (cache.scan.request !== request || steps.length < cache.scan.steps)) cache.scan = newScan();
+	const { scan } = cache;
+	const texts = scan.request === undefined ? [request] : [];
+	scan.request = request;
 	for (; scan.steps < steps.length; scan.steps++) texts.push(steps[scan.steps].text);
 	calls.forEach((c, i) => {
 		if (c.text === undefined || scan.calls.has(i)) return;
