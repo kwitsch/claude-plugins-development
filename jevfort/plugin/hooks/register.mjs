@@ -581,7 +581,9 @@ async function contextCompact($, e, ready, continued, fromPercent, forcePercent,
 	$.command.run({
 		command: "compact",
 		args: ""
-	}).catch((err) => {
+	}).then(() => {
+		compactQueued = false;
+	}, (err) => {
 		compactQueued = false;
 		lostCompact = String(err);
 	});

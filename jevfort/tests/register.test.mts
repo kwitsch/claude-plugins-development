@@ -1640,14 +1640,14 @@ test("a settings env change between turns counts from the next turn, also after 
 const finished = byId({ done: { type: "noul", noul: 0.9 }, end: { type: "noul", noul: 0.9 } });
 const intermediate = byId({ done: { type: "noul", noul: 0.9 }, end: { type: "noul", noul: 0.1 } });
 
-/** Stubs `/compact` and the context fill; returns the `/compact` run count. */
-function compactStubs(on: On, percent: number) {
-  const state = { compacts: 0 };
-  on("session.usage", () => ({ value: { context: { tokens: 1, window: 100, percent } } }));
+/** Stubs `/compact` and the context fill (`state.percent`, writable); returns the `/compact` run count. `pending`: `/compact` stays queued (never runs). */
+function compactStubs(on: On, percent: number, pending = false) {
+  const state = { compacts: 0, percent };
+  on("session.usage", () => ({ value: { context: { tokens: 1, window: 100, percent: state.percent } } }));
   on("command.run", (_$, e, next) => {
     if (e.command !== "compact") return next(e);
     state.compacts++;
-    return { value: undefined };
+    return pending ? new Promise<never>(() => {}) : { value: undefined };
   });
   return state;
 }
@@ -1738,13 +1738,27 @@ test("A done follow-up at 85% fill queues no compaction", { options: { classify:
   expect(calls()).toBe(1);
 });
 
-test("Context compaction is queued once per fill period", { options: { classify: false } }, async ($, on) => {
+test("Context compaction is queued once while it waits to run", { options: { classify: false } }, async ($, on) => {
   setup(on, { messages: [user("rename foo to bar")], jev: finished });
   followUps(on);
-  const state = compactStubs(on, 85);
+  const state = compactStubs(on, 85, true);
   await $.turn.complete(answered("t1", "Done."));
   await $.turn.complete(answered("t2", "Done."));
   expect(state.compacts).toBe(1);
+});
+
+// The live engine (2.1.325) bypasses jevfort's session.compact hook: the ran /compact itself must re-arm the next one.
+test("A /compact that ran without the session.compact hook lets a later high fill compact again", { options: { classify: false } }, async ($, on) => {
+  const { clock } = setup(on, { messages: [user("rename foo to bar")], jev: intermediate });
+  followUps(on);
+  const state = compactStubs(on, 96);
+  await $.turn.complete(answered("t1", "Done."));
+  await clock.advance(0);
+  state.percent = 10;
+  await $.turn.complete(answered("t2", "Done."));
+  state.percent = 97;
+  await $.turn.complete(answered("t3", "Done."));
+  expect(state.compacts).toBe(2);
 });
 
 // F06: decisions are buffered and the log and the counters are written once per turn, not once per decision.

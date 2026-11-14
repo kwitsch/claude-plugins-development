@@ -982,8 +982,11 @@ async function contextCompact($: Engine, e: TurnEnd, ready: boolean, continued: 
   if (compactQueued) return;
   compactQueued = true;
   await record($, { kind: "autocompact", applied: true, text, data: { percent, forced } }).catch(() => undefined);
-  // Not awaited: it resolves only once the compaction ran, after this turn ended. No `$` call in the rejection handler.
-  $.command.run({ command: "compact", args: "" }).catch((err: unknown) => {
+  // Not awaited: it resolves only once the compaction ran, after this turn ended. No `$` call in the handlers. The
+  // resolve clears the flag too: cc-plugin-sec-default bypasses the session.compact hook that would (2.1.325).
+  $.command.run({ command: "compact", args: "" }).then(() => {
+    compactQueued = false;
+  }, (err: unknown) => {
     compactQueued = false;
     lostCompact = String(err);
   });
