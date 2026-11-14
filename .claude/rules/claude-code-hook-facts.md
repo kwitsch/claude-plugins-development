@@ -16,6 +16,13 @@ Facts a plugin author keeps getting wrong. Re-verify with the `live-verify` skil
 - `mcp_tool` hooks call tools of the plugin's MCP server (hook-only tools carry `_meta.ui.visibility: ["app"]`); `${var}` templates that do not exist for an event are an error: `scripts/hooks.mts --check` guards them.
 - A tool's `tool.call` result in a function-hooks module arrives as `{ result }`; the worktree tools' output carries both `worktreePath` and `restoredCwd` (ExitWorktree: use `restoredCwd`).
 
+## Function-hooks module state (graphmind-helper bug hunt, 2.1.325)
+
+- A real MCP tool's `$.tool.call` result is `{ result: [{ type: "text", text }], text }`; a tool registered through `$.tool.register` answers `{ result: "<text>" }`. Read `text`, then a string `result`, then the text parts; an empty text is no answer.
+- A dispatch can be abandoned (interrupt, a hook above settled first, budget): `next.signal` aborts and whatever the hook returns is dropped. Check `next.signal?.aborted` after the last `await` and commit no conversation state (sent once, shown, searched) for an abandoned dispatch, or the next prompt never gets what this one lost.
+- Conversation state in module memory is reset on `session.start`, on `session.end` (raised for `/clear` and `/resume`, where no `session.start` follows) and after a main-conversation `session.compact` (the summary loses injected context). Skip the compaction reset for `trigger: "precompute"`, for an event with `agentId` (a subagent's transcript) and when `next`'s result carries `skip`. Machine-level caches (binary path, tool list) may survive the reset.
+- A cache flag set before an `await` lets parallel calls race past it: re-check the flag after the await before spending a once-per-session action.
+
 ## FileChanged and watchPaths
 
 - FileChanged hooks only ever get `change` and `add` events (never `unlink`). Claude Code watches each listed **file** on its own: a watched file that is unlinked and recreated (editor save, `git checkout`) loses its watch, racily, and the watch count only falls; files created later are never watched.

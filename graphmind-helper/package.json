@@ -1,0 +1,24 @@
+{
+  "name": "graphmind-helper",
+  "version": "0.2.0",
+  "private": true,
+  "description": "Does what `graphmind setup` and `graphmind init` do for Claude Code from the plugin: hooks, MCP server and project indexing, active only while the graphmind binary exists.",
+  "keywords": [
+    "graphmind",
+    "hooks",
+    "mcp",
+    "memory"
+  ],
+  "author": {
+    "name": "Kwitsch"
+  },
+  "type": "module",
+  "scripts": {
+    "build": "node ../development/scripts/build-plugin.mts",
+    "test": "vitest run --config \"$(git rev-parse --show-toplevel)/vitest.config.mts\""
+  },
+  "devDependencies": {
+    "claude-engine-vitest": "workspace:*"
+  },
+  "claudePlugin": {}
+}

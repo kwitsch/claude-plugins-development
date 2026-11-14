@@ -488,8 +488,9 @@ class Engine {
     const hooks = this.chain(event, input, ctx.caller);
     const signal = ctx.signal ?? new AbortController().signal;
     const bottom = ctx.bottom ?? ((e: Data) => this.bottom(event, e));
-    const nextFor = (i: number, called: { value: boolean }): Next => Object.assign((e2: Data) => (called.value = true, step(i + 1, e2)), { origin: ctx.origin, event, signal });
-    const stream = async function*(this: Engine, i: number, e: Data): AsyncGenerator<unknown, unknown> {
+    // `sig` is the signal hook i sees, `below` the one the rest of the chain gets from its next.
+    const nextFor = (i: number, called: { value: boolean }, sig = signal, below = signal): Next => Object.assign((e2: Data) => (called.value = true, step(i + 1, e2, below)), { origin: ctx.origin, event, signal: sig });
+    const stream = async function*(this: Engine, i: number, e: Data, _sig?: AbortSignal): AsyncGenerator<unknown, unknown> {
       this.activity++;
       if (i === hooks.length) return await bottom(e);
       const h = hooks[i];
@@ -514,28 +515,40 @@ class Engine {
     };
     const step = STREAMING.has(event)
       ? stream.bind(this)
-      : async (i: number, e: Data): Promise<unknown> => {
+      : async (i: number, e: Data, sig = signal): Promise<unknown> => {
         this.activity++;
         if (i === hooks.length) return bottom(e);
         const h = hooks[i];
         const called = { value: false };
         let pending: unknown;
-        const next = nextFor(i, called);
-        const tracked = Object.assign((e2: Data) => (pending = next(e2)), next);
+        let settled = false;
+        // The rest of the chain is abandoned (its next.signal aborts) when this hook settles before its next does, or when this hook's own dispatch is abandoned.
+        // AbortSignal.any: also aborted when `sig` already is, and holds no listener on a long-lived `sig` (a `$.clock.every` timer's).
+        const own = new AbortController();
+        const next = nextFor(i, called, sig, AbortSignal.any([sig, own.signal]));
+        const tracked = Object.assign((e2: Data) => {
+          pending = next(e2);
+          void Promise.resolve(pending).then(() => (settled = true), () => (settled = true));
+          return pending;
+        }, next);
         const { $, end } = this.api(h);
         try {
-          return await h.fn($, frozen(e), tracked);
+          const r = await h.fn($, frozen(e), tracked);
+          if (pending && !settled) own.abort();
+          return r;
         } catch (err) {
           if (h.catcher) {
             try {
-              return await h.catcher($, frozen(e), Object.assign(tracked, { error: { kind: "throw", message: message(err) }, called: called.value }));
+              const r = await h.catcher($, frozen(e), Object.assign(tracked, { error: { kind: "throw", message: message(err) }, called: called.value }));
+              if (pending && !settled) own.abort();
+              return r;
             } catch {
               // the handler failed too: skip the hook as without one
             }
           }
           this.report(h, err);
           if (pending) return pending; // the rest of the chain already ran: its outcome stands
-          return step(i + 1, e);
+          return step(i + 1, e, sig);
         } finally {
           end();
           this.activity++;
