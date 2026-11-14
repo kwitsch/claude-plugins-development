@@ -181,13 +181,13 @@ async function respond($: Parameters<Parameters<typeof test>[2]>[0]) {
  * @param on - The test's `on`.
  * @param percent - What `$.session.usage()` reports as the context fill.
  * @param run - Answers a `/compact` run: `{ value }` resolves it, `{ deny }` refuses it, a pending promise queues it.
- * @returns The clock, the `/compact` run count and the status lines said.
+ * @returns The clock, the state (`/compact` run count; `hold` true keeps each `$.session.usage()` pending in `held` until called) and the status lines said.
  */
 function chatSetup(on: Parameters<typeof mock.clock>[0], percent: number, run: () => unknown = () => ({ value: undefined })) {
   mock.store(on, {});
   const clock = mock.clock(on);
   const status: string[] = [];
-  const state = { compacts: 0 };
+  const state = { compacts: 0, hold: false, held: [] as Array<() => void> };
   on("session.cwd", () => ({ value: "/proj" }));
   on("ui.status", (_$, e) => {
     status.push(String(e.text));
@@ -202,7 +202,10 @@ function chatSetup(on: Parameters<typeof mock.clock>[0], percent: number, run: (
     yield { kind: "stop", stopReason: "end_turn", usage: usage1h };
     return { turnId: e.turnId, index: e.index, answer: "ok", toolUses: [], stopReason: "end_turn", usage: usage1h };
   });
-  on("session.usage", () => ({ value: { context: { tokens: 1, window: 100, percent } } }));
+  on("session.usage", () => {
+    const answer = { value: { context: { tokens: 1, window: 100, percent } } };
+    return state.hold ? new Promise((resolve) => state.held.push(() => resolve(answer))) : answer;
+  });
   on("command.run", (_$, e, next) => {
     if (e.command !== "compact") return next(e);
     state.compacts++;
@@ -245,6 +248,36 @@ test("a response that lands while the cold tick reads the clock keeps the warm c
   expect(armed).toBe(false);
   expect(state.compacts).toBe(0);
 });
+
+// The cold tick's fill read yields: whatever happens while it is pending must be judged again after it.
+for (
+  const [what, reads, runs, during] of [
+    ["two more cold ticks overlap it", 3, 1, async (_$, clock) => {
+      await clock.advance(15_000);
+      await clock.advance(15_000);
+    }],
+    ["a main-loop turn starts", 1, 0, async ($) => {
+      await $.turn.step({ turnId: "t2", index: 0, model: "claude-haiku-5-5", effort: "high", messageCount: 1 }).next();
+    }],
+    ["the session is reset (/clear)", 1, 0, async ($) => {
+      await $.session.end({ reason: "clear", sessionId: "s1", resume: { id: "s1" } });
+    }],
+  ] as const
+) {
+  test(`auto-compact runs /compact ${runs}x when ${what} during the cold tick's fill read`, async ($, on) => {
+    const { clock, state } = chatSetup(on, 70);
+    await $.session.start(START);
+    // turn.complete reads the fill too: hold only the reads after it.
+    await respond($);
+    state.hold = true;
+    await clock.advance(CACHE_TTL["1h"] + 1_000);
+    await during($, clock);
+    expect(state.held.length).toBe(reads);
+    for (const release of state.held.splice(0)) release();
+    await clock.settle();
+    expect(state.compacts).toBe(runs);
+  });
+}
 
 test("a /compact still queued behind the session is not issued again by the next ticks", async ($, on) => {
   // The engine keeps a plugin's `command.run` pending until the command ran: only the flag stops a repeat.
