@@ -26,15 +26,15 @@ export function registered(bin: string): boolean {
 }
 
 /**
- * Whether `graphmind setup` already registered its MCP server in `~/.claude.json`.
+ * Whether `graphmind setup` already registered its MCP server in Claude Code's global config `.claude.json`.
  *
- * @param home - Home directory.
+ * @param configDir - Directory of that file: `CLAUDE_CONFIG_DIR`, else the home directory (as Claude Code resolves it).
  * @param cwd - Working directory: only the project entries of it and of its ancestors count (a server of another project is not active here).
  * @returns True when a server named `graphmind` exists at the top level or in a project entry that covers `cwd`.
  */
-export function setupMcpPresent(home: string = homedir(), cwd: string = process.cwd()): boolean {
+export function setupMcpPresent(configDir: string = process.env.CLAUDE_CONFIG_DIR || homedir(), cwd: string = process.cwd()): boolean {
   try {
-    const text = readFileSync(join(home, ".claude.json"), "utf8");
+    const text = readFileSync(join(configDir, ".claude.json"), "utf8");
     // The file can be several MB: parse it only when the name occurs at all.
     if (!text.includes("\"graphmind\"")) return false;
     const json = JSON.parse(text) as { mcpServers?: Record<string, unknown>; projects?: Record<string, { mcpServers?: Record<string, unknown> }> };

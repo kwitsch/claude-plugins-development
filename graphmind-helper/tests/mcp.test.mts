@@ -39,14 +39,15 @@ afterEach(() => rmSync(root, { recursive: true, force: true }));
  * Runs the wrapper in the project directory.
  *
  * @param noBinary - Leave the fake off PATH.
+ * @param extraEnv - Further environment variables.
  * @returns Process result and the fake's call log.
  */
-function runWrapper(noBinary = false) {
+function runWrapper(noBinary = false, extraEnv: NodeJS.ProcessEnv = {}) {
   const log = join(root, "calls.log");
   const r = spawnSync(process.execPath, [MCP], {
     cwd: proj,
     encoding: "utf8",
-    env: { HOME: home, PATH: `${noBinary ? "" : `${fakeBin}:`}/usr/bin:/bin`, FAKE_LOG: log, FAKE_REGISTERED: join(root, "registered") },
+    env: { HOME: home, PATH: `${noBinary ? "" : `${fakeBin}:`}/usr/bin:/bin`, FAKE_LOG: log, FAKE_REGISTERED: join(root, "registered"), ...extraEnv },
     timeout: 20_000,
   });
   return { r, calls: existsSync(log) ? readFileSync(log, "utf8") : "" };
@@ -67,6 +68,17 @@ test("with the setup's server in ~/.claude.json the wrapper still inits but does
   const { calls } = runWrapper();
   assert.match(calls, /init --skip-build/);
   assert.doesNotMatch(calls, /^mcp$/m);
+});
+
+test("with CLAUDE_CONFIG_DIR set only its .claude.json counts, not the one in HOME", () => {
+  const cfg = join(root, "cfg");
+  const server = "{\"mcpServers\":{\"graphmind\":{\"command\":\"graphmind\"}}}";
+  mkdirSync(cfg);
+  writeFileSync(join(home, ".claude.json"), server);
+  assert.match(runWrapper(false, { CLAUDE_CONFIG_DIR: cfg }).calls, /^mcp$/m);
+  writeFileSync(join(cfg, ".claude.json"), server);
+  rmSync(join(root, "calls.log"));
+  assert.doesNotMatch(runWrapper(false, { CLAUDE_CONFIG_DIR: cfg }).calls, /^mcp$/m);
 });
 
 test("without the binary the wrapper exits 1; home and non-git folders are not indexable", () => {
