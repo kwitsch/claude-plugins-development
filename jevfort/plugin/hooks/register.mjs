@@ -372,7 +372,7 @@ async function projectCommands($, cwd) {
 	if (typeof pkg === "string") {
 		let scripts = {};
 		try {
-			scripts = JSON.parse(pkg).scripts ?? {};
+			scripts = JSON.parse(pkg.replace(/^\uFEFF/, "")).scripts ?? {};
 		} catch {}
 		const runner = await packageRunner($, cwd);
 		for (const name of Object.keys(scripts).filter((n) => isSafeScript(n) && typeof scripts[n] === "string")) {

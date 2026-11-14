@@ -65,7 +65,7 @@ type Runner = Parameters<Parameters<typeof test>[2]>[0];
 // Answers every call the mod makes on `$`. The batch tool is listed and answered from `jev`; a mod's `$.tool.call`
 // resolves to the stub's `value`: the tool result `{ result }`, or `{ deny }` as the real engine resolves a deny (a bare
 // `{ deny }` stub answer would make the kit reject instead). Other tools go on to the test's own `tool.call` stub.
-function setup(on: On, opts: { messages: Msg[]; jev: Jev; cwd?: () => string; files?: string[]; links?: string[]; packageJson?: object; env?: Record<string, string>; agents?: { status: string }[]; store?: Record<string, unknown>; tools?: { name: string; description: string; mcp: boolean }[] | null }) {
+function setup(on: On, opts: { messages: Msg[]; jev: Jev; cwd?: () => string; files?: string[]; links?: string[]; packageJson?: object | string; env?: Record<string, string>; agents?: { status: string }[]; store?: Record<string, unknown>; tools?: { name: string; description: string; mcp: boolean }[] | null }) {
   const sent: Asked[] = [];
   let batchCalls = 0;
   let reads = 0;
@@ -85,7 +85,7 @@ function setup(on: On, opts: { messages: Msg[]; jev: Jev; cwd?: () => string; fi
     const isLink = (opts.links ?? []).includes(String(e.path));
     return isLink || (opts.files ?? []).includes(String(e.path)) ? { value: { kind: "file", size: 100, mtimeMs: 0, isLink } } : { deny: "ENOENT" };
   });
-  on("fs.read", (_$, e) => (opts.packageJson && e.path === `${CWD}/package.json` ? { value: JSON.stringify(opts.packageJson) } : { deny: "ENOENT" }));
+  on("fs.read", (_$, e) => (opts.packageJson && e.path === `${CWD}/package.json` ? { value: typeof opts.packageJson === "string" ? opts.packageJson : JSON.stringify(opts.packageJson) } : { deny: "ENOENT" }));
   on("ui.status", () => ({ value: undefined }));
   on("agent.list", () => ({ value: opts.agents ?? [] }));
   // `tools: null` makes the listing fail.
@@ -1241,6 +1241,11 @@ test("A null script in the project's package.json does not stop the turn's routi
 
   await drain($.turn.step(step));
   expect(seen[0]).toMatchObject({ effort: "low" });
+});
+
+test("A package.json saved with a UTF-8 BOM still offers its scripts", async ($, on) => {
+  setup(on, { messages: [user("run the tests")], packageJson: `\uFEFF${JSON.stringify({ scripts: { test: "vitest run" } })}`, jev: () => undefined });
+  expect(await runJev($, "candidates")).toContain("npm test");
 });
 
 test("A failing store does not fail estimate_effort or a turn step", async ($, on) => {

@@ -715,7 +715,7 @@ async function projectCommands($: Engine, cwd: string): Promise<Candidate[]> {
   if (typeof pkg === "string") {
     let scripts: Record<string, string> = {};
     try {
-      scripts = (JSON.parse(pkg) as { scripts?: Record<string, string> }).scripts ?? {};
+      scripts = (JSON.parse(pkg.replace(/^\uFEFF/, "")) as { scripts?: Record<string, string> }).scripts ?? {};
     } catch {
       // a malformed package.json offers no scripts
     }
