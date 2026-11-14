@@ -61,8 +61,12 @@ export function fit(head, blocks, max = MAX_CHARS) {
 			for (const l of b.lines) whole.add(l);
 		} else if (room > 300) {
 			const kept = block.slice(0, room - 60);
-			const shown = new Set(kept.slice(0, kept.lastIndexOf("\n")).split("\n"));
-			for (const l of b.lines) if (shown.has(l)) whole.add(l);
+			let end = b.title ? b.title.length + 1 : 0;
+			for (const l of b.lines) {
+				end += l.length;
+				if (end <= kept.length) whole.add(l);
+				end += 1;
+			}
 			text += `${kept}\n[graphmind: cut to fit the hook output limit]\n`;
 		}
 	}

@@ -54,6 +54,13 @@ test("fit counts the lines of a cut block shown before the cut as whole, not the
   assert.ok(!out.whole.has(lines[shown.length]));
 });
 
+test("fit counts a full line as whole when the cut removes only its newline", () => {
+  const [l1, l2, l3] = ["a", "b", "c"].map((c) => c.repeat(200));
+  const out = fit("", [{ title: "T", lines: [l1, l2, l3] }], 463);
+  assert.ok(out.text.endsWith(`${l2}\n[graphmind: cut to fit the hook output limit]\n`));
+  assert.deepEqual([...out.whole], [l1, l2]);
+});
+
 test("fit puts a title-less block in as plain text", () => {
   assert.equal(fit("H\n", [{ title: "", lines: ["footer line"] }]).text, "H\nfooter line\n\n");
 });
