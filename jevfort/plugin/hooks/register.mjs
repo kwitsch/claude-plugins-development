@@ -5,7 +5,7 @@ import { COMPACT_MAX_TOKENS, COMPACT_MODEL, COMPACT_SYSTEM, compactInstructions,
 import { clip, splitTurn, summarize, toolCalls } from "./context.mjs";
 import { choice, COMPACT_API_TIMEOUT_S, COMPACT_TIMEOUT_MS, HAIKU_API_TIMEOUT_S, HAIKU_TIMEOUT_MS, isAnswer, JEV_API_TIMEOUT_S, JEV_BATCH, JEV_TOOL_PREFIX, JEV_TOOLS, MAX_CHOICE_OPTIONS, MAX_ERROR, MAX_PAUSE_MS, MEASURE_GRACE_MS, missingJevTools, noul, PAUSE_MS, score, TIMEOUT_MS } from "./jev.mjs";
 import { LOG_KEY, MAX_ENTRIES, recentDecisions, remember, statsKey } from "./log.mjs";
-import { bestAction, bounds, difficultyQuestion, doneQuestion, EFFORT_ORDER, effortQuestion, ESTIMATE_SPEC, ESTIMATE_TOOL, estimateEffort, EVERY_TURN_MODELS, inBandRange, inScratchpad, isEffort, lowerModel, mechanicalQuestion, modelFamily, nextActionQuestion, parseEstimateInput, pickCandidate, route, shouldContinue, singleActionQuestion } from "./policy.mjs";
+import { bestAction, bounds, difficultyQuestion, doneQuestion, EFFORT_ORDER, effortQuestion, ESTIMATE_SPEC, ESTIMATE_TOOL, estimateEffort, EVERY_TURN_MODELS, inBandRange, inScratchpad, isEffort, lowerModel, mechanicalQuestion, modelFamily, nextActionQuestion, parseEstimateInput, pickCandidate, route, shouldContinue, singleActionQuestion, taskEndQuestion } from "./policy.mjs";
 import { hints, NONE, promptQuestions } from "./prompt.mjs";
 import { buildReport } from "./report.mjs";
 import { SUMMARY_MODEL, SYSTEM } from "./summarize.mjs";
@@ -135,6 +135,8 @@ let lastResponseAt;
 let shownMinutes = null;
 let turnRunning = false;
 let coldCompacted = false;
+let compactQueued = false;
+let lostCompact;
 let cacheTimer;
 function showMinutes($, minutes) {
 	if (minutes === shownMinutes) return;
@@ -148,6 +150,7 @@ function resetCache($) {
 	cacheTtl = "1h";
 	lastResponseAt = undefined;
 	coldCompacted = false;
+	compactQueued = false;
 	showMinutes($, null);
 }
 async function cacheTick($, autoCompactPercent) {
@@ -486,6 +489,45 @@ async function blockSkill($, name) {
 		if (!list.includes(name)) await $.store.set(SKILL_BLOCKLIST_KEY, [...list, name]);
 	} catch {}
 }
+async function contextCompact($, e, ready, continued, fromPercent, forcePercent) {
+	if (e.agentId !== undefined || compactQueued || fromPercent <= 0 && forcePercent <= 0) return;
+	const reported = (await $.session.usage().catch(() => undefined))?.context.percent ?? 0;
+	const percent = Number.isFinite(reported) ? reported : 0;
+	const forced = forcePercent > 0 && percent >= forcePercent;
+	if (!forced && (fromPercent <= 0 || percent < fromPercent || !ready || continued || e.reason !== "answer")) return;
+	let text = `${percent.toFixed(0)}% full, forced`;
+	if (!forced) {
+		const ctx = await readTurn($);
+		if (!ctx) return;
+		const r = await askJev($, {
+			request: clip(ctx.request, 3e3),
+			final_message: clip(e.answer ?? "", 2e3),
+			recent: summarize(ctx.steps)
+		}, { end: taskEndQuestion });
+		if (!r.ok) return;
+		const end = noul(r.answers, "end");
+		if (end === undefined || end < .5) return;
+		text = `${percent.toFixed(0)}% full, task ended (p=${end.toFixed(2)})`;
+	}
+	if (compactQueued) return;
+	compactQueued = true;
+	await record($, {
+		kind: "autocompact",
+		applied: true,
+		text,
+		data: {
+			percent,
+			forced
+		}
+	}).catch(() => undefined);
+	$.command.run({
+		command: "compact",
+		args: ""
+	}).catch((err) => {
+		compactQueued = false;
+		lostCompact = String(err);
+	});
+}
 async function checkDone($, e, threshold) {
 	const agents = await $.agent.list().catch(() => undefined);
 	if (!agents) return false;
@@ -547,6 +589,8 @@ export const register = (on, options) => {
 	const jevRanking = options.compaction !== false;
 	const haikuCompact = options.haikuCompact !== false;
 	const autoCompactPercent = threshold("autoCompactPercent", 60);
+	const taskCompactPercent = threshold("taskCompactPercent", 80);
+	const forceCompactPercent = threshold("forceCompactPercent", 95);
 	on("ui.render", {
 		component: "CommandOutput",
 		props: { command: "jev" }
@@ -699,7 +743,10 @@ export const register = (on, options) => {
 		const ranked = jevRanking ? await withJevRanking($, e) : e;
 		const passOn = async () => {
 			const r = await next(ranked);
-			if (e.trigger !== "precompute" && r?.skip === undefined) cacheExpires = 0;
+			if (e.trigger !== "precompute" && r?.skip === undefined) {
+				cacheExpires = 0;
+				compactQueued = false;
+			}
 			return r;
 		};
 		if (!haikuCompact) return passOn();
@@ -726,6 +773,7 @@ export const register = (on, options) => {
 		}).catch(() => undefined);
 		if (!written) return passOn();
 		cacheExpires = 0;
+		compactQueued = false;
 		return { messages: [{
 			role: "user",
 			text: `This session is being continued from a previous conversation that ran out of context. The summary below covers the earlier portion of the conversation, written by Haiku 5.5 for jevfort.\n\n${text}\n\nContinue the conversation from where it left off without asking the user any further questions.`,
@@ -822,7 +870,10 @@ export const register = (on, options) => {
 		if (e.agentId === undefined) turnRunning = false;
 		const missing = await jevMissing($);
 		if (e.agentId === undefined) jevTools = undefined;
-		if (missing.length) return next(e);
+		if (missing.length) {
+			await contextCompact($, e, false, false, taskCompactPercent, forceCompactPercent).catch(() => undefined);
+			return next(e);
+		}
 		turns.delete(e.turnId);
 		if (e.reason === "aborted" || e.reason === "error") {
 			await record($, {
@@ -841,12 +892,22 @@ export const register = (on, options) => {
 			}).catch(() => undefined);
 			lostFollowUp = undefined;
 		}
+		if (lostCompact !== undefined) {
+			await record($, {
+				kind: "error",
+				applied: false,
+				text: `context compaction refused: ${lostCompact}`
+			}).catch(() => undefined);
+			lostCompact = undefined;
+		}
+		let continued = false;
 		if (e.agentId === undefined) {
 			const exempt = donePending;
 			donePending = false;
 			if (doneCheck && !exempt && e.reason === "answer") {
 				try {
 					if (await checkDone($, e, doneThreshold)) {
+						continued = true;
 						followUpEpoch = sessionEpoch;
 						$.prompt.submit({ text: DONE_PROMPT }).catch((err) => {
 							donePending = false;
@@ -862,6 +923,11 @@ export const register = (on, options) => {
 				}
 			}
 		}
+		await contextCompact($, e, true, continued, taskCompactPercent, forceCompactPercent).catch((err) => record($, {
+			kind: "error",
+			applied: false,
+			text: `context compaction check failed: ${String(err)}`
+		}).catch(() => undefined));
 		return next(e);
 	});
 	on("tool.call", async function onToolCall($, e, next) {

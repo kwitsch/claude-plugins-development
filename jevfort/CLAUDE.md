@@ -126,7 +126,7 @@ The built-in `cc-plugin-sec-default` passes `session.compact` on past every user
 
 ## Layout
 
-`package.json` is the only manifest source (`claudePlugin.userConfig`, 16 options). `pnpm build` compiles
+`package.json` is the only manifest source (`claudePlugin.userConfig`, 18 options). `pnpm build` compiles
 `src/**/*.mts` to `plugin/**/*.mjs` (`plugin/hooks/` unmangled and uncompressed) and generates
 `plugin/.claude-plugin/plugin.json`. Tests (`tests/*.test.mts`, vitest + `claude-engine-vitest`) run against `plugin/`.
 

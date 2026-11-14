@@ -25,7 +25,7 @@ import { choice, COMPACT_API_TIMEOUT_S, COMPACT_TIMEOUT_MS, HAIKU_API_TIMEOUT_S,
 import type { Answer, ChoiceAnswer, JevResult, Question } from "./jev.mjs";
 import { LOG_KEY, MAX_ENTRIES, recentDecisions, remember, statsKey } from "./log.mjs";
 import type { Entry } from "./log.mjs";
-import { bestAction, bounds, difficultyQuestion, doneQuestion, EFFORT_ORDER, effortQuestion, ESTIMATE_SPEC, ESTIMATE_TOOL, estimateEffort, EVERY_TURN_MODELS, inBandRange, inScratchpad, isEffort, lowerModel, mechanicalQuestion, modelFamily, nextActionQuestion, parseEstimateInput, pickCandidate, route, shouldContinue, singleActionQuestion } from "./policy.mjs";
+import { bestAction, bounds, difficultyQuestion, doneQuestion, EFFORT_ORDER, effortQuestion, ESTIMATE_SPEC, ESTIMATE_TOOL, estimateEffort, EVERY_TURN_MODELS, inBandRange, inScratchpad, isEffort, lowerModel, mechanicalQuestion, modelFamily, nextActionQuestion, parseEstimateInput, pickCandidate, route, shouldContinue, singleActionQuestion, taskEndQuestion } from "./policy.mjs";
 import type { Effort, EstimateBounds, EstimateModel, Route } from "./policy.mjs";
 import { hints, NONE, promptQuestions } from "./prompt.mjs";
 import { buildReport } from "./report.mjs";
@@ -306,6 +306,10 @@ let shownMinutes: number | null = null;
 let turnRunning = false;
 /** This cold period was already compacted (reset by the next response). */
 let coldCompacted = false;
+/** A context-fill compaction is already queued for this fill period (cleared when a compaction stands, by `resetCache`). */
+let compactQueued = false;
+/** Why the last queued context-fill compaction was refused: its rejection arrives after the hook frame ended, so the next `turn.complete` logs it. */
+let lostCompact: string | undefined;
 /** The session's cache tick, cancelled and started again by each `session.start`. */
 let cacheTimer: { cancel(): void } | undefined;
 
@@ -334,6 +338,7 @@ function resetCache($: Engine): void {
   cacheTtl = "1h";
   lastResponseAt = undefined;
   coldCompacted = false;
+  compactQueued = false;
   showMinutes($, null);
 }
 
@@ -825,6 +830,49 @@ async function blockSkill($: Engine, name: string): Promise<void> {
 }
 
 /**
+ * Context-fill compaction at the end of a main-loop turn. From `fromPercent` the first turn Jev judges to have closed a
+ * task queues the app's `/compact` (the `session.compact` hook makes it the jevfort-optimised one); from `forcePercent`
+ * the next turn end queues it without asking. Queued once per fill period.
+ *
+ * @remarks
+ * Module level because the engine accepts `$` passed only to top-level functions.
+ *
+ * @param $ - Engine interface.
+ * @param e - The `turn.complete` event.
+ * @param ready - jev-api is usable (the judgement needs it, the forced compaction does not).
+ * @param continued - The done check just sent Claude back: the task is not finished.
+ * @param fromPercent - Context fill from which a task end compacts; 0 is off.
+ * @param forcePercent - Context fill from which any turn end compacts; 0 is off.
+ */
+async function contextCompact($: Engine, e: TurnEnd, ready: boolean, continued: boolean, fromPercent: number, forcePercent: number): Promise<void> {
+  if (e.agentId !== undefined || compactQueued || (fromPercent <= 0 && forcePercent <= 0)) return;
+  // A non-finite fill (0/0, an empty window) is no fill: `Infinity >= x` would force a compaction.
+  const reported = (await $.session.usage().catch(() => undefined))?.context.percent ?? 0;
+  const percent = Number.isFinite(reported) ? reported : 0;
+  const forced = forcePercent > 0 && percent >= forcePercent;
+  if (!forced && (fromPercent <= 0 || percent < fromPercent || !ready || continued || e.reason !== "answer")) return;
+  let text = `${percent.toFixed(0)}% full, forced`;
+  if (!forced) {
+    const ctx = await readTurn($);
+    if (!ctx) return;
+    const r = await askJev($, { request: clip(ctx.request, 3000), final_message: clip(e.answer ?? "", 2000), recent: summarize(ctx.steps) }, { end: taskEndQuestion });
+    if (!r.ok) return;
+    const end = noul(r.answers, "end");
+    if (end === undefined || end < 0.5) return;
+    text = `${percent.toFixed(0)}% full, task ended (p=${end.toFixed(2)})`;
+  }
+  // Re-read after the awaits: a concurrent turn end may have queued it.
+  if (compactQueued) return;
+  compactQueued = true;
+  await record($, { kind: "autocompact", applied: true, text, data: { percent, forced } }).catch(() => undefined);
+  // Not awaited: it resolves only once the compaction ran, after this turn ended. No `$` call in the rejection handler.
+  $.command.run({ command: "compact", args: "" }).catch((err: unknown) => {
+    compactQueued = false;
+    lostCompact = String(err);
+  });
+}
+
+/**
  * The done check after a main-loop answer: asks Jev whether the request is finished and records the verdict.
  *
  * @remarks
@@ -896,6 +944,8 @@ export const register = (on: On, options: Options): void => {
   const jevRanking = options.compaction !== false;
   const haikuCompact = options.haikuCompact !== false;
   const autoCompactPercent = threshold("autoCompactPercent", 60);
+  const taskCompactPercent = threshold("taskCompactPercent", 80);
+  const forceCompactPercent = threshold("forceCompactPercent", 95);
 
   // Draws `/jev` output as Markdown, so the report's tables render as tables.
   on("ui.render", { component: "CommandOutput", props: { command: "jev" } }, function onRenderJev($: Engine, e: RenderEvent, next: (e: RenderEvent) => unknown): unknown {
@@ -1051,7 +1101,10 @@ export const register = (on: On, options: Options): void => {
     // precompute (it installs nothing) nor one that a hook beneath vetoes.
     const passOn = async (): Promise<unknown> => {
       const r = await next(ranked);
-      if (e.trigger !== "precompute" && (r as { skip?: unknown } | undefined)?.skip === undefined) cacheExpires = 0;
+      if (e.trigger !== "precompute" && (r as { skip?: unknown } | undefined)?.skip === undefined) {
+        cacheExpires = 0;
+        compactQueued = false;
+      }
       return r;
     };
     if (!haikuCompact) return passOn();
@@ -1078,6 +1131,7 @@ export const register = (on: On, options: Options): void => {
     }).catch(() => undefined);
     if (!written) return passOn();
     cacheExpires = 0;
+    compactQueued = false;
     return {
       messages: [{
         role: "user" as const,
@@ -1203,7 +1257,10 @@ export const register = (on: On, options: Options): void => {
     // No engine event reports a changed tool list: the next main-loop turn's first hook lists the jev-api tools again
     // (a subagent's completion does not drop it, so a mid-turn listing glitch cannot flap the band).
     if (e.agentId === undefined) jevTools = undefined;
-    if (missing.length) return next(e);
+    if (missing.length) {
+      await contextCompact($, e, false, false, taskCompactPercent, forceCompactPercent).catch(() => undefined);
+      return next(e);
+    }
     turns.delete(e.turnId);
     if (e.reason === "aborted" || e.reason === "error") {
       await record($, { kind: "turn", applied: false, text: `turn ${e.reason}`, turnId: e.turnId, data: { reason: e.reason } });
@@ -1212,6 +1269,11 @@ export const register = (on: On, options: Options): void => {
       await record($, { kind: "error", applied: false, text: `done follow-up not sent: ${lostFollowUp}` }).catch(() => undefined);
       lostFollowUp = undefined;
     }
+    if (lostCompact !== undefined) {
+      await record($, { kind: "error", applied: false, text: `context compaction refused: ${lostCompact}` }).catch(() => undefined);
+      lostCompact = undefined;
+    }
+    let continued = false;
     // Done check: runs here because cc-plugin-sec-default passes classic.Stop on past every user-tier hook.
     if (e.agentId === undefined) {
       const exempt = donePending;
@@ -1219,6 +1281,7 @@ export const register = (on: On, options: Options): void => {
       if (doneCheck && !exempt && e.reason === "answer") {
         try {
           if (await checkDone($, e, doneThreshold)) {
+            continued = true;
             // Not awaited: it resolves only once the new turn starts, which waits for this turn to end. No `$` call in the
             // rejection handler: it runs after this frame, so the next turn.complete logs the error in-frame.
             followUpEpoch = sessionEpoch;
@@ -1232,6 +1295,7 @@ export const register = (on: On, options: Options): void => {
         }
       }
     }
+    await contextCompact($, e, true, continued, taskCompactPercent, forceCompactPercent).catch((err: unknown) => record($, { kind: "error", applied: false, text: `context compaction check failed: ${String(err)}` }).catch(() => undefined));
     return next(e);
   });
 
