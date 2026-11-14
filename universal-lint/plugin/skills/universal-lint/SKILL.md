@@ -43,12 +43,14 @@ plugin's own tested hook logic through a colocated driver — no new linting log
 3. **Read `lint-files.reference.md`** (colocated) for the driver's invocation contract, per its
    table.
 
-4. **Write the list to a temp file, then run the driver.** Get a unique path with `mktemp`, use
-   the `Write` tool to write one resolved path per line into it (the `Write` tool authors the
-   file content, so no path text is ever interpolated into a shell command), then run:
+4. **Write the list to a temp file, then run the driver.** Get a unique directory with `mktemp -d`
+   (a directory, not a file: `Write` refuses to overwrite an existing file it has not read, and
+   `mktemp -u` would bring back the create race), then use the `Write` tool to create
+   `<dir>/list.txt` with one resolved path per line (the `Write` tool authors the file content, so
+   no path text is ever interpolated into a shell command), then run:
 
    ```bash
-   node ${CLAUDE_SKILL_DIR}/lint-files.mjs "$LIST"
+   node ${CLAUDE_SKILL_DIR}/lint-files.mjs "<dir>/list.txt"
    ```
 
    `${CLAUDE_SKILL_DIR}` is the bare pre-injection substitution token — never a live shell

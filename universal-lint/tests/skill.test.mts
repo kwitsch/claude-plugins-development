@@ -46,6 +46,12 @@ test("SKILL.md makes repo-root-relative git/gh paths resolvable from a subdirect
   assert.doesNotMatch(skillMd, /git diff --name-only/);
 });
 
+test("SKILL.md writes the list as a new file in a mktemp -d directory (Write refuses an unread existing file)", () => {
+  assert.ok(skillMd.includes("`mktemp -d`"));
+  assert.ok(skillMd.includes("<dir>/list.txt"));
+  assert.doesNotMatch(skillMd, /unique path with `mktemp`/);
+});
+
 test("SKILL.md never writes the exclamation-mark-then-backtick injection sequence", () => {
   assert.ok(!skillMd.includes("!" + "`"));
 });

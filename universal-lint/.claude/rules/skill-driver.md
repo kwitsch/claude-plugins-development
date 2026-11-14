@@ -17,4 +17,4 @@ paths:
 - Read-only — the driver never runs an autofix path.
 - Fail-open per file, chunk and tsconfig group; always exits 0 (2 only for a missing `<listfile>` argument).
 - `disable-model-invocation: true` (user-invoke-only); no `userConfig`. The skill dir is self-contained: no references to other plugins (tested).
-- Invocation contract in `plugin/skills/universal-lint/lint-files.reference.md`; `SKILL.md` calls `node ${CLAUDE_SKILL_DIR}/lint-files.mjs "$LIST"` and must never contain the exclamation-mark-plus-backtick preprocessor sequence (tested).
+- Invocation contract in `plugin/skills/universal-lint/lint-files.reference.md`; `SKILL.md` has Claude `Write` the list as a new `<dir>/list.txt` in a `mktemp -d` directory (`Write` refuses to overwrite an unread file, which plain `mktemp` always creates; tested), calls `node ${CLAUDE_SKILL_DIR}/lint-files.mjs "<dir>/list.txt"` and must never contain the exclamation-mark-plus-backtick preprocessor sequence (tested).
