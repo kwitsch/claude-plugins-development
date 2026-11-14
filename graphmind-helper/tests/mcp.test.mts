@@ -65,6 +65,19 @@ test("in an unregistered git repo the wrapper runs init --skip-build, a backgrou
   assert.match(readFileSync(join(root, "calls.log"), "utf8"), /^build$/m);
 });
 
+test("in a folder whose name is not valid UTF-8 the wrapper still serves mcp", () => {
+  const dir = Buffer.concat([Buffer.from(`${root}/`), Buffer.from("caf\xe9", "latin1")]);
+  mkdirSync(dir);
+  const log = join(root, "calls.log");
+  const r = spawnSync("sh", ["-c", `cd "$(printf '%s/caf\\351' "$R")" && exec "$NODE" "$MCP"`], {
+    encoding: "utf8",
+    env: { R: root, NODE: process.execPath, MCP, HOME: home, PATH: `${fakeBin}:/usr/bin:/bin`, FAKE_LOG: log, FAKE_REGISTERED: join(root, "registered") },
+    timeout: 20_000,
+  });
+  assert.equal(r.status, 0);
+  assert.match(readFileSync(log, "utf8"), /^mcp$/m);
+});
+
 test("started in a repo subdirectory the wrapper registers and builds the work tree root", async () => {
   mkdirSync(join(proj, "sub"));
   const realProj = realpathSync(proj);

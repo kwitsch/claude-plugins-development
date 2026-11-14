@@ -57,7 +57,8 @@ function main(): void {
   }
   // The user's own `graphmind setup` server (same tools) stays the one in use.
   if (setupPresent) process.exit(0);
-  const child = spawn(bin, ["mcp"], { cwd, stdio: "inherit" });
+  // No cwd option: process.cwd() mangles a non-UTF-8 folder name, and spawning there fails with ENOENT.
+  const child = spawn(bin, ["mcp"], { stdio: "inherit" });
   child.on("exit", (code) => process.exit(code ?? 1));
   child.on("error", () => process.exit(1));
 }
