@@ -41,11 +41,14 @@ function main(): void {
   const dir = stateDir(input.session_id);
   if (existsSync(join(dir, "nudged"))) return;
   const bin = findGraphmind();
-  const active = bin !== undefined && !setupHooksPresent() && registered(bin);
-  // Marked in every case: a project that is not indexed (or already wired by setup) would otherwise pay a `which` spawn on each matching call.
+  if (!bin) return;
+  // Setup's own hook handles it, for the whole session: mark it so later calls stop early.
+  const wired = setupHooksPresent();
+  // Not marked while the project is unregistered: init (MCP wrapper) may register it mid-session, and the nudge must still fire then.
+  if (!wired && !registered(bin)) return;
   mkdirSync(dir, { recursive: true });
   writeFileSync(join(dir, "nudged"), "");
-  if (!active) return;
+  if (wired) return;
   emit("PreToolUse", "⚡ This project is graphmind-indexed. Use /gm <query> for code exploration (symbols, callers, deps, outlines). Grep only for string literals/config values.");
 }
 

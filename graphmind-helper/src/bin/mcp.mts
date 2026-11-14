@@ -14,7 +14,10 @@ import { findGraphmind, registered, setupMcpPresent } from "./common.mjs";
  */
 export function indexable(dir: string): boolean {
   if (resolve(dir) === resolve(homedir())) return false;
+  const home = resolve(homedir());
   for (let d = resolve(dir);; d = resolve(d, "..")) {
+    // A dotfiles repo at $HOME must not make every folder below it indexable.
+    if (d === home) return false;
     if (existsSync(join(d, ".git"))) return true;
     if (resolve(d, "..") === d) return false;
   }
@@ -31,7 +34,8 @@ function main(): void {
   if (indexable(cwd) && !registered(bin)) {
     // Registration and git hooks are fast; the graph build of a large repo could outlast the MCP startup timeout.
     const init = spawnSync(bin, ["init", "--skip-build"], { cwd, stdio: ["ignore", "ignore", "inherit"], timeout: 30_000 });
-    if (init.status === 0) spawn(bin, ["build"], { cwd, detached: true, stdio: "ignore" }).unref();
+    // The no-op error listener: an unhandled spawn 'error' (EACCES) would crash the wrapper before it serves.
+    if (init.status === 0) spawn(bin, ["build"], { cwd, detached: true, stdio: "ignore" }).on("error", () => {}).unref();
   }
   // The user's own `graphmind setup` server (same tools) stays the one in use.
   if (setupMcpPresent()) process.exit(0);

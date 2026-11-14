@@ -38,7 +38,7 @@ function main(): void {
   const dir = stateDir(input.session_id);
   mkdirSync(dir, { recursive: true });
   const shownFile = join(dir, "priority-ids");
-  const shown = new Set(existsSync(shownFile) ? readFileSync(shownFile, "utf8").split("\n") : []);
+  const shown = new Set(existsSync(shownFile) ? readFileSync(shownFile, "utf8").split("\n").filter(Boolean) : []);
   const fresh = (lines: string[]) => lines.filter((l) => !shown.has(entryId(l) ?? ""));
 
   const turnsFile = join(dir, "turns");

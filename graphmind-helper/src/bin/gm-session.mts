@@ -6,6 +6,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { emit, findGraphmind, listing, MAX_CHARS, readInput, registered, run, setupHooksPresent, stateDir, wholeIds } from "./common.mjs";
 
+/** One day in ms. */
 const DAY_MS = 86_400_000;
 
 /**
@@ -40,7 +41,7 @@ function consolidateDaily(bin: string): void {
     if (existsSync(stamp) && Date.now() - statSync(stamp).mtimeMs < DAY_MS) return;
     mkdirSync(join(homedir(), ".graphmind"), { recursive: true });
     writeFileSync(stamp, "");
-    spawn(bin, ["memory", "consolidate"], { detached: true, stdio: "ignore" }).unref();
+    spawn(bin, ["memory", "consolidate"], { detached: true, stdio: "ignore" }).on("error", () => {}).unref();
   } catch { /* upkeep is optional */ }
 }
 

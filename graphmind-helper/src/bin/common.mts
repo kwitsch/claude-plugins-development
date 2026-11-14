@@ -2,7 +2,7 @@
 import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { delimiter, join } from "node:path";
+import { delimiter, join, resolve, sep } from "node:path";
 
 /** Where the hook output limit of Claude Code cuts a message, in characters (the setup scripts use the same). */
 export const MAX_CHARS = 9000;
@@ -75,15 +75,18 @@ export function setupHooksPresent(home: string = homedir()): boolean {
  * Whether `graphmind setup` already registered its MCP server in `~/.claude.json`.
  *
  * @param home - Home directory.
- * @returns True when a server named `graphmind` exists at the top level or in a project entry.
+ * @param cwd - Working directory: only the project entries of it and of its ancestors count (a server of another project is not active here).
+ * @returns True when a server named `graphmind` exists at the top level or in a project entry that covers `cwd`.
  */
-export function setupMcpPresent(home: string = homedir()): boolean {
+export function setupMcpPresent(home: string = homedir(), cwd: string = process.cwd()): boolean {
   try {
     const text = readFileSync(join(home, ".claude.json"), "utf8");
     // The file can be several MB: parse it only when the name occurs at all.
     if (!text.includes("\"graphmind\"")) return false;
     const json = JSON.parse(text) as { mcpServers?: Record<string, unknown>; projects?: Record<string, { mcpServers?: Record<string, unknown> }> };
-    return Boolean(json.mcpServers?.graphmind) || Object.values(json.projects ?? {}).some((p) => Boolean(p.mcpServers?.graphmind));
+    if (json.mcpServers?.graphmind) return true;
+    const here = resolve(cwd);
+    return Object.entries(json.projects ?? {}).some(([root, p]) => Boolean(p.mcpServers?.graphmind) && (here === resolve(root) || here.startsWith(`${resolve(root)}${sep}`)));
   } catch {
     return false;
   }
