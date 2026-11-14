@@ -24,7 +24,7 @@ the shapes below: `inline-headroom/docs/claude-code-verification.md`.
 - One hook per event without a matcher (`registered twice without a matcher` fails validate and test). Hence:
   `tool.call` has one unmatched hook (answers the `estimate_effort` tool, outcome of Jev's own calls, skill
   blocklist) plus one with the matcher `{ tool: "Agent" }`; `turn.step`, `tool.check`, `turn.complete`,
-  `session.start`, `session.end`, `prompt.submit`, `agent.offer` and `session.compact` have one each; `command.run` carries a
+  `session.start`, `session.end`, `agent.offer` and `session.compact` have one each; `command.run` carries a
   matcher; `ui.render` has two matcher hooks (`{ component: "CommandOutput", props: { command: "jev" } }` for the
   `/jev` output, `{ component: "AbovePrompt" }` for the effort band).
 - Jev is asked only through the jev-api plugin's tool `mcp__jev-api__batch`: `askJev` raises one
@@ -77,7 +77,7 @@ the shapes below: `inline-headroom/docs/claude-code-verification.md`.
 - `tool.call` failure: a result read back through `$.tool.call` carries `isError: true` or `deny: string`; an answer a hook gives for the model must use `deny` (its own `isError` is dropped, live on 2.1.325); there is no `exitCode`.
 - `turn.step` `usage` may be `null`; `command.run` returning `{}` prints no row and records no model context.
 - `cc-plugin-sec-default` skips every user-tier `prompt.compose`/`prompt.section`/`prompt.context` hook, so the mod
-  registers none of them; the prompt classifier uses `prompt.submit` and adds `context` entries. It also passes
+  registers none of them (and no `prompt.submit` hook: jevfort does not classify prompts). It also passes
   `classic.Stop` on past every user-tier hook (notice `its classic.Stop hook was skipped`); jevfort has no Stop-time work.
 
 ## Storage calls must run in-frame
@@ -87,7 +87,7 @@ core routes `$.mcp.call` through `$.tool.call` and its permission check, althoug
 plugin's own hooks see a call it raises only while one of its hooks runs; a call raised after the hook returned (an
 unawaited chain, a `$.clock.every` callback) skips them, so in `default` mode the user gets a permission dialog per
 call and a headless session denies it. jevfort uses `$.store`, `$.tool.call` (jev-api's batch tool) and `$.fs`, and every
-`askJev` is awaited in-frame except the step measurement of `turn.step`: its `$.tool.call` is raised in-frame before `next`, and after Claude's step it is awaited for at most `MEASURE_GRACE_MS` (250 ms); a later answer is dropped unrecorded (its closing `$.clock.now()` then runs out of frame, caught). `record(...)` only buffers;
+Every `askJev` is awaited in-frame. `record(...)` only buffers;
 its store writes run in `flushLog`, awaited in-frame by `turn.complete`, `session.end` and the `/jev` command for the same reason.
 
 ## Tests: the jev-api fake

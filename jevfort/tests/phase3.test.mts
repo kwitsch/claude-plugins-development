@@ -1,11 +1,10 @@
-// Phase 3 (prompt classifier, subagent types, compaction) of the built plugin/hooks/*.mjs: upstream jev-pilot
+// Phase 3 (subagent types, compaction) of the built plugin/hooks/*.mjs: upstream jev-pilot
 // tests/phase3.test.ts. The pure tests come first; the kit tests follow.
 import { createKit } from "claude-engine-vitest";
 import type { On } from "claude-engine-vitest";
 import { expect, test as pureTest } from "vitest";
 import { compactInstructions, compactItems } from "../plugin/hooks/compact.mjs";
 import { JEV_BATCH } from "../plugin/hooks/jev.mjs";
-import { hints, promptQuestions } from "../plugin/hooks/prompt.mjs";
 
 // The manifest defaults (jevfort/package.json claudePlugin.userConfig): the kit does not fill userConfig defaults.
 const DEFAULTS = {
@@ -25,8 +24,6 @@ const CWD = "/proj";
 
 /** The jev-api tool jevfort needs, as `$.tool.list()` lists it. */
 const JEV_TOOLS = [{ name: JEV_BATCH, description: "Ask Jev several questions", mcp: true }];
-/** The classifier's question ids by their instructions text (batch questions carry no id). */
-const PROMPT_IDS = new Map(Object.entries(promptQuestions({ none: "x" })).map(([id, q]) => [q.instructions, id]));
 
 type Msg = { role: "user" | "assistant"; text: string; toolUses: Record<string, unknown>[] };
 /** One question of a batch call as the fake saw it; `state` is the call's JSON text. */
@@ -51,110 +48,7 @@ function base(on: On, jev: (q: Asked) => Record<string, unknown>, messages: Msg[
   return sent;
 }
 
-pureTest("hints: a mid-confidence skill and a large task get hints; a confident skill is left to step 0", () => {
-  expect(hints("task", 0.9, { name: "aws-diagrams", p: 0.7 }, 0.85)).toHaveLength(2);
-  expect(hints("question", 0.9, { name: "aws-diagrams", p: 0.95 }, 0.85)).toHaveLength(0);
-  // Under takeOnlyForBypass the threshold is infinite, so only the name guard keeps `none` hint-free.
-  expect(hints("question", 0, { name: "none", p: 0.7 }, Number.POSITIVE_INFINITY)).toEqual([]);
-  expect(hints("question", 0, { name: "deploy-docs", p: 0.7 }, Number.POSITIVE_INFINITY)).toHaveLength(1);
-  // Below SKILL_HINT (0.6) and PLAN_HINT (0.85): no hint.
-  expect(hints("question", 0, { name: "deploy-docs", p: 0.5 }, Number.POSITIVE_INFINITY)).toEqual([]);
-  expect(hints("task", 0.8, undefined, Number.POSITIVE_INFINITY)).toEqual([]);
-});
-
-test("The prompt classifier adds a hint only Claude reads", async ($, on) => {
-  const answers: Record<string, Record<string, unknown>> = {
-    kind: { type: "choice", choice: "task", probabilities: { task: 0.9, question: 0.1 }, confidence: 0.8 },
-    needs_plan: { type: "noul", noul: 0.93 },
-    skill: { type: "choice", choice: "none", probabilities: { none: 0.9 }, confidence: 0.9 },
-  };
-  const sent = base(on, (q) => answers[PROMPT_IDS.get(q.instructions) ?? ""]);
-  // A skill named like an Object.prototype member is offered too.
-  on("command.list", () => ({ value: [{ name: "aws-diagrams", description: "Draw AWS diagrams", source: "plugin" }, { name: "constructor", description: "Build things", source: "user" }] }));
-  let seen: readonly string[] | undefined;
-  on("prompt.submit", (_$, e) => {
-    seen = e.context as readonly string[] | undefined;
-    return { text: e.text };
-  });
-  await $.prompt.submit({ text: "rewrite the storage layer to draw aws diagrams and build the constructor", wait: false, origin: { kind: "composer" } });
-  expect(seen?.join("\n") ?? "").toContain("plan");
-  // The batch's question types in order; the skill options are the related skills (best first) plus `none`.
-  expect(sent.map((q) => q.type)).toEqual(["choice", "noul", "choice"]);
-  expect(Object.keys(sent[2].criteria as object)).toEqual(["none", "aws-diagrams", "constructor"]);
-});
-
-test("A confident skill keeps its hint where step 0 cannot take it (takeOnlyForBypass is on by default)", async ($, on) => {
-  const answers: Record<string, Record<string, unknown>> = {
-    kind: { type: "choice", choice: "task", probabilities: { task: 0.9, question: 0.1 }, confidence: 0.8 },
-    needs_plan: { type: "noul", noul: 0.1 },
-    skill: { type: "choice", choice: "aws-diagrams", probabilities: { "aws-diagrams": 0.95, none: 0.05 }, confidence: 0.9 },
-  };
-  base(on, (q) => answers[PROMPT_IDS.get(q.instructions) ?? ""]);
-  on("command.list", () => ({ value: [{ name: "aws-diagrams", description: "Draw AWS diagrams", source: "plugin" }] }));
-  let seen: readonly string[] | undefined;
-  on("prompt.submit", (_$, e) => {
-    seen = e.context as readonly string[] | undefined;
-    return { text: e.text };
-  });
-  await $.prompt.submit({ text: "draw the aws diagram of the storage layer", wait: false, origin: { kind: "composer" } });
-  expect(seen?.join("\n") ?? "").toContain("the skill \"aws-diagrams\"");
-});
-
-test("A skill Jev answers that was never offered gets no hint", async ($, on) => {
-  const answers: Record<string, Record<string, unknown>> = {
-    kind: { type: "choice", choice: "task", probabilities: { task: 0.9, question: 0.1 }, confidence: 0.8 },
-    needs_plan: { type: "noul", noul: 0.1 },
-    skill: { type: "choice", choice: "deploy-prod", probabilities: { "deploy-prod": 0.7, none: 0.3 }, confidence: 0.9 },
-  };
-  const sent = base(on, (q) => answers[PROMPT_IDS.get(q.instructions) ?? ""]);
-  on("command.list", () => ({ value: [{ name: "aws-diagrams", description: "Draw AWS diagrams", source: "plugin" }] }));
-  let seen: readonly string[] | undefined;
-  on("prompt.submit", (_$, e) => {
-    seen = e.context as readonly string[] | undefined;
-    return { text: e.text };
-  });
-  await $.prompt.submit({ text: "draw the aws diagram of the storage layer", wait: false, origin: { kind: "composer" } });
-  expect(Object.keys(sent[2].criteria as object)).toEqual(["none", "aws-diagrams"]);
-  expect(seen?.join("\n") ?? "").not.toContain("deploy-prod");
-});
-
-test("The classifier offers only the related skills (at most 8, deduped), none first; no related skill, no skill question", async ($, on) => {
-  // Only the questions sent matter here, not the answers.
-  const sent = base(on, () => ({}));
-  const filler = Array.from({ length: 300 }, (_, i) => ({ name: `helper-${i}`, description: `Helper number ${i}`, source: "user" }));
-  const migrate = Array.from({ length: 12 }, (_, i) => ({ name: `migrate-${i}`, description: `Variant ${i}`, source: "plugin" }));
-  const best = { name: "db-migrate", description: "Migrate the database schema", source: "user" };
-  on("command.list", () => ({ value: [...filler, { ...best, name: "tools:db-migrate", source: "plugin" }, ...migrate, best] }));
-  on("prompt.submit", (_$, e) => ({ text: e.text }));
-  await $.prompt.submit({ text: "migrate the database schema to v2", wait: false, origin: { kind: "composer" } });
-  const options = Object.keys(sent[2].criteria as object);
-  expect(options).toHaveLength(9);
-  expect(options.slice(0, 2)).toEqual(["none", "db-migrate"]);
-  expect(options).not.toContain("tools:db-migrate");
-  sent.length = 0;
-  await $.prompt.submit({ text: "rewrite the storage layer", wait: false, origin: { kind: "composer" } });
-  expect(sent.map((q) => q.type)).toEqual(["choice", "noul"]);
-});
-
 /** A listed skill whose name is the classifier's no-skill option. */
-const SKILL_NONE = { name: "none", description: "Deploy the docs site to staging", source: "user" };
-
-test("A listed skill named none never replaces the no-skill option", async ($, on) => {
-  const sent = base(on, () => ({}));
-  on("command.list", () => ({ value: [SKILL_NONE, { name: "deploy-docs", description: "Deploy the docs site", source: "plugin" }] }));
-  on("prompt.submit", (_$, e) => ({ text: e.text }));
-  await $.prompt.submit({ text: "deploy the docs site", wait: false, origin: { kind: "composer" } });
-  expect(sent[2].criteria).toEqual({ none: "No listed skill is meant for this request", "deploy-docs": "Deploy the docs site" });
-});
-
-test("With only a skill named none related, no skill question", async ($, on) => {
-  const sent = base(on, () => ({}));
-  on("command.list", () => ({ value: [SKILL_NONE] }));
-  on("prompt.submit", (_$, e) => ({ text: e.text }));
-  await $.prompt.submit({ text: "deploy the docs site", wait: false, origin: { kind: "composer" } });
-  expect(sent.map((q) => q.type)).toEqual(["choice", "noul"]);
-});
-
 test("A general-purpose subagent is switched only when Jev is confident; an explicit type is kept", async ($, on) => {
   let p = 0.92;
   const sent = base(on, () => ({ type: "choice", choice: "Explore", probabilities: { Explore: p, "general-purpose": 1 - p }, confidence: 0.85 }));
@@ -332,22 +226,6 @@ test("session.compact waits longer for Jev than an interactive call, and tells j
   await done;
   expect(apiTimeout).toBe(9);
   expect(instructions).toContain("Keep exact details (paths, errors, decisions, values) from: Bash step a.");
-});
-
-test("A short follow-up is classified with the previous reply as context", async ($, on) => {
-  const answers: Record<string, Record<string, unknown>> = {
-    kind: { type: "choice", choice: "task", probabilities: { task: 1 }, confidence: 1 },
-    needs_plan: { type: "noul", noul: 0.1 },
-  };
-  const sent = base(on, (q) => answers[PROMPT_IDS.get(q.instructions) ?? ""], [{ role: "assistant", text: "The done check could skip while background tasks run. Want me to fix that?", toolUses: [] }]);
-  on("command.list", () => ({ value: [] }));
-  on("prompt.submit", (_$, e) => ({ text: e.text }));
-  await $.prompt.submit({ text: "fix it", wait: false, origin: { kind: "composer" } });
-  // Both questions (kind, needs_plan) carry the batch call's state as JSON text.
-  const sentStates = sent.map((q) => JSON.parse(q.state) as Record<string, unknown>);
-  expect(sentStates).toHaveLength(2);
-  expect(String(sentStates[0]?.previous_reply)).toContain("Want me to fix that?");
-  expect(sentStates[0]?.request).toBe("fix it");
 });
 
 // JJ: the compaction ranking's budget and jev-api timeout, with Jev configured and while Haiku answers.

@@ -1,7 +1,7 @@
 # jevfort
 
 Lets TypeSafe **Jev** take routine steps, answer simple prompts without the main model, estimate each turn's effort,
-allow writes into the session scratchpad, classify prompts,
+allow writes into the session scratchpad,
 pick subagent types and guide compaction. Every decision is logged and reported through `/jev`.
 
 jevfort has no off switch of its own: disable the plugin (`/plugin`, or `claude plugin disable`) to turn it off.
@@ -13,9 +13,7 @@ layout. jevfort makes no network request of its own: it asks Jev through the too
 
 The **jev-api** plugin, installed and enabled together with jevfort. jevfort declares it as a plugin dependency, so Claude Code keeps jevfort disabled while jev-api is missing or disabled. jevfort asks Jev only through jev-api's tool `mcp__jev-api__batch` (jev-api 0.2.0 or later): one call, and one request, per decision.
 
-Coming from 0.11: the options `doneCheck`, `doneThreshold`, `classify` and `measureSteps` are gone. The done check (the follow-up message after an answer that looks unfinished) is removed; prompt classification and the parallel step measurement are always on. `routing` is a boolean (default on): the `model` mode, which also switched to a cheaper model by difficulty, is removed, and any value other than `false` counts as on. A task-end judgement for the context-fill compaction is now its own request.
-
-Coming from 0.10: the prompt classifier offers Jev only the skills whose name or description shares words with the prompt (at most 8); with no such skill it asks no skill question, so a large skill list no longer slows every prompt (a German prompt rarely matches an English skill description and then gets no skill hint).
+Coming from 0.11: the options `doneCheck`, `doneThreshold`, `classify` and `measureSteps` are gone, and so are the features behind them: the done check (the follow-up message after an answer that looks unfinished), the prompt classifier (skill and plan hints) and the parallel step measurement. `routing` is a boolean (default on): the `model` mode, which also switched to a cheaper model by difficulty, is removed, and any value other than `false` counts as on. A task-end judgement for the context-fill compaction is now its own request.
 
 Coming from 0.9.0: `/jev export` writes a new `decisions-<time>.jsonl` per export instead of `decisions.jsonl`; with `takeOnlyForBypass` (the default) Jev takes only a Read or Bash step and a confident skill match is passed on to Claude as a hint; `estimate_effort` reports invalid input as an error result; a turn started by a slash command is judged by that command, not by the prompt before it.
 
@@ -28,7 +26,7 @@ Without jev-api's batch tool in a session (for example denied by a permission ru
 | Command           | Does                                                                                                                                                                                                                       |
 | ----------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `/jev`            | Status: effort routing on or off (`(effort auto off)` while the effort band's Auto button pauses the effort choice), the take threshold, decision counts, the last 10 decisions (` (pass)` marks one that changed nothing) |
-| `/jev report`     | Markdown report: steps Jev took, turns answered without Claude, agreement with Claude step by step, take-threshold table, effort routing, classifier, subagent types, compaction                                           |
+| `/jev report`     | Markdown report: steps Jev took, turns answered without Claude, agreement with Claude step by step, take-threshold table, effort routing, subagent types, compaction                                                       |
 | `/jev candidates` | The options Jev is offered at step 0 for the last prompt                                                                                                                                                                   |
 | `/jev export`     | Writes the log to a new file `<cwd>/.jev/decisions-<time>.jsonl` (never over an existing one)                                                                                                                              |
 | `/jev clear`      | Clears the log and the counters                                                                                                                                                                                            |

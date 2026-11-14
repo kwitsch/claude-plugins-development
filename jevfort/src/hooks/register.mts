@@ -21,13 +21,12 @@ import type { Candidate } from "./candidates.mjs";
 import { COMPACT_MAX_TOKENS, COMPACT_MODEL, COMPACT_SYSTEM, compactInstructions, compactItems, haikuTranscript, RELEVANCE } from "./compact.mjs";
 import { clip, head, splitTurn, summarize, toolCalls } from "./context.mjs";
 import type { SessionMessage, ToolUse, TurnContext } from "./context.mjs";
-import { choice, COMPACT_API_TIMEOUT_S, COMPACT_TIMEOUT_MS, HAIKU_API_TIMEOUT_S, HAIKU_TIMEOUT_MS, isAnswer, JEV_API_TIMEOUT_S, JEV_BATCH, JEV_TOOL_PREFIX, JEV_TOOLS, MAX_CHOICE_OPTIONS, MAX_ERROR, MAX_PAUSE_MS, MEASURE_GRACE_MS, missingJevTools, noul, PAUSE_MS, score, TIMEOUT_MS } from "./jev.mjs";
+import { choice, COMPACT_API_TIMEOUT_S, COMPACT_TIMEOUT_MS, HAIKU_API_TIMEOUT_S, HAIKU_TIMEOUT_MS, isAnswer, JEV_API_TIMEOUT_S, JEV_BATCH, JEV_TOOL_PREFIX, JEV_TOOLS, MAX_CHOICE_OPTIONS, MAX_ERROR, MAX_PAUSE_MS, missingJevTools, noul, PAUSE_MS, score, TIMEOUT_MS } from "./jev.mjs";
 import type { Answer, ChoiceAnswer, JevResult, Question } from "./jev.mjs";
 import { forgetRecent, LOG_KEY, MAX_ENTRIES, recentDecisions, remember, statsKey } from "./log.mjs";
 import type { Entry } from "./log.mjs";
 import { bestAction, bounds, EFFORT_ORDER, effortQuestion, ESTIMATE_SPEC, ESTIMATE_TOOL, estimateEffort, EVERY_TURN_MODELS, inBandRange, inScratchpad, isEffort, mechanicalQuestion, modelFamily, nextActionQuestion, parseEstimateInput, pickCandidate, singleActionQuestion, taskEndQuestion } from "./policy.mjs";
 import type { Effort, EstimateBounds, EstimateModel } from "./policy.mjs";
-import { hints, NONE, promptQuestions } from "./prompt.mjs";
 import { buildReport, escapePipes } from "./report.mjs";
 import { SUMMARY_MODEL, SYSTEM } from "./summarize.mjs";
 import type { ModelUsage, Summary } from "./summarize.mjs";
@@ -128,8 +127,6 @@ type ToolResult = { deny?: unknown; isError?: boolean } & Record<string, unknown
 type Check = { tool: string; tool_use_id?: string; agentId?: string; input?: unknown } & Record<string, unknown>;
 /** A `tool.check` result; `rule` is the settings rule that decided, absent for a tool's own check. */
 type Verdict = { decision: string; reason?: string; rule?: string } & Record<string, unknown>;
-/** A `prompt.submit` event; `origin` says who sent it (a background task's notification has kind `task-notification`). */
-type PromptEvent = { command?: unknown; isMeta?: boolean; text: string; context?: readonly string[]; origin?: { kind?: string } } & Record<string, unknown>;
 /** An `agent.offer` event. */
 type OfferEvent = { agent: string; description: string } & Record<string, unknown>;
 /** A `session.compact` event. */
@@ -181,7 +178,6 @@ type On = {
   (event: "tool.call", matcher: { tool: "Agent" }, hook: Hook<AgentCall, ToolResult>): void;
   (event: "turn.step", hook: ($: Engine, e: Step, next: (e: Step) => StepRun) => StepRun): void;
   (event: "tool.check", hook: Hook<Check, Verdict>): void;
-  (event: "prompt.submit", hook: Hook<PromptEvent, unknown>): void;
   (event: "agent.offer", hook: Hook<OfferEvent, unknown>): void;
   (event: "session.compact", hook: Hook<CompactEvent, unknown>): void;
   (event: "ui.render", matcher: { component: "CommandOutput"; props: { command: "jev" } }, hook: ($: Engine, e: RenderEvent, next: (e: RenderEvent) => unknown) => unknown): void;
@@ -340,7 +336,7 @@ function deadline($: Engine, ms: number): { elapsed: Promise<undefined>; cancel(
 let jevTools: Promise<string[]> | undefined;
 /** The whole `$.tool.list()` answer behind `jevTools`: step 0 offers its deferred tools without a second listing. */
 let toolListing: Promise<ToolInfo[]> | undefined;
-/** This turn's offerable skills (listed, not built in, not blocklisted, deduped), shared by the classifier and step 0; dropped with `jevTools` and by a new block. */
+/** This turn's offerable skills (listed, not built in, not blocklisted, deduped), offered at step 0; dropped with `jevTools` and by a new block. */
 let skillList: Promise<CommandInfo[]> | undefined;
 /** This turn's "none of jev-api's three env values is set, Haiku answers" decision; dropped with `jevTools`. */
 let haikuPath: Promise<boolean> | undefined;
@@ -865,7 +861,7 @@ async function summarizeResult($: Engine, request: string, action: string, outpu
 
 /**
  * The plugin and user skills Jev may offer: listed, not built in, not `jev`, not blocklisted, deduped. Read once per turn
- * (`skillList`), shared by the classifier and step 0; never rejects.
+ * (`skillList`), offered at step 0; never rejects.
  *
  * @param $ - Engine interface.
  * @returns The skills.
@@ -876,24 +872,6 @@ function offerableSkills($: Engine): Promise<CommandInfo[]> {
     const blocked = new Set(((await $.store.get(SKILL_BLOCKLIST_KEY).catch(() => undefined)) as string[] | undefined) ?? []);
     return dedupeSkills(commands.filter((c) => (c.source === "plugin" || c.source === "user") && c.name !== "jev" && !BUILTIN_COMMANDS.has(c.name) && !blocked.has(c.name)));
   })());
-}
-
-/**
- * The skill options of the prompt classifier: `none` plus the listed plugin or user skills that are not built in or
- * blocklisted and share words with the request (`relevant`, at most 8, best first, after `dedupeSkills`). System One's
- * latency grows ~32 ms per option: every listed skill crossed the 4 s budget from ~120 skills (F01).
- *
- * @param $ - Engine interface.
- * @param request - The prompt.
- * @returns The options, or `undefined` when no listed skill is related.
- */
-async function skillOptions($: Engine, request: string): Promise<Record<string, string> | undefined> {
-  // A skill named `none` would overwrite the no-skill option and read as "no skill" in `hints`.
-  const skills = relevant(request, await offerableSkills($)).filter((c) => c.name !== NONE);
-  if (!skills.length) return undefined;
-  const criteria: Record<string, string> = { [NONE]: "No listed skill is meant for this request" };
-  for (const c of skills) criteria[c.name] = clip(c.description, 160);
-  return criteria;
 }
 
 /**
@@ -930,9 +908,8 @@ function summarizeCalls(calls: readonly { tool: string; input: Record<string, un
  * @param answer - Jev's next-action answer.
  * @param candidates - The candidates Jev was offered.
  * @param toolUses - Claude's calls in the step.
- * @param measured - Whether Jev was asked in parallel (measure path) rather than before the step.
  */
-async function recordCompare($: Engine, turnId: string, step: number, request: string, answer: ChoiceAnswer, candidates: readonly Candidate[], toolUses: readonly { name: string; input?: unknown }[], measured: boolean): Promise<void> {
+async function recordCompare($: Engine, turnId: string, step: number, request: string, answer: ChoiceAnswer, candidates: readonly Candidate[], toolUses: readonly { name: string; input?: unknown }[]): Promise<void> {
   const best = bestAction(answer);
   const claudeCalls = toolUses.map((u) => ({ tool: u.name, input: (u.input ?? {}) as Record<string, unknown> }));
   const bestCandidate = candidates.find((c) => c.key === best?.key);
@@ -947,7 +924,6 @@ async function recordCompare($: Engine, turnId: string, step: number, request: s
     data: {
       request: clip(request, 120),
       step,
-      measured,
       claudeSummary,
       pick: answer.choice,
       best: best?.key,
@@ -1116,36 +1092,6 @@ export const register = (on: On, options: Options): void => {
 
   // Bumped at every main-loop turn.complete: the turn an agent type was last offered in (Jev's agent-switch options).
   let agentTurn = 0;
-  // Phase 3: classify each prompt as it is sent and, when Jev is confident, add a short hint only Claude reads.
-  on("prompt.submit", async function onPromptSubmit($: Engine, e: PromptEvent, next: Next<PromptEvent, unknown>): Promise<unknown> {
-    if ((await jevMissing($)).length) return next(e);
-    // A finished background task arrives as origin `task-notification` (not flagged meta): nothing to classify.
-    if (e.command || e.isMeta || e.origin?.kind === "task-notification" || e.text.trim().length < 3) return next(e);
-
-    const skillCriteria = await skillOptions($, e.text);
-    const questions = promptQuestions(skillCriteria);
-    const previous = previousReply(await $.session.messages({}).catch(() => undefined));
-    const r = await askJev($, { request: clip(e.text, 3000), ...(previous ? { previous_reply: previous } : {}) }, questions);
-    if (!r.ok) return next(e);
-    const kind = choice(r.answers, "kind");
-    const needsPlan = noul(r.answers, "needs_plan");
-    const skillAnswer = choice(r.answers, "skill");
-    // An answer outside the offered options (blocklisted, built in, made up) is no hint: jev-api checks only its Haiku answers.
-    const skill = skillAnswer && skillCriteria && Object.hasOwn(skillCriteria, skillAnswer.choice) ? { name: skillAnswer.choice, p: skillAnswer.probabilities[skillAnswer.choice] ?? 0 } : undefined;
-    // A confident skill is left to step 0 only where step 0 can take it: takeSteps on and not takeOnlyForBypass.
-    const added = hints(kind?.choice, needsPlan, skill, takeSteps && !takeOnlyForBypass ? takeThreshold : Number.POSITIVE_INFINITY);
-
-    await record($, {
-      kind: "classify",
-      applied: added.length > 0,
-      text: `${kind?.choice ?? "?"}${needsPlan !== undefined ? `, plan ${needsPlan.toFixed(2)}` : ""}${skill && skill.name !== NONE ? `, skill ${skill.name} ${skill.p.toFixed(2)}` : ""}${added.length ? " → hint" : ""}`,
-      ms: r.ms,
-      data: { request: clip(e.text, 120), kind: kind?.choice, kindP: kind?.confidence, needsPlan, skill: skill?.name, skillP: skill?.p, hints: added.length },
-    });
-    if (!added.length) return next(e);
-    return next({ ...e, context: [...(e.context ?? []), ...added] });
-  });
-
   // Phase 3: when Claude starts a general-purpose subagent, Jev may pick a more specialised agent type.
   if (options.agentTypes !== false) {
     // Agent types as the engine offers them to the model, with their descriptions and the main-loop turn of the offer.
@@ -1522,31 +1468,7 @@ export const register = (on: On, options: Options): void => {
     // The turn's effort, set at step 0, holds for every step of the turn.
     const routed = (step: Step): Step => (turn.effort ? { ...step, effort: turn.effort } : step);
 
-    if (!Object.keys(questions).length) {
-      // Inside a longer turn Jev doesn't take steps, but is asked in parallel with Claude which action it would
-      // take, so the take threshold can be measured adding at most MEASURE_GRACE_MS of delay after the step.
-      let measure: Promise<JevResult> | undefined;
-      let measured: Candidate[] = [];
-      // Not on a slash-command turn either: Jev would be compared on the bare command, whose skill text it cannot see.
-      if (takeSteps && !ctx.command && e.index > 0 && !e.agentId) {
-        measured = (await buildCandidates($, ctx.request, ctx.steps, calls, e.index, turn.cache)).filter((c) => !(last && sameCall(last, { tool: c.tool, input: c.input })));
-        if (measured.length) {
-          measure = askJev($, { request: clip(ctx.request, 4000), recent: summarize(ctx.steps), cwd: turn.cache.cwd ??= await $.session.cwd() }, { next_action: nextActionQuestion(measured) });
-        }
-      }
-      const claudeResult = yield* next(routed(e));
-      // Claude's step is done: wait only a moment for the measurement (it only logs; a late one is not recorded), never the rest of its budget.
-      // A throwing clock must not fail the step whose result is already in: the measurement is dropped. No measurement, no timer.
-      let measureResult: JevResult | undefined;
-      if (measure) {
-        const grace = deadline($, MEASURE_GRACE_MS);
-        measureResult = await Promise.race([measure, grace.elapsed]).catch(() => undefined);
-        grace.cancel();
-      }
-      const measureAnswer = measureResult?.ok ? choice(measureResult.answers, "next_action") : undefined;
-      if (measureAnswer) await recordCompare($, e.turnId, e.index, ctx.request, measureAnswer, measured, claudeResult.toolUses, true);
-      return claudeResult;
-    }
+    if (!Object.keys(questions).length) return yield* next(routed(e));
 
     // A short follow-up ("yes", "do it") is only rated with confidence when Jev sees what it answers: 0.0–0.2
     // without, 0.5–0.8 with.
@@ -1630,7 +1552,7 @@ export const register = (on: On, options: Options): void => {
     const result = yield* next(routed(e));
 
     // Compare Claude's own next call with Jev's top action.
-    if (answer) await recordCompare($, e.turnId, e.index, ctx.request, answer, candidates, result.toolUses, false);
+    if (answer) await recordCompare($, e.turnId, e.index, ctx.request, answer, candidates, result.toolUses);
     return result;
   });
 

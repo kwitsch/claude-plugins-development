@@ -239,9 +239,6 @@ test("the report counts summary rows, the newest 15 steps, the take threshold an
     c(1, { bestP: 0.9, agree: false, claude: ["Read", "Grep", "Read"] }),
     c(2, { bestP: 0.6, agree: true, claudeUsedCandidate: true }),
     ...Array.from({ length: 13 }, (_, i) => c(3 + i, { bestP: 0.5 })),
-    e("classify", true, { kind: "code", hints: 1 }),
-    e("classify", true, { kind: "code", hints: 0 }),
-    e("classify", false, { kind: "question", hints: 2 }),
     e("agent", true, { switched: true, agree: false }),
     e("agent", false, { switched: false, agree: true }),
     e("agent", false, { switched: true }),
@@ -263,7 +260,7 @@ test("the report counts summary rows, the newest 15 steps, the take threshold an
     expect(report).toContain(row);
   }
   expect(report).not.toContain("Done check");
-  expect(report).toContain("| Prompt classifier | 3 prompts | 2 code · 1 question · 2 hinted, 1 applied |");
+  expect(report).not.toContain("Prompt classifier");
   expect(report).toContain("| Subagent type | 3 spawns | 1 agreed with Claude · 2 switched, 1 applied |");
   expect(report).toContain("| Compaction | 2 runs | 15 results scored · 4 kept in detail · 6 marked droppable |");
   expect(report).toContain("_1 interrupted turn(s)._");

@@ -109,13 +109,6 @@ export function buildReport(log, threshold) {
 	out.push("| Decision | Checked | Result |");
 	out.push("|---|---|---|");
 	out.push(`| Effort routing | ${routes.length} turns | ${effortScores.length ? `avg effort score ${avgOf(effortScores)} (0 mechanical … 4 hardest)` : "avg effort score —"} · ${lowered.length} lowered, ${raised.length} raised, ${new Set([...lowered, ...raised].filter((e) => e.applied)).size} applied |`);
-	const classified = of("classify");
-	if (classified.length) {
-		const kinds = new Map();
-		for (const e of classified) kinds.set(str(e.data?.kind) ?? "?", (kinds.get(str(e.data?.kind) ?? "?") ?? 0) + 1);
-		const hinted = classified.filter((e) => (num(e.data?.hints) ?? 0) > 0);
-		out.push(`| Prompt classifier | ${classified.length} prompts | ${[...kinds].map(([k, n]) => `${n} ${k}`).join(" · ")} · ${hinted.length} hinted, ${hinted.filter((e) => e.applied).length} applied |`);
-	}
 	const agents = of("agent");
 	if (agents.length) {
 		const switched = agents.filter((e) => e.data?.switched === true);
