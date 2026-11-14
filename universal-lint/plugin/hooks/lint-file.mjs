@@ -1573,7 +1573,9 @@ export async function fileChangedHandler(args) {
 		} catch {}
 		if (recorded !== null) {
 			if (recorded === fileDigest(s.fp)) return {};
-			rmSync(writtenDigestPath(s.real), { force: true });
+			try {
+				rmSync(writtenDigestPath(s.real), { force: true });
+			} catch {}
 		}
 		const rec = recordEdit(s.fp, s.real, null);
 		try {

@@ -1,7 +1,7 @@
 // File detection: SessionStart/CwdChanged watch list and FileChanged linting, against the built hook in a real git repo.
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
-import { mkdirSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "vitest";
 import { FILE_CHANGED_SLOTS } from "../plugin/hooks/lint-file.mjs";
@@ -265,6 +265,24 @@ test("FileChanged: skipped while the content matches the Write/Edit digest, lint
   writeFileSync(a, "echo $2\n");
   assert.equal(changed(e, a).status, 2);
   assert.equal(e.lines().length, 2);
+});
+
+test("FileChanged: a stale digest that cannot be removed (read-only store) still lints the change", () => {
+  const e = makeEnv();
+  e.recStub("shellcheck", 1);
+  const a = e.file("a.sh", "echo a\n");
+  gitInit(e);
+  writeFileSync(a, "echo $1\n");
+  e.run(a, { out: OUT });
+  const written = path.join(e.data, "written");
+  chmodSync(written, 0o555);
+  try {
+    writeFileSync(a, "echo $2\n");
+    assert.equal(changed(e, a).status, 2);
+    assert.equal(e.lines().length, 2);
+  } finally {
+    chmodSync(written, 0o755);
+  }
 });
 
 test("FileChanged: a write by another program that landed before the Edit's hook ran is still linted", () => {

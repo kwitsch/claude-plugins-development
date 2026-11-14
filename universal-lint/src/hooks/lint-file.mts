@@ -2887,7 +2887,11 @@ export async function fileChangedHandler(args: PostToolUseHookInput): Promise<Ho
     }
     if (recorded !== null) {
       if (recorded === fileDigest(s.fp)) return {};
-      rmSync(writtenDigestPath(s.real), { force: true }); // stale: a later restore of the old bytes must lint
+      try {
+        rmSync(writtenDigestPath(s.real), { force: true }); // stale: a later restore of the old bytes must lint
+      } catch {
+        // fail open: an unwritable store costs a duplicate lint later, never this one
+      }
     }
     // The content changed outside Write/Edit (never for the digest-matched echo above): a whole-file edit for the
     // settle window, also when the git gate then skips the lint (a restore to committed content leaves no stale finding).
