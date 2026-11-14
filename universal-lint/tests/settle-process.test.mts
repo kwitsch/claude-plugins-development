@@ -82,7 +82,7 @@ test("a later edit that rewrote the finding's line without reproducing the error
   await intoHold(s.e);
   writeFileSync(s.file, SH4_FIXED);
   s.setFindings("");
-  const second = await start(s.e, s.findings, payload(s.file, s.e.cwd, { toolName: "Edit", toolResponse: EDIT_L2 }), {});
+  const second = await start(s.e, s.findings, payload(s.file, s.e.cwd, { toolName: "Edit", toolResponse: { ...EDIT_L2, originalFile: SH4 } }), {});
   const firstRan = await first;
   assert.equal(second.status, 0);
   assert.equal(firstRan.status, 0);
@@ -97,7 +97,7 @@ test("a later edit elsewhere: the first finding is still reported", async () => 
   await intoHold(s.e);
   writeFileSync(s.file, SH4.replace("$2", "\"$2\""));
   s.setFindings("");
-  const second = await start(s.e, s.findings, payload(s.file, s.e.cwd, { toolName: "Edit", toolResponse: EDIT_L4 }), {});
+  const second = await start(s.e, s.findings, payload(s.file, s.e.cwd, { toolName: "Edit", toolResponse: { ...EDIT_L4, originalFile: SH4 } }), {});
   const firstRan = await first;
   assert.equal(second.status, 0);
   assert.equal(firstRan.status, 2);
@@ -110,7 +110,7 @@ test("a later edit of the line that still has the error: the later edit reports 
   const first = start(s.e, s.findings, payload(s.file, s.e.cwd, { toolName: "Edit", toolResponse: EDIT_L2 }), { UNIVERSAL_LINT_SETTLE_MS: "2000" });
   await intoHold(s.e);
   writeFileSync(s.file, SH4_FIXED);
-  const second = await start(s.e, s.findings, payload(s.file, s.e.cwd, { toolName: "Edit", toolResponse: EDIT_L2 }), {});
+  const second = await start(s.e, s.findings, payload(s.file, s.e.cwd, { toolName: "Edit", toolResponse: { ...EDIT_L2, originalFile: SH4 } }), {});
   const firstRan = await first;
   assert.equal(second.status, 2);
   assert.match(second.stderr, /line2-marker/);
@@ -217,7 +217,7 @@ test("a later edit that fixed the cause of a held parse error on another line: t
   await intoHold(s.e);
   writeFileSync(s.file, SH4_FIXED);
   s.setFindings("");
-  const second = await start(s.e, s.findings, payload(s.file, s.e.cwd, { toolName: "Edit", toolResponse: EDIT_L2 }), {});
+  const second = await start(s.e, s.findings, payload(s.file, s.e.cwd, { toolName: "Edit", toolResponse: { ...EDIT_L2, originalFile: SH4 } }), {});
   const firstRan = await first;
   assert.equal(second.status, 0);
   assert.equal(firstRan.status, 0);
@@ -230,7 +230,7 @@ test("a later edit elsewhere that leaves the parse error: the later lint reports
   const first = start(s.e, s.findings, payload(s.file, s.e.cwd, { toolName: "Edit", toolResponse: EDIT_L4 }), { UNIVERSAL_LINT_SETTLE_MS: "2000" });
   await intoHold(s.e);
   writeFileSync(s.file, SH4_FIXED);
-  const second = await start(s.e, s.findings, payload(s.file, s.e.cwd, { toolName: "Edit", toolResponse: EDIT_L2 }), {});
+  const second = await start(s.e, s.findings, payload(s.file, s.e.cwd, { toolName: "Edit", toolResponse: { ...EDIT_L2, originalFile: SH4 } }), {});
   const firstRan = await first;
   assert.equal(second.status, 2);
   assert.match(second.stderr, /SC1009/);
@@ -250,8 +250,8 @@ test("two later edits whose hooks journal out of edit order: the held finding is
   const editB = { structuredPatch: [{ oldStart: 1, oldLines: 3, newStart: 1, newLines: 4, lines: ["+echo new", " echo a", " echo b", " echo $1"] }] };
   const editC = { structuredPatch: [{ oldStart: 2, oldLines: 3, newStart: 2, newLines: 3, lines: [" echo a", "-echo b", "+echo B", " echo $1"] }] };
   // C's hook journals before B's
-  assert.equal((await start(s.e, s.findings, payload(s.file, s.e.cwd, { toolName: "Edit", toolResponse: editC }), {})).status, 0);
-  assert.equal((await start(s.e, s.findings, payload(s.file, s.e.cwd, { toolName: "Edit", toolResponse: editB }), {})).status, 0);
+  assert.equal((await start(s.e, s.findings, payload(s.file, s.e.cwd, { toolName: "Edit", toolResponse: { ...editC, originalFile: "echo new\necho a\necho b\necho $1\necho c\n" } }), {})).status, 0);
+  assert.equal((await start(s.e, s.findings, payload(s.file, s.e.cwd, { toolName: "Edit", toolResponse: { ...editB, originalFile: "echo a\necho b\necho $1\necho c\n" } }), {})).status, 0);
   const firstRan = await first;
   assert.equal(firstRan.status, 2);
   assert.match(firstRan.stderr, /line3-marker/);
@@ -264,8 +264,25 @@ test("a later edit after a non-parse finding on another line: that finding is st
   await intoHold(s.e);
   writeFileSync(s.file, SH4_FIXED);
   s.setFindings("");
-  await start(s.e, s.findings, payload(s.file, s.e.cwd, { toolName: "Edit", toolResponse: EDIT_L2 }), {});
+  await start(s.e, s.findings, payload(s.file, s.e.cwd, { toolName: "Edit", toolResponse: { ...EDIT_L2, originalFile: SH4 } }), {});
   const firstRan = await first;
   assert.equal(firstRan.status, 2);
   assert.match(firstRan.stderr, /line4-marker/);
+});
+
+test("a change nobody journaled between the held lint and a later Edit: the held finding is reported, not lost", async () => {
+  const s = setup();
+  s.setFindings(FINDING_L2);
+  const first = start(s.e, s.findings, payload(s.file, s.e.cwd), { UNIVERSAL_LINT_SETTLE_MS: "2000" });
+  await intoHold(s.e);
+  // an outside change with no hook (`sed -i`, an unwatched file) puts two lines on top: `echo $1` moves to line 4
+  const shifted = `# header\n# todo\n${SH4}`;
+  writeFileSync(s.file, shifted.replace("# todo", "# done"));
+  s.setFindings("a.sh:4:6: note: line4-marker [SC2086]\n");
+  const editL2 = { structuredPatch: [{ oldStart: 1, oldLines: 3, newStart: 1, newLines: 3, lines: [" # header", "-# todo", "+# done", " echo a"] }], originalFile: shifted };
+  const second = await start(s.e, s.findings, payload(s.file, s.e.cwd, { toolName: "Edit", toolResponse: editL2 }), {});
+  assert.equal(second.status, 0, "line 4 is outside the second edit");
+  const firstRan = await first;
+  assert.equal(firstRan.status, 2);
+  assert.match(firstRan.stderr, /line2-marker/);
 });

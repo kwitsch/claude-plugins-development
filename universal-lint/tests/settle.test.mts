@@ -193,8 +193,9 @@ async function lay(w: ReturnType<typeof world>, later: Array<{ content: string; 
   const after: string[] = [];
   for (const l of later) {
     await sleep(3);
+    const before = after.at(-1) ?? digestOf(SIX);
     writeFileSync(w.file, l.content);
-    assert.ok(recordEdit(w.file, w.real, l.hunks === null ? null : editHunks(edit(l.hunks))));
+    assert.ok(recordEdit(w.file, w.real, l.hunks === null ? null : editHunks(edit(l.hunks)), l.hunks === null ? null : before));
     after.push(digestOf(l.content));
   }
   return { rec, d0: digestOf(SIX), after };
@@ -209,7 +210,7 @@ test("recordEdit writes <key>-<ms>-<pid>.json with the hunks and the digest, no 
   assert.equal(rec.key, hashPath(w.real));
   assert.deepEqual(readdirSync(w.journal), [rec.name]);
   assert.match(rec.name, /^[0-9a-f]{64}-\d{15}-\d+\.json$/);
-  assert.deepEqual(JSON.parse(readFileSync(path.join(w.journal, rec.name), "utf8")), { hunks, digest: digestOf(SIX) });
+  assert.deepEqual(JSON.parse(readFileSync(path.join(w.journal, rec.name), "utf8")), { hunks, digest: digestOf(SIX), before: null });
 });
 
 test("recordEdit prunes entries older than the hook timeout, also temp leftovers, and keeps fresh ones", () => {
@@ -342,6 +343,20 @@ test("settleFindings: records the linter's state already contains are not applie
   assert.deepEqual(await settleFindings(f, w.file, rec, after[0], after[0]), f);
   // a state no record produced: nothing can be said, report
   assert.deepEqual(await settleFindings(f, w.file, rec, digestOf("unknown"), digestOf("unknown")), f);
+});
+
+test("settleFindings: a later Edit cut from content no record holds (unjournaled change in between) means report", async () => {
+  const w = world();
+  const { rec, d0 } = await lay(w, []);
+  await sleep(3);
+  writeFileSync(w.file, SIX.replace("l3", "L3"));
+  assert.ok(recordEdit(w.file, w.real, editHunks(edit(REPLACE_3)), digestOf("shifted by sed -i")));
+  const f = [found(w.proj, [3])];
+  assert.equal(await settleFindings(f, w.file, rec, d0, d0), f);
+  // the same Edit cut from the anchored content drops the finding
+  const v = world();
+  const chained = await lay(v, [{ content: SIX.replace("l3", "L3"), hunks: REPLACE_3 }]);
+  assert.deepEqual(await settleFindings([found(v.proj, [3])], v.file, chained.rec, chained.d0, chained.d0), []);
 });
 
 test("settleFindings: an unreadable journal, a corrupt or an unreadable record means report", async () => {

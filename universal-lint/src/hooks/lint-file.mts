@@ -206,8 +206,8 @@ interface PostToolUseHookInput {
   tool_name?: unknown;
   /** The tool's input; `file_path` names the written file. Absent for non-tool events. */
   tool_input?: { file_path?: unknown };
-  /** The tool's result; `success: false` marks a failed Write/Edit, `structuredPatch` holds the Edit tool's diff hunks. */
-  tool_response?: { success?: boolean; structuredPatch?: unknown };
+  /** The tool's result; `success: false` marks a failed Write/Edit, `structuredPatch` holds the Edit tool's diff hunks, `originalFile` the content they apply to. */
+  tool_response?: { success?: boolean; structuredPatch?: unknown; originalFile?: unknown };
   [key: string]: unknown;
 }
 
@@ -2198,16 +2198,18 @@ function settleDir(): string {
 
 /**
  * Journal one edit of a file for the settle window: `<hashPath(real)>-<ms>-<pid>.json` holding the edit's hunks (null =
- * whole file) and the digest of the file after it, written atomically (temp file + `renameSync`). Older entries
+ * whole file), the digest of the file after it and `before`, the digest of the file the hunks apply to (an Edit's
+ * `originalFile`; null without hunks), written atomically (temp file + `renameSync`). Older entries
  * (name timestamp more than `HOOK_TIMEOUT_MS` ago or ahead, temp leftovers too) are pruned first, so a live reader
  * still finds everything a hook run can need. Fails open to null (the lint then reports at once).
  *
  * @param fp - Lexical path of the edited file (read for the digest).
  * @param real - Real path of the file (the key).
  * @param hunks - The edit's hunks, null when the whole file counts as edited.
+ * @param before - Digest of the content the hunks apply to, or null (unknown, or no hunks).
  * @returns The record handle, or null on any error.
  */
-export function recordEdit(fp: string, real: string, hunks: EditHunk[] | null): EditRecord | null {
+export function recordEdit(fp: string, real: string, hunks: EditHunk[] | null, before?: string | null): EditRecord | null {
   try {
     const dir = settleDir();
     mkdirSync(dir, { recursive: true });
@@ -2217,7 +2219,7 @@ export function recordEdit(fp: string, real: string, hunks: EditHunk[] | null): 
     const key = hashPath(real);
     const name = `${key}-${String(now).padStart(15, "0")}-${process.pid}.json`;
     const tmp = path.join(dir, `${name}.tmp`);
-    writeFileSync(tmp, JSON.stringify({ hunks, digest: fileDigest(fp) }));
+    writeFileSync(tmp, JSON.stringify({ hunks, digest: fileDigest(fp), before: before ?? null }));
     renameSync(tmp, path.join(dir, name));
     return { key, name };
   } catch {
@@ -2234,7 +2236,9 @@ export function recordEdit(fp: string, real: string, hunks: EditHunk[] | null): 
  * Coordinates: the finding's lines are those of the file as the linter read it, whose digest is `d0`. The reference
  * is the last journal record with `digest === d0`; only the records after it are later edits. A file that changed
  * during the lint (`d0 !== d1`), no matching record, no later record, two later records with one digest (a hook read
- * the file after a later edit landed, so the file order of the records may not be the edit order), a missing or
+ * the file after a later edit landed, so the file order of the records may not be the edit order), a later record with
+ * hunks whose `before` is not the digest of the record before it (an unjournaled change in between: its hunks are in
+ * other coordinates), a missing or
  * unreadable journal or record all mean "cannot tell":the findings are returned as they are (fail open, reported). Nothing is held when there is
  * nothing to report, no own record, or nothing the filter could drop (foreign or unlocated findings only).
  *
@@ -2261,7 +2265,7 @@ export async function settleFindings(findings: Finding[], resolved: string, rec:
     const recs = readdirSync(dir)
       .filter((n) => n.startsWith(`${rec.key}-`) && n.endsWith(".json"))
       .sort()
-      .map((n) => JSON.parse(readFileSync(path.join(dir, n), "utf8")) as { hunks: EditHunk[] | null; digest: string });
+      .map((n) => JSON.parse(readFileSync(path.join(dir, n), "utf8")) as { hunks: EditHunk[] | null; digest: string; before?: string | null });
     if (recs.some((r) => r.hunks !== null && !Array.isArray(r.hunks))) return findings;
     let at = -1;
     recs.forEach((r, i) => {
@@ -2270,6 +2274,8 @@ export async function settleFindings(findings: Finding[], resolved: string, rec:
     if (at === -1 || at === recs.length - 1) return findings;
     // A hook journaled after a later edit landed (two later records hold one digest): file order may not be edit order.
     if (new Set(recs.slice(at + 1).map((r) => r.digest)).size < recs.length - at - 1) return findings;
+    // Hunks are in the coordinates of the content they were cut from: a change nobody journaled breaks the chain.
+    for (let i = at + 1; i < recs.length; i++) if (recs[i].hunks !== null && recs[i].before !== recs[i - 1].digest) return findings;
     later = recs.slice(at + 1).map((r) => r.hunks);
   } catch {
     return findings;
@@ -2412,7 +2418,8 @@ function formatFindings(kept: Finding[], hookEventName: string, label: string): 
  * The lint_file tool handler (PostToolUse Write|Edit). Resolves to {} on every guard failure / clean / skip or rejection (fail open); async since F18.
  *
  * @remarks
- * Settle window (F34): the edit is journaled (`recordEdit`, also when the lint is clean), the lint runs between two
+ * Settle window (F34): the edit is journaled (`recordEdit` with the digest of an Edit's `originalFile` as `before`,
+ * also when the lint is clean), the lint runs between two
  * digests of the file (`d0`, `d1`), and its findings are held and filtered by `settleFindings` before they are
  * formatted. Takes no slot or lock.
  *
@@ -2425,7 +2432,9 @@ export async function lintFileHandler(args: PostToolUseHookInput, scoped: { fp: 
     if (!scoped || !resolved) return {};
     const ranges = editRanges(args);
     if (ranges?.length === 0) return {}; // the Edit changed nothing
-    const rec = recordEdit(resolved, scoped.real, editHunks(args));
+    const original = args.tool_response?.originalFile;
+    const before = typeof original === "string" ? createHash("sha256").update(original).digest("base64") : null;
+    const rec = recordEdit(resolved, scoped.real, editHunks(args), before);
     const d0 = digestOrNull(resolved);
     // `await` inside the try is load-bearing: a rejected promise must land in the catch (fail open).
     const kept = await lintResolved(resolved, args.cwd, ranges, "PostToolUse");

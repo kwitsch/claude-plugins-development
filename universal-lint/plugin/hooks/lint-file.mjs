@@ -1166,7 +1166,7 @@ function digestOrNull(fp) {
 function settleDir() {
 	return path.resolve(process.env.CLAUDE_PLUGIN_DATA || tmpdir(), "settle");
 }
-export function recordEdit(fp, real, hunks) {
+export function recordEdit(fp, real, hunks, before) {
 	try {
 		const dir = settleDir();
 		mkdirSync(dir, { recursive: true });
@@ -1177,7 +1177,8 @@ export function recordEdit(fp, real, hunks) {
 		const tmp = path.join(dir, `${name}.tmp`);
 		writeFileSync(tmp, JSON.stringify({
 			hunks,
-			digest: fileDigest(fp)
+			digest: fileDigest(fp),
+			before: before ?? null
 		}));
 		renameSync(tmp, path.join(dir, name));
 		return {
@@ -1206,6 +1207,7 @@ export async function settleFindings(findings, resolved, rec, d0, d1) {
 		});
 		if (at === -1 || at === recs.length - 1) return findings;
 		if (new Set(recs.slice(at + 1).map((r) => r.digest)).size < recs.length - at - 1) return findings;
+		for (let i = at + 1; i < recs.length; i++) if (recs[i].hunks !== null && recs[i].before !== recs[i - 1].digest) return findings;
 		later = recs.slice(at + 1).map((r) => r.hunks);
 	} catch {
 		return findings;
@@ -1296,7 +1298,9 @@ export async function lintFileHandler(args, scoped = postToolScope(args)) {
 		if (!scoped || !resolved) return {};
 		const ranges = editRanges(args);
 		if (ranges?.length === 0) return {};
-		const rec = recordEdit(resolved, scoped.real, editHunks(args));
+		const original = args.tool_response?.originalFile;
+		const before = typeof original === "string" ? createHash("sha256").update(original).digest("base64") : null;
+		const rec = recordEdit(resolved, scoped.real, editHunks(args), before);
 		const d0 = digestOrNull(resolved);
 		const kept = await lintResolved(resolved, args.cwd, ranges, "PostToolUse");
 		const d1 = kept.length > 0 ? digestOrNull(resolved) : null;
