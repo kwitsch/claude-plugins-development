@@ -267,6 +267,16 @@ test("An unsure Jev hands the step to Claude, with effort lowered for an easy tu
   expect(seen[0]).toMatchObject({ effort: "low", model: "claude-opus-5-5" });
 });
 
+test("subagents: false leaves a subagent step to Claude without asking Jev", { options: { subagents: false } }, async ($, on) => {
+  const seen: unknown[] = [];
+  const { calls } = setup(on, { messages: [user("what does this project do?")], jev: byId({ difficulty: easy, effort: easy }) });
+  claudeBeneath(on, seen);
+
+  await drain($.turn.step({ ...step, agentId: "a1" }));
+  expect(calls()).toBe(0);
+  expect(seen[0]).toMatchObject({ effort: "high", model: "claude-opus-5-5" });
+});
+
 test("model routing moves a trivial turn to Haiku", { options: { routing: "model" } }, async ($, on) => {
   const seen: unknown[] = [];
   setup(on, { messages: [user("hi, what time zone is UTC+2?")], jev: byId({ difficulty: easy, effort: easy }) });
