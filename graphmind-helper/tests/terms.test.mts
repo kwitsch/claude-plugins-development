@@ -96,5 +96,6 @@ test("resolveTools finds the plugin's own server and a setup server, and needs a
   assert.equal(resolveTools(setup)?.search, "mcp__graphmind__gm_search");
   assert.equal(resolveTools([...setup, ...own])?.map, "mcp__plugin_graphmind-helper_graphmind__gm_map");
   assert.equal(resolveTools(own.slice(1)), undefined);
-  assert.equal(resolveTools([{ name: "mcp__other__gm_status" }]), undefined);
+  const other = ["status", "map", "memory_list", "search"].map((t) => ({ name: `mcp__other__gm_${t}` }));
+  assert.equal(resolveTools(other), undefined);
 });
