@@ -49,6 +49,13 @@ const DENSITY_KEY = "density";
 const STORE_WAIT_MS = 1e3;
 const CUT_MARGIN_TOKENS = 64;
 const CONTEXT_ERROR = "exceed_context_size_error";
+const OPTIMISTIC_FACTOR = 2;
+const LATENCY_LINEAR_MS = .7;
+const LATENCY_QUADRATIC_MS = 18e-6;
+const LATENCY_MARGIN = 1.3;
+const MIN_BUDGET_TOKENS = 1e3;
+const HAIKU_MAX_CHARS = 15e4;
+const HEAD_SHARE = .6;
 function isTooBig(r) {
 	return isRecord(r.tooBig);
 }
@@ -488,6 +495,33 @@ async function askHaiku($, tool, state, questions, timeoutMs, signal) {
 		if (onAbort) signal.removeEventListener("abort", onAbort);
 	}
 }
+function questionsBody(tool, questions) {
+	return Object.fromEntries(questions.map((q, i) => [questionId(tool, i), q]));
+}
+function questionId(tool, i) {
+	return tool === "batch" ? `q${i}` : QUESTION_ID;
+}
+function timeBudgetTokens(timeoutMs) {
+	const a = LATENCY_LINEAR_MS * LATENCY_MARGIN;
+	const b = LATENCY_QUADRATIC_MS * LATENCY_MARGIN;
+	return Math.max(MIN_BUDGET_TOKENS, Math.floor((-a + Math.sqrt(a * a + 4 * b * timeoutMs)) / (2 * b)));
+}
+function estimateTokens(chars, density) {
+	return Math.ceil(chars / density) + PROMPT_OVERHEAD_TOKENS;
+}
+function cutState(state, keep) {
+	if (state.length <= keep) return state;
+	const headLength = Math.round(keep * HEAD_SHARE);
+	const tailLength = keep - headLength;
+	let head = state.slice(0, headLength);
+	if (/[\uD800-\uDBFF]$/.test(head)) head = head.slice(0, -1);
+	let tail = tailLength > 0 ? state.slice(-tailLength) : "";
+	if (/^[\uDC00-\uDFFF]/.test(tail)) tail = tail.slice(1);
+	return `${head}\n[... ${state.length - head.length - tail.length} characters omitted ...]\n${tail}`;
+}
+function stateForBudget(budget, density, questionsChars) {
+	return Math.max(0, Math.floor((budget - PROMPT_OVERHEAD_TOKENS - CUT_MARGIN_TOKENS) * density) - questionsChars);
+}
 function contextRefusal(text) {
 	const body = json(text);
 	const error = isRecord(body) ? body["error"] : undefined;
@@ -509,8 +543,8 @@ function tooBigError(tool, refused) {
 	return fail(tool, `state too large for System One: the request has ${refused.tokens} tokens, the limit is ${refused.limit}; shorten the state to about ${aim} characters`);
 }
 async function ask($, tool, state, questions, env, timeoutMs, signal, onSample) {
-	const ids = questions.map((_, i) => tool === "batch" ? `q${i}` : QUESTION_ID);
-	const questionsObject = Object.fromEntries(ids.map((id, i) => [id, questions[i]]));
+	const ids = questions.map((_, i) => questionId(tool, i));
+	const questionsObject = questionsBody(tool, questions);
 	const questionsChars = JSON.stringify(questionsObject).length;
 	const chars = state.length + questionsChars;
 	const target = endpoint(env.jevUrl, env.base);
@@ -587,6 +621,33 @@ async function ask($, tool, state, questions, env, timeoutMs, signal, onSample) 
 		if (onAbort) signal.removeEventListener("abort", onAbort);
 	}
 }
+function preflightError(tool, estimate, budget, limit, timeoutMs, aim) {
+	const aimHundreds = Math.floor(aim / 100) * 100;
+	if (budget >= limit) return fail(tool, `state too large for System One: at least ${estimate} tokens, the limit is ${limit}; shorten the state to about ${aimHundreds} characters`);
+	return fail(tool, `state too large for the timeout of ${timeoutMs / 1e3} s: at least ${estimate} tokens, about ${budget} fit; shorten the state to about ${aimHundreds} characters or raise the timeout (at most ${MAX_TIMEOUT_S} s)`);
+}
+async function answerJev($, tool, input, mode, env, timeoutMs, signal, know) {
+	const send = (state) => ask($, tool, state, input.questions, env, timeoutMs, signal, (chars, tokens) => learn($, know, chars, tokens));
+	const questionsChars = JSON.stringify(questionsBody(tool, input.questions)).length;
+	const limit = know.nctx - 1;
+	const budget = Math.min(limit, timeBudgetTokens(timeoutMs));
+	const estimate = estimateTokens(input.state.length + questionsChars, Math.min(MAX_DENSITY, OPTIMISTIC_FACTOR * know.density));
+	let refused;
+	if (estimate <= budget) {
+		const first = await send(input.state);
+		if (!isTooBig(first)) return first;
+		know.nctx = first.tooBig.limit + 1;
+		refused = first.tooBig;
+		if (signal.aborted) return fail(tool, "the call was abandoned");
+	}
+	if (mode === "error") return refused ? tooBigError(tool, refused) : preflightError(tool, estimate, budget, limit, timeoutMs, stateForBudget(budget, know.density, questionsChars));
+	if (mode === "haiku") return await askHaiku($, tool, cutState(input.state, HAIKU_MAX_CHARS), input.questions, timeoutMs, signal);
+	const byBudget = stateForBudget(budget, know.density, questionsChars);
+	const second = await send(cutState(input.state, refused ? Math.min(byBudget, stateThatFits(refused)) : byBudget));
+	if (!isTooBig(second)) return second;
+	know.nctx = second.tooBig.limit + 1;
+	return tooBigError(tool, second.tooBig);
+}
 async function registerOne($, st, type) {
 	try {
 		const r = await $.tool.register({
@@ -634,6 +695,8 @@ async function ensureTools($, st, ms) {
 }
 export function register(on, options) {
 	const fallbackS = seconds(options?.["timeout"]) ?? DEFAULT_TIMEOUT_S;
+	const optionOverflow = options?.["overflow"];
+	const defaultOverflow = isOverflow(optionOverflow) ? optionOverflow : DEFAULT_OVERFLOW;
 	const names = new Map(TOOLS.map((t) => [TOOL_PREFIX + t, t]));
 	const st = {
 		names,
@@ -678,15 +741,12 @@ export function register(on, options) {
 			if (!key && !base && !jevUrl) return await askHaiku($, type, input.state, input.questions, timeoutMs, next.signal);
 			await loadKnowledge($, know);
 			if (next.signal.aborted) return fail(type, "the call was abandoned");
-			const answer = await ask($, type, input.state, input.questions, {
+			return await answerJev($, type, input, input.overflow ?? defaultOverflow, {
 				key,
 				base,
 				jevUrl,
 				model
-			}, timeoutMs, next.signal, (chars, tokens) => learn($, know, chars, tokens));
-			if (!isTooBig(answer)) return answer;
-			know.nctx = answer.tooBig.limit + 1;
-			return tooBigError(type, answer.tooBig);
+			}, timeoutMs, next.signal, know);
 		} catch (err) {
 			return fail(type, message(err));
 		}

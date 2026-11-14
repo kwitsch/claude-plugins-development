@@ -233,6 +233,229 @@ test("a rejection teaches the density from its exact token count", async ($, on)
   expect((store.sets[0][1] as { v: number }).v).toBeCloseTo(smoothed(3, promptChars(fetched[0]) / (20000 - 26)), 6);
 });
 
+// --- Phase 4: the preflight and the overflow modes ---------------------------------------------------------------------
+
+/** The tokens a timeout in seconds allows: the positive root of 1.3 * (0.7 t + 1.8e-5 t^2) = ms, as the plugin computes it. */
+const budgetTokens = (seconds: number) => {
+  const a = 0.7 * 1.3;
+  const b = 1.8e-5 * 1.3;
+  return Math.floor((-a + Math.sqrt(a * a + 4 * b * seconds * 1000)) / (2 * b));
+};
+
+/** The characters of the one noul question in the request body (`{"answer":{...}}`). */
+const NOUL_QUESTION_CHARS = JSON.stringify({ answer: { type: "noul", instructions: BASE["noul"]["instructions"] } }).length;
+
+/** The longest state whose optimistic estimate (state + question) still fits `tokens` at `density` characters per token. */
+const edgeState = (tokens: number, density: number) => (tokens - 26) * density - NOUL_QUESTION_CHARS;
+
+for (const seconds of [4, 20, 30]) {
+  test(`at ${seconds} s the preflight sends a state at the time budget and refuses one character more`, async ($, on) => {
+    const edge = Math.floor(edgeState(budgetTokens(seconds), 6));
+    const fits = setup(on);
+    expect((await call($, "noul", { state: "a".repeat(edge), timeout: seconds, overflow: "error" })).deny).toBeUndefined();
+    expect(fits.fetched).toHaveLength(1);
+  });
+  test(`at ${seconds} s a state one character over the time budget is refused without a request`, async ($, on) => {
+    const edge = Math.floor(edgeState(budgetTokens(seconds), 6));
+    const { fetched } = setup(on);
+    const r = await call($, "noul", { state: "a".repeat(edge + 1), timeout: seconds, overflow: "error" });
+    expect(fetched).toHaveLength(0);
+    expect(r.deny).toMatch(new RegExp(`^noul: state too large for the timeout of ${seconds} s: at least ${budgetTokens(seconds) + 1} tokens, about ${budgetTokens(seconds)} fit; shorten the state to about \\d+ characters or raise the timeout`));
+  });
+}
+
+test("a timeout below the smallest budget never refuses a small state (the call just times out like before)", async ($, on) => {
+  const { fetched } = setup(on);
+  const r = await call($, "noul", { state: "Hello there!", timeout: 0.05, overflow: "error" });
+  expect(r.deny).toBeUndefined();
+  expect(fetched).toHaveLength(1);
+});
+
+test("the questions count towards the preflight", async ($, on) => {
+  // 100 options of 100 characters add about 11 KB to the prompt: a state that fits alone no longer does.
+  const criteria = Object.fromEntries(Array.from({ length: 100 }, (_, i) => [`option-${i}`, "d".repeat(100)]));
+  const state = "a".repeat(Math.floor(edgeState(budgetTokens(4), 6)) - 100);
+  const { fetched } = setup(on);
+  const alone = await call($, "noul", { state, timeout: 4, overflow: "error" });
+  expect(alone.deny).toBeUndefined();
+  const withQuestions = await call($, "choice", { state, criteria, timeout: 4, overflow: "error" });
+  expect(withQuestions.deny).toMatch(/^choice: state too large for the timeout of 4 s/);
+  expect(fetched).toHaveLength(1);
+});
+
+test("a learned dense density tightens the edge, a learned sparse one widens it (capped at 8)", async ($, on) => {
+  const dense = setup(on, { store: { density: { v: 1.2, n: 9 } } });
+  // Optimistic density 2.4: a state that default 3.0 (optimistic 6) sends is refused.
+  const r = await call($, "noul", { state: "a".repeat(Math.floor(edgeState(budgetTokens(20), 6))), timeout: 20, overflow: "error" });
+  expect(r.deny).toMatch(/^noul: state too large for the timeout of 20 s/);
+  expect(dense.fetched).toHaveLength(0);
+});
+
+test("a learned sparse density widens the edge up to 8 characters per token", async ($, on) => {
+  const { fetched } = setup(on, { store: { density: { v: 7.9, n: 9 } } });
+  const edge = Math.floor(edgeState(budgetTokens(20), 8));
+  expect((await call($, "noul", { state: "a".repeat(edge), timeout: 20, overflow: "error" })).deny).toBeUndefined();
+  expect(fetched).toHaveLength(1);
+  const over = await call($, "noul", { state: "a".repeat(edge + 1), timeout: 20, overflow: "error" });
+  expect(over.deny).toMatch(/^noul: state too large/);
+  expect(fetched).toHaveLength(1);
+});
+
+test("the context window the server reported replaces 32768 in the next preflight", async ($, on) => {
+  const { fetched } = setup(on, { replies: [tooBig(5000, 4096), okReply()] });
+  // 14922 prompt characters over 5000 - 26 tokens is exactly 3.0 per token: the refusal leaves the learned density where it was.
+  const first = await call($, "noul", { state: "a".repeat(14_922 - NOUL_QUESTION_CHARS), timeout: 30, overflow: "error" });
+  expect(first.deny).toContain("the limit is 4095;");
+  // 4095 tokens at the optimistic 6 characters per token is the edge now; the time budget at 30 s (21 k) no longer decides.
+  const edge = Math.floor(edgeState(4095, 6));
+  const inside = await call($, "noul", { state: "a".repeat(edge), timeout: 30, overflow: "error" });
+  expect(inside.deny).toBeUndefined();
+  const outside = await call($, "noul", { state: "a".repeat(edge + 1), timeout: 30, overflow: "error" });
+  expect(outside.deny).toMatch(/^noul: state too large for System One: at least 4096 tokens, the limit is 4095; shorten the state to about \d+ characters$/);
+  expect(fetched).toHaveLength(2);
+});
+
+const HUGE = "a".repeat(100_000);
+
+test("without an option or an input the overflow mode is haiku", async ($, on) => {
+  const answers = { answers: { answer: { type: "noul", noul: 0.5 } } };
+  const t = setup(on);
+  const asked: Record<string, unknown>[] = [];
+  on("model.complete", (_$, e) => (asked.push(e), { value: { isAnswered: true, text: JSON.stringify(answers), usage: {} } }));
+  expect((await call($, "noul", { state: HUGE, timeout: 20 })).deny).toBeUndefined();
+  expect(asked).toHaveLength(1);
+  expect(t.fetched).toHaveLength(0);
+});
+
+test("the overflow option is used when the call names none, and the call's own value wins", { options: { overflow: "error" } }, async ($, on) => {
+  const { fetched } = setup(on);
+  const withOption = await call($, "noul", { state: HUGE, timeout: 20 });
+  expect(withOption.deny).toMatch(/^noul: state too large for the timeout/);
+  const own = await call($, "noul", { state: HUGE, timeout: 20, overflow: "truncate" });
+  expect(own.deny).toBeUndefined();
+  expect(fetched).toHaveLength(1);
+});
+
+for (const bad of ["fail", 5, null]) {
+  test(`an invalid overflow option ${JSON.stringify(bad)} counts as haiku`, { options: { overflow: bad } }, async ($, on) => {
+    const t = setup(on);
+    const asked: unknown[] = [];
+    on("model.complete", (_$, e) => (asked.push(e), { value: { isAnswered: true, text: JSON.stringify({ answers: { answer: { type: "noul", noul: 0.5 } } }), usage: {} } }));
+    await call($, "noul", { state: HUGE, timeout: 20 });
+    expect(asked).toHaveLength(1);
+    expect(t.fetched).toHaveLength(0);
+  });
+}
+
+test("haiku mode answers an oversized call through the model with the whole state and sends no request", async ($, on) => {
+  const { fetched } = setup(on);
+  const asked: Record<string, unknown>[] = [];
+  on("model.complete", (_$, e) => (asked.push(e), { value: { isAnswered: true, text: JSON.stringify({ answers: { answer: { type: "noul", noul: 0.9 } } }), usage: {} } }));
+  const r = await call($, "noul", { state: HUGE, timeout: 20, overflow: "haiku" });
+  expect(JSON.parse(r.result ?? "null")).toMatchObject({ type: "noul" });
+  expect(fetched).toHaveLength(0);
+  expect(asked).toHaveLength(1);
+  expect(String(asked[0]["prompt"])).toContain(HUGE);
+});
+
+test("haiku mode cuts a state over 150000 characters, a state of exactly 150000 is passed whole", async ($, on) => {
+  setup(on);
+  const asked: Record<string, unknown>[] = [];
+  on("model.complete", (_$, e) => (asked.push(e), { value: { isAnswered: true, text: JSON.stringify({ answers: { answer: { type: "noul", noul: 0.9 } } }), usage: {} } }));
+  await call($, "noul", { state: "b".repeat(150_000), timeout: 20, overflow: "haiku" });
+  expect(String(asked[0]["prompt"])).toContain("b".repeat(150_000));
+  expect(String(asked[0]["prompt"])).not.toContain("omitted");
+  await call($, "noul", { state: "b".repeat(150_001), timeout: 20, overflow: "haiku" });
+  expect(String(asked[1]["prompt"])).toContain("characters omitted");
+  expect(String(asked[1]["prompt"]).length).toBeLessThan(150_000 + 1000);
+});
+
+test("haiku mode passes Haiku's own failure on", async ($, on) => {
+  setup(on);
+  on("model.complete", () => ({ value: { isAnswered: false, reason: "overloaded" } }));
+  const r = await call($, "noul", { state: HUGE, timeout: 20, overflow: "haiku" });
+  expect(r.deny).toBe("noul: fallback: overloaded");
+});
+
+/** The cut a state of `total` characters gets when `keep` of them stay: 60 % head, 40 % tail and the marker between. */
+const cut = (state: string, keep: number) => {
+  const head = Math.round(keep * 0.6);
+  return `${state.slice(0, head)}\n[... ${state.length - keep} characters omitted ...]\n${state.slice(state.length - (keep - head))}`;
+};
+
+test("truncate mode cuts the middle of an oversized state to what the time budget allows and sends one request", async ($, on) => {
+  const state = "A".repeat(60_000) + "B".repeat(40_000);
+  const { fetched } = setup(on);
+  const r = await call($, "noul", { state, timeout: 20, overflow: "truncate" });
+  expect(r.deny).toBeUndefined();
+  expect(fetched).toHaveLength(1);
+  // The characters kept: the budget minus overhead and margin at the learned 3.0 per token, minus the question.
+  const keep = Math.floor((budgetTokens(20) - 26 - 64) * 3) - NOUL_QUESTION_CHARS;
+  expect(fetched[0].body.state).toBe(cut(state, keep));
+});
+
+test("truncate mode sends a state that fits unchanged", async ($, on) => {
+  const { fetched } = setup(on);
+  await call($, "noul", { state: "Hello there!", timeout: 20, overflow: "truncate" });
+  expect(fetched[0].body.state).toBe("Hello there!");
+});
+
+test("truncate mode never leaves half of a surrogate pair at a cut", async ($, on) => {
+  // A leading character shifts the pairs by one unit: whatever the cut offsets, one of the two states is cut inside a pair.
+  const pairs = "\u{1F600}".repeat(60_000);
+  const { fetched } = setup(on);
+  for (const state of [pairs, `x${pairs}`]) {
+    await call($, "noul", { state, timeout: 20, overflow: "truncate" });
+  }
+  expect(fetched).toHaveLength(2);
+  for (const f of fetched) {
+    expect(f.body.state).toContain("characters omitted");
+    expect(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/.test(f.body.state)).toBe(false);
+  }
+});
+
+test("truncate mode with a state that cannot keep a character still sends the marker alone", async ($, on) => {
+  // 1 s budget floor of 1000 tokens: the 255 long options leave no room for any state at all.
+  const criteria = Object.fromEntries(Array.from({ length: 255 }, (_, i) => [`option-${i}`, "d".repeat(200)]));
+  const { fetched } = setup(on, { replies: [okReply()] });
+  await call($, "choice", { state: "x".repeat(20_000), criteria, timeout: 1, overflow: "truncate" });
+  expect(fetched).toHaveLength(1);
+  expect(fetched[0].body.state).toMatch(/^\n\[\.\.\. 20000 characters omitted \.\.\.\]\n$/);
+});
+
+test("after the server's refusal truncate retries once with the exact cut and answers", async ($, on) => {
+  const { fetched } = setup(on, { replies: [tooBig(40025, 8192), okReply()] });
+  const state = "A".repeat(60_000) + "B".repeat(40_000);
+  const r = await call($, "noul", { state, timeout: 30, overflow: "truncate" });
+  expect(r.deny).toBeUndefined();
+  expect(fetched).toHaveLength(2);
+  const keep = Math.max(0, Math.floor(((state.length + NOUL_QUESTION_CHARS) * (8191 - 26 - 64)) / (40025 - 26)) - NOUL_QUESTION_CHARS);
+  expect(fetched[1].body.state).toBe(cut(state, keep));
+});
+
+test("a second refusal after the retry is answered with the numbers and nothing is sent a third time", async ($, on) => {
+  const { fetched } = setup(on, { replies: [tooBig(40025, 8192), tooBig(9000, 8192)] });
+  const r = await call($, "noul", { state: "a".repeat(100_000), timeout: 30, overflow: "truncate" });
+  expect(fetched).toHaveLength(2);
+  expect(r.deny).toMatch(/^noul: state too large for System One: the request has 9000 tokens, the limit is 8191; shorten the state to about \d+ characters$/);
+});
+
+test("after the server's refusal haiku answers through the model", async ($, on) => {
+  const { fetched } = setup(on, { replies: [tooBig(40025)] });
+  on("model.complete", () => ({ value: { isAnswered: true, text: JSON.stringify({ answers: { answer: { type: "noul", noul: 0.9 } } }), usage: {} } }));
+  const r = await call($, "noul", { state: "a".repeat(100_000), timeout: 30, overflow: "haiku" });
+  expect(JSON.parse(r.result ?? "null")).toMatchObject({ type: "noul" });
+  expect(fetched).toHaveLength(1);
+});
+
+test("a batch call is cut and answered like a single tool, with its answer shape unchanged", async ($, on) => {
+  const replies = [httpReply(200, JSON.stringify({ answers: { q0: { type: "noul", noul: 0.9 }, q1: { type: "noul", noul: 0.1 } }, usage: {} }))];
+  const { fetched } = setup(on, { replies });
+  const r = await call($, "batch", { state: HUGE, timeout: 20, overflow: "truncate", questions: [{ type: "noul", instructions: "a?" }, { type: "noul", instructions: "b?" }] });
+  expect(JSON.parse(r.result ?? "null")).toEqual([{ type: "noul", noul: 0.9 }, { type: "noul", noul: 0.1 }]);
+  expect(fetched[0].body.state).toContain("characters omitted");
+});
+
 for (const [name, text] of [["another error type", JSON.stringify({ error: { code: 400, type: "invalid_request_error", message: "bad request", n_prompt_tokens: 40025, n_ctx: 32768 } })], ["no token counts", JSON.stringify({ error: { code: 400, type: "exceed_context_size_error", message: "too big" } })], ["a non-numeric token count", JSON.stringify({ error: { code: 400, type: "exceed_context_size_error", message: "too big", n_prompt_tokens: "40025", n_ctx: 32768 } })], ["not JSON", "<html>400</html>"]] as const) {
   test(`a 400 with ${name} keeps the generic HTTP error text`, async ($, on) => {
     setup(on, { replies: [httpReply(400, text)] });

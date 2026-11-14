@@ -273,6 +273,31 @@ const CUT_MARGIN_TOKENS = 64;
 /** The `error.type` System One answers a prompt over its context window with (HTTP 400). */
 const CONTEXT_ERROR = "exceed_context_size_error";
 
+/** The reject test assumes at most this many times the learned characters per token (capped at {@link MAX_DENSITY}): a call is refused before sending only when even this optimistic estimate does not fit. */
+const OPTIMISTIC_FACTOR = 2;
+
+/**
+ * System One's latency in ms for a prompt of `t` tokens: `LATENCY_LINEAR_MS * t + LATENCY_QUADRATIC_MS * t^2`, times
+ * {@link LATENCY_MARGIN}. Measured live 2026-11-14 for model `d1-3b` on an idle endpoint (4k tokens 2.9 s, 16k 15 s, 28k 35 s,
+ * 32767 tokens 42 s; held-out points within 0.9 to 1.3 of the fit).
+ */
+const LATENCY_LINEAR_MS = 0.7;
+
+/** The quadratic term of the latency model, see {@link LATENCY_LINEAR_MS}. */
+const LATENCY_QUADRATIC_MS = 1.8e-5;
+
+/** The safety factor of the latency model: the measured spread was up to 1.31. */
+const LATENCY_MARGIN = 1.3;
+
+/** The smallest token budget a timeout gives: a smaller timeout is the caller's choice (a test, a probe), not a size problem, so the call times out like before instead of being refused. */
+const MIN_BUDGET_TOKENS = 1000;
+
+/** The most characters of a state handed to Haiku: its window (200k tokens) at the worst one token per UTF-16 unit. */
+const HAIKU_MAX_CHARS = 150_000;
+
+/** The share of the kept characters of a cut state that comes from its start (the rest is its end). */
+const HEAD_SHARE = 0.6;
+
 /** What a module instance knows about System One's size limits; learned from answers, the density kept across sessions. */
 type Knowledge = {
   /** Learned characters per token. */
@@ -902,6 +927,82 @@ async function askHaiku($: Engine, tool: ToolName, state: string, questions: Que
 }
 
 /**
+ * The questions as the request body carries them: keyed `q0`, `q1`, ... for `batch`, by {@link QUESTION_ID} for a single tool.
+ *
+ * @param tool - The tool called.
+ * @param questions - The questions, in input order.
+ * @returns The `questions` object of the request body (the answers come back under the same keys).
+ */
+function questionsBody(tool: ToolName, questions: Question[]): Record<string, Question> {
+  return Object.fromEntries(questions.map((q, i) => [questionId(tool, i), q]));
+}
+
+/**
+ * The key of question `i` in the request and of its answer in the response.
+ *
+ * @param tool - The tool called.
+ * @param i - The question's index.
+ * @returns `q<i>` for `batch`, {@link QUESTION_ID} otherwise.
+ */
+function questionId(tool: ToolName, i: number): string {
+  return tool === "batch" ? `q${i}` : QUESTION_ID;
+}
+
+/**
+ * The tokens a timeout allows: the positive root of the latency model (see {@link LATENCY_LINEAR_MS}), at least {@link MIN_BUDGET_TOKENS}.
+ *
+ * @param timeoutMs - The request timeout in milliseconds.
+ * @returns Whole tokens.
+ */
+function timeBudgetTokens(timeoutMs: number): number {
+  const a = LATENCY_LINEAR_MS * LATENCY_MARGIN;
+  const b = LATENCY_QUADRATIC_MS * LATENCY_MARGIN;
+  return Math.max(MIN_BUDGET_TOKENS, Math.floor((-a + Math.sqrt(a * a + 4 * b * timeoutMs)) / (2 * b)));
+}
+
+/**
+ * The tokens of a prompt of `chars` characters at `density` characters per token, plus the fixed overhead.
+ *
+ * @param chars - The characters of the prompt.
+ * @param density - Characters per token.
+ * @returns Whole tokens.
+ */
+function estimateTokens(chars: number, density: number): number {
+  return Math.ceil(chars / density) + PROMPT_OVERHEAD_TOKENS;
+}
+
+/**
+ * Cuts the middle out of a state: {@link HEAD_SHARE} of `keep` from its start, the rest from its end, with a marker
+ * naming what was dropped. Measured in UTF-16 units (what the token estimate counts); a surrogate pair is never split.
+ *
+ * @param state - The text.
+ * @param keep - How many characters of it stay (at least 0).
+ * @returns The state itself when it is not longer than `keep`, else head, marker and tail.
+ */
+function cutState(state: string, keep: number): string {
+  if (state.length <= keep) return state;
+  const headLength = Math.round(keep * HEAD_SHARE);
+  const tailLength = keep - headLength;
+  let head = state.slice(0, headLength);
+  if (/[\uD800-\uDBFF]$/.test(head)) head = head.slice(0, -1);
+  let tail = tailLength > 0 ? state.slice(-tailLength) : "";
+  if (/^[\uDC00-\uDFFF]/.test(tail)) tail = tail.slice(1);
+  return `${head}\n[... ${state.length - head.length - tail.length} characters omitted ...]\n${tail}`;
+}
+
+/**
+ * The characters of the state that fit `budget` tokens at the learned density, with the margin kept free.
+ *
+ * @param budget - The tokens the prompt may have.
+ * @param density - Learned characters per token.
+ * @param questionsChars - The characters of the questions JSON.
+ * @returns Whole characters, at least 0.
+ */
+function stateForBudget(budget: number, density: number, questionsChars: number): number {
+  return Math.max(0, Math.floor((budget - PROMPT_OVERHEAD_TOKENS - CUT_MARGIN_TOKENS) * density) - questionsChars);
+}
+
+/**
  * Reads System One's refusal of a prompt over its context window: HTTP 400, `error.type` `exceed_context_size_error`,
  * with the exact token count of the prompt and the context size as whole numbers.
  *
@@ -959,8 +1060,8 @@ function tooBigError(tool: ToolName, refused: TooBig["tooBig"]): ToolResult {
  */
 async function ask($: Engine, tool: ToolName, state: string, questions: Question[], env: Env, timeoutMs: number, signal: AbortSignal, onSample: (chars: number, tokens: unknown) => void): Promise<ToolResult | TooBig> {
   // The id of each question in the request and of its answer in the response.
-  const ids = questions.map((_, i) => (tool === "batch" ? `q${i}` : QUESTION_ID));
-  const questionsObject = Object.fromEntries(ids.map((id, i) => [id, questions[i]]));
+  const ids = questions.map((_, i) => questionId(tool, i));
+  const questionsObject = questionsBody(tool, questions);
   // The prompt the server tokenizes is the state plus the questions: both count for the density and the limit.
   const questionsChars = JSON.stringify(questionsObject).length;
   const chars = state.length + questionsChars;
@@ -1032,6 +1133,62 @@ async function ask($: Engine, tool: ToolName, state: string, questions: Question
     timer?.cancel();
     if (onAbort) signal.removeEventListener("abort", onAbort); // a signal shared by many calls must not collect listeners
   }
+}
+
+/**
+ * The refusal a tool answers when the preflight finds the prompt too large and the overflow mode is `error`: nothing was sent.
+ *
+ * @param tool - The tool called.
+ * @param estimate - The optimistic token estimate of the prompt (a lower bound).
+ * @param budget - The tokens the prompt may have: the smaller of the server's limit and what the timeout allows.
+ * @param limit - The server's limit in tokens (its `n_ctx` minus one).
+ * @param timeoutMs - The request timeout.
+ * @param aim - The state size to aim for, in characters.
+ * @returns The error answer; it names the timeout when the timeout, not the server's limit, set the budget.
+ */
+function preflightError(tool: ToolName, estimate: number, budget: number, limit: number, timeoutMs: number, aim: number): ToolResult {
+  const aimHundreds = Math.floor(aim / 100) * 100;
+  if (budget >= limit) return fail(tool, `state too large for System One: at least ${estimate} tokens, the limit is ${limit}; shorten the state to about ${aimHundreds} characters`);
+  return fail(tool, `state too large for the timeout of ${timeoutMs / 1000} s: at least ${estimate} tokens, about ${budget} fit; shorten the state to about ${aimHundreds} characters or raise the timeout (at most ${MAX_TIMEOUT_S} s)`);
+}
+
+/**
+ * Answers one call through System One, reacting to a prompt that cannot work: before sending (the optimistic estimate
+ * does not fit the budget the limit and the timeout give) or after the server's refusal (its exact count).
+ *
+ * @param $ - The engine.
+ * @param tool - The tool called.
+ * @param input - The validated state and questions.
+ * @param mode - What to do with a prompt that does not fit: refuse with the numbers, cut the state (one retry after a refusal), or ask Haiku.
+ * @param env - The env values, trimmed.
+ * @param timeoutMs - The request timeout.
+ * @param signal - Aborts when the call is abandoned.
+ * @param know - What the module learned about the size limits; updated.
+ * @returns The tool result.
+ */
+async function answerJev($: Engine, tool: ToolName, input: { state: string; questions: Question[] }, mode: Overflow, env: Env, timeoutMs: number, signal: AbortSignal, know: Knowledge): Promise<ToolResult> {
+  const send = (state: string) => ask($, tool, state, input.questions, env, timeoutMs, signal, (chars, tokens) => learn($, know, chars, tokens));
+  const questionsChars = JSON.stringify(questionsBody(tool, input.questions)).length;
+  const limit = know.nctx - 1;
+  const budget = Math.min(limit, timeBudgetTokens(timeoutMs));
+  // Only what does not fit even at an optimistic density is refused before sending: a wrong refusal costs a valid call, a late one a fast 400.
+  const estimate = estimateTokens(input.state.length + questionsChars, Math.min(MAX_DENSITY, OPTIMISTIC_FACTOR * know.density));
+  let refused: TooBig["tooBig"] | undefined;
+  if (estimate <= budget) {
+    const first = await send(input.state);
+    if (!isTooBig(first)) return first;
+    know.nctx = first.tooBig.limit + 1;
+    refused = first.tooBig;
+    if (signal.aborted) return fail(tool, "the call was abandoned");
+  }
+  if (mode === "error") return refused ? tooBigError(tool, refused) : preflightError(tool, estimate, budget, limit, timeoutMs, stateForBudget(budget, know.density, questionsChars));
+  if (mode === "haiku") return await askHaiku($, tool, cutState(input.state, HAIKU_MAX_CHARS), input.questions, timeoutMs, signal);
+  // truncate: what the time budget allows at the learned density, and after a refusal also what the server's exact count allows
+  const byBudget = stateForBudget(budget, know.density, questionsChars);
+  const second = await send(cutState(input.state, refused ? Math.min(byBudget, stateThatFits(refused)) : byBudget));
+  if (!isTooBig(second)) return second;
+  know.nctx = second.tooBig.limit + 1;
+  return tooBigError(tool, second.tooBig);
 }
 
 /** The registration state of one module instance: what is registered, under way, refused and hanging. */
@@ -1127,6 +1284,9 @@ async function ensureTools($: Engine, st: RegState, ms: number): Promise<void> {
 export function register(on: On, options?: Options): void {
   // A call's own `timeout` wins; an invalid one falls back like a missing one.
   const fallbackS = seconds(options?.["timeout"]) ?? DEFAULT_TIMEOUT_S;
+  // A call's own `overflow` wins; an invalid option falls back to the default like an invalid timeout does.
+  const optionOverflow = options?.["overflow"];
+  const defaultOverflow = isOverflow(optionOverflow) ? optionOverflow : DEFAULT_OVERFLOW;
   // Full tool name -> tool: the default names (a call can reach an instance that saw no session.start), plus what the engine returned.
   const names = new Map<string, ToolName>(TOOLS.map((t) => [TOOL_PREFIX + t, t]));
   // `$` reaches a module only inside its hooks, so the tools register in the first hook that runs (session.start, or an earlier tool call).
@@ -1169,10 +1329,7 @@ export function register(on: On, options?: Options): void {
       if (!key && !base && !jevUrl) return await askHaiku($, type, input.state, input.questions, timeoutMs, next.signal);
       await loadKnowledge($, know);
       if (next.signal.aborted) return fail(type, "the call was abandoned");
-      const answer = await ask($, type, input.state, input.questions, { key, base, jevUrl, model }, timeoutMs, next.signal, (chars, tokens) => learn($, know, chars, tokens));
-      if (!isTooBig(answer)) return answer;
-      know.nctx = answer.tooBig.limit + 1;
-      return tooBigError(type, answer.tooBig);
+      return await answerJev($, type, input, input.overflow ?? defaultOverflow, { key, base, jevUrl, model }, timeoutMs, next.signal, know);
     } catch (err) {
       return fail(type, message(err));
     }
