@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, test } from "vitest";
-import { findGraphmind } from "../plugin/bin/common.mjs";
+import { findGraphmind, setupMcpPresent } from "../plugin/bin/common.mjs";
 import { indexable } from "../plugin/bin/mcp.mjs";
 
 const MCP = fileURLToPath(new URL("../plugin/bin/mcp.mjs", import.meta.url));
@@ -80,6 +80,24 @@ test("with CLAUDE_CONFIG_DIR set only its .claude.json counts, not the one in HO
   writeFileSync(join(cfg, ".claude.json"), server);
   rmSync(join(root, "calls.log"));
   assert.doesNotMatch(runWrapper(false, { CLAUDE_CONFIG_DIR: cfg }).calls, /^mcp$/m);
+});
+
+test("only the project entry Claude Code loads counts: git root, main checkout of a linked worktree, never an ancestor repo", () => {
+  const git = (cwd: string, ...args: string[]) => assert.equal(spawnSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", ...args], { cwd, stdio: "ignore" }).status, 0);
+  const outer = join(root, "outer");
+  const inner = join(outer, "inner");
+  const wt = join(root, "wt");
+  mkdirSync(join(inner, "sub"), { recursive: true });
+  git(outer, "init", "-q");
+  git(inner, "init", "-q");
+  git(outer, "commit", "-q", "--allow-empty", "-m", "i");
+  git(outer, "worktree", "add", "-q", wt);
+  writeFileSync(join(home, ".claude.json"), JSON.stringify({ projects: { [outer]: { mcpServers: { graphmind: {} } } } }));
+  assert.equal(setupMcpPresent(home, outer), true);
+  assert.equal(setupMcpPresent(home, wt), true);
+  assert.equal(setupMcpPresent(home, join(inner, "sub")), false);
+  writeFileSync(join(home, ".claude.json"), JSON.stringify({ projects: { [inner]: { mcpServers: { graphmind: {} } } } }));
+  assert.equal(setupMcpPresent(home, join(inner, "sub")), true);
 });
 
 test("a directory or non-executable graphmind earlier on PATH does not shadow the binary", () => {
