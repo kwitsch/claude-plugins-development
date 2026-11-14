@@ -63,7 +63,8 @@ const splice = (code: string, spans: { start: number; end: number; text: string 
  * Relies on what the sources guarantee, all of it checked here: helpers import each other by `./name.mjs` with named
  * imports only (no `as`), export only declarations, their top-level names (imported or declared) are unique across
  * helpers (they were one file once; named imports of one other source, such as `node:path`, merge into one import),
- * and they keep no state at module level that a test kit reload could miss.
+ * and they keep no state at module level that a test kit reload could miss. Only the entries may import a helper: the
+ * helper files are not shipped, so any other module importing one fails the build.
  *
  * @param compiled - Type-stripped code by output path.
  * @returns The helpers' output paths, the entry modules with their imports pointed at lib.mjs, and lib.mjs' code.
@@ -91,6 +92,15 @@ function bundleLib(compiled: Map<string, string>): { members: string[]; entries:
     }
     return imp.entries.map((e) => (e.importName.name === e.localName.value ? e.localName.value : `${e.importName.name ?? ""} as ${e.localName.value}`));
   };
+  // a helper file is not shipped: a module outside the bundle (bin/, mcp/, a hooks subdirectory) must not import one
+  const memberSet = new Set(members);
+  for (const [f, code] of compiled) {
+    if (memberSet.has(f) || entryPaths.has(f)) continue;
+    for (const imp of parse(f, code).imports) {
+      const target = path.resolve(path.dirname(f), imp.moduleRequest.value);
+      if (memberSet.has(target)) fail(`${path.relative(ROOT, f)} imports ${path.relative(ROOT, target)}, which is bundled into lib.mjs`);
+    }
+  }
   // the helpers in dependency order (a helper after the helpers it imports), the other imports (node:) hoisted
   const ordered: string[] = [];
   const hoisted = new Set<string>();

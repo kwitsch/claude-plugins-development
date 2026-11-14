@@ -17,7 +17,11 @@ const build = (files: Record<string, string>): { status: number | null; stderr: 
     mkdirSync(path.join(dir, "plugin/hooks"), { recursive: true });
     writeFileSync(path.join(dir, "plugin/hooks/hooks.json"), `{ "modules": ["./register.mjs"] }\n`);
     writeFileSync(path.join(dir, "package.json"), JSON.stringify({ name: "fixture", version: "0.0.1", description: "d", author: { name: "x" }, keywords: [], type: "module", pluginBuild: { bundleHooksLib: true }, claudePlugin: {} }));
-    for (const [f, t] of Object.entries(files)) writeFileSync(path.join(dir, "src/hooks", f), t);
+    for (const [f, t] of Object.entries(files)) {
+      // a key such as `../bin/tool.mts` places a module outside src/hooks
+      mkdirSync(path.dirname(path.join(dir, "src/hooks", f)), { recursive: true });
+      writeFileSync(path.join(dir, "src/hooks", f), t);
+    }
     const r = spawnSync(process.execPath, [BUILD, dir], { encoding: "utf8" });
     const out = path.join(dir, "plugin/hooks/register.mjs");
     const ok = r.status === 0;
@@ -46,6 +50,12 @@ test("an entry's namespace import of a helper fails the build", () => {
   const r = build({ "a.mts": A, "register.mts": `import * as A from "./a.mjs";\nexport function register(on: unknown): number { return A.one; }\n` });
   assert.equal(r.status, 1);
   assert.match(r.stderr, /register\.mjs imports \.\/a\.mjs other than by named imports/);
+});
+
+test("a module outside the bundle that imports a helper fails the build", () => {
+  const r = build({ "a.mts": A, "register.mts": `import { one } from "./a.mjs";\nexport function register(on: unknown): number { return one; }\n`, "../bin/tool.mts": `import { one } from "../hooks/a.mjs";\nconsole.log(one);\n` });
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /bin\/tool\.mjs imports plugin\/hooks\/a\.mjs, which is bundled into lib\.mjs/);
 });
 
 test("named helper imports still build", () => {
