@@ -3,7 +3,7 @@ import { expect, test } from "vitest";
 import { commandKey, coversStep, dedupeSkills, isSafeScript, isSafeToOffer, mentionedPaths, quotedTerms, relevant, words } from "../plugin/hooks/candidates.mjs";
 import { clip, splitTurn, summarize } from "../plugin/hooks/context.mjs";
 import { route } from "../plugin/hooks/policy.mjs";
-import { buildReport, when } from "../plugin/hooks/report.mjs";
+import { buildReport, verdict, when } from "../plugin/hooks/report.mjs";
 
 test("quoted terms become searches, file names do not", () => {
   expect(quotedTerms("where is `useAuth` used? and \"TODO: fix\" in `src/app.ts`")).toEqual(["useAuth", "TODO: fix"]);
@@ -16,6 +16,15 @@ test("paths with extensions are found in text", () => {
 
 test("a path at the end of a sentence is found", () => {
   for (const s of ["explain src/app.ts.", "what is in src/app.ts?", "src/app.ts!", "see (src/app.ts)."]) expect(mentionedPaths([s])).toEqual(["src/app.ts"]);
+});
+
+test("the report verdict follows the take threshold, agreement and Claude's own pick", () => {
+  const e = (data: Record<string, unknown>) => ({ at: 0, kind: "compare" as const, applied: false, text: "", data: { best: "read a", ...data } });
+  expect(verdict(e({ bestP: 0.9, agree: true }), 0.85)).toBe("match");
+  expect(verdict(e({ bestP: 0.9, agree: false }), 0.85)).toBe("differ");
+  expect(verdict(e({ bestP: 0.5, claudeUsedCandidate: true }), 0.85)).toBe("missed");
+  expect(verdict(e({ bestP: 0.5 }), 0.85)).toBe("both-claude");
+  expect(verdict(e({ bestP: 0.9, agree: true }), 0.95)).toBe("both-claude");
 });
 
 test("an empty log gives a hint, not a crash", () => {
