@@ -218,6 +218,19 @@ async function onSessionEnd(_$, e, next) {
 	};
 	return next(e);
 }
+async function onSessionCompact(_$, e, next) {
+	const r = await next(e);
+	const skipped = r !== null && typeof r === "object" && r.skip !== undefined;
+	if (e.trigger === "precompute" || e.agentId !== undefined || skipped) return r;
+	state = {
+		...fresh(),
+		bin: state.bin,
+		wired: state.wired,
+		tools: state.tools,
+		ready: state.ready
+	};
+	return r;
+}
 async function onPromptSubmit($, e, next) {
 	if (e.origin?.kind === "plugin" || e.isMeta || e.command) return next(e);
 	const added = await recallFor($, e.text, next.signal).catch(() => []);
@@ -244,6 +257,7 @@ async function onToolCall($, e, next) {
 export const register = (on) => {
 	on("session.start", onSessionStart);
 	on("session.end", onSessionEnd);
+	on("session.compact", onSessionCompact);
 	on("prompt.submit", onPromptSubmit);
 	on("tool.call", onToolCall);
 };

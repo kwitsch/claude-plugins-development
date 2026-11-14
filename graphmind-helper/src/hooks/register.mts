@@ -76,9 +76,17 @@ type PromptEvent = {
 } & Record<string, unknown>;
 /** A `tool.call` event; the tool's input fields sit on the event itself. */
 type ToolCall = SearchCall;
+/** A `session.compact` event (only the fields read here). */
+type CompactEvent = {
+  /** Who compacts: `manual`, `auto`, `plugin` or `precompute` (installs nothing). */
+  trigger: string;
+  /** Set for a subagent's or fork's own transcript; absent for the main conversation. */
+  agentId?: string;
+} & Record<string, unknown>;
 /** The `on` the engine passes to `register`, one overload per hooked event. */
 type On = {
   (event: "session.start" | "session.end", hook: Hook<unknown, unknown>): void;
+  (event: "session.compact", hook: Hook<CompactEvent, unknown>): void;
   (event: "prompt.submit", hook: Hook<PromptEvent, unknown>): void;
   (event: "tool.call", hook: Hook<ToolCall, ToolResult>): void;
 };
@@ -98,7 +106,7 @@ const CHECKPOINT_EVERY = 10;
 /** The closing line of the briefing. */
 const AUTO_MEMORY = "Auto-memory is ON: save decisions/patterns/conventions via gm_memory_add. Use --priority for always-injected facts. Recall via gm_memory_search.";
 
-/** Conversation state: reset at `session.start` and `session.end`. */
+/** Conversation state: reset at `session.start`, `session.end` and a main-conversation compaction. */
 type State = {
   /** The graphmind binary, once found. */
   bin?: string;
@@ -389,6 +397,25 @@ async function onSessionEnd(_$: Engine, e: unknown, next: Next<unknown, unknown>
 }
 
 /**
+ * `session.compact` hook: once the main conversation was compacted, the summary has lost the briefing and the priority
+ * entries, so the conversation state starts over (the setup's SessionStart script does the same for `source=compact`);
+ * the machine-level caches (binary, setup's hooks, tool list, readiness) stay.
+ *
+ * @param _$ - Engine interface, unused.
+ * @param e - Event, passed on unchanged.
+ * @param next - Continues the hook chain.
+ * @returns `next`'s result, unchanged.
+ */
+async function onSessionCompact(_$: Engine, e: CompactEvent, next: Next<CompactEvent, unknown>): Promise<unknown> {
+  const r = await next(e);
+  // A precompute installs nothing, a subagent's compaction is not the main conversation, a skip leaves it as it is.
+  const skipped = r !== null && typeof r === "object" && (r as { skip?: unknown }).skip !== undefined;
+  if (e.trigger === "precompute" || e.agentId !== undefined || skipped) return r;
+  state = { ...fresh(), bin: state.bin, wired: state.wired, tools: state.tools, ready: state.ready };
+  return r;
+}
+
+/**
  * `prompt.submit` hook: adds the briefing and recall as context for the model. A prompt another plugin submitted,
  * a meta prompt or a slash command passes untouched; any failure passes the prompt on unchanged.
  *
@@ -434,6 +461,7 @@ async function onToolCall($: Engine, e: ToolCall, next: Next<ToolCall, ToolResul
 export const register = (on: On): void => {
   on("session.start", onSessionStart);
   on("session.end", onSessionEnd);
+  on("session.compact", onSessionCompact);
   on("prompt.submit", onPromptSubmit);
   on("tool.call", onToolCall);
 };

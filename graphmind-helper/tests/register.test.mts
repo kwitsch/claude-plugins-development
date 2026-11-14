@@ -68,6 +68,7 @@ function setup(on: Parameters<typeof mock.clock>[0], w: World = {}) {
   });
   on("session.start", async () => ({}));
   on("session.end", async () => ({}));
+  on("session.compact", async () => ({ messages: [] }));
   on("prompt.submit", (_$, e) => {
     prompts.push({ context: e.context as readonly string[] | undefined });
     return { value: {} };
@@ -132,6 +133,29 @@ test("the first prompt gets the briefing and the recall, a later one only recall
   expect(second).not.toMatch(/Project indexed and ready/);
   // aaaaaaaa was shown in the briefing: not offered again.
   expect(second).not.toMatch(/always use X/);
+});
+
+test("a compaction of the main conversation brings the briefing and priority entries back", async ($, on) => {
+  const { prompts } = setup(on);
+  await $.session.start({ source: "startup" });
+  await prompt($, "where is foo_bar defined in the code");
+  await $.session.compact({ trigger: "auto" });
+  await prompt($, "something else entirely about parseConfig here");
+  const after = (prompts[1].context ?? []).join("\n");
+  expect(after).toMatch(/Project indexed and ready/);
+  expect(after).toMatch(/always use X/);
+});
+
+test("a precompute or a subagent's compaction does not brief again", async ($, on) => {
+  const { prompts } = setup(on);
+  await $.session.start({ source: "startup" });
+  await prompt($, "where is foo_bar defined in the code");
+  await $.session.compact({ trigger: "precompute" });
+  await $.session.compact({ trigger: "auto", agentId: "a1" });
+  await prompt($, "something else entirely about parseConfig here");
+  const after = (prompts[1].context ?? []).join("\n");
+  expect(after).not.toMatch(/Project indexed and ready/);
+  expect(after).not.toMatch(/always use X/);
 });
 
 /** Whether the inline plugin `above` settles the next prompt before the module does (the engine then abandons the dispatch). */
