@@ -42,6 +42,12 @@ importers:
         specifier: workspace:*
         version: link:../development/vitest/claude-engine
 
+  graphmind-helper:
+    devDependencies:
+      claude-engine-vitest:
+        specifier: workspace:*
+        version: link:../development/vitest/claude-engine
+
   inline-headroom:
     devDependencies:
       claude-engine-vitest:
