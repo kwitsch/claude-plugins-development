@@ -21,6 +21,7 @@ Legend: `[x]` finished (done, or closed without code: status `closed` in the tas
 
 - [ ] [F18](tasks/F18-haiku-call-not-cancelled-default-effort.md) `partial` low: the Haiku call carries the abort signal since 0.3.2; still no `effort` (thinking shares `maxTokens`, not measured)
 - [ ] [F19](tasks/F19-jevfort-compaction-wait-and-hook-budget.md) `partial` medium (jevfort): the compaction ranking budget is 9 s since 0.9.1 (~4.6 s measured); the hook is bypassed by `cc-plugin-sec-default` on 2.1.325, and the 15 s Haiku budget against the engine's 10 s hook budget was not checked on the compaction path
+- [ ] [F21](tasks/F21-oversized-state-sent-blindly.md) `open` medium: a state too large for System One (hard limit 32767 prompt tokens, timeout-bound already at ~15k to ~21k) is sent anyway; preflight estimate, 400 oracle and an `overflow` input proposed (found 2026-11-14, live measurements in the task)
 
 ## Closed without code (measurement records, decided 2026-11-13)
 

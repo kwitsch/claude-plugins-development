@@ -90,6 +90,13 @@ type Engine = {
     /** Writes a line to the plugin log. */
     log(text: string): unknown;
   };
+  /** The plugin's own JSON key-value store, kept between sessions (a mod cannot read `CLAUDE_PLUGIN_DATA`: live, 2.1.325). */
+  store: {
+    /** Reads a value; undefined when the key is unset. */
+    get(key: string): Promise<unknown>;
+    /** Writes a value (any JSON). */
+    set(key: string, value: unknown): Promise<unknown>;
+  };
   /** Environment variables. */
   env: {
     /** Reads a variable; undefined when unset. */
@@ -208,6 +215,162 @@ const MAX_TIMEOUT_S = 30;
 /** The optional `timeout` input property shared by the tools. */
 const TIMEOUT = { type: "number", exclusiveMinimum: 0, description: `Optional: the HTTP timeout of the request in seconds, at most ${MAX_TIMEOUT_S}. Default: the plugin's timeout option, else ${DEFAULT_TIMEOUT_S}.` };
 
+/** What a call does when its prompt cannot be answered by System One: refuse with the numbers, cut the state, or ask Haiku. */
+const OVERFLOWS = ["error", "truncate", "haiku"] as const;
+
+/** One of {@link OVERFLOWS}. */
+type Overflow = (typeof OVERFLOWS)[number];
+
+/** The overflow mode when neither the call nor the `overflow` option names a valid one. */
+const DEFAULT_OVERFLOW: Overflow = "haiku";
+
+/** The optional `overflow` input property shared by the tools. */
+const OVERFLOW = { type: "string", enum: [...OVERFLOWS], description: `Optional: what happens when the state and questions are too large for System One (or for the timeout): error refuses with the numbers, truncate cuts the middle of the state, haiku answers with Claude Haiku. Default: the plugin's overflow option, else ${DEFAULT_OVERFLOW}.` };
+
+/**
+ * Whether a value is one of the overflow modes.
+ *
+ * @param v - The value to test.
+ * @returns True for `error`, `truncate` or `haiku`.
+ */
+function isOverflow(v: unknown): v is Overflow {
+  return (OVERFLOWS as readonly unknown[]).includes(v);
+}
+
+/** The context window of System One in tokens (`n_ctx`, measured live 2026-11-14: a prompt of this many tokens is refused, one less passes). The server's own `n_ctx` replaces it once a rejection reports it. */
+const DEFAULT_CONTEXT_TOKENS = 32768;
+
+/** The tokens of an otherwise empty request (measured live 2026-11-14), counted on top of the state and the questions. */
+const PROMPT_OVERHEAD_TOKENS = 26;
+
+/** Characters per token assumed before anything is learned: typical text measures 3.3 (minified JS) to 4.8 (English prose), so cuts and messages stay on the safe side. */
+const DEFAULT_DENSITY = 3;
+
+/** The lowest learned characters per token: emoji, `€` and CJK cost one token per UTF-16 unit and no text measured below it. */
+const MIN_DENSITY = 1;
+
+/** The highest characters per token: repetitive text measures 8, nothing real comes near it. */
+const MAX_DENSITY = 8;
+
+/** The weight of the newest sample in the learned density. */
+const DENSITY_ALPHA = 0.2;
+
+/** A prompt under this many tokens teaches nothing: the fixed overhead and the question dominate it. */
+const MIN_SAMPLE_TOKENS = 400;
+
+/** A learned density is written to the store only when it moved by more than this share of the stored one. */
+const PERSIST_DELTA = 0.1;
+
+/** The `$.store` key of the learned density, `{ v: charsPerToken, n: samples }`. */
+const DENSITY_KEY = "density";
+
+/** How long the first call waits for the stored density (ms) before it goes on without it. */
+const STORE_WAIT_MS = 1000;
+
+/** Tokens kept free below the limit when a state is cut or a size is named (the estimate is a ratio, not a tokenizer). */
+const CUT_MARGIN_TOKENS = 64;
+
+/** The `error.type` System One answers a prompt over its context window with (HTTP 400). */
+const CONTEXT_ERROR = "exceed_context_size_error";
+
+/** What a module instance knows about System One's size limits; learned from answers, the density kept across sessions. */
+type Knowledge = {
+  /** Learned characters per token. */
+  density: number;
+  /** The density as last written to (or read from) the store. */
+  persisted: number;
+  /** How many samples the density holds. */
+  samples: number;
+  /** The server's context window in tokens. */
+  nctx: number;
+  /** The read of the stored density: started by the first call, shared by the others. */
+  loaded: Promise<void> | undefined;
+};
+
+/** The server's refusal of a prompt over its context window, with the numbers the plugin needs to react. */
+type TooBig = {
+  /** Always present: tells the refusal from a tool result. */
+  tooBig: {
+    /** The exact tokens of the refused prompt (`n_prompt_tokens`). */
+    tokens: number;
+    /** The most tokens the server takes: its `n_ctx` minus one. */
+    limit: number;
+    /** The characters of the prompt: the state plus the questions JSON. */
+    chars: number;
+    /** The characters of the questions JSON alone. */
+    questionsChars: number;
+  };
+};
+
+/**
+ * Whether an answer of {@link ask} is the server's context refusal.
+ *
+ * @param r - The answer.
+ * @returns True for a {@link TooBig}.
+ */
+function isTooBig(r: ToolResult | TooBig): r is TooBig {
+  return isRecord((r as Partial<TooBig>).tooBig);
+}
+
+/**
+ * Reads the stored density once per module instance and waits for it at most {@link STORE_WAIT_MS}; every failure
+ * (a missing key, a refused or hanging store, a value out of range) leaves the default in place.
+ *
+ * @param $ - The engine.
+ * @param k - What the module knows; its `loaded` is set by the first call.
+ * @returns A promise that never rejects.
+ */
+function loadKnowledge($: Engine, k: Knowledge): Promise<void> {
+  k.loaded ??= (async () => {
+    let timer: { cancel(): void } | undefined;
+    try {
+      const read = Promise.resolve($.store.get(DENSITY_KEY));
+      read.catch(() => undefined); // a late rejection after the wait must not go unhandled
+      const late = new Promise<undefined>((resolve) => {
+        timer = $.clock.after(STORE_WAIT_MS, () => resolve(undefined));
+      });
+      const stored = await Promise.race([read, late]);
+      const v = isRecord(stored) ? stored["v"] : undefined;
+      if (typeof v === "number" && Number.isFinite(v) && v >= MIN_DENSITY && v <= MAX_DENSITY && k.samples === 0) {
+        k.density = v;
+        k.persisted = v;
+        const n = isRecord(stored) ? stored["n"] : undefined;
+        k.samples = typeof n === "number" && Number.isInteger(n) && n > 0 ? n : 0;
+      }
+    } catch {
+      // best effort: the default density and an unreachable store must not fail a call
+    } finally {
+      timer?.cancel();
+    }
+  })();
+  return k.loaded;
+}
+
+/**
+ * Folds one measured prompt into the learned density and writes it to the store when it moved far enough. A prompt
+ * under {@link MIN_SAMPLE_TOKENS} tokens or a count that is not a number teaches nothing.
+ *
+ * @param $ - The engine.
+ * @param k - What the module knows; updated.
+ * @param chars - The characters of the prompt: the state plus the questions JSON.
+ * @param tokens - The tokens the server counted for it.
+ */
+function learn($: Engine, k: Knowledge, chars: number, tokens: unknown): void {
+  if (typeof tokens !== "number" || !Number.isFinite(tokens) || tokens < MIN_SAMPLE_TOKENS) return;
+  const sample = chars / (tokens - PROMPT_OVERHEAD_TOKENS);
+  if (!Number.isFinite(sample)) return;
+  k.density = (1 - DENSITY_ALPHA) * k.density + DENSITY_ALPHA * Math.min(MAX_DENSITY, Math.max(MIN_DENSITY, sample));
+  k.samples += 1;
+  if (Math.abs(k.density - k.persisted) / k.persisted <= PERSIST_DELTA) return;
+  k.persisted = k.density;
+  try {
+    // not awaited: a statistic must not hold an answer; a failing store only loses it
+    void Promise.resolve($.store.set(DENSITY_KEY, { v: k.density, n: k.samples })).catch(() => undefined);
+  } catch {
+    // best effort
+  }
+}
+
 /** The System One endpoint used when neither JEV_URL nor TYPESAFE_BASE_URL is set. */
 const DEFAULT_JEV_URL = "https://api.typesafe.ai/v1/systemone";
 
@@ -263,6 +426,7 @@ const SPECS: Record<ToolName, Omit<ToolSpec, "name">> = {
         instructions: { type: "string", description: "The yes/no question to answer about the text." },
         state: STATE,
         timeout: TIMEOUT,
+        overflow: OVERFLOW,
         criteria: {
           type: "object",
           description: "Optional: what counts as true and what counts as false.",
@@ -284,6 +448,7 @@ const SPECS: Record<ToolName, Omit<ToolSpec, "name">> = {
         instructions: { type: "string", description: "What to choose." },
         state: STATE,
         timeout: TIMEOUT,
+        overflow: OVERFLOW,
         criteria: {
           type: "object",
           description: "The options: option name -> description of when to pick it.",
@@ -303,6 +468,7 @@ const SPECS: Record<ToolName, Omit<ToolSpec, "name">> = {
         instructions: { type: "string", description: "What to rate." },
         state: STATE,
         timeout: TIMEOUT,
+        overflow: OVERFLOW,
         criteria: {
           type: "array",
           description: "The levels, lowest first; scores start at 0.",
@@ -321,6 +487,7 @@ const SPECS: Record<ToolName, Omit<ToolSpec, "name">> = {
       properties: {
         state: STATE,
         timeout: TIMEOUT,
+        overflow: OVERFLOW,
         questions: {
           type: "array",
           description: "The questions, each with the input of the noul, choice or score tool minus state, plus its type.",
@@ -507,14 +674,14 @@ function parseQuestion(type: QuestionType, instructions: unknown, criteria: unkn
 }
 
 /**
- * Validates the model-supplied tool input and builds the System One questions: one for a question-type tool, the
+ * Validates the state and questions of the model-supplied tool input: one question for a question-type tool, the
  * `questions` array for `batch`.
  *
  * @param tool - The tool called.
  * @param e - The `tool.call` event carrying the input fields.
  * @returns The state and questions, or the error message (no request is sent).
  */
-function parseInput(tool: ToolName, e: ToolCall): { state: string; questions: Question[] } | string {
+function parseQuestions(tool: ToolName, e: ToolCall): { state: string; questions: Question[] } | string {
   const { instructions, state } = e;
   // A question-type tool checks instructions, then state, then criteria.
   if (tool !== "batch" && !isText(instructions)) return "instructions must be a non-empty string";
@@ -533,6 +700,22 @@ function parseInput(tool: ToolName, e: ToolCall): { state: string; questions: Qu
     questions.push(question);
   }
   return { state, questions };
+}
+
+/**
+ * Validates the model-supplied tool input and builds the System One questions, plus the call's own overflow mode.
+ *
+ * @param tool - The tool called.
+ * @param e - The `tool.call` event carrying the input fields.
+ * @returns The state, the questions and the overflow mode the call named (undefined: the option decides), or the error
+ * message (no request is sent).
+ */
+function parseInput(tool: ToolName, e: ToolCall): { state: string; questions: Question[]; overflow?: Overflow } | string {
+  const parsed = parseQuestions(tool, e);
+  if (typeof parsed === "string") return parsed;
+  const overflow = e["overflow"];
+  if (overflow === undefined) return parsed;
+  return isOverflow(overflow) ? { ...parsed, overflow } : `overflow must be one of ${OVERFLOWS.join(", ")}`;
 }
 
 /**
@@ -719,6 +902,47 @@ async function askHaiku($: Engine, tool: ToolName, state: string, questions: Que
 }
 
 /**
+ * Reads System One's refusal of a prompt over its context window: HTTP 400, `error.type` `exceed_context_size_error`,
+ * with the exact token count of the prompt and the context size as whole numbers.
+ *
+ * @param text - The raw response body.
+ * @returns The refused prompt's tokens and the server's context window, or undefined for any other body.
+ */
+function contextRefusal(text: string): { tokens: number; nctx: number } | undefined {
+  const body = json(text);
+  const error = isRecord(body) ? body["error"] : undefined;
+  if (!isRecord(error) || error["type"] !== CONTEXT_ERROR) return undefined;
+  const tokens = error["n_prompt_tokens"];
+  const nctx = error["n_ctx"];
+  if (typeof tokens !== "number" || typeof nctx !== "number" || !Number.isInteger(tokens) || !Number.isInteger(nctx) || nctx < 2 || tokens < nctx) return undefined;
+  return { tokens, nctx };
+}
+
+/**
+ * The characters of the state that fit a token limit, from the exact ratio the server's count gives, the margin
+ * {@link CUT_MARGIN_TOKENS} kept free and the questions taken off.
+ *
+ * @param refused - The server's refusal with the prompt's size.
+ * @returns Whole characters, at least 0.
+ */
+function stateThatFits(refused: TooBig["tooBig"]): number {
+  const prompt = Math.floor((refused.chars * (refused.limit - PROMPT_OVERHEAD_TOKENS - CUT_MARGIN_TOKENS)) / (refused.tokens - PROMPT_OVERHEAD_TOKENS));
+  return Math.max(0, prompt - refused.questionsChars);
+}
+
+/**
+ * The refusal a tool answers when the prompt is over the server's context window and nothing else is done about it.
+ *
+ * @param tool - The tool called.
+ * @param refused - The server's refusal with the prompt's size.
+ * @returns The error answer: the exact numbers and the state size to aim for (in hundreds of characters).
+ */
+function tooBigError(tool: ToolName, refused: TooBig["tooBig"]): ToolResult {
+  const aim = Math.floor(stateThatFits(refused) / 100) * 100;
+  return fail(tool, `state too large for System One: the request has ${refused.tokens} tokens, the limit is ${refused.limit}; shorten the state to about ${aim} characters`);
+}
+
+/**
  * Sends the questions of one tool call in one System One request and maps every outcome to a tool result.
  *
  * @param $ - The engine.
@@ -728,12 +952,18 @@ async function askHaiku($: Engine, tool: ToolName, state: string, questions: Que
  * @param env - The env values, trimmed, undefined when unset or blank.
  * @param timeoutMs - How long the request may take before the tool reports a timeout.
  * @param signal - Aborts when the call is abandoned; the hook then answers at once.
- * @returns The answer object as JSON (for `batch` the array of answers in question order), or an error answer
- * prefixed with the tool name.
+ * @param onSample - Told the characters of the prompt and the tokens the server counted for it (an answer's
+ * `usage.input_tokens`, or a context refusal's `n_prompt_tokens`), whatever the outcome of the call.
+ * @returns The answer object as JSON (for `batch` the array of answers in question order), an error answer
+ * prefixed with the tool name, or the server's refusal of a prompt over its context window ({@link TooBig}).
  */
-async function ask($: Engine, tool: ToolName, state: string, questions: Question[], env: Env, timeoutMs: number, signal: AbortSignal): Promise<ToolResult> {
+async function ask($: Engine, tool: ToolName, state: string, questions: Question[], env: Env, timeoutMs: number, signal: AbortSignal, onSample: (chars: number, tokens: unknown) => void): Promise<ToolResult | TooBig> {
   // The id of each question in the request and of its answer in the response.
   const ids = questions.map((_, i) => (tool === "batch" ? `q${i}` : QUESTION_ID));
+  const questionsObject = Object.fromEntries(ids.map((id, i) => [id, questions[i]]));
+  // The prompt the server tokenizes is the state plus the questions: both count for the density and the limit.
+  const questionsChars = JSON.stringify(questionsObject).length;
+  const chars = state.length + questionsChars;
   const target = endpoint(env.jevUrl, env.base);
   if (!target.ok) return fail(tool, target.error);
   const { key } = env;
@@ -752,7 +982,7 @@ async function ask($: Engine, tool: ToolName, state: string, questions: Question
   let timer: { cancel(): void } | undefined;
   let onAbort: (() => void) | undefined;
   try {
-    const request = $.http.fetch(target.url, { method: "POST", headers, body: JSON.stringify({ model, state, questions: Object.fromEntries(ids.map((id, i) => [id, questions[i]])) }) });
+    const request = $.http.fetch(target.url, { method: "POST", headers, body: JSON.stringify({ model, state, questions: questionsObject }) });
     request.catch(() => undefined); // a late rejection after the timeout or an abort won must not go unhandled
     // The engine does not stop a hook's request when its dispatch is abandoned: answer at once instead of lingering.
     const stop = new Promise<"timeout" | "aborted">((resolve) => {
@@ -767,6 +997,12 @@ async function ask($: Engine, tool: ToolName, state: string, questions: Question
     if (res === "timeout") return fail(tool, `timeout after ${timeoutMs}ms`);
     if (res === "aborted") return fail(tool, "the call was abandoned");
     if (!res.ok) {
+      const refused = res.status === 400 ? contextRefusal(res.text) : undefined;
+      if (refused) {
+        // The refusal counts the prompt exactly: it teaches the density, and the caller reacts with the numbers.
+        onSample(chars, refused.tokens);
+        return { tooBig: { tokens: refused.tokens, limit: refused.nctx - 1, chars, questionsChars } };
+      }
       // Only a key made of number characters can sit inside a JSON number's text.
       const why = detail(res.text, redact, key !== undefined && key.length >= MIN_REDACT_KEY && /^[-+.\deE]+$/.test(key));
       let text = why === undefined ? "" : why.trim(); // detail() already redacted it: a second pass would nest the host placeholder
@@ -779,6 +1015,8 @@ async function ask($: Engine, tool: ToolName, state: string, questions: Question
     }
     const body = json(res.text);
     if (body === undefined) return fail(tool, `HTTP ${res.status} response was not valid JSON`);
+    const usage = isRecord(body) ? body["usage"] : undefined;
+    if (isRecord(usage)) onSample(chars, usage["input_tokens"]);
     const answers = isRecord(body) ? body["answers"] : undefined;
     const list: Record<string, unknown>[] = [];
     for (const [i, q] of questions.entries()) {
@@ -895,6 +1133,8 @@ export function register(on: On, options?: Options): void {
   // The engine accepts `$` only as an argument to a top-level function, hence `ensureTools` and the state object.
   // A tool whose registration failed stays in `missing`: the next hook tries it again (after a growing delay), no timers.
   const st: RegState = { names, missing: new Set<ToolName>(TOOLS), pending: new Map(), retryAt: new Map(), failures: new Map(), stuck: new Set() };
+  // What this instance learned about System One's size limits; the density comes back from the store in the first call that needs it.
+  const know: Knowledge = { density: DEFAULT_DENSITY, persisted: DEFAULT_DENSITY, samples: 0, nctx: DEFAULT_CONTEXT_TOKENS, loaded: undefined };
   on("session.start", async function onSessionStart($, e, next) {
     try {
       if (st.missing.size > 0) await ensureTools($, st, 5 * REGISTER_WAIT_MS);
@@ -927,7 +1167,12 @@ export function register(on: On, options?: Options): void {
       // A whole number of milliseconds, at least 1: $.model.complete refuses anything else (2.01 s * 1000 is 2009.9999999999998).
       const timeoutMs = Math.max(1, Math.round((seconds(e["timeout"]) ?? fallbackS) * 1000));
       if (!key && !base && !jevUrl) return await askHaiku($, type, input.state, input.questions, timeoutMs, next.signal);
-      return await ask($, type, input.state, input.questions, { key, base, jevUrl, model }, timeoutMs, next.signal);
+      await loadKnowledge($, know);
+      if (next.signal.aborted) return fail(type, "the call was abandoned");
+      const answer = await ask($, type, input.state, input.questions, { key, base, jevUrl, model }, timeoutMs, next.signal, (chars, tokens) => learn($, know, chars, tokens));
+      if (!isTooBig(answer)) return answer;
+      know.nctx = answer.tooBig.limit + 1;
+      return tooBigError(type, answer.tooBig);
     } catch (err) {
       return fail(type, message(err));
     }

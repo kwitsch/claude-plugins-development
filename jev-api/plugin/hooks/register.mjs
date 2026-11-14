@@ -23,6 +23,73 @@ const TIMEOUT = {
 	exclusiveMinimum: 0,
 	description: `Optional: the HTTP timeout of the request in seconds, at most ${MAX_TIMEOUT_S}. Default: the plugin's timeout option, else ${DEFAULT_TIMEOUT_S}.`
 };
+const OVERFLOWS = [
+	"error",
+	"truncate",
+	"haiku"
+];
+const DEFAULT_OVERFLOW = "haiku";
+const OVERFLOW = {
+	type: "string",
+	enum: [...OVERFLOWS],
+	description: `Optional: what happens when the state and questions are too large for System One (or for the timeout): error refuses with the numbers, truncate cuts the middle of the state, haiku answers with Claude Haiku. Default: the plugin's overflow option, else ${DEFAULT_OVERFLOW}.`
+};
+function isOverflow(v) {
+	return OVERFLOWS.includes(v);
+}
+const DEFAULT_CONTEXT_TOKENS = 32768;
+const PROMPT_OVERHEAD_TOKENS = 26;
+const DEFAULT_DENSITY = 3;
+const MIN_DENSITY = 1;
+const MAX_DENSITY = 8;
+const DENSITY_ALPHA = .2;
+const MIN_SAMPLE_TOKENS = 400;
+const PERSIST_DELTA = .1;
+const DENSITY_KEY = "density";
+const STORE_WAIT_MS = 1e3;
+const CUT_MARGIN_TOKENS = 64;
+const CONTEXT_ERROR = "exceed_context_size_error";
+function isTooBig(r) {
+	return isRecord(r.tooBig);
+}
+function loadKnowledge($, k) {
+	k.loaded ??= (async () => {
+		let timer;
+		try {
+			const read = Promise.resolve($.store.get(DENSITY_KEY));
+			read.catch(() => undefined);
+			const late = new Promise((resolve) => {
+				timer = $.clock.after(STORE_WAIT_MS, () => resolve(undefined));
+			});
+			const stored = await Promise.race([read, late]);
+			const v = isRecord(stored) ? stored["v"] : undefined;
+			if (typeof v === "number" && Number.isFinite(v) && v >= MIN_DENSITY && v <= MAX_DENSITY && k.samples === 0) {
+				k.density = v;
+				k.persisted = v;
+				const n = isRecord(stored) ? stored["n"] : undefined;
+				k.samples = typeof n === "number" && Number.isInteger(n) && n > 0 ? n : 0;
+			}
+		} catch {} finally {
+			timer?.cancel();
+		}
+	})();
+	return k.loaded;
+}
+function learn($, k, chars, tokens) {
+	if (typeof tokens !== "number" || !Number.isFinite(tokens) || tokens < MIN_SAMPLE_TOKENS) return;
+	const sample = chars / (tokens - PROMPT_OVERHEAD_TOKENS);
+	if (!Number.isFinite(sample)) return;
+	k.density = (1 - DENSITY_ALPHA) * k.density + DENSITY_ALPHA * Math.min(MAX_DENSITY, Math.max(MIN_DENSITY, sample));
+	k.samples += 1;
+	if (Math.abs(k.density - k.persisted) / k.persisted <= PERSIST_DELTA) return;
+	k.persisted = k.density;
+	try {
+		void Promise.resolve($.store.set(DENSITY_KEY, {
+			v: k.density,
+			n: k.samples
+		})).catch(() => undefined);
+	} catch {}
+}
 const DEFAULT_JEV_URL = "https://api.typesafe.ai/v1/systemone";
 const DEFAULT_MODEL = "jev-latest";
 const QUESTION_ID = "answer";
@@ -50,6 +117,7 @@ const SPECS = {
 				},
 				state: STATE,
 				timeout: TIMEOUT,
+				overflow: OVERFLOW,
 				criteria: {
 					type: "object",
 					description: "Optional: what counts as true and what counts as false.",
@@ -80,6 +148,7 @@ const SPECS = {
 				},
 				state: STATE,
 				timeout: TIMEOUT,
+				overflow: OVERFLOW,
 				criteria: {
 					type: "object",
 					description: "The options: option name -> description of when to pick it.",
@@ -106,6 +175,7 @@ const SPECS = {
 				},
 				state: STATE,
 				timeout: TIMEOUT,
+				overflow: OVERFLOW,
 				criteria: {
 					type: "array",
 					description: "The levels, lowest first; scores start at 0.",
@@ -128,6 +198,7 @@ const SPECS = {
 			properties: {
 				state: STATE,
 				timeout: TIMEOUT,
+				overflow: OVERFLOW,
 				questions: {
 					type: "array",
 					description: "The questions, each with the input of the noul, choice or score tool minus state, plus its type.",
@@ -248,7 +319,7 @@ function parseQuestion(type, instructions, criteria) {
 		criteria
 	};
 }
-function parseInput(tool, e) {
+function parseQuestions(tool, e) {
 	const { instructions, state } = e;
 	if (tool !== "batch" && !isText(instructions)) return "instructions must be a non-empty string";
 	if (!isText(state)) return "state must be a non-empty string";
@@ -272,6 +343,16 @@ function parseInput(tool, e) {
 		state,
 		questions
 	};
+}
+function parseInput(tool, e) {
+	const parsed = parseQuestions(tool, e);
+	if (typeof parsed === "string") return parsed;
+	const overflow = e["overflow"];
+	if (overflow === undefined) return parsed;
+	return isOverflow(overflow) ? {
+		...parsed,
+		overflow
+	} : `overflow must be one of ${OVERFLOWS.join(", ")}`;
 }
 function endpoint(jev, base) {
 	if (jev) return HTTP_URL.test(jev) ? {
@@ -407,8 +488,31 @@ async function askHaiku($, tool, state, questions, timeoutMs, signal) {
 		if (onAbort) signal.removeEventListener("abort", onAbort);
 	}
 }
-async function ask($, tool, state, questions, env, timeoutMs, signal) {
+function contextRefusal(text) {
+	const body = json(text);
+	const error = isRecord(body) ? body["error"] : undefined;
+	if (!isRecord(error) || error["type"] !== CONTEXT_ERROR) return undefined;
+	const tokens = error["n_prompt_tokens"];
+	const nctx = error["n_ctx"];
+	if (typeof tokens !== "number" || typeof nctx !== "number" || !Number.isInteger(tokens) || !Number.isInteger(nctx) || nctx < 2 || tokens < nctx) return undefined;
+	return {
+		tokens,
+		nctx
+	};
+}
+function stateThatFits(refused) {
+	const prompt = Math.floor(refused.chars * (refused.limit - PROMPT_OVERHEAD_TOKENS - CUT_MARGIN_TOKENS) / (refused.tokens - PROMPT_OVERHEAD_TOKENS));
+	return Math.max(0, prompt - refused.questionsChars);
+}
+function tooBigError(tool, refused) {
+	const aim = Math.floor(stateThatFits(refused) / 100) * 100;
+	return fail(tool, `state too large for System One: the request has ${refused.tokens} tokens, the limit is ${refused.limit}; shorten the state to about ${aim} characters`);
+}
+async function ask($, tool, state, questions, env, timeoutMs, signal, onSample) {
 	const ids = questions.map((_, i) => tool === "batch" ? `q${i}` : QUESTION_ID);
+	const questionsObject = Object.fromEntries(ids.map((id, i) => [id, questions[i]]));
+	const questionsChars = JSON.stringify(questionsObject).length;
+	const chars = state.length + questionsChars;
 	const target = endpoint(env.jevUrl, env.base);
 	if (!target.ok) return fail(tool, target.error);
 	const { key } = env;
@@ -429,7 +533,7 @@ async function ask($, tool, state, questions, env, timeoutMs, signal) {
 			body: JSON.stringify({
 				model,
 				state,
-				questions: Object.fromEntries(ids.map((id, i) => [id, questions[i]]))
+				questions: questionsObject
 			})
 		});
 		request.catch(() => undefined);
@@ -445,6 +549,16 @@ async function ask($, tool, state, questions, env, timeoutMs, signal) {
 		if (res === "timeout") return fail(tool, `timeout after ${timeoutMs}ms`);
 		if (res === "aborted") return fail(tool, "the call was abandoned");
 		if (!res.ok) {
+			const refused = res.status === 400 ? contextRefusal(res.text) : undefined;
+			if (refused) {
+				onSample(chars, refused.tokens);
+				return { tooBig: {
+					tokens: refused.tokens,
+					limit: refused.nctx - 1,
+					chars,
+					questionsChars
+				} };
+			}
 			const why = detail(res.text, redact, key !== undefined && key.length >= MIN_REDACT_KEY && /^[-+.\deE]+$/.test(key));
 			let text = why === undefined ? "" : why.trim();
 			if (text.length > MAX_DETAIL) {
@@ -456,6 +570,8 @@ async function ask($, tool, state, questions, env, timeoutMs, signal) {
 		}
 		const body = json(res.text);
 		if (body === undefined) return fail(tool, `HTTP ${res.status} response was not valid JSON`);
+		const usage = isRecord(body) ? body["usage"] : undefined;
+		if (isRecord(usage)) onSample(chars, usage["input_tokens"]);
 		const answers = isRecord(body) ? body["answers"] : undefined;
 		const list = [];
 		for (const [i, q] of questions.entries()) {
@@ -527,6 +643,13 @@ export function register(on, options) {
 		failures: new Map(),
 		stuck: new Set()
 	};
+	const know = {
+		density: DEFAULT_DENSITY,
+		persisted: DEFAULT_DENSITY,
+		samples: 0,
+		nctx: DEFAULT_CONTEXT_TOKENS,
+		loaded: undefined
+	};
 	on("session.start", async function onSessionStart($, e, next) {
 		try {
 			if (st.missing.size > 0) await ensureTools($, st, 5 * REGISTER_WAIT_MS);
@@ -553,12 +676,17 @@ export function register(on, options) {
 			if (next.signal.aborted) return fail(type, "the call was abandoned");
 			const timeoutMs = Math.max(1, Math.round((seconds(e["timeout"]) ?? fallbackS) * 1e3));
 			if (!key && !base && !jevUrl) return await askHaiku($, type, input.state, input.questions, timeoutMs, next.signal);
-			return await ask($, type, input.state, input.questions, {
+			await loadKnowledge($, know);
+			if (next.signal.aborted) return fail(type, "the call was abandoned");
+			const answer = await ask($, type, input.state, input.questions, {
 				key,
 				base,
 				jevUrl,
 				model
-			}, timeoutMs, next.signal);
+			}, timeoutMs, next.signal, (chars, tokens) => learn($, know, chars, tokens));
+			if (!isTooBig(answer)) return answer;
+			know.nctx = answer.tooBig.limit + 1;
+			return tooBigError(type, answer.tooBig);
 		} catch (err) {
 			return fail(type, message(err));
 		}
