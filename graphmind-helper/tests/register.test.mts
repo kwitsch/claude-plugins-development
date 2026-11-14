@@ -215,6 +215,16 @@ test("a memory search hit that is a priority entry is not shown again", async ($
   expect(second).toMatch(/about foo_bar/);
 });
 
+test("an empty priority store adds no priority block", async ($, on) => {
+  // Real CLI output (graphmind 0.3.7) for a store without priority entries: a notice without an entry id.
+  const { prompts } = setup(on, { priority: "No priority memories found.\n" });
+  await $.session.start({ source: "startup" });
+  await prompt($, "where is foo_bar defined in the code");
+  await prompt($, "something else entirely about parseConfig here");
+  const all = prompts.map((p) => (p.context ?? []).join("\n")).join("\n");
+  expect(all).not.toMatch(/No priority memories found|Priority context|new priority context/);
+});
+
 test("a recent memory that is a priority entry is left out of the briefing", async ($, on) => {
   // Real MCP shape (graphmind 0.3.7): gm_memory_list lists a priority entry without its star; the summary may hold 8 hex.
   const recent = ">> 3\n  [decision] always use X (id: aaaaaaaa-1111-2222-3333-444444444444)\n  [pattern] see aaaaaaaa notes (id: cccccccc-1111-2222-3333-444444444444)\n  [bug] recent one (id: dddddddd-1111-2222-3333-444444444444)";

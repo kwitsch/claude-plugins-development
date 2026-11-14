@@ -151,7 +151,7 @@ async function recallFor($, prompt, signal) {
 		if (state.searched.size > 50) state.searched.clear();
 		state.searched.set(terms, now);
 	}
-	const priority = listing(priorityRaw);
+	const priority = listing(priorityRaw).filter((l) => entryId(l) !== undefined);
 	const pids = new Set(priority.flatMap((l) => entryId(l) ?? []));
 	const skip = new Set([...state.shown, ...pids]);
 	const found = search ? [{

@@ -326,7 +326,8 @@ async function recallFor($: Engine, prompt: string, signal?: AbortSignal): Promi
     if (state.searched.size > 50) state.searched.clear();
     state.searched.set(terms, now);
   }
-  const priority = listing(priorityRaw);
+  // Only entries: an empty store prints "No priority memories found." without an id, which would never be marked shown.
+  const priority = listing(priorityRaw).filter((l) => entryId(l) !== undefined);
   // A search hit that is a priority entry is already shown or offered in the priority block (the setup's drop_shown).
   const pids = new Set(priority.flatMap((l) => entryId(l) ?? []));
   const skip = new Set([...state.shown, ...pids]);
