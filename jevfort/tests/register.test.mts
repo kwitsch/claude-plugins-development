@@ -1534,6 +1534,24 @@ test("The jev-api lookup is repeated after each turn", { options: { doneCheck: f
   expect(await runJev($, "report")).toContain("· 2 errors |");
 });
 
+test("estimate_effort is not registered again when jev-api goes away and comes back", { options: { doneCheck: false } }, async ($, on) => {
+  const tools: typeof JEV_TOOLS = [...JEV_TOOLS];
+  setup(on, { messages: [user("what does this project do?")], tools, jev: byId({ effort: easy }) });
+  claudeBeneath(on, []);
+  followUps(on);
+  const registered = sessionStubs(on);
+  await $.session.start(START);
+  expect(registered).toEqual(["estimate_effort"]);
+  tools.length = 0;
+  await $.turn.complete(answered("t1", "It is a todo app."));
+  await drain($.turn.step({ ...step, turnId: "t2" }));
+  // There is no unregister: back to ready keeps the one registration.
+  tools.push(...JEV_TOOLS);
+  await $.turn.complete(answered("t2", "It is a todo app."));
+  await drain($.turn.step({ ...step, turnId: "t3" }));
+  expect(registered).toEqual(["estimate_effort"]);
+});
+
 test("/jev between turns does not carry its listing into the next turn", { options: { doneCheck: false } }, async ($, on) => {
   const tools: typeof JEV_TOOLS = [];
   const { sent } = setup(on, { messages: [user("what does this project do?")], tools, jev: byId({ effort: easy }) });
