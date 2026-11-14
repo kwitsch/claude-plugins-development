@@ -94,6 +94,7 @@ test("parseEstimateInput names the first invalid field", () => {
   assert.equal(parseEstimateInput({ ...INPUT, maxEffort: 3 }), "maxEffort must be one of low, medium, high, xhigh, max");
   assert.equal(parseEstimateInput({ ...INPUT, minEffort: "high", maxEffort: "low" }), "minEffort must not be above maxEffort");
   assert.equal(parseEstimateInput({ ...INPUT, prompt: "" }), "prompt must be a non-empty string");
+  assert.equal(parseEstimateInput({ ...INPUT, prompt: "  \n " }), "prompt must be a non-empty string");
   assert.equal(parseEstimateInput({ ...INPUT, prompt: 42 }), "prompt must be a non-empty string");
 });
 
