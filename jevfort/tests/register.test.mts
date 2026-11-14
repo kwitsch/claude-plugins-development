@@ -1580,6 +1580,24 @@ for (const [percent, ids] of [[85, ["done", "end"]], [30, ["done"]]] as const) {
   });
 }
 
+test("A failed done+end call at 85% fill sends no second request and queues no compaction", { options: { classify: false } }, async ($, on) => {
+  const { calls } = setup(on, { messages: [user("rename foo to bar")], jev: () => ({ __deny: "batch: HTTP 503" }) });
+  followUps(on);
+  const state = compactStubs(on, 85);
+  await $.turn.complete(answered("t1", "Done."));
+  expect(calls()).toBe(1);
+  expect(state.compacts).toBe(0);
+});
+
+test("Turn end at 96% fill asks only the done question and still compacts", { options: { classify: false } }, async ($, on) => {
+  const { sent } = setup(on, { messages: [user("rename foo to bar")], jev: intermediate });
+  followUps(on);
+  const state = compactStubs(on, 96);
+  await $.turn.complete(answered("t1", "Done."));
+  expect(sent.map((q) => q.id)).toEqual(["done"]);
+  expect(state.compacts).toBe(1);
+});
+
 // F07: facts that do not change within a turn are read from the engine once per turn.
 test("A turn reads the project, env, lists and cwd once and the transcript once per hook", async ($, on) => {
   const ops: Record<string, number> = {};
