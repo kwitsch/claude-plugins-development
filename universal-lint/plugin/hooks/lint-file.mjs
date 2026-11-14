@@ -1120,6 +1120,13 @@ export function recordWritten(fp, real) {
 function recordWrittenFor(s) {
 	if (s) recordWritten(s.fp, s.real);
 }
+function digestOrNull(fp) {
+	try {
+		return fileDigest(fp);
+	} catch {
+		return null;
+	}
+}
 function settleDir() {
 	return path.resolve(process.env.CLAUDE_PLUGIN_DATA || tmpdir(), "settle");
 }
@@ -1208,7 +1215,7 @@ const NO_CHAIN = {
 function tscNeeded(typeCheckEligible, oxlintConfig, chainRan) {
 	return typeCheckEligible && !(oxlintConfig !== null && chainRan && oxlintConfigTypeChecks(oxlintConfig));
 }
-async function lintResolved(resolved, cwd, ranges, hookEventName, label) {
+async function lintResolved(resolved, cwd, ranges, hookEventName) {
 	const rel = path.relative(cwd, resolved);
 	const coalesce = hookEventName === "FileChanged";
 	const ext = path.extname(resolved).toLowerCase();
@@ -1230,6 +1237,9 @@ async function lintResolved(resolved, cwd, ranges, hookEventName, label) {
 		const g = gateFinding(f, ranges, resolved);
 		return g ? [g] : [];
 	});
+	return kept;
+}
+function formatFindings(kept, hookEventName, label) {
 	if (kept.length === 0) return {};
 	const blocks = kept.map((f) => `${f.tool} found issues in ${f.target}:\n${truncate(f.text)}`);
 	return { hookSpecificOutput: {
@@ -1240,10 +1250,14 @@ async function lintResolved(resolved, cwd, ranges, hookEventName, label) {
 export async function lintFileHandler(args, scoped = postToolScope(args)) {
 	try {
 		const resolved = scoped?.fp;
-		if (!resolved) return {};
+		if (!scoped || !resolved) return {};
 		const ranges = editRanges(args);
 		if (ranges?.length === 0) return {};
-		return await lintResolved(resolved, args.cwd, ranges, "PostToolUse", "universal-lint");
+		const rec = recordEdit(resolved, scoped.real, editHunks(args));
+		const d0 = digestOrNull(resolved);
+		const kept = await lintResolved(resolved, args.cwd, ranges, "PostToolUse");
+		const d1 = digestOrNull(resolved);
+		return formatFindings(await settleFindings(kept, resolved, rec, d0, d1), "PostToolUse", "universal-lint");
 	} catch {
 		return {};
 	}
@@ -1431,6 +1445,7 @@ export async function fileChangedHandler(args) {
 			if (recorded === fileDigest(s.fp)) return {};
 			rmSync(writtenDigestPath(s.real), { force: true });
 		}
+		const rec = recordEdit(s.fp, s.real, null);
 		try {
 			const status = execFileSync("git", [
 				"--no-optional-locks",
@@ -1462,13 +1477,19 @@ export async function fileChangedHandler(args) {
 			process.stderr.write(`universal-lint: FileChanged: no lint slot free in time, ${s.fp} not linted\n`);
 			return {};
 		}
+		let kept = [];
+		let d0 = null;
+		let d1 = null;
 		try {
-			return await lintResolved(s.fp, cwd, null, "FileChanged", "universal-lint (changed outside Write/Edit)");
+			d0 = digestOrNull(s.fp);
+			kept = await lintResolved(s.fp, cwd, null, "FileChanged");
+			d1 = digestOrNull(s.fp);
 		} finally {
 			try {
 				if (slot) rmSync(slot, { force: true });
 			} catch {}
 		}
+		return formatFindings(await settleFindings(kept, s.fp, rec, d0, d1), "FileChanged", "universal-lint (changed outside Write/Edit)");
 	} catch {
 		return {};
 	}

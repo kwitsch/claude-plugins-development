@@ -136,7 +136,8 @@ export function makeEnv(): LintEnv {
       env.stub(name, `printf "%s %s\\n" "${name}" "$*" >> "$RECORD"`, "printf '%s\\n' \"$OUT\"", `exit ${exitCode}`);
     },
     lines: () => readFileSync(record, "utf8").split("\n").filter(Boolean),
-    childEnv: (opts = {}) => ({ PATH: bin, HOME: home, RECORD: record, OUT: opts.out ?? "", CLAUDE_PLUGIN_DATA: data, GIT_CONFIG_NOSYSTEM: "1", ...opts.env }),
+    // UNIVERSAL_LINT_SETTLE_MS=0: findings are reported at once; a test of the settle window overrides it through opts.env.
+    childEnv: (opts = {}) => ({ PATH: bin, HOME: home, RECORD: record, OUT: opts.out ?? "", CLAUDE_PLUGIN_DATA: data, GIT_CONFIG_NOSYSTEM: "1", UNIVERSAL_LINT_SETTLE_MS: "0", ...opts.env }),
     run(filePath, opts) {
       const r = spawnSync(process.execPath, [HOOK], { input: payload(filePath, cwd, opts), env: env.childEnv(opts), encoding: "utf8" });
       return toRun(r.status, r.stderr, r.stdout);

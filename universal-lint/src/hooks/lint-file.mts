@@ -2110,6 +2110,20 @@ function recordWrittenFor(s: { fp: string; real: string } | null): void {
   if (s) recordWritten(s.fp, s.real);
 }
 
+/**
+ * SHA-256 base64 of a file, or null when it cannot be read.
+ *
+ * @param fp - File to hash.
+ * @returns The digest, or null.
+ */
+function digestOrNull(fp: string): string | null {
+  try {
+    return fileDigest(fp);
+  } catch {
+    return null;
+  }
+}
+
 /** Handle of the journal record a lint wrote for its own edit (F34). */
 export interface EditRecord {
   /** `hashPath` of the file's real path: the record files of one file share this prefix. */
@@ -2251,7 +2265,8 @@ function tscNeeded(typeCheckEligible: boolean, oxlintConfig: string | null, chai
 
 /**
  * Lint `resolved` (chain tool from `chainEntryFor` unless JS/TS or CSS/SCSS has no lint config, run by `runChainLint`,
- * + tsc), gate the findings against `ranges` (null = whole file), and build the hook result.
+ * + tsc) and gate the findings against `ranges` (null = whole file). The caller settles them (`settleFindings`) and
+ * formats them (`formatFindings`); no lock or slot is needed past this point.
  *
  * @remarks
  * tsc is decided up front (F18): for a type-check-eligible file whose oxlint config does not type-check (or that has
@@ -2267,12 +2282,10 @@ function tscNeeded(typeCheckEligible: boolean, oxlintConfig: string | null, chai
  * @param resolved - Lexical absolute path of the in-scope file.
  * @param cwd - Payload cwd (spawn cwd and config search root).
  * @param ranges - Edited line ranges, or null when the whole file counts.
- * @param hookEventName - `hookSpecificOutput.hookEventName` of the result. `hookEventName === "FileChanged"` also
- *   enables `coalesceProjectCheck` for the whole-project check.
- * @param label - Prefix of the findings text (`<label>: <findings>`).
- * @returns The hook result: findings as additionalContext, or an empty object.
+ * @param hookEventName - The event name; `"FileChanged"` also enables `coalesceProjectCheck` for the whole-project check.
+ * @returns The gated findings (empty when clean, skipped or all outside the edit).
  */
-async function lintResolved(resolved: string, cwd: string, ranges: Array<[number, number]> | null, hookEventName: string, label: string): Promise<HookResult> {
+async function lintResolved(resolved: string, cwd: string, ranges: Array<[number, number]> | null, hookEventName: string): Promise<Finding[]> {
   const rel = path.relative(cwd, resolved);
   const coalesce = hookEventName === "FileChanged";
   const ext = path.extname(resolved).toLowerCase();
@@ -2298,8 +2311,19 @@ async function lintResolved(resolved: string, cwd: string, ranges: Array<[number
     const g = gateFinding(f, ranges, resolved);
     return g ? [g] : [];
   });
-  if (kept.length === 0) return {};
+  return kept;
+}
 
+/**
+ * The hook result for the findings that survived the settle window.
+ *
+ * @param kept - The findings to report (possibly empty).
+ * @param hookEventName - `hookSpecificOutput.hookEventName` of the result.
+ * @param label - Prefix of the findings text (`<label>: <findings>`).
+ * @returns The hook result: findings as additionalContext, or an empty object.
+ */
+function formatFindings(kept: Finding[], hookEventName: string, label: string): HookResult {
+  if (kept.length === 0) return {};
   // truncate() is applied per-finding first (so a single finding's own text
   // is capped exactly as before this change), then AGAIN over the joined
   // whole -- two per-finding-capped blocks can still together exceed
@@ -2319,17 +2343,26 @@ async function lintResolved(resolved: string, cwd: string, ranges: Array<[number
 /**
  * The lint_file tool handler (PostToolUse Write|Edit). Resolves to {} on every guard failure / clean / skip or rejection (fail open); async since F18.
  *
+ * @remarks
+ * Settle window (F34): the edit is journaled (`recordEdit`, also when the lint is clean), the lint runs between two
+ * digests of the file (`d0`, `d1`), and its findings are held and filtered by `settleFindings` before they are
+ * formatted. Takes no slot or lock.
+ *
  * @param args - The PostToolUse hook payload.
  * @returns The hook result: findings as additionalContext, or an empty object.
  */
 export async function lintFileHandler(args: PostToolUseHookInput, scoped: { fp: string; real: string } | null = postToolScope(args)): Promise<HookResult> {
   try {
     const resolved = scoped?.fp;
-    if (!resolved) return {};
+    if (!scoped || !resolved) return {};
     const ranges = editRanges(args);
     if (ranges?.length === 0) return {}; // the Edit changed nothing
+    const rec = recordEdit(resolved, scoped.real, editHunks(args));
+    const d0 = digestOrNull(resolved);
     // `await` inside the try is load-bearing: a rejected promise must land in the catch (fail open).
-    return await lintResolved(resolved, args.cwd, ranges, "PostToolUse", "universal-lint");
+    const kept = await lintResolved(resolved, args.cwd, ranges, "PostToolUse");
+    const d1 = digestOrNull(resolved);
+    return formatFindings(await settleFindings(kept, resolved, rec, d0, d1), "PostToolUse", "universal-lint");
   } catch {
     return {};
   }
@@ -2608,7 +2641,9 @@ export async function coalesceProjectCheck(key: string, file: string, reserveMs:
  * `FILE_CHANGED_SLOTS` cross-process slots (`acquireSlot`) until `FILE_CHANGED_BUDGET_MS` minus the file's lint
  * budget; no slot in time skips with a stderr note; a slot error lints without a slot. Inside `lintResolved` the
  * whole-project check (tsc, go vet/golangci-lint, cargo) runs through `coalesceProjectCheck`: once per burst and project
- * (F13). Returns {} for every skip and on any error (fail open).
+ * (F13). Settle window (F34): once the digest check says the content changed, a whole-file edit is journaled
+ * (`recordEdit`), and the findings are held and filtered by `settleFindings` after the slot is released. Returns {}
+ * for every skip and on any error (fail open).
  * Async since F18 (the git call and `acquireSlot` stay sync: no child of this process exists yet).
  *
  * @param args - The FileChanged hook payload.
@@ -2632,6 +2667,9 @@ export async function fileChangedHandler(args: PostToolUseHookInput): Promise<Ho
       if (recorded === fileDigest(s.fp)) return {};
       rmSync(writtenDigestPath(s.real), { force: true }); // stale: a later restore of the old bytes must lint
     }
+    // The content changed outside Write/Edit (never for the digest-matched echo above): a whole-file edit for the
+    // settle window, also when the git gate then skips the lint (a restore to committed content leaves no stale finding).
+    const rec = recordEdit(s.fp, s.real, null);
     try {
       const status = execFileSync("git", ["--no-optional-locks", "status", "--porcelain", "--untracked-files=normal", "--ignored=matching", "--", s.fp], {
         cwd: path.dirname(s.fp),
@@ -2656,8 +2694,13 @@ export async function fileChangedHandler(args: PostToolUseHookInput): Promise<Ho
       process.stderr.write(`universal-lint: FileChanged: no lint slot free in time, ${s.fp} not linted\n`);
       return {};
     }
+    let kept: Finding[] = [];
+    let d0: string | null = null;
+    let d1: string | null = null;
     try {
-      return await lintResolved(s.fp, cwd, null, "FileChanged", "universal-lint (changed outside Write/Edit)");
+      d0 = digestOrNull(s.fp);
+      kept = await lintResolved(s.fp, cwd, null, "FileChanged");
+      d1 = digestOrNull(s.fp);
     } finally {
       try {
         if (slot) rmSync(slot, { force: true });
@@ -2665,6 +2708,8 @@ export async function fileChangedHandler(args: PostToolUseHookInput): Promise<Ho
         // left for slotStale: this pid is gone once the process exits
       }
     }
+    // The hold comes after the slot release: a held finding must not keep one of the K slots busy.
+    return formatFindings(await settleFindings(kept, s.fp, rec, d0, d1), "FileChanged", "universal-lint (changed outside Write/Edit)");
   } catch {
     return {};
   }

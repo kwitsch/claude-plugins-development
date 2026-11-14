@@ -9,6 +9,9 @@ import path from "node:path";
 import { test } from "vitest";
 import { acquireSlot, buildArgv, classifyCheckstyleOutput, classifyExit, coalesceProjectCheck, configExists, editRanges, FILE_CHANGED_SLOTS, gateFinding, hashPath, hasProjectMarkdownlintConfig, hasProjectYamllintConfig, isExcludedPath, isToolAvailable, lintFileHandler, lintFilesHandler, looksLikeSolutionStyleTsconfig, oxlintConfigTypeChecks, recordWritten, REGISTRY, resolveCargoManifest, resolveCheckstyleConfig, resolveLintTarget, resolveOxlintConfig, resolveTsconfig, scopedTarget, stripTrailingCommas, truncate, tsBuildInfoPathFor, tscOutputHasSourceDiagnostic, WATCH_LIMIT } from "../plugin/hooks/lint-file.mjs";
 
+// The handler tests below call lintFileHandler in this process: report findings at once, no settle window (F34).
+process.env.UNIVERSAL_LINT_SETTLE_MS = "0";
+
 const shellcheck = REGISTRY.shell.chain[0];
 const checkstyle = REGISTRY.java.chain[0];
 const ruff = REGISTRY.python.chain[0];
