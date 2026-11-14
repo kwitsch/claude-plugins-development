@@ -14,6 +14,18 @@ What shipped (`CLAUDE.md` "Oversized state" has the details): `answerJev` refuse
 
 Not done, follow-up: jevfort passes no `overflow`, so an oversized call of it would be answered by Haiku within its short budget; it may want `overflow: "error"`.
 
+Live validation (2026-11-14, real endpoint, the built hooks module driven by a hand-made `$` with real `fetch` and a file-backed store; separate processes):
+
+- 300 KB prose, `overflow: "error"`, 20 s: refused in 1 ms, no request (`at least 50038 tokens, about 15666 fit`).
+- 80000 characters of hex (1.7 characters per token), `error`, 30 s: passes the preflight, one request, the server's 400 becomes `the request has 46143 tokens, the limit is 32767; shorten the state to about 56600 characters` in 267 ms.
+- The same with `truncate`: two requests (80000, then 36723 characters), answered in 20.8 s in total. This run found that the first version sized the cut after a refusal with the learned density and so still ran into the timeout for dense text: the cut now uses the exact density the refusal gave (test "after a refusal the cut also respects the timeout").
+- Persistence across processes: after the runs `density` was stored as `{ v: 2.54, n: 2 }`; a new process then cut a 100000-character prose state to 39603 characters, which is `(15666 - 90) * 2.54 - question` and not the 46.7k of the default 3.0, so it read the stored value. A later success moved it to 2.98.
+- The shared endpoint is noisy: a 39603-character state (about 8k tokens) timed out once at 20 s while an earlier abandoned request was still running, and a 21-character state took 6.7 s; the same state answered in 6.6 s a minute later. The latency model is for an idle endpoint.
+
+In a real Claude Code session (2.1.325, `claude -p --plugin-dir jev-api/plugin --setting-sources project`) the split modules load and `mcp__jev-api__noul` answers `{"type":"noul","noul":0.978...}`.
+
+Not run live: the `haiku` mode (the harness has no model) and an abandoned call during a retry (kit tests only).
+
 Earlier state: Open, nothing implemented; this document held the measurements and the proposed reaction below.
 
 ## Problem
