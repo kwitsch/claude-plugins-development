@@ -1770,6 +1770,60 @@ test("session.end writes the decisions recorded outside a turn", { options: { mi
   expect(logs[0]).toContainEqual(expect.objectContaining({ kind: "error", text: expect.stringContaining("invalid effort bounds") }));
 });
 
+/** A `store.get("log")` stub above `mock.store` that reads first and then waits for `release()`: the read goes stale while a write is in flight. */
+function gatedLog(on: On, logs: unknown[][]) {
+  let release = () => {};
+  const gate = new Promise<void>((r) => (release = r));
+  on("store.get", async (_$, e, next) => {
+    const r = await next(e);
+    if (e.key === "log") await gate;
+    return r;
+  });
+  on("store.set", (_$, e, next) => (e.key === "log" && logs.push(e.value as unknown[]), next(e)));
+  return { release, settle: () => new Promise((r) => setTimeout(r, 20)) };
+}
+
+/** Lets `session.start`/`session.end` and their registrations pass. */
+const lifecycle = (on: On) => {
+  on("command.register", async () => ({ value: undefined }));
+  on("tool.register", async () => ({ value: { tool: "mcp__jevfort__estimate_effort" } }));
+  on("session.start", async () => ({}));
+  on("session.end", async () => ({}));
+};
+
+test("/jev clear waits for an in-flight flush instead of having it write the log back", { options: { minEffort: "high", maxEffort: "low" } }, async ($, on) => {
+  const logs: unknown[][] = [];
+  const g = gatedLog(on, logs);
+  setup(on, { messages: [], jev: () => undefined });
+  lifecycle(on);
+  await $.session.start({ cwd: CWD, surface: "terminal", isInteractive: true });
+  const end = $.session.end({ reason: "clear", sessionId: SID, resume: { id: SID } });
+  await g.settle();
+  const cleared = runJev($, "clear");
+  await g.settle();
+  g.release();
+  await end;
+  expect(await cleared).toBe("Jev pilot: log cleared.");
+  expect(logs.at(-1)).toEqual([]);
+});
+
+test("A flush started while another is in flight keeps both flushes' entries", { options: { minEffort: "high", maxEffort: "low" } }, async ($, on) => {
+  const logs: unknown[][] = [];
+  const g = gatedLog(on, logs);
+  setup(on, { messages: [], jev: () => undefined });
+  lifecycle(on);
+  await $.session.start({ cwd: CWD, surface: "terminal", isInteractive: true });
+  const end = $.session.end({ reason: "clear", sessionId: SID, resume: { id: SID } });
+  await g.settle();
+  await $.session.start({ cwd: CWD, surface: "terminal", isInteractive: true });
+  const status = runJev($, "");
+  await g.settle();
+  g.release();
+  await end;
+  await status;
+  expect(logs.at(-1)).toHaveLength(2);
+});
+
 test("An inactive turn.complete writes the decisions pending from the turn", async ($, on) => {
   const sets: string[] = [];
   on("store.set", (_$, e, next) => (sets.push(String(e.key)), next(e)));
