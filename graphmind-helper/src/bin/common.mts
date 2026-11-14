@@ -2,7 +2,7 @@
 import { spawnSync } from "node:child_process";
 import { accessSync, constants, readFileSync, realpathSync, statSync } from "node:fs";
 import { homedir } from "node:os";
-import { delimiter, dirname, join } from "node:path";
+import { basename, delimiter, dirname, join } from "node:path";
 import { binaryDirs } from "../hooks/terms.mjs";
 
 /**
@@ -43,7 +43,7 @@ export function registered(bin: string): boolean {
 
 /**
  * The `projects` key of `.claude.json` that Claude Code reads for `cwd`: the git root (for a linked worktree the main checkout's
- * root), outside git the real `cwd`. Only that one entry is loaded, never those of ancestors.
+ * root, or the common git dir of a bare or --separate-git-dir repo), outside git the real `cwd`. Only that one entry is loaded, never those of ancestors.
  *
  * @param cwd - Working directory.
  * @returns Absolute real path.
@@ -58,7 +58,8 @@ export function claudeProjectKey(cwd: string): string {
   const gitDir = top && rp("--git-dir");
   const common = top && rp("--git-common-dir");
   // A linked worktree's git dir differs from the common one; a submodule's does not (its root is its own top level).
-  const key = top ? (common && gitDir !== common ? dirname(common) : top) : cwd;
+  // Claude Code keys a worktree by the common dir's parent only when it is named `.git`; a bare or --separate-git-dir repo by the common dir itself.
+  const key = top ? (common && gitDir !== common ? (basename(common) === ".git" ? dirname(common) : common) : top) : cwd;
   try {
     return realpathSync(key);
   } catch {

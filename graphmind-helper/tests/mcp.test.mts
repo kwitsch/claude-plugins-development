@@ -132,6 +132,16 @@ test("only the project entry Claude Code loads counts: git root, main checkout o
   assert.equal(setupMcpPresent(home, join(inner, "sub")), false);
   writeFileSync(join(home, ".claude.json"), JSON.stringify({ projects: { [inner]: { mcpServers: { graphmind: {} } } } }));
   assert.equal(setupMcpPresent(home, join(inner, "sub")), true);
+  // A worktree of a bare repo: Claude Code keys it by the bare git dir itself, not its parent.
+  const bare = join(root, "bare.git");
+  const bwt = join(root, "bwt");
+  git(root, "init", "-q", "--bare", bare);
+  git(outer, "push", "-q", bare, "HEAD:refs/heads/main");
+  git(bare, "worktree", "add", "-q", bwt, "main");
+  writeFileSync(join(home, ".claude.json"), JSON.stringify({ projects: { [bare]: { mcpServers: { graphmind: {} } } } }));
+  assert.equal(setupMcpPresent(home, bwt), true);
+  writeFileSync(join(home, ".claude.json"), JSON.stringify({ projects: { [root]: { mcpServers: { graphmind: {} } } } }));
+  assert.equal(setupMcpPresent(home, bwt), false);
 });
 
 test("a repo path with a newline or trailing space is its own project key, not its parent folder", () => {
