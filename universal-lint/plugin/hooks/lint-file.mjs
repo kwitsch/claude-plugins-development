@@ -589,6 +589,15 @@ export function hasProjectYamllintConfig(cwd) {
 		dir = parent;
 	}
 }
+export function hasUserGlobalYamllintConfig() {
+	const env = process.env;
+	const p = env.YAMLLINT_CONFIG_FILE !== undefined ? env.YAMLLINT_CONFIG_FILE.replace(/^~(?=$|\/)/, homedir()) : path.join(env.XDG_CONFIG_HOME ?? path.join(homedir(), ".config"), "yamllint", "config");
+	try {
+		return statSync(p).isFile();
+	} catch {
+		return false;
+	}
+}
 const YAMLLINT_NO_LINE_LENGTH_CONFIG_DATA = "{extends: default, rules: {line-length: disable}}";
 const MARKDOWNLINT_CONFIG_FILENAMES = [
 	".markdownlint-cli2.jsonc",
@@ -669,7 +678,7 @@ export function buildArgv(tool, resolvedFile, cwd, manifest) {
 	if (tool.needsCheckstyleConfig) {
 		argv.push("-c", resolveCheckstyleConfig(dir, cwd) ?? "/google_checks.xml");
 	}
-	if (tool.guardYamlLineLength && !hasProjectYamllintConfig(cwd)) {
+	if (tool.guardYamlLineLength && !hasProjectYamllintConfig(cwd) && !hasUserGlobalYamllintConfig()) {
 		argv.push("-d", YAMLLINT_NO_LINE_LENGTH_CONFIG_DATA);
 	}
 	if (tool.guardMarkdownLineLength && !hasProjectMarkdownlintConfig(dir)) {

@@ -1106,12 +1106,32 @@ export function hasProjectYamllintConfig(cwd: string): boolean {
 }
 
 /**
+ * Port of yamllint/cli.py's user-global config lookup (1.38.0):
+ * `$YAMLLINT_CONFIG_FILE` (~ expanded) if set, else
+ * `$XDG_CONFIG_HOME/yamllint/config`, else `~/.config/yamllint/config`.
+ * yamllint uses it when no project config exists, but -d would replace it.
+ *
+ * @returns True when the user-global yamllint config file exists.
+ */
+export function hasUserGlobalYamllintConfig(): boolean {
+  const env = process.env;
+  const p = env.YAMLLINT_CONFIG_FILE !== undefined
+    ? env.YAMLLINT_CONFIG_FILE.replace(/^~(?=$|\/)/, homedir())
+    : path.join(env.XDG_CONFIG_HOME ?? path.join(homedir(), ".config"), "yamllint", "config");
+  try {
+    return statSync(p).isFile();
+  } catch {
+    return false;
+  }
+}
+
+/**
  * yamllint's line-length rule is "error" level in its own bundled default
  * ruleset (verified empirically against yamllint 1.38.0 -- NOT "warning", so
  * this hook's existing 0-clean/1-issues classifyExit contract already
  * surfaces it without --strict). -d overrides yamllint's own project-config
  * search entirely, so it is only ever passed when hasProjectYamllintConfig
- * found nothing. Single-line flow-style YAML (not the equivalent multi-line
+ * and hasUserGlobalYamllintConfig found nothing. Single-line flow-style YAML (not the equivalent multi-line
  * block form), passed as one argv element.
  */
 const YAMLLINT_NO_LINE_LENGTH_CONFIG_DATA = "{extends: default, rules: {line-length: disable}}";
@@ -1291,7 +1311,7 @@ export function buildArgv(tool: LintTool, resolvedFile: string, cwd: string, man
   if (tool.needsCheckstyleConfig) {
     argv.push("-c", resolveCheckstyleConfig(dir, cwd) ?? "/google_checks.xml");
   }
-  if (tool.guardYamlLineLength && !hasProjectYamllintConfig(cwd)) {
+  if (tool.guardYamlLineLength && !hasProjectYamllintConfig(cwd) && !hasUserGlobalYamllintConfig()) {
     argv.push("-d", YAMLLINT_NO_LINE_LENGTH_CONFIG_DATA);
   }
   if (tool.guardMarkdownLineLength && !hasProjectMarkdownlintConfig(dir)) {
