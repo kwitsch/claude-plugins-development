@@ -18,13 +18,9 @@ The user's request for this skill is the opt-in for the Workflow tool that `perf
 4. `git switch -c refactoring/<plugin>-$(date +%y%m%d)`. Stop with one line if that branch already exists.
 5. Note the worktree's absolute path and the branch. Run `pnpm install` when `node_modules` is missing.
 
-## 2. perf-worklist
+## 2. perf-worklist, then 3. bughunt-loop
 
-Run `Skill(perf-worklist, <plugin>)`. Its "Start: worktree and branch" is already done: skip it and do not create a `perf/` branch; the work stays on the refactoring branch. Wait for its Workflow to finish (the completion notification) before step 3. A blocked job is noted, not fatal.
-
-## 3. bughunt-loop
-
-Run `Skill(bughunt-loop, <plugin>)` in the same worktree, after step 2 is complete (both edit the same files, never in parallel). Skip its "Start: worktree and branch" the same way (no `fix/` branch). Wait for it to finish.
+Run `Skill(perf-worklist, <plugin>)`, wait for its Workflow to finish (the completion notification), then run `Skill(bughunt-loop, <plugin>)` in the same worktree (both edit the same files, never in parallel). In both, "Start: worktree and branch" is already done: skip it and create no `perf/` or `fix/` branch; the work stays on the refactoring branch. A blocked job or stop is noted, not fatal.
 
 ## 4. Merge-ready PR
 
