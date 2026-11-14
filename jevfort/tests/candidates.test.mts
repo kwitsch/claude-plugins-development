@@ -244,6 +244,10 @@ test("commands compare by what they run, not how the output is filtered", () => 
   expect(commandKey("git log --oneline -5")).toBe(commandKey("git log --oneline -n 15"));
   expect(commandKey("npm run lint")).not.toBe(commandKey("npm run build"));
   expect(commandKey("git diff")).not.toBe(commandKey("git status --short && git diff --stat"));
+  // Cases the 2-word cap does not hide: order, flags, pipe tail.
+  expect(commandKey("git diff; git status")).toBe(commandKey("git status && git diff"));
+  expect(commandKey("ls -la")).toBe(commandKey("ls"));
+  expect(commandKey("ls | wc -l")).toBe(commandKey("ls"));
 });
 
 test("a step matches only when Jev's one action would replace all of it", () => {
