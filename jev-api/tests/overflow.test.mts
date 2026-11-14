@@ -67,7 +67,11 @@ const BASE: Record<string, Record<string, unknown>> = {
   batch: { state: "Hello there!", questions: [{ type: "noul", instructions: "Is this text about animals?" }] },
 };
 
-const call = ($: Runner, type: string, input: Record<string, unknown> = {}) => $.tool.call({ tool: TOOL(type), ...BASE[type], ...input }) as Promise<Result>;
+// An HTTP error status is taken over by Haiku; these tests have no Haiku, so its failure text is cut off to compare the HTTP error alone.
+const call = async ($: Runner, type: string, input: Record<string, unknown> = {}) => {
+  const r = (await $.tool.call({ tool: TOOL(type), ...BASE[type], ...input })) as Result;
+  return r.deny === undefined ? r : { ...r, deny: r.deny.replace(/; fallback: [\s\S]*$/, "") };
+};
 
 // --- Phase 2: the overflow input and option -------------------------------------------------------------------------
 

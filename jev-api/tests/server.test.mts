@@ -61,8 +61,15 @@ const stub = async (): Promise<Stub> => {
 };
 
 /** A spawned server speaking newline JSON-RPC; every stdout line is parsed and kept. */
-const start = (env: Record<string, string>) => {
-  const child: ChildProcessWithoutNullStreams = spawn(process.execPath, [SERVER], { env: { PATH: process.env["PATH"] ?? "", ...env }, stdio: ["pipe", "pipe", "pipe"] });
+const CONFIG_VARS = { TYPESAFE_API_KEY: "key", TYPESAFE_BASE_URL: "base", JEV_URL: "jevUrl", TYPESAFE_DEFAULT_MODEL: "model" } as const;
+/** Spawns the server (its own environment holds only PATH and the test switches) and gives it the System One variables of `env` with a `config` call, as the mod does; `configure: false` leaves it unconfigured. */
+const start = (env: Record<string, string>, configure = true) => {
+  const own = configure ? Object.fromEntries(Object.entries(env).filter(([k]) => !(k in CONFIG_VARS))) : env;
+  const child: ChildProcessWithoutNullStreams = spawn(process.execPath, [SERVER], { env: { PATH: process.env["PATH"] ?? "", ...own }, stdio: ["pipe", "pipe", "pipe"] });
+  if (configure) {
+    const args = Object.fromEntries(Object.entries(CONFIG_VARS).filter(([k]) => k in env).map(([k, field]) => [field, env[k]]));
+    child.stdin.write(JSON.stringify({ jsonrpc: "2.0", id: "config-0", method: "tools/call", params: { name: "config", arguments: args } }) + "\n");
+  }
   const lines: string[] = [];
   const waiting = new Map<number | string, (m: Msg) => void>();
   const got = new Map<number | string, Msg>();
@@ -121,7 +128,7 @@ describe(".mcp.json", () => {
 });
 
 describe("protocol", () => {
-  test("legacy handshake lists exactly request and cancel, visible to the model", async () => {
+  test("legacy handshake lists exactly request, cancel and config, visible to the model", async () => {
     const { c } = await boot();
     const init = await c.rpc("initialize", { protocolVersion: "2025-11-25", capabilities: {}, clientInfo: { name: "t", version: "0" } });
     assert.equal(init["result"].protocolVersion, "2025-11-25");
@@ -130,7 +137,7 @@ describe("protocol", () => {
     c.send({ method: "notifications/initialized" });
     const list = await c.rpc("tools/list");
     const tools = list["result"].tools as Msg[];
-    assert.deepEqual(tools.map((t) => String(t["name"])).sort((a, b) => a.localeCompare(b)), ["cancel", "request"]);
+    assert.deepEqual(tools.map((t) => String(t["name"])).sort((a, b) => a.localeCompare(b)), ["cancel", "config", "request"]);
     for (const t of tools) {
       assert.match(t["description"], /^Internal transport of the jev-api plugin; calls from the model are refused\./);
       assert.equal(t["_meta"]?.ui?.visibility, undefined); // a hidden tool is not callable by $.mcp.call
@@ -150,7 +157,7 @@ describe("protocol", () => {
     const l = await c.rpc("tools/list", { _meta: META });
     assert.equal(l["result"].resultType, "complete");
     assert.equal(typeof l["result"].ttlMs, "number");
-    assert.equal(l["result"].tools.length, 2);
+    assert.equal(l["result"].tools.length, 3);
   });
 
   test("an unsupported modern version answers -32022 and an unknown method -32601", async () => {
@@ -226,6 +233,33 @@ describe("request", () => {
     const r = await c.request();
     assert.equal(r["result"].isError, true);
     assert.deepEqual(outcomeOf(r), { kind: "error", code: "config", message: "no System One access configured: set TYPESAFE_API_KEY, TYPESAFE_BASE_URL or JEV_URL" });
+  });
+
+  test("a server that was not given a configuration answers unconfigured and sends nothing", async () => {
+    const s = await stub();
+    stubs.push(s);
+    // the variables are in the server's own environment on purpose (no config call): it must not read them
+    const c = start({ JEV_URL: s.url, TYPESAFE_API_KEY: KEY }, false);
+    live.push(c);
+    assert.deepEqual(outcomeOf(await c.request()), { kind: "error", code: "unconfigured", message: "the server has no configuration yet" });
+    assert.equal(s.seen.length, 0);
+  });
+
+  test("a later config call replaces the endpoint, key and model; a blank field counts as unset", async () => {
+    const a = await stub();
+    const b = await stub();
+    stubs.push(a, b);
+    const c = start({ JEV_URL: a.url, TYPESAFE_API_KEY: KEY });
+    live.push(c);
+    assert.equal(outcomeOf(await c.request({ callId: "a" }))["kind"], "ok");
+    assert.equal(a.seen.length, 1);
+    const r = await c.call("config", { jevUrl: b.url, key: "  ", model: " m2 " });
+    assert.deepEqual(r["result"].structuredContent, { configured: true });
+    assert.equal(outcomeOf(await c.request({ callId: "b" }))["kind"], "ok");
+    assert.equal(a.seen.length, 1);
+    assert.equal(b.seen.length, 1);
+    assert.equal(b.seen[0].headers["authorization"], undefined);
+    assert.equal(JSON.parse(b.seen[0].body).model, "m2");
   });
 
   test("blank variables count as unset", async () => {

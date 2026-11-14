@@ -8,10 +8,26 @@
 import { askHaiku, HAIKU_MAX_CHARS } from "./haiku.mjs";
 import { cutState, DEFAULT_DENSITY, estimateTokens, isTooBig, learn, MAX_DENSITY, OPTIMISTIC_FACTOR, preflightError, refusedDensity, stateForBudget, timeBudgetTokens, tooBigError } from "./size.mjs";
 import type { Knowledge, TooBig } from "./size.mjs";
-import { sendOutcome } from "./transport.mjs";
+import { now, sendOutcome } from "./transport.mjs";
 import type { Link } from "./transport.mjs";
 import type { Engine, Env, Overflow, Question, ToolName, ToolResult } from "./types.mjs";
 import { fail, isRecord, json, questionId, questionsBody } from "./util.mjs";
+
+/** A request that System One answered with an HTTP error status (4xx or 5xx) that is not a context refusal: Haiku takes the call over. */
+type Failed = {
+  /** What the tool reports when Haiku cannot answer either: `HTTP <status>` and the API's reason. */
+  failed: string;
+};
+
+/**
+ * Whether an answer is an HTTP failure for Haiku to take over.
+ *
+ * @param answer - What {@link ask} returned.
+ * @returns True for {@link Failed}.
+ */
+function isFailed(answer: ToolResult | TooBig | Failed): answer is Failed {
+  return "failed" in answer;
+}
 
 /**
  * Sends the questions of one tool call in one System One request and maps every outcome to a tool result.
@@ -28,9 +44,10 @@ import { fail, isRecord, json, questionId, questionsBody } from "./util.mjs";
  * `usage.input_tokens`, or a context refusal's `n_prompt_tokens`), whatever the outcome of the call.
  * @param link - The transport state: the request goes through the plugin's MCP server while it is available.
  * @returns The answer object as JSON (for `batch` the array of answers in question order), an error answer
- * prefixed with the tool name, or the server's refusal of a prompt over its context window ({@link TooBig}).
+ * prefixed with the tool name, the server's refusal of a prompt over its context window ({@link TooBig}), or an HTTP
+ * error status ({@link Failed}).
  */
-export async function ask($: Engine, tool: ToolName, state: string, questions: Question[], env: Env, timeoutMs: number, signal: AbortSignal, questionsChars: number, onSample: (chars: number, tokens: unknown) => void, link: Link): Promise<ToolResult | TooBig> {
+export async function ask($: Engine, tool: ToolName, state: string, questions: Question[], env: Env, timeoutMs: number, signal: AbortSignal, questionsChars: number, onSample: (chars: number, tokens: unknown) => void, link: Link): Promise<ToolResult | TooBig | Failed> {
   // The id of each question in the request and of its answer in the response.
   const ids = questions.map((_, i) => questionId(tool, i));
   const questionsObject = questionsBody(tool, questions);
@@ -44,7 +61,7 @@ export async function ask($: Engine, tool: ToolName, state: string, questions: Q
       onSample(chars, outcome.refusal.tokens);
       return { tooBig: { tokens: outcome.refusal.tokens, limit: outcome.refusal.nctx - 1, chars, questionsChars } };
     }
-    return fail(tool, `HTTP ${outcome.status}${outcome.reason === undefined ? "" : `: ${outcome.reason}`}`);
+    return { failed: `HTTP ${outcome.status}${outcome.reason === undefined ? "" : `: ${outcome.reason}`}` };
   }
   const body = json(outcome.text);
   if (body === undefined) return fail(tool, `HTTP ${outcome.status} response was not valid JSON`);
@@ -77,6 +94,16 @@ export async function ask($: Engine, tool: ToolName, state: string, questions: Q
  */
 export async function answerJev($: Engine, tool: ToolName, input: { state: string; questions: Question[] }, mode: Overflow, env: Env, timeoutMs: number, signal: AbortSignal, know: Knowledge, link: Link): Promise<ToolResult> {
   const questionsChars = JSON.stringify(questionsBody(tool, input.questions)).length;
+  const started = await now($);
+  /** Haiku takes a call over whose request failed with an HTTP error: its timeout is the call's, less the time the request used. */
+  const takeOver = async (why: string): Promise<ToolResult> => {
+    const left = timeoutMs - ((await now($)) - started);
+    if (signal.aborted) return fail(tool, "the call was abandoned");
+    if (left < 1) return fail(tool, `${why}; no time left for the Haiku fallback`);
+    const r = await askHaiku($, tool, cutState(input.state, HAIKU_MAX_CHARS), input.questions, Math.round(left), signal);
+    // Haiku failed too: the model reads both reasons, the HTTP one first
+    return r.deny?.startsWith(`${tool}: fallback: `) ? fail(tool, `${why}; ${r.deny.slice(tool.length + 2)}`) : r;
+  };
   // A refusal also tells the server's context window: remembered for the rest of the instance.
   const send = async (state: string) => {
     const answer = await ask($, tool, state, input.questions, env, timeoutMs, signal, questionsChars, (chars, tokens) => learn($, know, chars, tokens), link);
@@ -91,6 +118,7 @@ export async function answerJev($: Engine, tool: ToolName, input: { state: strin
   let refused: TooBig["tooBig"] | undefined;
   if (estimate <= budget) {
     const first = await send(input.state);
+    if (isFailed(first)) return await takeOver(first.failed);
     if (!isTooBig(first)) return first;
     refused = first.tooBig;
     if (signal.aborted) return fail(tool, "the call was abandoned");
@@ -105,5 +133,6 @@ export async function answerJev($: Engine, tool: ToolName, input: { state: strin
     if (signal.aborted) return fail(tool, "the call was abandoned");
     answer = await cut(answer.tooBig);
   }
+  if (isFailed(answer)) return await takeOver(answer.failed);
   return isTooBig(answer) ? tooBigError(tool, answer.tooBig, budget) : answer;
 }

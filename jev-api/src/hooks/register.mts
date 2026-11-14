@@ -25,7 +25,7 @@ import type { RegState } from "./registry.mjs";
 import { cutState, DEFAULT_CONTEXT_TOKENS, DEFAULT_DENSITY, loadKnowledge } from "./size.mjs";
 import type { Knowledge } from "./size.mjs";
 import { TOOL_PREFIX } from "./tools.mjs";
-import { newLink, PLUGIN, SERVER_TOOL_PREFIX } from "./transport.mjs";
+import { configureServer, newLink, PLUGIN, SERVER_TOOL_PREFIX } from "./transport.mjs";
 import { DEFAULT_OVERFLOW, TOOLS } from "./types.mjs";
 import type { On, Options, ToolName } from "./types.mjs";
 import { DEFAULT_TIMEOUT_S, fail, isOverflow, message, seconds } from "./util.mjs";
@@ -59,6 +59,13 @@ export function register(on: On, options?: Options): void {
     } catch {
       // best effort (a hook above refusing $.clock): the session.start chain goes on
     }
+    // The server reads no environment: it gets the configuration here, and again whenever a request needs it (best effort, bounded by the connect wait).
+    try {
+      const [key, base, jevUrl, model] = (await Promise.all([$.env.get("TYPESAFE_API_KEY"), $.env.get("TYPESAFE_BASE_URL"), $.env.get("JEV_URL"), $.env.get("TYPESAFE_DEFAULT_MODEL")])).map((v) => v?.trim() || undefined);
+      if (key || base || jevUrl) await configureServer($, link, { key, base, jevUrl, model }, new AbortController().signal);
+    } catch {
+      // best effort: the first request sends the configuration
+    }
     return next(e);
   });
   on("tool.call", async function onToolCall($, e, next) {
@@ -81,7 +88,7 @@ export function register(on: On, options?: Options): void {
       const [key, base, jevUrl, model] = (await Promise.all([$.env.get("TYPESAFE_API_KEY"), $.env.get("TYPESAFE_BASE_URL"), $.env.get("JEV_URL"), $.env.get("TYPESAFE_DEFAULT_MODEL")])).map((v) => v?.trim() || undefined);
       // F05: an abandoned call sends nothing
       if (next.signal.aborted) return fail(type, "the call was abandoned");
-      // No Jev access configured: Haiku stands in. A configured Jev that fails stays an error.
+      // No Jev access configured: Haiku stands in, and for a configured Jev that answers with an HTTP error (4xx, 5xx) too, with the time left of the timeout (jev.mts).
       // A whole number of milliseconds, at least 1: $.model.complete refuses anything else (2.01 s * 1000 is 2009.9999999999998).
       const timeoutMs = Math.max(1, Math.round((seconds(e["timeout"]) ?? fallbackS) * 1000));
       if (!key && !base && !jevUrl) return await askHaiku($, type, cutState(input.state, HAIKU_MAX_CHARS), input.questions, timeoutMs, next.signal);

@@ -30,6 +30,7 @@ All live on Claude Code 2.1.325 with throwaway mods and stdio servers (`claude -
 
 - **bun instead of node (measured, same machine, node 24.22.2 and bun 1.3.14, a local stub, 20 starts and 200 requests each):** start to the first answer 28.3 ms (node) against 33.2 ms (bun); idle RSS 49.3 MB against 43.3 MB; a small request 1.9 ms against 1.7 ms; a request with a 1 MB state 16.5 ms against 7.3 ms (RSS after the requests 121 MB against 96 MB); timeout and `cancel` behave the same (the stub sees one closed connection each, `timeout after 300ms` at 302 to 305 ms). Against a real request of 150 ms to many seconds the differences are noise, and bun starts slower. A launcher script is also refused by the layout rule (`plugin/` allows no `.sh`). Verdict: no launcher.
 - **Proxy (measured):** Claude Code's own `$.http.fetch` and bun honour `HTTP_PROXY` (the proxy saw the request); Node's `fetch` ignores it, also with `HTTP_PROXY` alone in the server's environment. Node honours it with `NODE_USE_ENV_PROXY=1` or `--use-env-proxy` (through a `CONNECT` tunnel). So the server would have regressed behind a proxy. `plugin/.mcp.json` therefore sets `NODE_USE_ENV_PROXY` to `${NODE_USE_ENV_PROXY:-1}`: in a real session with `HTTP_PROXY` set and a target that only the proxy can reach, the request went through the tunnel and the answer came from the stub behind it; with `NODE_USE_ENV_PROXY=0` it failed with `fetch failed (ENOTFOUND)`. Port 9 is on `fetch`'s bad-port list (a test of mine used it first and learned that); Node older than 24.5 ignores the variable.
+- **Config call and Haiku takeover (live, `claude -p` with the real plugin, a local stub as System One):** the server answered through the endpoint the mod gave it with `config` (the stub saw the request, answer `{"type":"noul","noul":0.123}`); with the stub answering HTTP 500 after 2 s, Haiku took over (`{"type":"noul","noul":0.9998}`, the calibrated stretch of its answer). Not measured live: a key changed mid-session, a restarted server (unit tests only).
 
 ## Code locations
 
@@ -40,18 +41,18 @@ All live on Claude Code 2.1.325 with throwaway mods and stdio servers (`claude -
 
 ## Approach
 
-Done as designed: the server enforces `timeoutMs` with `AbortSignal.timeout` on its `fetch`; the mod races the call against `timeoutMs + 1500` and `next.signal` and fires one `cancel { callId }` when it gives up; a `cancel` that arrives first is remembered for 60 s (256 ids at most); the server takes no URL, header or key from its caller; the model is kept off the tools by `tool.check`; the old `$.http.fetch` path stays as the fallback (no reconnect for 60 s, one log line per outage).
+Done as designed: the server enforces `timeoutMs` with `AbortSignal.timeout` on its `fetch`; the mod races the call against `timeoutMs + 1500` and `next.signal` and fires one `cancel { callId }` when it gives up; a `cancel` that arrives first is remembered for 60 s (256 ids at most); the server takes no URL, header or key from `request`; its only source is the `config` tool, which the model cannot call either; the model is kept off the tools by `tool.check`; the old `$.http.fetch` path stays as the fallback (no reconnect for 60 s, one log line per outage).
 
 ## Verification
 
-- `pnpm lint && pnpm --filter jev-api build && pnpm --filter jev-api test` (316 tests at the end of the work), `claude plugin validate jev-api/plugin`.
+- `pnpm lint && pnpm --filter jev-api build && pnpm --filter jev-api test` (345 tests at the end of the work), `claude plugin validate jev-api/plugin`.
 - The live checks of the Evidence section; scripts were scratch files, not in the repository.
 
 ## Constraints
 
 - A node process per session; the server needs `node` on the `PATH` (the fallback covers its absence, without cancel).
 - `$.mcp.call` has no timeout and no cancel of its own: the server's timeout and the app-level `cancel` are the only enforcement. A call abandoned while the server is down or hung runs on only on the fallback path.
-- The server reads its environment once, when Claude Code starts it; the mod reads `$.env.get` per call. A key or `JEV_URL` changed mid-session reaches the mod but not the server (a key added later gives the final error `no System One access configured`; a changed `JEV_URL` goes to the old endpoint). A server `config` error is not retried through the fallback.
+- The server reads no environment (decided with the user): the mod gives it the four values with a `config` call at `session.start`, when they changed and after a failed request, and again when the server answers `unconfigured` (a restart). Not measured live: a key changed mid-session in a real Claude Code (the unit tests cover the calls). A server `config` error (an invalid `JEV_URL`) is not retried through the fallback.
 - When the mod's guard fires (a hung server) the link is not marked down and the call is not retried through `$.http.fetch`: the budget is spent, and the next call waits for the guard again until the server answers.
 - `json`, `isRecord` and the message helper exist twice (the shared core and `hooks/util.mts`): the bundler does not accept a re-export in a helper, and moving all importers was left out.
 - Not exercised live: an interactive session (tasks are not used by this server), a Windows host.

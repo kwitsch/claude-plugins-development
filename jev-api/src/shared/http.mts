@@ -67,8 +67,8 @@ export type Outcome =
   | {
     /** No answer: the request failed before there was one. */
     kind: "error";
-    /** `timeout` and `aborted` come from the caller's `doFetch`; `config` is an invalid endpoint variable; `network` is anything else. */
-    code: "timeout" | "aborted" | "network" | "config";
+    /** `timeout` and `aborted` come from the caller's `doFetch`; `config` is an invalid endpoint variable; `unconfigured` is a server that has not been given its configuration yet; `network` is anything else. */
+    code: "timeout" | "aborted" | "network" | "config" | "unconfigured";
     /** The redacted text for the model. */
     message: string;
   };

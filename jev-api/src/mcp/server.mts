@@ -8,10 +8,11 @@
  * @remarks
  * Newline-delimited JSON-RPC 2.0, dual-era (2025-11-25 `initialize`, 2026-07-28 `server/discover`) as in
  * `.claude/rules/mcp-dual-era.md`, modelled on `dprint/src/mcp/server.mts`; no tasks. stdout carries JSON-RPC only.
- * The two tools stay visible: a tool with `_meta.ui.visibility` without `model` is not callable by `$.mcp.call`
- * (measured), so the model is kept off them by the mod's `tool.check` hook, and the server takes no URL, header or key
- * from its caller: it reads `TYPESAFE_API_KEY`, `TYPESAFE_BASE_URL`, `JEV_URL` and `TYPESAFE_DEFAULT_MODEL` from its own
- * environment, which is the whole Claude Code environment including the settings' `env` block (measured live).
+ * The tools stay visible: a tool with `_meta.ui.visibility` without `model` is not callable by `$.mcp.call`
+ * (measured), so the model is kept off them by the mod's `tool.check` hook. The server reads no environment: the mod
+ * hands it the endpoint, key and model with the `config` tool (at session start, when they change, and after a failed
+ * request), and `request` takes no URL, header or key. Without a `config` call (a server just started) `request`
+ * answers an `unconfigured` error and the mod sends the config again.
  *
  * @packageDocumentation
  */
@@ -90,6 +91,20 @@ const TOOLS: Tool[] = [
     },
   },
   {
+    name: "config",
+    description: `${INTERNAL} Sets the endpoint, key and model the requests use (the server reads no environment of its own); each field is optional, blank counts as unset.`,
+    inputSchema: {
+      type: "object",
+      properties: {
+        key: { type: "string", description: "TYPESAFE_API_KEY." },
+        base: { type: "string", description: "TYPESAFE_BASE_URL." },
+        jevUrl: { type: "string", description: "JEV_URL." },
+        model: { type: "string", description: "TYPESAFE_DEFAULT_MODEL." },
+      },
+      additionalProperties: false,
+    },
+  },
+  {
     name: "cancel",
     description: `${INTERNAL} Aborts the request with this call id (a cancel that arrives first is remembered for 60 s) and answers whether one was running.`,
     inputSchema: { type: "object", properties: { callId: { type: "string", pattern: CALL_ID.source } }, required: ["callId"], additionalProperties: false },
@@ -127,14 +142,13 @@ function requestedVersion(params: RpcRequest["params"]): unknown {
 }
 
 /**
- * An environment variable, trimmed.
+ * A string field of the `config` call, trimmed.
  *
- * @param name - The variable.
- * @returns The value, or undefined when unset or blank.
+ * @param v - The field (a trust boundary: anything).
+ * @returns The value, or undefined when it is not a string or blank.
  */
-function env(name: string): string | undefined {
-  const v = process.env[name]?.trim();
-  return v ? v : undefined;
+function field(v: unknown): string | undefined {
+  return typeof v === "string" && v.trim() !== "" ? v.trim() : undefined;
 }
 
 /**
@@ -170,6 +184,8 @@ function startServer(): void {
   const byRpc = new Map<RequestId, Flight>();
   /** `request` calls in flight, by call id (`cancel`). */
   const byCall = new Map<string, Flight>();
+  /** What the mod set with `config`; undefined until it did. */
+  let config: HttpEnv | undefined;
   /** Cancels that arrived before their request: call id to expiry (insertion order is age). */
   const tombstones = new Map<string, number>();
   const send = (msg: JSONRPCResultResponse | JSONRPCErrorResponse) => process.stdout.write(JSON.stringify(msg) + "\n");
@@ -228,14 +244,15 @@ function startServer(): void {
     if (typeof questions !== "object" || questions === null || Array.isArray(questions)) return invalid("request", "questions must be an object");
     if (typeof timeoutMs !== "number" || !Number.isInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > MAX_TIMEOUT_MS) return invalid("request", `timeoutMs must be a whole number from 1 to ${MAX_TIMEOUT_MS}`);
     if (byCall.has(callId)) return invalid("request", "callId is already in use by a running request");
-    const config: HttpEnv = { key: env("TYPESAFE_API_KEY"), base: env("TYPESAFE_BASE_URL"), jevUrl: env("JEV_URL"), model: env("TYPESAFE_DEFAULT_MODEL") };
-    if (!config.key && !config.base && !config.jevUrl) return outcomeResult({ kind: "error", code: "config", message: "no System One access configured: set TYPESAFE_API_KEY, TYPESAFE_BASE_URL or JEV_URL" });
+    const cfg = config;
+    if (cfg === undefined) return outcomeResult({ kind: "error", code: "unconfigured", message: "the server has no configuration yet" });
+    if (!cfg.key && !cfg.base && !cfg.jevUrl) return outcomeResult({ kind: "error", code: "config", message: "no System One access configured: set TYPESAFE_API_KEY, TYPESAFE_BASE_URL or JEV_URL" });
     if (cancelledEarly(callId)) return outcomeResult({ kind: "error", code: "aborted", message: "the call was abandoned" });
     byCall.set(callId, flight);
     try {
       const timeout = AbortSignal.timeout(timeoutMs);
       const signal = AbortSignal.any([timeout, flight.controller.signal]);
-      const outcome = await sendRequest(config, state, questions as Record<string, unknown>, async (url, init) => {
+      const outcome = await sendRequest(cfg, state, questions as Record<string, unknown>, async (url, init) => {
         try {
           const res = await fetch(url, { ...init, signal });
           return { status: res.status, text: await readBody(res) };
@@ -253,6 +270,17 @@ function startServer(): void {
     } finally {
       byCall.delete(callId);
     }
+  };
+
+  /**
+   * Handles `tools/call` `config`: replaces the configuration the requests use.
+   *
+   * @param args - The call's arguments (a trust boundary: checked here).
+   * @returns The tool result.
+   */
+  const runConfig = (args: Record<string, unknown>): CallToolResult => {
+    config = { key: field(args["key"]), base: field(args["base"]), jevUrl: field(args["jevUrl"]), model: field(args["model"]) };
+    return toolResult({ configured: true });
   };
 
   /**
@@ -319,10 +347,11 @@ function startServer(): void {
         return reply({ tools: TOOLS, ...(modern ? { _meta: SERVER_INFO_META } : {}) }, true);
       case "tools/call": {
         const name = params?.name;
-        if (name !== "request" && name !== "cancel") return fail(id, -32602, `unknown tool: ${String(name)}`);
+        if (name !== "request" && name !== "cancel" && name !== "config") return fail(id, -32602, `unknown tool: ${String(name)}`);
         const args = params?.arguments ?? {};
         if (typeof args !== "object" || args === null || Array.isArray(args)) return fail(id, -32602, "arguments must be an object");
         if (name === "cancel") return reply(runCancel(args as Record<string, unknown>));
+        if (name === "config") return reply(runConfig(args as Record<string, unknown>));
         const flight: Flight = { controller: new AbortController(), silent: false };
         if (id !== undefined) byRpc.set(id, flight);
         try {

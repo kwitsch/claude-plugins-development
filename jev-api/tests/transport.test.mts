@@ -22,7 +22,7 @@ type Rig = Awaited<ReturnType<typeof rig>>;
  *
  * @param opts - `connect` answers `$.mcp.connect` (default: connected); `onCall` answers `$.mcp.call` (default: an ok outcome for `request`, `{cancelled:true}` for `cancel`); `noMcp` leaves `$.mcp` out like the older tests' world; `options` is the plugin's userConfig; `env` the env values.
  */
-async function rig(opts: { connect?: () => Promise<unknown>; onCall?: (c: Call) => unknown; noMcp?: boolean; options?: Record<string, unknown>; env?: Record<string, string> } = {}) {
+async function rig(opts: { connect?: () => Promise<unknown>; onCall?: (c: Call) => unknown; noMcp?: boolean; onConfig?: (c: Call) => unknown; complete?: (r: Args) => unknown; options?: Record<string, unknown>; env?: Record<string, string> } = {}) {
   const { register } = await import("../plugin/hooks/register.mjs");
   const hooks = new Map<string, (...a: unknown[]) => Promise<unknown>>();
   register((event: string, hook: (...a: unknown[]) => Promise<unknown>) => void hooks.set(event, hook), opts.options);
@@ -32,6 +32,7 @@ async function rig(opts: { connect?: () => Promise<unknown>; onCall?: (c: Call) 
   const timers: { ms: number; fn: () => void; cancelled: boolean }[] = [];
   const clock = { now: 1_000_000 };
   const connects = { n: 0 };
+  const completed: Args[] = [];
   const env = opts.env ?? { TYPESAFE_API_KEY: "k" };
   const $ = {
     env: { get: async (name: string) => env[name] },
@@ -44,6 +45,7 @@ async function rig(opts: { connect?: () => Promise<unknown>; onCall?: (c: Call) 
         return { cancel: () => void (t.cancelled = true) };
       },
     },
+    model: { complete: (r: Args) => (completed.push(r), Promise.resolve(opts.complete ? opts.complete(r) : { isAnswered: false, reason: "unavailable" })) },
     ui: { log: (t: string) => void logs.push(t) },
     ...(opts.noMcp ? {} : {
       mcp: {
@@ -51,22 +53,28 @@ async function rig(opts: { connect?: () => Promise<unknown>; onCall?: (c: Call) 
         call: (server: string, tool: string, args: Args) => {
           const c = { server, tool, args };
           mcpCalls.push(c);
+          if (tool === "config") return Promise.resolve(opts.onConfig ? opts.onConfig(c) : { isError: false, content: [{ type: "text", text: "{\"configured\":true}" }], structuredContent: { configured: true } });
           if (opts.onCall) return Promise.resolve(opts.onCall(c));
           return Promise.resolve(tool === "cancel" ? { isError: false, content: [{ type: "text", text: "{\"cancelled\":true}" }], structuredContent: { cancelled: true } } : okOutcome);
         },
       },
     }),
   };
-  const run = (type = "noul", input: Args = {}, signal: AbortSignal = new AbortController().signal) => hooks.get("tool.call")?.($, { tool: TOOL(type), ...BASE, ...input }, Object.assign(async () => ({}), { signal })) as Promise<{ result?: string; deny?: string }>;
+  // an HTTP error is taken over by Haiku: the stub has none by default, its failure text is cut off
+  const run = async (type = "noul", input: Args = {}, signal: AbortSignal = new AbortController().signal) => {
+    const r = (await hooks.get("tool.call")?.($, { tool: TOOL(type), ...BASE, ...input }, Object.assign(async () => ({}), { signal }))) as { result?: string; deny?: string };
+    return r.deny === undefined ? r : { ...r, deny: r.deny.replace("; fallback: unavailable", "") };
+  };
   /** Runs every live timer of this length. */
   const fire = (ms: number) => timers.filter((t) => t.ms === ms && !t.cancelled).forEach((t) => t.fn());
   const requests = () => mcpCalls.filter((c) => c.tool === "request");
+  const configs = () => mcpCalls.filter((c) => c.tool === "config");
   const cancels = () => mcpCalls.filter((c) => c.tool === "cancel");
   /** Waits until n calls of a tool were made. */
   const until = async (tool: string, n: number) => {
     for (let i = 0; i < 200 && mcpCalls.filter((c) => c.tool === tool).length < n; i++) await new Promise((r) => setImmediate(r));
   };
-  return { hooks, $, run, mcpCalls, fetched, logs, timers, clock, connects, fire, requests, cancels, until };
+  return { hooks, $, run, mcpCalls, fetched, logs, timers, clock, connects, fire, requests, cancels, configs, completed, env, until };
 }
 
 const NEVER = () => new Promise<never>(() => {});
@@ -200,7 +208,8 @@ describe("timeout guard and abandonment", () => {
     const t = await rig();
     await t.run(); // connects
     let release: (n: number) => void = () => undefined;
-    (t.$.clock as { now: () => Promise<number> }).now = () => new Promise<number>((resolve) => (release = resolve));
+    let reads = 0; // the first read is the call's start time, the second the call id's
+    (t.$.clock as { now: () => Promise<number> }).now = () => (++reads === 2 ? new Promise<number>((resolve) => (release = resolve)) : Promise.resolve(1_000_000));
     const ctl = new AbortController();
     const pending = t.run("noul", {}, ctl.signal);
     for (let i = 0; i < 50; i++) await new Promise((r) => setImmediate(r));
@@ -368,5 +377,135 @@ describe("tool.check keeps the model off the transport", () => {
     for (const tool of ["Bash", "mcp__jev-api__noul", "mcp__plugin_jev-api_http", "mcp__plugin_jev-api_httpx__request", "mcp__plugin_other_http__request"]) {
       expect(await check(t, tool, { plugin: "engine" })).toBe("passed");
     }
+  });
+});
+
+describe("the configuration of the server", () => {
+  it("is sent before the first request, once, and not again while it stays the same", async () => {
+    const t = await rig({ env: { TYPESAFE_API_KEY: "k", JEV_URL: "https://jev.example/v1/systemone", TYPESAFE_DEFAULT_MODEL: " m " } });
+    await t.run();
+    await t.run();
+    expect(t.configs().map((c) => c.args)).toEqual([{ key: "k", jevUrl: "https://jev.example/v1/systemone", model: "m" }]);
+    expect(t.mcpCalls.map((c) => c.tool)).toEqual(["config", "request", "request"]);
+  });
+  it("is sent again when a value changed", async () => {
+    const t = await rig();
+    await t.run();
+    t.env["TYPESAFE_API_KEY"] = "k2";
+    await t.run();
+    expect(t.configs().map((c) => c.args)).toEqual([{ key: "k" }, { key: "k2" }]);
+  });
+  it("is sent again after a failed request, read fresh, before the next one", async () => {
+    let n = 0;
+    const t = await rig({ onCall: () => (++n === 1 ? outcome({ kind: "http", status: 503 }) : okOutcome) });
+    await t.run();
+    expect(t.configs()).toHaveLength(1);
+    await t.run();
+    expect(t.configs()).toHaveLength(2);
+    await t.run();
+    expect(t.configs()).toHaveLength(2);
+    expect(t.mcpCalls.map((c) => c.tool)).toEqual(["config", "request", "config", "request", "request"]);
+  });
+  it("is not resent after an abandoned request", async () => {
+    let first = true;
+    const t = await rig({ onCall: () => (first ? ((first = false), NEVER()) : okOutcome) });
+    const ac = new AbortController();
+    const p = t.run("noul", {}, ac.signal);
+    await t.until("request", 1);
+    ac.abort();
+    await p;
+    await t.run();
+    expect(t.configs()).toHaveLength(1);
+  });
+  it("is sent again, and the request once more, when the server says it has none (a restarted server)", async () => {
+    let n = 0;
+    const t = await rig({ onCall: () => (++n === 1 ? outcome({ kind: "error", code: "unconfigured", message: "the server has no configuration yet" }) : okOutcome) });
+    expect(JSON.parse((await t.run()).result ?? "null")).toEqual(NOUL_ANSWER);
+    expect(t.mcpCalls.map((c) => c.tool)).toEqual(["config", "request", "config", "request"]);
+    expect(t.fetched).toHaveLength(0);
+  });
+  it("a server that refuses or never answers its configuration is an outage: the fetch path answers", async () => {
+    const refused = await rig({ onConfig: () => ({ isError: true, content: [{ type: "text", text: "config: nope" }] }) });
+    expect(JSON.parse((await refused.run()).result ?? "null")).toEqual(NOUL_ANSWER);
+    expect(refused.fetched).toHaveLength(1);
+    expect(outage(refused)[0]).toContain("refused its configuration");
+    const silent = await rig({ onConfig: NEVER });
+    const p = silent.run();
+    await silent.until("config", 1);
+    silent.fire(3000);
+    expect(JSON.parse((await p).result ?? "null")).toEqual(NOUL_ANSWER);
+    expect(silent.fetched).toHaveLength(1);
+  });
+  it("session.start sends it ahead of the first request, only with System One access", async () => {
+    const t = await rig();
+    await t.hooks.get("session.start")?.(t.$, { cwd: "/p" }, async () => ({}));
+    expect(t.configs().map((c) => c.args)).toEqual([{ key: "k" }]);
+    await t.run();
+    expect(t.configs()).toHaveLength(1);
+    const none = await rig({ env: {} });
+    await none.hooks.get("session.start")?.(none.$, { cwd: "/p" }, async () => ({}));
+    expect(none.mcpCalls).toHaveLength(0);
+  });
+});
+
+describe("Haiku takes over after an HTTP error status", () => {
+  const HAIKU_OK = { isAnswered: true, text: JSON.stringify({ answers: { answer: { type: "noul", noul: 0.7 } } }), usage: {} };
+  for (const status of [400, 404, 429, 500, 503]) {
+    it(`HTTP ${status}: Haiku answers with the timeout less the time the request used`, async () => {
+      const t = await rig({
+        complete: () => HAIKU_OK,
+        onCall: (c) => {
+          if (c.tool === "request") t.clock.now += 4000; // the request used 4 s
+          return outcome({ kind: "http", status, reason: "boom" });
+        },
+      });
+      const r = await t.run("noul", { timeout: 20 });
+      expect(JSON.parse(r.result ?? "null")).toMatchObject({ type: "noul" });
+      expect(t.completed).toHaveLength(1);
+      expect(t.completed[0]?.["timeoutMs"]).toBe(16_000);
+    });
+  }
+  it("the same through the fetch path", async () => {
+    const t = await rig({ noMcp: true, complete: () => HAIKU_OK });
+    t.$.http.fetch = () => {
+      t.clock.now += 2500;
+      return Promise.resolve({ status: 502, ok: false, headers: {}, text: "{}" });
+    };
+    expect(JSON.parse((await t.run("noul", { timeout: 10 })).result ?? "null")).toMatchObject({ type: "noul" });
+    expect(t.completed[0]?.["timeoutMs"]).toBe(7500);
+  });
+  it("a request that used the whole timeout leaves no time: the HTTP error is the answer and Haiku is not asked", async () => {
+    const t = await rig({
+      onCall: (c) => {
+        if (c.tool === "request") t.clock.now += 5000;
+        return outcome({ kind: "http", status: 500, reason: "boom" });
+      },
+    });
+    expect((await t.run("noul", { timeout: 5 })).deny).toBe("noul: HTTP 500: boom; no time left for the Haiku fallback");
+    expect(t.completed).toHaveLength(0);
+  });
+  it("when Haiku fails too, the error carries both reasons", async () => {
+    const t = await rig({ complete: () => ({ isAnswered: false, reason: "overloaded" }), onCall: () => outcome({ kind: "http", status: 500, reason: "boom" }) });
+    const r = await t.hooks.get("tool.call")?.(t.$, { tool: TOOL("noul"), ...BASE }, Object.assign(async () => ({}), { signal: new AbortController().signal }));
+    expect(r).toEqual({ deny: "noul: HTTP 500: boom; fallback: overloaded" });
+  });
+  it("no other failure goes to Haiku: a timeout, a network error and an invalid endpoint stay errors", async () => {
+    for (const o of [{ kind: "error", code: "network", message: "fetch failed (ECONNREFUSED)" }, { kind: "error", code: "timeout", message: "timeout after 20000ms" }, { kind: "error", code: "config", message: "JEV_URL must be an http(s) URL" }]) {
+      const t = await rig({ complete: () => HAIKU_OK, onCall: () => outcome(o) });
+      expect((await t.run()).deny).toBe(`noul: ${o["message"]}`);
+      expect(t.completed).toHaveLength(0);
+    }
+  });
+  it("an abandoned call is not handed to Haiku", async () => {
+    const ac = new AbortController();
+    const t = await rig({ complete: () => HAIKU_OK, onCall: () => (ac.abort(), outcome({ kind: "http", status: 500 })) });
+    expect((await t.run("noul", {}, ac.signal)).deny).toBe("noul: the call was abandoned");
+    expect(t.completed).toHaveLength(0);
+  });
+  it("a context refusal still follows the overflow mode, not Haiku", async () => {
+    const refusal = outcome({ kind: "http", status: 400, refusal: { tokens: 40000, nctx: 32768 } });
+    const t = await rig({ complete: () => HAIKU_OK, onCall: () => refusal });
+    expect((await t.run("noul", { overflow: "error" })).deny).toMatch(/^noul: state too large/);
+    expect(t.completed).toHaveLength(0);
   });
 });
