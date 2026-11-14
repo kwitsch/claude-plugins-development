@@ -12,25 +12,25 @@
  */
 
 /** The System One endpoint used when neither JEV_URL nor TYPESAFE_BASE_URL is set. */
-export const DEFAULT_JEV_URL = "https://api.typesafe.ai/v1/systemone";
+const DEFAULT_JEV_URL = "https://api.typesafe.ai/v1/systemone";
 
 /** The model sent when TYPESAFE_DEFAULT_MODEL is unset or blank. */
-export const DEFAULT_MODEL = "jev-latest";
+const DEFAULT_MODEL = "jev-latest";
 
 /** An http(s) URL: the `JEV_URL` check. */
-export const HTTP_URL = /^https?:\/\/[^/?#\s]+(?:[/?#]\S*)?$/i;
+const HTTP_URL = /^https?:\/\/[^/?#\s]+(?:[/?#]\S*)?$/i;
 
 /** An http(s) API root: like {@link HTTP_URL} but without query or fragment, since a path gets appended. */
-export const HTTP_BASE = /^https?:\/\/[^/?#\s]+(?:\/[^?#\s]*)?$/i;
+const HTTP_BASE = /^https?:\/\/[^/?#\s]+(?:\/[^?#\s]*)?$/i;
 
 /** The most characters of an API error reason passed on to the model (a server may send megabytes; cut after the redaction, never before it). */
-export const MAX_DETAIL = 1000;
+const MAX_DETAIL = 1000;
 
 /** The shortest API key that is replaced in error texts (a shorter one would match ordinary words). */
-export const MIN_REDACT_KEY = 6;
+const MIN_REDACT_KEY = 6;
 
 /** The `error.type` System One answers a prompt over its context window with (HTTP 400). */
-export const CONTEXT_ERROR = "exceed_context_size_error";
+const CONTEXT_ERROR = "exceed_context_size_error";
 
 /** The env values of a request, trimmed; undefined when unset or blank. */
 export type HttpEnv = {
@@ -107,13 +107,25 @@ function json(text: string, reviver?: (key: string, value: unknown, context?: { 
  * @param err - What was thrown or rejected.
  * @returns Its message, or the value as text.
  */
-function messageOf(err: unknown): string {
+export function messageOf(err: unknown): string {
   if (err instanceof Error) return err.message;
   try {
     return String(err);
   } catch {
     return "unknown error"; // a null-prototype object, or one whose toString throws
   }
+}
+
+/**
+ * An error with the given name, the way a caller's `doFetch` tells {@link sendRequest} its two ends from any other
+ * failure: `TimeoutError` (its deadline passed) and `AbortError` (it was cancelled).
+ *
+ * @param name - `TimeoutError` or `AbortError`.
+ * @param message - The text for the model.
+ * @returns The error.
+ */
+export function named(name: "TimeoutError" | "AbortError", message: string): Error {
+  return Object.assign(new Error(message), { name });
 }
 
 /**
@@ -236,9 +248,10 @@ export async function sendRequest(env: HttpEnv, state: string, questionsObject: 
   // or the key: a runtime quotes a header value it rejects (a newline or a non-Latin1 character in the key), whole.
   const redact = (text: string): string => {
     // In this order: the URL first (it may contain the key), the key before the host (a key may contain the host text).
-    let t = env.jevUrl ? hide(text, target.url, "<JEV_URL>") : env.base ? hide(text, target.url, "<TYPESAFE_BASE_URL>/v1/systemone") : text;
+    const custom = env.jevUrl || env.base; // the default endpoint is public: nothing to hide
+    let t = custom ? hide(text, target.url, env.jevUrl ? "<JEV_URL>" : "<TYPESAFE_BASE_URL>/v1/systemone") : text;
     if (key && key.length >= MIN_REDACT_KEY) t = t.replaceAll(key, "<TYPESAFE_API_KEY>"); // not a short key: it would match ordinary words
-    return env.jevUrl || env.base ? hideHost(t, target.url) : t;
+    return custom ? hideHost(t, target.url) : t;
   };
   try {
     const res = await doFetch(target.url, { method: "POST", headers, body: JSON.stringify({ model: env.model ?? DEFAULT_MODEL, state, questions: questionsObject }) });

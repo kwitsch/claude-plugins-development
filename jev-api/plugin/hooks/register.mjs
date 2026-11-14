@@ -1,4 +1,4 @@
-import { DEFAULT_CONTEXT_TOKENS, DEFAULT_DENSITY, DEFAULT_OVERFLOW, DEFAULT_TIMEOUT_S, HAIKU_MAX_CHARS, REGISTER_WAIT_MS, SERVER_TOOL_PREFIX, TOOLS, TOOL_PREFIX, answerJev, askHaiku, cutState, ensureTools, fail, isOverflow, loadKnowledge, message, newLink, parseInput, seconds } from "./lib.mjs";
+import { DEFAULT_CONTEXT_TOKENS, DEFAULT_DENSITY, DEFAULT_OVERFLOW, DEFAULT_TIMEOUT_S, HAIKU_MAX_CHARS, PLUGIN, REGISTER_WAIT_MS, SERVER_TOOL_PREFIX, TOOLS, TOOL_PREFIX, answerJev, askHaiku, cutState, ensureTools, fail, isOverflow, loadKnowledge, message, newLink, parseInput, seconds } from "./lib.mjs";
 export function register(on, options) {
 	const fallbackS = seconds(options?.["timeout"]) ?? DEFAULT_TIMEOUT_S;
 	const optionOverflow = options?.["overflow"];
@@ -60,13 +60,13 @@ export function register(on, options) {
 	});
 	on("tool.check", async function onToolCheck(_$, e, next) {
 		if (!e.tool.startsWith(SERVER_TOOL_PREFIX)) return next(e);
-		if (next.origin?.plugin === "jev-api") return {
+		if (next.origin?.plugin === PLUGIN) return {
 			decision: "allow",
-			reason: "jev-api's own HTTP transport"
+			reason: `${PLUGIN}'s own HTTP transport`
 		};
 		return {
 			decision: "deny",
-			reason: "this tool is the internal HTTP transport of the jev-api plugin; use mcp__jev-api__noul, mcp__jev-api__choice, mcp__jev-api__score or mcp__jev-api__batch"
+			reason: `this tool is the internal HTTP transport of the ${PLUGIN} plugin; use ${TOOLS.map((t) => TOOL_PREFIX + t).join(", ")}`
 		};
 	});
 }

@@ -23,7 +23,7 @@ import type { RegState } from "./registry.mjs";
 import { cutState, DEFAULT_CONTEXT_TOKENS, DEFAULT_DENSITY, loadKnowledge } from "./size.mjs";
 import type { Knowledge } from "./size.mjs";
 import { TOOL_PREFIX } from "./tools.mjs";
-import { newLink, SERVER_TOOL_PREFIX } from "./transport.mjs";
+import { newLink, PLUGIN, SERVER_TOOL_PREFIX } from "./transport.mjs";
 import { DEFAULT_OVERFLOW, TOOLS } from "./types.mjs";
 import type { On, Options, ToolName } from "./types.mjs";
 import { DEFAULT_TIMEOUT_S, fail, isOverflow, message, seconds } from "./util.mjs";
@@ -94,7 +94,7 @@ export function register(on: On, options?: Options): void {
   // does not reach a tool with `_meta.ui.visibility` without `model`). The mod's own calls carry this plugin as origin.
   on("tool.check", async function onToolCheck(_$, e, next) {
     if (!e.tool.startsWith(SERVER_TOOL_PREFIX)) return next(e);
-    if (next.origin?.plugin === "jev-api") return { decision: "allow", reason: "jev-api's own HTTP transport" };
-    return { decision: "deny", reason: "this tool is the internal HTTP transport of the jev-api plugin; use mcp__jev-api__noul, mcp__jev-api__choice, mcp__jev-api__score or mcp__jev-api__batch" };
+    if (next.origin?.plugin === PLUGIN) return { decision: "allow", reason: `${PLUGIN}'s own HTTP transport` };
+    return { decision: "deny", reason: `this tool is the internal HTTP transport of the ${PLUGIN} plugin; use ${TOOLS.map((t) => TOOL_PREFIX + t).join(", ")}` };
   });
 }

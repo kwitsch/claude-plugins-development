@@ -12,25 +12,28 @@
  * @packageDocumentation
  */
 
-import { sendRequest } from "../shared/http.mjs";
+import { named, sendRequest } from "../shared/http.mjs";
 import type { DoFetch, HttpEnv, Outcome } from "../shared/http.mjs";
-import type { Engine } from "./types.mjs";
+import type { Engine, McpResult } from "./types.mjs";
 import { isRecord, json, message } from "./util.mjs";
 
+/** This plugin's name: the origin of its own calls in `tool.check`, and part of its server's tool names. */
+export const PLUGIN = "jev-api";
+
 /** The `.mcp.json` key of the transport server. */
-export const SERVER_KEY = "http";
+const SERVER_KEY = "http";
 
 /** What the full names of the server's tools start with: `mcp__plugin_<plugin>_<key>__`. */
-export const SERVER_TOOL_PREFIX = "mcp__plugin_jev-api_http__";
+export const SERVER_TOOL_PREFIX = `mcp__plugin_${PLUGIN}_${SERVER_KEY}__`;
 
 /** How long a server that was not available is left alone before the next connect (ms). */
-export const RETRY_CONNECT_MS = 60_000;
+const RETRY_CONNECT_MS = 60_000;
 
 /** How long the mod waits beyond `timeoutMs` for the server's answer before it gives the call up (ms): the server ends the request at `timeoutMs` itself. */
-export const SERVER_GUARD_MS = 1500;
+const SERVER_GUARD_MS = 1500;
 
 /** The longest the mod waits for `$.mcp.connect` (ms). */
-export const CONNECT_WAIT_MS = 3000;
+const CONNECT_WAIT_MS = 3000;
 
 /** The mod's state about the transport server, one per module instance. */
 export type Link = {
@@ -56,17 +59,6 @@ export function newLink(): Link {
 }
 
 /**
- * An error with the given name, the way the HTTP core tells its two caller-set ends from any other failure.
- *
- * @param name - `TimeoutError` or `AbortError`.
- * @param message - The text for the model.
- * @returns The error.
- */
-function named(name: "TimeoutError" | "AbortError", message: string): Error {
-  return Object.assign(new Error(message), { name });
-}
-
-/**
  * The HTTP call through the engine's `$.http.fetch`: it races the request against the timeout and the abandonment of
  * the dispatch, because the engine's fetch has no signal and no timeout option (a timed-out or abandoned request runs
  * on until it settles or hits the engine's 30 s cap).
@@ -76,7 +68,7 @@ function named(name: "TimeoutError" | "AbortError", message: string): Error {
  * @param signal - Aborts when the call is abandoned: the request then ends as an `AbortError` at once.
  * @returns The `doFetch` for `sendRequest`.
  */
-export function fetchViaEngine($: Engine, timeoutMs: number, signal: AbortSignal): DoFetch {
+function fetchViaEngine($: Engine, timeoutMs: number, signal: AbortSignal): DoFetch {
   return async (url, init) => {
     let timer: { cancel(): void } | undefined;
     let onAbort: (() => void) | undefined;
@@ -156,7 +148,7 @@ async function markDown($: Engine, link: Link, reason: string): Promise<void> {
  * @param link - The transport state.
  * @returns The server name for `$.mcp.call`, or undefined while the server is not available.
  */
-export async function ensureServer($: Engine, link: Link): Promise<string | undefined> {
+async function ensureServer($: Engine, link: Link): Promise<string | undefined> {
   if (link.server !== undefined) return link.server;
   if ((await now($)) < link.retryAt) return undefined;
   link.connecting ??= (async () => {
@@ -201,7 +193,7 @@ export async function ensureServer($: Engine, link: Link): Promise<string | unde
  * @param r - The `$.mcp.call` result.
  * @returns The outcome (the structured content, or an error outcome for the plain error text of an invalid input), or undefined when the result is neither.
  */
-function readOutcome(r: { isError?: boolean; content?: { type: string; text?: string }[]; structuredContent?: unknown }): Outcome | undefined {
+function readOutcome(r: McpResult): Outcome | undefined {
   const text = r.content?.find((c) => c.type === "text")?.text;
   const sc = isRecord(r.structuredContent) ? r.structuredContent : text === undefined ? undefined : json(text);
   if (isRecord(sc)) {

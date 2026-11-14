@@ -70,6 +70,16 @@ export type ToolSpec = {
   };
 };
 
+/** An MCP tool result as `$.mcp.call` resolves it. */
+export type McpResult = {
+  /** Whether the tool reported a failure. */
+  isError?: boolean;
+  /** The result's content blocks; the text of the first text block carries the JSON. */
+  content?: { type: string; text?: string }[];
+  /** The same result as an object, where the server gives one. */
+  structuredContent?: unknown;
+};
+
 /** The part of the engine interface `$` this module uses. */
 export type Engine = {
   /** Timers. */
@@ -84,7 +94,7 @@ export type Engine = {
     /** Connects to a server of this plugin by its `.mcp.json` key; waits for the connection. `server` is the namespaced name `call` takes. */
     connect(key: string): Promise<{ isConnected: boolean; server?: string; message?: string }>;
     /** Calls a tool of a connected server; resolves the MCP tool result. Neither a timeout nor a signal can be given, and the dispatch's abandonment does not cancel it (measured live, 2.1.325). */
-    call(server: string, tool: string, args: Record<string, unknown>): Promise<{ isError?: boolean; content?: { type: string; text?: string }[]; structuredContent?: unknown }>;
+    call(server: string, tool: string, args: Record<string, unknown>): Promise<McpResult>;
   };
   /** User-visible output. */
   ui: {

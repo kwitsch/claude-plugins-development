@@ -19,7 +19,7 @@ import type { CallToolResult, DiscoverResult, Implementation, JSONRPCErrorRespon
 import { readFileSync } from "node:fs";
 import process from "node:process";
 import readline from "node:readline";
-import { sendRequest } from "../shared/http.mjs";
+import { messageOf, named, sendRequest } from "../shared/http.mjs";
 import type { HttpEnv, Outcome } from "../shared/http.mjs";
 
 /** Server name reported on `initialize`; the `.mcp.json` key is `http`, the engine names the server `plugin:jev-api:http`. */
@@ -80,7 +80,7 @@ const TOOLS: Tool[] = [
     inputSchema: {
       type: "object",
       properties: {
-        callId: { type: "string", pattern: "^[A-Za-z0-9._-]{1,64}$", description: "Names the request so `cancel` can abort it." },
+        callId: { type: "string", pattern: CALL_ID.source, description: "Names the request so `cancel` can abort it." },
         state: { type: "string", minLength: 1, description: "The text the questions are about." },
         questions: { type: "object", description: "The `questions` object of the System One request." },
         timeoutMs: { type: "integer", minimum: 1, maximum: MAX_TIMEOUT_MS, description: "How long the HTTP request may take, in milliseconds." },
@@ -92,7 +92,7 @@ const TOOLS: Tool[] = [
   {
     name: "cancel",
     description: `${INTERNAL} Aborts the request with this call id (a cancel that arrives first is remembered for 60 s) and answers whether one was running.`,
-    inputSchema: { type: "object", properties: { callId: { type: "string", pattern: "^[A-Za-z0-9._-]{1,64}$" } }, required: ["callId"], additionalProperties: false },
+    inputSchema: { type: "object", properties: { callId: { type: "string", pattern: CALL_ID.source } }, required: ["callId"], additionalProperties: false },
   },
 ];
 
@@ -127,14 +127,6 @@ function requestedVersion(params: RpcRequest["params"]): unknown {
 }
 
 /**
- * Message of a caught value.
- *
- * @param e - Anything thrown.
- * @returns `e.message` for an `Error`, else `String(e)`.
- */
-const errMsg = (e: unknown): string => e instanceof Error ? e.message : String(e);
-
-/**
  * An environment variable, trimmed.
  *
  * @param name - The variable.
@@ -143,17 +135,6 @@ const errMsg = (e: unknown): string => e instanceof Error ? e.message : String(e
 function env(name: string): string | undefined {
   const v = process.env[name]?.trim();
   return v ? v : undefined;
-}
-
-/**
- * An error with the given name, the way the HTTP core tells its two caller-set ends from any other failure.
- *
- * @param name - `TimeoutError` or `AbortError`.
- * @param message - The text for the model.
- * @returns The error.
- */
-function named(name: "TimeoutError" | "AbortError", message: string): Error {
-  return Object.assign(new Error(message), { name });
 }
 
 /**
@@ -316,7 +297,9 @@ function startServer(): void {
       case "notifications/initialized":
         return;
       case "notifications/cancelled": {
-        // an unknown or finished request id is ignored (the spec allows a cancel to race the answer)
+        // Kept for any client that sends it (the dual-era rule requires it; Claude Code does for an `mcp_tool` hook that timed out):
+        // the mod's `$.mcp.call` cannot, which is why the app-level `cancel` tool exists. An unknown or finished request id is ignored
+        // (the spec allows a cancel to race the answer).
         const target = params?.requestId;
         if (typeof target === "string" || typeof target === "number") {
           const flight = byRpc.get(target);
@@ -377,7 +360,7 @@ function startServer(): void {
     handle(req).catch((e: unknown) => {
       process.stderr.write(`[${SERVER_NAME}] handler crash: ${e instanceof Error ? e.stack : String(e)}\n`);
       // a request (has an id) must always get a response, or the client hangs
-      if (req.id !== undefined) fail(req.id, -32603, `internal error: ${errMsg(e)}`);
+      if (req.id !== undefined) fail(req.id, -32603, `internal error: ${messageOf(e)}`);
     });
   });
   rl.on("close", () => process.exit(0));
