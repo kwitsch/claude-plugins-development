@@ -321,6 +321,17 @@ for (
   });
 }
 
+test("a background subagent's step does not hold off auto-compact", async ($, on) => {
+  const { clock, state } = chatSetup(on, 70);
+  await $.session.start(START);
+  await respond($);
+  // A background agent: no main-loop turn.complete ever follows its step.
+  await $.turn.step({ turnId: "s1", index: 0, model: "claude-opus-5-5", effort: "high", messageCount: 1, agentId: "a1" }).next();
+  await clock.advance(CACHE_TTL["1h"] + 60_000);
+  await clock.advance(60_000);
+  expect(state.compacts).toBe(1);
+});
+
 test("a /compact still queued behind the session is not issued again by the next ticks", async ($, on) => {
   // The engine keeps a plugin's `command.run` pending until the command ran: only the flag stops a repeat.
   const { clock, state } = chatSetup(on, 70, () => new Promise(() => {}));
