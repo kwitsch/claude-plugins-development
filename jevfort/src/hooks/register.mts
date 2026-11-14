@@ -28,7 +28,7 @@ import type { Entry } from "./log.mjs";
 import { bestAction, bounds, difficultyQuestion, doneQuestion, EFFORT_ORDER, effortQuestion, ESTIMATE_SPEC, ESTIMATE_TOOL, estimateEffort, EVERY_TURN_MODELS, inBandRange, inScratchpad, isEffort, lowerModel, mechanicalQuestion, modelFamily, nextActionQuestion, parseEstimateInput, pickCandidate, route, shouldContinue, singleActionQuestion, taskEndQuestion } from "./policy.mjs";
 import type { Effort, EstimateBounds, EstimateModel, Route } from "./policy.mjs";
 import { hints, NONE, promptQuestions } from "./prompt.mjs";
-import { buildReport } from "./report.mjs";
+import { buildReport, escapePipes } from "./report.mjs";
 import { SUMMARY_MODEL, SYSTEM } from "./summarize.mjs";
 import type { ModelUsage, Summary } from "./summarize.mjs";
 
@@ -1377,7 +1377,7 @@ export const register = (on: On, options: Options): void => {
         const sections = [...groups].map(
           ([name, items]) =>
             `### ${name} (${items.length})\n\n| Option | Description |\n|---|---|\n`
-            + items.map((c) => `| \`${c.key.replace(/\|/g, "\\|")}\` | ${c.description.replace(/\|/g, "\\|").replace(/\s+/g, " ")} |`).join("\n"),
+            + items.map((c) => `| \`${escapePipes(c.key)}\` | ${escapePipes(c.description).replace(/\s+/g, " ")} |`).join("\n"),
         );
         return {
           text: [

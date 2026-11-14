@@ -11,8 +11,9 @@ const pct = (n, of) => of ? `${Math.round(n / of * 100)}%` : "—";
 const num = (v) => typeof v === "number" ? v : undefined;
 const str = (v) => typeof v === "string" ? v : undefined;
 const p2 = (v) => v === undefined ? "—" : v.toFixed(2);
+export const escapePipes = (s) => s.replace(/(\\*)\|/g, "$1$1\\|");
 const cell = (s, max = 48) => {
-	const one = s.replace(/\s+/g, " ").replace(/\|/g, "\\|").trim();
+	const one = escapePipes(s.replace(/\s+/g, " ")).trim();
 	return one.length > max ? `${one.slice(0, max - 1).replace(/[\uD800-\uDBFF]$/, "")}…` : one;
 };
 const bar = (n, of, width = 10) => {

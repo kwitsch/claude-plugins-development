@@ -3,7 +3,7 @@ import { expect, test } from "vitest";
 import { commandKey, coversStep, dedupeSkills, isSafeScript, isSafeToOffer, mentionedPaths, quotedTerms, relevant, words } from "../plugin/hooks/candidates.mjs";
 import { clip, splitTurn, summarize } from "../plugin/hooks/context.mjs";
 import { route } from "../plugin/hooks/policy.mjs";
-import { buildReport, verdict, when } from "../plugin/hooks/report.mjs";
+import { buildReport, escapePipes, verdict, when } from "../plugin/hooks/report.mjs";
 
 test("quoted terms become searches, file names do not", () => {
   expect(quotedTerms("where is `useAuth` used? and \"TODO: fix\" in `src/app.ts`")).toEqual(["useAuth", "TODO: fix"]);
@@ -37,6 +37,14 @@ test("cutting text never splits an emoji into a lone surrogate", () => {
   const report = buildReport([{ at: 0, kind: "compare", applied: false, text: "", data: { request, best: "read:a", bestP: 0.9, agree: true } }], 0.85);
   expect(report).toContain(`| ${"x".repeat(38)}… |`);
   expect(clip(request, 39)).toBe(`${"x".repeat(38)}… [${request.length - 39} more chars]`);
+});
+
+test("a backslash before a pipe in a cell does not split the table row", () => {
+  const report = buildReport([{ at: 0, kind: "compare", applied: false, text: "", data: { request: "find a\\|b", best: "run:git status", bestP: 0.3, claudeSummary: "Bash: grep -rn 'foo\\|bar' src", claudeUsedCandidate: false } }], 0.85);
+  const row = report.split("\n").find((l) => l.includes("grep"));
+  // unescaped pipe = preceded by an even number of backslashes
+  expect(row?.match(/(?<!\\)(?:\\\\)*\|/g)).toHaveLength(7);
+  expect(escapePipes("a\\|b")).toBe("a\\\\\\|b");
 });
 
 test("the report header shows the first entry in local time, like the rows", () => {

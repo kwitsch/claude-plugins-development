@@ -7,7 +7,7 @@ import { choice, COMPACT_API_TIMEOUT_S, COMPACT_TIMEOUT_MS, HAIKU_API_TIMEOUT_S,
 import { forgetRecent, LOG_KEY, MAX_ENTRIES, recentDecisions, remember, statsKey } from "./log.mjs";
 import { bestAction, bounds, difficultyQuestion, doneQuestion, EFFORT_ORDER, effortQuestion, ESTIMATE_SPEC, ESTIMATE_TOOL, estimateEffort, EVERY_TURN_MODELS, inBandRange, inScratchpad, isEffort, lowerModel, mechanicalQuestion, modelFamily, nextActionQuestion, parseEstimateInput, pickCandidate, route, shouldContinue, singleActionQuestion, taskEndQuestion } from "./policy.mjs";
 import { hints, NONE, promptQuestions } from "./prompt.mjs";
-import { buildReport } from "./report.mjs";
+import { buildReport, escapePipes } from "./report.mjs";
 import { SUMMARY_MODEL, SYSTEM } from "./summarize.mjs";
 const newScan = () => ({
 	steps: 0,
@@ -929,7 +929,7 @@ export const register = (on, options) => {
 				const kind = (c) => c.tool === "Skill" ? "Skills" : c.tool === "ToolSearch" ? "Tools to load" : c.tool === "Read" ? "File reads" : "Commands";
 				const groups = new Map();
 				for (const c of list) groups.set(kind(c), [...groups.get(kind(c)) ?? [], c]);
-				const sections = [...groups].map(([name, items]) => `### ${name} (${items.length})\n\n| Option | Description |\n|---|---|\n` + items.map((c) => `| \`${c.key.replace(/\|/g, "\\|")}\` | ${c.description.replace(/\|/g, "\\|").replace(/\s+/g, " ")} |`).join("\n"));
+				const sections = [...groups].map(([name, items]) => `### ${name} (${items.length})\n\n| Option | Description |\n|---|---|\n` + items.map((c) => `| \`${escapePipes(c.key)}\` | ${escapePipes(c.description).replace(/\s+/g, " ")} |`).join("\n"));
 				return { text: [
 					`## Jev candidates: ${list.length + 1} options`,
 					`_For the last prompt: "${clip(ctx?.request ?? "(none)", 60)}". Plus \`claude\`: leave the step to Claude._`,

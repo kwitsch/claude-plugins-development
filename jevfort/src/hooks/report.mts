@@ -41,6 +41,13 @@ const str = (v: unknown): string | undefined => (typeof v === "string" ? v : und
  */
 const p2 = (v: number | undefined): string => (v === undefined ? "—" : v.toFixed(2));
 /**
+ * Escapes pipes for a GFM table cell; backslashes right before a pipe are doubled, else `\|` becomes `\\|`, an escaped backslash plus a column separator.
+ *
+ * @param s - The text.
+ * @returns The text with every pipe escaped.
+ */
+export const escapePipes = (s: string): string => s.replace(/(\\*)\|/g, "$1$1\\|");
+/**
  * A table cell: one line, pipes escaped, cut to `max`.
  *
  * @param s - The text.
@@ -48,7 +55,7 @@ const p2 = (v: number | undefined): string => (v === undefined ? "—" : v.toFix
  * @returns The cell text.
  */
 const cell = (s: string, max = 48): string => {
-  const one = s.replace(/\s+/g, " ").replace(/\|/g, "\\|").trim();
+  const one = escapePipes(s.replace(/\s+/g, " ")).trim();
   // never end on a high surrogate: a split astral character renders as U+FFFD
   return one.length > max ? `${one.slice(0, max - 1).replace(/[\uD800-\uDBFF]$/, "")}…` : one;
 };
