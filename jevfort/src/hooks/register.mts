@@ -257,6 +257,7 @@ async function askJev($: Engine, state: unknown, questions: Record<string, Quest
   if (startedAt < jevPause.until) return { ok: false, error: `paused for ${Math.ceil((jevPause.until - startedAt) / 1000)} s after a timeout (${jevPause.error})` };
   // Without Jev access jev-api answers through Haiku, which needs a longer budget (jev-api reads the same three variables).
   // Read once per turn (`haikuPath`): a settings `env` change takes effect from the next turn.
+  if (!haikuPath && !turnRunning) readBetweenTurns = true;
   const haiku = await (haikuPath ??= Promise.all([$.env.get("TYPESAFE_API_KEY"), $.env.get("TYPESAFE_BASE_URL"), $.env.get("JEV_URL")]).then((vals) => !vals.some((v) => v?.trim()), () => true));
   const budgetMs = haiku ? HAIKU_TIMEOUT_MS : slow ? COMPACT_TIMEOUT_MS : TIMEOUT_MS;
   const apiTimeoutS = haiku ? HAIKU_API_TIMEOUT_S : slow ? COMPACT_API_TIMEOUT_S : JEV_API_TIMEOUT_S;
@@ -329,9 +330,12 @@ let toolListing: Promise<ToolInfo[]> | undefined;
 let skillList: Promise<CommandInfo[]> | undefined;
 /** This turn's "none of jev-api's three env values is set, Haiku answers" decision; dropped with `jevTools`. */
 let haikuPath: Promise<boolean> | undefined;
+/** `jevTools` or `haikuPath` was read while no main-loop turn ran (a background subagent, a compaction check), not by `session.start`'s baseline: the next main-loop step drops it. */
+let readBetweenTurns = false;
 
-/** Drops the per-turn engine reads shared across hooks: at every main-loop `turn.complete`, at `session.start`'s baseline. */
+/** Drops the per-turn engine reads shared across hooks: at every main-loop `turn.complete`, at `session.start`'s baseline, at a main-loop step after reads between turns. */
 function dropTurnReads(): void {
+  readBetweenTurns = false;
   jevTools = undefined;
   toolListing = undefined;
   skillList = undefined;
@@ -493,6 +497,7 @@ async function withJevRanking($: Engine, e: CompactEvent): Promise<CompactEvent>
  * @returns The missing full tool names, empty when jevfort can ask Jev.
  */
 function jevMissing($: Engine): Promise<string[]> {
+  if (!jevTools && !turnRunning) readBetweenTurns = true;
   return (jevTools ??= (toolListing = $.tool.list())
     .then((t) => missingJevTools(t.map((x) => x.name)))
     .catch(() => [...JEV_TOOLS])
@@ -1048,6 +1053,7 @@ export const register = (on: On, options: Options): void => {
     // making a tool call) may have cached a listing from before jev-api registered. Registers estimate_effort when ready.
     dropTurnReads();
     await jevApply($, await jevMissing($));
+    readBetweenTurns = false;
     // MCP servers may still be connecting: the first step 0 lists the deferred tools itself.
     toolListing = undefined;
     return result;
@@ -1113,7 +1119,11 @@ export const register = (on: On, options: Options): void => {
   // Opus/Sonnet, the loop's first turn only on Haiku/Fable, which then hold it). One Jev request carries all of it.
   on("turn.step", async function* onTurnStep($: Engine, e: Step, rawNext: (e: Step) => StepRun): StepRun {
     // Every main-loop response restarts the cache countdown (the work is jev-api independent).
-    if (e.agentId === undefined) turnRunning = true;
+    if (e.agentId === undefined) {
+      // A background subagent's step or tool call between turns read the env and tool listing: this turn reads them afresh.
+      if (!turnRunning && readBetweenTurns) dropTurnReads();
+      turnRunning = true;
+    }
     const next = (request: Step): StepRun => cacheWatch($, e, rawNext(request));
     if ((await jevMissing($)).length) return yield* next(e);
     if (e.agentId && !subagents) return yield* next(e);
