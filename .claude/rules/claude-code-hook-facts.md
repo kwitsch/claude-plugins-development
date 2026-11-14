@@ -32,6 +32,15 @@ Facts a plugin author keeps getting wrong. Re-verify with the `live-verify` skil
 - An in-flight `$.tool.call` does not use up the hook's 10 s budget (a 30 s call inside `prompt.submit` was not cut); the engine caps one `$.http.fetch` at 30 s.
 - Registration (typings and an in-process harness, not measured live): `$.tool.register` rejects until the session is bound (before `session.start`): retry per hook with back-off instead of memoizing a failure, and bound the wait for a registration that never answers (pay it once per tool).
 
+- A `tool.call` hook's own `isError` is dropped by core: the model gets the text as a normal result (live, 2.1.325). Answer a failure with `{ deny: "<tool>: <reason>" }`, which reaches the model as an error result. A result read back through `$.tool.call` carries `isError: true` or `deny`.
+- `$.tool.register` input schemas are not enforced (`enum`, `required`, `type` and bounds only describe the tool to the model): the hook gets whatever was sent, so validate every input in the `tool.call` hook.
+- `$.fs.write` follows symlinks (live, 2.1.325): never overwrite a fixed path inside the project (a committed symlink sends the write outside the cwd); write a new file name after a `$.fs.exists` check.
+- `$.store` holds at most 4 MiB of JSON text per plugin; a `$.store.set` over it rejects like a full disk, and a hook's error after `next` is rethrown after the request ran: catch every store call that runs after `next`.
+- `$.http.fetch` has no `signal`: a timed-out or abandoned request runs on until it settles or hits the 30 s cap, and in `claude -p` and other headless runs the process and the next prompt wait for it.
+- `$.session.messages` omits meta rows and carries no origin marker for a plugin's own `$.prompt.submit` text; a slash command that started a turn appears as a `<command-message>` row (arguments raw, a `<` stays), a local command (`/jev`) as a `<command-name>` row with no stdout row, and its skill text is not in the list.
+- A `tool.check` hook that returns an existing `allow` with a new `reason` makes `cc-plugin-sec-default` warn the user that a plugin tried to reword an allow rule: return an allow unchanged.
+- For live checks run `claude -p --plugin-dir <plugin> --setting-sources project`, so the user's own settings and installed plugins stay out of the run; `/reload-plugins` may leave a generated `.claude-plugin/types/` folder and a `tsconfig.json` in `plugin/` (untracked, the layout check refuses them): delete them before building.
+
 ## MCP and misc
 
 - The `initialize` answer carries a version the server supports, never the client's echo. See `mcp-dual-era.md`.

@@ -84,9 +84,13 @@ test("a slash command that started a turn is the request, a local command is not
   const typed = (text: string) => ({ role: "user" as const, text, toolUses: [] });
   const skill = typed("<command-message>audit</command-message>\n<command-name>/audit</command-name>\n<command-args>src</command-args>");
   expect(splitTurn([typed("Thanks!"), { role: "assistant", text: "ok", toolUses: [] }, skill])?.request).toBe("/audit src");
+  // Arguments are raw text: a `<` in them must not cut them.
+  const angle = typed("<command-message>fix</command-message>\n<command-name>/fix</command-name>\n<command-args>the <Button> props, Map<string, number></command-args>");
+  expect(splitTurn([typed("Thanks!"), angle])?.request).toBe("/fix the <Button> props, Map<string, number>");
+  // A local command (`<command-name>` first) starts no turn, whether the last row is it or a notice after it.
   const local = typed("<command-name>/jev</command-name>\n<command-args></command-args>");
-  const output = typed("<local-command-stdout>Jev pilot: ...</local-command-stdout>");
-  expect(splitTurn([typed("Thanks!"), local, output])?.request).toBe("Thanks!");
+  expect(splitTurn([typed("Thanks!"), { role: "assistant", text: "ok", toolUses: [] }, local])?.request).toBe("Thanks!");
+  expect(splitTurn([typed("Thanks!"), { role: "assistant", text: "ok", toolUses: [] }, local, typed("<task-notification>done</task-notification>")])?.request).toBe("Thanks!");
 });
 
 test("only skills related to the prompt are offered", () => {

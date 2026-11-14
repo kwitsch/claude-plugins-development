@@ -1318,7 +1318,7 @@ export const register = (on: On, options: Options): void => {
 
     if (!Object.keys(questions).length) {
       // Inside a longer turn Jev doesn't take steps, but is asked in parallel with Claude which action it would
-      // take, so the take threshold can be measured without adding a delay.
+      // take, so the take threshold can be measured adding at most MEASURE_GRACE_MS of delay after the step.
       let measure: Promise<JevResult> | undefined;
       let measured: Candidate[] = [];
       if (measureSteps && takeSteps && e.index > 0 && !e.agentId) {

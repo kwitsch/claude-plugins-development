@@ -69,8 +69,8 @@ export const clip = (text: string, max: number): string => text.length > max ? `
  */
 const TRANSCRIPT_ONLY = /^\s*<(bash-input|bash-stdout|bash-stderr|local-command-stdout|local-command-caveat|command-name|command-message|system-reminder|task-notification)>/;
 
-/** A slash command's row: its name and arguments in tags (a skill typed as `/name args`). */
-const COMMAND_ROW = /^\s*<command-(?:message|name)>/;
+/** The row of a slash command that started a turn (a skill typed as `/name args`): `<command-message>` comes first. A local command such as `/jev` starts with `<command-name>` and starts no turn. */
+const COMMAND_ROW = /^\s*<command-message>/;
 
 /**
  * The slash command a row stands for, as typed.
@@ -81,13 +81,14 @@ const COMMAND_ROW = /^\s*<command-(?:message|name)>/;
 function typedCommand(text: string): string | undefined {
   const name = /<command-name>\s*([^<]*?)\s*<\/command-name>/.exec(text)?.[1];
   if (!name) return undefined;
-  const args = /<command-args>([^<]*)<\/command-args>/.exec(text)?.[1]?.trim();
+  const args = /<command-args>([\s\S]*?)<\/command-args>/.exec(text)?.[1]?.trim();
   return args ? `${name} ${args}` : name;
 }
 
 /**
  * The last user message that carries text and no tool results is the request; a slash command that started a turn
- * (no local-command output row right after it, as `/jev` has) is the request as typed, not the prompt before it.
+ * (`<command-message>` row, as a skill has) is the request as typed, not the prompt before it. A local command
+ * (`<command-name>` row, as `/jev` has) is skipped like any transcript-only row.
  *
  * @param messages - The transcript.
  * @returns The request and the steps after it, or `undefined` without a request.
@@ -98,7 +99,7 @@ export function splitTurn(messages: readonly SessionMessage[]): TurnContext | un
     if (m.role !== "user" || m.text.trim() === "" || m.toolResults?.length) continue;
     if (COMMAND_ROW.test(m.text)) {
       const typed = typedCommand(m.text);
-      if (typed && !/^\s*<local-command-(stdout|caveat)>/.test(messages[i + 1]?.text ?? "")) return { request: typed, command: true, steps: messages.slice(i + 1) };
+      if (typed) return { request: typed, command: true, steps: messages.slice(i + 1) };
       continue;
     }
     if (!TRANSCRIPT_ONLY.test(m.text)) return { request: m.text, steps: messages.slice(i + 1) };

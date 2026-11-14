@@ -1,10 +1,10 @@
 export const clip = (text, max) => text.length > max ? `${text.slice(0, max)}… [${text.length - max} more chars]` : text;
 const TRANSCRIPT_ONLY = /^\s*<(bash-input|bash-stdout|bash-stderr|local-command-stdout|local-command-caveat|command-name|command-message|system-reminder|task-notification)>/;
-const COMMAND_ROW = /^\s*<command-(?:message|name)>/;
+const COMMAND_ROW = /^\s*<command-message>/;
 function typedCommand(text) {
 	const name = /<command-name>\s*([^<]*?)\s*<\/command-name>/.exec(text)?.[1];
 	if (!name) return undefined;
-	const args = /<command-args>([^<]*)<\/command-args>/.exec(text)?.[1]?.trim();
+	const args = /<command-args>([\s\S]*?)<\/command-args>/.exec(text)?.[1]?.trim();
 	return args ? `${name} ${args}` : name;
 }
 export function splitTurn(messages) {
@@ -13,7 +13,7 @@ export function splitTurn(messages) {
 		if (m.role !== "user" || m.text.trim() === "" || m.toolResults?.length) continue;
 		if (COMMAND_ROW.test(m.text)) {
 			const typed = typedCommand(m.text);
-			if (typed && !/^\s*<local-command-(stdout|caveat)>/.test(messages[i + 1]?.text ?? "")) return {
+			if (typed) return {
 				request: typed,
 				command: true,
 				steps: messages.slice(i + 1)
