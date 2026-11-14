@@ -30,6 +30,8 @@ type World = {
   configDir?: string;
   /** `gm_status` fails (project not registered). */
   unregistered?: boolean;
+  /** `gm_status` answers a result without any text part. */
+  emptyStatus?: boolean;
   /** Output of `graphmind memory search`. */
   search?: string;
   /** Text of `gm_memory_list`. */
@@ -83,6 +85,7 @@ function setup(on: Parameters<typeof mock.clock>[0], w: World = {}) {
     if (!tool.startsWith("mcp__")) return { result: "tool output" };
     calls.push({ ...e, tool });
     if (tool.endsWith("__gm_status") && w.unregistered) return { value: { deny: "Project is not registered" } };
+    if (tool.endsWith("__gm_status") && w.emptyStatus) return { value: { result: [] } };
     const text = tool.endsWith("__gm_status") ? "Project: p\nGraph: 1 symbols" : tool.endsWith("__gm_map") ? (w.map ?? ">> map\n  top file") : tool.endsWith("__gm_memory_list") ? (w.recent ?? ">> 1\n  [decision] recent one (id: x)") : "  foo [Function] a.ts:1";
     // The shape of a real MCP tool result (live, Claude Code 2.1.325): text parts under `result` and the joined text.
     return tool.includes("graphmind") ? { value: { result: [{ type: "text", text }], text } } : next(e);
@@ -260,6 +263,14 @@ test("a setup user's server (mcp__graphmind__*) works the same", async ($, on) =
 
 test("nothing is added when the project is not registered", async ($, on) => {
   const a = setup(on, { unregistered: true });
+  await $.session.start({ source: "startup" });
+  await prompt($, "where is foo_bar defined in the code");
+  expect(a.prompts[0].context).toBeUndefined();
+  expect(a.runs).toHaveLength(0);
+});
+
+test("a status without any text part does not make the project look registered", async ($, on) => {
+  const a = setup(on, { emptyStatus: true });
   await $.session.start({ source: "startup" });
   await prompt($, "where is foo_bar defined in the code");
   expect(a.prompts[0].context).toBeUndefined();
