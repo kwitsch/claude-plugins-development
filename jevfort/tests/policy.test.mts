@@ -1,7 +1,7 @@
 // Pure tests of the built plugin/hooks/policy.mjs.
 import assert from "node:assert/strict";
 import { test } from "vitest";
-import { bounds, effortLevel, estimateEffort, inScratchpad, isEffort, modelFamily, nextActionQuestion, parseEstimateInput } from "../plugin/hooks/policy.mjs";
+import { bounds, effortLevel, estimateEffort, inScratchpad, isEffort, lowerModel, modelFamily, nextActionQuestion, parseEstimateInput } from "../plugin/hooks/policy.mjs";
 
 const ROOTS = ["/tmp"];
 const SP = "/tmp/claude-1000/-proj/sid-1/scratchpad";
@@ -120,4 +120,13 @@ test("nextActionQuestion has string instructions and one string criterion per op
   assert.match(q.instructions, /^An AI coding assistant is working on the user request in `request`; .* pick claude\.$/);
   assert.deepEqual(Object.keys(q.criteria), ["claude", "read a.ts"]);
   assert.equal(q.criteria["read a.ts"], "Read the file a.ts");
+});
+
+test("lowerModel only lowers the model: a cheaper tier passes, an equal, higher, unknown or missing one does not", () => {
+  assert.equal(lowerModel("claude-opus-5-5", "claude-haiku-5-5"), "claude-haiku-5-5");
+  assert.equal(lowerModel("claude-opus-5-5", "claude-sonnet-5-5"), "claude-sonnet-5-5");
+  assert.equal(lowerModel("claude-haiku-5-5", "claude-sonnet-5-5"), undefined);
+  assert.equal(lowerModel("claude-sonnet-5-5", "claude-sonnet-5-5"), undefined);
+  assert.equal(lowerModel("some-model", "claude-haiku-5-5"), undefined);
+  assert.equal(lowerModel("claude-opus-5-5", undefined), undefined);
 });
