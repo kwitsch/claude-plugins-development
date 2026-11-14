@@ -7,7 +7,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSy
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "vitest";
-import { acquireSlot, buildArgv, classifyCheckstyleOutput, classifyExit, coalesceProjectCheck, configExists, editRanges, FILE_CHANGED_SLOTS, gateFinding, hashPath, hasProjectMarkdownlintConfig, hasProjectYamllintConfig, isExcludedPath, isToolAvailable, lintFileHandler, lintFilesHandler, looksLikeSolutionStyleTsconfig, oxlintConfigTypeChecks, recordWritten, REGISTRY, resolveCargoManifest, resolveCheckstyleConfig, resolveLintTarget, resolveOxlintConfig, resolveTsconfig, scopedTarget, stripTrailingCommas, truncate, tsBuildInfoPathFor, tscOutputHasSourceDiagnostic, WATCH_LIMIT, writtenContent } from "../plugin/hooks/lint-file.mjs";
+import { acquireSlot, buildArgv, classifyCheckstyleOutput, classifyExit, coalesceProjectCheck, configExists, editRanges, FILE_CHANGED_SLOTS, gateFinding, hashPath, hasProjectMarkdownlintConfig, hasProjectYamllintConfig, isExcludedPath, isToolAvailable, lintFileHandler, lintFilesHandler, looksLikeSolutionStyleTsconfig, oxlintConfigTypeChecks, recordWritten, REGISTRY, resolveCargoManifest, resolveCheckstyleConfig, resolveLintTarget, resolveOxlintConfig, resolveTsconfig, scopedTarget, slotDeadlineMs, stripTrailingCommas, truncate, tsBuildInfoPathFor, tscOutputHasSourceDiagnostic, WATCH_LIMIT, writtenContent } from "../plugin/hooks/lint-file.mjs";
 
 // The handler tests below call lintFileHandler in this process: report findings at once, no settle window (F34).
 process.env.UNIVERSAL_LINT_SETTLE_MS = "0";
@@ -353,6 +353,12 @@ async function withDataDir(fn: (dataDir: string) => void | Promise<void>): Promi
  * @returns The slot file path.
  */
 const slotPath = (dataDir: string, i: number) => path.join(path.resolve(dataDir), "fc-slots", String(i));
+
+test("slotDeadlineMs: the FileChanged slot wait stops at 85 s minus the file's lint reservation (.ts 75 s, .rs 45 s, other 30 s)", () => {
+  assert.equal(slotDeadlineMs(".ts"), 10000);
+  assert.equal(slotDeadlineMs(".rs"), 40000);
+  assert.equal(slotDeadlineMs(".sh"), 55000);
+});
 
 test("acquireSlot: takes free slots holding this pid; a live pid with an mtime under 90 s in the future and an empty slot count as held; gives up after one round when all are held (F10)", async () => {
   await withDataDir((dataDir) => {

@@ -2892,6 +2892,18 @@ export async function coalesceProjectCheck(key: string, file: string, reserveMs:
 }
 
 /**
+ * Process uptime (ms) at which FileChanged's slot wait gives up for a file: what is left of `FILE_CHANGED_BUDGET_MS`
+ * once the file's nominal lint budget is reserved, chain + `tsc` kept as the sum for the sequential oxlint-`typeCheck`
+ * fallback (`.ts`-family 10 s, `.rs` 40 s, any other extension 55 s; see `FILE_CHANGED_BUDGET_MS`).
+ *
+ * @param ext - The file's lower-cased extension with its dot.
+ * @returns The slot-wait deadline in ms of process uptime.
+ */
+export function slotDeadlineMs(ext: string): number {
+  return FILE_CHANGED_BUDGET_MS - (EXT_MAP[ext] === "rust" ? CARGO_SPAWN_TIMEOUT_MS : SPAWN_TIMEOUT_MS) - (TYPE_CHECK_EXTS.has(ext) ? TSC_SPAWN_TIMEOUT_MS : 0);
+}
+
+/**
  * FileChanged: lint a watched file changed outside Write/Edit, whole file (no edit-range gate). Skips, first match
  * wins: `unlink` event; out of scope (`scopedTarget`); content still equal to the digest Write/Edit recorded; git says
  * ignored (`!!`) or unchanged (empty status). A git failure (no git, not a repo, timeout) lints. Then waits for one of
@@ -2942,12 +2954,9 @@ export async function fileChangedHandler(args: PostToolUseHookInput): Promise<Ho
     } catch {
       // no git, not a repo, timeout or non-zero exit: lint
     }
-    const ext = path.extname(s.fp).toLowerCase();
-    // The wait gets what git left of FILE_CHANGED_BUDGET_MS once this file's nominal lint budget is reserved: chain + tsc, kept as the sum for the sequential oxlint-typeCheck fallback (see FILE_CHANGED_BUDGET_MS).
-    const lintMs = (EXT_MAP[ext] === "rust" ? CARGO_SPAWN_TIMEOUT_MS : SPAWN_TIMEOUT_MS) + (TYPE_CHECK_EXTS.has(ext) ? TSC_SPAWN_TIMEOUT_MS : 0);
     let slot: string | null | undefined; // undefined: slot error, lint without a slot (fail open, as before F10)
     try {
-      slot = acquireSlot(FILE_CHANGED_BUDGET_MS - lintMs);
+      slot = acquireSlot(slotDeadlineMs(path.extname(s.fp).toLowerCase()));
     } catch {
       // unusable slot dir or slot file: slot stays undefined
     }

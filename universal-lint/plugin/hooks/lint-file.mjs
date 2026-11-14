@@ -1580,6 +1580,9 @@ export async function coalesceProjectCheck(key, file, reserveMs, run, session = 
 		} catch {}
 	}
 }
+export function slotDeadlineMs(ext) {
+	return FILE_CHANGED_BUDGET_MS - (EXT_MAP[ext] === "rust" ? CARGO_SPAWN_TIMEOUT_MS : SPAWN_TIMEOUT_MS) - (TYPE_CHECK_EXTS.has(ext) ? TSC_SPAWN_TIMEOUT_MS : 0);
+}
 export async function fileChangedHandler(args) {
 	try {
 		if (args?.event === "unlink") return {};
@@ -1621,11 +1624,9 @@ export async function fileChangedHandler(args) {
 			});
 			if (status === "" || status.startsWith("!!")) return {};
 		} catch {}
-		const ext = path.extname(s.fp).toLowerCase();
-		const lintMs = (EXT_MAP[ext] === "rust" ? CARGO_SPAWN_TIMEOUT_MS : SPAWN_TIMEOUT_MS) + (TYPE_CHECK_EXTS.has(ext) ? TSC_SPAWN_TIMEOUT_MS : 0);
 		let slot;
 		try {
-			slot = acquireSlot(FILE_CHANGED_BUDGET_MS - lintMs);
+			slot = acquireSlot(slotDeadlineMs(path.extname(s.fp).toLowerCase()));
 		} catch {}
 		if (slot === null) {
 			process.stderr.write(`universal-lint: FileChanged: no lint slot free in time, ${s.fp} not linted\n`);
