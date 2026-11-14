@@ -225,12 +225,12 @@ test("lint-files.mjs finds a project-local linter through a symlinked cwd ($PWD 
   assert.equal(e.lines().filter((l) => l.startsWith("oxlint ")).length, 1);
 });
 
-test("lint-files.mjs finds a project-local linter for a real-path entry through a symlinked cwd (git toplevel prefix)", () => {
+test.each(["a.js", "..lib/a.js"])("lint-files.mjs finds a project-local linter for a real-path entry through a symlinked cwd (git toplevel prefix): %s", (name) => {
   const e = makeEnv();
   const link = path.join(path.dirname(e.cwd), "link");
   symlinkSync(e.cwd, link);
   e.file("eslint.config.js", "export default [];\n");
-  const real = e.file("a.js", "var x = 1;\n");
+  const real = e.file(name, "var x = 1;\n");
   const bin = e.file("node_modules/.bin/eslint", "#!/usr/bin/env bash\nprintf 'eslint %s\\n' \"$*\" >> \"$RECORD\"\necho 'a.js:1:5 error no-var'\nexit 1\n");
   chmodSync(bin, 0o755);
   const list = path.join(path.dirname(e.cwd), "list");

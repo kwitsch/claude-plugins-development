@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import{readFileSync as e,realpathSync as t}from"node:fs";import{isAbsolute as n,join as r,relative as i,resolve as a}from"node:path";import{lintFilesHandler as o}from"../../hooks/lint-file.mjs";const s=process.argv[2];s||(console.error(`usage: lint-files.mjs <listfile>`),process.exit(2));let c=process.cwd();try{let e=process.env.PWD;e&&n(e)&&t(e)===c&&(c=e)}catch{}const l=e(s,`utf8`).split(`
-`).map(e=>e.trim()).filter(e=>e.length>0),u=process.cwd();function d(e){let t=a(c,e),o=i(u,t);return c!==u&&!o.startsWith(`..`)&&!n(o)?r(c,o):t}let f;try{f=await o(c,l.map(d))}catch{f=[]}f.length===0?console.log(`universal-lint: no findings.`):(console.log(f.join(`
+import{readFileSync as e,realpathSync as t}from"node:fs";import{isAbsolute as n,join as r,relative as i,resolve as a,sep as o}from"node:path";import{lintFilesHandler as s}from"../../hooks/lint-file.mjs";const c=process.argv[2];c||(console.error(`usage: lint-files.mjs <listfile>`),process.exit(2));let l=process.cwd();try{let e=process.env.PWD;e&&n(e)&&t(e)===l&&(l=e)}catch{}const u=e(c,`utf8`).split(`
+`).map(e=>e.trim()).filter(e=>e.length>0),d=process.cwd();function f(e){let t=a(l,e),s=i(d,t);return l!==d&&s!==`..`&&!s.startsWith(`..`+o)&&!n(s)?r(l,s):t}let p;try{p=await s(l,u.map(f))}catch{p=[]}p.length===0?console.log(`universal-lint: no findings.`):(console.log(p.join(`
 
-`)),console.log(`\nuniversal-lint: ${f.length} block(s) with findings.`)),process.exit(0);
+`)),console.log(`\nuniversal-lint: ${p.length} block(s) with findings.`)),process.exit(0);

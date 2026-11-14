@@ -16,7 +16,7 @@
  */
 
 import { readFileSync, realpathSync } from "node:fs";
-import { isAbsolute, join, relative, resolve } from "node:path";
+import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { lintFilesHandler } from "../../hooks/lint-file.mjs";
 
 /** The list file named on the command line. */
@@ -58,7 +58,8 @@ const real = process.cwd();
 function abs(p: string): string {
   const a = resolve(cwd, p);
   const rel = relative(real, a);
-  return cwd !== real && !rel.startsWith("..") && !isAbsolute(rel) ? join(cwd, rel) : a;
+  // a first part such as `..lib` is inside, only `..` itself leaves the real cwd
+  return cwd !== real && rel !== ".." && !rel.startsWith(".." + sep) && !isAbsolute(rel) ? join(cwd, rel) : a;
 }
 
 /** One findings block per tool run; empty on any throw or rejection (fail open, matching the hook). */
