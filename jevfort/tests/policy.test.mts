@@ -1,7 +1,7 @@
 // Pure tests of the built plugin/hooks/policy.mjs.
 import assert from "node:assert/strict";
 import { test } from "vitest";
-import { bounds, effortLevel, estimateEffort, inScratchpad, isEffort, lowerModel, modelFamily, nextActionQuestion, parseEstimateInput } from "../plugin/hooks/policy.mjs";
+import { bestAction, bounds, effortLevel, estimateEffort, inScratchpad, isEffort, lowerModel, modelFamily, nextActionQuestion, parseEstimateInput } from "../plugin/hooks/policy.mjs";
 
 const ROOTS = ["/tmp"];
 const SP = "/tmp/claude-1000/-proj/sid-1/scratchpad";
@@ -130,4 +130,10 @@ test("lowerModel only lowers the model: a cheaper tier passes, an equal, higher,
   assert.equal(lowerModel("claude-sonnet-5-5", "claude-sonnet-5-5"), undefined);
   assert.equal(lowerModel("some-model", "claude-haiku-5-5"), undefined);
   assert.equal(lowerModel("claude-opus-5-5", undefined), undefined);
+});
+
+test("bestAction: most likely non-claude option, undefined when only claude or no answer", () => {
+  assert.deepEqual(bestAction({ type: "choice", choice: "claude", probabilities: { claude: 0.7, "read a": 0.1, "run:npm test": 0.2 }, confidence: 0.9 }), { key: "run:npm test", p: 0.2 });
+  assert.equal(bestAction({ type: "choice", choice: "claude", probabilities: { claude: 1 }, confidence: 1 }), undefined);
+  assert.equal(bestAction(undefined), undefined);
 });
