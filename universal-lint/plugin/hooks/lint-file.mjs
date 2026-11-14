@@ -1585,9 +1585,9 @@ export async function fileChangedHandler(args) {
 				"--untracked-files=normal",
 				"--ignored=matching",
 				"--",
-				s.fp
+				s.real
 			], {
-				cwd: path.dirname(s.fp),
+				cwd: path.dirname(s.real),
 				encoding: "utf8",
 				timeout: GIT_TIMEOUT_MS,
 				stdio: [

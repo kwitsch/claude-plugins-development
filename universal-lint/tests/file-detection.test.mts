@@ -195,6 +195,20 @@ test("FileChanged: a tracked, modified file is linted whole and labelled", () =>
   assert.match(e.lines()[0], /^shellcheck /);
 });
 
+test("FileChanged: a modified file reached through a committed symlinked dir (cwd through the link) is linted", () => {
+  const e = makeEnv();
+  e.recStub("shellcheck", 1);
+  mkdirSync(path.join(e.cwd, "real"), { recursive: true });
+  const a = e.file("real/a.sh", "echo a\n");
+  symlinkSync("real", path.join(e.cwd, "link"));
+  gitInit(e);
+  writeFileSync(a, "echo $1\n");
+  const link = path.join(e.cwd, "link");
+  const r = changed(e, path.join(link, "a.sh"), { cwd: link });
+  assert.equal(r.status, 2);
+  assert.match(e.lines()[0], /^shellcheck /);
+});
+
 test("FileChanged: skips unchanged, ignored, unlink, outside-cwd, escaping/dangling links and scratchpad files", () => {
   const e = makeEnv();
   e.recStub("shellcheck", 1);
