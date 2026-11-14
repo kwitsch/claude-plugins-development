@@ -590,7 +590,7 @@ async function record($: Engine, d: Omit<Entry, "at">): Promise<void> {
   const entry: Entry = { ...d, at: await $.clock.now().catch(() => Date.now()) };
   remember(entry);
   pending.push(entry);
-  if (d.kind !== "outcome" && d.kind !== "turn") void $.ui.status(`jev: ${d.text}`.slice(0, 80));
+  if (d.kind !== "outcome" && d.kind !== "turn") void $.ui.status(`jev: ${d.text}`.slice(0, 80).replace(/[\uD800-\uDBFF]$/, ""));
 }
 
 /**
@@ -902,7 +902,7 @@ function summarizeCalls(calls: readonly { tool: string; input: Record<string, un
     const target = typeof c.input.file_path === "string"
       ? c.input.file_path.split("/").pop()
       : typeof c.input.command === "string"
-      ? c.input.command.replace(/\s+/g, " ").slice(0, 30)
+      ? c.input.command.replace(/\s+/g, " ").slice(0, 30).replace(/[\uD800-\uDBFF]$/, "")
       : typeof c.input.skill === "string"
       ? c.input.skill
       : "";

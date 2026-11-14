@@ -889,6 +889,24 @@ test("Inside a longer turn Jev's measured top action is compared with Claude's c
   expect(report).not.toContain("shadow");
 });
 
+test("Claude's Bash command cut at 30 chars never leaves a lone surrogate in the report", async ($, on) => {
+  setup(on, {
+    messages: [user("what does src/app.ts export?")],
+    files: [`${CWD}/src/app.ts`],
+    jev: byId({ next_action: { type: "choice", choice: "read src/app.ts", probabilities: { "read src/app.ts": 0.92, claude: 0.08 }, confidence: 0.9 } }),
+  });
+  // The emoji starts at code unit 29, so the 30-unit cut lands between its surrogates.
+  const cmd = "echo aaaaaaaaaaaaaaaaaaaaaaaa\u{1F389} done";
+  on("turn.step", async function*(_$, e) {
+    yield { kind: "stop", stopReason: "tool_use", usage: null };
+    return { turnId: e.turnId, index: e.index, answer: "", toolUses: [{ name: "Bash", input: { command: cmd } }], stopReason: "tool_use", usage: null };
+  });
+  await drain($.turn.step({ ...step, index: 4 }));
+  const report = await runJev($, "report");
+  expect(report).toContain("| Bash echo aaaaaaaaaaaaaaaaaaaaaaaa | ✗ differ |");
+  expect(report).not.toMatch(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/);
+});
+
 test("An answered step measurement leaves no timer pending, the 250 ms grace timer included", async ($, on) => {
   const started: number[] = [];
   let cancelled = 0;
