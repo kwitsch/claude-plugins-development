@@ -196,6 +196,21 @@ describe("timeout guard and abandonment", () => {
     expect(t.fetched).toHaveLength(0);
   });
 
+  it("a dispatch abandoned while the call id is made sends no request", async () => {
+    const t = await rig();
+    await t.run(); // connects
+    let release: (n: number) => void = () => undefined;
+    (t.$.clock as { now: () => Promise<number> }).now = () => new Promise<number>((resolve) => (release = resolve));
+    const ctl = new AbortController();
+    const pending = t.run("noul", {}, ctl.signal);
+    for (let i = 0; i < 50; i++) await new Promise((r) => setImmediate(r));
+    ctl.abort();
+    release(1_000_000);
+    expect(await pending).toEqual({ deny: "noul: the call was abandoned" });
+    expect(t.requests()).toHaveLength(1);
+    expect(t.cancels()).toHaveLength(0);
+  });
+
   it("a settled call sends no cancel, also not when its signal aborts later or its guard fires", async () => {
     const t = await rig();
     const ctl = new AbortController();
@@ -253,6 +268,32 @@ describe("fallback to $.http.fetch", () => {
     await t.run();
     expect(t.fetched).toHaveLength(1);
     expect(outage(t)[0]).toContain("no such server");
+  });
+
+  it("a TypeError the connect call rejects with is an outage like any other: logged, tried again after 60 s", async () => {
+    let up = false;
+    const t = await rig({
+      connect: async () => {
+        if (!up) throw new TypeError("internal failure");
+        return { isConnected: true, server: SERVER };
+      },
+    });
+    await t.run();
+    expect(t.fetched).toHaveLength(1);
+    expect(outage(t)).toHaveLength(1);
+    expect(outage(t)[0]).toContain("internal failure");
+    up = true;
+    t.clock.now += 60_000;
+    await t.run();
+    expect(t.requests()).toHaveLength(1);
+    expect(t.fetched).toHaveLength(1);
+  });
+
+  it("a request call that resolves nothing falls back instead of throwing", async () => {
+    const t = await rig({ onCall: () => undefined });
+    expect(JSON.parse((await t.run()).result ?? "null")).toEqual(NOUL_ANSWER);
+    expect(t.fetched).toHaveLength(1);
+    expect(outage(t)[0]).toContain("not usable");
   });
 
   it("a connect that never answers is given up after 3 s", async () => {

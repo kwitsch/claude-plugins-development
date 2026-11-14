@@ -1,5 +1,5 @@
 /**
- * Small shared helpers: type guards, JSON parsing, tool errors, text redaction and the request's question keys.
+ * Small shared helpers: type guards, JSON parsing, tool errors, timeouts and the request's question keys.
  *
  * @packageDocumentation
  */

@@ -58,6 +58,45 @@ export function newLink(): Link {
   return { server: undefined, retryAt: 0, counter: 0, logged: false, connecting: undefined };
 }
 
+/** What stops a wait: its time ran out, or the call was abandoned. */
+type Stop = {
+  /** Settles with `timeout` or `aborted`, whichever comes first. */
+  stop: Promise<"timeout" | "aborted">;
+  /** Cancels the timer and removes the abort listener (a signal shared by many calls must not collect listeners); called when the race is over. */
+  done(): void;
+};
+
+/**
+ * Starts the wait of a request: `timeout` after `ms`, `aborted` when the signal aborts (at once if it already has).
+ *
+ * @param $ - The engine.
+ * @param ms - How long until `timeout`.
+ * @param signal - Aborts when the call is abandoned.
+ * @returns The wait.
+ */
+function stopOn($: Engine, ms: number, signal: AbortSignal): Stop {
+  let timer: { cancel(): void } | undefined;
+  let onAbort: (() => void) | undefined;
+  const stop = new Promise<"timeout" | "aborted">((resolve) => {
+    timer = $.clock.after(ms, () => resolve("timeout"));
+    if (signal.aborted) resolve("aborted");
+    else {
+      onAbort = () => resolve("aborted");
+      signal.addEventListener("abort", onAbort, { once: true });
+    }
+  });
+  return {
+    stop,
+    done: () => {
+      timer?.cancel();
+      if (onAbort) signal.removeEventListener("abort", onAbort);
+    },
+  };
+}
+
+/** The outcome of a call whose dispatch was abandoned. */
+const ABANDONED = { kind: "error", code: "aborted", message: "the call was abandoned" } as const satisfies Outcome;
+
 /**
  * The HTTP call through the engine's `$.http.fetch`: it races the request against the timeout and the abandonment of
  * the dispatch, because the engine's fetch has no signal and no timeout option (a timed-out or abandoned request runs
@@ -70,27 +109,18 @@ export function newLink(): Link {
  */
 function fetchViaEngine($: Engine, timeoutMs: number, signal: AbortSignal): DoFetch {
   return async (url, init) => {
-    let timer: { cancel(): void } | undefined;
-    let onAbort: (() => void) | undefined;
+    let wait: Stop | undefined;
     try {
       const request = $.http.fetch(url, init);
       request.catch(() => undefined); // a late rejection after the timeout or an abort won must not go unhandled
       // The engine does not stop a hook's request when its dispatch is abandoned: answer at once instead of lingering.
-      const stop = new Promise<"timeout" | "aborted">((resolve) => {
-        timer = $.clock.after(timeoutMs, () => resolve("timeout"));
-        if (signal.aborted) resolve("aborted");
-        else {
-          onAbort = () => resolve("aborted");
-          signal.addEventListener("abort", onAbort, { once: true });
-        }
-      });
-      const res = await Promise.race([request, stop]);
+      wait = stopOn($, timeoutMs, signal);
+      const res = await Promise.race([request, wait.stop]);
       if (res === "timeout") throw named("TimeoutError", `timeout after ${timeoutMs}ms`);
-      if (res === "aborted") throw named("AbortError", "the call was abandoned");
+      if (res === "aborted") throw named("AbortError", ABANDONED["message"]);
       return { status: res.status, text: res.text };
     } finally {
-      timer?.cancel();
-      if (onAbort) signal.removeEventListener("abort", onAbort); // a signal shared by many calls must not collect listeners
+      wait?.done();
     }
   };
 }
@@ -154,8 +184,10 @@ async function ensureServer($: Engine, link: Link): Promise<string | undefined> 
   link.connecting ??= (async () => {
     let reason = "not connected";
     let timer: { cancel(): void } | undefined;
+    let started = false; // the connect call was made: a TypeError after this is a failed connect, not a missing API
     try {
       const connect = Promise.resolve($.mcp.connect(SERVER_KEY));
+      started = true;
       connect.catch(() => undefined); // a late rejection after the wait must not go unhandled
       const late = new Promise<undefined>((resolve) => {
         timer = $.clock.after(CONNECT_WAIT_MS, () => resolve(undefined));
@@ -171,7 +203,7 @@ async function ensureServer($: Engine, link: Link): Promise<string | undefined> 
       // A TypeError is the call itself failing: an engine without the mcp API (an older one, a test double) has no
       // server to reach, which is the fetch path with nothing to log. (`$.mcp` must not be read as a value: the
       // engine's static check refuses that, also in lib.mjs.)
-      if (err instanceof TypeError) {
+      if (!started && err instanceof TypeError) {
         link.retryAt = Number.MAX_SAFE_INTEGER;
         return undefined;
       }
@@ -190,11 +222,12 @@ async function ensureServer($: Engine, link: Link): Promise<string | undefined> 
 /**
  * Reads the outcome out of an MCP tool result of the server.
  *
- * @param r - The `$.mcp.call` result.
+ * @param r - The `$.mcp.call` result (anything the engine resolves: a missing or odd one is no outcome).
  * @returns The outcome (the structured content, or an error outcome for the plain error text of an invalid input), or undefined when the result is neither.
  */
-function readOutcome(r: McpResult): Outcome | undefined {
-  const text = r.content?.find((c) => c.type === "text")?.text;
+function readOutcome(r: McpResult | null | undefined): Outcome | undefined {
+  if (!isRecord(r)) return undefined;
+  const text = Array.isArray(r.content) ? r.content.find((c) => c.type === "text")?.text : undefined;
   const sc = isRecord(r.structuredContent) ? r.structuredContent : text === undefined ? undefined : json(text);
   if (isRecord(sc)) {
     if (sc["kind"] === "ok" && typeof sc["status"] === "number" && typeof sc["text"] === "string") return sc as unknown as Outcome;
@@ -218,8 +251,7 @@ function readOutcome(r: McpResult): Outcome | undefined {
  * @returns The outcome, or `{ down }` with the reason when the server failed (the call threw, the answer is no outcome): the caller falls back.
  */
 async function callServer($: Engine, server: string, callId: string, state: string, questionsObject: Record<string, unknown>, timeoutMs: number, signal: AbortSignal): Promise<Outcome | { down: string }> {
-  let timer: { cancel(): void } | undefined;
-  let onAbort: (() => void) | undefined;
+  let wait: Stop | undefined;
   /** Tells the server to abort this request; called at most once, by whichever of the guard and the abandonment wins the race. The answer is not awaited and its failure does not matter. */
   const cancel = (): void => {
     try {
@@ -233,28 +265,20 @@ async function callServer($: Engine, server: string, callId: string, state: stri
       (value) => ({ value }),
       (error: unknown) => ({ error }),
     );
-    const stop = new Promise<"guard" | "aborted">((resolve) => {
-      timer = $.clock.after(timeoutMs + SERVER_GUARD_MS, () => resolve("guard"));
-      if (signal.aborted) resolve("aborted");
-      else {
-        onAbort = () => resolve("aborted");
-        signal.addEventListener("abort", onAbort, { once: true });
-      }
-    });
-    const r = await Promise.race([call, stop]);
-    if (r === "guard") {
+    wait = stopOn($, timeoutMs + SERVER_GUARD_MS, signal); // `timeout` here is the guard
+    const r = await Promise.race([call, wait.stop]);
+    if (r === "timeout") {
       cancel();
       return { kind: "error", code: "timeout", message: `timeout after ${timeoutMs}ms` };
     }
     if (r === "aborted") {
       cancel();
-      return { kind: "error", code: "aborted", message: "the call was abandoned" };
+      return ABANDONED;
     }
     if ("error" in r) return { down: message(r.error) };
     return readOutcome(r.value) ?? { down: "the server's answer was not usable" };
   } finally {
-    timer?.cancel();
-    if (onAbort) signal.removeEventListener("abort", onAbort); // a signal shared by many calls must not collect listeners
+    wait?.done();
   }
 }
 
@@ -275,15 +299,16 @@ async function callServer($: Engine, server: string, callId: string, state: stri
 export async function sendOutcome($: Engine, link: Link, env: HttpEnv, state: string, questionsObject: Record<string, unknown>, timeoutMs: number, signal: AbortSignal): Promise<Outcome> {
   const server = await ensureServer($, link);
   if (server !== undefined) {
-    if (signal.aborted) return { kind: "error", code: "aborted", message: "the call was abandoned" };
     // a call id the server can tell apart from every other one of this session and of earlier ones; the counter moves
     // before the await, or calls that run side by side would read the same number
     const n = ++link.counter;
     const callId = `${(await now($)).toString(36)}-${n}`;
+    // after the await: a dispatch abandoned while the clock was read sends nothing
+    if (signal.aborted) return ABANDONED;
     const outcome = await callServer($, server, callId, state, questionsObject, timeoutMs, signal);
     if (!("down" in outcome)) return outcome;
     await markDown($, link, outcome.down);
-    if (signal.aborted) return { kind: "error", code: "aborted", message: "the call was abandoned" };
+    if (signal.aborted) return ABANDONED;
   }
   return sendRequest(env, state, questionsObject, fetchViaEngine($, timeoutMs, signal));
 }

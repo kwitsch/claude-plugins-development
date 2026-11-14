@@ -261,10 +261,41 @@ describe("request", () => {
     assert.ok(one["kind"] === "ok" || one["code"] === "timeout"); // 1 ms may or may not win against a local stub
   });
 
-  test("a response over 1 MiB is a network error", async () => {
-    const { c } = await boot({}, { body: "x".repeat(1_100_000) });
+  test("a response over 1 MiB is a network error, one of exactly 1 MiB is an answer", async () => {
+    const { s, c } = await boot({}, { body: "x".repeat(1_048_577) });
+    assert.deepEqual(outcomeOf(await c.request()), { kind: "error", code: "network", message: "response too large" });
+    s.set({ body: "x".repeat(1_048_576) });
+    assert.equal(outcomeOf(await c.request({ callId: "c2" }))["kind"], "ok");
+  });
+
+  test("a state or question text with U+2028 or U+2029 is answered (readline would cut the line there)", async () => {
+    const { s, c } = await boot({}, { body: "{\"answers\":{}}" });
+    for (const [i, ch] of [" ", " "].entries()) {
+      const o = outcomeOf(await c.request({ callId: `ls${i}`, state: `a${ch}b`, questions: { answer: { type: "noul", instructions: `q${ch}?` } } }));
+      assert.equal(o["kind"], "ok");
+    }
+    const sent = s.seen.map((m) => JSON.parse(m["body"]) as Msg);
+    assert.deepEqual(sent.map((b) => b["state"]), ["a b", "a b"]);
+  });
+
+  test("a last line without its newline is still handled", async () => {
+    const { c } = await boot();
+    c.child.stdin.write(JSON.stringify({ jsonrpc: "2.0", id: 5, method: "ping" }));
+    c.child.stdin.end();
+    const closed = await new Promise<number | null>((resolve) => c.child.on("close", resolve));
+    assert.equal(closed, 0);
+    assert.ok(c.lines.some((l) => (JSON.parse(l) as Msg)["id"] === 5));
+  });
+
+  test("a network failure names its cause code, neither host nor port nor key", async () => {
+    const closedStub = await stub(); // a port that was listening a moment ago: the connection is refused (port 9 is blocked by fetch itself)
+    const { url } = closedStub;
+    await closedStub.close();
+    const c = start({ JEV_URL: url, TYPESAFE_API_KEY: KEY });
+    live.push(c);
     const o = outcomeOf(await c.request());
-    assert.deepEqual(o, { kind: "error", code: "network", message: "response too large" });
+    assert.equal(o["code"], "network");
+    assert.equal(o["message"], "fetch failed (ECONNREFUSED)");
   });
 
   test("two requests run at the same time", async () => {
@@ -285,9 +316,7 @@ describe("timeout and cancel", () => {
 
   test("a request slower than timeoutMs ends as a timeout and the connection is closed", async () => {
     const { s, c } = await boot({}, { delayMs: 5000 });
-    const t = Date.now();
-    const r = await c.request({ timeoutMs: 300 });
-    assert.ok(Date.now() - t < 4500, "ended long before the stub answered");
+    const r = await c.request({ timeoutMs: 300 }); // the stub answers after 5 s: a timeout outcome proves the request was cut
     assert.equal(r["result"].isError, true);
     const o = outcomeOf(r);
     assert.equal(o["kind"], "error");
@@ -349,6 +378,13 @@ describe("timeout and cancel", () => {
     await new Promise((r) => setTimeout(r, 100));
     assert.equal(outcomeOf(await c.request({ callId: "old" }))["kind"], "ok");
     assert.equal(s.seen.length, 1);
+  });
+
+  test("a blank JEV_API_TOMBSTONE_MS is unset: the cancel is remembered", async () => {
+    const { s, c } = await boot({ JEV_API_TOMBSTONE_MS: " " });
+    await c.call("cancel", { callId: "blank" });
+    assert.equal(outcomeOf(await c.request({ callId: "blank" }))["code"], "aborted");
+    assert.equal(s.seen.length, 0);
   });
 
   test("at most 256 cancels are remembered", async () => {

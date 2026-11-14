@@ -18,7 +18,6 @@
 import type { CallToolResult, DiscoverResult, Implementation, JSONRPCErrorResponse, JSONRPCRequest, JSONRPCResultResponse, ListToolsResult, ServerCapabilities, Tool } from "@modelcontextprotocol/server";
 import { readFileSync } from "node:fs";
 import process from "node:process";
-import readline from "node:readline";
 import { messageOf, named, sendRequest } from "../shared/http.mjs";
 import type { HttpEnv, Outcome } from "../shared/http.mjs";
 
@@ -45,8 +44,9 @@ const MAX_BODY_BYTES = 1_048_576;
 const MAX_TOMBSTONES = 256;
 /** How long a remembered cancel lives (ms); `JEV_API_TOMBSTONE_MS` overrides it, for tests only. */
 const TOMBSTONE_MS = ((): number => {
-  const v = Number(process.env["JEV_API_TOMBSTONE_MS"]);
-  return Number.isInteger(v) && v >= 0 && process.env["JEV_API_TOMBSTONE_MS"] !== undefined ? v : 60_000;
+  const raw = process.env["JEV_API_TOMBSTONE_MS"]?.trim();
+  const v = raw ? Number(raw) : NaN; // blank is unset: Number("") would be 0 and make every cancel expire at once
+  return Number.isInteger(v) && v >= 0 ? v : 60_000;
 })();
 /** A call id: 1 to 64 of letters, digits, dot, underscore, dash. */
 const CALL_ID = /^[A-Za-z0-9._-]{1,64}$/;
@@ -243,7 +243,10 @@ function startServer(): void {
           // the caller's two ends first (a cancel wins over a timeout that fires at the same time), anything else as it is
           if (flight.controller.signal.aborted) throw named("AbortError", "the call was abandoned");
           if (timeout.aborted) throw named("TimeoutError", `timeout after ${timeoutMs}ms`);
-          throw e;
+          // Node's fetch hides the reason in `cause` and says only `fetch failed`: add its code (ECONNREFUSED, ENOTFOUND, a certificate error), which names neither host nor port
+          const cause: unknown = e instanceof Error ? e.cause : undefined;
+          const code = typeof cause === "object" && cause !== null ? (cause as { code?: unknown }).code : undefined;
+          throw typeof code === "string" && /^[A-Z0-9_]{1,64}$/.test(code) ? new Error(`${messageOf(e)} (${code})`) : e;
         }
       });
       return outcomeResult(outcome);
@@ -341,8 +344,12 @@ function startServer(): void {
 
   process.stderr.write(`[${SERVER_NAME}] running (v${SERVER_INFO.version})\n`);
 
-  const rl = readline.createInterface({ input: process.stdin });
-  rl.on("line", (line: string) => {
+  /**
+   * Handles one line of the client's stream.
+   *
+   * @param line - The line without its terminator.
+   */
+  const onLine = (line: string): void => {
     const trimmed = line.trim();
     if (!trimmed) return;
     let msg: unknown;
@@ -362,8 +369,25 @@ function startServer(): void {
       // a request (has an id) must always get a response, or the client hangs
       if (req.id !== undefined) fail(req.id, -32603, `internal error: ${messageOf(e)}`);
     });
+  };
+
+  // Lines end at "\n" only. `readline` also ends a line at U+2028 and U+2029, which JSON.stringify leaves unescaped in a string:
+  // a state with one of them would arrive as two broken halves and the request would never be answered.
+  let buffered = "";
+  process.stdin.setEncoding("utf8");
+  process.stdin.on("data", (chunk: string) => {
+    buffered += chunk;
+    let start = 0;
+    for (let i = buffered.indexOf("\n", start); i >= 0; i = buffered.indexOf("\n", start)) {
+      onLine(buffered.slice(start, i));
+      start = i + 1;
+    }
+    buffered = buffered.slice(start);
   });
-  rl.on("close", () => process.exit(0));
+  process.stdin.on("end", () => {
+    onLine(buffered); // a last line without its terminator
+    process.exit(0);
+  });
 }
 
 startServer();
