@@ -1386,7 +1386,7 @@ export function buildArgv(tool: LintTool, resolvedFile: string, cwd: string, man
     }
     return argv;
   }
-  argv.push(tool.targetsDir ? dir : fileArg(tool, resolvedFile));
+  argv.push(tool.targetsDir ? dir : fileArg(tool, resolvedFile, spawnCwd));
   return argv;
 }
 
@@ -1394,12 +1394,18 @@ export function buildArgv(tool: LintTool, resolvedFile: string, cwd: string, man
  * The positional file argument for a file-scoped tool.
  * markdownlint-cli2 reads every positional as a glob (even with --no-globs), so
  * `notes (1).md` would match nothing; its `:` prefix marks a literal path.
+ * yamllint matches its `ignore` patterns against the path as given, so an absolute
+ * path never matches an anchored `gen/*.yaml`: it gets `./<path relative to its
+ * spawn cwd>`, the form `yamllint .` walks (the `./` also keeps a `-x.yaml` from
+ * reading as an option).
  *
  * @param tool - Chain entry.
  * @param fp - Absolute path of the file.
+ * @param spawnCwd - The cwd the tool is spawned in.
  * @returns The argv entry naming `fp`.
  */
-function fileArg(tool: Pick<LintTool, "name">, fp: string): string {
+function fileArg(tool: Pick<LintTool, "name">, fp: string, spawnCwd: string): string {
+  if (tool.name === "yamllint") return `./${path.relative(spawnCwd, fp)}`;
   return tool.name === "markdownlint-cli2" ? `:${fp}` : fp;
 }
 
@@ -2689,7 +2695,7 @@ export async function lintFilesHandler(cwd: string, files: readonly string[]): P
     for (let i = 0; i < group.length; i += step) {
       const chunk = group.slice(i, i + step);
       try {
-        const argv = fileScoped ? [...plan.argv.slice(0, -1), ...chunk.map((m) => fileArg(plan.tool, m.fp))] : plan.argv;
+        const argv = fileScoped ? [...plan.argv.slice(0, -1), ...chunk.map((m) => fileArg(plan.tool, m.fp, plan.spawnCwd))] : plan.argv;
         const out = await spawnPlan(plan, argv, chunk[0].fp);
         // Per-file fail-open: one unparsable or pathological file, a tool crash, kill or timeout must not drop the other files' findings.
         if ((!out || out.verdict === "skip") && fileScoped && chunk.length > 1) {

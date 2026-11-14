@@ -730,10 +730,11 @@ export function buildArgv(tool, resolvedFile, cwd, manifest, spawnCwd = cwd) {
 		}
 		return argv;
 	}
-	argv.push(tool.targetsDir ? dir : fileArg(tool, resolvedFile));
+	argv.push(tool.targetsDir ? dir : fileArg(tool, resolvedFile, spawnCwd));
 	return argv;
 }
-function fileArg(tool, fp) {
+function fileArg(tool, fp, spawnCwd) {
+	if (tool.name === "yamllint") return `./${path.relative(spawnCwd, fp)}`;
 	return tool.name === "markdownlint-cli2" ? `:${fp}` : fp;
 }
 export function classifyExit(toolName, status) {
@@ -1463,7 +1464,7 @@ export async function lintFilesHandler(cwd, files) {
 		for (let i = 0; i < group.length; i += step) {
 			const chunk = group.slice(i, i + step);
 			try {
-				const argv = fileScoped ? [...plan.argv.slice(0, -1), ...chunk.map((m) => fileArg(plan.tool, m.fp))] : plan.argv;
+				const argv = fileScoped ? [...plan.argv.slice(0, -1), ...chunk.map((m) => fileArg(plan.tool, m.fp, plan.spawnCwd))] : plan.argv;
 				const out = await spawnPlan(plan, argv, chunk[0].fp);
 				if ((!out || out.verdict === "skip") && fileScoped && chunk.length > 1) {
 					for (const m of chunk) {

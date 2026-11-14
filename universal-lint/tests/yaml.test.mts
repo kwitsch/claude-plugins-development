@@ -34,7 +34,7 @@ test("yaml: user-global ~/.config/yamllint/config present -> no -d override (it 
   const f = e.file("a.yaml", "a: 1\n");
   e.run(f);
   assert.ok(!e.lines().some((l) => l.includes("line-length: disable")));
-  assert.ok(e.lines().some((l) => l.includes(`yamllint ${f}`)));
+  assert.ok(e.lines().some((l) => l === "yamllint ./a.yaml"));
 });
 
 test("yaml: $YAMLLINT_CONFIG_FILE names a missing file -> -d guard stays (yamllint does not fall back to XDG)", () => {
@@ -53,7 +53,7 @@ test("yaml: project .yamllint present -> no -d override, yamllint runs bare", ()
   const f = e.file("a.yaml", "a: 1\n");
   e.run(f);
   assert.ok(!e.lines().some((l) => l.includes("line-length: disable")));
-  assert.ok(e.lines().some((l) => l.includes(`yamllint ${f}`)));
+  assert.ok(e.lines().some((l) => l === "yamllint ./a.yaml"));
 });
 
 test("yaml Edit: a U+0085 (NEL) above the edit shifts yamllint's lines past the patch's -> reported whole-file, exit 2", () => {
@@ -91,3 +91,16 @@ for (const [label, setup, guard] of YAML_GLOBAL_CASES) {
     assert.equal(e.lines().some((l) => l.includes("rules: {line-length: disable}")), guard);
   });
 }
+
+test("yaml: the target is ./<path relative to the spawn cwd>, so the project's anchored `ignore: gen/*.yaml` matches it (an absolute path never does)", () => {
+  const e = makeEnv();
+  e.file(".yamllint", "extends: default\nignore: |\n  gen/*.yaml\n");
+  e.recStub("yamllint", 0);
+  e.run(e.file("gen/a.yaml", "a: 1\n"));
+  assert.ok(e.lines().some((l) => l === "yamllint ./gen/a.yaml"), e.lines().join("\n"));
+  // yamllint stand-in: gitwildmatch of the anchored pattern against the argument exactly as given.
+  e.stub("yamllint", "case \"$1\" in ./gen/*.yaml|gen/*.yaml) exit 0;; esac", "printf \"%s\\n  1:5  error  trailing spaces  (trailing-spaces)\\n\" \"$1\"", "exit 1");
+  const r = e.run(e.file("gen/b.yaml", "a: 1   \n"));
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.stderr, "");
+});

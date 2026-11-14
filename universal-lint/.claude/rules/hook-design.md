@@ -54,6 +54,7 @@ Moved to `settle-window.md` (same `paths:`): contract, journal, coordinates, hol
 - **Exception: `checkstyle`** is classified by output (`classifyCheckstyleOutput`): its exit code counts only `error`-severity violations, and the bundled default ruleset (and many real projects) run at `warning` — exit-code classification would silently miss real findings.
 - `stylelint` (CSS/SCSS) does not share the 0-clean/1-issues contract: `0` clean, `2` real lint problem, anything else (`1` fatal, `64` bad usage, `78` bad config) skip (stylelint.io CLI docs). A `.css`/`.scss` file without a stylelint config never reaches it: `lintResolved` skips the chain before any PATH probe, local-bin lookup or npx (`languages.md`, F07, 0.15.6).
 - `yamllint` runs without `--strict`, so warnings-only findings don't surface — consistent with `eslint` (warnings don't affect its exit code either).
+- `yamllint` gets its target as `./<path relative to the spawn cwd>` (`fileArg`, hook and skill driver), never absolute: it matches `ignore`, per-rule `ignore` and `ignore-from-file` (gitwildmatch) against the path exactly as given, and an anchored pattern (`gen/*.yaml`) never matches an absolute path, so ignored files gave false findings.
 
 ### Local `node_modules/.bin` and npx fallback
 

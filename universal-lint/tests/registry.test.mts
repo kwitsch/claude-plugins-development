@@ -591,7 +591,7 @@ test("buildArgv: yamllint gets -d line-length-disable override when no project .
   delete process.env.XDG_CONFIG_HOME;
   delete process.env.YAMLLINT_CONFIG_FILE;
   try {
-    assert.deepEqual(buildArgv(yamllint, path.join(dir, "a.yaml"), dir), ["-d", "{extends: default, rules: {line-length: disable}}", path.join(dir, "a.yaml")]);
+    assert.deepEqual(buildArgv(yamllint, path.join(dir, "a.yaml"), dir), ["-d", "{extends: default, rules: {line-length: disable}}", "./a.yaml"]);
   } finally {
     keys.forEach((k, i) => {
       if (prev[i] === undefined) delete process.env[k];
@@ -604,7 +604,15 @@ test("buildArgv: yamllint runs bare when a project .yamllint exists", () => {
   const yamllint = REGISTRY.yaml.chain[0];
   const dir = mkdtempSync(path.join(tmpdir(), "ul-yl-"));
   writeFileSync(path.join(dir, ".yamllint"), "extends: default\n");
-  assert.deepEqual(buildArgv(yamllint, path.join(dir, "a.yaml"), dir), [path.join(dir, "a.yaml")]);
+  assert.deepEqual(buildArgv(yamllint, path.join(dir, "a.yaml"), dir), ["./a.yaml"]);
+});
+
+test("buildArgv: yamllint's target is ./<path relative to the spawn cwd> (its anchored `ignore` patterns never match an absolute path)", () => {
+  const yamllint = REGISTRY.yaml.chain[0];
+  const dir = mkdtempSync(path.join(tmpdir(), "ul-yl-"));
+  writeFileSync(path.join(dir, ".yamllint"), "extends: default\n");
+  assert.deepEqual(buildArgv(yamllint, path.join(dir, "gen", "a.yaml"), dir), ["./gen/a.yaml"]);
+  assert.deepEqual(buildArgv(yamllint, path.join(dir, "gen", "-x.yaml"), dir, undefined, path.join(dir, "gen")), ["./-x.yaml"]);
 });
 
 test("buildArgv: markdownlint-cli2 gets --config <MD013-off file in CLAUDE_PLUGIN_DATA> when no project config exists", () => {
