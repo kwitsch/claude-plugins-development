@@ -9,8 +9,10 @@
  * `development/scripts/build-plugin.mts` (`pluginBuild.bundleHooksLib`) keeps only `register.mjs` unmangled,
  * uncompressed and with its whitespace, since the engine's static check wants `$`/`on` spelled as such and no
  * `$.<noun>` passed as a bare value; every hook is a named function literal. Its siblings (`types`, `util`, `tools`,
- * `input`, `haiku`, `size`, `jev`, `registry`) are bundled into one `./lib.mjs` (compressed and stripped of
- * whitespace, not mangled) that `register.mjs` imports everything from. HTTP goes through `$.http.fetch`.
+ * `input`, `haiku`, `size`, `jev`, `transport`, `registry`) are bundled into one `./lib.mjs` (compressed and stripped of
+ * whitespace, not mangled) that `register.mjs` imports everything from. The System One request goes through the
+ * plugin's own MCP server (`transport.mts`), which enforces the timeout and cancels; `$.http.fetch` is the fallback.
+ * The third hook, `tool.check`, keeps the model off that server's tools.
  *
  * @packageDocumentation
  */
@@ -23,6 +25,7 @@ import type { RegState } from "./registry.mjs";
 import { cutState, DEFAULT_CONTEXT_TOKENS, DEFAULT_DENSITY, loadKnowledge } from "./size.mjs";
 import type { Knowledge } from "./size.mjs";
 import { TOOL_PREFIX } from "./tools.mjs";
+import { newLink, PLUGIN, SERVER_TOOL_PREFIX } from "./transport.mjs";
 import { DEFAULT_OVERFLOW, TOOLS } from "./types.mjs";
 import type { On, Options, ToolName } from "./types.mjs";
 import { DEFAULT_TIMEOUT_S, fail, isOverflow, message, seconds } from "./util.mjs";
@@ -48,6 +51,8 @@ export function register(on: On, options?: Options): void {
   const st: RegState = { names, missing: new Set<ToolName>(TOOLS), pending: new Map(), retryAt: new Map(), failures: new Map(), stuck: new Set() };
   // What this instance learned about System One's size limits; the density comes back from the store in the first call that needs it.
   const know: Knowledge = { density: DEFAULT_DENSITY, persisted: DEFAULT_DENSITY, samples: 0, nctx: DEFAULT_CONTEXT_TOKENS, loaded: undefined };
+  // The HTTP transport: the plugin's MCP server while it is available, `$.http.fetch` while it is not (see transport.mts).
+  const link = newLink();
   on("session.start", async function onSessionStart($, e, next) {
     try {
       if (st.missing.size > 0) await ensureTools($, st, 5 * REGISTER_WAIT_MS);
@@ -82,9 +87,16 @@ export function register(on: On, options?: Options): void {
       if (!key && !base && !jevUrl) return await askHaiku($, type, cutState(input.state, HAIKU_MAX_CHARS), input.questions, timeoutMs, next.signal);
       await loadKnowledge($, know);
       if (next.signal.aborted) return fail(type, "the call was abandoned");
-      return await answerJev($, type, input, input.overflow ?? defaultOverflow, { key, base, jevUrl, model }, timeoutMs, next.signal, know);
+      return await answerJev($, type, input, input.overflow ?? defaultOverflow, { key, base, jevUrl, model }, timeoutMs, next.signal, know, link);
     } catch (err) {
       return fail(type, message(err));
     }
+  });
+  // The model must not use the transport server's tools (a tool the mod can call cannot be hidden from the model: `$.mcp.call`
+  // does not reach a tool with `_meta.ui.visibility` without `model`). The mod's own calls carry this plugin as origin.
+  on("tool.check", async function onToolCheck(_$, e, next) {
+    if (!e.tool.startsWith(SERVER_TOOL_PREFIX)) return next(e);
+    if (next.origin?.plugin === PLUGIN) return { decision: "allow", reason: `${PLUGIN}'s own HTTP transport` };
+    return { decision: "deny", reason: `this tool is the internal HTTP transport of the ${PLUGIN} plugin; use ${TOOLS.map((t) => TOOL_PREFIX + t).join(", ")}` };
   });
 }
