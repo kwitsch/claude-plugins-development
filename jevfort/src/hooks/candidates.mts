@@ -90,13 +90,18 @@ const UNSAFE_PATH = /(^|\/)(tmp|private\/tmp|private\/var\/folders|var\/folders)
  */
 const TRANSCRIPT = /\/tasks\/[^/]+\.output$|\.output$|\.jsonl$/;
 /**
+ * Claude's own config and credentials (`~/.claude.json` with MCP env values, the OAuth token file, settings,
+ * project memory), refused wherever the cwd is, also when the project is `$HOME` itself.
+ */
+const CLAUDE_CONFIG = /\/\.claude\.json$|\/\.claude\/(?:\.credentials\.json$|projects\/|settings(?:\.local)?\.json$)/;
+/**
  * Whether a file may be offered as a Read candidate.
  *
  * @param file - The absolute path.
  * @param cwd - The project directory.
  * @returns Whether it is safe to offer.
  */
-export const isSafeToOffer = (file: string, cwd?: string): boolean => (cwd && file.startsWith(`${cwd}/`) ? !TRANSCRIPT.test(file) : !UNSAFE_PATH.test(file));
+export const isSafeToOffer = (file: string, cwd?: string): boolean => !CLAUDE_CONFIG.test(file) && (cwd && file.startsWith(`${cwd}/`) ? !TRANSCRIPT.test(file) : !UNSAFE_PATH.test(file));
 
 /**
  * `p` as an absolute path under `cwd`, with `.` segments removed, so spellings of one file compare equal.

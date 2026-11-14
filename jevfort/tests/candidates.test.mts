@@ -80,6 +80,14 @@ test("a project inside a temp dir can still be read; its transcripts cannot", ()
   expect(isSafeToOffer("/private/tmp/other/notes.txt", cwd)).toBe(false);
 });
 
+test("Claude's config and credentials are never offered, also with cwd at $HOME", () => {
+  expect(isSafeToOffer("/home/u/.claude/.credentials.json", "/home/u")).toBe(false);
+  expect(isSafeToOffer("/home/u/.claude/settings.json", "/home/u")).toBe(false);
+  expect(isSafeToOffer("/home/u/.claude.json", "/home/u")).toBe(false);
+  expect(isSafeToOffer("/home/u/.claude.json", "/home/u/proj")).toBe(false);
+  expect(isSafeToOffer("/home/u/notes.md", "/home/u")).toBe(true);
+});
+
 test("task notifications and reminders are not taken as the request", () => {
   const turn = splitTurn([
     { role: "user", text: "run the tests", toolUses: [] },
