@@ -226,6 +226,53 @@ test("the report counts a turn that lowered the model and raised the effort as o
   expect(report).toContain("1 lowered, 1 raised, 1 applied |");
 });
 
+test("the report counts summary rows, the newest 15 steps, the take threshold and the routing rows", () => {
+  const e = (kind: string, applied: boolean, data: Record<string, unknown> = {}) => ({ at: 1, kind, applied, text: kind, data });
+  const c = (i: number, data: Record<string, unknown>) => ({ ...e("compare", false, { request: `ask ${i}`, best: "read a", ...data }), at: 1 + i });
+  const log = [
+    e("take", true),
+    e("take", false),
+    e("outcome", true, { isError: true }),
+    e("outcome", true, { isError: false }),
+    e("bypass", true),
+    e("bypass", false),
+    c(0, { bestP: 0.95, agree: true }),
+    c(1, { bestP: 0.9, agree: false, claude: ["Read", "Grep", "Read"] }),
+    c(2, { bestP: 0.6, agree: true, claudeUsedCandidate: true }),
+    ...Array.from({ length: 13 }, (_, i) => c(3 + i, { bestP: 0.5 })),
+    e("done", true, { continued: true }),
+    e("done", false, { continued: true }),
+    e("done", true, { continued: false }),
+    e("classify", true, { kind: "code", hints: 1 }),
+    e("classify", true, { kind: "code", hints: 0 }),
+    e("classify", false, { kind: "question", hints: 2 }),
+    e("agent", true, { switched: true, agree: false }),
+    e("agent", false, { switched: false, agree: true }),
+    e("agent", false, { switched: true }),
+    e("compact", true, { items: 10, keep: 3, drop: 4 }),
+    e("compact", true, { items: 5, keep: 1, drop: 2 }),
+    e("turn", false, { reason: "aborted" }),
+    e("turn", false, { reason: "answer" }),
+  ];
+  const report = buildReport(log, 0.85);
+  expect(report).toContain("| Steps Jev took itself | **1** (≈ 1 Claude requests saved, 1 failed) |");
+  expect(report).toContain("| Turns answered without Claude | **1** (Jev's action + Haiku summary) |");
+  expect(report).toContain("| Agreement with Claude | **14 / 16** (88%) |");
+  expect(report).toContain("### Jev vs Claude, step by step (last 15)");
+  expect(report).not.toContain("| ask 0 |");
+  expect(report).toContain("| ask 15 |");
+  expect(report).toContain("| ask 1 | read a | 0.90 | Read ×2, Grep | ✗ differ |");
+  expect(report).toContain("| ask 2 | leave to Claude _(best: read a)_ | 0.60 | replied | ⚠ missed |");
+  for (const row of ["| 0.60 | 3 | 67% | `███████░░░` |", "| 0.70 | 2 | 50% | `█████░░░░░` |", "| **0.85 ← current** | 2 | 50% |", "| 0.90 | 2 | 50% |", "| 0.95 | 1 | 100% | `██████████` |"]) {
+    expect(report).toContain(row);
+  }
+  expect(report).toContain("| Done check | 3 stops | 2 unfinished, 1 sent back |");
+  expect(report).toContain("| Prompt classifier | 3 prompts | 2 code · 1 question · 2 hinted, 1 applied |");
+  expect(report).toContain("| Subagent type | 3 spawns | 1 agreed with Claude · 2 switched, 1 applied |");
+  expect(report).toContain("| Compaction | 2 runs | 15 results scored · 4 kept in detail · 6 marked droppable |");
+  expect(report).toContain("_1 interrupted turn(s)._");
+});
+
 test("only skills related to the prompt are offered", () => {
   const skills = dedupeSkills(SKILLS);
   expect(relevant("can you show me the full list", skills)).toEqual([]);
