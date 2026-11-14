@@ -1621,6 +1621,27 @@ test("The band shows the session effort bold and Jev's choice blue", async ($, o
   await ui.unmount();
 });
 
+test("A main-loop turn without a request clears the last turn's choice from the band", async ($, on) => {
+  const messages = [user("what does this project do?")];
+  const { clock } = setup(on, { messages, jev: byId({ effort: easy }) });
+  claudeBeneath(on, []);
+  sessionStubs(on);
+  await $.session.start(START);
+  const ui = await $.ui.mount(BAND);
+  await drain($.turn.step(step));
+  await clock.settle();
+  expect(await levelProps(ui, "low")).toEqual({ color: "blue" });
+
+  // An image-only prompt: an empty user row, no request; the session effort changed to medium.
+  messages.push({ role: "assistant", text: "done", toolUses: [] }, user(""));
+  await drain($.turn.step({ ...step, turnId: "t2", effort: "medium" }));
+  await clock.settle();
+  expect(await levelProps(ui, "low")).toEqual({ dimColor: true });
+  expect(await levelProps(ui, "high")).toEqual({ dimColor: true });
+  expect(await levelProps(ui, "medium")).toEqual({ bold: true });
+  await ui.unmount();
+});
+
 test("The band shows only the configured range plus a session effort outside it", { options: { minEffort: "medium", maxEffort: "high" } }, async ($, on) => {
   const { clock } = setup(on, { messages: [user("what does this project do?")], jev: byId({ effort: easy }) });
   claudeBeneath(on, []);

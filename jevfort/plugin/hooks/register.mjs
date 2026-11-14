@@ -683,6 +683,10 @@ export const register = (on, options) => {
 			cache: newCache()
 		};
 		turns.set(e.turnId, turn);
+		if (routing && e.index === 0 && !e.agentId) {
+			band = isEffort(e.effort) ? { configured: e.effort } : {};
+			$.ui.invalidate("ui.render");
+		}
 		const messages = await $.session.messages(e.agentId ? { agentId: e.agentId } : {});
 		const ctx = turnOf(messages);
 		if (!ctx) return yield* next(e);
@@ -733,10 +737,6 @@ export const register = (on, options) => {
 		let firstTurn;
 		if (routing && e.index === 0) {
 			const sessionEffort = isEffort(e.effort) ? e.effort : undefined;
-			if (!e.agentId) {
-				band = sessionEffort ? { configured: sessionEffort } : {};
-				$.ui.invalidate("ui.render");
-			}
 			if (!autoOff) {
 				const loop = e.agentId ?? "";
 				const first = firstTurns.get(loop);
