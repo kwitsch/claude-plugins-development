@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 // SessionStart hook: the project briefing of `graphmind setup`'s graphmind-session.sh (priority and recent memory, map, status).
 import { spawn } from "node:child_process";
-import { existsSync, mkdirSync, readdirSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { emit, entryId, findGraphmind, listing, MAX_CHARS, readInput, registered, run, setupHooksPresent, stateDir } from "./common.mjs";
+import { emit, findGraphmind, listing, MAX_CHARS, readInput, registered, run, setupHooksPresent, stateDir, wholeIds } from "./common.mjs";
 
 const DAY_MS = 86_400_000;
 
@@ -40,7 +40,6 @@ function consolidateDaily(bin: string): void {
     if (existsSync(stamp) && Date.now() - statSync(stamp).mtimeMs < DAY_MS) return;
     mkdirSync(join(homedir(), ".graphmind"), { recursive: true });
     writeFileSync(stamp, "");
-    utimesSync(stamp, new Date(), new Date());
     spawn(bin, ["memory", "consolidate"], { detached: true, stdio: "ignore" }).unref();
   } catch { /* upkeep is optional */ }
 }
@@ -68,9 +67,7 @@ function main(): void {
   if (msg.length > MAX_CHARS) msg = `${msg.slice(0, MAX_CHARS)}\n[graphmind: cut to fit the hook output limit]`;
 
   // Priority entries the session sees whole: the prompt hook adds the others later.
-  const whole = new Set(msg.split("\n"));
-  const ids = priority.filter((l) => whole.has(l)).map(entryId).filter((i): i is string => i !== undefined);
-  writeFileSync(join(dir, "priority-ids"), ids.map((i) => `${i}\n`).join(""));
+  writeFileSync(join(dir, "priority-ids"), wholeIds(msg, priority).map((i) => `${i}\n`).join(""));
   emit("SessionStart", msg);
 }
 

@@ -2,7 +2,7 @@
 // UserPromptSubmit hook: the memory and code recall of `graphmind setup`'s graphmind-prompt.sh, plus the memory checkpoint every 10th prompt.
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { emit, entryId, findGraphmind, listing, MAX_CHARS, readInput, registered, run, setupHooksPresent, stateDir, str } from "./common.mjs";
+import { emit, entryId, findGraphmind, listing, MAX_CHARS, readInput, registered, run, setupHooksPresent, stateDir, str, wholeIds } from "./common.mjs";
 
 /** Words that make poor search terms. */
 const STOPWORDS = new Set(
@@ -81,8 +81,7 @@ function main(): void {
   add("[graphmind ★ new priority context]", priority);
 
   // Only the priority entries that made it into the message whole count as shown.
-  const whole = new Set(msg.split("\n"));
-  const ids = priority.filter((l) => whole.has(l)).map(entryId).filter((i): i is string => i !== undefined);
+  const ids = wholeIds(msg, priority);
   if (ids.length) appendFileSync(shownFile, ids.map((i) => `${i}\n`).join(""));
   if (msg) emit("UserPromptSubmit", msg);
 }

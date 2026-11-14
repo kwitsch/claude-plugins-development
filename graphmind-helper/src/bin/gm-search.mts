@@ -41,9 +41,11 @@ function main(): void {
   const dir = stateDir(input.session_id);
   if (existsSync(join(dir, "nudged"))) return;
   const bin = findGraphmind();
-  if (!bin || setupHooksPresent() || !registered(bin)) return;
+  const active = bin !== undefined && !setupHooksPresent() && registered(bin);
+  // Marked in every case: a project that is not indexed (or already wired by setup) would otherwise pay a `which` spawn on each matching call.
   mkdirSync(dir, { recursive: true });
   writeFileSync(join(dir, "nudged"), "");
+  if (!active) return;
   emit("PreToolUse", "⚡ This project is graphmind-indexed. Use /gm <query> for code exploration (symbols, callers, deps, outlines). Grep only for string literals/config values.");
 }
 

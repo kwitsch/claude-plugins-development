@@ -47,6 +47,9 @@ type On = {
 /**
  * Whether a graphmind binary exists where the hooks look for it.
  *
+ * @remarks
+ * The directory list is a copy of `findGraphmind` in `src/bin/common.mts` (this module may not import); keep both in step.
+ *
  * @param $ - Engine interface.
  * @returns True when found.
  */

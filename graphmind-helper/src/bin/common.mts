@@ -13,6 +13,9 @@ const SETUP_HOOKS = ["graphmind-session.sh", "graphmind-prompt.sh", "graphmind-s
 /**
  * The graphmind binary: the first one on PATH, else the places the setup scripts add to PATH.
  *
+ * @remarks
+ * `src/hooks/notice.mts` (no imports allowed there) repeats this directory list; keep both in step.
+ *
  * @param env - Process environment.
  * @returns Absolute path, `undefined` when there is none.
  */
@@ -76,7 +79,10 @@ export function setupHooksPresent(home: string = homedir()): boolean {
  */
 export function setupMcpPresent(home: string = homedir()): boolean {
   try {
-    const json = JSON.parse(readFileSync(join(home, ".claude.json"), "utf8")) as { mcpServers?: Record<string, unknown>; projects?: Record<string, { mcpServers?: Record<string, unknown> }> };
+    const text = readFileSync(join(home, ".claude.json"), "utf8");
+    // The file can be several MB: parse it only when the name occurs at all.
+    if (!text.includes("\"graphmind\"")) return false;
+    const json = JSON.parse(text) as { mcpServers?: Record<string, unknown>; projects?: Record<string, { mcpServers?: Record<string, unknown> }> };
     return Boolean(json.mcpServers?.graphmind) || Object.values(json.projects ?? {}).some((p) => Boolean(p.mcpServers?.graphmind));
   } catch {
     return false;
@@ -136,6 +142,18 @@ export function emit(event: string, text: string): void {
  */
 export function entryId(line: string): string | undefined {
   return /[0-9a-f]{8}/.exec(line)?.[0];
+}
+
+/**
+ * The entry ids of the listing lines that appear whole in the message: what the session has actually seen.
+ *
+ * @param msg - The message that goes to the model.
+ * @param lines - Listing lines offered for it.
+ * @returns The ids, one per included line.
+ */
+export function wholeIds(msg: string, lines: string[]): string[] {
+  const whole = new Set(msg.split("\n"));
+  return lines.filter((l) => whole.has(l)).map(entryId).filter((i): i is string => i !== undefined);
 }
 
 /**
