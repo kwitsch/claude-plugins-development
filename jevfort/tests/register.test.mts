@@ -1930,6 +1930,28 @@ test("a settings env change between turns counts from the next turn, also after 
   expect(sent.at(-1)?.timeout).toBe(4);
 });
 
+test("a /compact between turns drops its env read and listing: a later settings env change counts from the next turn", async ($, on) => {
+  const env: Record<string, string> = {};
+  const { sent } = setup(on, { messages: [user("what does this project do?"), { role: "assistant", text: "It does X.", toolUses: [] }], jev: () => undefined, env });
+  on("command.list", () => ({ value: [] }));
+  on("turn.complete", () => ({}));
+  on("model.complete", () => ({ value: { isAnswered: false, reason: "down" } }));
+  on("session.compact", () => ({}));
+  claudeBeneath(on, []);
+  await $.turn.complete(answered("t1", "It does X."));
+  const before = sent.length;
+  const row = (id: string) => ({ role: "assistant" as const, text: "", toolUses: [{ tool_use_id: id, tool: "Bash", input: { command: `ls ${id}` }, text: `out ${id}` }] });
+  await $.session.compact({ trigger: "manual", messages: [user("fix the date bug"), row("a"), row("b"), row("c"), { role: "assistant", text: "done", toolUses: [] }] });
+  // The ranking ran on the Haiku path (no Jev variable set yet).
+  expect(sent.slice(before).length).toBeGreaterThan(0);
+  expect(sent.at(-1)?.timeout).toBe(14);
+  env.JEV_URL = "https://jev.example/x";
+  const ranked = sent.length;
+  await drain($.turn.step({ ...step, turnId: "t2" }));
+  expect(sent.length).toBeGreaterThan(ranked);
+  expect(sent.at(-1)?.timeout).toBe(4);
+});
+
 test("the task-end check's tool listing is dropped too: the next turn lists again and sees jev-api gone", async ($, on) => {
   const tools = [...JEV_TOOLS];
   let lists = 0;
