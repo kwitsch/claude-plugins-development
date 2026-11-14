@@ -392,7 +392,11 @@ async function projectCommands($, cwd) {
 }
 async function buildCandidates($, request, steps, calls, stepIndex, cache = newCache()) {
 	const { statted } = cache;
-	const cwd = cache.cwd ??= await $.session.cwd();
+	const cwd = await $.session.cwd();
+	if (cache.cwd !== cwd) {
+		cache.cwd = cwd;
+		cache.project = undefined;
+	}
 	const out = [];
 	if (cache.scan.request !== undefined && (cache.scan.request !== request || steps.length < cache.scan.steps)) cache.scan = newScan();
 	const { scan } = cache;

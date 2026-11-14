@@ -65,7 +65,7 @@ type Runner = Parameters<Parameters<typeof test>[2]>[0];
 // Answers every call the mod makes on `$`. The batch tool is listed and answered from `jev`; a mod's `$.tool.call`
 // resolves to the stub's `value`: the tool result `{ result }`, or `{ deny }` as the real engine resolves a deny (a bare
 // `{ deny }` stub answer would make the kit reject instead). Other tools go on to the test's own `tool.call` stub.
-function setup(on: On, opts: { messages: Msg[]; jev: Jev; files?: string[]; packageJson?: object; env?: Record<string, string>; agents?: { status: string }[]; store?: Record<string, unknown>; tools?: { name: string; description: string; mcp: boolean }[] | null }) {
+function setup(on: On, opts: { messages: Msg[]; jev: Jev; cwd?: () => string; files?: string[]; packageJson?: object; env?: Record<string, string>; agents?: { status: string }[]; store?: Record<string, unknown>; tools?: { name: string; description: string; mcp: boolean }[] | null }) {
   const sent: Asked[] = [];
   let batchCalls = 0;
   let reads = 0;
@@ -77,7 +77,7 @@ function setup(on: On, opts: { messages: Msg[]; jev: Jev; files?: string[]; pack
     reads++;
     return { value: [...opts.messages] };
   });
-  on("session.cwd", () => ({ value: CWD }));
+  on("session.cwd", () => ({ value: opts.cwd?.() ?? CWD }));
   on("session.id", () => ({ value: SID }));
   on("fs.exists", (_$, e) => ({ value: Boolean(opts.packageJson) && e.path === `${CWD}/package.json` }));
   on("fs.stat", (_$, e) => {
@@ -1107,6 +1107,23 @@ test("After a mid-turn compaction the path scan starts over and offers a newly n
   expect(Object.keys(last?.criteria ?? {})).toContain("read src/new.ts");
 });
 
+test("A mid-turn cd moves a later step's Read candidate to the new cwd", { options: { takeOnlyForBypass: false } }, async ($, on) => {
+  let cwd = CWD;
+  const messages: Msg[] = [user("check the sub project")];
+  const k = "read src/b.ts";
+  setup(on, { messages, cwd: () => cwd, files: [`${CWD}/sub/src/b.ts`, `${CWD}/src/b.ts`], jev: byId({ next_action: { type: "choice", choice: k, probabilities: { [k]: 0.95, claude: 0.05 }, confidence: 0.9 } }) });
+  claudeBeneath(on, []);
+  await drain($.turn.step(step));
+  // Claude's step 0 ran `cd sub` (carried over), its output names src/b.ts.
+  cwd = `${CWD}/sub`;
+  messages.push(
+    { role: "assistant", text: "", toolUses: [{ tool_use_id: "u1", tool: "Bash", input: { command: "cd sub && ls src" }, text: "src/b.ts" }] },
+    { role: "user", text: "", toolUses: [], toolResults: [{ tool_use_id: "u1", text: "src/b.ts", isError: false }] },
+  );
+  const { chunks } = await drain($.turn.step({ ...step, index: 1, messageCount: 3 }));
+  expect(chunks).toContainEqual({ kind: "input", index: 0, json: JSON.stringify({ file_path: `${CWD}/sub/src/b.ts` }) });
+});
+
 test("A call's result that arrives a step later is still scanned for file paths", async ($, on) => {
   const call: { tool_use_id: string; tool: string; input: Record<string, unknown>; text?: string } = { tool_use_id: "c1", tool: "Bash", input: { command: "tsc" } };
   const messages: Msg[] = [user("fix the build"), { role: "assistant", text: "", toolUses: [call] }];
@@ -1648,7 +1665,7 @@ test("Turn end at 96% fill asks only the done question and still compacts", { op
 });
 
 // F07: facts that do not change within a turn are read from the engine once per turn.
-test("A turn reads the project, env, lists and cwd once and the transcript once per hook", async ($, on) => {
+test("A turn reads the project, env and lists once, the cwd once per step and the transcript once per hook", async ($, on) => {
   const ops: Record<string, number> = {};
   for (const ev of ["env.get", "fs.exists", "fs.read", "session.cwd", "session.messages", "command.list", "tool.list", "store.get"]) {
     on(ev, (_$, e, next) => {
@@ -1671,14 +1688,15 @@ test("A turn reads the project, env, lists and cwd once and the transcript once 
   }
   // Step 0 reads the transcript once (no second read for the previous reply).
   expect(perHook[0]["session.messages"]).toBe(1);
-  // Later steps probe no project file and read no cwd.
-  for (const k of [1, 2]) for (const ev of ["fs.exists", "fs.read", "session.cwd"]) expect(perHook[k][ev] ?? 0).toBe(0);
-  // Once per turn: the three env values, the command list, the skill blocklist, the tool listing, the cwd.
+  // Later steps probe no project file and read the cwd once (a mid-turn `cd` can move it).
+  for (const k of [1, 2]) for (const ev of ["fs.exists", "fs.read"]) expect(perHook[k][ev] ?? 0).toBe(0);
+  for (const k of [1, 2]) expect(perHook[k]["session.cwd"]).toBe(1);
+  // Once per turn: the three env values, the command list, the skill blocklist, the tool listing; the cwd once per step.
   expect(ops["env.get"]).toBe(3);
   expect(ops["command.list"]).toBe(1);
   expect(ops["store.get skillBlocklist"]).toBe(1);
   expect(ops["tool.list"]).toBe(1);
-  expect(ops["session.cwd"]).toBe(1);
+  expect(ops["session.cwd"]).toBe(3);
 });
 
 test("A done follow-up at 85% fill queues no compaction", { options: { classify: false } }, async ($, on) => {

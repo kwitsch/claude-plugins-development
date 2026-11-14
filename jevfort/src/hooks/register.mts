@@ -735,12 +735,17 @@ async function projectCommands($: Engine, cwd: string): Promise<Candidate[]> {
  * @param stepIndex - The step within the turn.
  * @param cache - The turn's shared reads, filled here (a fresh one by default, so nothing outlives the turn): the stat
  * results by absolute path (at most `MAX_STATS` new paths per call), the path scan (only new rows are scanned), the cwd
- * and the project's commands.
+ * (read again every call) and the project's commands (dropped when the cwd changed).
  * @returns At most `MAX_CHOICE_OPTIONS - 1` candidates (one of jev-api's choice options is `claude`).
  */
 async function buildCandidates($: Engine, request: string, steps: readonly SessionMessage[], calls: readonly ToolUse[], stepIndex: number, cache: TurnCache = newCache()): Promise<Candidate[]> {
   const { statted } = cache;
-  const cwd = (cache.cwd ??= await $.session.cwd());
+  // Read every step: a carried-over `cd` or EnterWorktree moves the cwd mid-turn, and the project commands with it.
+  const cwd = await $.session.cwd();
+  if (cache.cwd !== cwd) {
+    cache.cwd = cwd;
+    cache.project = undefined;
+  }
   const out: Candidate[] = [];
 
   // Files named in the request or the turn's text/tool output, not yet read this turn.
@@ -780,7 +785,7 @@ async function buildCandidates($: Engine, request: string, steps: readonly Sessi
     out.push(bash(`grep -rnF --exclude-dir=node_modules --exclude-dir=.git -- '${term}' .`, `Search the project for the text "${term}"`));
   }
 
-  // The project's git commands, scripts and test runners: probed once per turn (a file created later counts next turn).
+  // The project's git commands, scripts and test runners: probed once per turn and cwd (a file created later counts next turn).
   out.push(...(cache.project ??= await projectCommands($, cwd)));
 
   // First move of a turn only: a skill to invoke, or a deferred tool to load.
