@@ -507,7 +507,8 @@ test("Further timeouts double the pause up to 10 min and no further", async ($, 
   const { clock, calls } = setup(on, { messages: [], jev: () => new Promise<never>(() => {}), env: { JEV_URL: "https://jev.example/x" } });
   const timeoutAt = async (n: number) => {
     const p = $.tool.call({ ...ESTIMATE });
-    for (let i = 0; i < 1000 && calls() < n; i++) await clock.advance(0);
+    // The first call waits out the module's dynamic import (file I/O), which no settle count bounds.
+    for (let i = 0; n === 1 ? calls() < n : i < 1000 && calls() < n; i++) await clock.advance(0);
     expect(calls()).toBe(n);
     await clock.advance(4000);
     await p;
