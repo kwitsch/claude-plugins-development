@@ -1222,7 +1222,10 @@ test("scopedTarget: null for cwd itself, an excluded path and an unsupported ext
   mkdirSync(path.join(dir, "node_modules"));
   writeFileSync(path.join(dir, "node_modules", "a.sh"), "echo hi\n");
   writeFileSync(path.join(dir, "x.txt"), "hi\n");
-  assert.equal(scopedTarget(dir, "."), null);
+  // A cwd with a lintable extension, so the `rel === ""` guard (not the extension gate) decides.
+  const shdir = path.join(dir, "proj.sh");
+  mkdirSync(shdir);
+  assert.equal(scopedTarget(shdir, "."), null);
   assert.equal(scopedTarget(dir, "node_modules/a.sh"), null);
   assert.equal(scopedTarget(dir, "x.txt"), null);
 });
