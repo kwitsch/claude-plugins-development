@@ -906,50 +906,54 @@ export const register = (on, options) => {
 		return next(e);
 	});
 	on("command.run", { command: "jev" }, async function onJevCommand($, e) {
-		const arg = e.args.trim();
-		await flushLog($);
-		if (arg === "report") {
-			return { text: buildReport(await readLog($), takeThreshold) };
-		}
-		if (arg === "candidates") {
-			const ctx = await readTurn($);
-			const calls = ctx ? toolCalls(ctx.steps) : [];
-			const list = await buildCandidates($, ctx?.request ?? "", ctx?.steps ?? [], calls, 0);
-			const kind = (c) => c.tool === "Skill" ? "Skills" : c.tool === "ToolSearch" ? "Tools to load" : c.tool === "Read" ? "File reads" : "Commands";
-			const groups = new Map();
-			for (const c of list) groups.set(kind(c), [...groups.get(kind(c)) ?? [], c]);
-			const sections = [...groups].map(([name, items]) => `### ${name} (${items.length})\n\n| Option | Description |\n|---|---|\n` + items.map((c) => `| \`${c.key.replace(/\|/g, "\\|")}\` | ${c.description.replace(/\|/g, "\\|").replace(/\s+/g, " ")} |`).join("\n"));
-			return { text: [
-				`## Jev candidates: ${list.length + 1} options`,
-				`_For the last prompt: "${clip(ctx?.request ?? "(none)", 60)}". Plus \`claude\`: leave the step to Claude._`,
-				...sections
-			].join("\n\n") };
-		}
-		if (arg === "clear") {
-			await clearLog($);
-			return { text: "Jev pilot: log cleared." };
-		}
-		if (arg === "export") {
-			const log = await readLog($);
-			const path = `${await $.session.cwd()}/.jev/decisions-${await $.clock.now().catch(() => Date.now())}.jsonl`;
-			try {
-				if (await $.fs.exists(path)) return { text: `Jev pilot: ${path} exists, nothing written` };
-				await $.fs.write(path, log.map((entry) => JSON.stringify(entry)).join("\n") + "\n");
-				return { text: `Jev pilot: wrote ${log.length} entries to ${path}` };
-			} catch (err) {
-				return { text: `Jev pilot: could not write ${path}: ${err instanceof Error ? err.message : String(err)}` };
+		try {
+			const arg = e.args.trim();
+			await flushLog($);
+			if (arg === "report") {
+				return { text: buildReport(await readLog($), takeThreshold) };
 			}
+			if (arg === "candidates") {
+				const ctx = await readTurn($);
+				const calls = ctx ? toolCalls(ctx.steps) : [];
+				const list = await buildCandidates($, ctx?.request ?? "", ctx?.steps ?? [], calls, 0);
+				const kind = (c) => c.tool === "Skill" ? "Skills" : c.tool === "ToolSearch" ? "Tools to load" : c.tool === "Read" ? "File reads" : "Commands";
+				const groups = new Map();
+				for (const c of list) groups.set(kind(c), [...groups.get(kind(c)) ?? [], c]);
+				const sections = [...groups].map(([name, items]) => `### ${name} (${items.length})\n\n| Option | Description |\n|---|---|\n` + items.map((c) => `| \`${c.key.replace(/\|/g, "\\|")}\` | ${c.description.replace(/\|/g, "\\|").replace(/\s+/g, " ")} |`).join("\n"));
+				return { text: [
+					`## Jev candidates: ${list.length + 1} options`,
+					`_For the last prompt: "${clip(ctx?.request ?? "(none)", 60)}". Plus \`claude\`: leave the step to Claude._`,
+					...sections
+				].join("\n\n") };
+			}
+			if (arg === "clear") {
+				await clearLog($);
+				return { text: "Jev pilot: log cleared." };
+			}
+			if (arg === "export") {
+				const log = await readLog($);
+				const path = `${await $.session.cwd()}/.jev/decisions-${await $.clock.now().catch(() => Date.now())}.jsonl`;
+				try {
+					if (await $.fs.exists(path)) return { text: `Jev pilot: ${path} exists, nothing written` };
+					await $.fs.write(path, log.map((entry) => JSON.stringify(entry)).join("\n") + "\n");
+					return { text: `Jev pilot: wrote ${log.length} entries to ${path}` };
+				} catch (err) {
+					return { text: `Jev pilot: could not write ${path}: ${err instanceof Error ? err.message : String(err)}` };
+				}
+			}
+			const missing = await jevMissing($);
+			const counts = Object.entries(await stats($).catch(() => ({ unreadable: 1 }))).map(([k, v]) => `${k}=${v}`).join(", ") || "none yet";
+			const lines = recentDecisions().slice(-10).map((d) => `- ${d.kind}${d.applied ? "" : " (pass)"}: ${d.text}${d.ms !== undefined ? ` [${Math.round(d.ms)}ms]` : ""}`);
+			return { text: [
+				...missing.length ? [`Jev pilot: inactive, the jev-api tools are missing (${missing.join(", ")}). jevfort needs jev-api 0.2.0 or later and no permissions.deny rule matching its tools; it looks again at the next turn.`] : [],
+				`Jev pilot: routing ${routing}${autoOff ? " (effort auto off)" : ""}, take steps ${takeSteps} (p ≥ ${takeThreshold}), done check ${doneCheck}, subagents ${subagents}`,
+				`Decisions (all sessions): ${counts}`,
+				lines.length ? `Recent:\n${lines.join("\n")}` : "No decisions this session yet.",
+				"Full analysis: /jev report"
+			].join("\n") };
+		} finally {
+			if (!turnRunning) dropTurnReads();
 		}
-		const missing = await jevMissing($);
-		const counts = Object.entries(await stats($).catch(() => ({ unreadable: 1 }))).map(([k, v]) => `${k}=${v}`).join(", ") || "none yet";
-		const lines = recentDecisions().slice(-10).map((d) => `- ${d.kind}${d.applied ? "" : " (pass)"}: ${d.text}${d.ms !== undefined ? ` [${Math.round(d.ms)}ms]` : ""}`);
-		return { text: [
-			...missing.length ? [`Jev pilot: inactive, the jev-api tools are missing (${missing.join(", ")}). jevfort needs jev-api 0.2.0 or later and no permissions.deny rule matching its tools; it looks again at the next turn.`] : [],
-			`Jev pilot: routing ${routing}${autoOff ? " (effort auto off)" : ""}, take steps ${takeSteps} (p ≥ ${takeThreshold}), done check ${doneCheck}, subagents ${subagents}`,
-			`Decisions (all sessions): ${counts}`,
-			lines.length ? `Recent:\n${lines.join("\n")}` : "No decisions this session yet.",
-			"Full analysis: /jev report"
-		].join("\n") };
 	});
 	on("turn.complete", async function onTurnComplete($, e, next) {
 		if (e.agentId === undefined) {

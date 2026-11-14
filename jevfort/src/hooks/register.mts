@@ -322,7 +322,7 @@ let skillList: Promise<CommandInfo[]> | undefined;
 /** This turn's "none of jev-api's three env values is set, Haiku answers" decision; dropped with `jevTools`. */
 let haikuPath: Promise<boolean> | undefined;
 
-/** Drops the per-turn engine reads shared across hooks: at every main-loop `turn.complete` and at `session.start`'s baseline. */
+/** Drops the per-turn engine reads shared across hooks: at every main-loop `turn.complete`, at `session.start`'s baseline and after a `/jev` between turns. */
 function dropTurnReads(): void {
   jevTools = undefined;
   toolListing = undefined;
@@ -1337,62 +1337,67 @@ export const register = (on: On, options: Options): void => {
   });
 
   on("command.run", { command: "jev" }, async function onJevCommand($: Engine, e: CommandEvent): Promise<{ text: string }> {
-    const arg = e.args.trim();
-    await flushLog($); // report, export and the counters read the store
-    if (arg === "report") {
-      return { text: buildReport(await readLog($), takeThreshold) };
-    }
-    if (arg === "candidates") {
-      // Exactly what Jev is offered at step 0 for the last prompt.
-      const ctx = await readTurn($);
-      const calls = ctx ? toolCalls(ctx.steps) : [];
-      const list = await buildCandidates($, ctx?.request ?? "", ctx?.steps ?? [], calls, 0);
-      const kind = (c: Candidate) => (c.tool === "Skill" ? "Skills" : c.tool === "ToolSearch" ? "Tools to load" : c.tool === "Read" ? "File reads" : "Commands");
-      const groups = new Map<string, Candidate[]>();
-      for (const c of list) groups.set(kind(c), [...(groups.get(kind(c)) ?? []), c]);
-      const sections = [...groups].map(
-        ([name, items]) =>
-          `### ${name} (${items.length})\n\n| Option | Description |\n|---|---|\n`
-          + items.map((c) => `| \`${c.key.replace(/\|/g, "\\|")}\` | ${c.description.replace(/\|/g, "\\|").replace(/\s+/g, " ")} |`).join("\n"),
-      );
+    // /jev runs between turns too: what it listed must not stand in for the next turn's own listing (mid-turn it stays the turn's).
+    try {
+      const arg = e.args.trim();
+      await flushLog($); // report, export and the counters read the store
+      if (arg === "report") {
+        return { text: buildReport(await readLog($), takeThreshold) };
+      }
+      if (arg === "candidates") {
+        // Exactly what Jev is offered at step 0 for the last prompt.
+        const ctx = await readTurn($);
+        const calls = ctx ? toolCalls(ctx.steps) : [];
+        const list = await buildCandidates($, ctx?.request ?? "", ctx?.steps ?? [], calls, 0);
+        const kind = (c: Candidate) => (c.tool === "Skill" ? "Skills" : c.tool === "ToolSearch" ? "Tools to load" : c.tool === "Read" ? "File reads" : "Commands");
+        const groups = new Map<string, Candidate[]>();
+        for (const c of list) groups.set(kind(c), [...(groups.get(kind(c)) ?? []), c]);
+        const sections = [...groups].map(
+          ([name, items]) =>
+            `### ${name} (${items.length})\n\n| Option | Description |\n|---|---|\n`
+            + items.map((c) => `| \`${c.key.replace(/\|/g, "\\|")}\` | ${c.description.replace(/\|/g, "\\|").replace(/\s+/g, " ")} |`).join("\n"),
+        );
+        return {
+          text: [
+            `## Jev candidates: ${list.length + 1} options`,
+            `_For the last prompt: "${clip(ctx?.request ?? "(none)", 60)}". Plus \`claude\`: leave the step to Claude._`,
+            ...sections,
+          ].join("\n\n"),
+        };
+      }
+      if (arg === "clear") {
+        await clearLog($);
+        return { text: "Jev pilot: log cleared." };
+      }
+      if (arg === "export") {
+        const log = await readLog($);
+        // A new file per export: $.fs.write follows symlinks (live, 2.1.325), so a committed `.jev/decisions.jsonl` symlink would make an overwrite land outside the cwd.
+        const path = `${await $.session.cwd()}/.jev/decisions-${await $.clock.now().catch(() => Date.now())}.jsonl`;
+        try {
+          if (await $.fs.exists(path)) return { text: `Jev pilot: ${path} exists, nothing written` };
+          await $.fs.write(path, log.map((entry) => JSON.stringify(entry)).join("\n") + "\n");
+          return { text: `Jev pilot: wrote ${log.length} entries to ${path}` };
+        } catch (err) {
+          return { text: `Jev pilot: could not write ${path}: ${err instanceof Error ? err.message : String(err)}` };
+        }
+      }
+      const missing = await jevMissing($);
+      const counts = Object.entries(await stats($).catch(() => ({ unreadable: 1 }))).map(([k, v]) => `${k}=${v}`).join(", ") || "none yet";
+      const lines = recentDecisions()
+        .slice(-10)
+        .map((d) => `- ${d.kind}${d.applied ? "" : " (pass)"}: ${d.text}${d.ms !== undefined ? ` [${Math.round(d.ms)}ms]` : ""}`);
       return {
         text: [
-          `## Jev candidates: ${list.length + 1} options`,
-          `_For the last prompt: "${clip(ctx?.request ?? "(none)", 60)}". Plus \`claude\`: leave the step to Claude._`,
-          ...sections,
-        ].join("\n\n"),
+          ...(missing.length ? [`Jev pilot: inactive, the jev-api tools are missing (${missing.join(", ")}). jevfort needs jev-api 0.2.0 or later and no permissions.deny rule matching its tools; it looks again at the next turn.`] : []),
+          `Jev pilot: routing ${routing}${autoOff ? " (effort auto off)" : ""}, take steps ${takeSteps} (p ≥ ${takeThreshold}), done check ${doneCheck}, subagents ${subagents}`,
+          `Decisions (all sessions): ${counts}`,
+          lines.length ? `Recent:\n${lines.join("\n")}` : "No decisions this session yet.",
+          "Full analysis: /jev report",
+        ].join("\n"),
       };
+    } finally {
+      if (!turnRunning) dropTurnReads();
     }
-    if (arg === "clear") {
-      await clearLog($);
-      return { text: "Jev pilot: log cleared." };
-    }
-    if (arg === "export") {
-      const log = await readLog($);
-      // A new file per export: $.fs.write follows symlinks (live, 2.1.325), so a committed `.jev/decisions.jsonl` symlink would make an overwrite land outside the cwd.
-      const path = `${await $.session.cwd()}/.jev/decisions-${await $.clock.now().catch(() => Date.now())}.jsonl`;
-      try {
-        if (await $.fs.exists(path)) return { text: `Jev pilot: ${path} exists, nothing written` };
-        await $.fs.write(path, log.map((entry) => JSON.stringify(entry)).join("\n") + "\n");
-        return { text: `Jev pilot: wrote ${log.length} entries to ${path}` };
-      } catch (err) {
-        return { text: `Jev pilot: could not write ${path}: ${err instanceof Error ? err.message : String(err)}` };
-      }
-    }
-    const missing = await jevMissing($);
-    const counts = Object.entries(await stats($).catch(() => ({ unreadable: 1 }))).map(([k, v]) => `${k}=${v}`).join(", ") || "none yet";
-    const lines = recentDecisions()
-      .slice(-10)
-      .map((d) => `- ${d.kind}${d.applied ? "" : " (pass)"}: ${d.text}${d.ms !== undefined ? ` [${Math.round(d.ms)}ms]` : ""}`);
-    return {
-      text: [
-        ...(missing.length ? [`Jev pilot: inactive, the jev-api tools are missing (${missing.join(", ")}). jevfort needs jev-api 0.2.0 or later and no permissions.deny rule matching its tools; it looks again at the next turn.`] : []),
-        `Jev pilot: routing ${routing}${autoOff ? " (effort auto off)" : ""}, take steps ${takeSteps} (p ≥ ${takeThreshold}), done check ${doneCheck}, subagents ${subagents}`,
-        `Decisions (all sessions): ${counts}`,
-        lines.length ? `Recent:\n${lines.join("\n")}` : "No decisions this session yet.",
-        "Full analysis: /jev report",
-      ].join("\n"),
-    };
   });
 
   on("turn.complete", async function onTurnComplete($: Engine, e: TurnEnd, next: Next<TurnEnd, unknown>): Promise<unknown> {
