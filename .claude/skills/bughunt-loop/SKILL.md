@@ -22,8 +22,8 @@ Split the plugin into areas as in `bughunt` (protocol/server, core logic, script
 
 `Workflow` with the script below, `args = { plugin, worktree, date, areas, dryRounds, maxRounds }`.
 
-- **Round**: one read-only reviewer per area in parallel (`opus`/`high`), each with the round's lens, the list of keys and titles already found, and the rule "report only CONFIRMED defects with a repro and its output". The lenses rotate: newest diff first, then interactions between fixes, TOCTOU, coarse cache keys, slow file systems and odd names/encodings, resource leaks, fail-open paths, docs contradicting code, tests that cannot fail.
-- **Fix** (sequential, one agent per new finding, `opus`/`high`): re-run the repro, refute or fix the root cause once in the shared code, a test that fails without the fix, build, `pnpm lint`, plugin tests, then commit and push. The first fix bumps `<plugin>/package.json` once per branch.
+- **Round**: one read-only reviewer per area in parallel (`opus`/`medium`), each with the round's lens, the list of keys and titles already found, and the rule "report only CONFIRMED defects with a repro and its output". The lenses rotate: newest diff first, then interactions between fixes, TOCTOU, coarse cache keys, slow file systems and odd names/encodings, resource leaks, fail-open paths, docs contradicting code, tests that cannot fail.
+- **Fix** (sequential, one agent per new finding, `sonnet`/`medium`): re-run the repro, refute or fix the root cause once in the shared code, a test that fails without the fix, build, `pnpm lint`, plugin tests, then commit and push. The first fix bumps `<plugin>/package.json` once per branch.
 - **Stop**: `dryRounds` rounds in a row without a confirmed new finding (refuted claims do not count as new), or `maxRounds`, or a blocked fix. The reason is returned and reported; a clean stop is never reported as "no bugs".
 - **Close** (when anything was fixed): one agent runs `/simplify`, `/code-review high --fix`, build, lint, tests, then the learnings pass of `bughunt` ("Close: learnings"); commit and push, clean tree, head equal to its upstream.
 
@@ -107,7 +107,7 @@ let fixed = 0
 let stop = 'maxRounds'
 for (let round = 1; round <= maxRounds; round++) {
   const lens = LENSES[(round - 1) % LENSES.length]
-  const reports = await parallel(areas.map((a) => () => run(huntPrompt(a, lens, seen), { label: `r${round}:${a.name}`, phase: 'Hunt', model: 'opus', effort: 'high', schema: FINDINGS })))
+  const reports = await parallel(areas.map((a) => () => run(huntPrompt(a, lens, seen), { label: `r${round}:${a.name}`, phase: 'Hunt', model: 'opus', effort: 'medium', schema: FINDINGS })))
   const fresh = []
   for (const f of reports.filter(Boolean).flatMap((r) => r.findings)) {
     if (seen.some((s) => s.key.toLowerCase() === f.key.toLowerCase())) continue
@@ -117,7 +117,7 @@ for (let round = 1; round <= maxRounds; round++) {
   let roundFixed = 0
   let blocked = false
   for (const f of fresh) {
-    const r = await run(fixPrompt(f, fixed === 0), { label: `r${round}:${f.key}`, phase: 'Fix', model: 'opus', effort: 'high', schema: FIX })
+    const r = await run(fixPrompt(f, fixed === 0), { label: `r${round}:${f.key}`, phase: 'Fix', model: 'sonnet', effort: 'medium', schema: FIX })
     if (!r || r.verdict === 'blocked') { blocked = true; log(`${f.key}: blocked`); break }
     if (r.verdict === 'fixed') { roundFixed++; fixed++ }
   }
@@ -132,7 +132,7 @@ for (let round = 1; round <= maxRounds; round++) {
 let close = null
 if (fixed > 0 && stop !== 'blocked fix') {
   args.summary = seen.map((s) => s.title).join('; ')
-  close = await run(closePrompt(), { label: 'close', phase: 'Close', model: 'opus', effort: 'high', schema: CLOSE })
+  close = await run(closePrompt(), { label: 'close', phase: 'Close', model: 'sonnet', effort: 'medium', schema: CLOSE })
 }
 return { stop, rounds, fixed, close, seen }
 ```
