@@ -12,6 +12,7 @@ Facts a plugin author keeps getting wrong. Re-verify with the `live-verify` skil
 
 - A Bash command that exits non-zero fires **`PostToolUseFailure`**, not `PostToolUse`. A hook that must see every finished Bash call is wired to both (the output's `hookEventName` must match the event, pass `${hook_event_name}`), and a start/finish pair is keyed by `${tool_use_id}` (Pre and both Post events carry it). `scripts/hooks.mts`-style input validators need `PostToolUseFailure` fields (`error`, `is_interrupt`).
 - Claude Code's own **Edit** with an empty `new_string` also deletes the line break after `old_string` (with `replace_all`: only occurrences followed by a line break); uniqueness is checked on the unwidened `old_string`. Edits are matched on the LF view of CRLF files and the file's line endings are written back. A hook that returns `updatedInput` must model exactly this.
+- Edit's `structuredPatch` (jsdiff) counts only `\n` and `\r\n` as line breaks. Tools that also count U+2028/U+2029 (tsc, eslint), a lone `\r` (eslint, markdownlint) or U+0085 (yamllint) number lines differently below such a character: do not map their line numbers through the patch for that file (universal-lint bug hunt).
 - `updatedInput` replaces the whole tool input; `additionalContext` of PostToolUse/PostToolUseFailure/PreToolUse reaches the model.
 - `mcp_tool` hooks call tools of the plugin's MCP server (hook-only tools carry `_meta.ui.visibility: ["app"]`); `${var}` templates that do not exist for an event are an error: `scripts/hooks.mts --check` guards them.
 - A tool's `tool.call` result in a function-hooks module arrives as `{ result }`; the worktree tools' output carries both `worktreePath` and `restoredCwd` (ExitWorktree: use `restoredCwd`).
@@ -58,4 +59,5 @@ Facts a plugin author keeps getting wrong. Re-verify with the `live-verify` skil
 
 - The `initialize` answer carries a version the server supports, never the client's echo. See `mcp-dual-era.md`.
 - `claude plugin validate <plugin>` warns `ICON_MISSING` and (for function-hooks modules) "gating hook without .catch" by design; neither is a failure.
+- Tools a skill tells Claude to use (universal-lint bug hunt): Glob returns at most 100 files without saying so (list folders with `git ls-files` or `find`); Write refuses to overwrite an existing file that was not Read in the session, so `mktemp` then Write fails (let Write create a new path); a named skill argument gets only the first word of the command text, `$ARGUMENTS` gets all of it.
 - In `claude -p`, `AskUserQuestion` is disabled, so interactive skill flows stop at their first question without changing anything.

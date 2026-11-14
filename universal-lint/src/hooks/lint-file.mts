@@ -394,6 +394,20 @@ function saveProbeStore(file: string, store: ProbeStore): void {
 function isExecutableFile(p: string): boolean {
   try {
     accessSync(p, fsConstants.X_OK);
+  } catch {
+    return false;
+  }
+  return isFile(p);
+}
+
+/**
+ * Whether a path is a regular file (symlinks followed).
+ *
+ * @param p - Candidate path.
+ * @returns False for a directory, a missing path or any stat error.
+ */
+function isFile(p: string): boolean {
+  try {
     return statSync(p).isFile();
   } catch {
     return false;
@@ -1140,11 +1154,7 @@ export function hasUserGlobalYamllintConfig(): boolean {
   const p = env.YAMLLINT_CONFIG_FILE !== undefined
     ? env.YAMLLINT_CONFIG_FILE.replace(/^~(?=$|\/)/, homedir())
     : path.join(env.XDG_CONFIG_HOME ?? path.join(homedir(), ".config"), "yamllint", "config");
-  try {
-    return statSync(p).isFile();
-  } catch {
-    return false;
-  }
+  return isFile(p);
 }
 
 /**
@@ -1237,13 +1247,7 @@ function hasMarkdownlintRc(spawnCwd: string): boolean {
   if (anyConfigExists(real, MARKDOWNLINT_CLASSIC_CONFIG_FILENAMES) || walkToRoot(real, (d) => configExists(d, ".markdownlintrc"))) return true;
   const home = homedir();
   const env = process.env.markdownlint_config;
-  return [...(env ? [path.resolve(real, env)] : []), path.join(home, ".config", "markdownlint", "config"), path.join(home, ".config", "markdownlint"), path.join(home, ".markdownlint", "config"), path.join(home, ".markdownlintrc"), "/etc/markdownlint/config", "/etc/markdownlintrc"].some((p) => {
-    try {
-      return statSync(p).isFile(); // run-con reads files only; ~/.config/markdownlint is often the dir holding `config`
-    } catch {
-      return false;
-    }
-  });
+  return [...(env ? [path.resolve(real, env)] : []), path.join(home, ".config", "markdownlint", "config"), path.join(home, ".config", "markdownlint"), path.join(home, ".markdownlint", "config"), path.join(home, ".markdownlintrc"), "/etc/markdownlint/config", "/etc/markdownlintrc"].some(isFile); // run-con reads files only; ~/.config/markdownlint is often the dir holding `config`
 }
 
 /**
@@ -2215,7 +2219,17 @@ function writtenDigestPath(real: string): string {
  * @returns Base64 digest.
  */
 function fileDigest(fp: string): string {
-  return createHash("sha256").update(readFileSync(fp)).digest("base64");
+  return digest(readFileSync(fp));
+}
+
+/**
+ * SHA-256 base64 of in-memory content (same encoding as `fileDigest`).
+ *
+ * @param data - Content to hash.
+ * @returns Base64 digest.
+ */
+function digest(data: string | Buffer): string {
+  return createHash("sha256").update(data).digest("base64");
 }
 
 /**
@@ -2270,7 +2284,7 @@ export function recordWritten(real: string, content: string | null): void {
     }
     mkdirSync(path.dirname(file), { recursive: true });
     const tmp = `${file}.${process.pid}.tmp`;
-    writeFileSync(tmp, createHash("sha256").update(content).digest("base64"));
+    writeFileSync(tmp, digest(content));
     renameSync(tmp, file);
   } catch {
     // fail open: a missing digest costs one duplicate lint
@@ -2598,10 +2612,10 @@ export async function lintFileHandler(args: PostToolUseHookInput, scoped: { fp: 
     const ranges = editRanges(args);
     if (ranges?.length === 0) return {}; // the Edit changed nothing
     const original = args.tool_response?.originalFile;
-    const before = typeof original === "string" ? createHash("sha256").update(original).digest("base64") : null;
+    const before = typeof original === "string" ? digest(original) : null;
     // the tool's content, not the disk: a change landing before this hook must not be folded into the edit's record
     const wc = writtenContent(args);
-    const rec = recordEdit(resolved, scoped.real, editHunks(args), before, wc === null ? null : createHash("sha256").update(wc).digest("base64"));
+    const rec = recordEdit(resolved, scoped.real, editHunks(args), before, wc === null ? null : digest(wc));
     // a line break the patch does not count shifts the linter's lines: no gate, no supersession (report whole-file)
     const odd = hasForeignLineBreak(resolved);
     const d0 = digestOrNull(resolved);

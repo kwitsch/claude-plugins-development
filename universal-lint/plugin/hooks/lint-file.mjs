@@ -168,6 +168,13 @@ function saveProbeStore(file, store) {
 function isExecutableFile(p) {
 	try {
 		accessSync(p, fsConstants.X_OK);
+	} catch {
+		return false;
+	}
+	return isFile(p);
+}
+function isFile(p) {
+	try {
 		return statSync(p).isFile();
 	} catch {
 		return false;
@@ -600,11 +607,7 @@ export function hasProjectYamllintConfig(cwd) {
 export function hasUserGlobalYamllintConfig() {
 	const env = process.env;
 	const p = env.YAMLLINT_CONFIG_FILE !== undefined ? env.YAMLLINT_CONFIG_FILE.replace(/^~(?=$|\/)/, homedir()) : path.join(env.XDG_CONFIG_HOME ?? path.join(homedir(), ".config"), "yamllint", "config");
-	try {
-		return statSync(p).isFile();
-	} catch {
-		return false;
-	}
+	return isFile(p);
 }
 const YAMLLINT_NO_LINE_LENGTH_CONFIG_DATA = "{extends: default, rules: {line-length: disable}}";
 const MARKDOWNLINT_CONFIG_FILENAMES = [
@@ -652,13 +655,7 @@ function hasMarkdownlintRc(spawnCwd) {
 		path.join(home, ".markdownlintrc"),
 		"/etc/markdownlint/config",
 		"/etc/markdownlintrc"
-	].some((p) => {
-		try {
-			return statSync(p).isFile();
-		} catch {
-			return false;
-		}
-	});
+	].some(isFile);
 }
 const STYLELINT_CONFIG_FILENAMES = [
 	".stylelintrc",
@@ -1184,7 +1181,10 @@ function writtenDigestPath(real) {
 	return path.resolve(process.env.CLAUDE_PLUGIN_DATA || tmpdir(), "written", hashPath(real));
 }
 function fileDigest(fp) {
-	return createHash("sha256").update(readFileSync(fp)).digest("base64");
+	return digest(readFileSync(fp));
+}
+function digest(data) {
+	return createHash("sha256").update(data).digest("base64");
 }
 export function writtenContent(args) {
 	if (args?.tool_name === "Write") return typeof args.tool_input?.content === "string" ? args.tool_input.content : null;
@@ -1219,7 +1219,7 @@ export function recordWritten(real, content) {
 		}
 		mkdirSync(path.dirname(file), { recursive: true });
 		const tmp = `${file}.${process.pid}.tmp`;
-		writeFileSync(tmp, createHash("sha256").update(content).digest("base64"));
+		writeFileSync(tmp, digest(content));
 		renameSync(tmp, file);
 	} catch {}
 }
@@ -1392,9 +1392,9 @@ export async function lintFileHandler(args, scoped = postToolScope(args)) {
 		const ranges = editRanges(args);
 		if (ranges?.length === 0) return {};
 		const original = args.tool_response?.originalFile;
-		const before = typeof original === "string" ? createHash("sha256").update(original).digest("base64") : null;
+		const before = typeof original === "string" ? digest(original) : null;
 		const wc = writtenContent(args);
-		const rec = recordEdit(resolved, scoped.real, editHunks(args), before, wc === null ? null : createHash("sha256").update(wc).digest("base64"));
+		const rec = recordEdit(resolved, scoped.real, editHunks(args), before, wc === null ? null : digest(wc));
 		const odd = hasForeignLineBreak(resolved);
 		const d0 = digestOrNull(resolved);
 		const t0 = journalTail(rec);
