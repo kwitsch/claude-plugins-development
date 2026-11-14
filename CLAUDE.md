@@ -19,7 +19,7 @@ Development repository for Claude Code plugins. One top-level directory per plug
 One config for all packages, at the repo root; no per-plugin lint or vitest config. Formatting stays with dprint (`dprint.json`); everything else is oxc.
 
 - Lint + type check: root `.oxlintrc.json` (oxlint, type-aware) with the solution `tsconfig.json` (`tsconfig.src.json` strict, `tsconfig.tests.json` relaxed for plugin `*/tests/`); `pnpm lint` is the type check. Details: `.claude/rules/lint-config.md`.
-- Build: the shared `development/scripts/build-plugin.mts` builds the plugin in the cwd (layout check, oxc-transform type stripping, oxc-minify, `plugin.json` generated from `package.json` by `plugin-manifest.mts`); a plugin's `build` script may run its own steps first.
+- Build: the shared `development/scripts/build-plugin.mts` builds the plugin in the cwd (layout check, oxc-transform type stripping, oxc-minify, `plugin.json` generated from `package.json` by `plugin-manifest.mts`); a plugin's `build` script may run its own steps first; `pluginBuild.bundleHooksLib: true` in `package.json` bundles the hooks helper modules (everything `hooks.json` does not list) into one compressed `hooks/lib.mjs` (jev-api).
 - `vitest.config.mts` at the root is the one vitest config. Tooling is root devDependencies only. Details: `.claude/rules/lint-config.md`.
 
 ## Commands

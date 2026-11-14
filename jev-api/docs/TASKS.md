@@ -17,6 +17,8 @@ Legend: `[x]` finished (done, or closed without code: status `closed` in the tas
 - [x] [F16](tasks/F16-hung-registration-stays-memoized.md) medium, bug: a hung registration stays memoized; every owned call waits 1 s, every session.start 5 s, no retry; one hung tool holds the other three
 - [x] [F17](tasks/F17-registration-retry-without-backoff.md) low: a failing registration is retried on every owned call (1 attempt + 1 log line per call), no back-off
 
+- [x] [F21](tasks/F21-oversized-state-sent-blindly.md) medium: a state too large for System One (hard limit 32767 prompt tokens, timeout-bound already at ~15k to ~21k) was sent anyway; since 0.4.0 a preflight estimate, the server's exact refusal and the overflow modes `error`, `truncate`, `haiku` (option `overflow`, default `haiku`) react, with the density learned across sessions in `$.store`
+
 ## Remaining
 
 - [ ] [F18](tasks/F18-haiku-call-not-cancelled-default-effort.md) `partial` low: the Haiku call carries the abort signal since 0.3.2; still no `effort` (thinking shares `maxTokens`, not measured)

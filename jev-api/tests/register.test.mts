@@ -257,12 +257,14 @@ test("tool.call answers the tool names the engine returned", async ($, on) => {
 
 // Only an mcp__<plugin>__<type> answer is followed: anything else must not make the hook claim (or crash on) another tool.
 test("session.start ignores a tool.register answer that names no own tool", async ($, on) => {
-  const answers: Record<string, unknown> = { noul: { tool: "Bash" }, choice: undefined, score: { tool: "mcp__other__score" } };
+  const answers: Record<string, unknown> = { noul: { tool: "x__noul" }, choice: undefined, score: { tool: "mcp__other__score" } };
   on("tool.register", async (_$, e) => ({ value: answers[String(e.name)] }));
   setup(on, { env: { JEV_URL: "https://jev.test/v1/systemone" } });
   on("tool.call", async () => ({ result: "from-next" }));
   await $.session.start({ cwd: "/proj", surface: "terminal", isInteractive: true });
   expect(await $.tool.call({ tool: "Bash", command: "ls" })).toEqual({ result: "from-next" });
+  // Ends with __noul but lacks the mcp__ prefix: only that prefix check keeps the hook from claiming it.
+  expect(await $.tool.call({ tool: "x__noul", ...BASE.noul })).toEqual({ result: "from-next" });
   expect(await $.tool.call({ tool: "mcp__other__score", ...BASE.score })).toEqual({ result: JSON.stringify(ANSWERS.score) });
 });
 
@@ -562,6 +564,24 @@ async function direct(overrides: Record<string, unknown>) {
   };
   const run = (type: string, signal: unknown = new AbortController().signal) => hooks.get("tool.call")?.($, { tool: TOOL(type), ...BASE[type] }, Object.assign(async () => ({}), { signal })) as Promise<{ result?: string; deny?: string }>;
   return { run, fetched, hooks, $ };
+}
+
+// F21: a truncate call abandoned while its request is out sends no second request, whether the server refused the full
+// state (it passed the preflight) or the first cut (the preflight said no). System One never cancels a request.
+for (const [label, state, timeout] of [["a refused full state", "word ".repeat(20_000), 30], ["a refused first cut", "x".repeat(150_000), 20]] as const) {
+  it(`an abandoned truncate call sends no retry after ${label}`, async () => {
+    const ctl = new AbortController();
+    const refusal = JSON.stringify({ error: { type: "exceed_context_size_error", n_prompt_tokens: 46000, n_ctx: 32768, message: "too big" } });
+    let sent = 0;
+    const { hooks, $ } = await direct({
+      store: { get: async () => undefined, set: async () => undefined },
+      // the user interrupts while the request is out; the server's refusal arrives at the same moment
+      http: { fetch: () => (sent++, ctl.abort(), Promise.resolve({ status: 400, ok: false, headers: {}, text: refusal })) },
+    });
+    const r = await hooks.get("tool.call")?.($, { tool: TOOL("noul"), ...BASE.noul, state, timeout, overflow: "truncate" }, Object.assign(async () => ({}), { signal: ctl.signal }));
+    expect(r).toEqual({ deny: "noul: the call was abandoned" });
+    expect(sent).toBe(1);
+  });
 }
 
 // F02: a tool whose registration failed is registered again by the next hook, the others are not registered twice.
