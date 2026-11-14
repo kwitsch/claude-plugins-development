@@ -359,6 +359,21 @@ test("a background subagent's step does not hold off auto-compact", async ($, on
   expect(state.compacts).toBe(1);
 });
 
+test("a subagent's response leaves the main loop's cache countdown alone", async ($, on) => {
+  const { clock } = chatSetup(on, 10);
+  on("ui.render", () => BENEATH);
+  await $.session.start(START);
+  const ui = await $.ui.mount(BAND);
+  await respond($);
+  await clock.advance(30 * 60_000);
+  expect(await label(ui)).toBe(" cache 29m");
+  const stream = $.turn.step({ turnId: "s1", index: 0, model: "claude-opus-5-5", effort: "high", messageCount: 1, agentId: "a1" });
+  while (!(await stream.next()).done);
+  await clock.advance(15_000);
+  expect(await label(ui)).toBe(" cache 29m");
+  await ui.unmount();
+});
+
 test("a subagent's turn end leaves a running main-loop turn running: no auto-compact mid-turn", async ($, on) => {
   const { clock, state } = chatSetup(on, 70);
   await $.session.start(START);
