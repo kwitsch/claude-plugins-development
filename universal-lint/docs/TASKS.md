@@ -66,7 +66,7 @@ Legend: `[x]` finished. `[ ]` not finished; tag = `open` (code change, not start
 
 Found by [EVALUATION-2026-11-14](EVALUATION-2026-11-14.md) on 0.16.0.
 
-- [ ] [F37](tasks/F37-hook-design-rule-size.md) hook-design.md is over the 40,000-character rule limit `open` priority:low. 42,361 characters (0.15.30: 36,010); docs only.
+- [x] [F37](tasks/F37-hook-design-rule-size.md) hook-design.md is over the 40,000-character rule limit `done` (0.16.1) priority:low. 42,361 characters (0.15.30: 36,010); docs only.
 
 ## Dependencies
 

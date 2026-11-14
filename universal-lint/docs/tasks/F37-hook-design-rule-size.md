@@ -1,14 +1,14 @@
 ---
 id: F37
 title: hook-design.md is over the 40,000-character rule limit
-status: open
+status: done
 priority: low
 area: universal-lint/.claude/rules/hook-design.md (docs)
 ---
 
 ## Status
 
-Open. Found by [EVALUATION-2026-11-14](../EVALUATION-2026-11-14.md) (docs drift check). Docs only, no code change.
+Done in 0.16.1. Found by [EVALUATION-2026-11-14](../EVALUATION-2026-11-14.md) (docs drift check). Docs only, no code change.
 
 ## Problem
 
@@ -37,3 +37,7 @@ Docs only. Do it before or together with F35/F36, which touch the same section. 
 ## Related
 
 F01 (Constraints), F34 (added the section), F35, F36.
+
+## Verification result
+
+Shipped in 0.16.1: the "Settle window (F34, 0.16.0)" section moved verbatim to `.claude/rules/settle-window.md` (paths: `src/hooks/**`, `plugin/hooks/**`, `tests/settle*.test.mts`), pointer left in hook-design.md, `CLAUDE.md` "Parts" updated. `wc -m`: hook-design.md 36,717 (was 42,336), settle-window.md 5,846.
