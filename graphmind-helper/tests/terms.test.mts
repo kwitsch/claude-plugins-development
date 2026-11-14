@@ -1,0 +1,50 @@
+// Pure helpers of the graphmind-helper module (built plugin/hooks/terms.mjs).
+import assert from "node:assert/strict";
+import { test } from "vitest";
+import { fit, isCodePrompt, isRecallable, resolveTools, searchTerms, shouldNudge } from "../plugin/hooks/terms.mjs";
+
+test("searchTerms puts identifiers first and drops stopwords", () => {
+  assert.equal(searchTerms("where is parseConfig and foo_bar defined"), "parseconfig foo_bar defined");
+});
+
+test("isRecallable skips short and system-made prompts", () => {
+  assert.equal(isRecallable("short"), false);
+  assert.equal(isRecallable("<task-notification> something long enough"), false);
+  assert.equal(isRecallable("where is foo_bar defined"), true);
+});
+
+test("isCodePrompt matches exploration and implementation prompts", () => {
+  assert.equal(isCodePrompt("how does the cache work"), true);
+  assert.equal(isCodePrompt("thanks, that is fine with me"), false);
+});
+
+test("shouldNudge: searches yes, graphmind itself and exhaustive searches no", () => {
+  assert.equal(shouldNudge({ tool: "Grep" }), true);
+  assert.equal(shouldNudge({ tool: "Bash", command: "cd src && rg foo" }), true);
+  assert.equal(shouldNudge({ tool: "Bash", command: "graphmind search foo" }), false);
+  assert.equal(shouldNudge({ tool: "Bash", command: "cat x | grep foo" }), false);
+  assert.equal(shouldNudge({ tool: "Bash", command: "grep -rn foo src", description: "find all usages of foo" }), false);
+  assert.equal(shouldNudge({ tool: "Bash", command: "grep -rc foo src" }), false);
+  assert.equal(shouldNudge({ tool: "Agent", subagent_type: "Explore" }), true);
+  assert.equal(shouldNudge({ tool: "Agent", prompt: "write the docs" }), false);
+  assert.equal(shouldNudge({ tool: "Read" }), false);
+});
+
+test("fit keeps whole blocks, cuts the one that overflows, and reports the lines that fit", () => {
+  const a = fit("", [{ title: "T1", lines: ["one", "two"] }, { title: "T2", lines: [] }, { title: "T3", lines: ["three"] }]);
+  assert.equal(a.text, "T1\none\ntwo\n\nT3\nthree\n\n");
+  assert.deepEqual([...a.whole], ["one", "two", "three"]);
+  const big = fit("", [{ title: "T", lines: ["x".repeat(900)] }], 500);
+  assert.match(big.text, /cut to fit the hook output limit/);
+  assert.equal(big.whole.size, 0);
+});
+
+test("resolveTools finds the plugin's own server and a setup server, and needs all four tools", () => {
+  const own = ["status", "map", "memory_list", "search"].map((t) => ({ name: `mcp__plugin_graphmind-helper_graphmind__gm_${t}` }));
+  const setup = ["status", "map", "memory_list", "search"].map((t) => ({ name: `mcp__graphmind__gm_${t}` }));
+  assert.equal(resolveTools(own)?.status, "mcp__plugin_graphmind-helper_graphmind__gm_status");
+  assert.equal(resolveTools(setup)?.search, "mcp__graphmind__gm_search");
+  assert.equal(resolveTools([...setup, ...own])?.map, "mcp__plugin_graphmind-helper_graphmind__gm_map");
+  assert.equal(resolveTools(own.slice(1)), undefined);
+  assert.equal(resolveTools([{ name: "mcp__other__gm_status" }]), undefined);
+});
