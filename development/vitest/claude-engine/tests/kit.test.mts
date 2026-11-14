@@ -89,6 +89,35 @@ test("a hook that settles before its next abandons the rest of the chain: next.s
   release();
 });
 
+/** Opens the gate of the late-dispatch abandonment test. */
+let open = () => {};
+/** The next.signal the stub of the late-dispatch abandonment test saw. */
+let late: AbortSignal | undefined;
+test("a hook dispatched after its chain was abandoned passes the abort on", {
+  plugins: [{
+    name: "above",
+    tier: "prepend",
+    register(on) {
+      on("prompt.submit", (_$, e, next) => (void Promise.resolve(next(e)).catch(() => {}), {}));
+    },
+  }, {
+    name: "mid",
+    register(on) {
+      on("prompt.submit", async (_$, e, next) => (await new Promise<void>((r) => (open = r)), next(e)));
+    },
+  }, {
+    name: "low",
+    register(on) {
+      on("prompt.submit", (_$, e, next) => next(e));
+    },
+  }],
+}, async ($, on) => {
+  on("prompt.submit", (_$, _e, next) => (late = next.signal, {}));
+  expect(await $.prompt.submit({ text: "x" })).toEqual({});
+  open();
+  await new Promise((r) => setTimeout(r, 0));
+  expect(late?.aborted).toBe(true);
+});
 
 test("the test's $ cannot fire a mods API call", ($) => {
   expect(() => $.ui.close({ id: "p" })).toThrow(/mods API call/);

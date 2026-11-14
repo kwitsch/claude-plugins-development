@@ -153,8 +153,9 @@ function fresh(): State {
  */
 function textOf(r: ToolResult): string | undefined {
   if (r.deny !== undefined || r.isError === true) return undefined;
-  if (typeof r.text === "string") return r.text;
-  if (typeof r.result === "string") return r.result;
+  // An empty text is no answer either (falls through to the parts).
+  if (typeof r.text === "string" && r.text !== "") return r.text;
+  if (typeof r.result === "string") return r.result || undefined;
   if (!Array.isArray(r.result)) return undefined;
   const parts = (r.result as unknown[]).map((p) => (p && typeof p === "object" && typeof (p as { text?: unknown }).text === "string" ? (p as { text: string }).text : "")).filter((t) => t !== "");
   // A result without any text part is no answer (an empty status must not make a project look registered).

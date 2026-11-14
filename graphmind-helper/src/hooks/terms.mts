@@ -109,7 +109,7 @@ export function shouldNudge(call: SearchCall): boolean {
  * @returns The 8-character id, `undefined` when the line has none.
  */
 export function entryId(line: string): string | undefined {
-  return /[0-9a-f]{8}/.exec(line)?.[0];
+  return /^[\s★]*([0-9a-f]{8})(?![0-9a-zA-Z])/.exec(line)?.[1];
 }
 
 /**

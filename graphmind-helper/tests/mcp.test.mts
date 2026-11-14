@@ -96,7 +96,7 @@ test("in a non-UTF-8 subdirectory of a repo with a setup server the wrapper step
 test("started in a repo subdirectory the wrapper registers and builds the work tree root", async () => {
   mkdirSync(join(proj, "sub"));
   const realProj = realpathSync(proj);
-  writeFileSync(join(fakeBin, "graphmind"), FAKE.replace('echo "$@" >> "$FAKE_LOG"', 'echo "$@ $PWD" >> "$FAKE_LOG"'));
+  writeFileSync(join(fakeBin, "graphmind"), FAKE.replace("echo \"$@\" >> \"$FAKE_LOG\"", "echo \"$@ $PWD\" >> \"$FAKE_LOG\""));
   assert.match(runWrapper(false, {}, join(proj, "sub")).calls, new RegExp(`^init --skip-build ${realProj}$`, "m"));
   await new Promise((done) => setTimeout(done, 300));
   assert.match(readFileSync(join(root, "calls.log"), "utf8"), new RegExp(`^build ${realProj}$`, "m"));
@@ -182,7 +182,7 @@ test("with the binary off PATH (in ~/.local/bin) init writes a project server wh
   const local = join(home, ".local", "bin");
   mkdirSync(local, { recursive: true });
   // Like graphmind 0.3.7: the entry's command is `graphmind` from PATH, else ~/.graphmind/bin/graphmind.
-  const fake = FAKE.replace('"mcpServers":{"graphmind":{}}', '"mcpServers":{"graphmind":{"command":"%s"}}').replace('"$PWD" >', '"$PWD" "$(command -v graphmind || echo "$HOME/.graphmind/bin/graphmind")" >');
+  const fake = FAKE.replace("\"mcpServers\":{\"graphmind\":{}}", "\"mcpServers\":{\"graphmind\":{\"command\":\"%s\"}}").replace("\"$PWD\" >", "\"$PWD\" \"$(command -v graphmind || echo \"$HOME/.graphmind/bin/graphmind\")\" >");
   writeFileSync(join(local, "graphmind"), fake);
   chmodSync(join(local, "graphmind"), 0o755);
   assert.equal(runWrapper(true).r.status, 0);

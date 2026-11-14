@@ -523,9 +523,9 @@ class Engine {
         let pending: unknown;
         let settled = false;
         // The rest of the chain is abandoned (its next.signal aborts) when this hook settles before its next does, or when this hook's own dispatch is abandoned.
-        const below = new AbortController();
-        sig.addEventListener("abort", () => below.abort(), { once: true });
-        const next = nextFor(i, called, sig, below.signal);
+        // AbortSignal.any: also aborted when `sig` already is, and holds no listener on a long-lived `sig` (a `$.clock.every` timer's).
+        const own = new AbortController();
+        const next = nextFor(i, called, sig, AbortSignal.any([sig, own.signal]));
         const tracked = Object.assign((e2: Data) => {
           pending = next(e2);
           void Promise.resolve(pending).then(() => (settled = true), () => (settled = true));
@@ -534,19 +534,21 @@ class Engine {
         const { $, end } = this.api(h);
         try {
           const r = await h.fn($, frozen(e), tracked);
-          if (pending && !settled) below.abort();
+          if (pending && !settled) own.abort();
           return r;
         } catch (err) {
           if (h.catcher) {
             try {
-              return await h.catcher($, frozen(e), Object.assign(tracked, { error: { kind: "throw", message: message(err) }, called: called.value }));
+              const r = await h.catcher($, frozen(e), Object.assign(tracked, { error: { kind: "throw", message: message(err) }, called: called.value }));
+              if (pending && !settled) own.abort();
+              return r;
             } catch {
               // the handler failed too: skip the hook as without one
             }
           }
           this.report(h, err);
           if (pending) return pending; // the rest of the chain already ran: its outcome stands
-          return step(i + 1, e);
+          return step(i + 1, e, sig);
         } finally {
           end();
           this.activity++;

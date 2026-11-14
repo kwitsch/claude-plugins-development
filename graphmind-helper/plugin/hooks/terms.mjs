@@ -44,7 +44,7 @@ export function shouldNudge(call) {
 	return !/\s-[a-zA-Z]*c|\|\s*wc\s|\|\s*sort\s|\|\s*uniq\s/.test(check);
 }
 export function entryId(line) {
-	return /[0-9a-f]{8}/.exec(line)?.[0];
+	return /^[\s★]*([0-9a-f]{8})(?![0-9a-zA-Z])/.exec(line)?.[1];
 }
 export function listing(out) {
 	return out.split("\n").filter((l) => l.trim() !== "" && !l.startsWith(">>"));

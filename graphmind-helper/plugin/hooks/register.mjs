@@ -19,8 +19,8 @@ function fresh() {
 }
 function textOf(r) {
 	if (r.deny !== undefined || r.isError === true) return undefined;
-	if (typeof r.text === "string") return r.text;
-	if (typeof r.result === "string") return r.result;
+	if (typeof r.text === "string" && r.text !== "") return r.text;
+	if (typeof r.result === "string") return r.result || undefined;
 	if (!Array.isArray(r.result)) return undefined;
 	const parts = r.result.map((p) => p && typeof p === "object" && typeof p.text === "string" ? p.text : "").filter((t) => t !== "");
 	return parts.length ? parts.join("\n") : undefined;

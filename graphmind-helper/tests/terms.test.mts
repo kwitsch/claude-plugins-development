@@ -1,7 +1,13 @@
 // Pure helpers of the graphmind-helper module (built plugin/hooks/terms.mjs).
 import assert from "node:assert/strict";
 import { test } from "vitest";
-import { binaryDirs, fit, isCodePrompt, isRecallable, resolveTools, searchTerms, shouldNudge } from "../plugin/hooks/terms.mjs";
+import { binaryDirs, entryId, fit, isCodePrompt, isRecallable, resolveTools, searchTerms, shouldNudge } from "../plugin/hooks/terms.mjs";
+
+test("entryId reads only the leading id, not 8 hex in the text", () => {
+  assert.equal(entryId("★ aaaaaaaa [decision] x"), "aaaaaaaa");
+  assert.equal(entryId("  bbbbbbbb [pattern] x"), "bbbbbbbb");
+  assert.equal(entryId("Found 20261114 entries, see deadbeef"), undefined);
+});
 
 test("searchTerms puts identifiers first and drops stopwords", () => {
   assert.equal(searchTerms("where is parseConfig and foo_bar defined"), "parseconfig foo_bar defined");
