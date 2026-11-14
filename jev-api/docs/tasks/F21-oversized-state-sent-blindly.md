@@ -24,6 +24,10 @@ Live validation (2026-11-14, real endpoint, the built hooks module driven by a h
 
 In a real Claude Code session (2.1.325, `claude -p --plugin-dir jev-api/plugin --setting-sources project`) the split modules load and `mcp__jev-api__noul` answers `{"type":"noul","noul":0.978...}`.
 
+After the bundling of the helper modules into `plugin/hooks/lib.mjs` (`pluginBuild.bundleHooksLib`) the same session checks were repeated on the final build: a Jev `noul` call and a `batch` call answered, an invalid `overflow` answered `noul: overflow must be one of error, truncate, haiku`, and with `JEV_URL` and `TYPESAFE_API_KEY` unset (`env -u`) Haiku answered `{"type":"noul","noul":0.9998}`. Shipped size of `plugin/hooks`: `register.mjs` 2272 bytes plus `lib.mjs` 20425 bytes, against 19821 bytes for the single unminified `register.mjs` of 0.3.2 (which had far less logic).
+
+Bug hunt: the loop (4 areas, up to 10 rounds) was stopped by the user after it had committed 8 fixes with tests (bundler import and name checks, the aim size under the time budget and its rounding, the `MIN_BUDGET_TOKENS` floor and docs, the registration prefix check test, a stale module comment). It did not run to its own stop condition and did not run its closing review, so no claim of "no further bugs" is made.
+
 Not run live: the `haiku` mode (the harness has no model) and an abandoned call during a retry (covered by the direct hook tests "an abandoned truncate call sends no retry after ..." in `tests/register.test.mts`).
 
 Earlier state: Open, nothing implemented; this document held the measurements and the proposed reaction below.
