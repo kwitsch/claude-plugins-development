@@ -3,20 +3,16 @@ import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { delimiter, join, resolve, sep } from "node:path";
+import { binaryDirs } from "../hooks/terms.mjs";
 
 /**
- * The graphmind binary: the first one on PATH, else the places the setup scripts add to PATH.
- *
- * @remarks
- * `src/hooks/register.mts` (a different runtime, no imports) repeats this directory list; keep both in step.
+ * The graphmind binary: the first one on PATH, else the places the setup scripts add to PATH (`binaryDirs`, shared with the module).
  *
  * @param env - Process environment.
  * @returns Absolute path, `undefined` when there is none.
  */
 export function findGraphmind(env: NodeJS.ProcessEnv = process.env): string | undefined {
-  const home = homedir();
-  const dirs = [...(env.PATH ?? "").split(delimiter).filter((d) => d.startsWith("/")), join(home, ".graphmind", "bin"), join(home, ".local", "bin"), "/usr/local/bin"];
-  return dirs.map((d) => join(d, "graphmind")).find((p) => existsSync(p));
+  return binaryDirs(env.PATH, homedir(), delimiter).map((d) => join(d, "graphmind")).find((p) => existsSync(p));
 }
 
 /**

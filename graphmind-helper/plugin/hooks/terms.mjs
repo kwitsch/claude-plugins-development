@@ -1,4 +1,4 @@
-export const MAX_CHARS = 9e3;
+const MAX_CHARS = 9e3;
 export const SETUP_SCRIPTS = [
 	"graphmind-session.sh",
 	"graphmind-prompt.sh",
@@ -15,6 +15,8 @@ const NOT_TYPED = [
 ];
 const CODE_PROMPT = /comment (fonctionne|marche)|how does|where is|où est|show me|montre|architecture|structure|schema|diagram|explique|explain|what does|qui appelle|who calls|trace|flow|parcour|find|cherche|search|look|refactor|implement|ajoute|add.*to|modify|change.*in|fix.*in|debug|implémente|créer|create/i;
 const SEG = String.raw`(^|&&|\|\||;)\s*(rtk\s+)?`;
+const GRAPHMIND_CMD = new RegExp(`${SEG}graphmind\\b`);
+const SEARCH_CMD = new RegExp(`${SEG}(grep|egrep|rg|ag|ugrep|find|fd|bfs)\\b`);
 export function isRecallable(prompt) {
 	return prompt.length >= 10 && !NOT_TYPED.some((p) => prompt.startsWith(p));
 }
@@ -34,7 +36,7 @@ export function shouldNudge(call) {
 	const check = `${command} ${str(call.description)}`;
 	let search = false;
 	if (call.tool === "Grep" || call.tool === "Glob") search = true;
-	else if (call.tool === "Bash") search = !new RegExp(`${SEG}graphmind\\b`).test(command) && new RegExp(`${SEG}(grep|egrep|rg|ag|ugrep|find|fd|bfs)\\b`).test(command);
+	else if (call.tool === "Bash") search = !GRAPHMIND_CMD.test(command) && SEARCH_CMD.test(command);
 	else if (call.tool === "Agent") search = call.subagent_type === "Explore" || /search|find|explore|locate|where is|which file/i.test(str(call.prompt));
 	if (!search) return false;
 	if (/all (usages|occurrences|references|instances)|find all|list all|exhaustive/i.test(check)) return false;
@@ -52,7 +54,7 @@ export function fit(head, blocks, max = MAX_CHARS) {
 	for (const b of blocks) {
 		const body = b.lines.join("\n").trimEnd();
 		if (!body) continue;
-		const block = `${b.title}\n${body}\n\n`;
+		const block = b.title ? `${b.title}\n${body}\n\n` : `${body}\n\n`;
 		const room = max - text.length;
 		if (block.length <= room) {
 			text += block;
@@ -81,4 +83,10 @@ export function resolveTools(tools) {
 		memoryList,
 		search
 	} : undefined;
+}
+export function binaryDirs(pathVar, home, delimiter = ":") {
+	const dirs = (pathVar ?? "").split(delimiter).filter((d) => d.startsWith("/"));
+	if (home) dirs.push(`${home}/.graphmind/bin`, `${home}/.local/bin`);
+	dirs.push("/usr/local/bin");
+	return dirs.map((d) => d.replace(/\/+$/, ""));
 }

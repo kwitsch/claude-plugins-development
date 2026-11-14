@@ -13,7 +13,6 @@ import { findGraphmind, registered, setupMcpPresent } from "./common.mjs";
  * @returns True when init may index it.
  */
 export function indexable(dir: string): boolean {
-  if (resolve(dir) === resolve(homedir())) return false;
   const home = resolve(homedir());
   for (let d = resolve(dir);; d = resolve(d, "..")) {
     // A dotfiles repo at $HOME must not make every folder below it indexable.

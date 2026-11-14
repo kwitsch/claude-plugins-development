@@ -1,7 +1,7 @@
 // Pure helpers of the graphmind-helper module (built plugin/hooks/terms.mjs).
 import assert from "node:assert/strict";
 import { test } from "vitest";
-import { fit, isCodePrompt, isRecallable, resolveTools, searchTerms, shouldNudge } from "../plugin/hooks/terms.mjs";
+import { binaryDirs, fit, isCodePrompt, isRecallable, resolveTools, searchTerms, shouldNudge } from "../plugin/hooks/terms.mjs";
 
 test("searchTerms puts identifiers first and drops stopwords", () => {
   assert.equal(searchTerms("where is parseConfig and foo_bar defined"), "parseconfig foo_bar defined");
@@ -37,6 +37,15 @@ test("fit keeps whole blocks, cuts the one that overflows, and reports the lines
   const big = fit("", [{ title: "T", lines: ["x".repeat(900)] }], 500);
   assert.match(big.text, /cut to fit the hook output limit/);
   assert.equal(big.whole.size, 0);
+});
+
+test("fit puts a title-less block in as plain text", () => {
+  assert.equal(fit("H\n", [{ title: "", lines: ["footer line"] }]).text, "H\nfooter line\n\n");
+});
+
+test("binaryDirs: absolute PATH entries first, then the places the setup scripts add", () => {
+  assert.deepEqual(binaryDirs("/a/:rel:/b", "/home/u"), ["/a", "/b", "/home/u/.graphmind/bin", "/home/u/.local/bin", "/usr/local/bin"]);
+  assert.deepEqual(binaryDirs(undefined, undefined), ["/usr/local/bin"]);
 });
 
 test("resolveTools finds the plugin's own server and a setup server, and needs all four tools", () => {

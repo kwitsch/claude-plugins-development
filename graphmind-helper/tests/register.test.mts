@@ -105,6 +105,9 @@ test("the first prompt gets the briefing and the recall, a later one only recall
   expect(first).toMatch(/top file/);
   expect(first).toMatch(/always use X/);
   expect(first).toMatch(/recent one/);
+  expect(first).toMatch(/Auto-memory is ON/);
+  // The briefing reuses the readiness probe's status text: gm_status is called once.
+  expect(calls.filter((c) => c.tool.endsWith("__gm_status"))).toHaveLength(1);
   expect(first).toMatch(/about foo_bar/);
   expect(first).toMatch(/\[graphmind code\] Relevant symbols:/);
   // The calls go to graphmind's server with the session cwd; the CLI only does what the tools cannot.

@@ -7,7 +7,7 @@
  */
 
 /** Where the hook output limit of Claude Code cuts a message, in characters (the setup scripts use the same). */
-export const MAX_CHARS = 9000;
+const MAX_CHARS = 9000;
 
 /** The scripts `graphmind setup` installs; their names in `~/.claude/settings.json` mean the user already wired the hooks. */
 export const SETUP_SCRIPTS = ["graphmind-session.sh", "graphmind-prompt.sh", "graphmind-search.sh"];
@@ -28,6 +28,12 @@ const CODE_PROMPT = /comment (fonctionne|marche)|how does|where is|où est|show 
 
 /** A search command starts a command line segment: at the start, or after `&&`, `||` or `;` (not after a pipe, which filters output). */
 const SEG = String.raw`(^|&&|\|\||;)\s*(rtk\s+)?`;
+
+/** A command that is graphmind itself. */
+const GRAPHMIND_CMD = new RegExp(`${SEG}graphmind\\b`);
+
+/** A command that is a text or file search. */
+const SEARCH_CMD = new RegExp(`${SEG}(grep|egrep|rg|ag|ugrep|find|fd|bfs)\\b`);
 
 /**
  * Whether a prompt is worth a recall: typed by a person and at least 10 characters.
@@ -62,7 +68,7 @@ export function searchTerms(prompt: string): string {
 }
 
 /** A tool call as the nudge rule reads it: the tool name and the input fields the engine puts on the event. */
-export type SearchCall = { tool: string; command?: unknown; description?: unknown; subagent_type?: unknown; prompt?: unknown };
+export type SearchCall = { tool: string } & Record<string, unknown>;
 
 /**
  * A field as text.
@@ -85,7 +91,7 @@ export function shouldNudge(call: SearchCall): boolean {
   const check = `${command} ${str(call.description)}`;
   let search = false;
   if (call.tool === "Grep" || call.tool === "Glob") search = true;
-  else if (call.tool === "Bash") search = !new RegExp(`${SEG}graphmind\\b`).test(command) && new RegExp(`${SEG}(grep|egrep|rg|ag|ugrep|find|fd|bfs)\\b`).test(command);
+  else if (call.tool === "Bash") search = !GRAPHMIND_CMD.test(command) && SEARCH_CMD.test(command);
   else if (call.tool === "Agent") search = call.subagent_type === "Explore" || /search|find|explore|locate|where is|which file/i.test(str(call.prompt));
   if (!search) return false;
   if (/all (usages|occurrences|references|instances)|find all|list all|exhaustive/i.test(check)) return false;
@@ -112,7 +118,7 @@ export function listing(out: string): string[] {
   return out.split("\n").filter((l) => l.trim() !== "" && !l.startsWith(">>"));
 }
 
-/** One titled block of a message. */
+/** One block of a message: lines under an optional title (an empty title puts the lines in as plain text). */
 export type Block = { title: string; lines: string[] };
 
 /** A message built within the budget. */
@@ -138,7 +144,7 @@ export function fit(head: string, blocks: Block[], max: number = MAX_CHARS): Fit
   for (const b of blocks) {
     const body = b.lines.join("\n").trimEnd();
     if (!body) continue;
-    const block = `${b.title}\n${body}\n\n`;
+    const block = b.title ? `${b.title}\n${body}\n\n` : `${body}\n\n`;
     const room = max - text.length;
     if (block.length <= room) {
       text += block;
@@ -153,8 +159,6 @@ export function fit(head: string, blocks: Block[], max: number = MAX_CHARS): Fit
 /** The graphmind MCP tools the module uses. */
 export type GmTools = { status: string; map: string; memoryList: string; search: string };
 
-/** One entry of `$.tool.list()`. */
-type Listed = { name: string };
 
 /**
  * Finds the graphmind MCP tools in the engine's tool list. The plugin's own server and the one `graphmind setup`
@@ -164,7 +168,7 @@ type Listed = { name: string };
  * @param tools - The engine's tool list.
  * @returns The tool names, `undefined` when `gm_status` or another needed tool is missing.
  */
-export function resolveTools(tools: readonly Listed[]): GmTools | undefined {
+export function resolveTools(tools: readonly { name: string }[]): GmTools | undefined {
   const find = (suffix: string): string | undefined => {
     const hits = tools.map((t) => t.name).filter((n) => /^mcp__.*graphmind.*__gm_/.test(n) && n.endsWith(`__gm_${suffix}`));
     return hits.find((n) => n.includes("plugin_graphmind-helper")) ?? hits[0];
@@ -174,4 +178,20 @@ export function resolveTools(tools: readonly Listed[]): GmTools | undefined {
   const memoryList = find("memory_list");
   const search = find("search");
   return status && map && memoryList && search ? { status, map, memoryList, search } : undefined;
+}
+
+/**
+ * The directories to look for the graphmind binary in, as the setup scripts do: absolute PATH entries, then
+ * `~/.graphmind/bin`, `~/.local/bin` and `/usr/local/bin`. Shared by the module and the MCP wrapper.
+ *
+ * @param pathVar - The PATH value.
+ * @param home - The home directory, `undefined` when unknown.
+ * @param delimiter - The PATH delimiter.
+ * @returns The directories without a trailing slash.
+ */
+export function binaryDirs(pathVar: string | undefined, home: string | undefined, delimiter = ":"): string[] {
+  const dirs = (pathVar ?? "").split(delimiter).filter((d) => d.startsWith("/"));
+  if (home) dirs.push(`${home}/.graphmind/bin`, `${home}/.local/bin`);
+  dirs.push("/usr/local/bin");
+  return dirs.map((d) => d.replace(/\/+$/, ""));
 }
