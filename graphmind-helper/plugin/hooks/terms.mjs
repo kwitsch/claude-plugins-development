@@ -15,8 +15,8 @@ const NOT_TYPED = [
 ];
 const CODE_PROMPT = /comment (fonctionne|marche)|how does|where is|où est|show me|montre|architecture|structure|schema|diagram|explique|explain|what does|qui appelle|who calls|trace|flow|parcour|find|cherche|search|look|refactor|implement|ajoute|add.*to|modify|change.*in|fix.*in|debug|implémente|créer|create/i;
 const SEG = String.raw`(^|&&|\|\||;)\s*(rtk\s+)?`;
-const GRAPHMIND_CMD = new RegExp(`${SEG}graphmind\\b`);
-const SEARCH_CMD = new RegExp(`${SEG}(grep|egrep|rg|ag|ugrep|find|fd|bfs)\\b`);
+const GRAPHMIND_CMD = new RegExp(`${SEG}graphmind\\b`, "m");
+const SEARCH_CMD = new RegExp(`${SEG}(grep|egrep|rg|ag|ugrep|find|fd|bfs)\\b`, "m");
 export function isRecallable(prompt) {
 	return prompt.length >= 10 && !NOT_TYPED.some((p) => prompt.startsWith(p));
 }

@@ -21,6 +21,7 @@ test("isCodePrompt matches exploration and implementation prompts", () => {
 test("shouldNudge: searches yes, graphmind itself and exhaustive searches no", () => {
   assert.equal(shouldNudge({ tool: "Grep" }), true);
   assert.equal(shouldNudge({ tool: "Bash", command: "cd src && rg foo" }), true);
+  assert.equal(shouldNudge({ tool: "Bash", command: "cd src\nrg foo" }), true);
   assert.equal(shouldNudge({ tool: "Bash", command: "graphmind search foo" }), false);
   assert.equal(shouldNudge({ tool: "Bash", command: "cat x | grep foo" }), false);
   assert.equal(shouldNudge({ tool: "Bash", command: "grep -rn foo src", description: "find all usages of foo" }), false);
