@@ -1198,6 +1198,14 @@ export function recordEdit(fp, real, hunks, before) {
 		return null;
 	}
 }
+function journalTail(rec) {
+	if (!rec) return null;
+	try {
+		return readdirSync(settleDir()).filter((n) => n.startsWith(`${rec.key}-`) && n.endsWith(".json")).sort().at(-1) ?? null;
+	} catch {
+		return null;
+	}
+}
 export async function settleFindings(findings, resolved, rec, d0, d1) {
 	if (findings.length === 0 || !rec || d0 === null || d0 !== d1) return findings;
 	try {
@@ -1311,8 +1319,9 @@ export async function lintFileHandler(args, scoped = postToolScope(args)) {
 		const before = typeof original === "string" ? createHash("sha256").update(original).digest("base64") : null;
 		const rec = recordEdit(resolved, scoped.real, editHunks(args), before);
 		const d0 = digestOrNull(resolved);
+		const t0 = journalTail(rec);
 		const kept = await lintResolved(resolved, args.cwd, ranges, "PostToolUse");
-		const d1 = kept.length > 0 ? digestOrNull(resolved) : null;
+		const d1 = kept.length > 0 && journalTail(rec) === t0 ? digestOrNull(resolved) : null;
 		return formatFindings(await settleFindings(kept, resolved, rec, d0, d1), "PostToolUse", "universal-lint");
 	} catch {
 		return {};
@@ -1538,8 +1547,9 @@ export async function fileChangedHandler(args) {
 		let d1 = null;
 		try {
 			d0 = digestOrNull(s.fp);
+			const t0 = journalTail(rec);
 			kept = await lintResolved(s.fp, cwd, null, "FileChanged");
-			if (kept.length > 0) d1 = digestOrNull(s.fp);
+			if (kept.length > 0 && journalTail(rec) === t0) d1 = digestOrNull(s.fp);
 		} finally {
 			try {
 				if (slot) rmSync(slot, { force: true });

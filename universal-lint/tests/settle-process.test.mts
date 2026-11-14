@@ -270,6 +270,48 @@ test("a later edit after a non-parse finding on another line: that finding is st
   assert.match(firstRan.stderr, /line4-marker/);
 });
 
+test("an edit and its exact undo while the linter runs (A->B->A): the held finding is reported, not lost", async () => {
+  const e = makeEnv();
+  // stub shellcheck: log `run`, wait READ_DELAY, read the file, log `read <delay>`, wait POST_DELAY, report each `echo $1` line
+  const js = path.join(path.dirname(e.record), "stub.mjs");
+  writeFileSync(
+    js,
+    [
+      "import { appendFileSync, readFileSync } from 'node:fs';",
+      "const s = (ms) => new Promise((r) => setTimeout(r, Number(ms || 0)));",
+      "const f = process.argv.at(-1);",
+      "appendFileSync(process.env.RECORD, 'run\\n');",
+      "await s(process.env.READ_DELAY);",
+      "const lines = readFileSync(f, 'utf8').split('\\n');",
+      "appendFileSync(process.env.RECORD, `read ${process.env.READ_DELAY ?? 0}\\n`);",
+      "await s(process.env.POST_DELAY);",
+      "const out = lines.flatMap((l, i) => (l.includes('echo $1') ? [`a.sh:${i + 1}:6: note: aba-marker [SC2086]`] : []));",
+      "if (out.length) { console.log(out.join('\\n')); process.exit(1); }",
+    ].join("\n"),
+  );
+  e.stub("shellcheck", `exec node "${js}" "$@"`);
+  const A = "echo a\necho $1\necho b\necho c\n";
+  const B = `x\n${A}`;
+  const file = e.file("a.sh", A);
+  const edit = (structuredPatch: unknown, originalFile: string) => payload(file, e.cwd, { toolName: "Edit", toolResponse: { structuredPatch, originalFile } });
+  const first = start(e, "", payload(file, e.cwd), { UNIVERSAL_LINT_SETTLE_MS: "3000", READ_DELAY: "1500", POST_DELAY: "2500" });
+  await expect.poll(() => e.lines().length, { interval: 20, timeout: 10_000 }).toBeGreaterThanOrEqual(1);
+  // B inserts a line at the top before the linter reads: it reads B and reports `echo $1` on line 3
+  writeFileSync(file, B);
+  assert.equal((await start(e, "", edit([{ oldStart: 1, oldLines: 3, newStart: 1, newLines: 4, lines: ["+x", " echo a", " echo $1", " echo b"] }], A), {})).status, 0);
+  await expect.poll(() => e.lines().includes("read 1500"), { interval: 20, timeout: 10_000 }).toBe(true);
+  // C undoes B while the linter still runs: the file is A again when the lint ends
+  writeFileSync(file, A);
+  assert.equal((await start(e, "", edit([{ oldStart: 1, oldLines: 4, newStart: 1, newLines: 3, lines: ["-x", " echo a", " echo $1", " echo b"] }], B), {})).status, 0);
+  await sleep(2800);
+  // D rewrites line 3 of A (`echo b`), which is not where the error is
+  writeFileSync(file, "echo a\necho $1\necho 'b'\necho c\n");
+  assert.equal((await start(e, "", edit([{ oldStart: 1, oldLines: 4, newStart: 1, newLines: 4, lines: [" echo a", " echo $1", "-echo b", "+echo 'b'", " echo c"] }], A), {})).status, 0);
+  const firstRan = await first;
+  assert.equal(firstRan.status, 2);
+  assert.match(firstRan.stderr, /aba-marker/);
+});
+
 test("a change nobody journaled between the held lint and a later Edit: the held finding is reported, not lost", async () => {
   const s = setup();
   s.setFindings(FINDING_L2);

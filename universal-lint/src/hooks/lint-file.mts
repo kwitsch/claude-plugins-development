@@ -2238,6 +2238,22 @@ export function recordEdit(fp: string, real: string, hunks: EditHunk[] | null, b
 }
 
 /**
+ * Name of the newest journal record of the file, taken next to `d0` and `d1`: a record that appeared while the linter
+ * ran means an edit landed then, even when the content is back to `d0` (an edit and its exact undo, A->B->A).
+ *
+ * @param rec - The lint's own journal record, or null.
+ * @returns The newest record name of `rec.key`, or null (no record, or the journal is unreadable).
+ */
+function journalTail(rec: EditRecord | null): string | null {
+  if (!rec) return null;
+  try {
+    return readdirSync(settleDir()).filter((n) => n.startsWith(`${rec.key}-`) && n.endsWith(".json")).sort().at(-1) ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * The settle window (F34): hold the findings of a finished lint for `settleWaitMs()`, then drop every diagnostic
  * located in `resolved` on a line a later edit of the file removed or replaced (that edit's own lint reports what
  * persists there). Diagnostics in other files and findings without a located line are never dropped.
@@ -2256,7 +2272,7 @@ export function recordEdit(fp: string, real: string, hunks: EditHunk[] | null, b
  * @param resolved - Lexical absolute path of the linted file.
  * @param rec - The lint's own journal record, or null.
  * @param d0 - Digest of the file right before the lint started, or null.
- * @param d1 - Digest of the file right after the lint ended, or null.
+ * @param d1 - Digest of the file right after the lint ended, or null (also when a journal record appeared during the lint).
  * @returns The findings that survive (possibly fewer diagnostics per finding).
  */
 export async function settleFindings(findings: Finding[], resolved: string, rec: EditRecord | null, d0: string | null, d1: string | null): Promise<Finding[]> {
@@ -2446,9 +2462,11 @@ export async function lintFileHandler(args: PostToolUseHookInput, scoped: { fp: 
     const before = typeof original === "string" ? createHash("sha256").update(original).digest("base64") : null;
     const rec = recordEdit(resolved, scoped.real, editHunks(args), before);
     const d0 = digestOrNull(resolved);
+    const t0 = journalTail(rec);
     // `await` inside the try is load-bearing: a rejected promise must land in the catch (fail open).
     const kept = await lintResolved(resolved, args.cwd, ranges, "PostToolUse");
-    const d1 = kept.length > 0 ? digestOrNull(resolved) : null; // only a held finding needs the second digest
+    // only a held finding needs the second digest; a record journaled during the lint (A->B->A) counts as a change
+    const d1 = kept.length > 0 && journalTail(rec) === t0 ? digestOrNull(resolved) : null;
     return formatFindings(await settleFindings(kept, resolved, rec, d0, d1), "PostToolUse", "universal-lint");
   } catch {
     return {};
@@ -2786,8 +2804,10 @@ export async function fileChangedHandler(args: PostToolUseHookInput): Promise<Ho
     let d1: string | null = null;
     try {
       d0 = digestOrNull(s.fp);
+      const t0 = journalTail(rec);
       kept = await lintResolved(s.fp, cwd, null, "FileChanged");
-      if (kept.length > 0) d1 = digestOrNull(s.fp); // only a held finding needs the second digest
+      // only a held finding needs the second digest; a record journaled during the lint (A->B->A) counts as a change
+      if (kept.length > 0 && journalTail(rec) === t0) d1 = digestOrNull(s.fp);
     } finally {
       try {
         if (slot) rmSync(slot, { force: true });
