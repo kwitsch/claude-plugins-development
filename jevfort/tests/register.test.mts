@@ -1067,7 +1067,7 @@ test("Writing the debug line does not cost the step its routed effort", async ($
   expect(seen.map((e) => e.effort)).toEqual(["xhigh"]);
 });
 
-test("The debug log says when Jev gave no effort, and says nothing with routing off", async ($, on) => {
+test("The debug log says when Jev gave no effort", async ($, on) => {
   const logged: string[] = [];
   on("ui.log", (_$, e) => (logged.push(String(e.text)), { value: undefined }));
   setup(on, { messages: [user("what does this project do?")], jev: () => 503 });
@@ -1097,6 +1097,17 @@ test("routing: false writes no effort line to the debug log", { options: { routi
   setup(on, { messages: [user("migrate the whole app to TypeScript")], jev: byId({ effort: scored(2.9), mechanical: mech(0.1) }) });
   claudeBeneath(on, []);
   await drain($.turn.step(step));
+  expect(logged).toEqual([]);
+});
+
+// The failed-ask branch: a take ask (next_action) still goes out with routing off, and its failure logs nothing.
+test("routing: false writes no 'jev unavailable' line when a take ask fails", { options: { routing: false } }, async ($, on) => {
+  const logged: string[] = [];
+  on("ui.log", (_$, e) => (logged.push(String(e.text)), { value: undefined }));
+  const { sent } = setup(on, { messages: [user("what does src/app.ts export?")], files: [`${CWD}/src/app.ts`], jev: () => 503 });
+  claudeBeneath(on, []);
+  await drain($.turn.step(step));
+  expect(ids(sent)).toContain("next_action");
   expect(logged).toEqual([]);
 });
 
