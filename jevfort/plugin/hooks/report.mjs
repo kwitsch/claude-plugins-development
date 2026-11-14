@@ -51,7 +51,8 @@ export function buildReport(log, threshold) {
 	if (!log.length) return "**Jev pilot report:** the log is empty. Use Claude for a while and run `/jev report` again.";
 	const of = (kind) => log.filter((e) => e.kind === kind);
 	const out = [];
-	const since = new Date(log[0].at).toISOString().slice(0, 16).replace("T", " ");
+	const first = new Date(log[0].at);
+	const since = `${day(first)} ${pad(first.getHours())}:${pad(first.getMinutes())}`;
 	const takes = of("take");
 	const taken = takes.filter((e) => e.applied);
 	const compares = of("compare");

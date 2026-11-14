@@ -19,6 +19,20 @@ test("an empty log gives a hint, not a crash", () => {
   expect(buildReport([], 0.85)).not.toContain("shadow");
 });
 
+test("the report header shows the first entry in local time, like the rows", () => {
+  const tz = process.env.TZ;
+  process.env.TZ = "Europe/Berlin";
+  try {
+    const at = Date.UTC(2026, 10, 14, 9, 0);
+    const report = buildReport([{ at, kind: "compare", applied: false, text: "", turnId: "t1", data: { request: "x", best: "read a", bestP: 0.5 } }], 0.9);
+    expect(report).toContain("since 2026-11-14 10:00 ");
+    expect(report).toContain("| 10:00 |");
+  } finally {
+    if (tz === undefined) delete process.env.TZ;
+    else process.env.TZ = tz;
+  }
+});
+
 test("shell output and slash-command rows are not taken as the request", () => {
   // Live (2.1.325): a `!` command starts a turn of its own, so the prompt before it is not what that turn answers.
   const turn = splitTurn([

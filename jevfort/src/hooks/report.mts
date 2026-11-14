@@ -142,7 +142,9 @@ export function buildReport(log: readonly Entry[], threshold: number): string {
   if (!log.length) return "**Jev pilot report:** the log is empty. Use Claude for a while and run `/jev report` again.";
   const of = (kind: Entry["kind"]) => log.filter((e) => e.kind === kind);
   const out: string[] = [];
-  const since = new Date(log[0].at).toISOString().slice(0, 16).replace("T", " ");
+  // Local time, like the table rows (`when`).
+  const first = new Date(log[0].at);
+  const since = `${day(first)} ${pad(first.getHours())}:${pad(first.getMinutes())}`;
 
   const takes = of("take");
   const taken = takes.filter((e) => e.applied);
