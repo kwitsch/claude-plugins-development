@@ -539,6 +539,23 @@ test("Parallel calls that time out in one outage lengthen the pause once", async
   expect(calls()).toBe(3);
 });
 
+test("A clock that reads earlier than the last timeout ends the pause (a new session)", async ($, on) => {
+  const back = { at: -1 };
+  on("clock.now", (_$, e, next) => (back.at < 0 ? next(e) : { value: back.at }));
+  let hang = true;
+  const { clock, calls } = setup(on, { messages: [], jev: () => (hang ? new Promise<never>(() => {}) : undefined), env: { JEV_URL: "https://jev.example/x" } });
+  await clock.advance(100_000);
+  const p = $.tool.call({ ...ESTIMATE });
+  while (calls() < 1) await clock.advance(0);
+  await clock.advance(4000);
+  await p;
+  // The 30 s pause would still hold; the clock now reads 5 s, before the timeout at 100 s.
+  back.at = 5000;
+  hang = false;
+  await $.tool.call({ ...ESTIMATE });
+  expect(calls()).toBe(2);
+});
+
 for (const [name, deny, env] of [["a jev-api timeout answered before jevfort's own", "batch: timeout after 4000ms", { JEV_URL: "https://jev.example/x" }], ["a Haiku timeout (14 s, before the 15 s budget)", "batch: fallback: timeout after 14000ms", {}]] as const) {
   test(`${name} pauses Jev like the local timeout`, async ($, on) => {
     const seen: unknown[] = [];
