@@ -70,8 +70,24 @@ test("A general-purpose subagent is switched only when Jev is confident; an expl
   await $.tool.call({ tool: "Agent", description: "find usages", prompt: "Find every caller of addTodo", tool_use_id: "a4" });
   expect(spawned).toEqual(["Explore", "Plan", "Explore", undefined]);
   // The offered agent types are the options of one choice call per Agent call.
-  expect(sent.map((q) => q.type)).toEqual(["choice", "choice", "choice", "choice"]);
+  // The call with a specific type (a2) is never switched, so it asks nothing.
+  expect(sent.map((q) => q.type)).toEqual(["choice", "choice", "choice"]);
   expect(sent[0].criteria).toEqual({ "general-purpose": "General tasks", Explore: "Read-only codebase search" });
+});
+
+test("An Agent call with a specific type makes no Jev request", async ($, on) => {
+  const sent = base(on, () => ({ type: "choice", choice: "Explore", probabilities: { Explore: 0.99 }, confidence: 0.9 }));
+  on("agent.offer", () => ({ isOffered: true }));
+  const spawned: unknown[] = [];
+  on("tool.call", (_$, e) => {
+    spawned.push(e.subagent_type);
+    return { result: undefined };
+  });
+  await $.agent.offer({ agent: "general-purpose", description: "General tasks", source: "built-in" });
+  await $.agent.offer({ agent: "Explore", description: "Read-only codebase search", source: "built-in" });
+  await $.tool.call({ tool: "Agent", description: "plan", prompt: "Plan it", subagent_type: "Plan", tool_use_id: "a1" });
+  expect(spawned).toEqual(["Plan"]);
+  expect(sent).toEqual([]);
 });
 
 test("agentTypes: false never asks Jev about an Agent call and keeps its type", { options: { agentTypes: false } }, async ($, on) => {

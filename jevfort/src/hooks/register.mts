@@ -937,7 +937,8 @@ export const register = (on: On, options: Options): void => {
       // (its plugin unloaded, its agent file removed) and must not become a switch target.
       const latest = Math.max(...[...offered.values()].map((o) => o.turn));
       for (const [name, o] of offered) if (o.turn < latest) offered.delete(name);
-      if (offered.size < 2 || claudeType === "fork") return next(e);
+      // A specific type is never switched, so asking would only cost latency.
+      if (offered.size < 2 || !GENERAL.has(claudeType)) return next(e);
 
       const criteria: Record<string, string> = {};
       // shortcut: past jev-api's choice limit later-offered agent types are left out; rank them if users hit it.
