@@ -17,7 +17,7 @@ Legend: `[x]` finished (done, or closed without code: status `closed` in the tas
 
 ## Remaining
 
-- [ ] [F02](tasks/F02-request-size-drives-latency.md) `open` medium: Jev latency follows the request size (~0.16 ms per byte); full clips cost ~3 s before the first token and 1.7 s per done check (0.11.0: 2.65 s and 1.77 s)
+- [ ] [F02](tasks/F02-request-size-drives-latency.md) `open` medium: Jev latency follows the request size (~0.16 ms per byte); full clips cost ~3 s before the first token and 1.7 s per done check (0.11.0: 2.65 s and 1.77 s). 0.12.0: only step 0 (and take-steps steps) and the task-end question remain; waiting for a user decision on accuracy vs latency (the calibration prompts are not in the repository)
 - [ ] [F14](tasks/F14-agent-type-choice-latency.md) `open` medium: the agent-type choice waits ~1.15 s (real median, 103 calls) before every Agent dispatch and switched none; 9% of the calls cannot switch at all
 
 ## Closed without code (measurement records, decided 2026-11-14)
