@@ -70,6 +70,7 @@ test("temp, task-output and Claude config paths are never offered for reading", 
   expect(isSafeToOffer("/private/tmp/claude-503/-Users-x/abc/tasks/a889.output")).toBe(false);
   expect(isSafeToOffer("/tmp/jev-gate-test/notes.txt")).toBe(false);
   expect(isSafeToOffer("/Users/nimf/.claude/settings.json")).toBe(false);
+  expect(isSafeToOffer("/var/folders/ab/T/claude/notes.txt")).toBe(false);
   expect(isSafeToOffer("/Users/nimf/Work/jev-demo/todo-app/todo.js")).toBe(true);
 });
 
@@ -92,6 +93,9 @@ test("Claude's config and credentials are never offered, also with cwd at $HOME"
   expect(isSafeToOffer("/home/u/.claude/settings.json", "/home/u")).toBe(false);
   expect(isSafeToOffer("/home/u/.claude.json", "/home/u")).toBe(false);
   expect(isSafeToOffer("/home/u/.claude.json", "/home/u/proj")).toBe(false);
+  expect(isSafeToOffer("/home/u/.claude/projects/-home-u/memory/MEMORY.md", "/home/u")).toBe(false);
+  expect(isSafeToOffer("/home/u/.claude/settings.local.json", "/home/u")).toBe(false);
+  expect(isSafeToOffer("/home/u/.claude/CLAUDE.md", "/home/u/proj")).toBe(false);
   expect(isSafeToOffer("/home/u/notes.md", "/home/u")).toBe(true);
 });
 
