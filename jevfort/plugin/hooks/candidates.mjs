@@ -29,9 +29,9 @@ export function quotedTerms(text) {
 	}
 	return [...seen].slice(0, MAX_SEARCHES);
 }
-const UNSAFE_PATH = /(^|\/)(tmp|private\/tmp|private\/var\/folders|var\/folders)\/|\/\.claude\/|\/tasks\/[^/]+\.output$|\.output$|\.jsonl$/;
-const TRANSCRIPT = /\/tasks\/[^/]+\.output$|\.output$|\.jsonl$/;
-const CLAUDE_CONFIG = /\/\.claude\.json(?:$|[.~-])|\/\.claude\/(?:projects\/|(?:\.credentials|settings(?:\.local)?)\.json(?:$|[.~-]))/;
+const UNSAFE_PATH = /(^|\/)(tmp|private\/tmp|private\/var\/folders|var\/folders)\/|\/\.claude\/|\/tasks\/[^/]+\.output$|\.output$|\.jsonl$/i;
+const TRANSCRIPT = /\/tasks\/[^/]+\.output$|\.output$|\.jsonl$/i;
+const CLAUDE_CONFIG = /\/\.claude\.json(?:$|[.~-])|\/\.claude\/(?:projects\/|(?:\.credentials|settings(?:\.local)?)\.json(?:$|[.~-]))/i;
 export const isSafeToOffer = (file, cwd) => !/(^|\/)\.\.(\/|$)/.test(file) && !CLAUDE_CONFIG.test(file) && (cwd && file.startsWith(`${cwd}/`) ? !TRANSCRIPT.test(file) : !UNSAFE_PATH.test(file));
 export const absolute = (cwd, p) => (p.startsWith("/") ? p : `${cwd}/${p}`).replace(/\/(?:\.\/)+/g, "/");
 export function sameCall(a, b) {

@@ -95,18 +95,19 @@ export function quotedTerms(text: string): string[] {
  * Never offered for reading: Claude Code's temp and task folders (a subagent's `.output` file is its whole
  * transcript and floods the context), system temp dirs, and Claude's own config tree.
  */
-const UNSAFE_PATH = /(^|\/)(tmp|private\/tmp|private\/var\/folders|var\/folders)\/|\/\.claude\/|\/tasks\/[^/]+\.output$|\.output$|\.jsonl$/;
+const UNSAFE_PATH = /(^|\/)(tmp|private\/tmp|private\/var\/folders|var\/folders)\/|\/\.claude\/|\/tasks\/[^/]+\.output$|\.output$|\.jsonl$/i;
 /**
  * Inside the project only transcripts are refused, so a project that lives in a temp dir (a scratch copy, a
  * benchmark) can still be read.
  */
-const TRANSCRIPT = /\/tasks\/[^/]+\.output$|\.output$|\.jsonl$/;
+const TRANSCRIPT = /\/tasks\/[^/]+\.output$|\.output$|\.jsonl$/i;
 /**
  * Claude's own config and credentials (`~/.claude.json` with MCP env values, the OAuth token file, settings,
  * project memory), refused wherever the cwd is, also when the project is `$HOME` itself. Suffixed copies
- * (`settings.json.bak`, `.claude.json~`) hold the same secrets and are refused too.
+ * (`settings.json.bak`, `.claude.json~`) hold the same secrets and are refused too. All three patterns ignore case:
+ * on APFS, Windows and WSL `/mnt/c` any capitalisation (`.CLAUDE.json`) opens the same file.
  */
-const CLAUDE_CONFIG = /\/\.claude\.json(?:$|[.~-])|\/\.claude\/(?:projects\/|(?:\.credentials|settings(?:\.local)?)\.json(?:$|[.~-]))/;
+const CLAUDE_CONFIG = /\/\.claude\.json(?:$|[.~-])|\/\.claude\/(?:projects\/|(?:\.credentials|settings(?:\.local)?)\.json(?:$|[.~-]))/i;
 /**
  * Whether a file may be offered as a Read candidate: never one with a `..` segment, which can leave the project
  * while still starting with the cwd.
