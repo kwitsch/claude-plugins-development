@@ -15,6 +15,7 @@ export function splitTurn(messages) {
 			const typed = typedCommand(m.text);
 			if (typed && !/^\s*<local-command-(stdout|caveat)>/.test(messages[i + 1]?.text ?? "")) return {
 				request: typed,
+				command: true,
 				steps: messages.slice(i + 1)
 			};
 			continue;

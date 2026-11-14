@@ -112,6 +112,10 @@ subagents load it via ToolSearch), no skills, agents, command hooks or MCP serve
 
 The built-in `cc-plugin-sec-default` passes `session.compact` on past every user-tier hook (debug log: `jevfort: session.compact bypassed by cc-plugin-sec-default (tier user); beneath runs`, and `its session.compact hook was skipped`), as it does for `prompt.compose`, `prompt.section`, `prompt.context` and `classic.Stop` (for `tool.check` only a re-dispatch notice appears, the verdict stays allow: inline-headroom/docs/claude-code-verification.md). So the Jev ranking, the Haiku compaction and the `cacheExpires = 0` reset after a compaction do not run until that changes; core compacts on its own. Seen live with a manual `/compact` in `claude -p`; an interactive session and an auto-compaction were not tried. Nothing in this plugin can get past a prepend-tier hook; the code and its tests stay as they are (the kit runs the hook).
 
+## Known limit: several sessions share one log
+
+`record()` reads and writes the whole `log` and `stats` values and is serialized only inside one process: two Claude processes on the same plugin store can overwrite each other's entries, so `/jev` counts and `/jev report` undercount while several sessions run at once. Behaviour is unaffected. A per-session key merged at read time would fix it; not done.
+
 ## Known limit: a hook above refusing a core read
 
 `turn.step` calls `$.session.messages`, `$.session.cwd` and the summary `$.model.complete` before `next`. A hook above jevfort that refuses one of them skips jevfort's whole `turn.step` hook for that step, including the cache countdown wrap: the countdown then keeps the previous response's expiry and auto-compact may run up to the cache lifetime early. Not guarded (it needs another plugin refusing core reads); the step itself is unaffected.

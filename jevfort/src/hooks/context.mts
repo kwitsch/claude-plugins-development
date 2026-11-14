@@ -47,6 +47,8 @@ export type TurnContext = {
   request: string;
   /** Messages after the request: the turn's steps so far. */
   steps: SessionMessage[];
+  /** True when a slash command started the turn: `request` is the command as typed, its skill text is not in the transcript. */
+  command?: true;
 };
 
 /** One step as Jev's `recent` lists it: an assistant text, or a tool call with its outcome. */
@@ -96,7 +98,7 @@ export function splitTurn(messages: readonly SessionMessage[]): TurnContext | un
     if (m.role !== "user" || m.text.trim() === "" || m.toolResults?.length) continue;
     if (COMMAND_ROW.test(m.text)) {
       const typed = typedCommand(m.text);
-      if (typed && !/^\s*<local-command-(stdout|caveat)>/.test(messages[i + 1]?.text ?? "")) return { request: typed, steps: messages.slice(i + 1) };
+      if (typed && !/^\s*<local-command-(stdout|caveat)>/.test(messages[i + 1]?.text ?? "")) return { request: typed, command: true, steps: messages.slice(i + 1) };
       continue;
     }
     if (!TRANSCRIPT_ONLY.test(m.text)) return { request: m.text, steps: messages.slice(i + 1) };

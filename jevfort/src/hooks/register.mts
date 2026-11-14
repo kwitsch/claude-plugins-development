@@ -1263,7 +1263,8 @@ export const register = (on: On, options: Options): void => {
 
     const questions: Record<string, Question> = {};
     let candidates: Candidate[] = [];
-    if (takeSteps && turn.taken < MAX_TAKES_PER_TURN && (!takeOnlyForBypass || (bypass && e.index === 0 && !e.agentId))) {
+    // Not on a slash-command turn: its skill text is not in the transcript, so Jev (and the Haiku summary) would answer the bare command and the skill never runs.
+    if (takeSteps && !ctx.command && turn.taken < MAX_TAKES_PER_TURN && (!takeOnlyForBypass || (bypass && e.index === 0 && !e.agentId))) {
       candidates = (await buildCandidates($, ctx.request, ctx.steps, calls, e.index)).filter((c) => !(last && sameCall(last, { tool: c.tool, input: c.input })));
       if (candidates.length) questions.next_action = nextActionQuestion(candidates);
     }
@@ -1440,13 +1441,14 @@ export const register = (on: On, options: Options): void => {
     // Jev's own calls come from the vetted candidate list: approve them so auto mode's classifier doesn't refuse
     // them. This and the scratchpad branch are the only places jevfort loosens Claude Code's verdict. A settings deny rule still wins.
     if (e.tool_use_id && ownCalls.has(e.tool_use_id)) {
-      if (base.decision === "deny") return base;
+      // Already allowed (a settings rule): leave it, rewording an allow rule makes the security plugin warn the user.
+      if (base.decision === "deny" || base.decision === "allow") return base;
       return { ...base, decision: "allow", reason: "Jev pilot: vetted action from its read-only/project-script list" };
     }
     const input = (e.input ?? {}) as Record<string, unknown>;
     // Writes into this session's scratchpad are allowed in every permission mode.
     // A mode's ask becomes allow; a settings deny or ask rule (`rule` set) still wins.
-    if (WRITE_TOOLS.has(e.tool) && base.decision !== "deny" && !(base.decision === "ask" && base.rule !== undefined)) {
+    if (WRITE_TOOLS.has(e.tool) && base.decision !== "deny" && base.decision !== "allow" && !(base.decision === "ask" && base.rule !== undefined)) {
       scratchpad ??= {
         roots: [await $.env.get("CLAUDE_CODE_TMPDIR"), await $.env.get("TMPDIR"), "/tmp"].filter((r): r is string => Boolean(r)),
         sid: await $.session.id(),

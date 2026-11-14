@@ -175,9 +175,6 @@ type On = {
   (event: "tool.call", hook: Hook<ToolCall, ToolResult>): void;
 };
 
-/** Description tail shared by the tools. */
-const NEEDS = " Set TYPESAFE_API_KEY, TYPESAFE_BASE_URL or JEV_URL to use Jev; without any of them Claude Haiku answers instead.";
-
 /** The model that stands in for Jev when none of the System One variables is set. */
 const HAIKU_MODEL = "claude-haiku-5-5";
 
@@ -259,7 +256,7 @@ const TOOL_PREFIX = "mcp__jev-api__";
 /** The tool registrations without their name, keyed by tool name. */
 const SPECS: Record<ToolName, Omit<ToolSpec, "name">> = {
   noul: {
-    description: "Ask TypeSafe Jev a yes/no question about a text; returns the probability (0..1) that the answer is true." + NEEDS,
+    description: "Ask TypeSafe Jev a yes/no question about a text; returns the probability (0..1) that the answer is true.",
     inputSchema: {
       type: "object",
       properties: {
@@ -280,7 +277,7 @@ const SPECS: Record<ToolName, Omit<ToolSpec, "name">> = {
     },
   },
   choice: {
-    description: "Ask TypeSafe Jev to pick one of named options for a text; returns the choice, its confidence and every option's probability." + NEEDS,
+    description: "Ask TypeSafe Jev to pick one of named options for a text; returns the choice, its confidence and every option's probability.",
     inputSchema: {
       type: "object",
       properties: {
@@ -299,8 +296,7 @@ const SPECS: Record<ToolName, Omit<ToolSpec, "name">> = {
     },
   },
   score: {
-    description: "Ask TypeSafe Jev to rate a text along ordered levels; returns the score (the expected level: 0 is the first, values between levels are fractional), its confidence, each level's probability and the legend."
-      + NEEDS,
+    description: "Ask TypeSafe Jev to rate a text along ordered levels; returns the score (the expected level: 0 is the first, values between levels are fractional), its confidence, each level's probability and the legend.",
     inputSchema: {
       type: "object",
       properties: {
@@ -319,8 +315,7 @@ const SPECS: Record<ToolName, Omit<ToolSpec, "name">> = {
     },
   },
   batch: {
-    description: "Ask TypeSafe Jev several noul, choice and score questions about one text in a single request; returns a JSON array of the answers in question order, each as the noul, choice or score tool returns it. One invalid or unanswered question fails the whole call."
-      + NEEDS,
+    description: "Ask TypeSafe Jev several noul, choice and score questions about one text in a single request; returns a JSON array of the answers in question order, each as the noul, choice or score tool returns it. One invalid or unanswered question fails the whole call.",
     inputSchema: {
       type: "object",
       properties: {

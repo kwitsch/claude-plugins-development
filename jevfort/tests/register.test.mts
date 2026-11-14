@@ -505,6 +505,35 @@ for (const [beneath, expected] of [["ask", "allow"], ["deny", "deny"]] as const)
   });
 }
 
+// An allow that a settings rule already gave stays as it is: rewording it makes the security plugin warn the user.
+test("A call Jev made itself keeps a settings allow verdict untouched", { options: { takeOnlyForBypass: false } }, async ($, on) => {
+  setup(on, {
+    messages: [user("what does src/app.ts export?")],
+    jev: byId({ next_action: { type: "choice", choice: "read src/app.ts", probabilities: { "read src/app.ts": 0.97, claude: 0.03 }, confidence: 0.95 }, difficulty: easy }),
+    files: [`${CWD}/src/app.ts`],
+  });
+  claudeBeneath(on, []);
+  const base = { decision: "allow", rule: "Read(/proj/**)", reason: "settings rule" };
+  on("tool.check", () => base);
+  const id = toolId((await drain($.turn.step(step))).chunks);
+  expect(await $.tool.check({ tool: "Read", input: { file_path: `${CWD}/src/app.ts` }, tool_use_id: id })).toEqual(base);
+});
+
+// A slash command's skill text is not in the transcript: Jev must not take a step or bypass the turn on the bare command.
+test("A turn started by a slash command is left to Claude (no take, no bypass)", async ($, on) => {
+  const seen: unknown[] = [];
+  const command = "<command-message>read-file</command-message>\n<command-name>/read-file</command-name>\n<command-args>src/app.ts</command-args>";
+  setup(on, {
+    messages: [user("Thanks!"), { role: "assistant", text: "ok", toolUses: [] }, user(command)],
+    jev: byId({ next_action: { type: "choice", choice: "read src/app.ts", probabilities: { "read src/app.ts": 0.97, claude: 0.03 }, confidence: 0.95 }, single_action: mech(0.95) }),
+    files: [`${CWD}/src/app.ts`],
+  });
+  claudeBeneath(on, seen);
+  const { chunks } = await drain($.turn.step(step));
+  expect(toolId(chunks)).toBe("");
+  expect(seen).toHaveLength(1);
+});
+
 // Phase 2: every decision is logged, and Claude's own call is compared with Jev's.
 test("Inside a longer turn Jev's measured top action is compared with Claude's call and reported as agreement", async ($, on) => {
   setup(on, {

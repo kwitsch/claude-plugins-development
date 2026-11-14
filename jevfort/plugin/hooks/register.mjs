@@ -926,7 +926,7 @@ export const register = (on, options) => {
 		}
 		const questions = {};
 		let candidates = [];
-		if (takeSteps && turn.taken < MAX_TAKES_PER_TURN && (!takeOnlyForBypass || bypass && e.index === 0 && !e.agentId)) {
+		if (takeSteps && !ctx.command && turn.taken < MAX_TAKES_PER_TURN && (!takeOnlyForBypass || bypass && e.index === 0 && !e.agentId)) {
 			candidates = (await buildCandidates($, ctx.request, ctx.steps, calls, e.index)).filter((c) => !(last && sameCall(last, {
 				tool: c.tool,
 				input: c.input
@@ -1141,7 +1141,7 @@ export const register = (on, options) => {
 		if ((await jevMissing($)).length) return next(e);
 		const base = await next(e);
 		if (e.tool_use_id && ownCalls.has(e.tool_use_id)) {
-			if (base.decision === "deny") return base;
+			if (base.decision === "deny" || base.decision === "allow") return base;
 			return {
 				...base,
 				decision: "allow",
@@ -1149,7 +1149,7 @@ export const register = (on, options) => {
 			};
 		}
 		const input = e.input ?? {};
-		if (WRITE_TOOLS.has(e.tool) && base.decision !== "deny" && !(base.decision === "ask" && base.rule !== undefined)) {
+		if (WRITE_TOOLS.has(e.tool) && base.decision !== "deny" && base.decision !== "allow" && !(base.decision === "ask" && base.rule !== undefined)) {
 			scratchpad ??= {
 				roots: [
 					await $.env.get("CLAUDE_CODE_TMPDIR"),
