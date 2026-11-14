@@ -2,7 +2,7 @@
 
 Source: performance analysis of the universal-lint hook (0.14.0) on 2026-11-07, WSL2, 12 cores, 9.7 GB RAM (node 24.22.2, git 2.43.0, npm 11.19.1, Claude Code 2.1.319). Five dimensions, each with an independent verification pass (refuted findings removed, corrected numbers used): JS/TS/sh/py benchmarks, other languages (PHP/Java/Kotlin/YAML/Markdown/CSS/Go/Rust), FileChanged and watch list, real Claude Code sessions (2908 transcripts mined plus live `claude -p --debug-file` runs), static hot-path walk. Linters: real binaries for tsc 7.0.2 (native), rtk 0.48.0, cargo/clippy, go vet; through npx (warm cache, plus cold runs with a fresh `npm_config_cache`) for eslint, markdownlint-cli2, stylelint, and oxlint (a root devDependency here, resolved by npx from `node_modules/.bin`); missing or replaced by instant stubs for shellcheck, ruff, yamllint, phpstan/psalm, ktlint, checkstyle, golangci-lint and markdownlint. One detail document per task in `tasks/`; read it before working on the task.
 
-Finished: all of F01-F34 shipped or closed docs-only in 0.15.1-0.15.29 and 0.16.0 (F34, user-requested settle window); 0.15.30 was the final verification and docs pass (no code change). Current baseline: the F01 doc 'Measured' section (0.15.29); 0.16.0 numbers, the 0.15.30 A/B and the settle-window costs: [EVALUATION-2026-11-14.md](EVALUATION-2026-11-14.md). Re-check recipes: docs/README.md. Open since that evaluation: F35, F37 (F36 shipped in 0.16.1) (section Remaining).
+Finished: all of F01-F34 shipped or closed docs-only in 0.15.1-0.15.29 and 0.16.0 (F34, user-requested settle window); 0.15.30 was the final verification and docs pass (no code change). Current baseline: the F01 doc 'Measured' section (0.15.29); 0.16.0 numbers, the 0.15.30 A/B and the settle-window costs: [EVALUATION-2026-11-14.md](EVALUATION-2026-11-14.md). Re-check recipes: docs/README.md. Open since that evaluation: F37 (F35 and F36 shipped in 0.16.1) (section Remaining).
 
 Measurements: every number in these documents is from one machine on one day, often under load (load average 6-8 while other benchmarks ran, about ±15% noise), and the machine's PATH carries 44 Windows `/mnt/c` dirs that inflate any PATH scan. Re-measure (F01), with `scripts/perf.mts`, before relying on a number, and judge each change against a fresh baseline.
 
@@ -60,11 +60,12 @@ Legend: `[x]` finished. `[ ]` not finished; tag = `open` (code change, not start
 
 - [x] [F36](tasks/F36-held-parse-error-fixed-elsewhere.md) A held parse error is dropped by any later edit `done` priority:low. Shipped in 0.16.1: `gateFinding(..., "drop")`.
 
+- [x] [F35](tasks/F35-skip-hold-when-nothing-droppable.md) Skip the settle hold when no held diagnostic can be dropped `done` priority:medium. Shipped in 0.16.1: foreign-only and unlocated-only findings are reported at once.
+
 ## Remaining
 
 Found by [EVALUATION-2026-11-14](EVALUATION-2026-11-14.md) on 0.16.0.
 
-- [ ] [F35](tasks/F35-skip-hold-when-nothing-droppable.md) Skip the settle hold when no held diagnostic can be dropped `open` priority:medium. Foreign-file-only and unlocated-only findings are held 5 s (5078-5081 ms against 54 ms without a hold) and come out byte-identical.
 - [ ] [F37](tasks/F37-hook-design-rule-size.md) hook-design.md is over the 40,000-character rule limit `open` priority:low. 42,361 characters (0.15.30: 36,010); docs only.
 
 ## Dependencies

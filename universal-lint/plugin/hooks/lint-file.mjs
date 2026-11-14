@@ -1156,6 +1156,9 @@ export function recordEdit(fp, real, hunks) {
 }
 export async function settleFindings(findings, resolved, rec, d0, d1) {
 	if (findings.length === 0 || !rec || d0 === null || d0 !== d1) return findings;
+	try {
+		if (findings.every((f) => gateFinding(f, () => false, resolved, "drop")?.text === f.text)) return findings;
+	} catch {}
 	const wait = settleWaitMs();
 	if (wait > 0) await sleep(wait);
 	let later;

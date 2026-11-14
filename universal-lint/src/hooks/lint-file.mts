@@ -2183,7 +2183,7 @@ export function recordEdit(fp: string, real: string, hunks: EditHunk[] | null): 
  * is the last journal record with `digest === d0`; only the records after it are later edits. A file that changed
  * during the lint (`d0 !== d1`), no matching record, no later record, a missing or unreadable journal or record
  * all mean "cannot tell": the findings are returned as they are (fail open, reported). Nothing is held when there is
- * nothing to report or no own record.
+ * nothing to report, no own record, or nothing the filter could drop (foreign or unlocated findings only).
  *
  * @param findings - The gated findings of the lint.
  * @param resolved - Lexical absolute path of the linted file.
@@ -2194,6 +2194,12 @@ export function recordEdit(fp: string, real: string, hunks: EditHunk[] | null): 
  */
 export async function settleFindings(findings: Finding[], resolved: string, rec: EditRecord | null, d0: string | null, d1: string | null): Promise<Finding[]> {
   if (findings.length === 0 || !rec || d0 === null || d0 !== d1) return findings;
+  // Nothing the filter could drop (worst case: every own-file located line goes): no later edit changes the result, no hold.
+  try {
+    if (findings.every((f) => gateFinding(f, () => false, resolved, "drop")?.text === f.text)) return findings;
+  } catch {
+    // fail open: hold as usual
+  }
   const wait = settleWaitMs();
   if (wait > 0) await sleep(wait);
   let later: Array<EditHunk[] | null>;

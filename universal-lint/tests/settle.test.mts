@@ -374,3 +374,20 @@ test("settleFindings: holds for the settle window when there is something to hol
   await settleFindings([found(w.proj, [3])], w.file, rec, d0, d0);
   assert.ok(Date.now() - t0 >= 380, "held");
 });
+
+test("settleFindings: findings the filter cannot drop (foreign file, unlocated) are not held; own-line and parse errors are", async () => {
+  const w = world();
+  const { rec, d0 } = await lay(w, [{ content: SIX.replace("l6", "L6"), hunks: REPLACE_6 }]);
+  process.env.UNIVERSAL_LINT_SETTLE_MS = "400";
+  const foreign = { tool: "tsc", target: "a.sh", base: w.proj, text: "/other/b.ts:1:1 error elsewhere-marker" };
+  const unlocated = { tool: "tsc", target: "a.sh", base: w.proj, text: "plain summary without a location" };
+  const t0 = Date.now();
+  assert.deepEqual(await settleFindings([foreign, unlocated], w.file, rec, d0, d0), [foreign, unlocated]);
+  assert.ok(Date.now() - t0 < 200, "no hold");
+  const parse = { tool: "shellcheck", target: "a.sh", base: w.proj, text: "a.sh:3:1: error: Couldn't parse this. [SC1073]" };
+  for (const f of [[found(w.proj, [3])], [parse], [found(w.proj, [3], ["/other/b.ts:1:1 error x"])]]) {
+    const t1 = Date.now();
+    await settleFindings(f, w.file, rec, d0, d0);
+    assert.ok(Date.now() - t1 >= 380, "held");
+  }
+});

@@ -1,14 +1,14 @@
 ---
 id: F35
 title: Skip the settle hold when no held diagnostic can be dropped
-status: open
+status: done
 priority: medium
 area: universal-lint/src/hooks/lint-file.mts (settleFindings, gateFinding)
 ---
 
 ## Status
 
-Open. Found by [EVALUATION-2026-11-14](../EVALUATION-2026-11-14.md) "Settle hold" on 0.16.0.
+Done in 0.16.1 (shipped together with F36). Found by [EVALUATION-2026-11-14](../EVALUATION-2026-11-14.md) "Settle hold" on 0.16.0.
 
 ## Problem
 
@@ -48,6 +48,12 @@ Update the contract in `.claude/rules/hook-design.md` "Settle window (F34)" (net
 - Unit test in `tests/settle.test.mts` for the precheck (own-file located, foreign, unlocated, parse error).
 - Re-run the settle bench rows of EVALUATION-2026-11-14 (method in its "How it was measured"): foreign-only and unlocated-only back to the 0.15.30 figure (about 54 ms).
 - `pnpm --filter universal-lint build && pnpm --filter universal-lint test && pnpm lint`.
+
+## Result
+
+`settleFindings` runs `gateFinding(f, () => false, resolved, "drop")` per finding before the hold ("drop", not `false` as first drafted: F36 made a parse error droppable, so it keeps the hold) and returns `findings` at once when every finding keeps its text; an error in the precheck holds as before.
+
+Verified by `tests/settle.test.mts` ("findings the filter cannot drop ... are not held", failed before the change: 400 ms hold on foreign/unlocated findings, now under 200 ms; own-line, parse error and mixed findings still held for at least 380 ms) and `tests/settle-process.test.mts` (real hook processes, hold 1500 ms: foreign-only and unlocated-only exit 2 under 1000 ms, mixed exits 2 after at least 1400 ms). The EVALUATION bench rows were not re-run; the test thresholds replace them.
 
 ## Constraints
 
