@@ -1,10 +1,11 @@
 # universal-lint docs (for Claude sessions)
 
-Working documents for agent sessions. Not shipped (`plugin/` is the installable part), not user documentation. Language: English. The F01-F33 performance run is finished (0.15.1-0.15.29 plus the 0.15.30 closure); `TASKS.md` stays the index if a task is reopened.
+Working documents for agent sessions. Not shipped (`plugin/` is the installable part), not user documentation. Language: English. The F01-F33 performance run is finished (0.15.1-0.15.29 plus the 0.15.30 closure), F34 shipped in 0.16.0; the evaluation of 2026-11-14 ([EVALUATION-2026-11-14.md](EVALUATION-2026-11-14.md)) opened F35-F37, shipped in 0.16.1; the second one of that day ([EVALUATION-2026-11-14b.md](EVALUATION-2026-11-14b.md), on 0.16.1) opened F38-F39. `TASKS.md` is the index.
 
 ## Layout
 
-- `TASKS.md`: index and staged checklist of all performance tasks (F01-F33), with dependencies. Start here.
+- `TASKS.md`: index and staged checklist of all performance tasks (F01-F39), with dependencies. Start here.
+- `EVALUATION-<date>.md`: dated evaluations (method, one-machine numbers, comparison, remaining findings, bug hunt, live validation); never edit old numbers, write a new dated file (a second run on the same day gets a letter suffix, `EVALUATION-2026-11-14b.md`).
 - `tasks/<id>-<slug>.md`: one detail document per task. Frontmatter: `id`, `title`, `status` (`done|partial|open|docs-only|measurement-only`), `priority`, `area`. Sections: Status, Problem, Evidence, Code locations, Approach, Verification, Constraints, Related.
 
 ## What shipped
@@ -33,7 +34,7 @@ All of F01-F33 shipped or were closed docs-only in universal-lint 0.15.1-0.15.29
 
 - Original 0.14.0 analysis: the `TASKS.md` header and each task's Evidence section.
 - Before/after numbers of a change: that task's Status or "Measured" section.
-- Current baseline: `tasks/F01-measurement-baseline.md`, "Measured" (0.15.29 medians, machine label).
+- Current baseline: `tasks/F01-measurement-baseline.md`, "Measured" (0.15.29 medians, machine label); 0.16.0 medians, the 0.15.30 A/B and the settle-window costs (hold, journal, digests, bursts): `EVALUATION-2026-11-14.md`; 0.16.1 medians, the F35/F36 effect, the precheck cost and bursts with an own-line finding per file: `EVALUATION-2026-11-14b.md`.
 - Harness and live-hook recipe: `../.claude/rules/hook-design.md`, "Measured cost".
 - Final verification of 0.15.30: 321 tests pass, `pnpm lint` exit 0, `claude plugin validate` passes (non-blocking ICON_MISSING warning, pre-existing), all 16 `perf.mts` cases ok; the table is the F01 "Measured" section.
 

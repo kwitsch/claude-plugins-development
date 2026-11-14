@@ -1,7 +1,7 @@
 // File detection: SessionStart/CwdChanged watch list and FileChanged linting, against the built hook in a real git repo.
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
-import { mkdirSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "vitest";
 import { FILE_CHANGED_SLOTS } from "../plugin/hooks/lint-file.mjs";
@@ -195,6 +195,20 @@ test("FileChanged: a tracked, modified file is linted whole and labelled", () =>
   assert.match(e.lines()[0], /^shellcheck /);
 });
 
+test("FileChanged: a modified file reached through a committed symlinked dir (cwd through the link) is linted", () => {
+  const e = makeEnv();
+  e.recStub("shellcheck", 1);
+  mkdirSync(path.join(e.cwd, "real"), { recursive: true });
+  const a = e.file("real/a.sh", "echo a\n");
+  symlinkSync("real", path.join(e.cwd, "link"));
+  gitInit(e);
+  writeFileSync(a, "echo $1\n");
+  const link = path.join(e.cwd, "link");
+  const r = changed(e, path.join(link, "a.sh"), { cwd: link });
+  assert.equal(r.status, 2);
+  assert.match(e.lines()[0], /^shellcheck /);
+});
+
 test("FileChanged: skips unchanged, ignored, unlink, outside-cwd, escaping/dangling links and scratchpad files", () => {
   const e = makeEnv();
   e.recStub("shellcheck", 1);
@@ -226,6 +240,18 @@ test("FileChanged: skips unchanged, ignored, unlink, outside-cwd, escaping/dangl
   assert.deepEqual(e.lines(), []);
 });
 
+test("FileChanged: a glob-like name unchanged against HEAD is skipped while a file it would match is modified", () => {
+  const e = makeEnv();
+  e.recStub("shellcheck", 1);
+  const glob = e.file("[ab].sh", "echo g\n");
+  const a = e.file("a.sh", "echo a\n");
+  gitInit(e);
+  writeFileSync(a, "echo $1\n");
+  const r = changed(e, glob);
+  assert.equal(r.status, 0);
+  assert.deepEqual(e.lines(), []);
+});
+
 test("FileChanged: skipped while the content matches the Write/Edit digest, linted after a further change", () => {
   const e = makeEnv();
   e.recStub("shellcheck", 1);
@@ -239,6 +265,41 @@ test("FileChanged: skipped while the content matches the Write/Edit digest, lint
   writeFileSync(a, "echo $2\n");
   assert.equal(changed(e, a).status, 2);
   assert.equal(e.lines().length, 2);
+  // the stale digest is gone: an outside restore of the written bytes lints
+  writeFileSync(a, "echo $1\n");
+  assert.equal(changed(e, a).status, 2);
+  assert.equal(e.lines().length, 3);
+});
+
+test("FileChanged: a stale digest that cannot be removed (read-only store) still lints the change", () => {
+  const e = makeEnv();
+  e.recStub("shellcheck", 1);
+  const a = e.file("a.sh", "echo a\n");
+  gitInit(e);
+  writeFileSync(a, "echo $1\n");
+  e.run(a, { out: OUT });
+  const written = path.join(e.data, "written");
+  chmodSync(written, 0o555);
+  try {
+    writeFileSync(a, "echo $2\n");
+    assert.equal(changed(e, a).status, 2);
+    assert.equal(e.lines().length, 2);
+  } finally {
+    chmodSync(written, 0o755);
+  }
+});
+
+test("FileChanged: a write by another program that landed before the Edit's hook ran is still linted", () => {
+  const e = makeEnv();
+  e.recStub("shellcheck", 1);
+  const a = e.file("a.sh", "echo a\necho b\n");
+  gitInit(e);
+  writeFileSync(a, "echo A\necho $2\n"); // the Edit changed line 1, a formatter/editor then line 2, all before the hook
+  const patch = [{ oldStart: 1, oldLines: 1, newStart: 1, newLines: 1, lines: ["-echo a", "+echo A"] }];
+  e.run(a, { toolName: "Edit", toolResponse: { originalFile: "echo a\necho b\n", structuredPatch: patch } });
+  const before = e.lines().length;
+  assert.equal(changed(e, a).status, 2);
+  assert.equal(e.lines().length, before + 1);
 });
 
 test("FileChanged: outside a git repo the file is linted (git failure means lint)", () => {
@@ -443,6 +504,23 @@ test("FileChanged: a change after the last completed check runs tsc again, a new
   writeFileSync(path.join(dir, lasts[0]), String(Date.now()));
   const r = changed(e, a);
   assert.equal(r.status, 0);
+  assert.equal(calls(e, "tsc "), 2);
+});
+
+test("FileChanged: the payload's session_id keys the coverage stamp, another session runs tsc again (F13)", () => {
+  const e = makeEnv();
+  e.file("tsconfig.json", TSCONFIG);
+  slowStub(e, "tsc", 0, "a.ts(1,1): error TS2322: marker", 2);
+  const a = e.file("a.ts", "export const a = 1;\n");
+  gitInit(e);
+  writeFileSync(a, "export const a = 2;\n");
+  for (const [i, session_id] of ["A", "B"].entries()) {
+    const r = changed(e, a, { session_id });
+    assert.equal(r.status, 2);
+    assert.match(r.stderr, /TS2322: marker/);
+    assert.equal(calls(e, "tsc "), i + 1);
+  }
+  assert.equal(changed(e, a, { session_id: "A" }).status, 0);
   assert.equal(calls(e, "tsc "), 2);
 });
 

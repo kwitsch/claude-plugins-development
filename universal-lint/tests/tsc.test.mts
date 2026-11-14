@@ -86,6 +86,18 @@ test("tsc Edit: a diagnostic only outside the edited line -> exit 0", () => {
   assert.equal(r.ctx, "");
 });
 
+test("tsc Edit: a U+2028 above the edit shifts tsc's lines past the patch's -> reported whole-file, exit 2", () => {
+  const e = makeEnv();
+  e.file("tsconfig.json", "{\"compilerOptions\":{\"noEmit\":true},\"include\":[\"*.ts\"]}");
+  const l1 = "export const s = \"a\u2028b\";";
+  const a = e.file("a.ts", `${l1}\nexport const x: number = 1;\nexport const y: number = "s";\n`);
+  e.recStub("tsc", 2);
+  const patch = [{ oldStart: 1, oldLines: 3, newStart: 1, newLines: 3, lines: [` ${l1}`, " export const x: number = 1;", "-export const y: number = 2;", "+export const y: number = \"s\";"] }];
+  const r = e.run(a, { toolName: "Edit", toolResponse: { structuredPatch: patch }, out: "a.ts(4,14): error TS2322: u2028-marker" });
+  assert.equal(r.status, 2);
+  assert.match(r.ctx, /u2028-marker/);
+});
+
 /** A tsconfig.json that governs `*.ts` in the project root. */
 const TSCONFIG = "{\"compilerOptions\":{\"noEmit\":true},\"include\":[\"*.ts\"]}";
 const TS = "const x: number = 1;\n";
@@ -121,6 +133,13 @@ test("tsc: solution-style tsconfig.json (references only) -> {}, tsc stub never 
   e.recStub("tsc", 2);
   assert.deepEqual(e.run(e.file("a.ts", TS), { out: "issue" }).result, {});
   assert.deepEqual(e.lines(), []);
+});
+
+test("tsc: references with no files/include (tsc default include) -> tsc stub invoked, finding surfaced", () => {
+  const e = makeEnv();
+  e.file("tsconfig.json", "{\"references\":[{\"path\":\"./lib\"}]}");
+  e.recStub("tsc", 2);
+  assert.match(e.run(e.file("a.ts", TS), { out: "a.ts(1,1): error TS2322: tsc-finding-marker" }).ctx, /tsc-finding-marker/);
 });
 
 test("tsc clean (exit 0) -> {}", () => {
@@ -179,6 +198,15 @@ test("tsc: absent from PATH but present at node_modules/.bin/tsc -> that absolut
   const r = e.run(a);
   assert.match(r.ctx, /local-tsc-marker/);
   assert.ok(e.lines().some((l) => l.startsWith("localtsc ")));
+});
+
+test("tsc: on PATH and at node_modules/.bin/tsc -> the PATH one runs", () => {
+  const { e, a } = proj();
+  e.recStub("tsc", 0);
+  chmodSync(e.file("node_modules/.bin/tsc", "#!/usr/bin/env bash\necho localtsc >> \"$RECORD\"\n"), 0o755);
+  e.run(a);
+  assert.ok(e.lines().some((l) => l.startsWith("tsc ")));
+  assert.ok(!e.lines().includes("localtsc"));
 });
 
 test("tsc: absent from PATH and no node_modules/.bin/tsc -> {}, no candidate", () => {

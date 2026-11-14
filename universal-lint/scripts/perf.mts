@@ -91,7 +91,7 @@ function makeFixtures(dir: string): Case[] {
   git(dir, "commit", "-q", "-m", "fixture");
   const repo = execFileSync("git", ["rev-parse", "--show-toplevel"], { cwd: ROOT, encoding: "utf8" }).trim();
   /** PostToolUse payload for fixture file `f`. */
-  const post = (tool: string, f: string, extra: Record<string, unknown> = {}): object => ({ hook_event_name: "PostToolUse", tool_name: tool, tool_input: { file_path: join(dir, f) }, tool_response: { success: true, ...extra }, cwd: dir });
+  const post = (tool: string, f: string, extra: Record<string, unknown> = {}): object => ({ hook_event_name: "PostToolUse", tool_name: tool, tool_input: { file_path: join(dir, f), content: tool === "Write" ? files[f] : undefined }, tool_response: { success: true, ...extra }, cwd: dir });
   /** FileChanged payload for fixture file `f`. */
   const changed = (event: string, f: string): object => ({ hook_event_name: "FileChanged", event, file_path: join(dir, f), cwd: dir });
   /** SessionStart payload for `cwd`. */
@@ -251,7 +251,8 @@ async function main(): Promise<void> {
     cases.forEach((c, i) => writeFileSync(join(data, `p${i}.json`), JSON.stringify(c.payload ?? {})));
     // the hook's writtenDigestPath(hashPath(real path)): sha256 hex of the real path under <CLAUDE_PLUGIN_DATA>/written/
     const digest = join(data, "written", createHash("sha256").update(realpathSync(join(dir, "a.sh"))).digest("hex"));
-    const base: NodeJS.ProcessEnv = { ...process.env, CLAUDE_PLUGIN_DATA: data };
+    // UNIVERSAL_LINT_SETTLE_MS=0: the harness measures lint cost, not the 5 s settle hold of findings (F34)
+    const base: NodeJS.ProcessEnv = { ...process.env, CLAUDE_PLUGIN_DATA: data, UNIVERSAL_LINT_SETTLE_MS: "0" };
     delete base.NODE_OPTIONS;
     const envs = paths.map((PATH) => ({ ...base, PATH }));
     const times = cases.map(() => envs.map((): number[] => []));

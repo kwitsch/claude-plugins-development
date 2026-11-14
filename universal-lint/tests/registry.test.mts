@@ -7,7 +7,10 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSy
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "vitest";
-import { acquireSlot, buildArgv, classifyCheckstyleOutput, classifyExit, coalesceProjectCheck, configExists, editRanges, FILE_CHANGED_SLOTS, gateFinding, hashPath, hasProjectMarkdownlintConfig, hasProjectYamllintConfig, isExcludedPath, isToolAvailable, lintFileHandler, lintFilesHandler, looksLikeSolutionStyleTsconfig, oxlintConfigTypeChecks, recordWritten, REGISTRY, resolveCargoManifest, resolveCheckstyleConfig, resolveLintTarget, resolveOxlintConfig, resolveTsconfig, scopedTarget, stripTrailingCommas, truncate, tsBuildInfoPathFor, tscOutputHasSourceDiagnostic, WATCH_LIMIT } from "../plugin/hooks/lint-file.mjs";
+import { acquireSlot, buildArgv, classifyCheckstyleOutput, classifyExit, coalesceProjectCheck, configExists, editRanges, FILE_CHANGED_SLOTS, gateFinding, hashPath, hasProjectMarkdownlintConfig, hasProjectYamllintConfig, isExcludedPath, isToolAvailable, lintFileHandler, lintFilesHandler, looksLikeSolutionStyleTsconfig, oxlintConfigTypeChecks, recordWritten, REGISTRY, resolveCargoManifest, resolveCheckstyleConfig, resolveLintTarget, resolveOxlintConfig, resolveTsconfig, scopedTarget, slotDeadlineMs, stripTrailingCommas, truncate, tsBuildInfoPathFor, tscOutputHasSourceDiagnostic, WATCH_LIMIT, writtenContent } from "../plugin/hooks/lint-file.mjs";
+
+// The handler tests below call lintFileHandler in this process: report findings at once, no settle window (F34).
+process.env.UNIVERSAL_LINT_SETTLE_MS = "0";
 
 const shellcheck = REGISTRY.shell.chain[0];
 const checkstyle = REGISTRY.java.chain[0];
@@ -42,8 +45,9 @@ test("buildArgv: plain tool appends the resolved file last", () => {
   assert.deepEqual(buildArgv(shellcheck, "/proj/a.sh", "/proj"), ["/proj/a.sh"]);
 });
 
-test("buildArgv: ruff check keeps its subcommand before the file", () => {
-  assert.deepEqual(buildArgv(ruff, "/proj/a.py", "/proj"), ["check", "/proj/a.py"]);
+test("buildArgv: ruff check keeps its subcommand before the file and forces the project's exclude", () => {
+  // Without --force-exclude ruff lints an explicitly passed file even when extend-exclude covers it.
+  assert.deepEqual(buildArgv(ruff, "/proj/a.py", "/proj"), ["check", "--force-exclude", "/proj/a.py"]);
 });
 
 test("buildArgv: go entries target the directory, not the file", () => {
@@ -249,6 +253,10 @@ test("looksLikeSolutionStyleTsconfig: references with no files/include -> true",
   assert.equal(looksLikeSolutionStyleTsconfig("{\n  \"files\": [],\n  \"references\": [{\"path\": \"./pkg\"}]\n}"), true);
 });
 
+test("looksLikeSolutionStyleTsconfig: references with files AND include absent (tsc default include) -> false", () => {
+  assert.equal(looksLikeSolutionStyleTsconfig("{\"references\":[{\"path\":\"./lib\"}]}"), false);
+});
+
 test("looksLikeSolutionStyleTsconfig: references alongside include -> false", () => {
   assert.equal(looksLikeSolutionStyleTsconfig("{\n  \"include\": [\"src/**/*.ts\"],\n  \"references\": [{\"path\": \"./pkg\"}]\n}"), false);
 });
@@ -346,6 +354,12 @@ async function withDataDir(fn: (dataDir: string) => void | Promise<void>): Promi
  */
 const slotPath = (dataDir: string, i: number) => path.join(path.resolve(dataDir), "fc-slots", String(i));
 
+test("slotDeadlineMs: the FileChanged slot wait stops at 85 s minus the file's lint reservation (.ts 75 s, .rs 45 s, other 30 s)", () => {
+  assert.equal(slotDeadlineMs(".ts"), 10000);
+  assert.equal(slotDeadlineMs(".rs"), 40000);
+  assert.equal(slotDeadlineMs(".sh"), 55000);
+});
+
 test("acquireSlot: takes free slots holding this pid; a live pid with an mtime under 90 s in the future and an empty slot count as held; gives up after one round when all are held (F10)", async () => {
   await withDataDir((dataDir) => {
     for (let i = 0; i < FILE_CHANGED_SLOTS; i++) {
@@ -385,10 +399,11 @@ test.each([
  *
  * @param dataDir - Plugin data dir.
  * @param key - Project key passed to coalesceProjectCheck.
- * @param ext - `.lock` (the claim) or `.last` (the last completed run's start stamp).
+ * @param ext - `.lock` (the claim, shared by all sessions) or `.last` (the session's last completed run's start stamp).
+ * @param session - Session id the `.last` stamp belongs to.
  * @returns The file path.
  */
-const lockPath = (dataDir: string, key: string, ext: ".lock" | ".last") => path.join(path.resolve(dataDir), "fc-locks", `${key}${ext}`);
+const lockPath = (dataDir: string, key: string, ext: ".lock" | ".last", session = "") => path.join(path.resolve(dataDir), "fc-locks", ext === ".lock" ? `${key}.lock` : `${key}-${hashPath(session)}.last`);
 
 /**
  * Block this thread for `ms` milliseconds (no `sleep` binary needed).
@@ -429,6 +444,18 @@ test("coalesceProjectCheck: a .last stamp newer than the file's ctime and not in
   });
 });
 
+test("coalesceProjectCheck: a future-dated .last stamp never covers, the check runs (F13)", async () => {
+  await withDataDir(async (dataDir) => {
+    const file = path.join(dataDir, "a.ts");
+    writeFileSync(file, "export const a = 1;\n");
+    mkdirSync(path.join(dataDir, "fc-locks"), { recursive: true });
+    writeFileSync(lockPath(dataDir, "k12", ".last"), String(Date.now() + 3600000));
+    const { run, calls } = stubRun();
+    assert.equal((await coalesceProjectCheck("k12", file, 45000, run))?.status, 0);
+    assert.equal(calls.n, 1);
+  });
+});
+
 test("coalesceProjectCheck: without a stamp it runs once, stamps the run's start and releases the lock (F13, async F18)", async () => {
   await withDataDir(async (dataDir) => {
     const file = path.join(dataDir, "a.ts");
@@ -441,6 +468,20 @@ test("coalesceProjectCheck: without a stamp it runs once, stamps the run's start
     const t = Number(readFileSync(lockPath(dataDir, "k7", ".last"), "utf8"));
     assert.ok(t >= before && t <= Date.now(), `stamp ${t} not within [${before}, now]`);
     assert.equal(existsSync(lockPath(dataDir, "k7", ".lock")), false);
+  });
+});
+
+test("coalesceProjectCheck: the coverage stamp is per session: another session runs again, the same session is covered", async () => {
+  await withDataDir(async (dataDir) => {
+    const file = path.join(dataDir, "a.ts");
+    writeFileSync(file, "export const a = 1;\n");
+    waitMs(20); // file timestamps use the coarse kernel clock, up to one tick behind Date.now()
+    const { run, calls } = stubRun();
+    assert.equal((await coalesceProjectCheck("k11", file, 45000, run, "s1"))?.status, 0);
+    assert.equal((await coalesceProjectCheck("k11", file, 45000, run, "s2"))?.status, 0);
+    assert.equal(calls.n, 2);
+    assert.equal(await coalesceProjectCheck("k11", file, 45000, run, "s1"), null);
+    assert.equal(calls.n, 2);
   });
 });
 
@@ -550,14 +591,35 @@ test("hasProjectMarkdownlintConfig: nothing found -> false", () => {
 test("buildArgv: yamllint gets -d line-length-disable override when no project .yamllint exists", () => {
   const yamllint = REGISTRY.yaml.chain[0];
   const dir = mkdtempSync(path.join(tmpdir(), "ul-yl-"));
-  assert.deepEqual(buildArgv(yamllint, path.join(dir, "a.yaml"), dir), ["-d", "{extends: default, rules: {line-length: disable}}", path.join(dir, "a.yaml")]);
+  // Isolate from the developer's own ~/.yamllint, ~/.config/yamllint/config and YAMLLINT_CONFIG_FILE.
+  const keys = ["HOME", "XDG_CONFIG_HOME", "YAMLLINT_CONFIG_FILE"] as const;
+  const prev = keys.map((k) => process.env[k]);
+  process.env.HOME = mkdtempSync(path.join(tmpdir(), "ul-yl-home-"));
+  delete process.env.XDG_CONFIG_HOME;
+  delete process.env.YAMLLINT_CONFIG_FILE;
+  try {
+    assert.deepEqual(buildArgv(yamllint, path.join(dir, "a.yaml"), dir), ["-d", "{extends: default, rules: {line-length: disable}}", "./a.yaml"]);
+  } finally {
+    keys.forEach((k, i) => {
+      if (prev[i] === undefined) delete process.env[k];
+      else process.env[k] = prev[i];
+    });
+  }
 });
 
 test("buildArgv: yamllint runs bare when a project .yamllint exists", () => {
   const yamllint = REGISTRY.yaml.chain[0];
   const dir = mkdtempSync(path.join(tmpdir(), "ul-yl-"));
   writeFileSync(path.join(dir, ".yamllint"), "extends: default\n");
-  assert.deepEqual(buildArgv(yamllint, path.join(dir, "a.yaml"), dir), [path.join(dir, "a.yaml")]);
+  assert.deepEqual(buildArgv(yamllint, path.join(dir, "a.yaml"), dir), ["./a.yaml"]);
+});
+
+test("buildArgv: yamllint's target is ./<path relative to the spawn cwd> (its anchored `ignore` patterns never match an absolute path)", () => {
+  const yamllint = REGISTRY.yaml.chain[0];
+  const dir = mkdtempSync(path.join(tmpdir(), "ul-yl-"));
+  writeFileSync(path.join(dir, ".yamllint"), "extends: default\n");
+  assert.deepEqual(buildArgv(yamllint, path.join(dir, "gen", "a.yaml"), dir), ["./gen/a.yaml"]);
+  assert.deepEqual(buildArgv(yamllint, path.join(dir, "gen", "-x.yaml"), dir, undefined, path.join(dir, "gen")), ["./-x.yaml"]);
 });
 
 test("buildArgv: markdownlint-cli2 gets --config <MD013-off file in CLAUDE_PLUGIN_DATA> when no project config exists", () => {
@@ -569,7 +631,7 @@ test("buildArgv: markdownlint-cli2 gets --config <MD013-off file in CLAUDE_PLUGI
   try {
     const argv = buildArgv(markdownlintCli2, path.join(dir, "a.md"), dir);
     const cfg = path.join(dataDir, "markdownlint-no-line-length.json");
-    assert.deepEqual(argv, ["--no-globs", "--config", cfg, path.join(dir, "a.md")]);
+    assert.deepEqual(argv, ["--no-globs", "--config", cfg, `:${path.join(dir, "a.md")}`]);
     assert.deepEqual(JSON.parse(readFileSync(cfg, "utf8")), { MD013: false });
   } finally {
     if (prev === undefined) delete process.env.CLAUDE_PLUGIN_DATA;
@@ -581,7 +643,77 @@ test("buildArgv: markdownlint-cli2 runs with only --no-globs when a project conf
   const markdownlintCli2 = REGISTRY.markdown.chain[0];
   const dir = mkdtempSync(path.join(tmpdir(), "ul-md-"));
   writeFileSync(path.join(dir, ".markdownlint.json"), "{}");
-  assert.deepEqual(buildArgv(markdownlintCli2, path.join(dir, "a.md"), dir), ["--no-globs", path.join(dir, "a.md")]);
+  assert.deepEqual(buildArgv(markdownlintCli2, path.join(dir, "a.md"), dir), ["--no-globs", `:${path.join(dir, "a.md")}`]);
+});
+
+test("buildArgv: classic markdownlint runs bare with a .markdownlintrc (rc config) above the file; cli2 keeps its guard", () => {
+  const root = mkdtempSync(path.join(tmpdir(), "ul-md-"));
+  writeFileSync(path.join(root, ".markdownlintrc"), "{\"MD013\": {\"line_length\": 20}}");
+  const sub = path.join(root, "docs");
+  mkdirSync(sub, { recursive: true });
+  const file = path.join(sub, "a.md");
+  const dataDir = mkdtempSync(path.join(tmpdir(), "ul-data-"));
+  const prev = process.env.CLAUDE_PLUGIN_DATA;
+  process.env.CLAUDE_PLUGIN_DATA = dataDir;
+  try {
+    assert.deepEqual(buildArgv(REGISTRY.markdown.chain[1], file, root), [file]);
+    assert.deepEqual(buildArgv(REGISTRY.markdown.chain[0], file, root), ["--no-globs", "--config", path.join(dataDir, "markdownlint-no-line-length.json"), `:${file}`]);
+  } finally {
+    if (prev === undefined) delete process.env.CLAUDE_PLUGIN_DATA;
+    else process.env.CLAUDE_PLUGIN_DATA = prev;
+  }
+});
+
+test("buildArgv: classic markdownlint keeps the guard for configs it never reads (below the spawn cwd, missing $markdownlint_config)", () => {
+  const root = mkdtempSync(path.join(tmpdir(), "ul-md-"));
+  const sub = path.join(root, "sub");
+  mkdirSync(sub, { recursive: true });
+  writeFileSync(path.join(sub, ".markdownlintrc"), "{\"MD009\": false}");
+  writeFileSync(path.join(sub, ".markdownlint.json"), "{\"MD009\": false}");
+  const file = path.join(sub, "a.md");
+  const dataDir = mkdtempSync(path.join(tmpdir(), "ul-data-"));
+  const guarded = [path.join(dataDir, "markdownlint-no-line-length.json"), file];
+  const prev = { data: process.env.CLAUDE_PLUGIN_DATA, home: process.env.HOME, env: process.env.markdownlint_config };
+  process.env.CLAUDE_PLUGIN_DATA = dataDir;
+  process.env.HOME = mkdtempSync(path.join(tmpdir(), "ul-home-"));
+  process.env.markdownlint_config = path.join(root, "missing.json");
+  try {
+    const classic = REGISTRY.markdown.chain[1];
+    assert.deepEqual(buildArgv(classic, file, root), ["--config", ...guarded]);
+    // spawned in sub (a local package root there): markdownlint reads sub's configs
+    assert.deepEqual(buildArgv(classic, file, root, null, sub), [file]);
+    writeFileSync(path.join(root, ".markdownlint.yaml"), "MD009: false\n");
+    assert.deepEqual(buildArgv(classic, file, root), [file]);
+  } finally {
+    for (const [k, v] of [["CLAUDE_PLUGIN_DATA", prev.data], ["HOME", prev.home], ["markdownlint_config", prev.env]] as const) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
+  }
+});
+
+test("symlinked spawn cwd: classic markdownlint's .markdownlintrc and yamllint's project config are found above the REAL cwd only", () => {
+  const top = mkdtempSync(path.join(tmpdir(), "ul-symcwd-"));
+  const real = path.join(top, "real", "proj");
+  mkdirSync(real, { recursive: true });
+  mkdirSync(path.join(top, "lex"));
+  const lex = path.join(top, "lex", "proj");
+  symlinkSync(real, lex);
+  writeFileSync(path.join(top, "real", ".markdownlintrc"), "{\"MD013\": {\"line_length\": 40}}");
+  writeFileSync(path.join(top, "real", ".yamllint"), "extends: default\n");
+  const file = path.join(lex, "a.md");
+  const prev = { data: process.env.CLAUDE_PLUGIN_DATA, home: process.env.HOME };
+  process.env.CLAUDE_PLUGIN_DATA = mkdtempSync(path.join(tmpdir(), "ul-data-"));
+  process.env.HOME = mkdtempSync(path.join(tmpdir(), "ul-home-"));
+  try {
+    assert.deepEqual(buildArgv(REGISTRY.markdown.chain[1], file, lex), [file]);
+    assert.equal(hasProjectYamllintConfig(lex), true);
+  } finally {
+    for (const [k, v] of [["CLAUDE_PLUGIN_DATA", prev.data], ["HOME", prev.home]] as const) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
+  }
 });
 
 test("REGISTRY: php chain is phpstan -> psalm, neither carries npmSpec", () => {
@@ -630,6 +762,12 @@ test("isExcludedPath: *.local.* files excluded regardless of location", () => {
   assert.equal(isExcludedPath(path.join(".claude", "settings.local.json")), true);
   assert.equal(isExcludedPath("docker-compose.local.yml"), true);
   assert.equal(isExcludedPath("a.sh"), false);
+});
+
+test("isExcludedPath: worktrees/agent-memory only under .claude, .local. only in the basename", () => {
+  assert.equal(isExcludedPath(path.join("docs", "worktrees", "a.md")), false);
+  assert.equal(isExcludedPath(path.join("src", "agent-memory", "a.ts")), false);
+  assert.equal(isExcludedPath(path.join("conf.local.d", "a.sh")), false);
 });
 
 /** The PostToolUse payload resolveLintTarget reads. */
@@ -897,6 +1035,8 @@ test("editRanges: a pure deletion gives the two lines around the deletion point"
 test("editRanges: several hunks and runs each give a range; `\\ No newline` is not a line", () => {
   const hunks = [{ newStart: 1, lines: ["+x", " a", "-b", "+y", "\\ No newline at end of file"] }, { newStart: 20, lines: [" c", "+z"] }];
   assert.deepEqual(editRanges(editArgs(hunks)), [[0, 0], [2, 2], [20, 20]]);
+  // mid-hunk marker (old last line replaced): counting it as a line would widen and shift the range
+  assert.deepEqual(editRanges(editArgs([{ newStart: 1, lines: [" a", "-b", "\\ No newline at end of file", "+B", "\\ No newline at end of file"] }])), [[1, 1]]);
 });
 
 test("editRanges: Write, a missing or a malformed patch gives null (whole file)", () => {
@@ -974,6 +1114,22 @@ test("gateFinding: shellcheck tty `In <file> line N:` block", () => {
   assert.equal(gateFinding(gf(text), [[0, 0]], resolved), null);
 });
 
+test("gateFinding: a shellcheck source line like `127.0.0.1:8080` is no foreign location (miss dropped)", () => {
+  const resolved = path.join(GATE_DIR, "a.sh");
+  const text = `\nIn ${resolved} line 3:\ncurl http://127.0.0.1:8080/$p\n                          ^-- SC2086 (info): sc-url-marker\n\nDid you mean:\ncurl http://127.0.0.1:8080/"$p"\n`;
+  const sc = { ...gf(text), tool: "shellcheck" };
+  assert.equal(gateFinding(sc, [[4, 4]], resolved), null);
+  assert.match(gateFinding(sc, [[2, 2]], resolved)?.text ?? "", /sc-url-marker/);
+});
+
+test("gateFinding: a code-frame source line like `ok.pow(2)` is no foreign location (rustc miss dropped)", () => {
+  const crate = path.join(GATE_DIR, "crate-frame");
+  const rs = path.join(crate, "src", "main.rs");
+  const text = "error: unused variable: `unused` frame-marker\n --> src/main.rs:4:9\n  |\n4 |     let unused = ok.pow(2);\n  |         ^^^^^^ help: prefix it\n";
+  assert.equal(gateFinding(gf(text, crate), [[2, 2]], rs), null);
+  assert.match(gateFinding(gf(text, crate), [[3, 3]], rs)?.text ?? "", /frame-marker/);
+});
+
 test("gateFinding: cargo `--> src/a.rs:L` against the crate directory hits", () => {
   const crate = path.join(GATE_DIR, "crate");
   mkdirSync(path.join(crate, "src"), { recursive: true });
@@ -1009,6 +1165,15 @@ test("gateFinding: an own-file parse error outside the range is kept (location l
   const rs = path.join(GATE_DIR, "src", "b.rs");
   assert.ok(gateFinding(gf("error: this file contains an unclosed delimiter\n --> src/b.rs:40:3\n"), [[0, 0]], rs));
   assert.equal(gateFinding(gf("a.ts(9,1): error TS2322: type-marker\n"), [[0, 0]], resolved), null);
+});
+
+test("gateFinding: eslint eqeqeq and rustc E0308 `expected` wording outside the range are not parse errors (dropped)", () => {
+  const js = path.join(GATE_DIR, "a.js");
+  assert.equal(gateFinding(gf(`${js}\n  3:7  error  Expected '===' and instead saw '=='  eqeqeq\n\n✖ 1 problem\n`), [[1, 1]], js), null);
+  const rs = path.join(GATE_DIR, "src", "c.rs");
+  const e0308 = "error[E0308]: mismatched types\n --> src/c.rs:4:20\n  |\n4 |     let x: u8 = {};\n  |            --   ^^ expected `u8`, found `()`\n";
+  assert.equal(gateFinding(gf(e0308), [[2, 2]], rs), null);
+  assert.ok(gateFinding(gf("error: expected `;`, found `println`\n --> src/c.rs:4:20\n"), [[2, 2]], rs));
 });
 
 test("gateFinding: text without any location is returned unchanged", () => {
@@ -1086,7 +1251,10 @@ test("scopedTarget: null for cwd itself, an excluded path and an unsupported ext
   mkdirSync(path.join(dir, "node_modules"));
   writeFileSync(path.join(dir, "node_modules", "a.sh"), "echo hi\n");
   writeFileSync(path.join(dir, "x.txt"), "hi\n");
-  assert.equal(scopedTarget(dir, "."), null);
+  // A cwd with a lintable extension, so the `rel === ""` guard (not the extension gate) decides.
+  const shdir = path.join(dir, "proj.sh");
+  mkdirSync(shdir);
+  assert.equal(scopedTarget(shdir, "."), null);
   assert.equal(scopedTarget(dir, "node_modules/a.sh"), null);
   assert.equal(scopedTarget(dir, "x.txt"), null);
 });
@@ -1119,21 +1287,37 @@ test("resolveLintTarget: null for a file inside the payload scratchpad_dir", () 
   assert.equal(resolveLintTarget(mockResolveArgs(dir, "s/e.sh")), path.join(dir, "s", "e.sh"));
 });
 
-test("recordWritten: stores the SHA-256 base64 of the file bytes at CLAUDE_PLUGIN_DATA/written/<hashPath(real)>", () => {
+test("recordWritten: stores the SHA-256 base64 of the given content at CLAUDE_PLUGIN_DATA/written/<hashPath(real)>, null removes it", () => {
   const dir = mkdtempSync(path.join(tmpdir(), "ul-rw-"));
   const data = path.join(dir, "data");
   const fp = path.join(dir, "a.sh");
-  writeFileSync(fp, "echo hi\n");
+  writeFileSync(fp, "echo other\n");
   const real = realpathSync(fp);
+  const digest = path.join(data, "written", hashPath(real));
   const prev = process.env.CLAUDE_PLUGIN_DATA;
   process.env.CLAUDE_PLUGIN_DATA = data;
   try {
-    recordWritten(fp, real);
+    recordWritten(real, "echo hi\n");
+    assert.equal(readFileSync(digest, "utf8"), createHash("sha256").update("echo hi\n").digest("base64"));
+    recordWritten(real, null);
+    assert.equal(existsSync(digest), false);
   } finally {
     if (prev === undefined) delete process.env.CLAUDE_PLUGIN_DATA;
     else process.env.CLAUDE_PLUGIN_DATA = prev;
   }
-  assert.equal(readFileSync(path.join(data, "written", hashPath(real)), "utf8"), createHash("sha256").update("echo hi\n").digest("base64"));
+});
+
+test("writtenContent: Write content; Edit hunks applied to originalFile (insertion, deletion, `\\ No newline`); null without them", () => {
+  const edit = (originalFile: unknown, structuredPatch: unknown) => writtenContent({ tool_name: "Edit", tool_response: { originalFile, structuredPatch } });
+  assert.equal(writtenContent({ tool_name: "Write", tool_input: { content: "x\n" } }), "x\n");
+  assert.equal(writtenContent({ tool_name: "Write", tool_input: {} }), null);
+  assert.equal(edit("a\nb\nc\nd\n", [{ oldStart: 2, oldLines: 1, lines: ["-b", "+B"] }, { oldStart: 4, oldLines: 0, lines: ["+e"] }]), "a\nB\nc\nd\ne\n");
+  assert.equal(edit("a\nb\nc\n", [{ oldStart: 1, oldLines: 2, lines: [" a", "-b"] }]), "a\nc\n");
+  assert.equal(edit("a\nb", [{ oldStart: 2, oldLines: 1, lines: ["-b", "\\ No newline at end of file", "+c", "\\ No newline at end of file"] }]), "a\nc");
+  assert.equal(edit("a\nb", [{ oldStart: 2, oldLines: 1, lines: ["-b", "\\ No newline at end of file", "+c"] }]), "a\nc\n");
+  assert.equal(edit("", [{ oldStart: 0, oldLines: 0, lines: ["+x"] }]), "x\n");
+  assert.equal(edit("a\n", [{ oldStart: 5, oldLines: 1, lines: ["-z"] }]), null);
+  assert.equal(edit(undefined, []), null);
 });
 
 test("WATCH_LIMIT is 5000", () => {

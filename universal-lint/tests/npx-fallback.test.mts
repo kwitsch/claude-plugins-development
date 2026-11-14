@@ -69,7 +69,7 @@ function stamp(e: LintEnv, ageMs = 0): string {
  * @returns The space-joined argv.
  */
 function mdArgv(e: LintEnv, f: string): string {
-  return `--no-globs --config ${path.join(e.data, "markdownlint-no-line-length.json")} ${f}`;
+  return `--no-globs --config ${path.join(e.data, "markdownlint-no-line-length.json")} :${f}`;
 }
 
 test("eslint absent but npx present -> npx --yes eslint fallback runs, issues surfaced", () => {
@@ -133,6 +133,19 @@ test("local bin: one that cannot spawn (no exec bit) falls back to npx --yes", (
   e.run(e.file("a.js", "let x = 1;\n"));
   assert.ok(e.lines().some((l) => l.includes("npx --yes oxlint")));
   assert.ok(!e.lines().some((l) => l.startsWith("local:")));
+});
+
+test("local bin: one that cannot spawn (no exec bit) does not block the npx cache route: the cached bin runs, npx never invoked", () => {
+  const e = makeEnv();
+  e.recStub("npx", 0);
+  stamp(e);
+  localStub(e, CACHED, "markdownlint-cli2", 1);
+  localStub(e, ".", "markdownlint-cli2", 0, false);
+  const f = e.file("a.md", "# T\n");
+  const r = e.run(f, { out: "cache-marker" });
+  assert.match(r.ctx, /cache-marker/);
+  assert.ok(e.lines().includes(`local:${CACHED}/markdownlint-cli2 ${mdArgv(e, f)}`));
+  assert.ok(!e.lines().some((l) => l.startsWith("npx")));
 });
 
 test("local bin: never above cwd (file reached through a symlinked dir outside cwd) -> npx, the above-cwd bin never runs", () => {
@@ -280,4 +293,15 @@ test("npx env: the cached-bin direct route gets no npm_config vars (env belongs 
   assert.ok(e.lines().some((l) => l.startsWith("local:")));
   assert.ok(e.lines().includes("env:,,"));
   assert.ok(!e.lines().some((l) => l.startsWith("npx")));
+});
+
+test("local bin: its relative paths resolve against the package root it ran in (Finding.base), so a same-named cwd file stays apart", () => {
+  const e = makeEnv();
+  e.file(".oxlintrc.json", "{}");
+  e.file("a.js", "x\n");
+  localStub(e, "pkg", "oxlint", 1);
+  const f = e.file("pkg/a.js", "a\nb\nc\n");
+  const patch = [{ oldStart: 1, oldLines: 3, newStart: 1, newLines: 3, lines: ["-z", "+a", " b", " c"] }];
+  // pkg/a.js:3 lies outside the edited line 1 -> dropped; resolved against cwd it would be cwd/a.js (foreign, kept).
+  assert.equal(e.run(f, { toolName: "Edit", toolResponse: { structuredPatch: patch }, out: "a.js:3:1 far-marker" }).status, 0);
 });

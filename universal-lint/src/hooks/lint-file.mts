@@ -177,7 +177,7 @@ interface LangEntry {
 }
 
 /** One tool's issues, ready to be rendered into the hook's additionalContext. */
-interface Finding {
+export interface Finding {
   /** Name of the tool that reported. */
   tool: string;
   /** What was checked, relative to the project root. */
@@ -196,6 +196,8 @@ interface PostToolUseHookInput {
   hook_event_name?: unknown;
   /** The session scratchpad directory; files inside it are out of scope. */
   scratchpad_dir?: unknown;
+  /** The Claude Code session; FileChanged keys the project-check coverage stamp by it (`coalesceProjectCheck`). */
+  session_id?: unknown;
   /** FileChanged: the changed file. */
   file_path?: unknown;
   /** FileChanged: `"change"`, `"add"` or `"unlink"`. */
@@ -204,10 +206,10 @@ interface PostToolUseHookInput {
   new_cwd?: unknown;
   /** Name of the tool that fired the hook (`Write` or `Edit`). */
   tool_name?: unknown;
-  /** The tool's input; `file_path` names the written file. Absent for non-tool events. */
-  tool_input?: { file_path?: unknown };
-  /** The tool's result; `success: false` marks a failed Write/Edit, `structuredPatch` holds the Edit tool's diff hunks. */
-  tool_response?: { success?: boolean; structuredPatch?: unknown };
+  /** The tool's input; `file_path` names the written file, `content` is what a Write wrote. Absent for non-tool events. */
+  tool_input?: { file_path?: unknown; content?: unknown };
+  /** The tool's result; `success: false` marks a failed Write/Edit, `structuredPatch` holds the Edit tool's diff hunks, `originalFile` the content they apply to. */
+  tool_response?: { success?: boolean; structuredPatch?: unknown; originalFile?: unknown };
   [key: string]: unknown;
 }
 
@@ -276,7 +278,9 @@ export const REGISTRY: Record<string, LangEntry> = {
   // --no-error-on-unmatched-pattern: a file excluded by the project's oxlint
   // ignorePatterns otherwise exits 1 ("No files found to lint") -> false finding.
   oxlint: { chain: [{ name: "oxlint", args: ["--no-error-on-unmatched-pattern"], npmSpec: "oxlint" }] },
-  python: { chain: [{ name: "ruff", args: ["check"] }] },
+  // --force-exclude: ruff otherwise lints an explicitly passed file even when the
+  // project's exclude/extend-exclude covers it -> false finding; excluded = exit 0.
+  python: { chain: [{ name: "ruff", args: ["check", "--force-exclude"] }] },
   go: {
     chain: [
       { name: "golangci-lint", args: ["run"], targetsDir: true },
@@ -311,9 +315,9 @@ export const REGISTRY: Record<string, LangEntry> = {
   },
   rust: {
     chain: [
-      // name/onPath gates on the standalone cargo-clippy driver binary --
-      // its presence on PATH is how the clippy rustup component is detected
-      // (see `.claude/rules/languages.md`, "Rust"). But
+      // name/onPath gates on the standalone cargo-clippy binary (rustup puts
+      // its proxy on PATH even without the clippy component; `runPlan` then
+      // falls back to cargo check, see `.claude/rules/languages.md`, "Rust"). But
       // that bare binary does NOT accept --manifest-path (it belongs to
       // cargo/its clippy subcommand, not the driver clippy-driver itself
       // invokes) -- spawnAs runs the actually-selected tool as `cargo
@@ -382,11 +386,40 @@ function saveProbeStore(file: string, store: ProbeStore): void {
 }
 
 /**
+ * Whether a path is an executable regular file, as `command -v` checks (a directory passes `X_OK` alone).
+ *
+ * @param p - Candidate path.
+ * @returns True when `p` (symlinks followed) is a file the process may execute.
+ */
+function isExecutableFile(p: string): boolean {
+  try {
+    accessSync(p, fsConstants.X_OK);
+  } catch {
+    return false;
+  }
+  return isFile(p);
+}
+
+/**
+ * Whether a path is a regular file (symlinks followed).
+ *
+ * @param p - Candidate path.
+ * @returns False for a directory, a missing path or any stat error.
+ */
+function isFile(p: string): boolean {
+  try {
+    return statSync(p).isFile();
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Whether a tool is executable on PATH (memoized per process, persisted across processes in the probe file).
  *
  * @param tool - Binary name to look for.
  * @returns True when an executable of that name sits in a PATH directory.
- * @remarks A stored hit is re-validated with one `accessSync` on its directory; a stored miss is trusted while
+ * @remarks A stored hit is re-validated with `isExecutableFile` on its directory; a stored miss is trusted while
  * `0 <= Date.now() - at < PROBE_MISS_TTL_MS` (a future-dated miss is expired); otherwise PATH is scanned and the
  * result written back. Residuals: (1) a newly installed tool is not seen for up to 10 min after a persisted miss,
  * also an earlier chain tool (a later chain tool, a local bin or npx runs meanwhile); (2) a copy added to an
@@ -402,13 +435,10 @@ function onPath(tool: string): boolean {
   probeStore ??= loadProbeStore(file);
   const known = probeStore.hits[tool];
   if (typeof known === "string" && path.isAbsolute(known)) {
-    try {
-      accessSync(path.join(known, tool), fsConstants.X_OK);
+    if (isExecutableFile(path.join(known, tool))) {
       probeCache.set(tool, true);
       return true;
-    } catch {
-      /* gone or no longer executable: probe PATH again */
-    }
+    } // gone or no longer executable: probe PATH again
   }
   const at = probeStore.misses[tool];
   if (typeof at === "number") {
@@ -422,12 +452,9 @@ function onPath(tool: string): boolean {
   let foundDir: string | null = null;
   for (const dir of (process.env.PATH || "").split(path.delimiter)) {
     if (!dir) continue;
-    try {
-      accessSync(path.join(dir, tool), fsConstants.X_OK);
+    if (isExecutableFile(path.join(dir, tool))) {
       foundDir = dir;
       break;
-    } catch {
-      /* keep looking */
     }
   }
   // a hit through a relative PATH entry depends on the cwd: memoize it for this process only
@@ -628,7 +655,9 @@ async function spawnBin(bin: string, argv: string[], spawnOpts: SpawnSyncOptions
  * decision), (2) npx holds `<dir>/concurrency.lock` (an install is in progress), or (3) the refresh stamp
  * `${CLAUDE_PLUGIN_DATA || os.tmpdir()}/npx-refreshed-<key>` is missing, older than `NPX_REFRESH_MS` or dated in the future. Every npx run
  * that spawned (no `error`, any exit status) renews the stamp (errors swallowed), except in
- * case (1), whose npx run never touches the cache. The hook only reads the npm cache, never writes it.
+ * case (1), whose npx run never touches the cache. The hook only reads the npm cache, never writes it. `failed`, the
+ * project-local bin that just could not spawn, does not count for (1): the cache route runs past it, but a bare npx
+ * run from that cwd still runs it again (it fails, exit 126/127, read as a skip).
  * Only the bare `npx --yes` spawn carries `npm_config_update_notifier`, `npm_config_fund` and `npm_config_audit` = `false`
  * (F24): npm's notice lines would otherwise land in the finding text. No `npm_config_loglevel` is set, so install
  * errors still reach stderr.
@@ -637,9 +666,10 @@ async function spawnBin(bin: string, argv: string[], spawnOpts: SpawnSyncOptions
  * @param npmSpec - npm package of the chain entry (`LintTool.npmSpec`); also the cache key's input.
  * @param argv - Full argv from buildArgv.
  * @param spawnOpts - Options for spawnGroup; its cwd is npx's cwd and the cached bin's.
+ * @param failed - Project-local bin that could not spawn (ENOENT/EACCES), left out of check (1), or null.
  * @returns The spawn result of the cached bin or of npx.
  */
-async function runNpx(name: string, npmSpec: string, argv: string[], spawnOpts: SpawnSyncOptionsWithStringEncoding): Promise<SpawnSyncReturns<string>> {
+async function runNpx(name: string, npmSpec: string, argv: string[], spawnOpts: SpawnSyncOptionsWithStringEncoding, failed: string | null): Promise<SpawnSyncReturns<string>> {
   /**
    * Run `npx --yes <npmSpec> ...argv` with `spawnOpts`, the longer `NPX_SPAWN_TIMEOUT_MS` budget and npm's
    * update-notifier, fund and audit messages switched off through `npm_config_*` env vars (F24).
@@ -654,7 +684,7 @@ async function runNpx(name: string, npmSpec: string, argv: string[], spawnOpts: 
     });
   // npx runs a node_modules/.bin/<name> from its cwd up to / before its cache (npm 11.19.1 localFileExists): leave that to npx.
   const rel = path.join("node_modules", ".bin", name);
-  if (walkToRoot(String(spawnOpts.cwd), (d) => configExists(d, rel))) return npx();
+  if (walkToRoot(String(spawnOpts.cwd), (d) => path.join(d, rel) !== failed && configExists(d, rel))) return npx();
   // libnpmexec's cache key: sha512 hex of the sorted, newline-joined spec list, first 16 chars (one bare spec hashes as itself).
   const key = createHash("sha512").update(npmSpec).digest("hex").slice(0, 16);
   const dir = path.join(process.env.npm_config_cache || process.env.NPM_CONFIG_CACHE || path.join(homedir(), ".npm"), "_npx", key);
@@ -705,14 +735,15 @@ async function runNpx(name: string, npmSpec: string, argv: string[], spawnOpts: 
 async function runLintTool(tool: LintTool, argv: string[], spawnOpts: SpawnSyncOptionsWithStringEncoding, local: string | null): Promise<SpawnSyncReturns<string>> {
   const viaLocal = local ? await spawnBin(local, argv, spawnOpts) : null;
   if (viaLocal) return viaLocal;
-  if (tool.npmSpec && !onPath(tool.name)) return runNpx(tool.name, tool.npmSpec, argv, spawnOpts);
+  if (tool.npmSpec && !onPath(tool.name)) return runNpx(tool.name, tool.npmSpec, argv, spawnOpts, local);
   // spawnAs decouples "which binary name gates PATH-availability /
   // selectLintTool matching" (tool.name -- probed by onPath/selectLintTool)
   // from "which binary + args are actually spawned". Only the rust chain's
-  // clippy entry sets it today: it probes the standalone cargo-clippy driver
-  // binary (whose presence signals the clippy rustup component is installed)
+  // clippy entry sets it today: it probes the standalone cargo-clippy binary
   // but must actually run via the `cargo clippy` subcommand, since the bare
-  // driver binary rejects buildArgv's --manifest-path.
+  // driver binary rejects buildArgv's --manifest-path. (rustup's cargo-clippy
+  // proxy is on PATH even without the clippy component; `runPlan` falls back
+  // to `cargo check` on rustup's "not installed" error.)
   const spawnName = tool.spawnAs?.name ?? tool.name;
   const spawnArgv = tool.spawnAs ? [...tool.spawnAs.args, ...argv] : argv;
   return spawnGroup(spawnName, spawnArgv, spawnOpts);
@@ -1007,14 +1038,15 @@ export function stripTrailingCommas(text: string): string {
 
 /**
  * A "solution-style" tsconfig (`references` present, `include` absent, and
- * `files` either absent or an empty array) compiles and checks nothing under
+ * `files` an explicit empty array) compiles and checks nothing under
  * plain `-p` -- confirmed empirically: `tsc --noEmit` against this shape
  * exits 0 even with a real type error in the referenced project.
  * `"files": []` is the TS handbook's own documented way to author a
  * solution-style config (it's how you disable direct compilation), so an
- * empty `files` array must NOT disqualify -- only a real `include`, or a
- * `files` array with at least one entry, means this config actually compiles
- * something itself. Existence/pattern-only regex over comment-stripped text,
+ * empty `files` array must NOT disqualify -- only a real `include`, a `files`
+ * array with at least one entry, or no `files` at all (tsc's default include
+ * then compiles every source under the config) means this config actually
+ * compiles something itself. Existence/pattern-only regex over comment-stripped text,
  * not a full JSON/JSONC parse (tsconfig permits comments/trailing commas) --
  * unanchored (no line-start requirement) so it matches equally in compact
  * single-line and pretty-printed JSON. A string VALUE that happens to contain
@@ -1033,8 +1065,7 @@ export function looksLikeSolutionStyleTsconfig(text: string): boolean {
   const hasInclude = /"include"\s*:/.test(stripped);
   if (hasInclude) return false;
   const filesMatch = stripped.match(/"files"\s*:\s*\[([^\]]*)\]/);
-  const hasNonEmptyFiles = !!filesMatch && filesMatch[1].trim() !== "";
-  return !hasNonEmptyFiles;
+  return !!filesMatch && filesMatch[1].trim() === "";
 }
 
 /**
@@ -1095,6 +1126,11 @@ const YAMLLINT_CONFIG_FILENAMES = [".yamllint", ".yamllint.yaml", ".yamllint.yml
  */
 export function hasProjectYamllintConfig(cwd: string): boolean {
   let dir = path.resolve(cwd);
+  try {
+    dir = realpathSync(dir); // yamllint walks `..` from its real cwd (abspath('.') is getcwd()); $HOME stays as written, as in yamllint
+  } catch {
+    // missing cwd: walk the lexical path
+  }
   const home = path.resolve(homedir());
   for (;;) {
     if (anyConfigExists(dir, YAMLLINT_CONFIG_FILENAMES)) return true;
@@ -1106,12 +1142,28 @@ export function hasProjectYamllintConfig(cwd: string): boolean {
 }
 
 /**
+ * Port of yamllint/cli.py's user-global config lookup (1.38.0):
+ * `$YAMLLINT_CONFIG_FILE` (~ expanded) if set, else
+ * `$XDG_CONFIG_HOME/yamllint/config`, else `~/.config/yamllint/config`.
+ * yamllint uses it when no project config exists, but -d would replace it.
+ *
+ * @returns True when the user-global yamllint config file exists.
+ */
+export function hasUserGlobalYamllintConfig(): boolean {
+  const env = process.env;
+  const p = env.YAMLLINT_CONFIG_FILE !== undefined
+    ? env.YAMLLINT_CONFIG_FILE.replace(/^~(?=$|\/)/, homedir())
+    : path.join(env.XDG_CONFIG_HOME ?? path.join(homedir(), ".config"), "yamllint", "config");
+  return isFile(p);
+}
+
+/**
  * yamllint's line-length rule is "error" level in its own bundled default
  * ruleset (verified empirically against yamllint 1.38.0 -- NOT "warning", so
  * this hook's existing 0-clean/1-issues classifyExit contract already
  * surfaces it without --strict). -d overrides yamllint's own project-config
  * search entirely, so it is only ever passed when hasProjectYamllintConfig
- * found nothing. Single-line flow-style YAML (not the equivalent multi-line
+ * and hasUserGlobalYamllintConfig found nothing. Single-line flow-style YAML (not the equivalent multi-line
  * block form), passed as one argv element.
  */
 const YAMLLINT_NO_LINE_LENGTH_CONFIG_DATA = "{extends: default, rules: {line-length: disable}}";
@@ -1168,6 +1220,34 @@ function walkToRoot(dir: string, checkDir: (dir: string) => boolean): boolean {
  */
 export function hasProjectMarkdownlintConfig(fileDir: string): boolean {
   return walkToRoot(fileDir, (dir) => anyConfigExists(dir, MARKDOWNLINT_CONFIG_FILENAMES));
+}
+
+/** Project config names classic markdownlint (markdownlint-cli 0.49) reads, each only relative to its cwd (`fs.accessSync`, no walk). */
+const MARKDOWNLINT_CLASSIC_CONFIG_FILENAMES = [".markdownlint.jsonc", ".markdownlint.json", ".markdownlint.yaml", ".markdownlint.yml"];
+
+/**
+ * True if markdownlint (classic) reads a config of its own, so the MD013 guard must stay off: markdownlint-cli 0.49
+ * starts from `rc("markdownlint")` (run-con), spreads the first of MARKDOWNLINT_CLASSIC_CONFIG_FILENAMES found in its
+ * cwd over it and deep-extends `--config` over both, so the guard would turn off a configured MD013. run-con's places:
+ * `.markdownlintrc` from the real spawn cwd upward (`cc.find` starts at `process.cwd()`, a symlink-free path), the file `$markdownlint_config`
+ * (relative to the spawn cwd; a missing one is ignored), `~/.config/markdownlint{,/config}`, `~/.markdownlint/config`,
+ * `~/.markdownlintrc`, `/etc/markdownlint{rc,/config}`. A config next to the file but below the spawn cwd is never
+ * read. markdownlint-cli2 reads none of them (`hasProjectMarkdownlintConfig` serves it).
+ *
+ * @param spawnCwd - The cwd markdownlint is spawned in.
+ * @returns True when such a config exists.
+ */
+function hasMarkdownlintRc(spawnCwd: string): boolean {
+  let real = spawnCwd;
+  try {
+    real = realpathSync(spawnCwd); // the child's process.cwd() is the real path, so run-con's walk climbs the real parents
+  } catch {
+    // missing cwd: walk the lexical path
+  }
+  if (anyConfigExists(real, MARKDOWNLINT_CLASSIC_CONFIG_FILENAMES) || walkToRoot(real, (d) => configExists(d, ".markdownlintrc"))) return true;
+  const home = homedir();
+  const env = process.env.markdownlint_config;
+  return [...(env ? [path.resolve(real, env)] : []), path.join(home, ".config", "markdownlint", "config"), path.join(home, ".config", "markdownlint"), path.join(home, ".markdownlint", "config"), path.join(home, ".markdownlintrc"), "/etc/markdownlint/config", "/etc/markdownlintrc"].some(isFile); // run-con reads files only; ~/.config/markdownlint is often the dir holding `config`
 }
 
 /**
@@ -1283,18 +1363,19 @@ function markdownlintNoLineLengthConfigPath(): string {
  * @param resolvedFile - Absolute path of the edited file.
  * @param cwd - Project root.
  * @param manifest - Precomputed resolveCargoManifest result, to skip a second walk.
+ * @param spawnCwd - The cwd the tool is spawned in (classic markdownlint reads its configs from there); defaults to `cwd`.
  * @returns The tool's argv, target last (none for manifestPath tools).
  */
-export function buildArgv(tool: LintTool, resolvedFile: string, cwd: string, manifest?: string | null): string[] {
+export function buildArgv(tool: LintTool, resolvedFile: string, cwd: string, manifest?: string | null, spawnCwd: string = cwd): string[] {
   const dir = path.dirname(resolvedFile);
   const argv = tool.args.slice();
   if (tool.needsCheckstyleConfig) {
     argv.push("-c", resolveCheckstyleConfig(dir, cwd) ?? "/google_checks.xml");
   }
-  if (tool.guardYamlLineLength && !hasProjectYamllintConfig(cwd)) {
+  if (tool.guardYamlLineLength && !hasProjectYamllintConfig(cwd) && !hasUserGlobalYamllintConfig()) {
     argv.push("-d", YAMLLINT_NO_LINE_LENGTH_CONFIG_DATA);
   }
-  if (tool.guardMarkdownLineLength && !hasProjectMarkdownlintConfig(dir)) {
+  if (tool.guardMarkdownLineLength && !(tool.name === "markdownlint" ? hasMarkdownlintRc(spawnCwd) : hasProjectMarkdownlintConfig(dir))) {
     argv.push("--config", markdownlintNoLineLengthConfigPath());
   }
   // cargo clippy/check take no positional target. Resolve the nearest
@@ -1311,8 +1392,27 @@ export function buildArgv(tool: LintTool, resolvedFile: string, cwd: string, man
     }
     return argv;
   }
-  argv.push(tool.targetsDir ? dir : resolvedFile);
+  argv.push(tool.targetsDir ? dir : fileArg(tool, resolvedFile, spawnCwd));
   return argv;
+}
+
+/**
+ * The positional file argument for a file-scoped tool.
+ * markdownlint-cli2 reads every positional as a glob (even with --no-globs), so
+ * `notes (1).md` would match nothing; its `:` prefix marks a literal path.
+ * yamllint matches its `ignore` patterns against the path as given, so an absolute
+ * path never matches an anchored `gen/*.yaml`: it gets `./<path relative to its
+ * spawn cwd>`, the form `yamllint .` walks (the `./` also keeps a `-x.yaml` from
+ * reading as an option).
+ *
+ * @param tool - Chain entry.
+ * @param fp - Absolute path of the file.
+ * @param spawnCwd - The cwd the tool is spawned in.
+ * @returns The argv entry naming `fp`.
+ */
+function fileArg(tool: Pick<LintTool, "name">, fp: string, spawnCwd: string): string {
+  if (tool.name === "yamllint") return `./${path.relative(spawnCwd, fp)}`;
+  return tool.name === "markdownlint-cli2" ? `:${fp}` : fp;
 }
 
 /**
@@ -1544,12 +1644,34 @@ function planChainLint(lang: LangEntry, resolved: string, cwd: string): ChainPla
     if (!manifest) return null;
   }
 
-  const argv = buildArgv(tool, resolved, cwd, manifest);
-  // Compile-heavy cargo tools get their own budget (mirrors TSC_SPAWN_TIMEOUT_MS).
-  const timeout = tool.manifestPath ? CARGO_SPAWN_TIMEOUT_MS : SPAWN_TIMEOUT_MS;
   // A local bin runs from its package root (the dir holding node_modules): eslint <= 9 resolves its flat config from the spawn cwd.
   const spawnCwd = sel.local ? path.join(sel.local, "../../..") : cwd;
+  const argv = buildArgv(tool, resolved, cwd, manifest, spawnCwd);
+  // Compile-heavy cargo tools get their own budget (mirrors TSC_SPAWN_TIMEOUT_MS).
+  const timeout = tool.manifestPath ? CARGO_SPAWN_TIMEOUT_MS : SPAWN_TIMEOUT_MS;
   return { tool, local: sel.local, argv, spawnCwd, timeout, manifest };
+}
+
+/** rustup's proxy message when the active toolchain lacks the clippy component (its `cargo-clippy` proxy is on PATH anyway). */
+const CLIPPY_MISSING_RE = /'cargo-clippy' is not installed for/;
+
+/**
+ * Spawn a planned chain-tool run (shared by `runChainLint` and `lintFilesHandler`). When the selected tool is
+ * `cargo-clippy` and rustup reports the clippy component missing (`CLIPPY_MISSING_RE`, non-zero exit), the next rust
+ * chain entry (`cargo check`) runs instead with the same manifest, spawn cwd and timeout.
+ *
+ * @param plan - The plan from `planChainLint`.
+ * @param argv - The argv to run (`plan.argv`, or a batch argv for file-scoped tools).
+ * @param resolved - Absolute path of a file the plan covers (for the fallback's argv).
+ * @param cwd - Project root.
+ * @returns The tool that actually ran and its spawn result.
+ */
+async function runPlan(plan: ChainPlan, argv: string[], resolved: string, cwd: string): Promise<{ tool: LintTool; result: SpawnSyncReturns<string> }> {
+  const spawnOpts = buildSpawnOpts(plan.spawnCwd, plan.timeout);
+  const result = await runLintTool(plan.tool, argv, spawnOpts, plan.local);
+  const next = REGISTRY.rust.chain[REGISTRY.rust.chain.indexOf(plan.tool) + 1];
+  if (plan.tool.name !== "cargo-clippy" || !next || result.error || result.signal || result.status === 0 || !CLIPPY_MISSING_RE.test(result.stderr ?? "") || !onPath(next.name)) return { tool: plan.tool, result };
+  return { tool: next, result: await runLintTool(next, buildArgv(next, resolved, cwd, plan.manifest, plan.spawnCwd), spawnOpts, null) };
 }
 
 /**
@@ -1595,17 +1717,22 @@ function chainOutcome(tool: LintTool, result: SpawnSyncReturns<string> | null): 
  * @returns `ran`: a tool ran to a clean or issues verdict (false on no tool, guard
  *   failure, spawn error/signal or skip verdict); `finding`: the issues, else null. `{ ran: false, finding: null }`
  *   also when `coalesceProjectCheck` skipped the run (a completed run already covers the file).
+ * @param session - FileChanged: the payload's session id, passed to `coalesceProjectCheck`.
  */
-async function runChainLint(lang: LangEntry, resolved: string, cwd: string, rel: string, coalesce = false): Promise<ChainResult> {
+async function runChainLint(lang: LangEntry, resolved: string, cwd: string, rel: string, coalesce = false, session = ""): Promise<ChainResult> {
   const none = NO_CHAIN;
   const plan = planChainLint(lang, resolved, cwd);
   if (!plan) return none;
-  const { tool, argv, timeout, spawnCwd, manifest } = plan;
-  const spawnOpts = buildSpawnOpts(spawnCwd, timeout);
-  const spawnTool = (): Promise<SpawnSyncReturns<string>> => runLintTool(tool, argv, spawnOpts, plan.local);
+  const { argv, timeout, spawnCwd, manifest } = plan;
+  let tool = plan.tool;
+  const spawnTool = async (): Promise<SpawnSyncReturns<string>> => {
+    const ran = await runPlan(plan, argv, resolved, cwd);
+    tool = ran.tool;
+    return ran.result;
+  };
   // Directory- and crate-scoped tools check the whole package/crate: one run per FileChanged burst covers every file.
   const key = coalesce ? (tool.targetsDir ? hashPath(`${tool.name}:${path.dirname(resolved)}`) : manifest ? hashPath(`${tool.name}:${manifest}`) : null) : null;
-  const result = key ? await coalesceProjectCheck(key, resolved, timeout, spawnTool) : await spawnTool();
+  const result = key ? await coalesceProjectCheck(key, resolved, timeout, spawnTool, session) : await spawnTool();
   const outcome = chainOutcome(tool, result);
   if (!outcome) return none;
 
@@ -1665,8 +1792,9 @@ export function tscOutputHasSourceDiagnostic(text: string): boolean {
  * @param coalesce - FileChanged: run tsc through `coalesceProjectCheck`, once per burst and tsconfig.
  * @returns The finding, or null (also when `coalesceProjectCheck` skipped the run because a completed run covers the
  *   file).
+ * @param session - FileChanged: the payload's session id, passed to `coalesceProjectCheck`.
  */
-async function runTypeCheck(resolved: string, cwd: string, coalesce = false): Promise<Finding | null> {
+async function runTypeCheck(resolved: string, cwd: string, coalesce = false, session = ""): Promise<Finding | null> {
   const tsconfigPath = resolveTsconfig(path.dirname(resolved), cwd);
   if (!tsconfigPath) return null;
 
@@ -1685,7 +1813,7 @@ async function runTypeCheck(resolved: string, cwd: string, coalesce = false): Pr
   const bin = onPath("tsc") ? "tsc" : existsSync(localTsc) ? localTsc : null;
   if (!bin) return null;
   const spawnTsc = (): Promise<SpawnSyncReturns<string>> => spawnGroup(bin, ["--noEmit", "--incremental", "--tsBuildInfoFile", cachePath, "-p", tsconfigPath], buildSpawnOpts(cwd, TSC_SPAWN_TIMEOUT_MS));
-  const result = coalesce ? await coalesceProjectCheck(hashPath(`tsc:${tsconfigPath}`), resolved, TSC_SPAWN_TIMEOUT_MS, spawnTsc) : await spawnTsc();
+  const result = coalesce ? await coalesceProjectCheck(hashPath(`tsc:${tsconfigPath}`), resolved, TSC_SPAWN_TIMEOUT_MS, spawnTsc, session) : await spawnTsc();
   if (!result || result.error || result.signal) return null;
   if (classifyExit("tsc", result.status) !== "issues") return null;
 
@@ -1887,6 +2015,84 @@ export function editRanges(args: PostToolUseHookInput): Array<[number, number]> 
   return ranges;
 }
 
+/** Default length of the settle window (ms): findings are held this long before they are reported (F34). */
+export const SETTLE_MS = 5000;
+
+/**
+ * Length of the hold for this process: `UNIVERSAL_LINT_SETTLE_MS` (a finite number >= 0; a test and perf-harness seam,
+ * not a user setting) else `SETTLE_MS`, cut so the hold ends at least 1 s before the 90 s hook backstop.
+ *
+ * @param uptimeMs - Process uptime in ms (injectable for tests).
+ * @returns Milliseconds to wait, never negative.
+ */
+export function settleWaitMs(uptimeMs: number = process.uptime() * 1000): number {
+  const raw = process.env.UNIVERSAL_LINT_SETTLE_MS;
+  const n = raw === undefined || raw.trim() === "" ? Number.NaN : Number(raw);
+  const base = Number.isFinite(n) && n >= 0 ? n : SETTLE_MS;
+  return Math.max(0, Math.min(base, HOOK_TIMEOUT_MS - 1000 - uptimeMs));
+}
+
+/** One `structuredPatch` hunk with the old-line map the settle window's supersession needs. */
+export interface EditHunk {
+  /** 1-based first old line as in the patch (the line before the hunk when it has no old lines). */
+  oldStart: number;
+  /** Old-side lines walked (context and removed). */
+  oldLines: number;
+  /** 1-based first new line as in the patch. */
+  newStart: number;
+  /** New-side lines walked (context and added). */
+  newLines: number;
+  /** One entry per old-side line: its new 0-based line, or -1 when the edit removed it. */
+  map: number[];
+}
+
+/**
+ * The hunks of an Edit with the old-to-new line map of each (the data `editRanges` reads, kept per old line).
+ *
+ * @param args - The PostToolUse hook payload.
+ * @returns The hunks, or null when the whole file counts as edited (Write, other tool, missing or malformed patch).
+ */
+export function editHunks(args: PostToolUseHookInput): EditHunk[] | null {
+  const patch = args?.tool_response?.structuredPatch;
+  if (args?.tool_name !== "Edit" || !Array.isArray(patch)) return null;
+  const hunks: EditHunk[] = [];
+  for (const h of patch as Array<{ oldStart?: unknown; newStart?: unknown; lines?: unknown }>) {
+    if (typeof h?.oldStart !== "number" || typeof h.newStart !== "number" || !Array.isArray(h.lines)) return null;
+    const map: number[] = [];
+    let next = h.newStart - 1;
+    for (const l of h.lines as unknown[]) {
+      const c = typeof l === "string" ? l[0] : " ";
+      if (c === "\\") continue; // `\ No newline at end of file` is not a line
+      if (c === "-") map.push(-1);
+      else if (c === "+") next++;
+      else map.push(next++);
+    }
+    hunks.push({ oldStart: h.oldStart, oldLines: map.length, newStart: h.newStart, newLines: next - (h.newStart - 1), map });
+  }
+  return hunks;
+}
+
+/**
+ * Where an old line sits after an edit.
+ *
+ * @param line - 0-based line before the edit.
+ * @param hunks - The edit's hunks in file order.
+ * @returns The 0-based line after the edit, or null when the edit removed or replaced it.
+ */
+export function carryLine(line: number, hunks: readonly EditHunk[]): number | null {
+  let shift = 0;
+  for (const h of hunks) {
+    const start = h.oldLines === 0 ? h.oldStart : h.oldStart - 1; // a hunk without old lines names the line before it
+    if (line < start) break;
+    if (line < start + h.oldLines) {
+      const n = h.map[line - start];
+      return n < 0 ? null : n;
+    }
+    shift += h.newLines - h.oldLines;
+  }
+  return line + shift;
+}
+
 /**
  * Location regex A: `<path>.<ext>:<line>` or `<path>.<ext>(<line>` (ruff, ktlint, golangci-lint, go vet, checkstyle,
  * markdownlint, psalm, oxlint `,-[src/a.ts:3:7]`, cargo `--> src/a.rs:12:5`, tsc `a.ts(12,5)` / `a.ts:12:5`).
@@ -1897,13 +2103,18 @@ const LOC_PATH_RE = /(?<![^\s:()[\]'"])(?<path>[^\s:()[\]'"]+\.[A-Za-z0-9]+)[:(]
 const LOC_ROW_RE = /^\s*(?<line>\d+):\d+\s/;
 /** Location regex C: shellcheck's default tty header `In <file> line <line>:` (path-less: the edited file is its only target). */
 const LOC_SHELLCHECK_RE = /^In .+ line (?<line>\d+):/;
+/** shellcheck `-f gcc` line (`a.sh:3:6: note: ...`, e.g. via `SHELLCHECK_OPTS`): located by regex A; any other shellcheck line only by C. */
+const SHELLCHECK_GCC_RE = /:\d+:\d+: (?:error|warning|info|style|note): /;
+/** Code-frame gutter line (`4 |     v.push(1);`, rustc/cargo, ruff full, oxlint): never a location, checked before A-C. */
+const CODE_FRAME_RE = /^\s*\d*\s*[|│]/;
 
 /**
- * Parse/syntax error wording (plus tsc's TS1xxx and shellcheck's SC1xxx parser codes). An edit-caused parse error is
+ * Parse/syntax error wording (plus rustc's unnumbered `error: expected ...` header, tsc's TS1xxx and shellcheck's SC1xxx
+ * parser codes; a bare `expected '...'` would also match eslint eqeqeq and rustc E0308 type errors). An edit-caused parse error is
  * often reported away from the edit (unclosed brace -> EOF), so such a diagnostic is kept even outside the range.
  * shortcut: wording heuristic, a tool phrasing parse errors differently is still gated; extend the list when one shows up.
  */
-const PARSE_ERROR_RE = /pars(?:e|ing) error|syntax ?error|unexpected (?:token|end|eof|character|indent)|unterminated|unclosed|end of (?:file|input)|\bexpected [`'"]|\b(?:TS1|SC1)\d{3}\b/i;
+const PARSE_ERROR_RE = /pars(?:e|ing) error|syntax ?error|unexpected (?:token|end|eof|character|indent)|unterminated|unclosed|end of (?:file|input)|\berror: expected\b|\b(?:TS1|SC1)\d{3}\b/i;
 
 /**
  * Drop the diagnostics of `finding` located in `resolved` outside `ranges`. Text is split into blank-line paragraphs;
@@ -1914,12 +2125,16 @@ const PARSE_ERROR_RE = /pars(?:e|ing) error|syntax ?error|unexpected (?:token|en
  * not reportable. existsSync results are memoized per call.
  *
  * @param finding - One tool's finding.
- * @param ranges - Inclusive 0-based edited line ranges, or null when every line counts as edited.
+ * @param ranges - Inclusive 0-based edited line ranges, null when every line counts as edited, or a predicate on the
+ *   0-based line that says whether a diagnostic located there is kept (the settle window's "line survives" test).
  * @param resolved - Absolute path of the edited file.
+ * @param keepParseErrors - `true` (default): keep an own-file parse error that misses `ranges`. `false`: treat it like any
+ *   diagnostic. `"drop"`: drop an own-file parse error on any line (the settle window with a later edit: that edit's
+ *   own lint reports a parse error that persists, and its cause may be on another line than the error).
  * @returns The finding with only the kept text, `finding` itself when no line is located (unknown format, fail open),
  *   or null when nothing reportable remains.
  */
-export function gateFinding(finding: Finding, ranges: Array<[number, number]> | null, resolved: string): Finding | null {
+export function gateFinding(finding: Finding, ranges: Array<[number, number]> | null | ((line0: number) => boolean), resolved: string, keepParseErrors: boolean | "drop" = true): Finding | null {
   const seen = new Map<string, boolean>();
   /** Memoized `existsSync` for this call (the filesystem is stable within one call). */
   const exists = (abs: string): boolean => {
@@ -1930,9 +2145,15 @@ export function gateFinding(finding: Finding, ranges: Array<[number, number]> | 
     }
     return found;
   };
-  const hit = (line: number): "hit" | "miss" => (ranges === null || ranges.some(([s, e]) => s <= line - 1 && line - 1 <= e) ? "hit" : "miss");
+  const hit = (line: number): "hit" | "miss" => (ranges === null || (typeof ranges === "function" ? ranges(line - 1) : ranges.some(([s, e]) => s <= line - 1 && line - 1 <= e)) ? "hit" : "miss");
   const classify = (raw: string): "hit" | "miss" | "foreign" | null => {
     const plain = raw.replace(ANSI_SGR_RE, "");
+    if (finding.tool === "shellcheck" && !SHELLCHECK_GCC_RE.test(plain)) {
+      // tty format echoes the source line and fix without a gutter (`curl 127.0.0.1:8080`): only the header is a location
+      const sc = LOC_SHELLCHECK_RE.exec(plain);
+      return sc?.groups ? hit(Number(sc.groups.line)) : null;
+    }
+    if (CODE_FRAME_RE.test(plain)) return null; // a source line in a code frame: `ok.pow(2` is no location
     const row = LOC_ROW_RE.exec(plain); // a stylish row first: its message text can look like `foo.bar(3)`
     if (row?.groups) return hit(Number(row.groups.line));
     const a = LOC_PATH_RE.exec(plain);
@@ -1965,7 +2186,9 @@ export function gateFinding(finding: Finding, ranges: Array<[number, number]> | 
     const preambleParse = PARSE_ERROR_RE.test(out.join("\n"));
     starts.forEach((start, n) => {
       const seg = lines.slice(start, starts[n + 1] ?? lines.length);
-      if (kinds[start] === "miss" && !preambleParse && !PARSE_ERROR_RE.test(seg.join("\n"))) return;
+      const parse = preambleParse || PARSE_ERROR_RE.test(seg.join("\n"));
+      if (keepParseErrors === "drop" && parse && kinds[start] !== "foreign") return;
+      if (kinds[start] === "miss" && !(keepParseErrors === true && parse)) return;
       out.push(...seg);
       any = true;
     });
@@ -1996,23 +2219,72 @@ function writtenDigestPath(real: string): string {
  * @returns Base64 digest.
  */
 function fileDigest(fp: string): string {
-  return createHash("sha256").update(readFileSync(fp)).digest("base64");
+  return digest(readFileSync(fp));
 }
 
 /**
- * Record the on-disk content digest of a Write/Edit target, atomically (temp file + renameSync), so a FileChanged
- * process can skip the file while its content still matches. One file per real path: concurrent hook processes need
- * no locking. Fails open silently (cost: one duplicate lint, never a lost one).
+ * SHA-256 base64 of in-memory content (same encoding as `fileDigest`).
  *
- * @param fp - Lexical path of the written file (read for the digest).
- * @param real - Real path of the written file (the digest key).
+ * @param data - Content to hash.
+ * @returns Base64 digest.
  */
-export function recordWritten(fp: string, real: string): void {
+function digest(data: string | Buffer): string {
+  return createHash("sha256").update(data).digest("base64");
+}
+
+/**
+ * The content a Write/Edit left at its target as the tool reports it: Write's `tool_input.content`, or an Edit's
+ * `tool_response.structuredPatch` applied to its `originalFile`. Never read from disk: another writer may already have
+ * changed the file when the hook runs.
+ *
+ * @param args - The PostToolUse hook payload.
+ * @returns The content, or null when the payload does not carry it (or the patch does not fit `originalFile`).
+ */
+export function writtenContent(args: PostToolUseHookInput): string | null {
+  if (args?.tool_name === "Write") return typeof args.tool_input?.content === "string" ? args.tool_input.content : null;
+  const original = args?.tool_response?.originalFile;
+  const patch = args?.tool_response?.structuredPatch;
+  if (args?.tool_name !== "Edit" || typeof original !== "string" || !Array.isArray(patch)) return null;
+  const src = original.match(/[^\n]*\n|[^\n]+$/g) ?? []; // lines with their own terminator
+  let out = "";
+  let i = 0;
+  for (const h of patch as Array<{ oldStart?: unknown; lines?: unknown }>) {
+    if (typeof h?.oldStart !== "number" || !Array.isArray(h.lines) || !h.lines.every((l) => typeof l === "string")) return null;
+    const lines = h.lines;
+    const old = lines.filter((l) => l[0] === " " || l[0] === "-").length;
+    const start = old === 0 ? h.oldStart : h.oldStart - 1; // a hunk without old lines names the line before it
+    if (start < i || start + old > src.length) return null;
+    out += src.slice(i, start).join("");
+    i = start;
+    lines.forEach((l, k) => {
+      if (l[0] === " ") out += src[i++];
+      else if (l[0] === "-") i++;
+      // a `\ No newline at end of file` marker after an added line: the file ends without a newline
+      else if (l[0] === "+") out += l.slice(1) + (lines[k + 1]?.startsWith("\\") ? "" : "\n");
+    });
+  }
+  return out + src.slice(i).join("");
+}
+
+/**
+ * Record the digest of the content a Write/Edit produced (`writtenContent`), atomically (temp file + renameSync), so a
+ * FileChanged process can skip the file while its content still matches. Not the disk: a write by another program that
+ * lands before the hook runs must still differ. Without content the old digest is removed. One file per real path:
+ * concurrent hook processes need no locking. Fails open silently (cost: one duplicate lint, never a lost one).
+ *
+ * @param real - Real path of the written file (the digest key).
+ * @param content - The content the tool wrote, or null when unknown.
+ */
+export function recordWritten(real: string, content: string | null): void {
   try {
     const file = writtenDigestPath(real);
+    if (content === null) {
+      rmSync(file, { force: true });
+      return;
+    }
     mkdirSync(path.dirname(file), { recursive: true });
     const tmp = `${file}.${process.pid}.tmp`;
-    writeFileSync(tmp, fileDigest(fp));
+    writeFileSync(tmp, digest(content));
     renameSync(tmp, file);
   } catch {
     // fail open: a missing digest costs one duplicate lint
@@ -2024,9 +2296,186 @@ export function recordWritten(fp: string, real: string): void {
  * within milliseconds. Never throws.
  *
  * @param s - The `postToolScope` result, or null.
+ * @param args - The PostToolUse hook payload (source of the written content).
  */
-function recordWrittenFor(s: { fp: string; real: string } | null): void {
-  if (s) recordWritten(s.fp, s.real);
+function recordWrittenFor(s: { fp: string; real: string } | null, args: PostToolUseHookInput): void {
+  if (s) recordWritten(s.real, writtenContent(args));
+}
+
+/**
+ * SHA-256 base64 of a file, or null when it cannot be read.
+ *
+ * @param fp - File to hash.
+ * @returns The digest, or null.
+ */
+function digestOrNull(fp: string): string | null {
+  try {
+    return fileDigest(fp);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Whether the file holds a line break that the Edit's `structuredPatch` (jsdiff: `\n` and `\r\n` only) does not count
+ * but a linter may (tsc: U+2028/U+2029, eslint: those and a lone `\r`, markdownlint: a lone `\r`, yamllint: U+0085
+ * NEL and the others via PyYAML marks). Then the linter's
+ * line numbers and the patch's differ below it, so neither the edit-range gate nor the settle window can place a
+ * finding.
+ *
+ * @param fp - Path of the file to read.
+ * @returns True on such a line break or a read error (cannot tell: report whole-file).
+ */
+function hasForeignLineBreak(fp: string): boolean {
+  try {
+    return /\r(?!\n)|[\u0085\u2028\u2029]/.test(readFileSync(fp, "utf8"));
+  } catch {
+    return true;
+  }
+}
+
+/** Handle of the journal record a lint wrote for its own edit (F34). */
+export interface EditRecord {
+  /** `hashPath` of the file's real path: the record files of one file share this prefix. */
+  key: string;
+  /** File name of the record inside the journal directory. */
+  name: string;
+}
+
+/**
+ * Settle-window journal directory: `CLAUDE_PLUGIN_DATA` (OS temp dir when unset)/settle. Never inside the project tree.
+ *
+ * @returns Absolute path of the directory.
+ */
+function settleDir(): string {
+  return path.resolve(process.env.CLAUDE_PLUGIN_DATA || tmpdir(), "settle");
+}
+
+/**
+ * Journal one edit of a file for the settle window: `<hashPath(real)>-<ms>-<pid>.json` holding the edit's hunks (null =
+ * whole file), the digest of the file after it and `before`, the digest of the file the hunks apply to (an Edit's
+ * `originalFile`; null without hunks), written atomically (temp file + `renameSync`). Older entries
+ * (name timestamp more than `HOOK_TIMEOUT_MS` ago or ahead, temp leftovers too) are pruned first, so a live reader
+ * still finds everything a hook run can need. Fails open to null (the lint then reports at once).
+ *
+ * @param fp - Lexical path of the edited file (read for the digest when `written` is not given).
+ * @param real - Real path of the file (the key).
+ * @param hunks - The edit's hunks, null when the whole file counts as edited.
+ * @param before - Digest of the content the hunks apply to, or null (unknown, or no hunks).
+ * @param written - Digest of the content the tool wrote (null: unknown); omitted, the disk is hashed (FileChanged).
+ * @returns The record handle, or null on any error.
+ */
+export function recordEdit(fp: string, real: string, hunks: EditHunk[] | null, before?: string | null, written?: string | null): EditRecord | null {
+  try {
+    const dir = settleDir();
+    mkdirSync(dir, { recursive: true });
+    const now = Date.now();
+    // |age|: a name dated that far ahead (clock stepped back) would sort after every fresh record and read as a later edit
+    for (const n of readdirSync(dir)) if (Math.abs(now - Number(n.split("-")[1])) > HOOK_TIMEOUT_MS) rmSync(path.join(dir, n), { force: true });
+    const key = hashPath(real);
+    const name = `${key}-${String(now).padStart(15, "0")}-${process.pid}.json`;
+    const tmp = path.join(dir, `${name}.tmp`);
+    writeFileSync(tmp, JSON.stringify({ hunks, digest: written === undefined ? fileDigest(fp) : written, before: before ?? null }));
+    renameSync(tmp, path.join(dir, name));
+    return { key, name };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Name of the newest journal record of the file, taken next to `d0` and `d1`: a record that appeared while the linter
+ * ran means an edit landed then, even when the content is back to `d0` (an edit and its exact undo, A->B->A).
+ *
+ * @param rec - The lint's own journal record, or null.
+ * @returns The newest record name of `rec.key`, or null (no record, or the journal is unreadable).
+ */
+function journalTail(rec: EditRecord | null): string | null {
+  if (!rec) return null;
+  try {
+    return readdirSync(settleDir()).filter((n) => n.startsWith(`${rec.key}-`) && n.endsWith(".json")).sort().at(-1) ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The settle window (F34): hold the findings of a finished lint for `settleWaitMs()`, then drop every diagnostic
+ * located in `resolved` on a line a later edit of the file removed or replaced (that edit's own lint reports what
+ * persists there). Diagnostics in other files and findings without a located line are never dropped.
+ *
+ * @remarks
+ * Coordinates: the finding's lines are those of the file as the linter read it, whose digest is `d0`. The reference
+ * is the last journal record with `digest === d0`; only the records after it are later edits, except the lint's own
+ * record (`rec`): a hook that journals late sorts its own record after a later edit's, but that record never changed
+ * the content the lint read (the lint reads the disk after journaling), so it would drop every own-file line as a
+ * whole-file edit. A file that changed during the lint (`d0 !== d1`), no matching record, no later record, a later
+ * record with hunks whose `before` is not the digest of the later record before it (an unjournaled change in between,
+ * or records journaled out of edit order: its hunks are in other coordinates), a missing or
+ * unreadable journal or record all mean "cannot tell": the findings are returned as they are (fail open, reported). Nothing is held when there is
+ * nothing to report, no own record, or nothing the filter could drop (foreign or unlocated findings only).
+ *
+ * @param findings - The gated findings of the lint.
+ * @param resolved - Lexical absolute path of the linted file.
+ * @param rec - The lint's own journal record, or null.
+ * @param d0 - Digest of the file right before the lint started, or null.
+ * @param d1 - Digest of the file right after the lint ended, or null (also when a journal record appeared during the lint).
+ * @returns The findings that survive (possibly fewer diagnostics per finding).
+ */
+export async function settleFindings(findings: Finding[], resolved: string, rec: EditRecord | null, d0: string | null, d1: string | null): Promise<Finding[]> {
+  if (findings.length === 0 || !rec || d0 === null || d0 !== d1) return findings;
+  // Nothing the filter could drop (worst case: every own-file located line goes): no later edit changes the result, no hold.
+  try {
+    if (findings.every((f) => gateFinding(f, () => false, resolved, "drop")?.text === f.text)) return findings;
+  } catch {
+    // fail open: hold as usual
+  }
+  const wait = settleWaitMs();
+  if (wait > 0) await sleep(wait);
+  let later: Array<EditHunk[] | null>;
+  try {
+    const dir = settleDir();
+    const recs = readdirSync(dir)
+      .filter((n) => n.startsWith(`${rec.key}-`) && n.endsWith(".json"))
+      .sort()
+      .map((n) => ({ name: n, ...(JSON.parse(readFileSync(path.join(dir, n), "utf8")) as { hunks: EditHunk[] | null; digest: string; before?: string | null }) }));
+    if (recs.some((r) => r.hunks !== null && !Array.isArray(r.hunks))) return findings;
+    let at = -1;
+    recs.forEach((r, i) => {
+      if (r.digest === d0) at = i;
+    });
+    if (at === -1) return findings;
+    // The own record never changed what this lint read (it read the disk after journaling): a late hook's own record is no later edit.
+    const after = recs.slice(at + 1).filter((r) => r.name !== rec.name);
+    if (after.length === 0) return findings;
+    // Hunks are in the coordinates of the content they were cut from: a change nobody journaled breaks the chain.
+    let prev = recs[at].digest;
+    for (const r of after) {
+      if (r.hunks !== null && r.before !== prev) return findings;
+      prev = r.digest;
+    }
+    later = after.map((r) => r.hunks);
+  } catch {
+    return findings;
+  }
+  const survives = (line0: number): boolean => {
+    let l = line0;
+    for (const h of later) {
+      if (h === null) return false;
+      const n = carryLine(l, h);
+      if (n === null) return false;
+      l = n;
+    }
+    return true;
+  };
+  try {
+    return findings.flatMap((f) => {
+      const g = gateFinding(f, survives, resolved, "drop");
+      return g ? [g] : [];
+    });
+  } catch {
+    return findings; // a record whose hunks are malformed below the array check: cannot tell, report
+  }
 }
 
 /**
@@ -2069,7 +2518,8 @@ function tscNeeded(typeCheckEligible: boolean, oxlintConfig: string | null, chai
 
 /**
  * Lint `resolved` (chain tool from `chainEntryFor` unless JS/TS or CSS/SCSS has no lint config, run by `runChainLint`,
- * + tsc), gate the findings against `ranges` (null = whole file), and build the hook result.
+ * + tsc) and gate the findings against `ranges` (null = whole file). The caller settles them (`settleFindings`) and
+ * formats them (`formatFindings`); no lock or slot is needed past this point.
  *
  * @remarks
  * tsc is decided up front (F18): for a type-check-eligible file whose oxlint config does not type-check (or that has
@@ -2085,39 +2535,48 @@ function tscNeeded(typeCheckEligible: boolean, oxlintConfig: string | null, chai
  * @param resolved - Lexical absolute path of the in-scope file.
  * @param cwd - Payload cwd (spawn cwd and config search root).
  * @param ranges - Edited line ranges, or null when the whole file counts.
- * @param hookEventName - `hookSpecificOutput.hookEventName` of the result. `hookEventName === "FileChanged"` also
- *   enables `coalesceProjectCheck` for the whole-project check.
- * @param label - Prefix of the findings text (`<label>: <findings>`).
- * @returns The hook result: findings as additionalContext, or an empty object.
+ * @param hookEventName - The event name; `"FileChanged"` also enables `coalesceProjectCheck` for the whole-project check.
+ * @param session - FileChanged: the payload's session id, which keys `coalesceProjectCheck`'s coverage stamp.
+ * @returns The gated findings (empty when clean, skipped or all outside the edit).
  */
-async function lintResolved(resolved: string, cwd: string, ranges: Array<[number, number]> | null, hookEventName: string, label: string): Promise<HookResult> {
+async function lintResolved(resolved: string, cwd: string, ranges: Array<[number, number]> | null, hookEventName: string, session = ""): Promise<Finding[]> {
   const rel = path.relative(cwd, resolved);
   const coalesce = hookEventName === "FileChanged";
   const ext = path.extname(resolved).toLowerCase();
   const typeCheckEligible = TYPE_CHECK_EXTS.has(ext);
   const { entry, oxlintConfig } = chainEntryFor(resolved, cwd);
 
-  const chainP: Promise<ChainResult> = entry ? runChainLint(entry, resolved, cwd, rel, coalesce) : Promise.resolve(NO_CHAIN);
+  const chainP: Promise<ChainResult> = entry ? runChainLint(entry, resolved, cwd, rel, coalesce, session) : Promise.resolve(NO_CHAIN);
   let chain: ChainResult;
   let tsResult: Finding | null = null;
   // tsc needed even when the chain runs fine (no oxlint typeCheck config): start it at once.
   if (tscNeeded(typeCheckEligible, oxlintConfig, true)) {
     // tsc does not depend on the chain outcome: run both at once (each keeps its own timeout).
-    [chain, tsResult] = await Promise.all([chainP, runTypeCheck(resolved, cwd, coalesce)]);
+    [chain, tsResult] = await Promise.all([chainP, runTypeCheck(resolved, cwd, coalesce, session)]);
   } else {
     chain = await chainP;
-    if (tscNeeded(typeCheckEligible, oxlintConfig, chain.ran)) tsResult = await runTypeCheck(resolved, cwd, coalesce);
+    if (tscNeeded(typeCheckEligible, oxlintConfig, chain.ran)) tsResult = await runTypeCheck(resolved, cwd, coalesce, session);
   }
   const findings: Finding[] = [];
   if (chain.finding) findings.push(chain.finding);
   if (tsResult) findings.push(tsResult);
   // Gate before truncate() so the context budget is spent on in-range text.
-  const kept = findings.flatMap((f) => {
+  return findings.flatMap((f) => {
     const g = gateFinding(f, ranges, resolved);
     return g ? [g] : [];
   });
-  if (kept.length === 0) return {};
+}
 
+/**
+ * The hook result for the findings that survived the settle window.
+ *
+ * @param kept - The findings to report (possibly empty).
+ * @param hookEventName - `hookSpecificOutput.hookEventName` of the result.
+ * @param label - Prefix of the findings text (`<label>: <findings>`).
+ * @returns The hook result: findings as additionalContext, or an empty object.
+ */
+function formatFindings(kept: Finding[], hookEventName: string, label: string): HookResult {
+  if (kept.length === 0) return {};
   // truncate() is applied per-finding first (so a single finding's own text
   // is capped exactly as before this change), then AGAIN over the joined
   // whole -- two per-finding-capped blocks can still together exceed
@@ -2137,17 +2596,35 @@ async function lintResolved(resolved: string, cwd: string, ranges: Array<[number
 /**
  * The lint_file tool handler (PostToolUse Write|Edit). Resolves to {} on every guard failure / clean / skip or rejection (fail open); async since F18.
  *
+ * @remarks
+ * Settle window (F34): the edit is journaled (`recordEdit` with the digest of an Edit's `originalFile` as `before`,
+ * also when the lint is clean), the lint runs between two
+ * digests of the file (`d0`, `d1`), and its findings are held and filtered by `settleFindings` before they are
+ * formatted. Takes no slot or lock.
+ *
  * @param args - The PostToolUse hook payload.
  * @returns The hook result: findings as additionalContext, or an empty object.
  */
 export async function lintFileHandler(args: PostToolUseHookInput, scoped: { fp: string; real: string } | null = postToolScope(args)): Promise<HookResult> {
   try {
     const resolved = scoped?.fp;
-    if (!resolved) return {};
+    if (!scoped || !resolved) return {};
     const ranges = editRanges(args);
     if (ranges?.length === 0) return {}; // the Edit changed nothing
+    const original = args.tool_response?.originalFile;
+    const before = typeof original === "string" ? digest(original) : null;
+    // the tool's content, not the disk: a change landing before this hook must not be folded into the edit's record
+    const wc = writtenContent(args);
+    const rec = recordEdit(resolved, scoped.real, editHunks(args), before, wc === null ? null : digest(wc));
+    // a line break the patch does not count shifts the linter's lines: no gate, no supersession (report whole-file)
+    const odd = hasForeignLineBreak(resolved);
+    const d0 = digestOrNull(resolved);
+    const t0 = journalTail(rec);
     // `await` inside the try is load-bearing: a rejected promise must land in the catch (fail open).
-    return await lintResolved(resolved, args.cwd, ranges, "PostToolUse", "universal-lint");
+    const kept = await lintResolved(resolved, args.cwd, odd ? null : ranges, "PostToolUse");
+    // only a held finding needs the second digest; a record journaled during the lint (A->B->A) counts as a change
+    const d1 = kept.length > 0 && journalTail(rec) === t0 ? digestOrNull(resolved) : null;
+    return formatFindings(await settleFindings(kept, resolved, odd ? null : rec, d0, d1), "PostToolUse", "universal-lint");
   } catch {
     return {};
   }
@@ -2218,12 +2695,18 @@ export async function lintFilesHandler(cwd: string, files: readonly string[]): P
 
   const ran = new Set<string>();
   const chainBlocks: string[] = [];
-  const spawnPlan = async (plan: ChainPlan, argv: string[]): Promise<ReturnType<typeof chainOutcome>> => chainOutcome(plan.tool, await runLintTool(plan.tool, argv, buildSpawnOpts(plan.spawnCwd, plan.timeout), plan.local));
-  const record = (members: Array<{ fp: string; plan: ChainPlan }>, out: ReturnType<typeof chainOutcome>): void => {
+  type Outcome = (NonNullable<ReturnType<typeof chainOutcome>> & { tool: LintTool }) | null;
+  const spawnPlan = async (plan: ChainPlan, argv: string[], fp: string): Promise<Outcome> => {
+    const { tool, result } = await runPlan(plan, argv, fp, cwd);
+    const out = chainOutcome(tool, result);
+    return out && { ...out, tool };
+  };
+  const record = (members: Array<{ fp: string; plan: ChainPlan }>, out: Outcome): void => {
     if (!out || out.verdict === "skip") return;
     for (const m of members) ran.add(m.fp);
     if (out.verdict !== "issues") return;
-    const { tool, manifest } = members[0].plan;
+    const { tool } = out;
+    const { manifest } = members[0].plan;
     const targets = new Set(members.map(({ fp }) => chainTarget(tool, manifest, cwd, fp)));
     // One block now carries up to BATCH_MAX_FILES files: keep the old per-file budget so later files' findings are not cut.
     chainBlocks.push(`universal-lint: ${tool.name} found issues in ${[...targets].join(", ")}:\n${truncate(out.text, MAX_CONTEXT_CHARS * members.length)}`);
@@ -2235,13 +2718,13 @@ export async function lintFilesHandler(cwd: string, files: readonly string[]): P
     for (let i = 0; i < group.length; i += step) {
       const chunk = group.slice(i, i + step);
       try {
-        const argv = fileScoped ? [...plan.argv.slice(0, -1), ...chunk.map((m) => m.fp)] : plan.argv;
-        const out = await spawnPlan(plan, argv);
+        const argv = fileScoped ? [...plan.argv.slice(0, -1), ...chunk.map((m) => fileArg(plan.tool, m.fp, plan.spawnCwd))] : plan.argv;
+        const out = await spawnPlan(plan, argv, chunk[0].fp);
         // Per-file fail-open: one unparsable or pathological file, a tool crash, kill or timeout must not drop the other files' findings.
         if ((!out || out.verdict === "skip") && fileScoped && chunk.length > 1) {
           for (const m of chunk) {
             try {
-              record([m], await spawnPlan(m.plan, m.plan.argv));
+              record([m], await spawnPlan(m.plan, m.plan.argv, m.fp));
             } catch {
               // fail open: drop this file only
             }
@@ -2351,9 +2834,11 @@ export function acquireSlot(untilMs: number): string | null {
 /**
  * Run a whole-project check (`tsc -p`, `go vet <dir>`, `cargo ... --manifest-path`) once per FileChanged burst and
  * project. State under `${CLAUDE_PLUGIN_DATA || tmpdir()}/fc-locks/`: `<key>.lock` (exclusive `wx` create holding
- * this pid, reclaimed per `slotStale`) and `<key>.last` (`Date.now()` taken before the spawn of the last run that
+ * this pid, reclaimed per `slotStale`; shared by all sessions, so their runs stay serialised) and
+ * `<key>-<hashPath(session)>.last` (`Date.now()` taken before the spawn of the last run of this session that
  * completed without error or signal). Skips (returns null) when `.last` is newer than `file`'s ctime and not in the
- * future: a completed run started after the file's last change, so its process reported this file's findings.
+ * future: a completed run started after the file's last change, so its process reported this file's findings to this
+ * session (the data dir is shared by every session, and another session's report never reaches this one).
  * Otherwise claims the lock, re-checking `.last` every 100 ms (async `setTimeout` from `node:timers/promises`, so a
  * concurrent chain child keeps being read; under `lintResolved`'s concurrent branch this wait overlaps that child) while a live holder runs, until process
  * uptime reaches `FILE_CHANGED_BUDGET_MS - reserveMs`, after which it runs unlocked; after a claim it re-checks `.last`
@@ -2364,12 +2849,13 @@ export function acquireSlot(untilMs: number): string | null {
  * @param file - The changed file (its ctime decides whether the last completed run covers it).
  * @param reserveMs - The check's spawn timeout; the lock wait stops this long before `FILE_CHANGED_BUDGET_MS`.
  * @param run - Spawns the check (async, a `spawnGroup` result).
- * @returns `run`'s result, or null when a completed run already covers `file`.
+ * @param session - The FileChanged payload's session id (empty when missing): the coverage stamp is per session.
+ * @returns `run`'s result, or null when a completed run of this session already covers `file`.
  */
-export async function coalesceProjectCheck(key: string, file: string, reserveMs: number, run: () => Promise<SpawnSyncReturns<string>>): Promise<SpawnSyncReturns<string> | null> {
+export async function coalesceProjectCheck(key: string, file: string, reserveMs: number, run: () => Promise<SpawnSyncReturns<string>>, session = ""): Promise<SpawnSyncReturns<string> | null> {
   const dir = path.resolve(process.env.CLAUDE_PLUGIN_DATA || tmpdir(), "fc-locks");
   const lock = path.join(dir, `${key}.lock`);
-  const last = path.join(dir, `${key}.last`);
+  const last = path.join(dir, `${key}-${hashPath(session)}.last`);
   let changed: number;
   try {
     // statSync: a symlinked file's target is what the check reads; ctime: copies can preserve an old mtime.
@@ -2420,13 +2906,27 @@ export async function coalesceProjectCheck(key: string, file: string, reserveMs:
 }
 
 /**
+ * Process uptime (ms) at which FileChanged's slot wait gives up for a file: what is left of `FILE_CHANGED_BUDGET_MS`
+ * once the file's nominal lint budget is reserved, chain + `tsc` kept as the sum for the sequential oxlint-`typeCheck`
+ * fallback (`.ts`-family 10 s, `.rs` 40 s, any other extension 55 s; see `FILE_CHANGED_BUDGET_MS`).
+ *
+ * @param ext - The file's lower-cased extension with its dot.
+ * @returns The slot-wait deadline in ms of process uptime.
+ */
+export function slotDeadlineMs(ext: string): number {
+  return FILE_CHANGED_BUDGET_MS - (EXT_MAP[ext] === "rust" ? CARGO_SPAWN_TIMEOUT_MS : SPAWN_TIMEOUT_MS) - (TYPE_CHECK_EXTS.has(ext) ? TSC_SPAWN_TIMEOUT_MS : 0);
+}
+
+/**
  * FileChanged: lint a watched file changed outside Write/Edit, whole file (no edit-range gate). Skips, first match
  * wins: `unlink` event; out of scope (`scopedTarget`); content still equal to the digest Write/Edit recorded; git says
  * ignored (`!!`) or unchanged (empty status). A git failure (no git, not a repo, timeout) lints. Then waits for one of
  * `FILE_CHANGED_SLOTS` cross-process slots (`acquireSlot`) until `FILE_CHANGED_BUDGET_MS` minus the file's lint
  * budget; no slot in time skips with a stderr note; a slot error lints without a slot. Inside `lintResolved` the
  * whole-project check (tsc, go vet/golangci-lint, cargo) runs through `coalesceProjectCheck`: once per burst and project
- * (F13). Returns {} for every skip and on any error (fail open).
+ * (F13). Settle window (F34): once the digest check says the content changed, a whole-file edit is journaled
+ * (`recordEdit`), and the findings are held and filtered by `settleFindings` after the slot is released. Returns {}
+ * for every skip and on any error (fail open).
  * Async since F18 (the git call and `acquireSlot` stay sync: no child of this process exists yet).
  *
  * @param args - The FileChanged hook payload.
@@ -2448,11 +2948,18 @@ export async function fileChangedHandler(args: PostToolUseHookInput): Promise<Ho
     }
     if (recorded !== null) {
       if (recorded === fileDigest(s.fp)) return {};
-      rmSync(writtenDigestPath(s.real), { force: true }); // stale: a later restore of the old bytes must lint
+      try {
+        rmSync(writtenDigestPath(s.real), { force: true }); // stale: a later restore of the old bytes must lint
+      } catch {
+        // fail open: an unwritable store costs a duplicate lint later, never this one
+      }
     }
+    // The content changed outside Write/Edit (never for the digest-matched echo above): a whole-file edit for the
+    // settle window, also when the git gate then skips the lint (a restore to committed content leaves no stale finding).
+    const rec = recordEdit(s.fp, s.real, null);
     try {
-      const status = execFileSync("git", ["--no-optional-locks", "status", "--porcelain", "--untracked-files=normal", "--ignored=matching", "--", s.fp], {
-        cwd: path.dirname(s.fp),
+      const status = execFileSync("git", ["--no-optional-locks", "--literal-pathspecs", "status", "--porcelain", "--untracked-files=normal", "--ignored=matching", "--", s.real], {
+        cwd: path.dirname(s.real), // git maps a lexical path through an in-repo symlinked dir to a path not in the index
         encoding: "utf8",
         timeout: GIT_TIMEOUT_MS,
         stdio: ["ignore", "pipe", "ignore"],
@@ -2461,12 +2968,9 @@ export async function fileChangedHandler(args: PostToolUseHookInput): Promise<Ho
     } catch {
       // no git, not a repo, timeout or non-zero exit: lint
     }
-    const ext = path.extname(s.fp).toLowerCase();
-    // The wait gets what git left of FILE_CHANGED_BUDGET_MS once this file's nominal lint budget is reserved: chain + tsc, kept as the sum for the sequential oxlint-typeCheck fallback (see FILE_CHANGED_BUDGET_MS).
-    const lintMs = (EXT_MAP[ext] === "rust" ? CARGO_SPAWN_TIMEOUT_MS : SPAWN_TIMEOUT_MS) + (TYPE_CHECK_EXTS.has(ext) ? TSC_SPAWN_TIMEOUT_MS : 0);
     let slot: string | null | undefined; // undefined: slot error, lint without a slot (fail open, as before F10)
     try {
-      slot = acquireSlot(FILE_CHANGED_BUDGET_MS - lintMs);
+      slot = acquireSlot(slotDeadlineMs(path.extname(s.fp).toLowerCase()));
     } catch {
       // unusable slot dir or slot file: slot stays undefined
     }
@@ -2474,8 +2978,17 @@ export async function fileChangedHandler(args: PostToolUseHookInput): Promise<Ho
       process.stderr.write(`universal-lint: FileChanged: no lint slot free in time, ${s.fp} not linted\n`);
       return {};
     }
+    let kept: Finding[] = [];
+    let d0: string | null = null;
+    let d1: string | null = null;
+    let odd = false;
     try {
-      return await lintResolved(s.fp, cwd, null, "FileChanged", "universal-lint (changed outside Write/Edit)");
+      odd = hasForeignLineBreak(s.fp); // later edits' hunks would be placed in other line numbers: no supersession
+      d0 = digestOrNull(s.fp);
+      const t0 = journalTail(rec);
+      kept = await lintResolved(s.fp, cwd, null, "FileChanged", typeof args.session_id === "string" ? args.session_id : "");
+      // only a held finding needs the second digest; a record journaled during the lint (A->B->A) counts as a change
+      if (kept.length > 0 && journalTail(rec) === t0) d1 = digestOrNull(s.fp);
     } finally {
       try {
         if (slot) rmSync(slot, { force: true });
@@ -2483,6 +2996,8 @@ export async function fileChangedHandler(args: PostToolUseHookInput): Promise<Ho
         // left for slotStale: this pid is gone once the process exits
       }
     }
+    // The hold comes after the slot release: a held finding must not keep one of the K slots busy.
+    return formatFindings(await settleFindings(kept, s.fp, odd ? null : rec, d0, d1), "FileChanged", "universal-lint (changed outside Write/Edit)");
   } catch {
     return {};
   }
@@ -2586,7 +3101,7 @@ async function main(): Promise<void> {
     if (ev === "FileChanged") ctx = (await fileChangedHandler(input)).hookSpecificOutput?.additionalContext;
     else {
       const scoped = postToolScope(input);
-      recordWrittenFor(scoped);
+      recordWrittenFor(scoped, input);
       ctx = (await lintFileHandler(input, scoped)).hookSpecificOutput?.additionalContext;
     }
     if (ctx) {

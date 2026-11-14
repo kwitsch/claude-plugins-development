@@ -65,4 +65,4 @@ Must never lose a finding for the final file state. No debounce. A reopened drop
 
 ## Related
 
-F14 (larger source of avoidable wakes), F02 (false wakes), F01 (mining recipe), F13 (FileChanged dedup that is not a debounce).
+F14 (larger source of avoidable wakes), F02 (false wakes), F01 (mining recipe), F13 (FileChanged dedup that is not a debounce), F34 (2026-11-14: the user-requested settle window reopens the superseded-finding question narrowly: only a finding on a line a later edit rewrote is dropped, after a 5 s hold of the report).

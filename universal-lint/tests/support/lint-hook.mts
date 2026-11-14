@@ -80,9 +80,18 @@ export interface LintEnv {
  * @param filePath - Written file.
  * @param cwd - Payload cwd.
  * @param opts - Run options; `toolName` and `toolResponse` shape the payload.
- * @returns The JSON text.
+ * @returns The JSON text; a Write carries the file's current text as `tool_input.content`, as Claude Code's does.
  */
-export const payload = (filePath: string, cwd: string, opts: RunOptions = {}): string => JSON.stringify({ hook_event_name: "PostToolUse", tool_name: opts.toolName ?? "Write", tool_input: { file_path: filePath }, tool_response: { success: true, ...opts.toolResponse }, cwd });
+export const payload = (filePath: string, cwd: string, opts: RunOptions = {}): string => {
+  const tool = opts.toolName ?? "Write";
+  let content: string | undefined;
+  try {
+    if (tool === "Write") content = readFileSync(path.resolve(cwd, filePath), "utf8");
+  } catch {
+    // no such file: the payload carries no content
+  }
+  return JSON.stringify({ hook_event_name: "PostToolUse", tool_name: tool, tool_input: { file_path: filePath, content }, tool_response: { success: true, ...opts.toolResponse }, cwd });
+};
 
 /**
  * Build a HookRun from the exit status and raw stderr.
@@ -136,7 +145,8 @@ export function makeEnv(): LintEnv {
       env.stub(name, `printf "%s %s\\n" "${name}" "$*" >> "$RECORD"`, "printf '%s\\n' \"$OUT\"", `exit ${exitCode}`);
     },
     lines: () => readFileSync(record, "utf8").split("\n").filter(Boolean),
-    childEnv: (opts = {}) => ({ PATH: bin, HOME: home, RECORD: record, OUT: opts.out ?? "", CLAUDE_PLUGIN_DATA: data, GIT_CONFIG_NOSYSTEM: "1", ...opts.env }),
+    // UNIVERSAL_LINT_SETTLE_MS=0: findings are reported at once; a test of the settle window overrides it through opts.env.
+    childEnv: (opts = {}) => ({ PATH: bin, HOME: home, RECORD: record, OUT: opts.out ?? "", CLAUDE_PLUGIN_DATA: data, GIT_CONFIG_NOSYSTEM: "1", UNIVERSAL_LINT_SETTLE_MS: "0", ...opts.env }),
     run(filePath, opts) {
       const r = spawnSync(process.execPath, [HOOK], { input: payload(filePath, cwd, opts), env: env.childEnv(opts), encoding: "utf8" });
       return toRun(r.status, r.stderr, r.stdout);

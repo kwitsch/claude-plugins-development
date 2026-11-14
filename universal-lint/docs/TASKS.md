@@ -2,7 +2,7 @@
 
 Source: performance analysis of the universal-lint hook (0.14.0) on 2026-11-07, WSL2, 12 cores, 9.7 GB RAM (node 24.22.2, git 2.43.0, npm 11.19.1, Claude Code 2.1.319). Five dimensions, each with an independent verification pass (refuted findings removed, corrected numbers used): JS/TS/sh/py benchmarks, other languages (PHP/Java/Kotlin/YAML/Markdown/CSS/Go/Rust), FileChanged and watch list, real Claude Code sessions (2908 transcripts mined plus live `claude -p --debug-file` runs), static hot-path walk. Linters: real binaries for tsc 7.0.2 (native), rtk 0.48.0, cargo/clippy, go vet; through npx (warm cache, plus cold runs with a fresh `npm_config_cache`) for eslint, markdownlint-cli2, stylelint, and oxlint (a root devDependency here, resolved by npx from `node_modules/.bin`); missing or replaced by instant stubs for shellcheck, ruff, yamllint, phpstan/psalm, ktlint, checkstyle, golangci-lint and markdownlint. One detail document per task in `tasks/`; read it before working on the task.
 
-Finished: all of F01-F33 shipped or closed docs-only in 0.15.1-0.15.29; 0.15.30 is the final verification and docs pass (no code change). Current baseline: the F01 doc 'Measured' section (0.15.29). Re-check recipes: docs/README.md.
+Finished: all of F01-F34 shipped or closed docs-only in 0.15.1-0.15.29 and 0.16.0 (F34, user-requested settle window); 0.15.30 was the final verification and docs pass (no code change). Current baseline: the F01 doc 'Measured' section (0.15.29); 0.16.0 numbers, the 0.15.30 A/B and the settle-window costs: [EVALUATION-2026-11-14.md](EVALUATION-2026-11-14.md). Re-check recipes: docs/README.md. F35-F37 (found by that evaluation) shipped in 0.16.1; 0.16.1 numbers (F35/F36 effect, precheck cost, corrected bursts): [EVALUATION-2026-11-14b.md](EVALUATION-2026-11-14b.md), which opened F38 and F39 (section Remaining).
 
 Measurements: every number in these documents is from one machine on one day, often under load (load average 6-8 while other benchmarks ran, about ±15% noise), and the machine's PATH carries 44 Windows `/mnt/c` dirs that inflate any PATH scan. Re-measure (F01), with `scripts/perf.mts`, before relying on a number, and judge each change against a fresh baseline.
 
@@ -56,7 +56,27 @@ Legend: `[x]` finished. `[ ]` not finished; tag = `open` (code change, not start
 - [x] [F32](tasks/F32-filechanged-echo-race.md) Measure how often the FileChanged echo of Claude's own write beats the digest `done` priority:low. Closed docs-only in 0.15.28: 55/61 echoed, 55 hits, 0 misses, race margin p50 600 ms (min 592, max 2083); >200 KB Edit (2): race margin 595/595/609/609 ms (min/p50/p90/max).
 - [x] [F33](tasks/F33-watchpaths-size-recheck.md) watchPaths JSON size and watch count need no change; re-check on Claude Code upgrades `done` priority:low. Closed docs-only in 0.15.29: on Claude Code 2.1.321, 4800 paths gave `provided 4800 watchPaths` and `FileChanged: watching 4800 paths` (counts match, no cap), 657,670 B SessionStart stdout of a direct hook run (same binary, same cwd), reproduced byte-for-byte by the session's debug record of the hook payload, about 137 B/path with the 126-character measured cwd prefix; 5001 paths gave no watch lines and 0 B stdout (stderr note only).
 
+- [x] [F34](tasks/F34-settle-window.md) Settle window: a finding that the next edit already repaired never wakes Claude `done` priority:medium. Shipped in 0.16.0 on user request (2026-11-14): findings are held 5 s and dropped when a later edit removed or replaced their line (per-edit journal with hunks and digests, digest-anchored coordinates, hold outside slot and locks); live-verified interactively, headless `-p` does not background the hook so the hold only delays that turn (documented residual).
+
+- [x] [F36](tasks/F36-held-parse-error-fixed-elsewhere.md) A held parse error is dropped by any later edit `done` priority:low. Shipped in 0.16.1: `gateFinding(..., "drop")`.
+
+- [x] [F35](tasks/F35-skip-hold-when-nothing-droppable.md) Skip the settle hold when no held diagnostic can be dropped `done` priority:medium. Shipped in 0.16.1: foreign-only and unlocated-only findings are reported at once.
+
+## Remaining
+
+Found by [EVALUATION-2026-11-14](EVALUATION-2026-11-14.md) on 0.16.0.
+
+- [x] [F37](tasks/F37-hook-design-rule-size.md) hook-design.md is over the 40,000-character rule limit `done` (0.16.1) priority:low. 42,361 characters (0.15.30: 36,010); docs only.
+
+Found by [EVALUATION-2026-11-14b](EVALUATION-2026-11-14b.md) on 0.16.1.
+
+- [ ] [F38](tasks/F38-settle-docs-after-f36.md) Settle-window docs still describe the 0.16.0 parse-error rule `open` priority:low. README "edits elsewhere drop nothing" and settle-window.md "Lines." (`gateFinding(..., false)`) predate F36; docs only.
+- [ ] [F39](tasks/F39-settle-process-test-wall-time.md) settle-process.test.mts now sets the test suite's wall time `open` priority:low. 14 sequential hold-bound tests, 17.4 -> 25.5 s, suite 22.5 -> 25.5 s; tests only.
+
 ## Dependencies
+
+- F37 before or with F35/F36: all three touch `hook-design.md` "Settle window (F34)"; F35's precheck counts a parse error as droppable, so F36 does not change it.
+- F38 and F39 are independent; both change files under `universal-lint/` and need a version bump, so they can share one patch release.
 
 - Before each task: re-run `node universal-lint/scripts/perf.mts` (F01, done) for a fresh baseline; each task's Verification compares against it.
 - F02 + F03 together remove all false eslint findings seen in this analysis; F02 alone (the safety net) covers projects that have a config but no reachable binary. F04's walk from the file's directory fixes the sub-package case (91 of 128 historical pnpm findings).
@@ -69,7 +89,7 @@ Legend: `[x]` finished. `[ ]` not finished; tag = `open` (code change, not start
 
 ## Notes
 
-- Finding ids are local to this document set (F01-F33) and unrelated to `dprint/docs` ids; cross-references to dprint say "dprint F24" explicitly.
+- Finding ids are local to this document set (F01-F39) and unrelated to `dprint/docs` ids; cross-references to dprint say "dprint F24" explicitly.
 - Measured, no task:
   - Double plugin install: each debug log reads one hooks.json per plugin id, so the hook cost is not doubled. Whether the repo-explorer-mcp project pin shadows 0.14.0 was not pursued (closed with the F01 follow-ups in 0.15.30, reason in the F01 doc).
   - PostToolUse tsc cost grows with project size and with the importer count of the edited file: ts1000 296-335 ms for a leaf edit, 532-1210 ms after an edit to a widely imported module. Accepted under no-debounce. Only F18's overlap reduces wall time; F13 dedups FileChanged only.

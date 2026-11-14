@@ -1,7 +1,7 @@
 // The /universal-lint:universal-lint skill (SKILL.md + lint-files.mjs); ported from test/universal-lint/skill.bats.
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, readdirSync, readFileSync, realpathSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "vitest";
 import { DRIVER, makeEnv } from "./support/lint-hook.mts";
@@ -26,9 +26,10 @@ test("SKILL.md exists and is non-empty", () => {
   assert.ok(statSync(path.join(SKILL, "SKILL.md")).size > 0);
 });
 
-test("SKILL.md frontmatter: user-only, arguments file_scope, scoped allowed-tools (no bare Bash)", () => {
+test("SKILL.md frontmatter: user-only, full text via $ARGUMENTS (a named arg binds the first word only), scoped allowed-tools (no bare Bash)", () => {
   assert.match(frontmatter, /disable-model-invocation: true/);
-  assert.match(frontmatter, /arguments: file_scope/);
+  assert.doesNotMatch(frontmatter, /^arguments:/m);
+  assert.ok(skillMd.includes("$ARGUMENTS"));
   assert.ok(frontmatter.includes("\"Glob\""));
   assert.ok(frontmatter.includes("\"AskUserQuestion\""));
   assert.ok(frontmatter.includes("\"Bash(git:*)\""));
@@ -38,6 +39,32 @@ test("SKILL.md frontmatter: user-only, arguments file_scope, scoped allowed-tool
 test("SKILL.md points at the reference doc and invokes the driver via the literal token", () => {
   assert.ok(skillMd.includes("lint-files.reference.md"));
   assert.ok(skillMd.includes("${CLAUDE_SKILL_DIR}/lint-files.mjs"));
+});
+
+test("SKILL.md makes repo-root-relative git/gh paths resolvable from a subdirectory cwd", () => {
+  assert.ok(skillMd.includes("git -c core.quotePath=false diff --relative --name-only"));
+  // without --untracked-files=all a new directory is one `dir/` entry and its files go unlinted
+  assert.ok(skillMd.includes("git -c core.quotePath=false status --porcelain --untracked-files=all"));
+  assert.ok(skillMd.includes("$(git rev-parse --show-toplevel)/"));
+  assert.doesNotMatch(skillMd, /git diff --name-only/);
+});
+
+test("SKILL.md PR route checks that HEAD is the PR head (the driver lints the working tree)", () => {
+  assert.ok(skillMd.includes("gh pr view <N> --json headRefOid -q .headRefOid"));
+  assert.ok(skillMd.includes("git rev-parse HEAD"));
+  assert.ok(skillMd.includes("gh pr checkout <N>"));
+});
+
+test("SKILL.md resolves a folder scope without the Glob tool's 100-file cap", () => {
+  assert.ok(skillMd.includes("git -c core.quotePath=false ls-files --cached --others --exclude-standard -- <folder>"));
+  assert.ok(skillMd.includes("never pass a\n     truncated list on"));
+  assert.doesNotMatch(skillMd, /<folder-or-glob>" → the `Glob` tool;/);
+});
+
+test("SKILL.md writes the list as a new file in a mktemp -d directory (Write refuses an unread existing file)", () => {
+  assert.ok(skillMd.includes("`mktemp -d`"));
+  assert.ok(skillMd.includes("<dir>/list.txt"));
+  assert.doesNotMatch(skillMd, /unique path with `mktemp`/);
 });
 
 test("SKILL.md never writes the exclamation-mark-then-backtick injection sequence", () => {
@@ -133,6 +160,32 @@ test("lint-files.mjs runs tsc once per tsconfig", () => {
   assert.match(r.stdout, /universal-lint: 1 block\(s\) with findings\./);
 });
 
+/**
+ * Project with a typeCheck oxlint config, a tsconfig, an oxlint stub exiting `oxlintExit` and a tsc stub; runs the driver on two .ts files.
+ *
+ * @param oxlintExit - Exit code of the oxlint stub.
+ * @returns The recorded oxlint and tsc call counts.
+ */
+function oxlintTypeCheck(oxlintExit: number): { oxlint: number; tsc: number } {
+  const e = makeEnv();
+  e.file(".oxlintrc.json", "{\"options\":{\"typeAware\":true,\"typeCheck\":true}}");
+  e.file("tsconfig.json", "{\"compilerOptions\":{\"noEmit\":true}}");
+  e.recStub("oxlint", oxlintExit);
+  e.recStub("tsc", 2);
+  driver(e, [e.file("a.ts", "export const x: number = 1;\n"), e.file("b.ts", "export const y: number = 1;\n")], "a.ts(1,1): error TS2322: x");
+  const calls = e.lines();
+  return { oxlint: calls.filter((l) => l.startsWith("oxlint ")).length, tsc: calls.filter((l) => l.startsWith("tsc ")).length };
+}
+
+test("lint-files.mjs skips tsc for files oxlint type-checked (typeCheck true, oxlint issues verdict)", () => {
+  assert.deepEqual(oxlintTypeCheck(1), { oxlint: 1, tsc: 0 });
+});
+
+test("lint-files.mjs runs tsc once when oxlint's typeCheck run is a skip verdict (exit 2)", () => {
+  const c = oxlintTypeCheck(2);
+  assert.equal(c.tsc, 1);
+});
+
 test("lint-files.mjs reruns files singly when the batch run is a skip", () => {
   const e = makeEnv();
   e.recStub("shellcheck", 2);
@@ -194,4 +247,46 @@ test("lint-files.mjs splits a tool's files into one run per argv prefix (markdow
   assert.equal(calls.filter((l) => l.includes(withConfig) && !l.includes(without) && !l.includes("--config")).length, 1, calls.join("\n"));
   assert.equal(calls.filter((l) => l.includes(without) && !l.includes(withConfig) && l.includes("--config")).length, 1, calls.join("\n"));
   assert.match(r.stdout, /no findings/);
+});
+
+test("lint-files.mjs finds a project-local linter through a symlinked cwd ($PWD keeps the link)", () => {
+  const e = makeEnv();
+  const link = path.join(path.dirname(e.cwd), "link");
+  symlinkSync(e.cwd, link);
+  e.file(".oxlintrc.json", "{}\n");
+  e.file("a.ts", "export const x = 1;\n");
+  const bin = e.file("node_modules/.bin/oxlint", "#!/usr/bin/env bash\nprintf 'oxlint %s\\n' \"$*\" >> \"$RECORD\"\necho 'a.ts:1:1 warning: x'\nexit 1\n");
+  chmodSync(bin, 0o755);
+  const list = path.join(path.dirname(e.cwd), "list");
+  writeFileSync(list, path.join(link, "a.ts") + "\n");
+  const r = spawnSync(process.execPath, [DRIVER, list], { cwd: link, env: { ...e.childEnv(), PWD: link }, encoding: "utf8" });
+  assert.equal(r.status, 0);
+  assert.match(r.stdout, /oxlint found issues/, r.stdout);
+  assert.equal(e.lines().filter((l) => l.startsWith("oxlint ")).length, 1);
+});
+
+test.each(["a.js", "..lib/a.js"])("lint-files.mjs finds a project-local linter for a real-path entry through a symlinked cwd (git toplevel prefix): %s", (name) => {
+  const e = makeEnv();
+  const link = path.join(path.dirname(e.cwd), "link");
+  symlinkSync(e.cwd, link);
+  e.file("eslint.config.js", "export default [];\n");
+  const real = e.file(name, "var x = 1;\n");
+  const bin = e.file("node_modules/.bin/eslint", "#!/usr/bin/env bash\nprintf 'eslint %s\\n' \"$*\" >> \"$RECORD\"\necho 'a.js:1:5 error no-var'\nexit 1\n");
+  chmodSync(bin, 0o755);
+  const list = path.join(path.dirname(e.cwd), "list");
+  writeFileSync(list, realpathSync(real) + "\n");
+  const r = spawnSync(process.execPath, [DRIVER, list], { cwd: link, env: { ...e.childEnv(), PWD: link }, encoding: "utf8" });
+  assert.equal(r.status, 0);
+  assert.match(r.stdout, /eslint found issues/, r.stdout);
+  assert.equal(e.lines().filter((l) => l.startsWith("eslint ")).length, 1);
+});
+
+test("lint-files.mjs keeps a leading space in a listed name (git prints ' lead.sh' as is)", () => {
+  const e = makeEnv();
+  e.recStub("shellcheck", 1);
+  e.file(" lead.sh", "echo $1\n");
+  const r = driver(e, [" lead.sh"], " lead.sh:1:6: note: x [SC2086]");
+  assert.equal(r.status, 0);
+  assert.match(r.stdout, /SC2086/, r.stdout);
+  assert.equal(e.lines().filter((l) => l.startsWith("shellcheck ")).length, 1);
 });
