@@ -560,7 +560,7 @@ export const register = (on, options) => {
 			const answer = choice(r.answers, "agent_type");
 			if (!answer) return next(e);
 			const p = answer.probabilities[answer.choice] ?? 0;
-			const canSwitch = GENERAL.has(claudeType) && !GENERAL.has(answer.choice) && Object.hasOwn(criteria, answer.choice) && p >= SWITCH_AT;
+			const canSwitch = !GENERAL.has(answer.choice) && Object.hasOwn(criteria, answer.choice) && p >= SWITCH_AT;
 			return canSwitch ? next({
 				...e,
 				subagent_type: answer.choice
@@ -835,8 +835,7 @@ export const register = (on, options) => {
 				usage: null
 			};
 		}
-		const result = yield* next(routed(e));
-		return result;
+		return yield* next(routed(e));
 	});
 	on("tool.check", async function onToolCheck($, e, next) {
 		if (e.tool === ESTIMATE_TOOL) {

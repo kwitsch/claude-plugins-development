@@ -360,7 +360,6 @@ for (
 
     await drain($.turn.step(step));
     expect(seen[0]).toMatchObject({ effort: "high" });
-    // The newest /jev row: the recent list is module state, so an older case's identical row must not satisfy this one.
   });
 }
 

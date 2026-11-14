@@ -20,7 +20,7 @@ the shapes below: `inline-headroom/docs/claude-code-verification.md`.
   `any`, no `import()` (a module holding `import()` does not load).
 - The pure modules must never reference `$`: the engine rejects passing the mods API into functions imported from
   another file. It also rejects `$.<noun>` as a bare value (bound, passed or read), so same-file helpers take the
-  whole `$` typed `Engine` (`askJev($, …)`, `record($, …)`, `buildCandidates($, …)`).
+  whole `$` typed `Engine` (`askJev($, …)`, `debugEffort($, …)`, `buildCandidates($, …)`).
 - One hook per event without a matcher (`registered twice without a matcher` fails validate and test). Hence:
   `tool.call` has one unmatched hook (answers the `estimate_effort` tool, outcome of Jev's own calls, skill
   blocklist) plus one with the matcher `{ tool: "Agent" }`; `turn.step`, `tool.check`, `turn.complete`,
@@ -40,12 +40,11 @@ the shapes below: `inline-headroom/docs/claude-code-verification.md`.
   concurrent hooks: a main-loop `turn.complete` (no `agentId`) drops it after its own guard listing (no engine event reports a changed tool
   list), `session.start` drops it right after `next(e)` and lists the session's baseline (a jevfort hook raised inside
   `next(e)` may have cached a listing from before jev-api registered). A rejected or malformed listing counts as the
-  tool missing. `jevApply` applies a listing whose missing set differs from `jevState` once: going inactive logs
-  `inactive: jev-api tools missing (...)`, becoming ready registers `estimate_effort` (`estimateRegistered`: a failed registration is retried by the next
+  tool missing. `jevApply` applies a listing whose missing set differs from `jevState` once: becoming ready registers `estimate_effort` (`estimateRegistered`: a failed registration is retried by the next
   listing, a registered one never again; reset at `session.start`), both call
   `$.ui.invalidate("ui.render")`. `jevState` is unset from the start of `session.start` until its baseline, so a
   listing raised beneath `next(e)` applies nothing. A new hook needs the guard too; `session.start` must not start with
-  it (beneath it, jev-api has not registered batch yet). The render hooks read `jevState` instead (no `$.tool`, `$.store`, `record` or `jevMissing` call while
+  it (beneath it, jev-api has not registered batch yet). The render hooks read `jevState` instead (no `$.tool`, `$.store` or `jevMissing` call while
   drawing).
 - `jevApply` registers the `estimate_effort` tool with `$.tool.register(ESTIMATE_SPEC)` whatever `routing` says (a
   throw is retried by the next listing) when the jev-api tools become listed: at `session.start`'s baseline after

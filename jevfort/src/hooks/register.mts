@@ -504,13 +504,13 @@ function jevMissing($: Engine): Promise<string[]> {
 }
 
 /**
- * Applies a jev-api listing once when it differs from the last applied one: going inactive logs why, becoming ready
- * registers `estimate_effort` (whatever `routing` says: Skills and subagents call it too); both redraw the effort band.
- * Never throws: a failed log or registration is caught.
+ * Applies a jev-api listing once when it differs from the last applied one: becoming ready registers
+ * `estimate_effort` (whatever `routing` says: Skills and subagents call it too); both directions redraw the effort band.
+ * Never throws: a failed registration is caught.
  *
  * @remarks
  * Module level because the engine accepts `$` passed only to top-level functions; runs inside the awaited listing
- * promise of {@link jevMissing} (or `session.start`), so its `record` and `$.tool.register` stay in-frame.
+ * promise of {@link jevMissing} (or `session.start`), so its `$.tool.register` stays in-frame.
  *
  * @param $ - Engine interface.
  * @param missing - The missing full tool names of the listing.
@@ -953,7 +953,7 @@ export const register = (on: On, options: Options): void => {
       if (!answer) return next(e);
       const p = answer.probabilities[answer.choice] ?? 0;
       // Only to a type Jev was offered: an answer outside `criteria` may name one that is gone.
-      const canSwitch = GENERAL.has(claudeType) && !GENERAL.has(answer.choice) && Object.hasOwn(criteria, answer.choice) && p >= SWITCH_AT;
+      const canSwitch = !GENERAL.has(answer.choice) && Object.hasOwn(criteria, answer.choice) && p >= SWITCH_AT;
       return canSwitch ? next({ ...e, subagent_type: answer.choice }) : next(e);
     });
   }
@@ -1038,7 +1038,7 @@ export const register = (on: On, options: Options): void => {
     // After `next(e)`: jev-api registers its tools in its own session.start, which may run beneath this hook.
     const result = await next(e);
     // The session's baseline, listed only now: a jevfort hook raised inside `next(e)` (another plugin's session.start
-    // making a tool call) may have cached a listing from before jev-api registered. Logs inactive or registers estimate_effort.
+    // making a tool call) may have cached a listing from before jev-api registered. Registers estimate_effort when ready.
     dropTurnReads();
     await jevApply($, await jevMissing($));
     // MCP servers may still be connecting: the first step 0 lists the deferred tools itself.
@@ -1077,8 +1077,8 @@ export const register = (on: On, options: Options): void => {
   });
 
   // Answers the estimate_effort tool itself, before the readiness guard (never `next(e)`: a registered tool no hook
-  // answers fails, and the tool stays registered after jev-api goes away), and logs the outcome of each call Jev made
-  // itself, for the report.
+  // answers fails, and the tool stays registered after jev-api goes away), and blocklists a skill whose call Jev made
+  // itself failed.
   on("tool.call", async function onToolCall($: Engine, e: ToolCall, next: Next<ToolCall, ToolResult>): Promise<ToolResult> {
     if (e.tool === ESTIMATE_TOOL) {
       const input = parseEstimateInput(e);
@@ -1101,8 +1101,7 @@ export const register = (on: On, options: Options): void => {
   });
 
   // Each model request: Jev may take the step itself, and at step 0 estimates the turn's effort (every turn on
-  // Opus/Sonnet, the loop's first turn only on Haiku/Fable, which then hold it). One Jev request carries all of it. Every answer is logged; when Claude takes the step, its call is compared
-  // with Jev's top action so the take threshold can be calibrated.
+  // Opus/Sonnet, the loop's first turn only on Haiku/Fable, which then hold it). One Jev request carries all of it.
   on("turn.step", async function* onTurnStep($: Engine, e: Step, rawNext: (e: Step) => StepRun): StepRun {
     // Every main-loop response restarts the cache countdown (the work is jev-api independent).
     if (e.agentId === undefined) turnRunning = true;
@@ -1235,10 +1234,7 @@ export const register = (on: On, options: Options): void => {
       return { turnId: e.turnId, index: e.index, answer: "", toolUses: [{ name: pick.tool, input: pick.input }], stopReason: "tool_use", usage: null };
     }
 
-    const result = yield* next(routed(e));
-
-    // Compare Claude's own next call with Jev's top action.
-    return result;
+    return yield* next(routed(e));
   });
 
   // Permission check: approves Jev's own vetted calls and writes into this session's scratchpad; every other verdict stays Claude Code's.
