@@ -107,13 +107,14 @@ const TRANSCRIPT = /\/tasks\/[^/]+\.output$|\.output$|\.jsonl$/;
  */
 const CLAUDE_CONFIG = /\/\.claude\.json$|\/\.claude\/(?:\.credentials\.json$|projects\/|settings(?:\.local)?\.json$)/;
 /**
- * Whether a file may be offered as a Read candidate.
+ * Whether a file may be offered as a Read candidate: never one with a `..` segment, which can leave the project
+ * while still starting with the cwd.
  *
  * @param file - The absolute path.
  * @param cwd - The project directory.
  * @returns Whether it is safe to offer.
  */
-export const isSafeToOffer = (file: string, cwd?: string): boolean => !CLAUDE_CONFIG.test(file) && (cwd && file.startsWith(`${cwd}/`) ? !TRANSCRIPT.test(file) : !UNSAFE_PATH.test(file));
+export const isSafeToOffer = (file: string, cwd?: string): boolean => !/(^|\/)\.\.(\/|$)/.test(file) && !CLAUDE_CONFIG.test(file) && (cwd && file.startsWith(`${cwd}/`) ? !TRANSCRIPT.test(file) : !UNSAFE_PATH.test(file));
 
 /**
  * `p` as an absolute path under `cwd`, with `.` segments removed, so spellings of one file compare equal.

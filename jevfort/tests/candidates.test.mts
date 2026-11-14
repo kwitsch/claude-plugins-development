@@ -80,6 +80,13 @@ test("a project inside a temp dir can still be read; its transcripts cannot", ()
   expect(isSafeToOffer("/private/tmp/other/notes.txt", cwd)).toBe(false);
 });
 
+test("a `..` path is never offered, neither by the scanner nor by the safety check", () => {
+  expect(mentionedPaths(["read ../.aws/config.json and a/../b.ts"])).toEqual([]);
+  expect(isSafeToOffer("/proj/../.aws/config.json", "/proj")).toBe(false);
+  expect(isSafeToOffer("/proj/a/..", "/proj")).toBe(false);
+  expect(isSafeToOffer("/proj/a..b/c.ts", "/proj")).toBe(true);
+});
+
 test("Claude's config and credentials are never offered, also with cwd at $HOME", () => {
   expect(isSafeToOffer("/home/u/.claude/.credentials.json", "/home/u")).toBe(false);
   expect(isSafeToOffer("/home/u/.claude/settings.json", "/home/u")).toBe(false);
