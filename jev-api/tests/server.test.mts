@@ -1,6 +1,7 @@
 // Tests of the jev-api MCP server (plugin/mcp/server.mjs): a spawned stdio server against a local HTTP stub.
 import assert from "node:assert/strict";
 import { type ChildProcessWithoutNullStreams, spawn } from "node:child_process";
+import { readFileSync } from "node:fs";
 import http from "node:http";
 import type { AddressInfo } from "node:net";
 import path from "node:path";
@@ -107,6 +108,17 @@ const boot = async (extra: Record<string, string> = {}, behaviour: Parameters<St
   return { s, c };
 };
 const outcomeOf = (r: Msg): Outcome => r["result"].structuredContent as Outcome;
+
+describe(".mcp.json", () => {
+  test("starts the server with node and lets Node's fetch honour HTTP_PROXY unless the user turns it off", () => {
+    const cfg = JSON.parse(readFileSync(path.resolve(import.meta.dirname, "../plugin/.mcp.json"), "utf8")) as { mcpServers: Record<string, { command: string; args: string[]; env?: Record<string, string> }> };
+    assert.deepEqual(Object.keys(cfg.mcpServers), ["http"]);
+    assert.equal(cfg.mcpServers["http"].command, "node");
+    assert.deepEqual(cfg.mcpServers["http"].args, ["${CLAUDE_PLUGIN_ROOT}/mcp/server.mjs"]);
+    // Node's fetch ignores HTTP_PROXY without this (measured: Claude Code's own $.http.fetch and bun honour it); `:-1` leaves room for an override
+    assert.deepEqual(cfg.mcpServers["http"].env, { NODE_USE_ENV_PROXY: "${NODE_USE_ENV_PROXY:-1}" });
+  });
+});
 
 describe("protocol", () => {
   test("legacy handshake lists exactly request and cancel, visible to the model", async () => {

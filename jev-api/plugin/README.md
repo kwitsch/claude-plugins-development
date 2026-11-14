@@ -98,6 +98,7 @@ The System One request is made by a small MCP server of this plugin (`mcp/server
 - **Two more tools show up in the tool list** (deferred behind ToolSearch): `mcp__plugin_jev-api_http__request` and `mcp__plugin_jev-api_http__cancel`. They are the plugin's internal transport; the plugin refuses every call that does not come from itself (a tool the plugin calls cannot be hidden from the model, so it is refused instead). Use the four tools above.
 - **Node must be on the `PATH`** of Claude Code for the server. When the server cannot start, answers nothing or fails, the plugin falls back to `$.http.fetch` (without cancellation and with the engine's own 30 second cap), logs `jev-api: HTTP server not available, using $.http.fetch: <reason>` once and tries the server again after 60 seconds.
 - The server needs no configuration of its own and no extra permission; the endpoint rules, the redaction of errors and the "key only to https" rule are unchanged.
+- **Proxy:** `HTTP_PROXY`, `HTTPS_PROXY` and `NO_PROXY` of Claude Code's environment are honoured by the server (the plugin turns on Node's `NODE_USE_ENV_PROXY`, which needs Node 24.5 or later; set `NODE_USE_ENV_PROXY=0` before starting Claude Code to turn it off).
 
 ## Where the text goes
 
