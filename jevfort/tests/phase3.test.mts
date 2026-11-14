@@ -61,6 +61,9 @@ pureTest("hints: a mid-confidence skill and a large task get hints; a confident 
   // Under takeOnlyForBypass the threshold is infinite, so only the name guard keeps `none` hint-free.
   expect(hints("question", 0, { name: "none", p: 0.7 }, Number.POSITIVE_INFINITY)).toEqual([]);
   expect(hints("question", 0, { name: "deploy-docs", p: 0.7 }, Number.POSITIVE_INFINITY)).toHaveLength(1);
+  // Below SKILL_HINT (0.6) and PLAN_HINT (0.85): no hint.
+  expect(hints("question", 0, { name: "deploy-docs", p: 0.5 }, Number.POSITIVE_INFINITY)).toEqual([]);
+  expect(hints("task", 0.8, undefined, Number.POSITIVE_INFINITY)).toEqual([]);
 });
 
 test("The prompt classifier adds a hint only Claude reads", async ($, on) => {
