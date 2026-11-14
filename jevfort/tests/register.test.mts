@@ -1371,6 +1371,21 @@ for (const model of ["claude-haiku-5-5", "claude-fable-5"]) {
   });
 }
 
+for (const row of ["", "[Request interrupted by user]"]) {
+  test(`A held Haiku effort also applies to a turn without a request (${JSON.stringify(row)})`, async ($, on) => {
+    const seen: { effort?: string }[] = [];
+    const messages = [user("what does this project do?")];
+    const { sent } = setup(on, { messages, jev: inOrder({ effort: scored(1.6) }, { effort: scored(2.9) }) });
+    claudeBeneath(on, seen);
+    await drain($.turn.step(turnStep("t1", "claude-haiku-5-5", "high")));
+    messages.push({ role: "assistant", text: "done", toolUses: [] }, user(row));
+    await drain($.turn.step(turnStep("t2", "claude-haiku-5-5", "high")));
+    await drain($.turn.step({ ...turnStep("t2", "claude-haiku-5-5", "high"), index: 1 }));
+    expect(ids(sent)).toEqual(["effort", "mechanical"]);
+    expect(seen.map((s) => s.effort)).toEqual(["medium", "medium", "medium"]);
+  });
+}
+
 test("A held Haiku effort still applies when Jev fails on a later turn", async ($, on) => {
   const seen: { effort?: string }[] = [];
   // A named file gives the held t2 a step-0 question, so its 401 reaches the failure branch.
