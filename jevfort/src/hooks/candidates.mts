@@ -24,8 +24,8 @@ export const MAX_READS = 8;
 export const MAX_STATS = 16;
 /** How many quoted-term searches a turn may be offered. */
 const MAX_SEARCHES = 3;
-/** package.json script names safe to run unasked. */
-export const SAFE_SCRIPT = /^(test|tests|lint|build|typecheck|type-check|check|test:[\w:-]+|lint:[\w:-]+)$/;
+/** package.json script names safe to run unasked; a segment that rewrites files (`fix`, `update`, `u`) or never exits (`watch`, `dev`) is refused. */
+export const SAFE_SCRIPT = /^(?!.*(?:^|[:-])(?:fix|write|format|update|u|watch|dev|serve)(?:$|[:-]))(test|tests|lint|build|typecheck|type-check|check|test:[\w:-]+|lint:[\w:-]+)$/;
 /**
  * Built-in CLI commands the command list can report as user commands but the Skill tool refuses (`/diff` did).
  * Failed skills are also blocklisted at run time.
