@@ -233,6 +233,18 @@ pureTest("Compaction instructions keep relevant results and mark stale ones", ()
   expect(text).toContain("dropped: Bash ls.");
 });
 
+pureTest("compactItems keeps the newest 30 results, results cut at 500 and command labels at 80 characters", () => {
+  const uses = Array.from({ length: 35 }, (_, i) => ({ tool_use_id: `t${i + 1}`, tool: "Bash", input: { command: "x".repeat(200) }, text: "r".repeat(2000) }));
+  const items = compactItems([{ role: "assistant", text: "", toolUses: uses }]);
+  expect(items).toHaveLength(30);
+  expect(items[0].id).toBe("t6");
+  expect(items[29].id).toBe("t35");
+  for (const i of items) {
+    expect(i.result).toBe(`${"r".repeat(500)}… [1500 more chars]`);
+    expect(i.label).toBe(`Bash ${"x".repeat(80)}… [120 more chars]`);
+  }
+});
+
 test("session.compact passes the ranking to the summarizer", async ($, on) => {
   const messages: Msg[] = [
     { role: "user", text: "fix the failing date test", toolUses: [] },
