@@ -143,6 +143,10 @@ function bundleLib(compiled: Map<string, string>): { members: string[]; entries:
   const text = ordered.map((f) => (bodies.get(f) ?? "").replace(/^export\s+(?=(?:async\s+)?(?:function|const|let|class)\b)/gm, "")).join("\n");
   if (/^export\s/m.test(text)) fail("a helper exports something other than a declaration");
   const code = `${imports.join("\n")}\n${text}\nexport { ${[...needed].sort().join(", ")} };\n`;
+  // the name check above sees only a declaration's first name; Node's parse catches every other duplicate binding
+  // (`const a = 1, b = 2`, destructuring) before it ships as a SyntaxError
+  const parse = spawnSync(process.execPath, ["--check", "--input-type=module"], { input: code, encoding: "utf8" });
+  if (parse.status !== 0) fail(`lib.mjs does not parse (a top-level name bound twice across helpers?):\n${parse.stderr}`);
   return { members, entries, code };
 }
 

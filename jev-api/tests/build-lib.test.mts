@@ -93,3 +93,20 @@ test("one local name bound by two hoisted imports or by an import and a declarat
   assert.equal(decl.status, 1);
   assert.match(decl.stderr, /join is/);
 });
+
+test("one name bound twice by a later declarator or a destructuring pattern fails the build", () => {
+  const declarators = build({
+    "a.mts": `export const k = 1, LIMIT = 5;\nexport const fa = (): number => LIMIT + k;\n`,
+    "b.mts": `import { fa } from "./a.mjs";\nexport const m = 2, LIMIT = 7;\nexport const two = (): number => LIMIT + m + fa();\n`,
+    "register.mts": REGISTER,
+  });
+  assert.equal(declarators.status, 1);
+  assert.match(declarators.stderr, /LIMIT/);
+  const patterns = build({
+    "a.mts": `export const { pa, shared } = { pa: 1, shared: 2 };\n`,
+    "b.mts": `import { pa } from "./a.mjs";\nexport const { pb, shared } = { pb: pa, shared: 3 };\nexport const two = (): number => pb + shared;\n`,
+    "register.mts": REGISTER,
+  });
+  assert.equal(patterns.status, 1);
+  assert.match(patterns.stderr, /shared/);
+});
