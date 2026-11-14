@@ -226,6 +226,26 @@ for (const [percent, option, runs] of [[70, 60, 1], [50, 60, 0], [90, 0, 0], [Nu
   });
 }
 
+test("a response that lands while the cold tick reads the clock keeps the warm chat from being compacted", async ($, on) => {
+  let armed = false;
+  // Registered before mock.clock, so it runs above it: one-shot, the tick's own clock read runs a whole turn.
+  on("clock.now", async (_$, e, next) => {
+    if (armed) {
+      armed = false;
+      await respond($);
+    }
+    return next(e);
+  });
+  const { clock, state } = chatSetup(on, 70);
+  await $.session.start(START);
+  await respond($);
+  await clock.advance(CACHE_TTL["1h"] - 5_000);
+  armed = true;
+  await clock.advance(10_000);
+  expect(armed).toBe(false);
+  expect(state.compacts).toBe(0);
+});
+
 test("a /compact still queued behind the session is not issued again by the next ticks", async ($, on) => {
   // The engine keeps a plugin's `command.run` pending until the command ran: only the flag stops a repeat.
   const { clock, state } = chatSetup(on, 70, () => new Promise(() => {}));

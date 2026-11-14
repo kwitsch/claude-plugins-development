@@ -394,10 +394,11 @@ function resetCache($: Engine): void {
 async function cacheTick($: Engine, autoCompactPercent: number): Promise<void> {
   // No response seen and nothing drawn: no engine call.
   if (cacheExpires <= 0 && shownMinutes === null) return;
-  const minutes = minutesLeft(cacheExpires, await $.clock.now());
-  showMinutes($, minutes);
-  if (turnRunning || autoCompactPercent <= 0 || minutes !== 0 || coldCompacted) return;
+  // Read once before the clock await: the minutes and the staleness check below must judge the same expiry.
   const expires = cacheExpires;
+  const minutes = minutesLeft(expires, await $.clock.now());
+  showMinutes($, minutes);
+  if (turnRunning || autoCompactPercent <= 0 || minutes !== 0 || coldCompacted || cacheExpires !== expires) return;
   const percent = (await $.session.usage()).context.percent ?? 0;
   // The await yields: a tick that overlapped, a turn that started, a response that refreshed the cache (`cacheExpires`
   // moved) or a session reset (zeroed it) makes this decision stale, so the state is read again.
