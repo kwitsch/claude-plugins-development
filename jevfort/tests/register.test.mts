@@ -1270,6 +1270,18 @@ test("The path scan starts over when the transcript has fewer steps under the sa
   expect(Object.keys(last?.criteria ?? {})).toContain("read src/new.ts");
 });
 
+test("The path scan starts over on a message delivered mid-turn without fewer steps", { options: { takeOnlyForBypass: false } }, async ($, on) => {
+  const messages: Msg[] = [user("hello there")];
+  const { sent } = setup(on, { messages, files: [`${CWD}/src/late.ts`], jev: () => undefined });
+  claudeBeneath(on, []);
+  await drain($.turn.step(step));
+  // A new request row with no step rows after it: the step count does not shrink.
+  messages.push(user("also check src/late.ts"));
+  await drain($.turn.step({ ...step, index: 1 }));
+  const last = sent.filter((q) => q.id === "next_action").at(-1);
+  expect(Object.keys(last?.criteria ?? {})).toContain("read src/late.ts");
+});
+
 test("A mid-turn cd moves a later step's Read candidate to the new cwd", { options: { takeOnlyForBypass: false } }, async ($, on) => {
   let cwd = CWD;
   const messages: Msg[] = [user("check the sub project")];
