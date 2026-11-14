@@ -1027,6 +1027,34 @@ test("Effort routing does not ask Jev the difficulty question", async ($, on) =>
   expect(ids(sent)).toEqual(["effort", "mechanical"]);
 });
 
+// The debug log (`$.ui.log`) names the effort chosen for a turn: the only line jevfort logs.
+test("The chosen effort is written to the debug log, with its source and score", async ($, on) => {
+  const logged: string[] = [];
+  on("ui.log", (_$, e) => (logged.push(String(e.text)), { value: undefined }));
+  setup(on, { messages: [user("migrate the whole app to TypeScript")], jev: byId({ effort: scored(2.9), mechanical: mech(0.1) }) });
+  claudeBeneath(on, []);
+  await drain($.turn.step({ ...step, effort: "medium" }));
+  expect(logged).toEqual(["effort claude-opus-5-5: session medium → xhigh · jev (score 2.90)"]);
+});
+
+test("The debug log says when Jev gave no effort, and says nothing with routing off", async ($, on) => {
+  const logged: string[] = [];
+  on("ui.log", (_$, e) => (logged.push(String(e.text)), { value: undefined }));
+  setup(on, { messages: [user("what does this project do?")], jev: () => 503 });
+  claudeBeneath(on, []);
+  await drain($.turn.step(step));
+  expect(logged).toEqual(["effort claude-opus-5-5: session high → unchanged · jev unavailable (batch: HTTP 503)"]);
+});
+
+test("routing: false writes no effort line to the debug log", { options: { routing: false } }, async ($, on) => {
+  const logged: string[] = [];
+  on("ui.log", (_$, e) => (logged.push(String(e.text)), { value: undefined }));
+  setup(on, { messages: [user("migrate the whole app to TypeScript")], jev: byId({ effort: scored(2.9), mechanical: mech(0.1) }) });
+  claudeBeneath(on, []);
+  await drain($.turn.step(step));
+  expect(logged).toEqual([]);
+});
+
 const ESTIMATE = { tool: "mcp__jevfort__estimate_effort", model: "opus", defaultEffort: "high", minEffort: "low", maxEffort: "xhigh", prompt: "add a retry to the HTTP client" };
 const estimateCall = async ($: Runner, input: Record<string, unknown> = {}) => (await $.tool.call({ ...ESTIMATE, ...input })) as { result?: string; isError?: boolean; deny?: string };
 
