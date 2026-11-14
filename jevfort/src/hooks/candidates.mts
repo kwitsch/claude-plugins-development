@@ -103,9 +103,10 @@ const UNSAFE_PATH = /(^|\/)(tmp|private\/tmp|private\/var\/folders|var\/folders)
 const TRANSCRIPT = /\/tasks\/[^/]+\.output$|\.output$|\.jsonl$/;
 /**
  * Claude's own config and credentials (`~/.claude.json` with MCP env values, the OAuth token file, settings,
- * project memory), refused wherever the cwd is, also when the project is `$HOME` itself.
+ * project memory), refused wherever the cwd is, also when the project is `$HOME` itself. Suffixed copies
+ * (`settings.json.bak`, `.claude.json~`) hold the same secrets and are refused too.
  */
-const CLAUDE_CONFIG = /\/\.claude\.json$|\/\.claude\/(?:\.credentials\.json$|projects\/|settings(?:\.local)?\.json$)/;
+const CLAUDE_CONFIG = /\/\.claude\.json(?:$|[.~-])|\/\.claude\/(?:projects\/|(?:\.credentials|settings(?:\.local)?)\.json(?:$|[.~-]))/;
 /**
  * Whether a file may be offered as a Read candidate: never one with a `..` segment, which can leave the project
  * while still starting with the cwd.

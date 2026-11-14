@@ -104,6 +104,10 @@ test("Claude's config and credentials are never offered, also with cwd at $HOME"
   expect(isSafeToOffer("/home/u/.claude.json", "/home/u/proj")).toBe(false);
   expect(isSafeToOffer("/home/u/.claude/projects/-home-u/memory/MEMORY.md", "/home/u")).toBe(false);
   expect(isSafeToOffer("/home/u/.claude/settings.local.json", "/home/u")).toBe(false);
+  expect(isSafeToOffer("/home/u/.claude/settings.json.bak", "/home/u")).toBe(false);
+  expect(isSafeToOffer("/home/u/.claude/settings.local.json.bak", "/home/u")).toBe(false);
+  expect(isSafeToOffer("/home/u/.claude/.credentials.json~", "/home/u")).toBe(false);
+  expect(isSafeToOffer("/home/u/.claude.json.backup", "/home/u")).toBe(false);
   expect(isSafeToOffer("/home/u/.claude/CLAUDE.md", "/home/u/proj")).toBe(false);
   expect(isSafeToOffer("/home/u/notes.md", "/home/u")).toBe(true);
 });
