@@ -1135,7 +1135,7 @@ export function recordEdit(fp, real, hunks) {
 		const dir = settleDir();
 		mkdirSync(dir, { recursive: true });
 		const now = Date.now();
-		for (const n of readdirSync(dir)) if (now - Number(n.split("-")[1]) > HOOK_TIMEOUT_MS) rmSync(path.join(dir, n), { force: true });
+		for (const n of readdirSync(dir)) if (Math.abs(now - Number(n.split("-")[1])) > HOOK_TIMEOUT_MS) rmSync(path.join(dir, n), { force: true });
 		const key = hashPath(real);
 		const name = `${key}-${String(now).padStart(15, "0")}-${process.pid}.json`;
 		const tmp = path.join(dir, `${name}.tmp`);
@@ -1180,10 +1180,14 @@ export async function settleFindings(findings, resolved, rec, d0, d1) {
 		}
 		return true;
 	};
-	return findings.flatMap((f) => {
-		const g = gateFinding(f, survives, resolved, false);
-		return g ? [g] : [];
-	});
+	try {
+		return findings.flatMap((f) => {
+			const g = gateFinding(f, survives, resolved, false);
+			return g ? [g] : [];
+		});
+	} catch {
+		return findings;
+	}
 }
 function chainEntryFor(resolved, cwd) {
 	const ext = path.extname(resolved).toLowerCase();
@@ -1233,11 +1237,10 @@ async function lintResolved(resolved, cwd, ranges, hookEventName) {
 	const findings = [];
 	if (chain.finding) findings.push(chain.finding);
 	if (tsResult) findings.push(tsResult);
-	const kept = findings.flatMap((f) => {
+	return findings.flatMap((f) => {
 		const g = gateFinding(f, ranges, resolved);
 		return g ? [g] : [];
 	});
-	return kept;
 }
 function formatFindings(kept, hookEventName, label) {
 	if (kept.length === 0) return {};

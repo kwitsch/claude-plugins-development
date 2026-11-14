@@ -21,9 +21,13 @@ const FINDING_L2 = "a.sh:2:6: note: line2-marker [SC2086]\n";
 
 /** Outcome of one hook process. */
 interface Ran {
+  /** Exit status, null when killed by a signal. */
   status: number | null;
+  /** Everything the process wrote to stderr (the findings, on exit 2). */
   stderr: string;
+  /** Everything the process wrote to stdout. */
   stdout: string;
+  /** Wall time from spawn to close. */
   ms: number;
 }
 

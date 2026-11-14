@@ -215,6 +215,20 @@ test("recordEdit prunes entries older than the hook timeout, also temp leftovers
   assert.deepEqual(readdirSync(w.journal).sort(byName), [fresh, rec.name].sort(byName));
 });
 
+test("recordEdit also prunes a record dated far ahead (clock stepped back): it must not read as a later edit", async () => {
+  const w = world();
+  const { rec, d0 } = await lay(w, []);
+  const hunks = [{ oldStart: 1, oldLines: 6, newStart: 1, newLines: 6, map: [-1, -1, -1, -1, -1, -1] }];
+  const ahead = `${rec.key}-${String(Date.now() + 3_600_000).padStart(15, "0")}-1.json`;
+  writeFileSync(path.join(w.journal, ahead), JSON.stringify({ hunks, digest: "stale" }));
+  await sleep(3);
+  const own = recordEdit(w.file, w.real, null);
+  assert.ok(own);
+  assert.ok(!readdirSync(w.journal).includes(ahead));
+  const f = [found(w.proj, [3])];
+  assert.equal(await settleFindings(f, w.file, own, d0, d0), f);
+});
+
 test("recordEdit fails open: an unusable data dir gives null", () => {
   const w = world();
   writeFileSync(w.file, SIX);
@@ -329,6 +343,14 @@ test("settleFindings: an unreadable journal, a corrupt or an unreadable record m
   mkdirSync(corrupt); // a directory where a record should be: reading it throws
   assert.equal(await settleFindings(f, w.file, rec, d0, d0), f);
   rmSync(w.journal, { recursive: true });
+  assert.equal(await settleFindings(f, w.file, rec, d0, d0), f);
+});
+
+test("settleFindings: a record with malformed hunks means report, never a lost finding", async () => {
+  const w = world();
+  const { rec, d0 } = await lay(w, []);
+  writeFileSync(path.join(w.journal, `${rec.key}-${"9".repeat(15)}-2.json`), JSON.stringify({ hunks: [null], digest: "x" }));
+  const f = [found(w.proj, [3])];
   assert.equal(await settleFindings(f, w.file, rec, d0, d0), f);
 });
 

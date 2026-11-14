@@ -2144,8 +2144,8 @@ function settleDir(): string {
 /**
  * Journal one edit of a file for the settle window: `<hashPath(real)>-<ms>-<pid>.json` holding the edit's hunks (null =
  * whole file) and the digest of the file after it, written atomically (temp file + `renameSync`). Older entries
- * (name timestamp more than `HOOK_TIMEOUT_MS` ago, temp leftovers too) are pruned first, so a live reader still
- * finds everything a hook run can need. Fails open to null (the lint then reports at once).
+ * (name timestamp more than `HOOK_TIMEOUT_MS` ago or ahead, temp leftovers too) are pruned first, so a live reader
+ * still finds everything a hook run can need. Fails open to null (the lint then reports at once).
  *
  * @param fp - Lexical path of the edited file (read for the digest).
  * @param real - Real path of the file (the key).
@@ -2157,7 +2157,8 @@ export function recordEdit(fp: string, real: string, hunks: EditHunk[] | null): 
     const dir = settleDir();
     mkdirSync(dir, { recursive: true });
     const now = Date.now();
-    for (const n of readdirSync(dir)) if (now - Number(n.split("-")[1]) > HOOK_TIMEOUT_MS) rmSync(path.join(dir, n), { force: true });
+    // |age|: a name dated that far ahead (clock stepped back) would sort after every fresh record and read as a later edit
+    for (const n of readdirSync(dir)) if (Math.abs(now - Number(n.split("-")[1])) > HOOK_TIMEOUT_MS) rmSync(path.join(dir, n), { force: true });
     const key = hashPath(real);
     const name = `${key}-${String(now).padStart(15, "0")}-${process.pid}.json`;
     const tmp = path.join(dir, `${name}.tmp`);
@@ -2219,10 +2220,14 @@ export async function settleFindings(findings: Finding[], resolved: string, rec:
     }
     return true;
   };
-  return findings.flatMap((f) => {
-    const g = gateFinding(f, survives, resolved, false);
-    return g ? [g] : [];
-  });
+  try {
+    return findings.flatMap((f) => {
+      const g = gateFinding(f, survives, resolved, false);
+      return g ? [g] : [];
+    });
+  } catch {
+    return findings; // a record whose hunks are malformed below the array check: cannot tell, report
+  }
 }
 
 /**
@@ -2307,11 +2312,10 @@ async function lintResolved(resolved: string, cwd: string, ranges: Array<[number
   if (chain.finding) findings.push(chain.finding);
   if (tsResult) findings.push(tsResult);
   // Gate before truncate() so the context budget is spent on in-range text.
-  const kept = findings.flatMap((f) => {
+  return findings.flatMap((f) => {
     const g = gateFinding(f, ranges, resolved);
     return g ? [g] : [];
   });
-  return kept;
 }
 
 /**
