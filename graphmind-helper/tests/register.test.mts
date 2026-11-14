@@ -28,6 +28,10 @@ type World = {
   search?: string;
   /** Text of `gm_memory_list`. */
   recent?: string;
+  /** Output of `graphmind memory list --priority`. */
+  priority?: string;
+  /** Text of `gm_map`. */
+  map?: string;
 };
 
 /**
@@ -52,7 +56,7 @@ function setup(on: Parameters<typeof mock.clock>[0], w: World = {}) {
   on("process.run", (_$, e) => {
     const argv = [...(e.argv as string[])];
     runs.push(argv);
-    const out = argv[1] === "memory" && argv[2] === "list" ? ">> p\n★ aaaaaaaa [decision] always use X\n" : argv[2] === "search" ? (w.search ?? "bbbbbbbb [pattern] about foo_bar\n") : "";
+    const out = argv[1] === "memory" && argv[2] === "list" ? (w.priority ?? ">> p\n★ aaaaaaaa [decision] always use X\n") : argv[2] === "search" ? (w.search ?? "bbbbbbbb [pattern] about foo_bar\n") : "";
     return { value: { exitCode: 0, stdout: out, stderr: "" } };
   });
   on("ui.toast", (_$, e) => {
@@ -70,7 +74,7 @@ function setup(on: Parameters<typeof mock.clock>[0], w: World = {}) {
     if (!tool.startsWith("mcp__")) return { result: "tool output" };
     calls.push({ ...e, tool });
     if (tool.endsWith("__gm_status") && w.unregistered) return { value: { deny: "Project is not registered" } };
-    const text = tool.endsWith("__gm_status") ? "Project: p\nGraph: 1 symbols" : tool.endsWith("__gm_map") ? ">> map\n  top file" : tool.endsWith("__gm_memory_list") ? (w.recent ?? ">> 1\n  [decision] recent one (id: x)") : "  foo [Function] a.ts:1";
+    const text = tool.endsWith("__gm_status") ? "Project: p\nGraph: 1 symbols" : tool.endsWith("__gm_map") ? (w.map ?? ">> map\n  top file") : tool.endsWith("__gm_memory_list") ? (w.recent ?? ">> 1\n  [decision] recent one (id: x)") : "  foo [Function] a.ts:1";
     // The shape of a real MCP tool result (live, Claude Code 2.1.325): text parts under `result` and the joined text.
     return tool.includes("graphmind") ? { value: { result: [{ type: "text", text }], text } } : next(e);
   });
@@ -125,6 +129,19 @@ test("the first prompt gets the briefing and the recall, a later one only recall
   expect(second).not.toMatch(/Project indexed and ready/);
   // aaaaaaaa was shown in the briefing: not offered again.
   expect(second).not.toMatch(/always use X/);
+});
+
+test("a full briefing does not starve the first prompt's recall", async ($, on) => {
+  // A real project's priority block is about 6000 chars: the briefing and the recall each get their own budget.
+  const priority = `>> 20\n${Array.from({ length: 20 }, (_, i) => `★ ${String(i).padStart(8, "a")} [decision] ${"x".repeat(280)}`).join("\n")}\n`;
+  const map = Array.from({ length: 20 }, (_, i) => `  src/file${i}.ts ${"y".repeat(150)}`).join("\n");
+  const { prompts } = setup(on, { priority, map });
+  await $.session.start({ source: "startup" });
+  await prompt($, "where is foo_bar defined in the code");
+  const first = (prompts[0].context ?? []).join("\n");
+  expect(first).toMatch(/Priority context/);
+  expect(first).toMatch(/about foo_bar/);
+  expect(first).toMatch(/\[graphmind code\] Relevant symbols:/);
 });
 
 test("a memory search hit that is a priority entry is not shown again", async ($, on) => {

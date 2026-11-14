@@ -278,6 +278,7 @@ async function usable($: Engine): Promise<Usable | undefined> {
 /**
  * The context a prompt gets: on the first prompt of the conversation the project briefing (the SessionStart script's
  * content), on every prompt the recall (memory and code) and, every tenth, the save reminder. Never throws.
+ * On the first prompt the briefing and the recall are two entries, each fitted to its own budget, as the setup's two hooks send them.
  *
  * @param $ - Engine interface.
  * @param prompt - The prompt text.
@@ -331,20 +332,21 @@ async function recallFor($: Engine, prompt: string): Promise<string[]> {
       { title: "★ Priority context (always active):", lines: priority },
       // gm_memory_list does not star priority entries (the setup drops them by the star); match its "(id: " prefix, the summary can hold any 8 hex.
       { title: "Recent memories:", lines: listing(recent ?? "").filter((l) => !pids.has(/\(id: ([0-9a-f]{8})/.exec(l)?.[1] ?? "")).slice(0, 5) },
-      ...found,
       { title: "", lines: [AUTO_MEMORY] },
     ];
   } else {
     blocks = [{ title: "[graphmind ★ new priority context]", lines: priority.filter((l) => !state.shown.has(entryId(l) ?? "")) }, ...found];
   }
 
+  // The setup sends the briefing (SessionStart) and the recall (UserPromptSubmit) as two outputs, each with its own budget.
   const out = fit(head, blocks);
+  const rec = briefing ? fit("", found).text.trimEnd() : "";
   for (const l of priority) {
     const id = entryId(l);
     if (id && out.whole.has(l)) state.shown.add(id);
   }
   state.briefed = true;
-  return out.text.trim() ? [out.text.trimEnd()] : [];
+  return [out.text.trimEnd(), rec].filter(Boolean);
 }
 
 /**

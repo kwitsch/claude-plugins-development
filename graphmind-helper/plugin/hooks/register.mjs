@@ -181,7 +181,6 @@ async function recallFor($, prompt) {
 				title: "Recent memories:",
 				lines: listing(recent ?? "").filter((l) => !pids.has(/\(id: ([0-9a-f]{8})/.exec(l)?.[1] ?? "")).slice(0, 5)
 			},
-			...found,
 			{
 				title: "",
 				lines: [AUTO_MEMORY]
@@ -194,12 +193,13 @@ async function recallFor($, prompt) {
 		}, ...found];
 	}
 	const out = fit(head, blocks);
+	const rec = briefing ? fit("", found).text.trimEnd() : "";
 	for (const l of priority) {
 		const id = entryId(l);
 		if (id && out.whole.has(l)) state.shown.add(id);
 	}
 	state.briefed = true;
-	return out.text.trim() ? [out.text.trimEnd()] : [];
+	return [out.text.trimEnd(), rec].filter(Boolean);
 }
 async function onSessionStart($, e, next) {
 	state = fresh();
