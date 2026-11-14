@@ -114,6 +114,15 @@ describe("jev-solver", () => {
     assert.match(read("skills/solve/SKILL.md"), /`--type=<value>`: `tiny`, `feature` or `bugfix`[^\n]*track question of the triage is skipped/);
   });
 
+  it("solve triage has a size floor: functional changes at least M, several functionalities or modules at least L, tiny only for trivial edits", () => {
+    const text = read("skills/solve/SKILL.md");
+    assert.match(text, /## Size floor/);
+    assert.match(text, /at least `M`/);
+    assert.match(text, /several functionalities, modules or subprojects[^\n]*at least `L`/);
+    assert.match(text, /`tiny` only[^\n]*single file or configuration[^\n]*without significant influence on functionality or tests/);
+    assert.match(text, /explicit `--size` is never raised/);
+  });
+
   it("solve handles --headless through decider and --size", () => {
     const text = read("skills/solve/SKILL.md");
     assert.match(text, /--headless/);
