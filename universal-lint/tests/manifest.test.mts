@@ -62,6 +62,14 @@ test("lint-file.mjs keeps the createRequire fallback next to getBuiltinModule (N
   assert.ok(text.includes("createRequire"));
 });
 
+test("README and plugin.json description say a user-level linter config also keeps the line-length rule on", () => {
+  const readme = readFileSync(path.join(PLUGIN, "README.md"), "utf8");
+  for (const place of ["~/.config/yamllint/config", "$YAMLLINT_CONFIG_FILE", "~/.markdownlintrc", "/etc/markdownlint"]) {
+    assert.ok(readme.includes(place), place);
+  }
+  assert.match(json(".claude-plugin/plugin.json").description, /neither the project nor the user has a linter config/);
+});
+
 test("plugin README first ## heading is Install, with the install command and no ## Hooks section", () => {
   const readme = readFileSync(path.join(PLUGIN, "README.md"), "utf8");
   assert.equal(/^## .*/m.exec(readme)?.[0], "## Install");
