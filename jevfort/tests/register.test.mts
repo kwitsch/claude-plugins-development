@@ -1377,10 +1377,13 @@ test("A file the turn already read is not offered again under another spelling",
     user("check src/./app.ts"),
     { role: "assistant", text: "", toolUses: [{ tool_use_id: "r1", tool: "Read", input: { file_path: "src/app.ts" }, text: "1\texport const a = 1" }] },
     { role: "user", text: "", toolUses: [], toolResults: [{ tool_use_id: "r1", text: "1\texport const a = 1", isError: false }] },
+    // A later call, so the Read is not the step's last call and only the already-read filter can drop it.
+    { role: "assistant", text: "", toolUses: [{ tool_use_id: "b1", tool: "Bash", input: { command: "git status" }, text: "clean" }] },
+    { role: "user", text: "", toolUses: [], toolResults: [{ tool_use_id: "b1", text: "clean", isError: false }] },
   ];
   const { sent } = setup(on, { messages, files: [`${CWD}/src/./app.ts`, `${CWD}/src/app.ts`], jev: () => undefined });
   claudeBeneath(on, []);
-  await drain($.turn.step({ ...step, index: 1, messageCount: 3 }));
+  await drain($.turn.step({ ...step, index: 2, messageCount: 5 }));
   const last = sent.filter((q) => q.id === "next_action").at(-1);
   expect(Object.keys(last?.criteria ?? {}).filter((k) => k.startsWith("read "))).toEqual([]);
 });
