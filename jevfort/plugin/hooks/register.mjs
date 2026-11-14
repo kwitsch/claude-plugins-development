@@ -1,10 +1,10 @@
 import { GENERAL, SWITCH_AT } from "./agents.mjs";
 import { CACHE_TTL, cacheColor, cacheLabel, minutesLeft, nextTtl } from "./cache.mjs";
-import { absolute, AUTH_TOOL, bash, BUILTIN_COMMANDS, clipScript, coversStep, dedupeSkills, isSafeScript, isSafeToOffer, MAX_READS, MAX_STATS, mentionedPaths, quotedTerms, relevant, SAFE_MAKE, sameCall, SKILL_BLOCKLIST_KEY } from "./candidates.mjs";
+import { absolute, AUTH_TOOL, bash, BUILTIN_COMMANDS, clipScript, dedupeSkills, isSafeScript, isSafeToOffer, MAX_READS, MAX_STATS, mentionedPaths, quotedTerms, relevant, SAFE_MAKE, sameCall, SKILL_BLOCKLIST_KEY } from "./candidates.mjs";
 import { COMPACT_MAX_TOKENS, COMPACT_MODEL, COMPACT_SYSTEM, compactInstructions, compactItems, haikuTranscript, RELEVANCE } from "./compact.mjs";
-import { clip, head, splitTurn, summarize, toolCalls } from "./context.mjs";
+import { clip, splitTurn, summarize, toolCalls } from "./context.mjs";
 import { choice, COMPACT_API_TIMEOUT_S, COMPACT_TIMEOUT_MS, HAIKU_API_TIMEOUT_S, HAIKU_TIMEOUT_MS, isAnswer, JEV_API_TIMEOUT_S, JEV_BATCH, JEV_TOOL_PREFIX, JEV_TOOLS, MAX_CHOICE_OPTIONS, MAX_ERROR, MAX_PAUSE_MS, missingJevTools, noul, PAUSE_MS, score, TIMEOUT_MS } from "./jev.mjs";
-import { bestAction, bounds, EFFORT_ORDER, effortQuestion, ESTIMATE_SPEC, ESTIMATE_TOOL, estimateEffort, EVERY_TURN_MODELS, inBandRange, inScratchpad, isEffort, mechanicalQuestion, modelFamily, nextActionQuestion, parseEstimateInput, pickCandidate, singleActionQuestion, taskEndQuestion } from "./policy.mjs";
+import { bounds, EFFORT_ORDER, effortQuestion, ESTIMATE_SPEC, ESTIMATE_TOOL, estimateEffort, EVERY_TURN_MODELS, inBandRange, inScratchpad, isEffort, mechanicalQuestion, modelFamily, nextActionQuestion, parseEstimateInput, pickCandidate, singleActionQuestion, taskEndQuestion } from "./policy.mjs";
 import { SUMMARY_MODEL, SYSTEM } from "./summarize.mjs";
 const newScan = () => ({
 	steps: 0,
@@ -150,7 +150,6 @@ let shownMinutes = null;
 let turnRunning = false;
 let coldCompacted = false;
 let compactQueued = false;
-let lostCompact;
 let cacheTimer;
 function showMinutes($, minutes) {
 	if (minutes === shownMinutes) return;
@@ -184,7 +183,7 @@ async function cacheTick($, autoCompactPercent) {
 	await $.command.run({
 		command: "compact",
 		args: ""
-	}).catch((err) => $.ui.status(`jev: auto-compact failed: ${String(err)}`.slice(0, 80)));
+	}).catch(() => undefined);
 }
 async function* cacheWatch($, original, run) {
 	const result = yield* run;
@@ -221,9 +220,6 @@ async function withJevRanking($, e) {
 	if (!r.ok) return e;
 	const scores = items.map((_, i) => score(r.answers, `item_${i}`)?.score);
 	const added = compactInstructions(items, scores);
-	const keep = scores.filter((s) => (s ?? 0) >= 2.2).length;
-	const drop = scores.filter((s) => s !== undefined && s < .8).length;
-	note($, `${e.trigger} compaction: ${items.length} results scored, keep ${keep}, drop ${drop}`);
 	return added ? {
 		...e,
 		instructions: e.instructions ? `${e.instructions}\n\n${added}` : added
@@ -244,19 +240,11 @@ async function jevApply($, missing) {
 	try {
 		$.ui.invalidate("ui.render");
 	} catch {}
-	if (key) {
-		note($, `inactive: jev-api tools missing (${key})`);
-		return;
-	}
+	if (key) return;
 	try {
 		if (!estimateRegistered) await $.tool.register(ESTIMATE_SPEC);
 		estimateRegistered = true;
-	} catch (err) {
-		note($, `estimate_effort not registered: ${String(err)}`);
-	}
-}
-function note($, text) {
-	void $.ui.status(head(`jev: ${text}`, 80));
+	} catch {}
 }
 async function readTurn($, agentId) {
 	return turnOf(await $.session.messages(agentId ? { agentId } : {}));
@@ -435,26 +423,6 @@ function offerableSkills($) {
 		return dedupeSkills(commands.filter((c) => (c.source === "plugin" || c.source === "user") && !BUILTIN_COMMANDS.has(c.name) && !blocked.has(c.name)));
 	})();
 }
-function summarizeCalls(calls) {
-	if (!calls.length) return "replied";
-	const parts = new Map();
-	for (const c of calls) {
-		const target = typeof c.input.file_path === "string" ? c.input.file_path.split("/").pop() : typeof c.input.command === "string" ? head(c.input.command.replace(/\s+/g, " "), 30) : typeof c.input.skill === "string" ? c.input.skill : "";
-		const key = target ? `${c.tool} ${target}` : c.tool;
-		parts.set(key, (parts.get(key) ?? 0) + 1);
-	}
-	return [...parts].map(([k, n]) => n > 1 ? `${k} ×${n}` : k).join(", ");
-}
-function noteCompare($, answer, candidates, toolUses) {
-	const best = bestAction(answer);
-	const claudeCalls = toolUses.map((u) => ({
-		tool: u.name,
-		input: u.input ?? {}
-	}));
-	const bestCandidate = candidates.find((c) => c.key === best?.key);
-	const agree = Boolean(bestCandidate && coversStep(claudeCalls, bestCandidate));
-	note($, `Claude: ${summarizeCalls(claudeCalls)} · Jev best ${best?.key ?? "none"}${agree ? " ✓" : ""}`);
-}
 async function blockSkill($, name) {
 	try {
 		const list = await $.store.get(SKILL_BLOCKLIST_KEY) ?? [];
@@ -467,7 +435,6 @@ async function contextCompact($, e, ready, fromPercent, forcePercent) {
 	const percent = await fillPercent($);
 	const forced = forcePercent > 0 && percent >= forcePercent;
 	if (!forced && (fromPercent <= 0 || percent < fromPercent || !ready || e.reason !== "answer")) return;
-	let text = `${percent.toFixed(0)}% full, forced`;
 	if (!forced) {
 		const ctx = await readTurn($);
 		if (!ctx) return;
@@ -479,19 +446,16 @@ async function contextCompact($, e, ready, fromPercent, forcePercent) {
 		if (!r.ok) return;
 		const end = noul(r.answers, "end");
 		if (end === undefined || end < .5) return;
-		text = `${percent.toFixed(0)}% full, task ended (p=${end.toFixed(2)})`;
 	}
 	if (compactQueued) return;
 	compactQueued = true;
-	note($, text);
 	$.command.run({
 		command: "compact",
 		args: ""
 	}).then(() => {
 		compactQueued = false;
-	}, (err) => {
+	}, () => {
 		compactQueued = false;
-		lostCompact = String(err);
 	});
 }
 async function fillPercent($) {
@@ -514,7 +478,6 @@ export const register = (on, options) => {
 		minEffort: "low",
 		maxEffort: "xhigh"
 	};
-	const badRange = !configuredRange && (options.minEffort !== undefined || options.maxEffort !== undefined) ? `minEffort ${String(options.minEffort)}, maxEffort ${String(options.maxEffort)}` : undefined;
 	const jevRanking = options.compaction !== false;
 	const haikuCompact = options.haikuCompact !== false;
 	const autoCompactPercent = threshold("autoCompactPercent", 60);
@@ -597,7 +560,6 @@ export const register = (on, options) => {
 			if (!answer) return next(e);
 			const p = answer.probabilities[answer.choice] ?? 0;
 			const canSwitch = GENERAL.has(claudeType) && !GENERAL.has(answer.choice) && Object.hasOwn(criteria, answer.choice) && p >= SWITCH_AT;
-			note($, `Claude ${claudeType || "(default)"} · Jev ${answer.choice} p=${p.toFixed(2)}${canSwitch ? " → switched" : ""}`);
 			return canSwitch ? next({
 				...e,
 				subagent_type: answer.choice
@@ -632,7 +594,6 @@ export const register = (on, options) => {
 		}));
 		const text = r.isAnswered ? r.text.trim() : "";
 		const written = text.length > 200 && r.isAnswered && r.usage.output_tokens < COMPACT_MAX_TOKENS;
-		note($, written ? `${e.trigger} compaction written by ${COMPACT_MODEL}` : `${COMPACT_MODEL} could not compact (${r.isAnswered ? "empty or cut-off summary" : r.reason}), Claude Code does it`);
 		if (!written) return passOn();
 		cacheExpires = 0;
 		compactQueued = false;
@@ -660,7 +621,6 @@ export const register = (on, options) => {
 		bandStale = false;
 		cacheTimer?.cancel();
 		cacheTimer = $.clock.every(CACHE_TICK_MS, () => void cacheTick($, autoCompactPercent).catch(() => undefined));
-		if (badRange) note($, `invalid effort bounds (${badRange}): using low..xhigh`);
 		const result = await next(e);
 		dropTurnReads();
 		await jevApply($, await jevMissing($));
@@ -684,11 +644,7 @@ export const register = (on, options) => {
 			return next(e);
 		}
 		turns.delete(e.turnId);
-		if (lostCompact !== undefined) {
-			note($, `context compaction refused: ${lostCompact}`);
-			lostCompact = undefined;
-		}
-		await contextCompact($, e, true, taskCompactPercent, forceCompactPercent).catch((err) => note($, `context compaction check failed: ${String(err)}`));
+		await contextCompact($, e, true, taskCompactPercent, forceCompactPercent).catch(() => undefined);
 		if (e.agentId === undefined) haikuPath = undefined;
 		return next(e);
 	});
@@ -702,7 +658,6 @@ export const register = (on, options) => {
 			});
 			const effortAnswer = r.ok ? score(r.answers, "effort") : undefined;
 			const est = estimateEffort(effortAnswer, r.ok ? noul(r.answers, "mechanical") : undefined, input);
-			note($, `${input.model}: ${est.effort} (${est.source}${r.ok ? "" : `, ${r.error}`})`);
 			return { result: JSON.stringify(est) };
 		}
 		if ((await jevMissing($)).length) return next(e);
@@ -736,7 +691,6 @@ export const register = (on, options) => {
 			const done = calls.find((c) => c.tool_use_id === id);
 			if (done?.text !== undefined && !(done.isError && REFUSED.test(done.text))) {
 				const s = await summarizeResult($, ctx.request, turn.bypassAction ?? done.tool, done.text);
-				note($, s.ok ? `answered with ${SUMMARY_MODEL} after ${turn.bypassAction}` : `summary failed (${s.reason}), Claude answers`);
 				if (s.ok) {
 					const usage = {
 						...s.usage,
@@ -823,10 +777,7 @@ export const register = (on, options) => {
 			cwd: turn.cache.cwd ??= await $.session.cwd()
 		};
 		const r = await askJev($, state, questions);
-		if (!r.ok) {
-			note($, `unavailable: ${r.error}`);
-			return yield* next(routed(e));
-		}
+		if (!r.ok) return yield* next(routed(e));
 		if (estimate) {
 			const mechanical = noul(r.answers, "mechanical");
 			const effortAnswer = score(r.answers, "effort");
@@ -837,18 +788,11 @@ export const register = (on, options) => {
 				band.chosen = est.effort;
 				$.ui.invalidate("ui.render");
 			}
-			const effort = turn.effort;
-			note($, `effort → ${effort !== undefined ? `${e.model}, effort ${effort}` : "no change"} · ${est.source}`);
 		}
 		const answer = choice(r.answers, "next_action");
-		const best = bestAction(answer);
 		const singleAction = noul(r.answers, "single_action") ?? 0;
 		const picked = pickCandidate(answer, candidates, takeThreshold);
 		const pick = takeOnlyForBypass && (singleAction < SINGLE_ACTION || picked?.tool !== "Read" && picked?.tool !== "Bash") ? undefined : picked;
-		if (answer) {
-			const p = answer.probabilities[answer.choice] ?? 0;
-			note($, `${answer.choice} (p=${p.toFixed(2)})${pick ? "" : best ? `; best action ${best.key} p=${best.p.toFixed(2)}` : ""}`);
-		}
 		if (pick) {
 			turn.taken += 1;
 			const id = `toolu_jev_${crypto.randomUUID().replace(/-/g, "")}`;
@@ -886,7 +830,6 @@ export const register = (on, options) => {
 			};
 		}
 		const result = yield* next(routed(e));
-		if (answer) noteCompare($, answer, candidates, result.toolUses);
 		return result;
 	});
 	on("tool.check", async function onToolCheck($, e, next) {

@@ -16,14 +16,14 @@
 import { GENERAL, SWITCH_AT } from "./agents.mjs";
 import { CACHE_TTL, cacheColor, cacheLabel, minutesLeft, nextTtl } from "./cache.mjs";
 import type { CacheTtl } from "./cache.mjs";
-import { absolute, AUTH_TOOL, bash, BUILTIN_COMMANDS, clipScript, coversStep, dedupeSkills, isSafeScript, isSafeToOffer, MAX_READS, MAX_STATS, mentionedPaths, quotedTerms, relevant, SAFE_MAKE, sameCall, SKILL_BLOCKLIST_KEY } from "./candidates.mjs";
+import { absolute, AUTH_TOOL, bash, BUILTIN_COMMANDS, clipScript, dedupeSkills, isSafeScript, isSafeToOffer, MAX_READS, MAX_STATS, mentionedPaths, quotedTerms, relevant, SAFE_MAKE, sameCall, SKILL_BLOCKLIST_KEY } from "./candidates.mjs";
 import type { Candidate } from "./candidates.mjs";
 import { COMPACT_MAX_TOKENS, COMPACT_MODEL, COMPACT_SYSTEM, compactInstructions, compactItems, haikuTranscript, RELEVANCE } from "./compact.mjs";
-import { clip, head, splitTurn, summarize, toolCalls } from "./context.mjs";
+import { clip, splitTurn, summarize, toolCalls } from "./context.mjs";
 import type { SessionMessage, ToolUse, TurnContext } from "./context.mjs";
 import { choice, COMPACT_API_TIMEOUT_S, COMPACT_TIMEOUT_MS, HAIKU_API_TIMEOUT_S, HAIKU_TIMEOUT_MS, isAnswer, JEV_API_TIMEOUT_S, JEV_BATCH, JEV_TOOL_PREFIX, JEV_TOOLS, MAX_CHOICE_OPTIONS, MAX_ERROR, MAX_PAUSE_MS, missingJevTools, noul, PAUSE_MS, score, TIMEOUT_MS } from "./jev.mjs";
-import type { Answer, ChoiceAnswer, JevResult, Question } from "./jev.mjs";
-import { bestAction, bounds, EFFORT_ORDER, effortQuestion, ESTIMATE_SPEC, ESTIMATE_TOOL, estimateEffort, EVERY_TURN_MODELS, inBandRange, inScratchpad, isEffort, mechanicalQuestion, modelFamily, nextActionQuestion, parseEstimateInput, pickCandidate, singleActionQuestion, taskEndQuestion } from "./policy.mjs";
+import type { Answer, JevResult, Question } from "./jev.mjs";
+import { bounds, EFFORT_ORDER, effortQuestion, ESTIMATE_SPEC, ESTIMATE_TOOL, estimateEffort, EVERY_TURN_MODELS, inBandRange, inScratchpad, isEffort, mechanicalQuestion, modelFamily, nextActionQuestion, parseEstimateInput, pickCandidate, singleActionQuestion, taskEndQuestion } from "./policy.mjs";
 import type { Effort, EstimateBounds, EstimateModel } from "./policy.mjs";
 import { SUMMARY_MODEL, SYSTEM } from "./summarize.mjs";
 import type { ModelUsage, Summary } from "./summarize.mjs";
@@ -79,7 +79,6 @@ type Engine = {
   model: { complete(spec: { model: string; system: string; prompt: string; maxTokens: number; timeoutMs: number }): Promise<Completion> };
   /** User interface. */
   ui: {
-    status(text: string): Promise<unknown>;
     /** Redraws the render sites of an event (the effort band). */
     invalidate(event: "ui.render"): void;
     // The element factories are plain functions, called detached from the object (`const { Box } = …`).
@@ -357,8 +356,6 @@ let turnRunning = false;
 let coldCompacted = false;
 /** A context-fill compaction is already queued for this fill period (cleared when a compaction stands, by `resetCache`). */
 let compactQueued = false;
-/** Why the last queued context-fill compaction was refused: its rejection arrives after the hook frame ended, so the next `turn.complete` logs it. */
-let lostCompact: string | undefined;
 /** The session's cache tick, cancelled and started again by each `session.start`. */
 let cacheTimer: { cancel(): void } | undefined;
 
@@ -419,9 +416,9 @@ async function cacheTick($: Engine, autoCompactPercent: number): Promise<void> {
   if (!Number.isFinite(percent) || percent < autoCompactPercent || coldCompacted || turnRunning || cacheExpires !== expires) return;
   coldCompacted = true;
   // The app's own /compact, run as if typed: queued until the session is idle, resolved once it ran. A compaction that
-  // stands zeroes `cacheExpires` itself (the session.compact hook). A refusal (a Stop, DISABLE_COMPACT) is said in the
-  // status line; this cold period is not tried again.
-  await $.command.run({ command: "compact", args: "" }).catch((err: unknown) => $.ui.status(`jev: auto-compact failed: ${String(err)}`.slice(0, 80)));
+  // stands zeroes `cacheExpires` itself (the session.compact hook). A refusal (a Stop, DISABLE_COMPACT) is swallowed:
+  // this cold period is not tried again.
+  await $.command.run({ command: "compact", args: "" }).catch(() => undefined);
 }
 
 /**
@@ -477,10 +474,6 @@ async function withJevRanking($: Engine, e: CompactEvent): Promise<CompactEvent>
   if (!r.ok) return e;
   const scores = items.map((_, i) => score(r.answers, `item_${i}`)?.score);
   const added = compactInstructions(items, scores);
-  const keep = scores.filter((s) => (s ?? 0) >= 2.2).length;
-  const drop = scores.filter((s) => s !== undefined && s < 0.8).length;
-  // A failing log write must not cost the compaction its ranking.
-  note($, `${e.trigger} compaction: ${items.length} results scored, keep ${keep}, drop ${drop}`);
   return added ? { ...e, instructions: e.instructions ? `${e.instructions}\n\n${added}` : added } : e;
 }
 
@@ -529,26 +522,11 @@ async function jevApply($: Engine, missing: string[]): Promise<void> {
   try {
     $.ui.invalidate("ui.render");
   } catch { /* no mounted render site (headless): the band just is not redrawn */ }
-  if (key) {
-    note($, `inactive: jev-api tools missing (${key})`);
-    return;
-  }
+  if (key) return;
   try {
     if (!estimateRegistered) await $.tool.register(ESTIMATE_SPEC);
     estimateRegistered = true;
-  } catch (err) {
-    note($, `estimate_effort not registered: ${String(err)}`);
-  }
-}
-
-/**
- * Says a decision in the status line.
- *
- * @param $ - Engine interface.
- * @param text - What was decided.
- */
-function note($: Engine, text: string): void {
-  void $.ui.status(head(`jev: ${text}`, 80));
+  } catch { /* retried by the next listing */ }
 }
 
 /**
@@ -784,46 +762,6 @@ function offerableSkills($: Engine): Promise<CommandInfo[]> {
 }
 
 /**
- * Short form of a step's tool calls: `Edit app.js ×3, Bash npm test`.
- *
- * @param calls - The calls.
- * @returns The summary, `replied` without calls.
- */
-function summarizeCalls(calls: readonly { tool: string; input: Record<string, unknown> }[]): string {
-  if (!calls.length) return "replied";
-  const parts = new Map<string, number>();
-  for (const c of calls) {
-    const target = typeof c.input.file_path === "string"
-      ? c.input.file_path.split("/").pop()
-      : typeof c.input.command === "string"
-      ? head(c.input.command.replace(/\s+/g, " "), 30)
-      : typeof c.input.skill === "string"
-      ? c.input.skill
-      : "";
-    const key = target ? `${c.tool} ${target}` : c.tool;
-    parts.set(key, (parts.get(key) ?? 0) + 1);
-  }
-  return [...parts].map(([k, n]) => (n > 1 ? `${k} ×${n}` : k)).join(", ");
-}
-
-/**
- * Says Claude's step next to Jev's top action. `agree` means Jev's action would have replaced Claude's whole step
- * (one call, same command once output filters and flags are set aside), so taking it would have saved one Claude request.
- *
- * @param $ - Engine interface.
- * @param answer - Jev's next-action answer.
- * @param candidates - The candidates Jev was offered.
- * @param toolUses - Claude's calls in the step.
- */
-function noteCompare($: Engine, answer: ChoiceAnswer, candidates: readonly Candidate[], toolUses: readonly { name: string; input?: unknown }[]): void {
-  const best = bestAction(answer);
-  const claudeCalls = toolUses.map((u) => ({ tool: u.name, input: (u.input ?? {}) as Record<string, unknown> }));
-  const bestCandidate = candidates.find((c) => c.key === best?.key);
-  const agree = Boolean(bestCandidate && coversStep(claudeCalls, bestCandidate));
-  note($, `Claude: ${summarizeCalls(claudeCalls)} · Jev best ${best?.key ?? "none"}${agree ? " ✓" : ""}`);
-}
-
-/**
  * Never offers skill `name` again (the Skill tool refused it).
  *
  * @param $ - Engine interface.
@@ -858,7 +796,6 @@ async function contextCompact($: Engine, e: TurnEnd, ready: boolean, fromPercent
   const percent = await fillPercent($);
   const forced = forcePercent > 0 && percent >= forcePercent;
   if (!forced && (fromPercent <= 0 || percent < fromPercent || !ready || e.reason !== "answer")) return;
-  let text = `${percent.toFixed(0)}% full, forced`;
   if (!forced) {
     const ctx = await readTurn($);
     if (!ctx) return;
@@ -866,19 +803,16 @@ async function contextCompact($: Engine, e: TurnEnd, ready: boolean, fromPercent
     if (!r.ok) return;
     const end = noul(r.answers, "end");
     if (end === undefined || end < 0.5) return;
-    text = `${percent.toFixed(0)}% full, task ended (p=${end.toFixed(2)})`;
   }
   // Re-read after the awaits: a concurrent turn end may have queued it.
   if (compactQueued) return;
   compactQueued = true;
-  note($, text);
   // Not awaited: it resolves only once the compaction ran, after this turn ended. No `$` call in the handlers. The
   // resolve clears the flag too: cc-plugin-sec-default bypasses the session.compact hook that would (2.1.325).
   $.command.run({ command: "compact", args: "" }).then(() => {
     compactQueued = false;
-  }, (err: unknown) => {
+  }, () => {
     compactQueued = false;
-    lostCompact = String(err);
   });
 }
 
@@ -915,8 +849,6 @@ export const register = (on: On, options: Options): void => {
   // The bounds of the turn-start effort estimate; invalid or inverted options fall back to low..xhigh together.
   const configuredRange = bounds(options.minEffort, options.maxEffort);
   const effortRange: { minEffort: Effort; maxEffort: Effort } = configuredRange ?? { minEffort: "low", maxEffort: "xhigh" };
-  /** Set when the user configured `minEffort`/`maxEffort` but they are invalid or inverted; logged at session start. */
-  const badRange = !configuredRange && (options.minEffort !== undefined || options.maxEffort !== undefined) ? `minEffort ${String(options.minEffort)}, maxEffort ${String(options.maxEffort)}` : undefined;
 
   const jevRanking = options.compaction !== false;
   const haikuCompact = options.haikuCompact !== false;
@@ -1009,7 +941,6 @@ export const register = (on: On, options: Options): void => {
       const p = answer.probabilities[answer.choice] ?? 0;
       // Only to a type Jev was offered: an answer outside `criteria` may name one that is gone.
       const canSwitch = GENERAL.has(claudeType) && !GENERAL.has(answer.choice) && Object.hasOwn(criteria, answer.choice) && p >= SWITCH_AT;
-      note($, `Claude ${claudeType || "(default)"} · Jev ${answer.choice} p=${p.toFixed(2)}${canSwitch ? " → switched" : ""}`);
       return canSwitch ? next({ ...e, subagent_type: answer.choice }) : next(e);
     });
   }
@@ -1049,8 +980,6 @@ export const register = (on: On, options: Options): void => {
     const text = r.isAnswered ? r.text.trim() : "";
     // A usable summary: shorter ones are an empty reply, one that used all its tokens was cut off.
     const written = text.length > 200 && r.isAnswered && r.usage.output_tokens < COMPACT_MAX_TOKENS;
-    // A failing log write must not throw away the summary that was just paid for.
-    note($, written ? `${e.trigger} compaction written by ${COMPACT_MODEL}` : `${COMPACT_MODEL} could not compact (${r.isAnswered ? "empty or cut-off summary" : r.reason}), Claude Code does it`);
     if (!written) return passOn();
     cacheExpires = 0;
     compactQueued = false;
@@ -1093,7 +1022,6 @@ export const register = (on: On, options: Options): void => {
     // The cache tick's timer lives here: one started inside a request ends with it.
     cacheTimer?.cancel();
     cacheTimer = $.clock.every(CACHE_TICK_MS, () => void cacheTick($, autoCompactPercent).catch(() => undefined));
-    if (badRange) note($, `invalid effort bounds (${badRange}): using low..xhigh`);
     // After `next(e)`: jev-api registers its tools in its own session.start, which may run beneath this hook.
     const result = await next(e);
     // The session's baseline, listed only now: a jevfort hook raised inside `next(e)` (another plugin's session.start
@@ -1129,11 +1057,7 @@ export const register = (on: On, options: Options): void => {
       return next(e);
     }
     turns.delete(e.turnId);
-    if (lostCompact !== undefined) {
-      note($, `context compaction refused: ${lostCompact}`);
-      lostCompact = undefined;
-    }
-    await contextCompact($, e, true, taskCompactPercent, forceCompactPercent).catch((err: unknown) => note($, `context compaction check failed: ${String(err)}`));
+    await contextCompact($, e, true, taskCompactPercent, forceCompactPercent).catch(() => undefined);
     // The compaction check above may have read the env: drop it again so the next turn reads the settings `env` afresh.
     if (e.agentId === undefined) haikuPath = undefined;
     return next(e);
@@ -1149,7 +1073,6 @@ export const register = (on: On, options: Options): void => {
       const r = await askJev($, { request: clip(input.prompt, 4000) }, { effort: effortQuestion, mechanical: mechanicalQuestion });
       const effortAnswer = r.ok ? score(r.answers, "effort") : undefined;
       const est = estimateEffort(effortAnswer, r.ok ? noul(r.answers, "mechanical") : undefined, input);
-      note($, `${input.model}: ${est.effort} (${est.source}${r.ok ? "" : `, ${r.error}`})`);
       return { result: JSON.stringify(est) };
     }
     if ((await jevMissing($)).length) return next(e);
@@ -1192,7 +1115,6 @@ export const register = (on: On, options: Options): void => {
       const done = calls.find((c) => c.tool_use_id === id);
       if (done?.text !== undefined && !(done.isError && REFUSED.test(done.text))) {
         const s = await summarizeResult($, ctx.request, turn.bypassAction ?? done.tool, done.text);
-        note($, s.ok ? `answered with ${SUMMARY_MODEL} after ${turn.bypassAction}` : `summary failed (${s.reason}), Claude answers`);
         if (s.ok) {
           const usage = { ...s.usage, model: SUMMARY_MODEL };
           yield { kind: "text", index: 0, text: s.text };
@@ -1261,10 +1183,7 @@ export const register = (on: On, options: Options): void => {
       cwd: turn.cache.cwd ??= await $.session.cwd(),
     };
     const r = await askJev($, state, questions);
-    if (!r.ok) {
-      note($, `unavailable: ${r.error}`);
-      return yield* next(routed(e));
-    }
+    if (!r.ok) return yield* next(routed(e));
 
     if (estimate) {
       const mechanical = noul(r.answers, "mechanical");
@@ -1276,20 +1195,13 @@ export const register = (on: On, options: Options): void => {
         band.chosen = est.effort;
         $.ui.invalidate("ui.render");
       }
-      const effort = turn.effort;
-      note($, `effort → ${effort !== undefined ? `${e.model}, effort ${effort}` : "no change"} · ${est.source}`);
     }
 
     const answer = choice(r.answers, "next_action");
-    const best = bestAction(answer);
     const singleAction = noul(r.answers, "single_action") ?? 0;
     const picked = pickCandidate(answer, candidates, takeThreshold);
     // takeOnlyForBypass: only a read-only Read or Bash that is the whole prompt; a skill or tool load run by Jev would end the turn on a summary of "Launching skill".
     const pick = takeOnlyForBypass && (singleAction < SINGLE_ACTION || (picked?.tool !== "Read" && picked?.tool !== "Bash")) ? undefined : picked;
-    if (answer) {
-      const p = answer.probabilities[answer.choice] ?? 0;
-      note($, `${answer.choice} (p=${p.toFixed(2)})${pick ? "" : best ? `; best action ${best.key} p=${best.p.toFixed(2)}` : ""}`);
-    }
 
     if (pick) {
       turn.taken += 1;
@@ -1308,7 +1220,6 @@ export const register = (on: On, options: Options): void => {
     const result = yield* next(routed(e));
 
     // Compare Claude's own next call with Jev's top action.
-    if (answer) noteCompare($, answer, candidates, result.toolUses);
     return result;
   });
 

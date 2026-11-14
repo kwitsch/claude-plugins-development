@@ -190,18 +190,14 @@ async function respond($: Parameters<Parameters<typeof test>[2]>[0]) {
  * @param on - The test's `on`.
  * @param percent - What `$.session.usage()` reports as the context fill.
  * @param run - Answers a `/compact` run: `{ value }` resolves it, `{ deny }` refuses it, a pending promise queues it.
- * @returns The clock, the state (`/compact` run count; `hold` true keeps each `$.session.usage()` pending in `held` until called) and the status lines said.
+ * @returns The clock, the state (`/compact` run count; `hold` true keeps each `$.session.usage()` pending in `held` until called).
  */
 function chatSetup(on: Parameters<typeof mock.clock>[0], percent: number, run: () => unknown = () => ({ value: undefined })) {
   mock.store(on, {});
   const clock = mock.clock(on);
-  const status: string[] = [];
   const state = { compacts: 0, hold: false, held: [] as Array<() => void> };
   on("session.cwd", () => ({ value: "/proj" }));
-  on("ui.status", (_$, e) => {
-    status.push(String(e.text));
-    return { value: undefined };
-  });
+  on("ui.status", () => ({ value: undefined }));
   on("tool.list", () => ({ value: [] }));
   on("session.start", async () => ({}));
   on("session.end", async () => ({}));
@@ -219,7 +215,7 @@ function chatSetup(on: Parameters<typeof mock.clock>[0], percent: number, run: (
     state.compacts++;
     return run();
   });
-  return { clock, state, status };
+  return { clock, state };
 }
 
 for (const [percent, option, runs] of [[70, 60, 1], [50, 60, 0], [90, 0, 0], [Number.NaN, 60, 0], [Number.POSITIVE_INFINITY, 60, 0]] as const) {
@@ -373,14 +369,13 @@ test("a /compact still queued behind the session is not issued again by the next
   expect(state.compacts).toBe(1);
 });
 
-test("a refused /compact is said in the status line and not tried again in the same cold period", async ($, on) => {
-  const { clock, state, status } = chatSetup(on, 70, () => ({ deny: "no command named /compact" }));
+test("a refused /compact is not tried again in the same cold period", async ($, on) => {
+  const { clock, state } = chatSetup(on, 70, () => ({ deny: "no command named /compact" }));
   await $.session.start(START);
   await respond($);
   await clock.advance(CACHE_TTL["1h"] + 60_000);
   await clock.advance(10 * 60_000);
   expect(state.compacts).toBe(1);
-  expect(status.filter((s) => s.startsWith("jev: auto-compact failed"))).toHaveLength(1);
 });
 
 test("a precompute or a vetoed compaction leaves the countdown, a compaction that stands clears it", async ($, on) => {

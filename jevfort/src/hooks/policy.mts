@@ -53,21 +53,6 @@ export const taskEndQuestion: Question = {
 };
 
 /**
- * The most likely option other than claude, with its probability.
- *
- * @param answer - The next-action answer.
- * @returns The best listed action, or `undefined` without an answer or options.
- */
-export function bestAction(answer: ChoiceAnswer | undefined): { key: string; p: number } | undefined {
-  if (!answer) return undefined;
-  let best: { key: string; p: number } | undefined;
-  for (const [key, p] of Object.entries(answer.probabilities)) {
-    if (key !== CLAUDE && (!best || p > best.p)) best = { key, p };
-  }
-  return best;
-}
-
-/**
  * Which candidate Jev takes, or undefined to let Claude decide.
  *
  * @param answer - The next-action answer.

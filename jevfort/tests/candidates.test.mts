@@ -1,6 +1,6 @@
 // Pure logic of the built plugin/hooks/{candidates,report,context,policy}.mjs: upstream jev-pilot tests/candidates.test.ts.
 import { expect, test } from "vitest";
-import { commandKey, coversStep, dedupeSkills, isSafeScript, isSafeToOffer, mentionedPaths, quotedTerms, relevant, SAFE_MAKE, sameCall, words } from "../plugin/hooks/candidates.mjs";
+import { dedupeSkills, isSafeScript, isSafeToOffer, mentionedPaths, quotedTerms, relevant, SAFE_MAKE, sameCall, words } from "../plugin/hooks/candidates.mjs";
 import { clip, splitTurn, summarize } from "../plugin/hooks/context.mjs";
 
 test("quoted terms become searches, file names do not", () => {
@@ -190,26 +190,6 @@ test("sameCall compares each tool by the argument that matters", () => {
   expect(sameCall(call("Bash", { command: "npm test " }), call("Bash", { command: "npm test" }))).toBe(true);
   expect(sameCall(call("Bash", { command: "npm test" }), call("Bash", { command: "npm run build" }))).toBe(false);
   expect(sameCall(call("Read", { file_path: "/a" }), call("Skill", { skill: "/a" }))).toBe(false);
-});
-
-test("commands compare by what they run, not how the output is filtered", () => {
-  expect(commandKey("npm test 2>&1 | grep -E '^(ok|not ok)'")).toBe(commandKey("npm test"));
-  expect(commandKey("cd /x/todo-app && npm test")).toBe("npm test");
-  expect(commandKey("git status; git diff --stat | head -40")).toBe(commandKey("git status --short && git diff --stat"));
-  expect(commandKey("git log --oneline -5")).toBe(commandKey("git log --oneline -n 15"));
-  expect(commandKey("npm run lint")).not.toBe(commandKey("npm run build"));
-  expect(commandKey("git diff")).not.toBe(commandKey("git status --short && git diff --stat"));
-  // Cases the 2-word cap does not hide: order, flags, pipe tail.
-  expect(commandKey("git diff; git status")).toBe(commandKey("git status && git diff"));
-  expect(commandKey("ls -la")).toBe(commandKey("ls"));
-  expect(commandKey("ls | wc -l")).toBe(commandKey("ls"));
-});
-
-test("a step matches only when Jev's one action would replace all of it", () => {
-  const jev = { tool: "Bash", input: { command: "npm test" } };
-  expect(coversStep([{ tool: "Bash", input: { command: "npm test 2>&1 | tail -20" } }], jev)).toBe(true);
-  expect(coversStep([{ tool: "Bash", input: { command: "ls && cat package.json && npm test" } }], jev)).toBe(false);
-  expect(coversStep([{ tool: "Bash", input: { command: "npm test" } }, { tool: "Read", input: { file_path: "/a" } }], jev)).toBe(false);
 });
 
 test("words keeps umlauts whole instead of splitting at them", () => {
