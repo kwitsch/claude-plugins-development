@@ -94,6 +94,17 @@ test("with the setup's server in ~/.claude.json the wrapper still inits but does
   assert.doesNotMatch(calls, /^mcp$/m);
 });
 
+test("a setup server disabled for this project (/mcp) does not suppress the wrapper's own", () => {
+  const key = realpathSync(proj);
+  const server = { graphmind: { command: "graphmind" } };
+  for (const cfg of [{ mcpServers: server, projects: { [key]: { disabledMcpServers: ["graphmind"] } } }, { projects: { [key]: { mcpServers: server, disabledMcpServers: ["graphmind"] } } }]) {
+    writeFileSync(join(home, ".claude.json"), JSON.stringify(cfg));
+    writeFileSync(join(root, "registered"), "");
+    rmSync(join(root, "calls.log"), { force: true });
+    assert.match(runWrapper().calls, /^mcp$/m, JSON.stringify(cfg));
+  }
+});
+
 test("with CLAUDE_CONFIG_DIR set only its .claude.json counts, not the one in HOME", () => {
   const cfg = join(root, "cfg");
   const server = "{\"mcpServers\":{\"graphmind\":{\"command\":\"graphmind\"}}}";

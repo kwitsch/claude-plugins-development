@@ -71,15 +71,18 @@ export function claudeProjectKey(cwd: string): string {
  *
  * @param configDir - Directory of that file: `CLAUDE_CONFIG_DIR`, else the home directory (as Claude Code resolves it).
  * @param cwd - Working directory: only the project entry Claude Code loads for it counts (`claudeProjectKey`).
- * @returns True when a server named `graphmind` exists at the top level or in that project entry.
+ * @returns True when a server named `graphmind` exists at the top level or in that project entry and that entry's `disabledMcpServers` does not list it.
  */
 export function setupMcpPresent(configDir: string = process.env.CLAUDE_CONFIG_DIR || homedir(), cwd: string = process.cwd()): boolean {
   try {
     const text = readFileSync(join(configDir, ".claude.json"), "utf8");
     // The file can be several MB: parse it only when the name occurs at all.
     if (!text.includes("\"graphmind\"")) return false;
-    const json = JSON.parse(text) as { mcpServers?: Record<string, unknown>; projects?: Record<string, { mcpServers?: Record<string, unknown> }> };
-    return Boolean(json.mcpServers?.graphmind ?? json.projects?.[claudeProjectKey(cwd)]?.mcpServers?.graphmind);
+    const json = JSON.parse(text) as { mcpServers?: Record<string, unknown>; projects?: Record<string, { mcpServers?: Record<string, unknown>; disabledMcpServers?: unknown }> };
+    const p = json.projects?.[claudeProjectKey(cwd)];
+    // Disabled via /mcp for this project: Claude Code does not start it, so it cannot stand in for ours.
+    if (Array.isArray(p?.disabledMcpServers) && p.disabledMcpServers.includes("graphmind")) return false;
+    return Boolean(json.mcpServers?.graphmind ?? p?.mcpServers?.graphmind);
   } catch {
     return false;
   }
