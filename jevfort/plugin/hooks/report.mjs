@@ -13,7 +13,7 @@ const str = (v) => typeof v === "string" ? v : undefined;
 const p2 = (v) => v === undefined ? "—" : v.toFixed(2);
 const cell = (s, max = 48) => {
 	const one = s.replace(/\s+/g, " ").replace(/\|/g, "\\|").trim();
-	return one.length > max ? `${one.slice(0, max - 1)}…` : one;
+	return one.length > max ? `${one.slice(0, max - 1).replace(/[\uD800-\uDBFF]$/, "")}…` : one;
 };
 const bar = (n, of, width = 10) => {
 	const filled = of ? Math.round(n / of * width) : 0;

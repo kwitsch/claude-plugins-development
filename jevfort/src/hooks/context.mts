@@ -61,7 +61,7 @@ export type StepSummary = { assistant?: string; tool?: string; input?: string; r
  * @param max - The maximum length kept.
  * @returns The text, clipped when longer than `max`.
  */
-export const clip = (text: string, max: number): string => text.length > max ? `${text.slice(0, max)}… [${text.length - max} more chars]` : text;
+export const clip = (text: string, max: number): string => text.length > max ? `${text.slice(0, max).replace(/[\uD800-\uDBFF]$/, "")}… [${text.length - max} more chars]` : text;
 
 /**
  * Rows the person didn't type as a request: `!` shell runs, slash-command output, and the engine's notices

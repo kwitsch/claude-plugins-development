@@ -49,7 +49,8 @@ const p2 = (v: number | undefined): string => (v === undefined ? "—" : v.toFix
  */
 const cell = (s: string, max = 48): string => {
   const one = s.replace(/\s+/g, " ").replace(/\|/g, "\\|").trim();
-  return one.length > max ? `${one.slice(0, max - 1)}…` : one;
+  // never end on a high surrogate: a split astral character renders as U+FFFD
+  return one.length > max ? `${one.slice(0, max - 1).replace(/[\uD800-\uDBFF]$/, "")}…` : one;
 };
 /**
  * A text bar of `n` of `of`.

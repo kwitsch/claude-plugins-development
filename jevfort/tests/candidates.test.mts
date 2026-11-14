@@ -1,7 +1,7 @@
 // Pure logic of the built plugin/hooks/{candidates,report,context,policy}.mjs: upstream jev-pilot tests/candidates.test.ts.
 import { expect, test } from "vitest";
 import { commandKey, coversStep, dedupeSkills, isSafeToOffer, mentionedPaths, quotedTerms, relevant, words } from "../plugin/hooks/candidates.mjs";
-import { splitTurn, summarize } from "../plugin/hooks/context.mjs";
+import { clip, splitTurn, summarize } from "../plugin/hooks/context.mjs";
 import { route } from "../plugin/hooks/policy.mjs";
 import { buildReport, when } from "../plugin/hooks/report.mjs";
 
@@ -21,6 +21,13 @@ test("a path at the end of a sentence is found", () => {
 test("an empty log gives a hint, not a crash", () => {
   expect(buildReport([], 0.85)).toContain("the log is empty");
   expect(buildReport([], 0.85)).not.toContain("shadow");
+});
+
+test("cutting text never splits an emoji into a lone surrogate", () => {
+  const request = `${"x".repeat(38)}🚀 rest of request`;
+  const report = buildReport([{ at: 0, kind: "compare", applied: false, text: "", data: { request, best: "read:a", bestP: 0.9, agree: true } }], 0.85);
+  expect(report).toContain(`| ${"x".repeat(38)}… |`);
+  expect(clip(request, 39)).toBe(`${"x".repeat(38)}… [${request.length - 39} more chars]`);
 });
 
 test("the report header shows the first entry in local time, like the rows", () => {
@@ -201,12 +208,16 @@ test("mentionedPaths extends the turn's set, so only new rows need scanning", ()
 });
 
 test("summarize walks from the end: same last entries, old rows are never serialized", () => {
-  const poison = { toJSON: () => { throw new Error("old row serialized"); } };
+  const poison = {
+    toJSON: () => {
+      throw new Error("old row serialized");
+    },
+  };
   const row = (n: number, input: unknown = { n }) => ({ role: "assistant" as const, text: `t${n}`, toolUses: [{ tool: "Read", input: input as Record<string, unknown>, text: `r${n}` }] });
   const steps = [row(0, poison), row(1, poison), ...Array.from({ length: 5 }, (_, i) => row(i + 2))];
   const out = summarize(steps);
   expect(out).toHaveLength(8);
   expect(out[0]).toEqual({ assistant: "t3" });
-  expect(out[7]).toEqual({ tool: "Read", input: '{"n":6}', result: "r6" });
+  expect(out[7]).toEqual({ tool: "Read", input: "{\"n\":6}", result: "r6" });
   expect(summarize(steps.slice(2, 4))).toHaveLength(4);
 });
