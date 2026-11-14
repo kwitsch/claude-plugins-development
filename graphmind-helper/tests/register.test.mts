@@ -209,6 +209,17 @@ test("a full briefing does not starve the first prompt's recall", async ($, on) 
   expect(first).toMatch(/\[graphmind code\] Relevant symbols:/);
 });
 
+test("a priority entry cut from the briefing is offered on the next prompt", async ($, on) => {
+  const priority = `>> 20\n${Array.from({ length: 20 }, (_, i) => `★ ${String(i).padStart(8, "a")} [decision] entry${i} ${"x".repeat(280)}`).join("\n")}\n`;
+  const map = Array.from({ length: 20 }, (_, i) => `  src/file${i}.ts ${"y".repeat(150)}`).join("\n");
+  const { prompts } = setup(on, { priority, map });
+  await $.session.start({ source: "startup" });
+  await prompt($, "where is foo_bar defined in the code");
+  expect((prompts[0].context ?? []).join("\n")).not.toMatch(/entry19 /);
+  await prompt($, "something else entirely about parseConfig here");
+  expect((prompts[1].context ?? []).join("\n")).toMatch(/entry19 /);
+});
+
 test("a memory search hit that is a priority entry is not shown again", async ($, on) => {
   // Real CLI shape (graphmind 0.3.7): the search lists the priority entry without its star.
   const { prompts } = setup(on, { search: ">> 2 result(s):\n\n  aaaaaaaa [decision] always use X (tags: x)\n  bbbbbbbb [pattern] about foo_bar\n" });
