@@ -45,10 +45,10 @@ export function registered(bin: string): boolean {
  * The `projects` key of `.claude.json` that Claude Code reads for `cwd`: the git root (for a linked worktree the main checkout's
  * root, or the common git dir of a bare or --separate-git-dir repo), outside git the real `cwd`. Only that one entry is loaded, never those of ancestors.
  *
- * @param cwd - Working directory.
+ * @param cwd - Working directory; omitted, git inherits the process's own (`process.cwd()` mangles a non-UTF-8 folder name, and spawning there fails).
  * @returns Absolute real path.
  */
-export function claudeProjectKey(cwd: string): string {
+export function claudeProjectKey(cwd?: string): string {
   // One call per value: a path may hold newlines or trailing spaces, so only git's own final newline is cut.
   const rp = (opt: string) => {
     const r = spawnSync("git", ["rev-parse", "--path-format=absolute", opt], { cwd, encoding: "utf8", timeout: 10_000 });
@@ -59,7 +59,7 @@ export function claudeProjectKey(cwd: string): string {
   const common = top && rp("--git-common-dir");
   // A linked worktree's git dir differs from the common one; a submodule's does not (its root is its own top level).
   // Claude Code keys a worktree by the common dir's parent only when it is named `.git`; a bare or --separate-git-dir repo by the common dir itself.
-  const key = top ? (common && gitDir !== common ? (basename(common) === ".git" ? dirname(common) : common) : top) : cwd;
+  const key = top ? (common && gitDir !== common ? (basename(common) === ".git" ? dirname(common) : common) : top) : (cwd ?? process.cwd());
   try {
     return realpathSync(key);
   } catch {
@@ -71,10 +71,10 @@ export function claudeProjectKey(cwd: string): string {
  * Whether `graphmind setup` already registered its MCP server in Claude Code's global config `.claude.json`.
  *
  * @param configDir - Directory of that file: `CLAUDE_CONFIG_DIR`, else the home directory (as Claude Code resolves it).
- * @param cwd - Working directory: only the project entry Claude Code loads for it counts (`claudeProjectKey`).
+ * @param cwd - Working directory, default the process's own: only the project entry Claude Code loads for it counts (`claudeProjectKey`).
  * @returns True when a server named `graphmind` exists at the top level or in that project entry and that entry's `disabledMcpServers` does not list it.
  */
-export function setupMcpPresent(configDir: string = process.env.CLAUDE_CONFIG_DIR || homedir(), cwd: string = process.cwd()): boolean {
+export function setupMcpPresent(configDir: string = process.env.CLAUDE_CONFIG_DIR || homedir(), cwd?: string): boolean {
   try {
     const text = readFileSync(join(configDir, ".claude.json"), "utf8");
     // The file can be several MB: parse it only when the name occurs at all.

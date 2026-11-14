@@ -78,6 +78,21 @@ test("in a folder whose name is not valid UTF-8 the wrapper still serves mcp", (
   assert.match(readFileSync(log, "utf8"), /^mcp$/m);
 });
 
+test("in a non-UTF-8 subdirectory of a repo with a setup server the wrapper steps aside", () => {
+  mkdirSync(Buffer.concat([Buffer.from(`${proj}/`), Buffer.from("caf\xe9", "latin1")]));
+  assert.equal(spawnSync("git", ["init", "-q"], { cwd: proj }).status, 0);
+  writeFileSync(join(home, ".claude.json"), JSON.stringify({ projects: { [realpathSync(proj)]: { mcpServers: { graphmind: {} } } } }));
+  writeFileSync(join(root, "registered"), "");
+  const log = join(root, "calls.log");
+  const r = spawnSync("sh", ["-c", `cd "$(printf '%s/caf\\351' "$P")" && exec "$NODE" "$MCP"`], {
+    encoding: "utf8",
+    env: { P: proj, NODE: process.execPath, MCP, HOME: home, PATH: `${fakeBin}:/usr/bin:/bin`, FAKE_LOG: log, FAKE_REGISTERED: join(root, "registered") },
+    timeout: 20_000,
+  });
+  assert.equal(r.status, 0);
+  assert.doesNotMatch(readFileSync(log, "utf8"), /^mcp$/m);
+});
+
 test("started in a repo subdirectory the wrapper registers and builds the work tree root", async () => {
   mkdirSync(join(proj, "sub"));
   const realProj = realpathSync(proj);
