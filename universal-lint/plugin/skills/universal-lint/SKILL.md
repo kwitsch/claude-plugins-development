@@ -30,7 +30,11 @@ plugin's own tested hook logic through a colocated driver — no new linting log
      truncated list on;
    - "files changed in PR <N>" → run `gh auth status` first (it exits non-zero for both a
      missing PR and a dead token, so auth is checked before the diff), then
-     `gh pr diff <N> --name-only`;
+     `gh pr diff <N> --name-only`; the driver lints the working tree, not the PR, so compare
+     `gh pr view <N> --json headRefOid -q .headRefOid` with `git rev-parse HEAD`: if they differ,
+     stop and tell the user to run `gh pr checkout <N>` first (files the PR adds would be dropped
+     and the rest linted at this checkout's version) — lint the local copies only if the user
+     explicitly agrees;
    - "files changed on this branch / in the working tree" →
      `git -c core.quotePath=false diff --relative --name-only <base>...HEAD`
      or `git -c core.quotePath=false status --porcelain --untracked-files=all` (without

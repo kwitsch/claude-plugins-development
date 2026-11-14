@@ -48,6 +48,12 @@ test("SKILL.md makes repo-root-relative git/gh paths resolvable from a subdirect
   assert.doesNotMatch(skillMd, /git diff --name-only/);
 });
 
+test("SKILL.md PR route checks that HEAD is the PR head (the driver lints the working tree)", () => {
+  assert.ok(skillMd.includes("gh pr view <N> --json headRefOid -q .headRefOid"));
+  assert.ok(skillMd.includes("git rev-parse HEAD"));
+  assert.ok(skillMd.includes("gh pr checkout <N>"));
+});
+
 test("SKILL.md resolves a folder scope without the Glob tool's 100-file cap", () => {
   assert.ok(skillMd.includes("git -c core.quotePath=false ls-files --cached --others --exclude-standard -- <folder>"));
   assert.ok(skillMd.includes("never pass a\n     truncated list on"));
