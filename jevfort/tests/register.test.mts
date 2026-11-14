@@ -6,7 +6,7 @@ import { createKit } from "claude-engine-vitest";
 import type { On } from "claude-engine-vitest";
 import { expect } from "vitest";
 import { JEV_BATCH, JEV_TOOL_PREFIX } from "../plugin/hooks/jev.mjs";
-import { difficultyQuestion, doneQuestion, effortQuestion, mechanicalQuestion, nextActionQuestion, singleActionQuestion } from "../plugin/hooks/policy.mjs";
+import { difficultyQuestion, doneQuestion, effortQuestion, mechanicalQuestion, nextActionQuestion, singleActionQuestion, taskEndQuestion } from "../plugin/hooks/policy.mjs";
 
 // The manifest defaults (jevfort/package.json claudePlugin.userConfig): the kit does not fill userConfig defaults.
 const DEFAULTS = {
@@ -44,6 +44,7 @@ const QUESTION_IDS = new Map<string, string>([
   [effortQuestion.instructions, "effort"],
   [mechanicalQuestion.instructions, "mechanical"],
   [doneQuestion.instructions, "done"],
+  [taskEndQuestion.instructions, "end"],
 ]);
 /** What the fake answers a question the test's `jev` leaves open, by type: not true, leave it to Claude, an unconfident score. */
 const NEUTRAL: Record<string, Record<string, unknown>> = {
@@ -1214,4 +1215,39 @@ test("With routing off the band passes", { options: { routing: "off" } }, async 
   expect(await ui.find({ type: "Text", text: "beneath" })).toBeDefined();
   expect(await autoLabel(ui)).toBeUndefined();
   await ui.unmount();
+});
+
+// Context-fill compaction: from taskCompactPercent the first judged task end compacts, from forceCompactPercent any turn end does.
+const finished = byId({ done: { type: "noul", noul: 0.9 }, end: { type: "noul", noul: 0.9 } });
+const intermediate = byId({ done: { type: "noul", noul: 0.9 }, end: { type: "noul", noul: 0.1 } });
+
+/** Stubs `/compact` and the context fill; returns the `/compact` run count. */
+function compactStubs(on: On, percent: number) {
+  const state = { compacts: 0 };
+  on("session.usage", () => ({ value: { context: { tokens: 1, window: 100, percent } } }));
+  on("command.run", (_$, e, next) => {
+    if (e.command !== "compact") return next(e);
+    state.compacts++;
+    return { value: undefined };
+  });
+  return state;
+}
+
+for (const [percent, jev, runs, label] of [[85, finished, 1, "a task end"], [85, intermediate, 0, "an intermediate result"], [70, finished, 0, "a task end below 80%"], [96, intermediate, 1, "an intermediate result at 95%"]] as const) {
+  test(`Context at ${percent}% after ${label}: /compact runs ${runs}x`, { options: { classify: false } }, async ($, on) => {
+    setup(on, { messages: [user("rename foo to bar")], jev });
+    followUps(on);
+    const state = compactStubs(on, percent);
+    await $.turn.complete(answered("t1", "Done."));
+    expect(state.compacts).toBe(runs);
+  });
+}
+
+test("Context compaction is queued once per fill period", { options: { classify: false } }, async ($, on) => {
+  setup(on, { messages: [user("rename foo to bar")], jev: finished });
+  followUps(on);
+  const state = compactStubs(on, 85);
+  await $.turn.complete(answered("t1", "Done."));
+  await $.turn.complete(answered("t2", "Done."));
+  expect(state.compacts).toBe(1);
 });
