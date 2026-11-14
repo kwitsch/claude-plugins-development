@@ -432,7 +432,7 @@ async function buildCandidates($, request, steps, calls, stepIndex, cache = newC
 			statted.set(file, await $.fs.stat(file).catch(() => undefined));
 		}
 		const stat = statted.get(file);
-		if (stat?.kind !== "file" || stat.size > 2e6) continue;
+		if (stat?.kind !== "file" || stat.isLink || stat.size > 2e6) continue;
 		out.push({
 			key: `read ${p}`,
 			description: `Read the file ${p}`,
@@ -1365,7 +1365,7 @@ export const register = (on, options) => {
 		if ((await jevMissing($)).length) return next(e);
 		const base = await next(e);
 		if (e.tool_use_id && ownCalls.has(e.tool_use_id)) {
-			if (settled(base)) return base;
+			if (settled(base) || e.tool === "Read") return base;
 			return {
 				...base,
 				decision: "allow",

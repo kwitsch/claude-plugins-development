@@ -65,7 +65,7 @@ type Runner = Parameters<Parameters<typeof test>[2]>[0];
 // Answers every call the mod makes on `$`. The batch tool is listed and answered from `jev`; a mod's `$.tool.call`
 // resolves to the stub's `value`: the tool result `{ result }`, or `{ deny }` as the real engine resolves a deny (a bare
 // `{ deny }` stub answer would make the kit reject instead). Other tools go on to the test's own `tool.call` stub.
-function setup(on: On, opts: { messages: Msg[]; jev: Jev; cwd?: () => string; files?: string[]; packageJson?: object; env?: Record<string, string>; agents?: { status: string }[]; store?: Record<string, unknown>; tools?: { name: string; description: string; mcp: boolean }[] | null }) {
+function setup(on: On, opts: { messages: Msg[]; jev: Jev; cwd?: () => string; files?: string[]; links?: string[]; packageJson?: object; env?: Record<string, string>; agents?: { status: string }[]; store?: Record<string, unknown>; tools?: { name: string; description: string; mcp: boolean }[] | null }) {
   const sent: Asked[] = [];
   let batchCalls = 0;
   let reads = 0;
@@ -82,7 +82,8 @@ function setup(on: On, opts: { messages: Msg[]; jev: Jev; cwd?: () => string; fi
   on("fs.exists", (_$, e) => ({ value: Boolean(opts.packageJson) && e.path === `${CWD}/package.json` }));
   on("fs.stat", (_$, e) => {
     statted.push(String(e.path));
-    return (opts.files ?? []).includes(String(e.path)) ? { value: { kind: "file", size: 100, mtimeMs: 0, isLink: false } } : { deny: "ENOENT" };
+    const isLink = (opts.links ?? []).includes(String(e.path));
+    return isLink || (opts.files ?? []).includes(String(e.path)) ? { value: { kind: "file", size: 100, mtimeMs: 0, isLink } } : { deny: "ENOENT" };
   });
   on("fs.read", (_$, e) => (opts.packageJson && e.path === `${CWD}/package.json` ? { value: JSON.stringify(opts.packageJson) } : { deny: "ENOENT" }));
   on("ui.status", () => ({ value: undefined }));
@@ -764,12 +765,12 @@ for (const reason of ["aborted", "error", "refusal"]) {
 for (const [beneath, expected] of [["ask", "allow"], ["deny", "deny"]] as const) {
   test(`A call Jev made itself is approved over "${beneath}" → ${expected}`, { options: { takeOnlyForBypass: false } }, async ($, on) => {
     setup(on, {
-      messages: [user("what does src/app.ts export?")],
+      messages: [user("run the tests please")],
+      packageJson: { scripts: { test: "node --test" } },
       jev: byId({
-        next_action: { type: "choice", choice: "read src/app.ts", probabilities: { "read src/app.ts": 0.97, claude: 0.03 }, confidence: 0.95 },
+        next_action: { type: "choice", choice: "run npm test", probabilities: { "run npm test": 0.97, claude: 0.03 }, confidence: 0.95 },
         difficulty: easy,
       }),
-      files: [`${CWD}/src/app.ts`],
     });
     claudeBeneath(on, []);
     on("tool.check", () => ({ decision: beneath }));
@@ -778,12 +779,36 @@ for (const [beneath, expected] of [["ask", "allow"], ["deny", "deny"]] as const)
     const id = toolId(chunks);
     expect(id).not.toBe("");
 
-    expect(await decision($, { tool: "Read", input: { file_path: `${CWD}/src/app.ts` }, tool_use_id: id })).toBe(expected);
+    expect(await decision($, { tool: "Bash", input: { command: "npm test" }, tool_use_id: id })).toBe(expected);
 
     // Claude's own call to the same tool is left to the engine.
-    expect(await decision($, { tool: "Read", input: { file_path: `${CWD}/src/app.ts` }, tool_use_id: "toolu_claude" })).toBe(beneath);
+    expect(await decision($, { tool: "Bash", input: { command: "npm test" }, tool_use_id: "toolu_claude" })).toBe(beneath);
   });
 }
+
+// Claude Code allows in-project reads itself, so its ask on a Read means the path resolves outside the working directories (a symlink).
+test("A Read Jev made itself keeps Claude Code's ask", { options: { takeOnlyForBypass: false } }, async ($, on) => {
+  setup(on, {
+    messages: [user("what does src/app.ts export?")],
+    jev: byId({ next_action: { type: "choice", choice: "read src/app.ts", probabilities: { "read src/app.ts": 0.97, claude: 0.03 }, confidence: 0.95 }, difficulty: easy }),
+    files: [`${CWD}/src/app.ts`],
+  });
+  claudeBeneath(on, []);
+  on("tool.check", () => ({ decision: "ask", reason: "/proj/src/app.ts resolves through a symlink to /etc/x, which is outside the allowed working directories." }));
+  const id = toolId((await drain($.turn.step(step))).chunks);
+  expect(id).not.toBe("");
+  expect(await decision($, { tool: "Read", input: { file_path: `${CWD}/src/app.ts` }, tool_use_id: id })).toBe("ask");
+});
+
+test("A symlinked file is never offered as a Read candidate", { options: { takeOnlyForBypass: false } }, async ($, on) => {
+  setup(on, {
+    messages: [user("what is in notes.txt?")],
+    jev: byId({ next_action: { type: "choice", choice: "read notes.txt", probabilities: { "read notes.txt": 0.97, claude: 0.03 }, confidence: 0.95 }, difficulty: easy }),
+    links: [`${CWD}/notes.txt`],
+  });
+  claudeBeneath(on, []);
+  expect(toolId((await drain($.turn.step(step))).chunks)).toBe("");
+});
 
 // An allow that a settings rule already gave stays as it is: rewording it makes the security plugin warn the user.
 test("A call Jev made itself keeps a settings allow verdict untouched", { options: { takeOnlyForBypass: false } }, async ($, on) => {

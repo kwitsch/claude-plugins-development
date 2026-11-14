@@ -63,7 +63,7 @@ type Engine = {
   /** Filesystem. */
   fs: {
     exists(path: string): Promise<boolean>;
-    stat(path: string): Promise<{ kind: string; size: number }>;
+    stat(path: string): Promise<{ kind: string; size: number; isLink?: boolean }>;
     read(path: string): Promise<string>;
     write(path: string, text: string): Promise<unknown>;
   };
@@ -149,7 +149,7 @@ type PathScan = { request?: string; steps: number; calls: Set<number>; paths: Se
 /** An empty path scan. */
 const newScan = (): PathScan => ({ steps: 0, calls: new Set(), paths: new Set() });
 /** A turn's `$.fs.stat` results by absolute path (`undefined`: missing or refused). */
-type StatCache = Map<string, { kind: string; size: number } | undefined>;
+type StatCache = Map<string, { kind: string; size: number; isLink?: boolean } | undefined>;
 /** What one turn's `buildCandidates` calls share (dropped with the turn): stat results, the path scan, the cwd and the project's commands. */
 type TurnCache = { statted: StatCache; scan: PathScan; cwd?: string; project?: Candidate[] };
 /** An empty turn cache. */
@@ -797,7 +797,8 @@ async function buildCandidates($: Engine, request: string, steps: readonly Sessi
       statted.set(file, await $.fs.stat(file).catch(() => undefined));
     }
     const stat = statted.get(file);
-    if (stat?.kind !== "file" || stat.size > 2_000_000) continue;
+    // A symlink may lead outside the project: never offer one.
+    if (stat?.kind !== "file" || stat.isLink || stat.size > 2_000_000) continue;
     out.push({ key: `read ${p}`, description: `Read the file ${p}`, tool: "Read", input: { file_path: file } });
     offered.add(file);
     reads += 1;
@@ -1748,7 +1749,8 @@ export const register = (on: On, options: Options): void => {
     // Jev's own calls come from the vetted candidate list: approve them so auto mode's classifier doesn't refuse
     // them. This and the scratchpad branch are the only places jevfort loosens Claude Code's verdict. A settings deny or ask rule still wins.
     if (e.tool_use_id && ownCalls.has(e.tool_use_id)) {
-      if (settled(base)) return base;
+      // Claude Code already allows in-project reads: its ask on a Read means the path resolves outside the working directories.
+      if (settled(base) || e.tool === "Read") return base;
       return { ...base, decision: "allow", reason: "Jev pilot: vetted action from its read-only/project-script list" };
     }
     const input = (e.input ?? {}) as Record<string, unknown>;
