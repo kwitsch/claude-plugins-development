@@ -758,6 +758,12 @@ test("isExcludedPath: *.local.* files excluded regardless of location", () => {
   assert.equal(isExcludedPath("a.sh"), false);
 });
 
+test("isExcludedPath: worktrees/agent-memory only under .claude, .local. only in the basename", () => {
+  assert.equal(isExcludedPath(path.join("docs", "worktrees", "a.md")), false);
+  assert.equal(isExcludedPath(path.join("src", "agent-memory", "a.ts")), false);
+  assert.equal(isExcludedPath(path.join("conf.local.d", "a.sh")), false);
+});
+
 /** The PostToolUse payload resolveLintTarget reads. */
 function mockResolveArgs(cwd: string, filePath: string, success = true) {
   return {
