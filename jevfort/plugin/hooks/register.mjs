@@ -422,7 +422,9 @@ function offerableSkills($) {
 	})();
 }
 function debugEffort($, e, source, chosen) {
-	void $.ui.log(`effort ${e.agentId ? `(agent ${e.agentId}) ` : ""}${String(e.model)}: session ${String(e.effort)} → ${chosen ?? "unchanged"} · ${source}`).catch(() => undefined);
+	try {
+		$.ui.log(`effort ${e.agentId ? `(agent ${e.agentId}) ` : ""}${String(e.model)}: session ${String(e.effort)} → ${chosen ?? "unchanged"} · ${source}`, { to: "debug" });
+	} catch {}
 }
 async function blockSkill($, name) {
 	try {

@@ -1055,6 +1055,15 @@ test("The chosen effort is written to the debug log, with its source and score",
   expect(logged).toEqual(["effort claude-opus-5-5: session medium → xhigh · jev (score 2.90)"]);
 });
 
+// $.ui.log returns undefined in the real engine (and the kit): a `.catch` on it threw and skipped the whole step hook.
+test("Writing the debug line does not cost the step its routed effort", async ($, on) => {
+  const seen: { effort?: string }[] = [];
+  setup(on, { messages: [user("migrate the whole app to TypeScript")], jev: byId({ effort: scored(2.9), mechanical: mech(0.1) }) });
+  claudeBeneath(on, seen);
+  await drain($.turn.step({ ...step, effort: "medium" }));
+  expect(seen.map((e) => e.effort)).toEqual(["xhigh"]);
+});
+
 test("The debug log says when Jev gave no effort, and says nothing with routing off", async ($, on) => {
   const logged: string[] = [];
   on("ui.log", (_$, e) => (logged.push(String(e.text)), { value: undefined }));

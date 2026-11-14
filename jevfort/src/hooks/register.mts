@@ -80,7 +80,7 @@ type Engine = {
   /** User interface. */
   ui: {
     /** Writes a line to Claude Code's debug log (`--debug`), nowhere else. */
-    log(text: string): Promise<unknown>;
+    log(text: string, options?: { to?: "transcript" | "debug" }): void;
     /** Redraws the render sites of an event (the effort band). */
     invalidate(event: "ui.render"): void;
     // The element factories are plain functions, called detached from the object (`const { Box } = …`).
@@ -770,7 +770,12 @@ function offerableSkills($: Engine): Promise<CommandInfo[]> {
  * @param chosen - The effort jevfort set for the turn, `undefined` when it left the session effort.
  */
 function debugEffort($: Engine, e: Step, source: string, chosen: string | undefined): void {
-  void $.ui.log(`effort ${e.agentId ? `(agent ${e.agentId}) ` : ""}${String(e.model)}: session ${String(e.effort)} → ${chosen ?? "unchanged"} · ${source}`).catch(() => undefined);
+  try {
+    // $.ui.log returns nothing (no promise to catch); a throw must not cost the step its effort.
+    $.ui.log(`effort ${e.agentId ? `(agent ${e.agentId}) ` : ""}${String(e.model)}: session ${String(e.effort)} → ${chosen ?? "unchanged"} · ${source}`, { to: "debug" });
+  } catch {
+    // The log line is cosmetic.
+  }
 }
 
 /**
