@@ -1,7 +1,7 @@
 // Pure tests of the built plugin/hooks/policy.mjs.
 import assert from "node:assert/strict";
 import { test } from "vitest";
-import { bestAction, bounds, effortLevel, estimateEffort, inScratchpad, isEffort, lowerModel, modelFamily, nextActionQuestion, parseEstimateInput } from "../plugin/hooks/policy.mjs";
+import { bestAction, bounds, effortLevel, estimateEffort, inScratchpad, isEffort, lowerModel, modelFamily, nextActionQuestion, parseEstimateInput, route, shouldContinue } from "../plugin/hooks/policy.mjs";
 
 const ROOTS = ["/tmp"];
 const SP = "/tmp/claude-1000/-proj/sid-1/scratchpad";
@@ -136,4 +136,15 @@ test("bestAction: most likely non-claude option, undefined when only claude or n
   assert.deepEqual(bestAction({ type: "choice", choice: "claude", probabilities: { claude: 0.7, "read a": 0.1, "run:npm test": 0.2 }, confidence: 0.9 }), { key: "run:npm test", p: 0.2 });
   assert.equal(bestAction({ type: "choice", choice: "claude", probabilities: { claude: 1 }, confidence: 1 }), undefined);
   assert.equal(bestAction(undefined), undefined);
+});
+
+test("route and shouldContinue cut points: HIGH_FROM and MIN_CONFIDENCE are inclusive, LOW_BELOW and the done threshold exclusive", () => {
+  const rated = (score: number, confidence = 0.9) => ({ type: "score" as const, score, probabilities: {}, confidence });
+  assert.deepEqual(route(rated(1.8, 0.5), "model"), { level: 1.8 });
+  assert.deepEqual(route(rated(1.0), "model"), { level: 1, model: "claude-sonnet-5-5" });
+  assert.equal(route(rated(0.99), "model")?.model, "claude-haiku-5-5");
+  assert.equal(route(rated(1.8, 0.49), "model"), undefined);
+  assert.equal(shouldContinue(0.15, 0.15), false);
+  assert.equal(shouldContinue(0.149, 0.15), true);
+  assert.equal(shouldContinue(undefined), false);
 });
