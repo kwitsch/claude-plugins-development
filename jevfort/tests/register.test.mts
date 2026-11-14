@@ -883,6 +883,22 @@ test("With takeOnlyForBypass a confident skill pick is not taken by Jev (the ski
   expect(seen).toHaveLength(1);
 });
 
+test("A refused clock read fails neither estimate_effort nor a turn step", async ($, on) => {
+  on("clock.now", () => ({ deny: "clock refused" }));
+  const seen: unknown[] = [];
+  setup(on, { messages: [user("what does this project do?")], jev: byId({ effort: scored(1.6), mechanical: mech(0.1) }) });
+  claudeBeneath(on, seen);
+  expect(await estimateCall($)).toEqual({ result: JSON.stringify({ effort: "medium", source: "jev" }) });
+  await drain($.turn.step(step));
+  expect(seen).toHaveLength(1);
+});
+
+test("/jev status still answers when the counters cannot be read", async ($, on) => {
+  on("store.get", () => ({ deny: "EACCES" }));
+  setup(on, { messages: [], jev: () => undefined });
+  expect(await runJev($, "")).toContain("Decisions (all sessions): unreadable=1");
+});
+
 test("estimate_effort rejects invalid input without asking Jev", async ($, on) => {
   const { sent } = setup(on, { messages: [], jev: byId({ effort: scored(1.6) }) });
   expect(await estimateCall($, { model: "gpt" })).toEqual({ deny: "estimate_effort: model must be one of haiku, sonnet, opus, fable" });

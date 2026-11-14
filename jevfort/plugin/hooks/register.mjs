@@ -27,13 +27,13 @@ const FINISHED = new Set([
 ]);
 const asText = (v) => String(v);
 async function askJev($, state, questions, slow = false) {
-	const startedAt = await $.clock.now();
+	const startedAt = await $.clock.now().catch(() => Date.now());
 	const done = async (r) => ({
 		...r.ok ? r : {
 			ok: false,
 			error: clip(r.error, MAX_ERROR)
 		},
-		ms: await $.clock.now() - startedAt
+		ms: await $.clock.now().catch(() => Date.now()) - startedAt
 	});
 	const [key, base, jevUrl] = await Promise.all([
 		$.env.get("TYPESAFE_API_KEY"),
@@ -230,7 +230,7 @@ let storeQueue = Promise.resolve();
 async function record($, d) {
 	const entry = {
 		...d,
-		at: await $.clock.now()
+		at: await $.clock.now().catch(() => Date.now())
 	};
 	remember(entry);
 	const run = storeQueue.then(async () => {
@@ -720,7 +720,11 @@ export const register = (on, options) => {
 		await $.command.register({
 			name: "jev",
 			description: "Jev pilot: status, /jev report, /jev candidates, /jev export, /jev clear"
-		});
+		}).catch((err) => record($, {
+			kind: "error",
+			applied: false,
+			text: `/jev not registered: ${err instanceof Error ? err.message : String(err)}`
+		}).catch(() => undefined));
 		const result = await next(e);
 		jevTools = undefined;
 		await jevApply($, await jevMissing($));
@@ -766,7 +770,7 @@ export const register = (on, options) => {
 			}
 		}
 		const missing = await jevMissing($);
-		const counts = Object.entries(await stats($)).map(([k, v]) => `${k}=${v}`).join(", ") || "none yet";
+		const counts = Object.entries(await stats($).catch(() => ({ unreadable: 1 }))).map(([k, v]) => `${k}=${v}`).join(", ") || "none yet";
 		const lines = recentDecisions().slice(-10).map((d) => `- ${d.kind}${d.applied ? "" : " (pass)"}: ${d.text}${d.ms !== undefined ? ` [${Math.round(d.ms)}ms]` : ""}`);
 		return { text: [
 			...missing.length ? [`Jev pilot: inactive, the jev-api tools are missing (${missing.join(", ")}). jevfort needs jev-api 0.2.0 or later and no permissions.deny rule matching its tools; it looks again at the next turn.`] : [],

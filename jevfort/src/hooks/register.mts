@@ -203,8 +203,9 @@ const asText = (v: unknown): string => String(v);
  * @returns The answers, or the error, with the time taken.
  */
 async function askJev($: Engine, state: unknown, questions: Record<string, Question>, slow = false): Promise<JevResult> {
-  const startedAt = await $.clock.now();
-  const done = async (r: { ok: true; answers: Record<string, Answer> } | { ok: false; error: string }): Promise<JevResult> => ({ ...(r.ok ? r : { ok: false as const, error: clip(r.error, MAX_ERROR) }), ms: (await $.clock.now()) - startedAt });
+  // A refused clock read must not throw out of askJev (its caller may be past `next`): the wall clock stands in.
+  const startedAt = await $.clock.now().catch(() => Date.now());
+  const done = async (r: { ok: true; answers: Record<string, Answer> } | { ok: false; error: string }): Promise<JevResult> => ({ ...(r.ok ? r : { ok: false as const, error: clip(r.error, MAX_ERROR) }), ms: (await $.clock.now().catch(() => Date.now())) - startedAt });
 
   // Without Jev access jev-api answers through Haiku, which needs a longer budget (jev-api reads the same three variables).
   const [key, base, jevUrl] = await Promise.all([$.env.get("TYPESAFE_API_KEY"), $.env.get("TYPESAFE_BASE_URL"), $.env.get("JEV_URL")]).catch(() => [undefined, undefined, undefined]);
@@ -476,7 +477,7 @@ let storeQueue: Promise<void> = Promise.resolve();
  * @param d - The decision without its time.
  */
 async function record($: Engine, d: Omit<Entry, "at">): Promise<void> {
-  const entry: Entry = { ...d, at: await $.clock.now() };
+  const entry: Entry = { ...d, at: await $.clock.now().catch(() => Date.now()) };
   remember(entry);
 
   // Serialized: parallel hooks would otherwise read the same log and tally and lose each other's writes.
@@ -1065,10 +1066,11 @@ export const register = (on: On, options: Options): void => {
     cacheTimer?.cancel();
     cacheTimer = $.clock.every(CACHE_TICK_MS, () => void cacheTick($, autoCompactPercent).catch(() => undefined));
     if (badRange) await record($, { kind: "error", applied: false, text: `invalid effort bounds (${badRange}): using low..xhigh` }).catch(() => undefined);
+    // Refused: the rest of the session start (baseline, estimate_effort, the band) must still run.
     await $.command.register({
       name: "jev",
       description: "Jev pilot: status, /jev report, /jev candidates, /jev export, /jev clear",
-    });
+    }).catch((err: unknown) => record($, { kind: "error", applied: false, text: `/jev not registered: ${err instanceof Error ? err.message : String(err)}` }).catch(() => undefined));
     // After `next(e)`: jev-api registers its tools in its own session.start, which may run beneath this hook.
     const result = await next(e);
     // The session's baseline, listed only now: a jevfort hook raised inside `next(e)` (another plugin's session.start
@@ -1131,7 +1133,7 @@ export const register = (on: On, options: Options): void => {
       }
     }
     const missing = await jevMissing($);
-    const counts = Object.entries(await stats($)).map(([k, v]) => `${k}=${v}`).join(", ") || "none yet";
+    const counts = Object.entries(await stats($).catch(() => ({ unreadable: 1 }))).map(([k, v]) => `${k}=${v}`).join(", ") || "none yet";
     const lines = recentDecisions()
       .slice(-10)
       .map((d) => `- ${d.kind}${d.applied ? "" : " (pass)"}: ${d.text}${d.ms !== undefined ? ` [${Math.round(d.ms)}ms]` : ""}`);

@@ -178,7 +178,12 @@ function isType(v) {
 	return TYPES.includes(v);
 }
 function message(err) {
-	return err instanceof Error ? err.message : String(err);
+	if (err instanceof Error) return err.message;
+	try {
+		return String(err);
+	} catch {
+		return "unknown error";
+	}
 }
 function hide(text, url, placeholder) {
 	let href = url;

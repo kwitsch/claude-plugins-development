@@ -1149,6 +1149,15 @@ it("a numeric key echoed with more digits than a double holds, or as 123456.0, i
   }
 });
 
+// A rejection value that cannot be made into text must not leave the call unanswered.
+it("a call is answered when the env read rejects with a value that cannot be stringified", async () => {
+  const { run } = await direct({
+    env: { get: () => Promise.reject(Object.create(null) as Error) },
+    tool: { register: async (s: { name: string }) => ({ tool: TOOL(s.name) }) },
+  });
+  expect((await run("noul")).deny).toBe("noul: unknown error");
+});
+
 // A registration answer without a string tool name is a registration, not a failure.
 it("a registration answering a non-string tool is not retried", async () => {
   const tries: string[] = [];
