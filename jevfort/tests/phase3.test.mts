@@ -58,7 +58,9 @@ function base(on: On, jev: (q: Asked) => Record<string, unknown>, messages: Msg[
 pureTest("hints: a mid-confidence skill and a large task get hints; a confident skill is left to step 0", () => {
   expect(hints("task", 0.9, { name: "aws-diagrams", p: 0.7 }, 0.85)).toHaveLength(2);
   expect(hints("question", 0.9, { name: "aws-diagrams", p: 0.95 }, 0.85)).toHaveLength(0);
-  expect(hints("task", 0.2, { name: "none", p: 0.9 }, 0.85)).toHaveLength(0);
+  // Under takeOnlyForBypass the threshold is infinite, so only the name guard keeps `none` hint-free.
+  expect(hints("question", 0, { name: "none", p: 0.7 }, Number.POSITIVE_INFINITY)).toEqual([]);
+  expect(hints("question", 0, { name: "deploy-docs", p: 0.7 }, Number.POSITIVE_INFINITY)).toHaveLength(1);
 });
 
 test("The prompt classifier adds a hint only Claude reads", async ($, on) => {
