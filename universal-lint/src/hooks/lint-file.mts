@@ -278,7 +278,9 @@ export const REGISTRY: Record<string, LangEntry> = {
   // --no-error-on-unmatched-pattern: a file excluded by the project's oxlint
   // ignorePatterns otherwise exits 1 ("No files found to lint") -> false finding.
   oxlint: { chain: [{ name: "oxlint", args: ["--no-error-on-unmatched-pattern"], npmSpec: "oxlint" }] },
-  python: { chain: [{ name: "ruff", args: ["check"] }] },
+  // --force-exclude: ruff otherwise lints an explicitly passed file even when the
+  // project's exclude/extend-exclude covers it -> false finding; excluded = exit 0.
+  python: { chain: [{ name: "ruff", args: ["check", "--force-exclude"] }] },
   go: {
     chain: [
       { name: "golangci-lint", args: ["run"], targetsDir: true },

@@ -45,8 +45,9 @@ test("buildArgv: plain tool appends the resolved file last", () => {
   assert.deepEqual(buildArgv(shellcheck, "/proj/a.sh", "/proj"), ["/proj/a.sh"]);
 });
 
-test("buildArgv: ruff check keeps its subcommand before the file", () => {
-  assert.deepEqual(buildArgv(ruff, "/proj/a.py", "/proj"), ["check", "/proj/a.py"]);
+test("buildArgv: ruff check keeps its subcommand before the file and forces the project's exclude", () => {
+  // Without --force-exclude ruff lints an explicitly passed file even when extend-exclude covers it.
+  assert.deepEqual(buildArgv(ruff, "/proj/a.py", "/proj"), ["check", "--force-exclude", "/proj/a.py"]);
 });
 
 test("buildArgv: go entries target the directory, not the file", () => {

@@ -84,7 +84,7 @@ export const REGISTRY = {
 	}] },
 	python: { chain: [{
 		name: "ruff",
-		args: ["check"]
+		args: ["check", "--force-exclude"]
 	}] },
 	go: { chain: [{
 		name: "golangci-lint",
