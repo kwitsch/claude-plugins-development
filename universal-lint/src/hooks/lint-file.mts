@@ -2099,6 +2099,8 @@ const LOC_PATH_RE = /(?<![^\s:()[\]'"])(?<path>[^\s:()[\]'"]+\.[A-Za-z0-9]+)[:(]
 const LOC_ROW_RE = /^\s*(?<line>\d+):\d+\s/;
 /** Location regex C: shellcheck's default tty header `In <file> line <line>:` (path-less: the edited file is its only target). */
 const LOC_SHELLCHECK_RE = /^In .+ line (?<line>\d+):/;
+/** shellcheck `-f gcc` line (`a.sh:3:6: note: ...`, e.g. via `SHELLCHECK_OPTS`): located by regex A; any other shellcheck line only by C. */
+const SHELLCHECK_GCC_RE = /:\d+:\d+: (?:error|warning|info|style|note): /;
 /** Code-frame gutter line (`4 |     v.push(1);`, rustc/cargo, ruff full, oxlint): never a location, checked before A-C. */
 const CODE_FRAME_RE = /^\s*\d*\s*[|│]/;
 
@@ -2142,6 +2144,11 @@ export function gateFinding(finding: Finding, ranges: Array<[number, number]> | 
   const hit = (line: number): "hit" | "miss" => (ranges === null || (typeof ranges === "function" ? ranges(line - 1) : ranges.some(([s, e]) => s <= line - 1 && line - 1 <= e)) ? "hit" : "miss");
   const classify = (raw: string): "hit" | "miss" | "foreign" | null => {
     const plain = raw.replace(ANSI_SGR_RE, "");
+    if (finding.tool === "shellcheck" && !SHELLCHECK_GCC_RE.test(plain)) {
+      // tty format echoes the source line and fix without a gutter (`curl 127.0.0.1:8080`): only the header is a location
+      const sc = LOC_SHELLCHECK_RE.exec(plain);
+      return sc?.groups ? hit(Number(sc.groups.line)) : null;
+    }
     if (CODE_FRAME_RE.test(plain)) return null; // a source line in a code frame: `ok.pow(2` is no location
     const row = LOC_ROW_RE.exec(plain); // a stylish row first: its message text can look like `foo.bar(3)`
     if (row?.groups) return hit(Number(row.groups.line));

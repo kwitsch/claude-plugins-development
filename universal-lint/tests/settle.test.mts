@@ -305,7 +305,7 @@ test("settleFindings: the line is carried through several later edits", async ()
 
 test("settleFindings: a later whole-file edit drops the own-file diagnostics, foreign and unlocated ones stay", async () => {
   const w = world();
-  const extra = ["/other/b.ts:1:1 error elsewhere-marker", "plain summary without a location"];
+  const extra = ["/other/b.sh:1:1: note: elsewhere-marker [SC2086]", "plain summary without a location"];
   const { rec, d0 } = await lay(w, [{ content: "rewritten\n", hunks: null }]);
   const out = await settleFindings([found(w.proj, [3], extra)], w.file, rec, d0, d0);
   assert.equal(out.length, 1);
@@ -325,7 +325,7 @@ test("settleFindings: two later whole-file writes with one digest still drop the
 
 test("settleFindings: a partial later edit leaves foreign diagnostics alone too", async () => {
   const w = world();
-  const extra = ["/other/b.ts:1:1 error elsewhere-marker"];
+  const extra = ["/other/b.sh:1:1: note: elsewhere-marker [SC2086]"];
   const { rec, d0 } = await lay(w, [{ content: SIX.replace("l3", "L3"), hunks: REPLACE_3 }]);
   const out = await settleFindings([found(w.proj, [3], extra)], w.file, rec, d0, d0);
   assert.equal(out.length, 1);

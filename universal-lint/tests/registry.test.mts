@@ -1102,6 +1102,14 @@ test("gateFinding: shellcheck tty `In <file> line N:` block", () => {
   assert.equal(gateFinding(gf(text), [[0, 0]], resolved), null);
 });
 
+test("gateFinding: a shellcheck source line like `127.0.0.1:8080` is no foreign location (miss dropped)", () => {
+  const resolved = path.join(GATE_DIR, "a.sh");
+  const text = `\nIn ${resolved} line 3:\ncurl http://127.0.0.1:8080/$p\n                          ^-- SC2086 (info): sc-url-marker\n\nDid you mean:\ncurl http://127.0.0.1:8080/"$p"\n`;
+  const sc = { ...gf(text), tool: "shellcheck" };
+  assert.equal(gateFinding(sc, [[4, 4]], resolved), null);
+  assert.match(gateFinding(sc, [[2, 2]], resolved)?.text ?? "", /sc-url-marker/);
+});
+
 test("gateFinding: a code-frame source line like `ok.pow(2)` is no foreign location (rustc miss dropped)", () => {
   const crate = path.join(GATE_DIR, "crate-frame");
   const rs = path.join(crate, "src", "main.rs");

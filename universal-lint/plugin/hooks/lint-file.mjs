@@ -1113,6 +1113,7 @@ export function carryLine(line, hunks) {
 const LOC_PATH_RE = /(?<![^\s:()[\]'"])(?<path>[^\s:()[\]'"]+\.[A-Za-z0-9]+)[:(](?<line>\d+)(?:[:,]\d+)?/;
 const LOC_ROW_RE = /^\s*(?<line>\d+):\d+\s/;
 const LOC_SHELLCHECK_RE = /^In .+ line (?<line>\d+):/;
+const SHELLCHECK_GCC_RE = /:\d+:\d+: (?:error|warning|info|style|note): /;
 const CODE_FRAME_RE = /^\s*\d*\s*[|│]/;
 const PARSE_ERROR_RE = /pars(?:e|ing) error|syntax ?error|unexpected (?:token|end|eof|character|indent)|unterminated|unclosed|end of (?:file|input)|\berror: expected\b|\b(?:TS1|SC1)\d{3}\b/i;
 export function gateFinding(finding, ranges, resolved, keepParseErrors = true) {
@@ -1128,6 +1129,10 @@ export function gateFinding(finding, ranges, resolved, keepParseErrors = true) {
 	const hit = (line) => ranges === null || (typeof ranges === "function" ? ranges(line - 1) : ranges.some(([s, e]) => s <= line - 1 && line - 1 <= e)) ? "hit" : "miss";
 	const classify = (raw) => {
 		const plain = raw.replace(ANSI_SGR_RE, "");
+		if (finding.tool === "shellcheck" && !SHELLCHECK_GCC_RE.test(plain)) {
+			const sc = LOC_SHELLCHECK_RE.exec(plain);
+			return sc?.groups ? hit(Number(sc.groups.line)) : null;
+		}
 		if (CODE_FRAME_RE.test(plain)) return null;
 		const row = LOC_ROW_RE.exec(plain);
 		if (row?.groups) return hit(Number(row.groups.line));
