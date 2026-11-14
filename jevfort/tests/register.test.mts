@@ -1131,7 +1131,10 @@ test("Built-in commands are never offered as skills, and a skill that fails is b
   });
   on("command.list", () => ({
     value: [
-      { name: "diff", description: "View uncommitted changes", source: "user" },
+      // All share the prompt's words, so only the name/source filters can drop the first three.
+      { name: "diff", description: "Summarize recent changes", source: "user" },
+      { name: "recap", description: "Summarize recent changes", source: "mcp" },
+      { name: "jev", description: "Summarize recent changes", source: "plugin" },
       { name: "changelog", description: "Summarize recent changes", source: "plugin" },
     ],
   }));
@@ -1140,6 +1143,8 @@ test("Built-in commands are never offered as skills, and a skill that fails is b
 
   const { chunks } = await drain($.turn.step(step));
   expect(offered[0]).not.toContain("skill diff");
+  expect(offered[0]).not.toContain("skill recap");
+  expect(offered[0]).not.toContain("skill jev");
   expect(offered[0]).toContain("skill changelog");
   await $.tool.call({ tool: "Skill", skill: "changelog", tool_use_id: toolId(chunks) });
 
