@@ -1107,6 +1107,11 @@ const YAMLLINT_CONFIG_FILENAMES = [".yamllint", ".yamllint.yaml", ".yamllint.yml
  */
 export function hasProjectYamllintConfig(cwd: string): boolean {
   let dir = path.resolve(cwd);
+  try {
+    dir = realpathSync(dir); // yamllint walks `..` from its real cwd (abspath('.') is getcwd()); $HOME stays as written, as in yamllint
+  } catch {
+    // missing cwd: walk the lexical path
+  }
   const home = path.resolve(homedir());
   for (;;) {
     if (anyConfigExists(dir, YAMLLINT_CONFIG_FILENAMES)) return true;
@@ -1209,7 +1214,7 @@ const MARKDOWNLINT_CLASSIC_CONFIG_FILENAMES = [".markdownlint.jsonc", ".markdown
  * True if markdownlint (classic) reads a config of its own, so the MD013 guard must stay off: markdownlint-cli 0.49
  * starts from `rc("markdownlint")` (run-con), spreads the first of MARKDOWNLINT_CLASSIC_CONFIG_FILENAMES found in its
  * cwd over it and deep-extends `--config` over both, so the guard would turn off a configured MD013. run-con's places:
- * `.markdownlintrc` from the spawn cwd upward (`cc.find` starts at `process.cwd()`), the file `$markdownlint_config`
+ * `.markdownlintrc` from the real spawn cwd upward (`cc.find` starts at `process.cwd()`, a symlink-free path), the file `$markdownlint_config`
  * (relative to the spawn cwd; a missing one is ignored), `~/.config/markdownlint{,/config}`, `~/.markdownlint/config`,
  * `~/.markdownlintrc`, `/etc/markdownlint{rc,/config}`. A config next to the file but below the spawn cwd is never
  * read. markdownlint-cli2 reads none of them (`hasProjectMarkdownlintConfig` serves it).
@@ -1218,10 +1223,16 @@ const MARKDOWNLINT_CLASSIC_CONFIG_FILENAMES = [".markdownlint.jsonc", ".markdown
  * @returns True when such a config exists.
  */
 function hasMarkdownlintRc(spawnCwd: string): boolean {
-  if (anyConfigExists(spawnCwd, MARKDOWNLINT_CLASSIC_CONFIG_FILENAMES) || walkToRoot(spawnCwd, (d) => configExists(d, ".markdownlintrc"))) return true;
+  let real = spawnCwd;
+  try {
+    real = realpathSync(spawnCwd); // the child's process.cwd() is the real path, so run-con's walk climbs the real parents
+  } catch {
+    // missing cwd: walk the lexical path
+  }
+  if (anyConfigExists(real, MARKDOWNLINT_CLASSIC_CONFIG_FILENAMES) || walkToRoot(real, (d) => configExists(d, ".markdownlintrc"))) return true;
   const home = homedir();
   const env = process.env.markdownlint_config;
-  return [...(env ? [path.resolve(spawnCwd, env)] : []), path.join(home, ".config", "markdownlint", "config"), path.join(home, ".config", "markdownlint"), path.join(home, ".markdownlint", "config"), path.join(home, ".markdownlintrc"), "/etc/markdownlint/config", "/etc/markdownlintrc"].some((p) => {
+  return [...(env ? [path.resolve(real, env)] : []), path.join(home, ".config", "markdownlint", "config"), path.join(home, ".config", "markdownlint"), path.join(home, ".markdownlint", "config"), path.join(home, ".markdownlintrc"), "/etc/markdownlint/config", "/etc/markdownlintrc"].some((p) => {
     try {
       return statSync(p).isFile(); // run-con reads files only; ~/.config/markdownlint is often the dir holding `config`
     } catch {

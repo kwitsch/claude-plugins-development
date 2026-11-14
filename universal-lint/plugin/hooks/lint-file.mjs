@@ -585,6 +585,9 @@ const YAMLLINT_CONFIG_FILENAMES = [
 ];
 export function hasProjectYamllintConfig(cwd) {
 	let dir = path.resolve(cwd);
+	try {
+		dir = realpathSync(dir);
+	} catch {}
 	const home = path.resolve(homedir());
 	for (;;) {
 		if (anyConfigExists(dir, YAMLLINT_CONFIG_FILENAMES)) return true;
@@ -634,11 +637,15 @@ const MARKDOWNLINT_CLASSIC_CONFIG_FILENAMES = [
 	".markdownlint.yml"
 ];
 function hasMarkdownlintRc(spawnCwd) {
-	if (anyConfigExists(spawnCwd, MARKDOWNLINT_CLASSIC_CONFIG_FILENAMES) || walkToRoot(spawnCwd, (d) => configExists(d, ".markdownlintrc"))) return true;
+	let real = spawnCwd;
+	try {
+		real = realpathSync(spawnCwd);
+	} catch {}
+	if (anyConfigExists(real, MARKDOWNLINT_CLASSIC_CONFIG_FILENAMES) || walkToRoot(real, (d) => configExists(d, ".markdownlintrc"))) return true;
 	const home = homedir();
 	const env = process.env.markdownlint_config;
 	return [
-		...env ? [path.resolve(spawnCwd, env)] : [],
+		...env ? [path.resolve(real, env)] : [],
 		path.join(home, ".config", "markdownlint", "config"),
 		path.join(home, ".config", "markdownlint"),
 		path.join(home, ".markdownlint", "config"),

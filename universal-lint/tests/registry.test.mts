@@ -665,6 +665,30 @@ test("buildArgv: classic markdownlint keeps the guard for configs it never reads
   }
 });
 
+test("symlinked spawn cwd: classic markdownlint's .markdownlintrc and yamllint's project config are found above the REAL cwd only", () => {
+  const top = mkdtempSync(path.join(tmpdir(), "ul-symcwd-"));
+  const real = path.join(top, "real", "proj");
+  mkdirSync(real, { recursive: true });
+  mkdirSync(path.join(top, "lex"));
+  const lex = path.join(top, "lex", "proj");
+  symlinkSync(real, lex);
+  writeFileSync(path.join(top, "real", ".markdownlintrc"), "{\"MD013\": {\"line_length\": 40}}");
+  writeFileSync(path.join(top, "real", ".yamllint"), "extends: default\n");
+  const file = path.join(lex, "a.md");
+  const prev = { data: process.env.CLAUDE_PLUGIN_DATA, home: process.env.HOME };
+  process.env.CLAUDE_PLUGIN_DATA = mkdtempSync(path.join(tmpdir(), "ul-data-"));
+  process.env.HOME = mkdtempSync(path.join(tmpdir(), "ul-home-"));
+  try {
+    assert.deepEqual(buildArgv(REGISTRY.markdown.chain[1], file, lex), [file]);
+    assert.equal(hasProjectYamllintConfig(lex), true);
+  } finally {
+    for (const [k, v] of [["CLAUDE_PLUGIN_DATA", prev.data], ["HOME", prev.home]] as const) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
+  }
+});
+
 test("REGISTRY: php chain is phpstan -> psalm, neither carries npmSpec", () => {
   assert.equal(REGISTRY.php.chain.length, 2);
   assert.equal(REGISTRY.php.chain[0].name, "phpstan");
