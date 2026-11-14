@@ -17,6 +17,13 @@ test("isRecallable skips short and system-made prompts", () => {
   assert.equal(isRecallable("where is foo_bar defined"), true);
 });
 
+test("searchTerms is fast on a long unbroken token", () => {
+  const start = performance.now();
+  const terms = searchTerms(`where is ${"a".repeat(80000)} parseConfig`);
+  assert.ok(performance.now() - start < 100);
+  assert.equal(terms, "parseconfig");
+});
+
 test("isCodePrompt matches exploration and implementation prompts", () => {
   assert.equal(isCodePrompt("how does the cache work"), true);
   assert.equal(isCodePrompt("thanks, that is fine with me"), false);
