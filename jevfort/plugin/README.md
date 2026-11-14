@@ -47,7 +47,7 @@ Ported from [HeyCubit/effortless](https://github.com/HeyCubit/effortless). None 
 
 ## Tool
 
-`estimate_effort` (model-visible name `mcp__jevfort__estimate_effort`, deferred: load it with ToolSearch `select:mcp__jevfort__estimate_effort`) estimates the reasoning effort a prompt most likely needs; Skills and subagents can call it. Claude Code runs it without a permission prompt; a deny rule for `mcp__jevfort__estimate_effort` withholds it.
+`estimate_effort` (model-visible name `mcp__jevfort__estimate_effort`, deferred: load it with ToolSearch `select:mcp__jevfort__estimate_effort`) estimates the reasoning effort a prompt most likely needs; Skills and subagents can call it. Claude Code runs it without a permission prompt; a deny rule for `mcp__jevfort__estimate_effort` withholds it, an ask rule keeps the prompt.
 
 | Input           | Values                                  | Meaning                                                                              |
 | --------------- | --------------------------------------- | ------------------------------------------------------------------------------------ |

@@ -55,8 +55,8 @@ the shapes below: `inline-headroom/docs/claude-code-verification.md`.
   unregister and a registered tool that no hook answers fails, so the unmatched `tool.call` hook answers
   `mcp__jevfort__estimate_effort` before the readiness guard and never calls `next(e)`: `{ result }` (the JSON
   estimate; while the batch tool is really missing `askJev` fails and it is `defaultEffort` with source `fallback` (an inactive state caused by a failed listing still asks Jev)) or, on invalid input,
-  `{ deny: "estimate_effort: <reason>" }` without a Jev request (a hook's own `isError` is dropped: the model sees a normal result, live on 2.1.325); `tool.check` approves it before the guard (a settings deny still
-  wins). Calls are logged as kind `estimate`.
+  `{ deny: "estimate_effort: <reason>" }` without a Jev request (a hook's own `isError` is dropped: the model sees a normal result, live on 2.1.325); `tool.check` approves it before the guard (a settings deny or ask
+  rule still wins). Calls are logged as kind `estimate`.
 - Effort band: the `ui.render` hook with matcher `{ component: "AbovePrompt" }` draws `Box`/`Text`/`Button` from
   `$.ui.resolve(e)` (detached factories) out of the closure state `band` (written at main-loop step 0 in `turn.step`:
   `configured` = step-0 `e.effort`, `chosen` = the estimate or held effort) and `autoOff` (flipped by the Button

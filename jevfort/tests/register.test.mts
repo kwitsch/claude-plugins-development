@@ -646,6 +646,18 @@ test("A call Jev made itself keeps a settings allow verdict untouched", { option
   expect(await $.tool.check({ tool: "Read", input: { file_path: `${CWD}/src/app.ts` }, tool_use_id: id })).toEqual(base);
 });
 
+test("A settings ask rule beats the allow for a call Jev made itself", { options: { takeOnlyForBypass: false } }, async ($, on) => {
+  setup(on, {
+    messages: [user("what does src/app.ts export?")],
+    jev: byId({ next_action: { type: "choice", choice: "read src/app.ts", probabilities: { "read src/app.ts": 0.97, claude: 0.03 }, confidence: 0.95 }, difficulty: easy }),
+    files: [`${CWD}/src/app.ts`],
+  });
+  claudeBeneath(on, []);
+  on("tool.check", () => ({ decision: "ask", rule: "Read(/proj/src/**)" }));
+  const id = toolId((await drain($.turn.step(step))).chunks);
+  expect(await decision($, { tool: "Read", input: { file_path: `${CWD}/src/app.ts` }, tool_use_id: id })).toBe("ask");
+});
+
 // A slash command's skill text is not in the transcript: Jev must not take a step or bypass the turn on the bare command.
 test("A turn started by a slash command is left to Claude (no take, no bypass)", async ($, on) => {
   const seen: unknown[] = [];
@@ -1030,6 +1042,12 @@ test("estimate_effort keeps a settings allow verdict untouched", async ($, on) =
   const base = { decision: "allow", rule: "mcp__jevfort__estimate_effort", reason: "settings rule" };
   on("tool.check", () => base);
   expect(await $.tool.check({ tool: ESTIMATE.tool, input: {}, tool_use_id: "toolu_1" })).toEqual(base);
+});
+
+test("A settings ask rule beats the estimate_effort allow", async ($, on) => {
+  setup(on, { messages: [], jev: () => undefined });
+  on("tool.check", () => ({ decision: "ask", rule: "mcp__jevfort__estimate_effort" }));
+  expect(await decision($, { tool: ESTIMATE.tool, input: {}, tool_use_id: "toolu_1" })).toBe("ask");
 });
 
 test("estimate_effort falls back to defaultEffort when Jev is unreachable", async ($, on) => {

@@ -183,6 +183,17 @@ const CACHE_TICK_MS = 15_000;
 const MAX_TAKES_PER_TURN = 3;
 /** The file tools whose writes into the session scratchpad are always allowed. */
 const WRITE_TOOLS = new Set(["Edit", "Write", "NotebookEdit"]);
+
+/**
+ * Tells whether `tool.check` must return Claude Code's verdict unchanged: a deny, an allow (rewording it makes the
+ * security plugin warn the user) or an ask from a settings rule (`rule` set). Only a mode's bare ask may become allow.
+ *
+ * @param base - The verdict of the hooks beneath.
+ * @returns `true` when jevfort must not loosen it.
+ */
+function settled(base: Verdict): boolean {
+  return base.decision === "deny" || base.decision === "allow" || (base.decision === "ask" && base.rule !== undefined);
+}
 /** From this `single_action` probability on, a taken step bypasses the whole turn. */
 const SINGLE_ACTION = 0.8;
 /** This plugin's name: the `origin.name` of the prompts it submits itself. */
@@ -1719,25 +1730,24 @@ export const register = (on: On, options: Options): void => {
 
   // Permission check: approves Jev's own vetted calls and writes into this session's scratchpad; every other verdict stays Claude Code's.
   on("tool.check", async function onToolCheck($: Engine, e: Check, next: Next<Check, Verdict>): Promise<Verdict> {
-    // The estimate tool is answered by the tool.call hook, also while inactive, so there is nothing to prompt for. A settings deny rule still wins;
-    // an existing allow is returned unchanged (rewording it makes the security plugin warn the user).
+    // The estimate tool is answered by the tool.call hook, also while inactive, so there is nothing to prompt for. A settings deny or ask rule
+    // still wins; an existing allow is returned unchanged (rewording it makes the security plugin warn the user).
     if (e.tool === ESTIMATE_TOOL) {
       const base = await next(e);
-      return base.decision !== "deny" && base.decision !== "allow" ? { ...base, decision: "allow", reason: "jevfort: estimate_effort is answered locally" } : base;
+      return settled(base) ? base : { ...base, decision: "allow", reason: "jevfort: estimate_effort is answered locally" };
     }
     if ((await jevMissing($)).length) return next(e);
     const base = await next(e);
     // Jev's own calls come from the vetted candidate list: approve them so auto mode's classifier doesn't refuse
-    // them. This and the scratchpad branch are the only places jevfort loosens Claude Code's verdict. A settings deny rule still wins.
+    // them. This and the scratchpad branch are the only places jevfort loosens Claude Code's verdict. A settings deny or ask rule still wins.
     if (e.tool_use_id && ownCalls.has(e.tool_use_id)) {
-      // Already allowed (a settings rule): leave it, rewording an allow rule makes the security plugin warn the user.
-      if (base.decision === "deny" || base.decision === "allow") return base;
+      if (settled(base)) return base;
       return { ...base, decision: "allow", reason: "Jev pilot: vetted action from its read-only/project-script list" };
     }
     const input = (e.input ?? {}) as Record<string, unknown>;
     // Writes into this session's scratchpad are allowed in every permission mode.
     // A mode's ask becomes allow; a settings deny or ask rule (`rule` set) still wins.
-    if (WRITE_TOOLS.has(e.tool) && base.decision !== "deny" && base.decision !== "allow" && !(base.decision === "ask" && base.rule !== undefined)) {
+    if (WRITE_TOOLS.has(e.tool) && !settled(base)) {
       scratchpad ??= {
         roots: [await $.env.get("CLAUDE_CODE_TMPDIR"), await $.env.get("TMPDIR"), "/tmp"].filter((r): r is string => Boolean(r)),
         sid: await $.session.id(),

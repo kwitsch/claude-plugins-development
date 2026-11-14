@@ -25,6 +25,9 @@ const WRITE_TOOLS = new Set([
 	"Write",
 	"NotebookEdit"
 ]);
+function settled(base) {
+	return base.decision === "deny" || base.decision === "allow" || base.decision === "ask" && base.rule !== undefined;
+}
 const SINGLE_ACTION = .8;
 const PLUGIN_NAME = "jevfort";
 const DONE_PROMPT = "Jev: the user's request doesn't look finished yet. Continue with what remains. If it is actually complete, say so in one line.";
@@ -1348,16 +1351,16 @@ export const register = (on, options) => {
 	on("tool.check", async function onToolCheck($, e, next) {
 		if (e.tool === ESTIMATE_TOOL) {
 			const base = await next(e);
-			return base.decision !== "deny" && base.decision !== "allow" ? {
+			return settled(base) ? base : {
 				...base,
 				decision: "allow",
 				reason: "jevfort: estimate_effort is answered locally"
-			} : base;
+			};
 		}
 		if ((await jevMissing($)).length) return next(e);
 		const base = await next(e);
 		if (e.tool_use_id && ownCalls.has(e.tool_use_id)) {
-			if (base.decision === "deny" || base.decision === "allow") return base;
+			if (settled(base)) return base;
 			return {
 				...base,
 				decision: "allow",
@@ -1365,7 +1368,7 @@ export const register = (on, options) => {
 			};
 		}
 		const input = e.input ?? {};
-		if (WRITE_TOOLS.has(e.tool) && base.decision !== "deny" && base.decision !== "allow" && !(base.decision === "ask" && base.rule !== undefined)) {
+		if (WRITE_TOOLS.has(e.tool) && !settled(base)) {
 			scratchpad ??= {
 				roots: [
 					await $.env.get("CLAUDE_CODE_TMPDIR"),
