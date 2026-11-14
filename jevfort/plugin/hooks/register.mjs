@@ -272,27 +272,31 @@ async function stats($) {
 	return await $.store.get("stats") ?? {};
 }
 let storeQueue = Promise.resolve();
+const pending = [];
 async function record($, d) {
 	const entry = {
 		...d,
 		at: await $.clock.now().catch(() => Date.now())
 	};
 	remember(entry);
+	pending.push(entry);
+	if (d.kind !== "outcome" && d.kind !== "turn") void $.ui.status(`jev: ${d.text}`.slice(0, 80));
+}
+async function flushLog($) {
+	if (!pending.length) return;
+	const entries = pending.splice(0);
 	const run = storeQueue.then(async () => {
 		const log = await readLog($);
-		await $.store.set(LOG_KEY, [...log, entry].slice(-MAX_ENTRIES));
+		await $.store.set(LOG_KEY, [...log, ...entries].slice(-MAX_ENTRIES));
 		const tally = await stats($);
-		const key = statsKey(d);
-		await $.store.set("stats", {
-			...tally,
-			[key]: (tally[key] ?? 0) + 1
-		});
+		for (const d of entries) tally[statsKey(d)] = (tally[statsKey(d)] ?? 0) + 1;
+		await $.store.set("stats", tally);
 	});
 	storeQueue = run.catch(() => undefined);
 	await storeQueue;
-	if (d.kind !== "outcome" && d.kind !== "turn") void $.ui.status(`jev: ${d.text}`.slice(0, 80));
 }
 async function clearLog($) {
+	pending.length = 0;
 	const run = storeQueue.then(async () => {
 		await $.store.set(LOG_KEY, []);
 		await $.store.set("stats", {});
@@ -869,10 +873,12 @@ export const register = (on, options) => {
 		sessionEpoch += 1;
 		forgetConversation();
 		resetCache($);
+		await flushLog($);
 		return next(e);
 	});
 	on("command.run", { command: "jev" }, async function onJevCommand($, e) {
 		const arg = e.args.trim();
+		await flushLog($);
 		if (arg === "report") {
 			return { text: buildReport(await readLog($), takeThreshold) };
 		}
@@ -922,6 +928,7 @@ export const register = (on, options) => {
 		if (e.agentId === undefined) dropTurnReads();
 		if (missing.length) {
 			await contextCompact($, e, false, false, taskCompactPercent, forceCompactPercent).catch(() => undefined);
+			await flushLog($);
 			return next(e);
 		}
 		turns.delete(e.turnId);
@@ -984,6 +991,7 @@ export const register = (on, options) => {
 			applied: false,
 			text: `context compaction check failed: ${String(err)}`
 		}).catch(() => undefined));
+		await flushLog($);
 		return next(e);
 	});
 	on("tool.call", async function onToolCall($, e, next) {

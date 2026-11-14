@@ -89,8 +89,8 @@ core routes `$.mcp.call` through `$.tool.call` and its permission check, althoug
 plugin's own hooks see a call it raises only while one of its hooks runs; a call raised after the hook returned (an
 unawaited chain, a `$.clock.every` callback) skips them, so in `default` mode the user gets a permission dialog per
 call and a headless session denies it. jevfort uses `$.store`, `$.tool.call` (jev-api's batch tool) and `$.fs`, and every
-`askJev` is awaited in-frame except the step measurement of `turn.step`: its `$.tool.call` is raised in-frame before `next`, and after Claude's step it is awaited for at most `MEASURE_GRACE_MS` (250 ms); a later answer is dropped unrecorded (its closing `$.clock.now()` then runs out of frame, caught). Every
-`record(...)` is awaited inside its hook for the same reason.
+`askJev` is awaited in-frame except the step measurement of `turn.step`: its `$.tool.call` is raised in-frame before `next`, and after Claude's step it is awaited for at most `MEASURE_GRACE_MS` (250 ms); a later answer is dropped unrecorded (its closing `$.clock.now()` then runs out of frame, caught). `record(...)` only buffers;
+its store writes run in `flushLog`, awaited in-frame by `turn.complete`, `session.end` and the `/jev` command for the same reason.
 
 ## Tests: the jev-api fake
 

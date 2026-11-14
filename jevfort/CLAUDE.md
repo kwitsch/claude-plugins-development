@@ -125,7 +125,7 @@ The built-in `cc-plugin-sec-default` passes `session.compact` on past every user
 
 ## Known limit: several sessions share one log
 
-`record()` reads and writes the whole `log` and `stats` values and is serialized only inside one process: two Claude processes on the same plugin store can overwrite each other's entries, so `/jev` counts and `/jev report` undercount while several sessions run at once. Behaviour is unaffected. A per-session key merged at read time would fix it; not done.
+`record()` buffers decisions in memory and `flushLog` (in-frame at `turn.complete`, `session.end` and `/jev`; F06, 0.11.0) reads and writes the whole `log` and `stats` values once per flush, serialized only inside one process (a process that dies before a flush loses its pending decisions): two Claude processes on the same plugin store can overwrite each other's entries, so `/jev` counts and `/jev report` undercount while several sessions run at once. Behaviour is unaffected. A per-session key merged at read time would fix it; not done.
 
 ## Known limit: a hook above refusing a core read
 

@@ -535,11 +535,17 @@ async function readLog($: Engine): Promise<Entry[]> {
 async function stats($: Engine): Promise<Record<string, number>> {
   return ((await $.store.get("stats")) as Record<string, number> | undefined) ?? {};
 }
-/** Tail of the queue that serializes record()'s store writes. */
+/** Tail of the queue that serializes flushLog()'s store writes. */
 let storeQueue: Promise<void> = Promise.resolve();
+/**
+ * Decisions recorded since the last {@link flushLog}, oldest first.
+ *
+ * @remarks shortcut: unbounded between flushes (every turn.complete flushes), cap it if one turn can record thousands.
+ */
+const pending: Entry[] = [];
 
 /**
- * Logs a decision: this session's buffer, the capped store log, the counters, and the status line.
+ * Logs a decision: this session's buffer, the pending store entries ({@link flushLog} writes them), and the status line.
  *
  * @param $ - Engine interface.
  * @param d - The decision without its time.
@@ -547,30 +553,41 @@ let storeQueue: Promise<void> = Promise.resolve();
 async function record($: Engine, d: Omit<Entry, "at">): Promise<void> {
   const entry: Entry = { ...d, at: await $.clock.now().catch(() => Date.now()) };
   remember(entry);
-
-  // Serialized: parallel hooks would otherwise read the same log and tally and lose each other's writes.
-  const run = storeQueue.then(async () => {
-    const log = await readLog($);
-    await $.store.set(LOG_KEY, [...log, entry].slice(-MAX_ENTRIES));
-
-    const tally = await stats($);
-    const key = statsKey(d);
-    await $.store.set("stats", { ...tally, [key]: (tally[key] ?? 0) + 1 });
-  });
-  storeQueue = run.catch(() => undefined);
-  // A failing store (over its 4 MiB cap, a full disk) must not fail a hook: this runs after Claude's step too, and the engine rethrows a hook's error after the request ran.
-  await storeQueue;
-
+  pending.push(entry);
   if (d.kind !== "outcome" && d.kind !== "turn") void $.ui.status(`jev: ${d.text}`.slice(0, 80));
 }
 
 /**
- * Empties the log and the counters.
+ * Writes the pending decisions into the capped store log and the counters: one read and one write of each per call.
+ * Called in-frame from `turn.complete`, `session.end` and `/jev`; a hook that never completes loses its own entries.
+ *
+ * @param $ - Engine interface.
+ */
+async function flushLog($: Engine): Promise<void> {
+  if (!pending.length) return;
+  const entries = pending.splice(0);
+  // Serialized: parallel hooks would otherwise read the same log and tally and lose each other's writes.
+  const run = storeQueue.then(async () => {
+    const log = await readLog($);
+    await $.store.set(LOG_KEY, [...log, ...entries].slice(-MAX_ENTRIES));
+
+    const tally = await stats($);
+    for (const d of entries) tally[statsKey(d)] = (tally[statsKey(d)] ?? 0) + 1;
+    await $.store.set("stats", tally);
+  });
+  storeQueue = run.catch(() => undefined);
+  // A failing store (over its 4 MiB cap, a full disk) must not fail a hook: the entries are dropped, as one record() used to drop its own.
+  await storeQueue;
+}
+
+/**
+ * Empties the log, the counters and the pending decisions.
  *
  * @param $ - Engine interface.
  */
 async function clearLog($: Engine): Promise<void> {
-  // In the same queue as record(): one still in flight would otherwise write the cleared log back.
+  pending.length = 0;
+  // In the same queue as flushLog(): one still in flight would otherwise write the cleared log back.
   const run = storeQueue.then(async () => {
     await $.store.set(LOG_KEY, []);
     await $.store.set("stats", {});
@@ -1270,11 +1287,13 @@ export const register = (on: On, options: Options): void => {
     sessionEpoch += 1; // /clear raises only session.end (no session.start follows)
     forgetConversation();
     resetCache($);
+    await flushLog($);
     return next(e);
   });
 
   on("command.run", { command: "jev" }, async function onJevCommand($: Engine, e: CommandEvent): Promise<{ text: string }> {
     const arg = e.args.trim();
+    await flushLog($); // report, export and the counters read the store
     if (arg === "report") {
       return { text: buildReport(await readLog($), takeThreshold) };
     }
@@ -1339,6 +1358,7 @@ export const register = (on: On, options: Options): void => {
     if (e.agentId === undefined) dropTurnReads();
     if (missing.length) {
       await contextCompact($, e, false, false, taskCompactPercent, forceCompactPercent).catch(() => undefined);
+      await flushLog($);
       return next(e);
     }
     turns.delete(e.turnId);
@@ -1384,6 +1404,7 @@ export const register = (on: On, options: Options): void => {
       }
     }
     await contextCompact($, e, true, continued, taskCompactPercent, forceCompactPercent, asked).catch((err: unknown) => record($, { kind: "error", applied: false, text: `context compaction check failed: ${String(err)}` }).catch(() => undefined));
+    await flushLog($); // the turn's decisions, written once instead of per decision (F06)
     return next(e);
   });
 

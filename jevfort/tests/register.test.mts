@@ -556,7 +556,8 @@ test("A finished background task (origin task-notification) is not classified", 
 });
 
 for (const [status, asked] of [["completed", 1], ["failed", 1], ["killed", 1], ["idle", 1], ["running", 0], ["pending", 0], ["starting", 0]] as const) {
-  test(`The done check with a ${status} subagent asks Jev ${asked} time(s)`, async ($, on) => {
+  // classify off: the kit runs the unawaited follow-up's prompt.submit (unstamped, so classified) before the assertion.
+  test(`The done check with a ${status} subagent asks Jev ${asked} time(s)`, { options: { classify: false } }, async ($, on) => {
     const { sent } = setup(on, { messages: [user("rename foo to bar in all files")], jev: unfinished, agents: [{ status }] });
     followUps(on);
     await $.turn.complete(answered("t1", "One file only."));
@@ -1107,6 +1108,7 @@ test("route and estimate log entries carry effortScore and effortConfidence", as
   claudeBeneath(on, []);
   await drain($.turn.step(step));
   await estimateCall($, { model: "opus" });
+  await runJev($, "report"); // writes the pending decisions
   for (const kind of ["route", "estimate"]) {
     const entry = log.find((l) => l.kind === kind);
     expect(entry?.data).toMatchObject({ effortScore: 1.6, effortConfidence: 0.3 });
@@ -1596,4 +1598,28 @@ test("Context compaction is queued once per fill period", { options: { classify:
   await $.turn.complete(answered("t1", "Done."));
   await $.turn.complete(answered("t2", "Done."));
   expect(state.compacts).toBe(1);
+});
+
+// F06: decisions are buffered and the log and the counters are written once per turn, not once per decision.
+test("A 6-step turn writes the log and the counters once, and /jev export still holds every decision", async ($, on) => {
+  const sets: string[] = [];
+  on("store.set", (_$, e, next) => (sets.push(String(e.key)), next(e)));
+  setup(on, { messages: [user("what does src/app.ts export?")], files: [`${CWD}/src/app.ts`], jev: finished });
+  followUps(on);
+  claudeBeneath(on, []);
+  let written = "";
+  on("fs.write", (_$, e) => ((written = String(e.text)), { value: undefined }));
+  await $.prompt.submit({ text: "what does src/app.ts export?", wait: false, origin: { kind: "composer" } });
+  for (const index of [0, 1, 2, 3, 4, 5]) await drain($.turn.step({ ...step, index }));
+  expect(sets).toEqual([]);
+  await $.turn.complete(answered("t1", "Done."));
+  expect(sets.filter((k) => k === "log")).toHaveLength(1);
+  expect(sets.filter((k) => k === "stats")).toHaveLength(1);
+  expect(await runJev($, "export")).toMatch(/wrote \d+ entries/);
+  const kinds = written.trim().split("\n").map((l) => (JSON.parse(l) as { kind: string }).kind);
+  expect(kinds).toContain("classify");
+  expect(kinds).toContain("route");
+  expect(kinds.filter((k) => k === "compare")).toHaveLength(6);
+  expect(kinds).toContain("done");
+  expect(await runJev($, "")).toMatch(/compare(:pass)?=6/);
 });
