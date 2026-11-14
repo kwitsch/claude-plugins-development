@@ -2110,6 +2110,107 @@ function recordWrittenFor(s: { fp: string; real: string } | null): void {
   if (s) recordWritten(s.fp, s.real);
 }
 
+/** Handle of the journal record a lint wrote for its own edit (F34). */
+export interface EditRecord {
+  /** `hashPath` of the file's real path: the record files of one file share this prefix. */
+  key: string;
+  /** File name of the record inside the journal directory. */
+  name: string;
+}
+
+/**
+ * Settle-window journal directory: `CLAUDE_PLUGIN_DATA` (OS temp dir when unset)/settle. Never inside the project tree.
+ *
+ * @returns Absolute path of the directory.
+ */
+function settleDir(): string {
+  return path.resolve(process.env.CLAUDE_PLUGIN_DATA || tmpdir(), "settle");
+}
+
+/**
+ * Journal one edit of a file for the settle window: `<hashPath(real)>-<ms>-<pid>.json` holding the edit's hunks (null =
+ * whole file) and the digest of the file after it, written atomically (temp file + `renameSync`). Older entries
+ * (name timestamp more than `HOOK_TIMEOUT_MS` ago, temp leftovers too) are pruned first, so a live reader still
+ * finds everything a hook run can need. Fails open to null (the lint then reports at once).
+ *
+ * @param fp - Lexical path of the edited file (read for the digest).
+ * @param real - Real path of the file (the key).
+ * @param hunks - The edit's hunks, null when the whole file counts as edited.
+ * @returns The record handle, or null on any error.
+ */
+export function recordEdit(fp: string, real: string, hunks: EditHunk[] | null): EditRecord | null {
+  try {
+    const dir = settleDir();
+    mkdirSync(dir, { recursive: true });
+    const now = Date.now();
+    for (const n of readdirSync(dir)) if (now - Number(n.split("-")[1]) > HOOK_TIMEOUT_MS) rmSync(path.join(dir, n), { force: true });
+    const key = hashPath(real);
+    const name = `${key}-${String(now).padStart(15, "0")}-${process.pid}.json`;
+    const tmp = path.join(dir, `${name}.tmp`);
+    writeFileSync(tmp, JSON.stringify({ hunks, digest: fileDigest(fp) }));
+    renameSync(tmp, path.join(dir, name));
+    return { key, name };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The settle window (F34): hold the findings of a finished lint for `settleWaitMs()`, then drop every diagnostic
+ * located in `resolved` on a line a later edit of the file removed or replaced (that edit's own lint reports what
+ * persists there). Diagnostics in other files and findings without a located line are never dropped.
+ *
+ * @remarks
+ * Coordinates: the finding's lines are those of the file as the linter read it, whose digest is `d0`. The reference
+ * is the last journal record with `digest === d0`; only the records after it are later edits. A file that changed
+ * during the lint (`d0 !== d1`), no matching record, no later record, a missing or unreadable journal or record
+ * all mean "cannot tell": the findings are returned as they are (fail open, reported). Nothing is held when there is
+ * nothing to report or no own record.
+ *
+ * @param findings - The gated findings of the lint.
+ * @param resolved - Lexical absolute path of the linted file.
+ * @param rec - The lint's own journal record, or null.
+ * @param d0 - Digest of the file right before the lint started, or null.
+ * @param d1 - Digest of the file right after the lint ended, or null.
+ * @returns The findings that survive (possibly fewer diagnostics per finding).
+ */
+export async function settleFindings(findings: Finding[], resolved: string, rec: EditRecord | null, d0: string | null, d1: string | null): Promise<Finding[]> {
+  if (findings.length === 0 || !rec || d0 === null || d0 !== d1) return findings;
+  const wait = settleWaitMs();
+  if (wait > 0) await sleep(wait);
+  let later: Array<EditHunk[] | null>;
+  try {
+    const dir = settleDir();
+    const recs = readdirSync(dir)
+      .filter((n) => n.startsWith(`${rec.key}-`) && n.endsWith(".json"))
+      .sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))
+      .map((n) => JSON.parse(readFileSync(path.join(dir, n), "utf8")) as { hunks: EditHunk[] | null; digest: string });
+    if (recs.some((r) => r.hunks !== null && !Array.isArray(r.hunks))) return findings;
+    let at = -1;
+    recs.forEach((r, i) => {
+      if (r.digest === d0) at = i;
+    });
+    if (at === -1 || at === recs.length - 1) return findings;
+    later = recs.slice(at + 1).map((r) => r.hunks);
+  } catch {
+    return findings;
+  }
+  const survives = (line0: number): boolean => {
+    let l = line0;
+    for (const h of later) {
+      if (h === null) return false;
+      const n = carryLine(l, h);
+      if (n === null) return false;
+      l = n;
+    }
+    return true;
+  };
+  return findings.flatMap((f) => {
+    const g = gateFinding(f, survives, resolved, false);
+    return g ? [g] : [];
+  });
+}
+
 /**
  * The chain entry for one file (shared by `lintResolved` and `lintFilesHandler`): the language from `EXT_MAP`, the
  * no-config gates for JS/TS (no oxlint and no eslint config) and CSS/SCSS (no stylelint config), and for JS/TS with an

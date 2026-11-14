@@ -1,7 +1,12 @@
 // Settle window (F34): findings are held for a few seconds and dropped when a later edit rewrote the line they sit on.
 import assert from "node:assert/strict";
-import { test } from "vitest";
-import { carryLine, editHunks, gateFinding, settleWaitMs } from "../plugin/hooks/lint-file.mjs";
+import { createHash } from "node:crypto";
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { setTimeout as sleep } from "node:timers/promises";
+import { afterAll, test } from "vitest";
+import { carryLine, editHunks, gateFinding, hashPath, recordEdit, settleFindings, settleWaitMs } from "../plugin/hooks/lint-file.mjs";
 
 /** An Edit payload with the given structuredPatch hunks. */
 const edit = (structuredPatch: unknown) => ({ tool_name: "Edit", tool_response: { structuredPatch } });
@@ -121,4 +126,217 @@ test("gateFinding: keepParseErrors=false drops a parse error the predicate rejec
   const parse = { tool: "shellcheck", target: "a.sh", base: "/p", text: "a.sh:3:1: error: Couldn't parse this. [SC1073]" };
   assert.ok(gateFinding(parse, () => false, "/p/a.sh"));
   assert.equal(gateFinding(parse, () => false, "/p/a.sh", false), null);
+});
+
+// ---- journal and supersession -------------------------------------------------------------------------------------
+
+/** Scratch root of this file's journal tests, removed when the file finishes. */
+const SCRATCH = mkdtempSync(path.join(tmpdir(), "universal-lint-settle-"));
+afterAll(() => rmSync(SCRATCH, { recursive: true, force: true }));
+/** Counter giving every `world` its own directory. */
+let worlds = 0;
+/** The 6-line file the scenarios start from. */
+const SIX = "l1\nl2\nl3\nl4\nl5\nl6\n";
+/** SHA-256 base64 of a text, as `fileDigest` computes it. */
+const digestOf = (text: string): string => createHash("sha256").update(text).digest("base64");
+/** Hunks replacing line 3 of SIX. */
+const REPLACE_3 = [{ oldStart: 1, oldLines: 6, newStart: 1, newLines: 6, lines: [" l1", " l2", "-l3", "+L3", " l4", " l5", " l6"] }];
+/** Hunks replacing line 6 of SIX. */
+const REPLACE_6 = [{ oldStart: 4, oldLines: 3, newStart: 4, newLines: 3, lines: [" l4", " l5", "-l6", "+L6"] }];
+/** Hunks inserting two lines after line 1 of SIX. */
+const INSERT_AFTER_1 = [{ oldStart: 1, oldLines: 3, newStart: 1, newLines: 5, lines: [" l1", "+n1", "+n2", " l2", " l3"] }];
+
+/** Make the scratch directories of one scenario and point the plugin data dir at them. */
+function world() {
+  const base = path.join(SCRATCH, String(worlds++));
+  const data = path.join(base, "data");
+  const proj = path.join(base, "proj");
+  mkdirSync(proj, { recursive: true });
+  process.env.CLAUDE_PLUGIN_DATA = data;
+  process.env.UNIVERSAL_LINT_SETTLE_MS = "0";
+  const file = path.join(proj, "a.sh");
+  return { data, proj, file, journal: path.join(data, "settle"), real: realpathSync(proj) + "/a.sh" };
+}
+
+/** A shellcheck-style finding with one diagnostic per given 1-based line, plus optional extra paragraphs. */
+const found = (proj: string, lines: number[], extra: string[] = []) => ({
+  tool: "shellcheck",
+  target: "a.sh",
+  base: proj,
+  text: [...lines.map((n) => `a.sh:${n}:6: note: m${n}-marker [SC2086]`), ...extra].join("\n\n"),
+});
+
+/**
+ * Lay out one scenario: the file holds `SIX` and the lint's own record is written; every later edit rewrites the file
+ * and records itself with its hunks (a sleep keeps the record names apart: same pid, same millisecond collides).
+ *
+ * @param w - The `world`.
+ * @param later - The later edits in order: new file content and hunks (null = whole file).
+ * @returns The own record, the digest of the content the linter read (SIX) and the digests after each later edit.
+ */
+async function lay(w: ReturnType<typeof world>, later: Array<{ content: string; hunks: unknown }>) {
+  writeFileSync(w.file, SIX);
+  const rec = recordEdit(w.file, w.real, null);
+  assert.ok(rec);
+  const after: string[] = [];
+  for (const l of later) {
+    await sleep(3);
+    writeFileSync(w.file, l.content);
+    assert.ok(recordEdit(w.file, w.real, l.hunks === null ? null : editHunks(edit(l.hunks))));
+    after.push(digestOf(l.content));
+  }
+  return { rec, d0: digestOf(SIX), after };
+}
+
+test("recordEdit writes <key>-<ms>-<pid>.json with the hunks and the digest, no temp file left", () => {
+  const w = world();
+  writeFileSync(w.file, SIX);
+  const hunks = editHunks(edit(REPLACE_3));
+  const rec = recordEdit(w.file, w.real, hunks);
+  assert.ok(rec);
+  assert.equal(rec.key, hashPath(w.real));
+  assert.deepEqual(readdirSync(w.journal), [rec.name]);
+  assert.match(rec.name, /^[0-9a-f]{64}-\d{15}-\d+\.json$/);
+  assert.deepEqual(JSON.parse(readFileSync(path.join(w.journal, rec.name), "utf8")), { hunks, digest: digestOf(SIX) });
+});
+
+test("recordEdit prunes entries older than the hook timeout, also temp leftovers, and keeps fresh ones", () => {
+  const w = world();
+  writeFileSync(w.file, SIX);
+  mkdirSync(w.journal, { recursive: true });
+  const stamp = (ms: number) => String(ms).padStart(15, "0");
+  const old = `${"a".repeat(64)}-${stamp(Date.now() - 91_000)}-1.json`;
+  const oldTmp = `${"b".repeat(64)}-${stamp(Date.now() - 120_000)}-1.json.tmp`;
+  const fresh = `${"c".repeat(64)}-${stamp(Date.now() - 10_000)}-1.json`;
+  for (const n of [old, oldTmp, fresh]) writeFileSync(path.join(w.journal, n), "{}");
+  const rec = recordEdit(w.file, w.real, null);
+  assert.ok(rec);
+  const byName = (a: string, b: string): number => a.localeCompare(b);
+  assert.deepEqual(readdirSync(w.journal).sort(byName), [fresh, rec.name].sort(byName));
+});
+
+test("recordEdit fails open: an unusable data dir gives null", () => {
+  const w = world();
+  writeFileSync(w.file, SIX);
+  process.env.CLAUDE_PLUGIN_DATA = w.file; // a regular file: mkdir below it fails
+  assert.equal(recordEdit(w.file, w.real, null), null);
+});
+
+test("settleFindings: nothing to settle returns the findings at once", async () => {
+  const w = world();
+  const { rec, d0 } = await lay(w, [{ content: SIX.replace("l3", "L3"), hunks: REPLACE_3 }]);
+  process.env.UNIVERSAL_LINT_SETTLE_MS = "400";
+  const f = [found(w.proj, [3])];
+  const t0 = Date.now();
+  assert.deepEqual(await settleFindings([], w.file, rec, d0, d0), []);
+  assert.equal(await settleFindings(f, w.file, null, d0, d0), f);
+  assert.equal(await settleFindings(f, w.file, rec, null, null), f);
+  assert.equal(await settleFindings(f, w.file, rec, d0, "changed during the lint"), f);
+  assert.ok(Date.now() - t0 < 200, "none of these holds");
+});
+
+test("settleFindings: no later edit, the findings stand", async () => {
+  const w = world();
+  const { rec, d0 } = await lay(w, []);
+  const f = [found(w.proj, [3])];
+  assert.equal(await settleFindings(f, w.file, rec, d0, d0), f);
+});
+
+test("settleFindings: a later edit that replaced the finding's line drops it, other lines stay", async () => {
+  const w = world();
+  const { rec, d0 } = await lay(w, [{ content: SIX.replace("l3", "L3"), hunks: REPLACE_3 }]);
+  const out = await settleFindings([found(w.proj, [3, 5])], w.file, rec, d0, d0);
+  assert.equal(out.length, 1);
+  assert.doesNotMatch(out[0].text, /m3-marker/);
+  assert.match(out[0].text, /m5-marker/);
+  assert.deepEqual(await settleFindings([found(w.proj, [3])], w.file, rec, d0, d0), []);
+});
+
+test("settleFindings: a later edit elsewhere drops nothing", async () => {
+  const w = world();
+  const { rec, d0 } = await lay(w, [{ content: SIX.replace("l6", "L6"), hunks: REPLACE_6 }]);
+  const f = [found(w.proj, [3])];
+  assert.deepEqual(await settleFindings(f, w.file, rec, d0, d0), f);
+});
+
+test("settleFindings: lines inserted above push the finding down, it is not touched", async () => {
+  const w = world();
+  const { rec, d0 } = await lay(w, [{ content: "l1\nn1\nn2\nl2\nl3\nl4\nl5\nl6\n", hunks: INSERT_AFTER_1 }]);
+  const f = [found(w.proj, [3])];
+  assert.deepEqual(await settleFindings(f, w.file, rec, d0, d0), f);
+});
+
+test("settleFindings: the line is carried through several later edits", async () => {
+  const w = world();
+  const second = [{ oldStart: 4, oldLines: 3, newStart: 4, newLines: 3, lines: [" l2", "-l3", "+L3", " l4"] }]; // l3 now sits on line 5
+  const { rec, d0 } = await lay(w, [
+    { content: "l1\nn1\nn2\nl2\nl3\nl4\nl5\nl6\n", hunks: INSERT_AFTER_1 },
+    { content: "l1\nn1\nn2\nl2\nL3\nl4\nl5\nl6\n", hunks: second },
+  ]);
+  assert.deepEqual(await settleFindings([found(w.proj, [3])], w.file, rec, d0, d0), []);
+});
+
+test("settleFindings: a later whole-file edit drops the own-file diagnostics, foreign and unlocated ones stay", async () => {
+  const w = world();
+  const extra = ["/other/b.ts:1:1 error elsewhere-marker", "plain summary without a location"];
+  const { rec, d0 } = await lay(w, [{ content: "rewritten\n", hunks: null }]);
+  const out = await settleFindings([found(w.proj, [3], extra)], w.file, rec, d0, d0);
+  assert.equal(out.length, 1);
+  assert.doesNotMatch(out[0].text, /m3-marker/);
+  assert.match(out[0].text, /elsewhere-marker/);
+  assert.match(out[0].text, /plain summary/);
+});
+
+test("settleFindings: a partial later edit leaves foreign diagnostics alone too", async () => {
+  const w = world();
+  const extra = ["/other/b.ts:1:1 error elsewhere-marker"];
+  const { rec, d0 } = await lay(w, [{ content: SIX.replace("l3", "L3"), hunks: REPLACE_3 }]);
+  const out = await settleFindings([found(w.proj, [3], extra)], w.file, rec, d0, d0);
+  assert.equal(out.length, 1);
+  assert.match(out[0].text, /elsewhere-marker/);
+  assert.doesNotMatch(out[0].text, /m3-marker/);
+});
+
+test("settleFindings: a parse error on a rewritten line does not survive", async () => {
+  const w = world();
+  const { rec, d0 } = await lay(w, [{ content: SIX.replace("l3", "L3"), hunks: REPLACE_3 }]);
+  const parse = { tool: "shellcheck", target: "a.sh", base: w.proj, text: "a.sh:3:1: error: Couldn't parse this. [SC1073]" };
+  assert.deepEqual(await settleFindings([parse], w.file, rec, d0, d0), []);
+});
+
+test("settleFindings: records the linter's state already contains are not applied (digest anchor)", async () => {
+  const w = world();
+  const edits = [
+    { content: SIX.replace("l3", "L3"), hunks: REPLACE_3 },
+    { content: SIX.replace("l3", "L3").replace("l6", "L6"), hunks: REPLACE_6 },
+  ];
+  const { rec, after } = await lay(w, edits);
+  const f = [found(w.proj, [3])];
+  // the linter read the state after the first later edit: only the second one counts, and it left line 3 alone
+  assert.deepEqual(await settleFindings(f, w.file, rec, after[0], after[0]), f);
+  // a state no record produced: nothing can be said, report
+  assert.deepEqual(await settleFindings(f, w.file, rec, digestOf("unknown"), digestOf("unknown")), f);
+});
+
+test("settleFindings: an unreadable journal, a corrupt or an unreadable record means report", async () => {
+  const w = world();
+  const { rec, d0 } = await lay(w, [{ content: SIX.replace("l3", "L3"), hunks: REPLACE_3 }]);
+  const f = [found(w.proj, [3])];
+  const corrupt = path.join(w.journal, `${rec.key}-${"9".repeat(15)}-1.json`);
+  writeFileSync(corrupt, "{");
+  assert.equal(await settleFindings(f, w.file, rec, d0, d0), f);
+  rmSync(corrupt);
+  mkdirSync(corrupt); // a directory where a record should be: reading it throws
+  assert.equal(await settleFindings(f, w.file, rec, d0, d0), f);
+  rmSync(w.journal, { recursive: true });
+  assert.equal(await settleFindings(f, w.file, rec, d0, d0), f);
+});
+
+test("settleFindings: holds for the settle window when there is something to hold", async () => {
+  const w = world();
+  const { rec, d0 } = await lay(w, [{ content: SIX.replace("l6", "L6"), hunks: REPLACE_6 }]);
+  process.env.UNIVERSAL_LINT_SETTLE_MS = "400";
+  const t0 = Date.now();
+  await settleFindings([found(w.proj, [3])], w.file, rec, d0, d0);
+  assert.ok(Date.now() - t0 >= 380, "held");
 });

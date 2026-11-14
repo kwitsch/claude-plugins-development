@@ -1120,6 +1120,64 @@ export function recordWritten(fp, real) {
 function recordWrittenFor(s) {
 	if (s) recordWritten(s.fp, s.real);
 }
+function settleDir() {
+	return path.resolve(process.env.CLAUDE_PLUGIN_DATA || tmpdir(), "settle");
+}
+export function recordEdit(fp, real, hunks) {
+	try {
+		const dir = settleDir();
+		mkdirSync(dir, { recursive: true });
+		const now = Date.now();
+		for (const n of readdirSync(dir)) if (now - Number(n.split("-")[1]) > HOOK_TIMEOUT_MS) rmSync(path.join(dir, n), { force: true });
+		const key = hashPath(real);
+		const name = `${key}-${String(now).padStart(15, "0")}-${process.pid}.json`;
+		const tmp = path.join(dir, `${name}.tmp`);
+		writeFileSync(tmp, JSON.stringify({
+			hunks,
+			digest: fileDigest(fp)
+		}));
+		renameSync(tmp, path.join(dir, name));
+		return {
+			key,
+			name
+		};
+	} catch {
+		return null;
+	}
+}
+export async function settleFindings(findings, resolved, rec, d0, d1) {
+	if (findings.length === 0 || !rec || d0 === null || d0 !== d1) return findings;
+	const wait = settleWaitMs();
+	if (wait > 0) await sleep(wait);
+	let later;
+	try {
+		const dir = settleDir();
+		const recs = readdirSync(dir).filter((n) => n.startsWith(`${rec.key}-`) && n.endsWith(".json")).sort((a, b) => a < b ? -1 : a > b ? 1 : 0).map((n) => JSON.parse(readFileSync(path.join(dir, n), "utf8")));
+		if (recs.some((r) => r.hunks !== null && !Array.isArray(r.hunks))) return findings;
+		let at = -1;
+		recs.forEach((r, i) => {
+			if (r.digest === d0) at = i;
+		});
+		if (at === -1 || at === recs.length - 1) return findings;
+		later = recs.slice(at + 1).map((r) => r.hunks);
+	} catch {
+		return findings;
+	}
+	const survives = (line0) => {
+		let l = line0;
+		for (const h of later) {
+			if (h === null) return false;
+			const n = carryLine(l, h);
+			if (n === null) return false;
+			l = n;
+		}
+		return true;
+	};
+	return findings.flatMap((f) => {
+		const g = gateFinding(f, survives, resolved, false);
+		return g ? [g] : [];
+	});
+}
 function chainEntryFor(resolved, cwd) {
 	const ext = path.extname(resolved).toLowerCase();
 	const lang = EXT_MAP[ext];
