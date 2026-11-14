@@ -562,8 +562,7 @@ export function looksLikeSolutionStyleTsconfig(text) {
 	const hasInclude = /"include"\s*:/.test(stripped);
 	if (hasInclude) return false;
 	const filesMatch = stripped.match(/"files"\s*:\s*\[([^\]]*)\]/);
-	const hasNonEmptyFiles = !!filesMatch && filesMatch[1].trim() !== "";
-	return !hasNonEmptyFiles;
+	return !!filesMatch && filesMatch[1].trim() === "";
 }
 export function hashPath(p) {
 	return createHash("sha256").update(p).digest("hex");

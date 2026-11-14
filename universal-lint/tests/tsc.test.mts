@@ -135,6 +135,13 @@ test("tsc: solution-style tsconfig.json (references only) -> {}, tsc stub never 
   assert.deepEqual(e.lines(), []);
 });
 
+test("tsc: references with no files/include (tsc default include) -> tsc stub invoked, finding surfaced", () => {
+  const e = makeEnv();
+  e.file("tsconfig.json", "{\"references\":[{\"path\":\"./lib\"}]}");
+  e.recStub("tsc", 2);
+  assert.match(e.run(e.file("a.ts", TS), { out: "a.ts(1,1): error TS2322: tsc-finding-marker" }).ctx, /tsc-finding-marker/);
+});
+
 test("tsc clean (exit 0) -> {}", () => {
   const { e, a } = proj();
   e.recStub("tsc", 0);

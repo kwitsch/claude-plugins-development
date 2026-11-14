@@ -1019,14 +1019,15 @@ export function stripTrailingCommas(text: string): string {
 
 /**
  * A "solution-style" tsconfig (`references` present, `include` absent, and
- * `files` either absent or an empty array) compiles and checks nothing under
+ * `files` an explicit empty array) compiles and checks nothing under
  * plain `-p` -- confirmed empirically: `tsc --noEmit` against this shape
  * exits 0 even with a real type error in the referenced project.
  * `"files": []` is the TS handbook's own documented way to author a
  * solution-style config (it's how you disable direct compilation), so an
- * empty `files` array must NOT disqualify -- only a real `include`, or a
- * `files` array with at least one entry, means this config actually compiles
- * something itself. Existence/pattern-only regex over comment-stripped text,
+ * empty `files` array must NOT disqualify -- only a real `include`, a `files`
+ * array with at least one entry, or no `files` at all (tsc's default include
+ * then compiles every source under the config) means this config actually
+ * compiles something itself. Existence/pattern-only regex over comment-stripped text,
  * not a full JSON/JSONC parse (tsconfig permits comments/trailing commas) --
  * unanchored (no line-start requirement) so it matches equally in compact
  * single-line and pretty-printed JSON. A string VALUE that happens to contain
@@ -1045,8 +1046,7 @@ export function looksLikeSolutionStyleTsconfig(text: string): boolean {
   const hasInclude = /"include"\s*:/.test(stripped);
   if (hasInclude) return false;
   const filesMatch = stripped.match(/"files"\s*:\s*\[([^\]]*)\]/);
-  const hasNonEmptyFiles = !!filesMatch && filesMatch[1].trim() !== "";
-  return !hasNonEmptyFiles;
+  return !!filesMatch && filesMatch[1].trim() === "";
 }
 
 /**

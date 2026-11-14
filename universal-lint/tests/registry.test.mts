@@ -252,6 +252,10 @@ test("looksLikeSolutionStyleTsconfig: references with no files/include -> true",
   assert.equal(looksLikeSolutionStyleTsconfig("{\n  \"files\": [],\n  \"references\": [{\"path\": \"./pkg\"}]\n}"), true);
 });
 
+test("looksLikeSolutionStyleTsconfig: references with files AND include absent (tsc default include) -> false", () => {
+  assert.equal(looksLikeSolutionStyleTsconfig("{\"references\":[{\"path\":\"./lib\"}]}"), false);
+});
+
 test("looksLikeSolutionStyleTsconfig: references alongside include -> false", () => {
   assert.equal(looksLikeSolutionStyleTsconfig("{\n  \"include\": [\"src/**/*.ts\"],\n  \"references\": [{\"path\": \"./pkg\"}]\n}"), false);
 });
