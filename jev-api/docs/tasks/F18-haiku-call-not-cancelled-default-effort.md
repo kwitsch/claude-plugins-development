@@ -1,12 +1,14 @@
 ---
 id: F18
 title: The Haiku fallback call is not cancelled when abandoned and runs at the model's default effort
-status: partial
+status: closed
 priority: low
 area: jev-api/src/hooks/register.mts (askHaiku)
 ---
 
 ## Status
+
+Closed on 2026-11-15, no further code. The abort signal part shipped in 0.3.2 (below). The `effort` part is not done on purpose: the 0.3.1 calibration (120-prompt check, stretch, calibration paragraph) was measured at Haiku's default effort, so any effort change would invalidate it and needs a full live re-calibration for an unproven benefit (no cut-off was ever observed; the F04 budget has 19% headroom and a cut-off already degrades to a clean `fallback:` error). Reopen only when a live cut-off is reported.
 
 Done in jev-api 0.3.2 for the abort signal: `askHaiku` passes `{ signal }` as the second argument (options) of `$.model.complete`; a first version put it into the request, where the typings have no such field (found by the bug hunt). `ModelCompleteRequest.effort` exists in the typings but is not set: an observation, not measured (thinking may take part of `maxTokens`). Test: "the Haiku call gets the abort signal as an option".
 

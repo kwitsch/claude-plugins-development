@@ -22,7 +22,6 @@ Legend: `[x]` finished (done, or closed without code: status `closed` in the tas
 
 ## Remaining
 
-- [ ] [F18](tasks/F18-haiku-call-not-cancelled-default-effort.md) `partial` low: the Haiku call carries the abort signal since 0.3.2; still no `effort` (thinking shares `maxTokens`, not measured)
 - [ ] [F19](tasks/F19-jevfort-compaction-wait-and-hook-budget.md) `partial` medium (jevfort): the compaction ranking budget is 9 s since 0.9.1 (~4.6 s measured); the hook is bypassed by `cc-plugin-sec-default` on 2.1.325, and the 15 s Haiku budget against the engine's 10 s hook budget was not checked on the compaction path
 
 ## Closed without code (measurement records, decided 2026-11-13)
@@ -33,6 +32,7 @@ Legend: `[x]` finished (done, or closed without code: status `closed` in the tas
 - [x] [F13](tasks/F13-batch-shape-and-concurrency.md) Batch vs single requests, parallel calls
 - [x] [F14](tasks/F14-timers-and-memory.md) Timer cleanup and module memory
 - [x] [F15](tasks/F15-test-suite-runtime.md) Test-suite runtime
+- [x] [F18](tasks/F18-haiku-call-not-cancelled-default-effort.md) Haiku call: abort signal since 0.3.2; `effort` left at the default (calibration was measured there, no cut-off observed), closed 2026-11-15
 - [x] [F08](tasks/F08-haiku-prompt-repeats-criteria.md) Haiku prompt repeats identical criteria per question (26% of a compaction prompt)
 - [x] [F20](tasks/F20-jevfort-budget-equals-api-timeout.md) jevfort's 4 s budget and jev-api's 4 s timeout race: jevfort always decides, harmless (re-run)
 
@@ -42,4 +42,4 @@ Legend: `[x]` finished (done, or closed without code: status `closed` in the tas
 - F02 and F03 touched the same code (since the rewrite: `RegState`, `registerOne`, `ensureTools`, both hooks).
 - F05 and F06 touch `ask`/`askHaiku`'s race: do them together.
 - F16 and F17 touched the same registration code (since the rewrite: `RegState`, `registerOne`, `ensureTools`, both hooks); F03 (a bounded wait) was its first step, F16 its residual.
-- F19 was worked in jevfort and partly done by sizing (9 s), no live check of the engine's hook limit was run (skill `live-verify` would do it); F18 needs a live Haiku measurement before any `effort` change.
+- F19 was worked in jevfort and partly done by sizing (9 s), no live check of the engine's hook limit was run (skill `live-verify` would do it).
