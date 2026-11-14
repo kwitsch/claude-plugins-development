@@ -1298,6 +1298,19 @@ test("After a mid-turn compaction the path scan starts over and offers a newly n
   expect(Object.keys(last?.criteria ?? {})).toContain("read src/new.ts");
 });
 
+test("The path scan starts over when the transcript has fewer steps under the same request row", async ($, on) => {
+  const said = (text: string): Msg => ({ role: "assistant", text, toolUses: [] });
+  const messages: Msg[] = [user("tidy up the helpers"), said("one"), said("two"), said("three")];
+  const { sent } = setup(on, { messages, files: [`${CWD}/src/new.ts`], jev: () => undefined });
+  claudeBeneath(on, []);
+  await drain($.turn.step({ ...step, index: 1 }));
+  // Same request row, but the step rows were replaced by fewer ones naming a new file.
+  messages.splice(1, messages.length, said("look at src/new.ts"));
+  await drain($.turn.step({ ...step, index: 2 }));
+  const last = sent.filter((q) => q.id === "next_action").at(-1);
+  expect(Object.keys(last?.criteria ?? {})).toContain("read src/new.ts");
+});
+
 test("A mid-turn cd moves a later step's Read candidate to the new cwd", { options: { takeOnlyForBypass: false } }, async ($, on) => {
   let cwd = CWD;
   const messages: Msg[] = [user("check the sub project")];
