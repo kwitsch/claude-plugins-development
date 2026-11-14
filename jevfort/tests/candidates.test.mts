@@ -254,6 +254,6 @@ test("summarize walks from the end: same last entries, old rows are never serial
 });
 
 test("isSafeScript refuses scripts that rewrite files or never exit", () => {
-  for (const n of ["lint:fix", "lint:write", "lint:prettier:fix", "test:update", "test:u", "test:update-snapshots", "test:watch", "test:dev", "test:watchAll", "lint:autofix", "lint:fixAll", "lint:eslint_fix", "test:e2e:ui", "test:UI", "test:open", "test:debug", "test:updateSnapshot"]) expect(isSafeScript(n), n).toBe(false);
+  for (const n of ["lint:fix", "lint:write", "lint:prettier:fix", "test:update", "test:u", "test:update-snapshots", "test:watch", "test:dev", "test:watchAll", "lint:autofix", "lint:fixAll", "lint:eslint_fix", "test:e2e:ui", "test:UI", "test:open", "test:debug", "test:updateSnapshot", "lint:CSSFix", "test:E2EWatch"]) expect(isSafeScript(n), n).toBe(false);
   for (const n of ["test", "lint", "build", "test:unit", "lint:types", "test:e2e", "test:unit:ci", "type-check", "test:typesOnly"]) expect(isSafeScript(n), n).toBe(true);
 });

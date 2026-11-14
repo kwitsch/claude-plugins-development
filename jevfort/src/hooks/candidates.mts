@@ -33,10 +33,10 @@ const UNSAFE_WORD = /^(?:(?:auto)?fix|write|format|update|u|watch|dev|serve|ui|o
  * Whether a package.json script is safe to run unasked.
  *
  * @param name - The script name.
- * @returns True for an allowlisted name none of whose words (split at `:`, `-`, `_` and camelCase humps) is in {@link UNSAFE_WORD}.
+ * @returns True for an allowlisted name none of whose words (split at `:`, `-`, `_` and camelCase humps, also after an acronym run as in `CSSFix`) is in {@link UNSAFE_WORD}.
  */
 export function isSafeScript(name: string): boolean {
-  return SCRIPT_HEAD.test(name) && !name.split(/[:_-]|(?<=[a-z\d])(?=[A-Z])/).some((w) => UNSAFE_WORD.test(w.toLowerCase()));
+  return SCRIPT_HEAD.test(name) && !name.split(/[:_-]|(?<=[a-z\d])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])/).some((w) => UNSAFE_WORD.test(w.toLowerCase()));
 }
 /**
  * Built-in CLI commands the command list can report as user commands but the Skill tool refuses (`/diff` did).

@@ -4,7 +4,7 @@ const MAX_SEARCHES = 3;
 const SCRIPT_HEAD = /^(?:test|tests|lint|build|typecheck|type-check|check|test:[\w:-]+|lint:[\w:-]+)$/;
 const UNSAFE_WORD = /^(?:(?:auto)?fix|write|format|update|u|watch|dev|serve|ui|open|debug)$/;
 export function isSafeScript(name) {
-	return SCRIPT_HEAD.test(name) && !name.split(/[:_-]|(?<=[a-z\d])(?=[A-Z])/).some((w) => UNSAFE_WORD.test(w.toLowerCase()));
+	return SCRIPT_HEAD.test(name) && !name.split(/[:_-]|(?<=[a-z\d])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])/).some((w) => UNSAFE_WORD.test(w.toLowerCase()));
 }
 export const BUILTIN_COMMANDS = new Set(("add-dir agents bug clear compact config context cost diff doctor exit export help hooks ide init " + "install-github-app login logout mcp memory model permissions plugin pr-comments release-notes resume " + "review rewind status statusline terminal-setup theme upgrade usage vim").split(" "));
 export const SKILL_BLOCKLIST_KEY = "skillBlocklist";
