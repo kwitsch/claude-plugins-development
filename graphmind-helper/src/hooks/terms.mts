@@ -212,5 +212,5 @@ export function binaryDirs(pathVar: string | undefined, home: string | undefined
   const dirs = (pathVar ?? "").split(delimiter).filter((d) => d.startsWith("/"));
   if (home) dirs.push(`${home}/.graphmind/bin`, `${home}/.local/bin`);
   dirs.push("/usr/local/bin");
-  return dirs.map((d) => d.replace(/\/+$/, ""));
+  return dirs.map((d) => d.replace(/(.)\/+$/, "$1")); // keep "/" itself: "" would make the binary path relative
 }

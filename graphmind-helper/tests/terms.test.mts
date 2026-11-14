@@ -61,6 +61,7 @@ test("fit puts a title-less block in as plain text", () => {
 test("binaryDirs: absolute PATH entries first, then the places the setup scripts add", () => {
   assert.deepEqual(binaryDirs("/a/:rel:/b", "/home/u"), ["/a", "/b", "/home/u/.graphmind/bin", "/home/u/.local/bin", "/usr/local/bin"]);
   assert.deepEqual(binaryDirs(undefined, undefined), ["/usr/local/bin"]);
+  assert.deepEqual(binaryDirs("//:/usr/bin", undefined), ["/", "/usr/bin", "/usr/local/bin"]);
 });
 
 test("resolveTools finds the plugin's own server and a setup server, and needs all four tools", () => {
