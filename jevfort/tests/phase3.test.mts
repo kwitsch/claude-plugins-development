@@ -75,9 +75,9 @@ test("The prompt classifier adds a hint only Claude reads", async ($, on) => {
     seen = e.context as readonly string[] | undefined;
     return { text: e.text };
   });
-  await $.prompt.submit({ text: "rewrite the storage layer to use IndexedDB and sync across tabs", wait: false, origin: { kind: "composer" } });
+  await $.prompt.submit({ text: "rewrite the storage layer to draw aws diagrams and build the constructor", wait: false, origin: { kind: "composer" } });
   expect(seen?.join("\n") ?? "").toContain("plan");
-  // The batch's question types in order; the skill options are the listed skills plus `none`.
+  // The batch's question types in order; the skill options are the related skills (best first) plus `none`.
   expect(sent.map((q) => q.type)).toEqual(["choice", "noul", "choice"]);
   expect(Object.keys(sent[2].criteria as object)).toEqual(["none", "aws-diagrams", "constructor"]);
 });
@@ -99,17 +99,22 @@ test("A confident skill keeps its hint where step 0 cannot take it (takeOnlyForB
   expect(seen?.join("\n") ?? "").toContain("the skill \"aws-diagrams\"");
 });
 
-test("The classifier offers at most 255 skill options, none first, each name once", async ($, on) => {
+test("The classifier offers only the related skills (at most 8, deduped), none first; no related skill, no skill question", async ($, on) => {
   // Only the questions sent matter here, not the answers.
   const sent = base(on, () => ({}));
-  const skills = Array.from({ length: 300 }, (_, i) => ({ name: `skill-${i}`, description: `Skill ${i}`, source: "user" }));
-  on("command.list", () => ({ value: [skills[0], ...skills] }));
+  const filler = Array.from({ length: 300 }, (_, i) => ({ name: `helper-${i}`, description: `Helper number ${i}`, source: "user" }));
+  const migrate = Array.from({ length: 12 }, (_, i) => ({ name: `migrate-${i}`, description: `Variant ${i}`, source: "plugin" }));
+  const best = { name: "db-migrate", description: "Migrate the database schema", source: "user" };
+  on("command.list", () => ({ value: [...filler, { ...best, name: "tools:db-migrate", source: "plugin" }, ...migrate, best] }));
   on("prompt.submit", (_$, e) => ({ text: e.text }));
-  await $.prompt.submit({ text: "rewrite the storage layer", wait: false, origin: { kind: "composer" } });
+  await $.prompt.submit({ text: "migrate the database schema to v2", wait: false, origin: { kind: "composer" } });
   const options = Object.keys(sent[2].criteria as object);
-  expect(options).toHaveLength(255);
-  expect(options.slice(0, 3)).toEqual(["none", "skill-0", "skill-1"]);
-  expect(options.at(-1)).toBe("skill-253");
+  expect(options).toHaveLength(9);
+  expect(options.slice(0, 2)).toEqual(["none", "db-migrate"]);
+  expect(options).not.toContain("tools:db-migrate");
+  sent.length = 0;
+  await $.prompt.submit({ text: "rewrite the storage layer", wait: false, origin: { kind: "composer" } });
+  expect(sent.map((q) => q.type)).toEqual(["choice", "noul"]);
 });
 
 test("A general-purpose subagent is switched only when Jev is confident; an explicit type is kept", async ($, on) => {

@@ -1,14 +1,18 @@
 ---
 id: F01
 title: The prompt classifier sends every listed skill; from ~120 skills every classification times out and pauses Jev
-status: open
+status: done
 priority: high
 area: jevfort/src/hooks/register.mts (skillOptions, onPromptSubmit, onAgentCall), jevfort/src/hooks/prompt.mts (promptQuestions)
 ---
 
 ## Status
 
-Open. Found in the performance analysis of 2026-11-14 ([../EVALUATION-2026-11-14.md](../EVALUATION-2026-11-14.md)), plugin 0.10.1.
+Done in jevfort 0.11.0 (approach 1). `skillOptions($, request)` filters like step 0: `relevant(request, dedupeSkills(...))` (at most 8, `MAX_RELATED`, best first) plus `none`; with no related skill it returns `undefined` and `promptQuestions` asks only `kind` and `needs_plan`. The classifier request stays at <= 9 skill options (2.8 KB) whatever is installed: 254 skills 495 ms instead of a timeout ([../EVALUATION-2026-11-14-F01.md](../EVALUATION-2026-11-14-F01.md)).
+
+Decision (approach 1 over 2/3): the hint fired on 6 of 156 classified prompts in the user's real store, each sharing a word with the skill's name or description, so the word filter keeps them; a German prompt with no shared word loses the classifier hint (stated in the README upgrade note and CLAUDE.md). Approach 2 still grows with the list, approach 3 does not help under the default `takeOnlyForBypass`. Approach 4 (agent types) not done: 30 types cost 1.04 s, below the budget, and `relevant` matches subagent prompts against type descriptions poorly; left as is.
+
+Earlier state: Open. Found in the performance analysis of 2026-11-14 ([../EVALUATION-2026-11-14.md](../EVALUATION-2026-11-14.md)), plugin 0.10.1.
 
 ## Problem
 
@@ -56,6 +60,14 @@ Prototype and measure first; candidates:
 Do not raise the budget instead: the classifier sits before the first token of every turn.
 
 ## Verification
+
+Done (0.11.0):
+
+- `tests/phase3.test.mts` "The classifier offers only the related skills (at most 8, deduped), none first; no related skill, no skill question": 313 listed skills, prompt "migrate the database schema to v2" gives 9 options (`none`, `db-migrate` first, `tools:db-migrate` deduped); "rewrite the storage layer" sends only the 2 questions. Failed without the fix (255 options).
+- Real endpoint sweep (5 runs, median): 20 skills 840 -> 324 ms, 100 skills 3241 -> 500 ms, 254 skills timeout -> 495 ms, 300 skills 501 ms ([../EVALUATION-2026-11-14-F01.md](../EVALUATION-2026-11-14-F01.md)).
+- `pnpm --filter jevfort build`, `pnpm lint` (0 findings), `pnpm --filter jevfort test` (196 passed).
+
+Planned:
 
 - A kit test: with 300 listed skills the classifier's batch call carries at most the chosen number of skill options (and the expected one for a matching prompt).
 - Re-measure with the evaluation's `real2.mjs`-style sweep (classifier at 20/100/254 skills) and record it in a new dated evaluation; no timeout at 254 skills.

@@ -728,26 +728,22 @@ async function summarizeResult($: Engine, request: string, action: string, outpu
 }
 
 /**
- * The skill options of the prompt classifier: `none` plus each listed plugin or user skill that is not built in or
- * blocklisted, once per name and in listing order, at most `MAX_CHOICE_OPTIONS` options in all (jev-api's choice
- * limit).
+ * The skill options of the prompt classifier: `none` plus the listed plugin or user skills that are not built in or
+ * blocklisted and share words with the request (`relevant`, at most 8, best first, after `dedupeSkills`). System One's
+ * latency grows ~32 ms per option: every listed skill crossed the 4 s budget from ~120 skills (F01).
  *
  * @param $ - Engine interface.
- * @returns The options, or `undefined` when no skill is listed.
+ * @param request - The prompt.
+ * @returns The options, or `undefined` when no listed skill is related.
  */
-async function skillOptions($: Engine): Promise<Record<string, string> | undefined> {
+async function skillOptions($: Engine, request: string): Promise<Record<string, string> | undefined> {
   const commands = await $.command.list().catch(() => []);
   const blocked = new Set(((await $.store.get(SKILL_BLOCKLIST_KEY).catch(() => undefined)) as string[] | undefined) ?? []);
+  const skills = relevant(request, dedupeSkills(commands.filter((c) => (c.source === "plugin" || c.source === "user") && c.name !== "jev" && !BUILTIN_COMMANDS.has(c.name) && !blocked.has(c.name))));
+  if (!skills.length) return undefined;
   const criteria: Record<string, string> = { [NONE]: "No listed skill is meant for this request" };
-  for (const c of commands) {
-    // shortcut: past jev-api's choice limit later skills are left out; rank them if users hit it.
-    if (Object.keys(criteria).length >= MAX_CHOICE_OPTIONS) break;
-    // Own keys only: `in` would also see Object.prototype members, dropping a skill named `constructor` or `toString`.
-    if ((c.source === "plugin" || c.source === "user") && c.name !== "jev" && !BUILTIN_COMMANDS.has(c.name) && !blocked.has(c.name) && !Object.hasOwn(criteria, c.name)) {
-      criteria[c.name] = clip(c.description, 160);
-    }
-  }
-  return Object.keys(criteria).length > 1 ? criteria : undefined;
+  for (const c of skills) criteria[c.name] = clip(c.description, 160);
+  return criteria;
 }
 
 /**
@@ -1023,7 +1019,7 @@ export const register = (on: On, options: Options): void => {
     // A finished background task arrives as origin `task-notification` (not flagged meta): nothing to classify.
     if (options.classify === false || e.command || e.isMeta || e.origin?.kind === "task-notification" || e.text.trim().length < 3) return next(e);
 
-    const questions = promptQuestions(await skillOptions($));
+    const questions = promptQuestions(await skillOptions($, e.text));
     const previous = await previousReply($);
     const r = await askJev($, { request: clip(e.text, 3000), ...(previous ? { previous_reply: previous } : {}) }, questions);
     if (!r.ok) return next(e);

@@ -104,6 +104,9 @@ subagents load it via ToolSearch), no skills, agents, command hooks or MCP serve
   the rule. The cuts are for `d1-3b`; the Haiku fallback of jev-api is not calibrated either. `route` and `estimate` log entries carry `effortScore` and `effortConfidence` to recalibrate from real turns.
   `tests/effort-fixture.test.mts` pins the acceptance numbers (A1 to A5). `words()` in `candidates.mts` splits at
   `[^\p{L}\p{N}]` so umlauts survive; German prompts still share few words with English skill descriptions.
+  The prompt classifier's `skill` question (`skillOptions`, 0.11.0, F01) offers only `relevant(request, dedupeSkills(...))` (at most 8) plus
+  `none`, and is left out when no listed skill is related: System One costs ~32 ms per option, and every listed skill crossed the 4 s budget
+  (and tripped `jevPause`) from ~120 skills. A related skill without a shared word (German prompt) gets no classifier hint.
   Opus/Sonnet sessions are estimated every turn; Haiku/Fable sessions only on each loop's first turn, whose estimate is
   then held while the session effort is unchanged. A model switch starts a new first turn. Bounds: options
   `minEffort`/`maxEffort`; invalid or inverted values fall back to `low`/`xhigh` with a logged error at session start.

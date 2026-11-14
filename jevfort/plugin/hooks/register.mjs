@@ -431,17 +431,14 @@ async function summarizeResult($, request, action, output) {
 		reason: "empty-reply"
 	};
 }
-async function skillOptions($) {
+async function skillOptions($, request) {
 	const commands = await $.command.list().catch(() => []);
 	const blocked = new Set(await $.store.get(SKILL_BLOCKLIST_KEY).catch(() => undefined) ?? []);
+	const skills = relevant(request, dedupeSkills(commands.filter((c) => (c.source === "plugin" || c.source === "user") && c.name !== "jev" && !BUILTIN_COMMANDS.has(c.name) && !blocked.has(c.name))));
+	if (!skills.length) return undefined;
 	const criteria = { [NONE]: "No listed skill is meant for this request" };
-	for (const c of commands) {
-		if (Object.keys(criteria).length >= MAX_CHOICE_OPTIONS) break;
-		if ((c.source === "plugin" || c.source === "user") && c.name !== "jev" && !BUILTIN_COMMANDS.has(c.name) && !blocked.has(c.name) && !Object.hasOwn(criteria, c.name)) {
-			criteria[c.name] = clip(c.description, 160);
-		}
-	}
-	return Object.keys(criteria).length > 1 ? criteria : undefined;
+	for (const c of skills) criteria[c.name] = clip(c.description, 160);
+	return criteria;
 }
 function summarizeCalls(calls) {
 	if (!calls.length) return "replied";
@@ -655,7 +652,7 @@ export const register = (on, options) => {
 		}
 		if (e.origin?.kind === "composer" && !e.isMeta) donePending = false;
 		if (options.classify === false || e.command || e.isMeta || e.origin?.kind === "task-notification" || e.text.trim().length < 3) return next(e);
-		const questions = promptQuestions(await skillOptions($));
+		const questions = promptQuestions(await skillOptions($, e.text));
 		const previous = await previousReply($);
 		const r = await askJev($, {
 			request: clip(e.text, 3e3),
