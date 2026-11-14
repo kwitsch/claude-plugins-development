@@ -249,7 +249,7 @@ test("Jev takes a confident Read step without asking Claude", { options: { takeO
   expect(chunks).toContainEqual({ kind: "input", index: 0, json: JSON.stringify({ file_path: `${CWD}/src/app.ts` }) });
 });
 
-test("An unsure Jev hands the step to Claude, with effort lowered for an easy turn", async ($, on) => {
+test("An unsure Jev hands the step to Claude, with effort lowered for an easy turn", { options: { takeOnlyForBypass: false } }, async ($, on) => {
   const seen: unknown[] = [];
   setup(on, {
     messages: [user("what does src/app.ts export?")],
