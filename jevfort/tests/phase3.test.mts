@@ -117,6 +117,25 @@ test("The classifier offers only the related skills (at most 8, deduped), none f
   expect(sent.map((q) => q.type)).toEqual(["choice", "noul"]);
 });
 
+/** A listed skill whose name is the classifier's no-skill option. */
+const SKILL_NONE = { name: "none", description: "Deploy the docs site to staging", source: "user" };
+
+test("A listed skill named none never replaces the no-skill option", async ($, on) => {
+  const sent = base(on, () => ({}));
+  on("command.list", () => ({ value: [SKILL_NONE, { name: "deploy-docs", description: "Deploy the docs site", source: "plugin" }] }));
+  on("prompt.submit", (_$, e) => ({ text: e.text }));
+  await $.prompt.submit({ text: "deploy the docs site", wait: false, origin: { kind: "composer" } });
+  expect(sent[2].criteria).toEqual({ none: "No listed skill is meant for this request", "deploy-docs": "Deploy the docs site" });
+});
+
+test("With only a skill named none related, no skill question", async ($, on) => {
+  const sent = base(on, () => ({}));
+  on("command.list", () => ({ value: [SKILL_NONE] }));
+  on("prompt.submit", (_$, e) => ({ text: e.text }));
+  await $.prompt.submit({ text: "deploy the docs site", wait: false, origin: { kind: "composer" } });
+  expect(sent.map((q) => q.type)).toEqual(["choice", "noul"]);
+});
+
 test("A general-purpose subagent is switched only when Jev is confident; an explicit type is kept", async ($, on) => {
   const sent = base(on, () => ({ type: "choice", choice: "Explore", probabilities: { Explore: 0.92, "general-purpose": 0.08 }, confidence: 0.85 }));
   on("agent.offer", () => ({ isOffered: true }));

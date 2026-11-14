@@ -847,7 +847,8 @@ function offerableSkills($: Engine): Promise<CommandInfo[]> {
  * @returns The options, or `undefined` when no listed skill is related.
  */
 async function skillOptions($: Engine, request: string): Promise<Record<string, string> | undefined> {
-  const skills = relevant(request, await offerableSkills($));
+  // A skill named `none` would overwrite the no-skill option and read as "no skill" in `hints`.
+  const skills = relevant(request, await offerableSkills($)).filter((c) => c.name !== NONE);
   if (!skills.length) return undefined;
   const criteria: Record<string, string> = { [NONE]: "No listed skill is meant for this request" };
   for (const c of skills) criteria[c.name] = clip(c.description, 160);

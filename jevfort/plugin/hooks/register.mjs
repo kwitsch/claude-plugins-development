@@ -487,7 +487,7 @@ function offerableSkills($) {
 	})();
 }
 async function skillOptions($, request) {
-	const skills = relevant(request, await offerableSkills($));
+	const skills = relevant(request, await offerableSkills($)).filter((c) => c.name !== NONE);
 	if (!skills.length) return undefined;
 	const criteria = { [NONE]: "No listed skill is meant for this request" };
 	for (const c of skills) criteria[c.name] = clip(c.description, 160);
