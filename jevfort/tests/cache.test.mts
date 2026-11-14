@@ -114,21 +114,6 @@ test("session.compact is written by Haiku, with the user's note, without jev-api
   expect(asked[0]).toContain("claude-haiku-5-5|");
   expect(asked[0]).toContain("keep the paths");
   expect(r.messages[0].text).toContain("S".repeat(300));
-  // One compaction counts once, under its own log kind (not as a second Jev-ranking run).
-  const status = (await $.command.run({ command: "jev", args: "" })) as { text: string };
-  expect(status.text).toContain("summary=1");
-  expect(status.text).not.toContain("compact=");
-});
-
-test("a failing log write does not throw away the Haiku summary", async ($, on) => {
-  on("store.get", () => ({ value: undefined }));
-  on("store.set", () => ({ deny: "disk full" }));
-  on("clock.now", () => ({ value: 0 }));
-  on("ui.status", () => ({ value: undefined }));
-  on("tool.list", () => ({ value: [] }));
-  on("model.complete", () => ({ value: { isAnswered: true, text: "S".repeat(300), usage: { input_tokens: 1, output_tokens: 1 } } }));
-  const r = (await $.session.compact({ trigger: "manual", messages: MESSAGES })) as { messages?: { text: string }[] };
-  expect(r.messages?.[0].text).toContain("S".repeat(300));
 });
 
 test("session.compact falls through to Claude Code when Haiku fails", async ($, on) => {
@@ -218,7 +203,6 @@ function chatSetup(on: Parameters<typeof mock.clock>[0], percent: number, run: (
     return { value: undefined };
   });
   on("tool.list", () => ({ value: [] }));
-  on("command.register", () => ({ value: undefined }));
   on("session.start", async () => ({}));
   on("session.end", async () => ({}));
   on("turn.complete", async () => ({}));

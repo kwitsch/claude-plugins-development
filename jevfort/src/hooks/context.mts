@@ -104,7 +104,7 @@ function isTranscriptOnly(text: string): boolean {
 /**
  * The row of a slash command that started a turn (a skill typed as `/name args`): `<command-message>` first, then the
  * name and optional arguments, nothing else. The arguments group is greedy, so the row's last closing tag ends it
- * whatever the arguments contain. A local command such as `/jev` starts with `<command-name>` and starts no turn.
+ * whatever the arguments contain. A local command such as `/context` starts with `<command-name>` and starts no turn.
  * The name group takes its surrounding blanks and {@link typedCommand} trims them: a lazy group beside `\s*` backtracks
  * cubically on a long run of blanks (2000 of them took 2 s).
  */
@@ -133,7 +133,7 @@ function typedCommand(text: string): string | undefined {
 /**
  * The last user message that carries text and no tool results is the request; a slash command that started a turn
  * (`<command-message>` row, as a skill has) is the request as typed, not the prompt before it. A local command
- * (`<command-name>` row, as `/jev` has) is skipped like any transcript-only row.
+ * (`<command-name>` row, as a local command has) is skipped like any transcript-only row.
  *
  * @param messages - The transcript.
  * @returns The request and the steps after it, or `undefined` without a request.

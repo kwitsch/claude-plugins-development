@@ -4,9 +4,7 @@ import { absolute, AUTH_TOOL, bash, BUILTIN_COMMANDS, clipScript, coversStep, de
 import { COMPACT_MAX_TOKENS, COMPACT_MODEL, COMPACT_SYSTEM, compactInstructions, compactItems, haikuTranscript, RELEVANCE } from "./compact.mjs";
 import { clip, head, splitTurn, summarize, toolCalls } from "./context.mjs";
 import { choice, COMPACT_API_TIMEOUT_S, COMPACT_TIMEOUT_MS, HAIKU_API_TIMEOUT_S, HAIKU_TIMEOUT_MS, isAnswer, JEV_API_TIMEOUT_S, JEV_BATCH, JEV_TOOL_PREFIX, JEV_TOOLS, MAX_CHOICE_OPTIONS, MAX_ERROR, MAX_PAUSE_MS, missingJevTools, noul, PAUSE_MS, score, TIMEOUT_MS } from "./jev.mjs";
-import { forgetRecent, LOG_KEY, MAX_ENTRIES, recentDecisions, remember, statsKey } from "./log.mjs";
 import { bestAction, bounds, EFFORT_ORDER, effortQuestion, ESTIMATE_SPEC, ESTIMATE_TOOL, estimateEffort, EVERY_TURN_MODELS, inBandRange, inScratchpad, isEffort, mechanicalQuestion, modelFamily, nextActionQuestion, parseEstimateInput, pickCandidate, singleActionQuestion, taskEndQuestion } from "./policy.mjs";
-import { buildReport, escapePipes } from "./report.mjs";
 import { SUMMARY_MODEL, SYSTEM } from "./summarize.mjs";
 const newScan = () => ({
 	steps: 0,
@@ -225,18 +223,7 @@ async function withJevRanking($, e) {
 	const added = compactInstructions(items, scores);
 	const keep = scores.filter((s) => (s ?? 0) >= 2.2).length;
 	const drop = scores.filter((s) => s !== undefined && s < .8).length;
-	await record($, {
-		kind: "compact",
-		applied: added !== undefined,
-		text: `${e.trigger} compaction: ${items.length} results scored, keep ${keep}, drop ${drop}`,
-		ms: r.ms,
-		data: {
-			trigger: e.trigger,
-			items: items.length,
-			keep,
-			drop
-		}
-	}).catch(() => undefined);
+	note($, `${e.trigger} compaction: ${items.length} results scored, keep ${keep}, drop ${drop}`);
 	return added ? {
 		...e,
 		instructions: e.instructions ? `${e.instructions}\n\n${added}` : added
@@ -258,63 +245,18 @@ async function jevApply($, missing) {
 		$.ui.invalidate("ui.render");
 	} catch {}
 	if (key) {
-		await record($, {
-			kind: "error",
-			applied: false,
-			text: `inactive: jev-api tools missing (${key})`
-		}).catch(() => undefined);
+		note($, `inactive: jev-api tools missing (${key})`);
 		return;
 	}
 	try {
 		if (!estimateRegistered) await $.tool.register(ESTIMATE_SPEC);
 		estimateRegistered = true;
 	} catch (err) {
-		await record($, {
-			kind: "error",
-			applied: false,
-			text: `estimate_effort not registered: ${String(err)}`
-		}).catch(() => undefined);
+		note($, `estimate_effort not registered: ${String(err)}`);
 	}
 }
-async function readLog($) {
-	return await $.store.get(LOG_KEY) ?? [];
-}
-async function stats($) {
-	return await $.store.get("stats") ?? {};
-}
-let storeQueue = Promise.resolve();
-const pending = [];
-async function record($, d) {
-	const entry = {
-		...d,
-		at: await $.clock.now().catch(() => Date.now())
-	};
-	remember(entry);
-	pending.push(entry);
-	if (d.kind !== "outcome" && d.kind !== "turn") void $.ui.status(head(`jev: ${d.text}`, 80));
-}
-async function flushLog($) {
-	if (!pending.length) return storeQueue;
-	const entries = pending.splice(0);
-	const run = storeQueue.then(async () => {
-		const log = await readLog($);
-		await $.store.set(LOG_KEY, [...log, ...entries].slice(-MAX_ENTRIES));
-		const tally = await stats($);
-		for (const key of entries.map(statsKey)) tally[key] = (tally[key] ?? 0) + 1;
-		await $.store.set("stats", tally);
-	});
-	storeQueue = run.catch(() => undefined);
-	await storeQueue;
-}
-async function clearLog($) {
-	pending.length = 0;
-	forgetRecent();
-	const run = storeQueue.then(async () => {
-		await $.store.set(LOG_KEY, []);
-		await $.store.set("stats", {});
-	});
-	storeQueue = run.catch(() => undefined);
-	await run;
+function note($, text) {
+	void $.ui.status(head(`jev: ${text}`, 80));
 }
 async function readTurn($, agentId) {
 	return turnOf(await $.session.messages(agentId ? { agentId } : {}));
@@ -490,7 +432,7 @@ function offerableSkills($) {
 	return skillList ??= (async () => {
 		const commands = await $.command.list().catch(() => []);
 		const blocked = new Set(await $.store.get(SKILL_BLOCKLIST_KEY).catch(() => undefined) ?? []);
-		return dedupeSkills(commands.filter((c) => (c.source === "plugin" || c.source === "user") && c.name !== "jev" && !BUILTIN_COMMANDS.has(c.name) && !blocked.has(c.name)));
+		return dedupeSkills(commands.filter((c) => (c.source === "plugin" || c.source === "user") && !BUILTIN_COMMANDS.has(c.name) && !blocked.has(c.name)));
 	})();
 }
 function summarizeCalls(calls) {
@@ -503,7 +445,7 @@ function summarizeCalls(calls) {
 	}
 	return [...parts].map(([k, n]) => n > 1 ? `${k} ×${n}` : k).join(", ");
 }
-async function recordCompare($, turnId, step, request, answer, candidates, toolUses) {
+function noteCompare($, answer, candidates, toolUses) {
 	const best = bestAction(answer);
 	const claudeCalls = toolUses.map((u) => ({
 		tool: u.name,
@@ -511,26 +453,7 @@ async function recordCompare($, turnId, step, request, answer, candidates, toolU
 	}));
 	const bestCandidate = candidates.find((c) => c.key === best?.key);
 	const agree = Boolean(bestCandidate && coversStep(claudeCalls, bestCandidate));
-	const claudeUsedCandidate = claudeCalls.some((c) => candidates.some((k) => coversStep([c], k)));
-	const claudeSummary = summarizeCalls(claudeCalls);
-	await record($, {
-		kind: "compare",
-		applied: false,
-		text: `Claude: ${claudeSummary} · Jev best ${best?.key ?? "none"}${agree ? " ✓" : ""}`,
-		turnId,
-		data: {
-			request: clip(request, 120),
-			step,
-			claudeSummary,
-			pick: answer.choice,
-			best: best?.key,
-			bestP: best?.p,
-			claude: claudeCalls.map((c) => c.tool),
-			claudeCalls: claudeCalls.map((c) => clip(asText(c.input.command ?? c.input.file_path ?? c.input.skill ?? c.input.query ?? ""), 200)),
-			agree,
-			claudeUsedCandidate
-		}
-	});
+	note($, `Claude: ${summarizeCalls(claudeCalls)} · Jev best ${best?.key ?? "none"}${agree ? " ✓" : ""}`);
 }
 async function blockSkill($, name) {
 	try {
@@ -560,15 +483,7 @@ async function contextCompact($, e, ready, fromPercent, forcePercent) {
 	}
 	if (compactQueued) return;
 	compactQueued = true;
-	await record($, {
-		kind: "autocompact",
-		applied: true,
-		text,
-		data: {
-			percent,
-			forced
-		}
-	}).catch(() => undefined);
+	note($, text);
 	$.command.run({
 		command: "compact",
 		args: ""
@@ -605,14 +520,6 @@ export const register = (on, options) => {
 	const autoCompactPercent = threshold("autoCompactPercent", 60);
 	const taskCompactPercent = threshold("taskCompactPercent", 80);
 	const forceCompactPercent = threshold("forceCompactPercent", 95);
-	on("ui.render", {
-		component: "CommandOutput",
-		props: { command: "jev" }
-	}, function onRenderJev($, e, next) {
-		if (e.props.isErrored) return next(e);
-		const { Markdown } = $.ui.resolve(e);
-		return Markdown({ text: e.props.text });
-	});
 	let band = {};
 	let autoOff = false;
 	on("ui.render", { component: "AbovePrompt" }, async function onRenderBand($, e, next) {
@@ -690,19 +597,7 @@ export const register = (on, options) => {
 			if (!answer) return next(e);
 			const p = answer.probabilities[answer.choice] ?? 0;
 			const canSwitch = GENERAL.has(claudeType) && !GENERAL.has(answer.choice) && Object.hasOwn(criteria, answer.choice) && p >= SWITCH_AT;
-			await record($, {
-				kind: "agent",
-				applied: canSwitch,
-				text: `Claude ${claudeType || "(default)"} · Jev ${answer.choice} p=${p.toFixed(2)}${canSwitch ? " → switched" : ""}`,
-				ms: r.ms,
-				data: {
-					claude: claudeType || "general-purpose",
-					jev: answer.choice,
-					p,
-					switched: canSwitch,
-					agree: answer.choice === (claudeType || "general-purpose")
-				}
-			});
+			note($, `Claude ${claudeType || "(default)"} · Jev ${answer.choice} p=${p.toFixed(2)}${canSwitch ? " → switched" : ""}`);
 			return canSwitch ? next({
 				...e,
 				subagent_type: answer.choice
@@ -724,11 +619,11 @@ export const register = (on, options) => {
 		if (e.trigger === "precompute") return { skip: "jevfort compacts with Haiku when it is time" };
 		const transcript = haikuTranscript(ranked.messages);
 		if (transcript === undefined) return passOn();
-		const note = ranked.instructions?.trim();
+		const focus = ranked.instructions?.trim();
 		const r = await $.model.complete({
 			model: COMPACT_MODEL,
 			system: COMPACT_SYSTEM,
-			prompt: `${transcript}\n\n---\nWrite the summary now.${note ? `\nThe summary should keep or stress: ${note}` : ""}`,
+			prompt: `${transcript}\n\n---\nWrite the summary now.${focus ? `\nThe summary should keep or stress: ${focus}` : ""}`,
 			maxTokens: COMPACT_MAX_TOKENS,
 			timeoutMs: 24e4
 		}).catch((err) => ({
@@ -737,11 +632,7 @@ export const register = (on, options) => {
 		}));
 		const text = r.isAnswered ? r.text.trim() : "";
 		const written = text.length > 200 && r.isAnswered && r.usage.output_tokens < COMPACT_MAX_TOKENS;
-		await record($, {
-			kind: "summary",
-			applied: written,
-			text: written ? `${e.trigger} compaction written by ${COMPACT_MODEL}` : `${COMPACT_MODEL} could not compact (${r.isAnswered ? "empty or cut-off summary" : r.reason}), Claude Code does it`
-		}).catch(() => undefined);
+		note($, written ? `${e.trigger} compaction written by ${COMPACT_MODEL}` : `${COMPACT_MODEL} could not compact (${r.isAnswered ? "empty or cut-off summary" : r.reason}), Claude Code does it`);
 		if (!written) return passOn();
 		cacheExpires = 0;
 		compactQueued = false;
@@ -757,7 +648,6 @@ export const register = (on, options) => {
 	let scratchpad;
 	const forgetConversation = () => {
 		firstTurns.clear();
-		forgetRecent();
 		band = {};
 		autoOff = false;
 		scratchpad = undefined;
@@ -770,19 +660,7 @@ export const register = (on, options) => {
 		bandStale = false;
 		cacheTimer?.cancel();
 		cacheTimer = $.clock.every(CACHE_TICK_MS, () => void cacheTick($, autoCompactPercent).catch(() => undefined));
-		if (badRange) await record($, {
-			kind: "error",
-			applied: false,
-			text: `invalid effort bounds (${badRange}): using low..xhigh`
-		}).catch(() => undefined);
-		await $.command.register({
-			name: "jev",
-			description: "Jev pilot: status, /jev report, /jev candidates, /jev export, /jev clear"
-		}).catch((err) => record($, {
-			kind: "error",
-			applied: false,
-			text: `/jev not registered: ${err instanceof Error ? err.message : String(err)}`
-		}).catch(() => undefined));
+		if (badRange) note($, `invalid effort bounds (${badRange}): using low..xhigh`);
 		const result = await next(e);
 		dropTurnReads();
 		await jevApply($, await jevMissing($));
@@ -792,57 +670,7 @@ export const register = (on, options) => {
 	on("session.end", async function onSessionEnd($, e, next) {
 		forgetConversation();
 		resetCache($);
-		await flushLog($);
 		return next(e);
-	});
-	on("command.run", { command: "jev" }, async function onJevCommand($, e) {
-		try {
-			const arg = e.args.trim();
-			await flushLog($);
-			if (arg === "report") {
-				return { text: buildReport(await readLog($), takeThreshold) };
-			}
-			if (arg === "candidates") {
-				const ctx = await readTurn($);
-				const list = await buildCandidates($, ctx?.request ?? "", [], [], 0);
-				const kind = (c) => c.tool === "Skill" ? "Skills" : c.tool === "ToolSearch" ? "Tools to load" : c.tool === "Read" ? "File reads" : "Commands";
-				const groups = new Map();
-				for (const c of list) groups.set(kind(c), [...groups.get(kind(c)) ?? [], c]);
-				const sections = [...groups].map(([name, items]) => `### ${name} (${items.length})\n\n| Option | Description |\n|---|---|\n` + items.map((c) => `| \`${escapePipes(c.key)}\` | ${escapePipes(c.description).replace(/\s+/g, " ")} |`).join("\n"));
-				return { text: [
-					`## Jev candidates: ${list.length + 1} options`,
-					`_For the last prompt: "${clip(ctx?.request ?? "(none)", 60)}". Plus \`claude\`: leave the step to Claude._`,
-					...sections
-				].join("\n\n") };
-			}
-			if (arg === "clear") {
-				await clearLog($);
-				return { text: "Jev pilot: log cleared." };
-			}
-			if (arg === "export") {
-				const log = await readLog($);
-				const path = `${await $.session.cwd()}/.jev/decisions-${await $.clock.now().catch(() => Date.now())}.jsonl`;
-				try {
-					if (await $.fs.exists(path)) return { text: `Jev pilot: ${path} exists, nothing written` };
-					await $.fs.write(path, log.map((entry) => JSON.stringify(entry)).join("\n") + "\n");
-					return { text: `Jev pilot: wrote ${log.length} entries to ${path}` };
-				} catch (err) {
-					return { text: `Jev pilot: could not write ${path}: ${err instanceof Error ? err.message : String(err)}` };
-				}
-			}
-			const missing = await jevMissing($);
-			const counts = Object.entries(await stats($).catch(() => ({ unreadable: 1 }))).map(([k, v]) => `${k}=${v}`).join(", ") || "none yet";
-			const lines = recentDecisions().slice(-10).map((d) => `- ${d.kind}${d.applied ? "" : " (pass)"}: ${d.text}${d.ms !== undefined ? ` [${Math.round(d.ms)}ms]` : ""}`);
-			return { text: [
-				...missing.length ? [`Jev pilot: inactive, the jev-api tools are missing (${missing.join(", ")}). jevfort needs jev-api 0.2.0 or later and no permissions.deny rule matching its tools; it looks again at the next turn.`] : [],
-				`Jev pilot: effort routing ${routing ? "on" : "off"}${autoOff ? " (effort auto off)" : ""}, take steps ${takeSteps} (p ≥ ${takeThreshold}), subagents ${subagents}`,
-				`Decisions (all sessions): ${counts}`,
-				lines.length ? `Recent:\n${lines.join("\n")}` : "No decisions this session yet.",
-				"Full analysis: /jev report"
-			].join("\n") };
-		} finally {
-			if (!turnRunning) dropTurnReads();
-		}
 	});
 	on("turn.complete", async function onTurnComplete($, e, next) {
 		if (e.agentId === undefined) {
@@ -853,33 +681,14 @@ export const register = (on, options) => {
 		if (e.agentId === undefined) dropTurnReads();
 		if (missing.length) {
 			await contextCompact($, e, false, taskCompactPercent, forceCompactPercent).catch(() => undefined);
-			await flushLog($);
 			return next(e);
 		}
 		turns.delete(e.turnId);
-		if (e.reason === "aborted" || e.reason === "error") {
-			await record($, {
-				kind: "turn",
-				applied: false,
-				text: `turn ${e.reason}`,
-				turnId: e.turnId,
-				data: { reason: e.reason }
-			});
-		}
 		if (lostCompact !== undefined) {
-			await record($, {
-				kind: "error",
-				applied: false,
-				text: `context compaction refused: ${lostCompact}`
-			}).catch(() => undefined);
+			note($, `context compaction refused: ${lostCompact}`);
 			lostCompact = undefined;
 		}
-		await contextCompact($, e, true, taskCompactPercent, forceCompactPercent).catch((err) => record($, {
-			kind: "error",
-			applied: false,
-			text: `context compaction check failed: ${String(err)}`
-		}).catch(() => undefined));
-		await flushLog($);
+		await contextCompact($, e, true, taskCompactPercent, forceCompactPercent).catch((err) => note($, `context compaction check failed: ${String(err)}`));
 		if (e.agentId === undefined) haikuPath = undefined;
 		return next(e);
 	});
@@ -893,20 +702,7 @@ export const register = (on, options) => {
 			});
 			const effortAnswer = r.ok ? score(r.answers, "effort") : undefined;
 			const est = estimateEffort(effortAnswer, r.ok ? noul(r.answers, "mechanical") : undefined, input);
-			await record($, {
-				kind: "estimate",
-				applied: est.source !== "fallback",
-				text: `${input.model}: ${est.effort} (${est.source}${r.ok ? "" : `, ${r.error}`})`,
-				ms: r.ms,
-				data: {
-					model: input.model,
-					effort: est.effort,
-					source: est.source,
-					error: r.ok ? undefined : r.error,
-					effortScore: effortAnswer?.score,
-					effortConfidence: effortAnswer?.confidence
-				}
-			});
+			note($, `${input.model}: ${est.effort} (${est.source}${r.ok ? "" : `, ${r.error}`})`);
 			return { result: JSON.stringify(est) };
 		}
 		if ((await jevMissing($)).length) return next(e);
@@ -914,15 +710,6 @@ export const register = (on, options) => {
 		if (e.tool_use_id && ownCalls.has(e.tool_use_id)) {
 			const isError = result.deny !== undefined || result.isError === true;
 			ownCalls.delete(e.tool_use_id);
-			await record($, {
-				kind: "outcome",
-				applied: true,
-				text: `${e.tool} ${isError ? "failed" : "ok"}`,
-				data: {
-					id: e.tool_use_id,
-					isError
-				}
-			});
 			const skill = e.skill;
 			if (isError && e.tool === "Skill" && typeof skill === "string") await blockSkill($, skill);
 		}
@@ -949,17 +736,7 @@ export const register = (on, options) => {
 			const done = calls.find((c) => c.tool_use_id === id);
 			if (done?.text !== undefined && !(done.isError && REFUSED.test(done.text))) {
 				const s = await summarizeResult($, ctx.request, turn.bypassAction ?? done.tool, done.text);
-				await record($, {
-					kind: "bypass",
-					applied: s.ok,
-					text: s.ok ? `answered with ${SUMMARY_MODEL} after ${turn.bypassAction}` : `summary failed (${s.reason}), Claude answers`,
-					turnId: e.turnId,
-					data: {
-						action: turn.bypassAction,
-						model: SUMMARY_MODEL,
-						...s.ok ? { usage: s.usage } : { reason: s.reason }
-					}
-				});
+				note($, s.ok ? `answered with ${SUMMARY_MODEL} after ${turn.bypassAction}` : `summary failed (${s.reason}), Claude answers`);
 				if (s.ok) {
 					const usage = {
 						...s.usage,
@@ -1047,13 +824,7 @@ export const register = (on, options) => {
 		};
 		const r = await askJev($, state, questions);
 		if (!r.ok) {
-			await record($, {
-				kind: "error",
-				applied: false,
-				text: `unavailable: ${r.error}`,
-				ms: r.ms,
-				turnId: e.turnId
-			});
+			note($, `unavailable: ${r.error}`);
 			return yield* next(routed(e));
 		}
 		if (estimate) {
@@ -1067,25 +838,7 @@ export const register = (on, options) => {
 				$.ui.invalidate("ui.render");
 			}
 			const effort = turn.effort;
-			const raised = effort !== undefined && EFFORT_ORDER.indexOf(effort) > (isEffort(e.effort) ? EFFORT_ORDER.indexOf(e.effort) : -1);
-			const lowered = effort !== undefined && !raised;
-			await record($, {
-				kind: "route",
-				applied: effort !== undefined,
-				text: `effort → ${effort !== undefined ? `${e.model}, effort ${effort}` : "no change"} · ${est.source}`,
-				ms: r.ms,
-				turnId: e.turnId,
-				data: {
-					effort,
-					lowered,
-					raised,
-					estimate: est.effort,
-					source: est.source,
-					mechanical,
-					effortScore: effortAnswer?.score,
-					effortConfidence: effortAnswer?.confidence
-				}
-			});
+			note($, `effort → ${effort !== undefined ? `${e.model}, effort ${effort}` : "no change"} · ${est.source}`);
 		}
 		const answer = choice(r.answers, "next_action");
 		const best = bestAction(answer);
@@ -1094,23 +847,7 @@ export const register = (on, options) => {
 		const pick = takeOnlyForBypass && (singleAction < SINGLE_ACTION || picked?.tool !== "Read" && picked?.tool !== "Bash") ? undefined : picked;
 		if (answer) {
 			const p = answer.probabilities[answer.choice] ?? 0;
-			await record($, {
-				kind: "take",
-				applied: pick !== undefined,
-				text: `${answer.choice} (p=${p.toFixed(2)})${pick ? "" : best ? `; best action ${best.key} p=${best.p.toFixed(2)}` : ""}`,
-				ms: r.ms,
-				turnId: e.turnId,
-				data: {
-					pick: answer.choice,
-					p,
-					best: best?.key,
-					bestP: best?.p,
-					candidates: candidates.length,
-					threshold: takeThreshold,
-					singleAction: noul(r.answers, "single_action"),
-					agentId: e.agentId
-				}
-			});
+			note($, `${answer.choice} (p=${p.toFixed(2)})${pick ? "" : best ? `; best action ${best.key} p=${best.p.toFixed(2)}` : ""}`);
 		}
 		if (pick) {
 			turn.taken += 1;
@@ -1149,7 +886,7 @@ export const register = (on, options) => {
 			};
 		}
 		const result = yield* next(routed(e));
-		if (answer) await recordCompare($, e.turnId, e.index, ctx.request, answer, candidates, result.toolUses);
+		if (answer) noteCompare($, answer, candidates, result.toolUses);
 		return result;
 	});
 	on("tool.check", async function onToolCheck($, e, next) {

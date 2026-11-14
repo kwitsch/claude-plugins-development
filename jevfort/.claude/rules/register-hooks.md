@@ -10,7 +10,7 @@ paths:
 
 `plugin/hooks/hooks.json` (hand-written) is exactly `{"modules": ["./register.mjs"]}`. `src/hooks/register.mts` holds
 every hook and every `$` use and imports the pure modules `./jev.mjs`, `./policy.mjs`, `./candidates.mjs`,
-`./context.mjs`, `./cache.mjs`, `./log.mjs`, `./report.mjs`, `./prompt.mjs`, `./agents.mjs`, `./compact.mjs`, `./summarize.mjs`.
+`./context.mjs`, `./cache.mjs`, `./agents.mjs`, `./compact.mjs`, `./summarize.mjs`.
 Tested by `tests/register.test.mts` (kit-style tests on the workspace package `claude-engine-vitest`). Evidence for
 the shapes below: `inline-headroom/docs/claude-code-verification.md`.
 
@@ -24,17 +24,15 @@ the shapes below: `inline-headroom/docs/claude-code-verification.md`.
 - One hook per event without a matcher (`registered twice without a matcher` fails validate and test). Hence:
   `tool.call` has one unmatched hook (answers the `estimate_effort` tool, outcome of Jev's own calls, skill
   blocklist) plus one with the matcher `{ tool: "Agent" }`; `turn.step`, `tool.check`, `turn.complete`,
-  `session.start`, `session.end`, `agent.offer` and `session.compact` have one each; `command.run` carries a
-  matcher; `ui.render` has two matcher hooks (`{ component: "CommandOutput", props: { command: "jev" } }` for the
-  `/jev` output, `{ component: "AbovePrompt" }` for the effort band).
+  `session.start`, `session.end`, `agent.offer` and `session.compact` have one each; `ui.render` has one matcher hook (`{ component: "AbovePrompt" }` for the effort band).
 - Jev is asked only through the jev-api plugin's tool `mcp__jev-api__batch`: `askJev` raises one
   `$.tool.call({ tool: "mcp__jev-api__batch", state, questions, timeout: apiTimeoutS })` (`state` is `JSON.stringify` text, `questions` the
   `Question` objects in id order, `timeout` in seconds equal to the budget, 14 s just under 15 s on the Haiku path), raced against the budget (`TIMEOUT_MS` 4 s, `COMPACT_TIMEOUT_MS` 9 s for the compaction ranking, `HAIKU_TIMEOUT_MS` 15 s without Jev access); a `{ deny }`, `isError`, a rejection, a result that is not
   a JSON array with one answer per question that has the asked type and the fields jevfort reads (`isAnswer`), or the timeout fails the whole `askJev` (`{ ok: false }`,
   never a throw). The engine
   member is typed `tool.call(input): Promise<ToolResult>`; there is no `$.http` use.
-- Readiness guard: every hook except `session.start`, `session.end`, `session.compact`, the `/jev` `command.run` and
-  both `ui.render` hooks starts with `if ((await jevMissing($)).length) return next(e);` (`return yield* next(e)` in
+- Readiness guard: every hook except `session.start`, `session.end`, `session.compact` and
+  the `ui.render` hook starts with `if ((await jevMissing($)).length) return next(e);` (`return yield* next(e)` in
   `turn.step`, whose `cacheWatch` and `turnRunning` work comes before it; `turn.complete` clears `turnRunning` before
   it; `session.compact` guards only the Jev ranking inside `withJevRanking`); `tool.call` and `tool.check` handle
   `ESTIMATE_TOOL` before it. `jevMissing`, `jevApply` and their state `jevTools`/`jevState` are
@@ -50,13 +48,13 @@ the shapes below: `inline-headroom/docs/claude-code-verification.md`.
   it (beneath it, jev-api has not registered batch yet). The render hooks read `jevState` instead (no `$.tool`, `$.store`, `record` or `jevMissing` call while
   drawing).
 - `jevApply` registers the `estimate_effort` tool with `$.tool.register(ESTIMATE_SPEC)` whatever `routing` says (a
-  throw is logged as `kind: "error"`) when the jev-api tools become listed: at `session.start`'s baseline after
+  throw is said in the status line) when the jev-api tools become listed: at `session.start`'s baseline after
   `next(e)` (jev-api registers its tools in its own `session.start`) or at a later turn's listing. There is no
   unregister and a registered tool that no hook answers fails, so the unmatched `tool.call` hook answers
   `mcp__jevfort__estimate_effort` before the readiness guard and never calls `next(e)`: `{ result }` (the JSON
   estimate; while the batch tool is really missing `askJev` fails and it is `defaultEffort` with source `fallback` (an inactive state caused by a failed listing still asks Jev)) or, on invalid input,
   `{ deny: "estimate_effort: <reason>" }` without a Jev request (a hook's own `isError` is dropped: the model sees a normal result, live on 2.1.325); `tool.check` approves it before the guard (a settings deny or ask
-  rule still wins). Calls are logged as kind `estimate`.
+  rule still wins). Calls are said in the status line.
 - Effort band: the `ui.render` hook with matcher `{ component: "AbovePrompt" }` draws `Box`/`Text`/`Button` from
   `$.ui.resolve(e)` (detached factories) out of the closure state `band` (written at main-loop step 0 in `turn.step`:
   `configured` = step-0 `e.effort`, `chosen` = the estimate or held effort) and `autoOff` (flipped by the Button
@@ -87,8 +85,7 @@ core routes `$.mcp.call` through `$.tool.call` and its permission check, althoug
 plugin's own hooks see a call it raises only while one of its hooks runs; a call raised after the hook returned (an
 unawaited chain, a `$.clock.every` callback) skips them, so in `default` mode the user gets a permission dialog per
 call and a headless session denies it. jevfort uses `$.store`, `$.tool.call` (jev-api's batch tool) and `$.fs`, and every
-Every `askJev` is awaited in-frame. `record(...)` only buffers;
-its store writes run in `flushLog`, awaited in-frame by `turn.complete`, `session.end` and the `/jev` command for the same reason.
+Every `askJev` is awaited in-frame; `note(...)` only calls `$.ui.status`.
 
 ## Tests: the jev-api fake
 

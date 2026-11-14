@@ -12,7 +12,7 @@ export const PAUSE_MS = 30_000;
 /** The longest pause after repeated timeouts of Jev, in ms. */
 export const MAX_PAUSE_MS = 600_000;
 
-/** The longest error text `askJev` returns (and so the log and `/jev` hold), in characters: an error body of megabytes must not be stored whole. */
+/** The longest error text `askJev` returns (and so the status line holds), in characters: an error body of megabytes must not be stored whole. */
 export const MAX_ERROR = 1000;
 
 /** The local budget of one `askJev` (its one batch call) before Claude Code's own behaviour wins, in ms. */

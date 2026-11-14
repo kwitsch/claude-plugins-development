@@ -4,9 +4,8 @@
 // Jev is the jev-api plugin's batch tool: a fake `tool.call` answers `mcp__jev-api__batch` question by question.
 import { createKit } from "claude-engine-vitest";
 import type { On } from "claude-engine-vitest";
-import { expect, test as pureTest } from "vitest";
+import { expect } from "vitest";
 import { JEV_BATCH, JEV_TOOL_PREFIX } from "../plugin/hooks/jev.mjs";
-import { statsKey } from "../plugin/hooks/log.mjs";
 import { effortQuestion, mechanicalQuestion, nextActionQuestion, singleActionQuestion, taskEndQuestion } from "../plugin/hooks/policy.mjs";
 
 // The manifest defaults (jevfort/package.json claudePlugin.userConfig): the kit does not fill userConfig defaults.
@@ -31,8 +30,6 @@ const SID = "sid-1";
 const JEV_TOOLS = [{ name: JEV_BATCH, description: "Ask Jev several questions", mcp: true }];
 /** jev-api 0.1's tools, which lack the batch tool. */
 const SINGLE_TOOLS = ["noul", "choice", "score"].map((t) => ({ name: JEV_TOOL_PREFIX + t, description: `Ask Jev a ${t} question`, mcp: true }));
-/** The first line of /jev while the batch tool is missing. */
-const INACTIVE = "Jev pilot: inactive, the jev-api tools are missing (mcp__jev-api__batch). jevfort needs jev-api 0.2.0 or later and no permissions.deny rule matching its tools; it looks again at the next turn.";
 /** The question id each instructions text belongs to (batch questions carry no id; the fake finds it by the text). */
 const QUESTION_IDS = new Map<string, string>([
   [nextActionQuestion([]).instructions, "next_action"],
@@ -81,7 +78,8 @@ function setup(on: On, opts: { messages: Msg[]; jev: Jev; cwd?: () => string; fi
     return isLink || (opts.files ?? []).includes(String(e.path)) ? { value: { kind: "file", size: 100, mtimeMs: 0, isLink } } : { deny: "ENOENT" };
   });
   on("fs.read", (_$, e) => (opts.packageJson && e.path === `${CWD}/package.json` ? { value: typeof opts.packageJson === "string" ? opts.packageJson : JSON.stringify(opts.packageJson) } : { deny: "ENOENT" }));
-  on("ui.status", () => ({ value: undefined }));
+  said = [];
+  on("ui.status", (_$, e) => (said.push(String(e.text)), { value: undefined }));
   // `tools: null` makes the listing fail.
   on("tool.list", () => (opts.tools === null ? { deny: "tool.list failed" } : { value: opts.tools ?? JEV_TOOLS }));
   on("tool.call", async (_$, e, next) => {
@@ -180,7 +178,8 @@ function claudeBeneath(on: On, seen: unknown[]) {
 
 const toolId = (chunks: Chunk[]) => (chunks.find((c) => c.kind === "tool")?.id as string | undefined) ?? "";
 
-const runJev = async ($: Runner, args: string) => String(((await $.command.run({ command: "jev", args, origin: { kind: "composer" }, presentation: { isFullscreen: false, columns: 80 } })) as { text?: string }).text ?? "");
+/** The status lines jevfort said (`$.ui.status`) since the last `setup`. */
+let said: string[] = [];
 
 const decision = async ($: Runner, input: Record<string, unknown>) => ((await $.tool.check(input)) as { decision?: string }).decision;
 
@@ -188,14 +187,13 @@ const decision = async ($: Runner, input: Record<string, unknown>) => ((await $.
 const START = { cwd: CWD, surface: "terminal", isInteractive: true };
 
 /**
- * The stubs `session.start` needs beneath jevfort: `/jev` registration, `estimate_effort` registration, the event's end.
+ * The stubs `session.start` needs beneath jevfort: `estimate_effort` registration, the event's end.
  *
  * @param on - The test's `on`.
  * @returns The names passed to `$.tool.register`, in call order.
  */
 function sessionStubs(on: On) {
   const registered: unknown[] = [];
-  on("command.register", async () => ({ value: undefined }));
   on("tool.register", async (_$, e) => {
     registered.push(e.name);
     return { value: { tool: "mcp__jevfort__estimate_effort" } };
@@ -323,7 +321,7 @@ test("A jev-api deny leaves the step to Claude and is logged with its text", asy
 
   await drain($.turn.step(step));
   expect(seen[0]).toMatchObject({ effort: "high", model: "claude-opus-5-5" });
-  expect(await runJev($, "")).toContain("error (pass): unavailable: batch: HTTP 503");
+  expect(said.join("\n")).toContain("unavailable: batch: HTTP 503");
 });
 
 test("One wrong answer discards the other answers of the same decision", async ($, on) => {
@@ -334,7 +332,7 @@ test("One wrong answer discards the other answers of the same decision", async (
 
   await drain($.turn.step(step));
   expect(seen[0]).toMatchObject({ effort: "high" });
-  expect(await runJev($, "")).toContain("unavailable: batch: no valid noul answer for questions[1]");
+  expect(said.join("\n")).toContain("unavailable: batch: no valid noul answer for questions[1]");
 });
 
 // One malformed answer per case, every other answer valid, so only the field under test can fail the decision.
@@ -359,7 +357,7 @@ for (
     await drain($.turn.step(step));
     expect(seen[0]).toMatchObject({ effort: "high" });
     // The newest /jev row: the recent list is module state, so an older case's identical row must not satisfy this one.
-    expect((await runJev($, "")).split("\n").filter((l) => l.startsWith("- ")).at(-1)).toContain(`unavailable: batch: ${error}`);
+    expect(said.at(-1)).toContain(`unavailable: batch: ${error}`);
   });
 }
 
@@ -373,7 +371,7 @@ test("Core's error result for the batch call fails the decision with a batch: pr
 
   await drain($.turn.step(step));
   expect(seen[0]).toMatchObject({ effort: "high" });
-  expect(await runJev($, "")).toContain(`unavailable: batch: ${error}`);
+  expect(said.join("\n")).toContain("unavailable: batch: Error: jev-api registered the tool batch");
 });
 
 for (const [name, answer, error] of [["of another type", mech(0.5), "batch: no valid score answer for questions[0]"], ["that is not JSON", "<html>", "batch: result is not JSON"], ["with too few answers", "[]", "batch: expected 2 answers"]] as const) {
@@ -384,7 +382,7 @@ for (const [name, answer, error] of [["of another type", mech(0.5), "batch: no v
 
     await drain($.turn.step(step));
     expect(seen[0]).toMatchObject({ effort: "high" });
-    expect(await runJev($, "")).toContain(`unavailable: ${error}`);
+    expect(said.join("\n")).toContain(`unavailable: ${error}`);
   });
 }
 
@@ -419,7 +417,7 @@ test("Jev calls that do not answer within 4000 ms time out and Claude takes the 
   await run;
   expect(ids(sent)).toEqual(["effort", "mechanical"]);
   expect(seen[0]).toMatchObject({ effort: "high", model: "claude-opus-5-5" });
-  expect(await runJev($, "")).toContain("unavailable: timeout after 4000ms");
+  expect(said.join("\n")).toContain("unavailable: timeout after 4000ms");
 });
 
 test("After a timeout Jev is not asked again for 30 s, then once more", async ($, on) => {
@@ -434,7 +432,7 @@ test("After a timeout Jev is not asked again for 30 s, then once more", async ($
   // Within the pause nothing is sent.
   await drain($.turn.step(step));
   expect(calls()).toBe(1);
-  expect(await runJev($, "")).toContain("paused for");
+  expect(said.join("\n")).toContain("paused for");
   // After it, one probe goes out.
   await clock.advance(30_000);
   run = drain($.turn.step(step));
@@ -537,7 +535,7 @@ for (const [name, deny, env] of [["a jev-api timeout answered before jevfort's o
     // Within the pause nothing is sent.
     await drain($.turn.step(step));
     expect(calls()).toBe(1);
-    expect(await runJev($, "")).toContain("paused for");
+    expect(said.join("\n")).toContain("paused for");
   });
 }
 
@@ -562,7 +560,7 @@ test("without any Jev variable (Haiku answers in jev-api) the budget is 15000 ms
   await clock.advance(1);
   await run;
   expect(seen).toHaveLength(1);
-  expect(await runJev($, "")).toContain("unavailable: timeout after 15000ms");
+  expect(said.join("\n")).toContain("unavailable: timeout after 15000ms");
 });
 
 const userSubmit = ($: Runner, text: string) => $.prompt.submit({ text, wait: false, origin: { kind: "composer" } });
@@ -666,8 +664,8 @@ test("A turn started by a slash command is left to Claude (no take, no bypass)",
   expect(seen).toHaveLength(1);
 });
 
-// Phase 2: every decision is logged, and Claude's own call is compared with Jev's.
-test("Inside a longer turn Jev's top action is compared with Claude's call and reported as agreement", { options: { takeOnlyForBypass: false } }, async ($, on) => {
+// Every decision is said in the status line, and Claude's own call is compared with Jev's.
+test("Inside a longer turn Jev's top action is compared with Claude's call and said in the status line", { options: { takeOnlyForBypass: false } }, async ($, on) => {
   setup(on, {
     messages: [user("what does src/app.ts export?")],
     files: [`${CWD}/src/app.ts`],
@@ -684,14 +682,10 @@ test("Inside a longer turn Jev's top action is compared with Claude's call and r
 
   // A later step of the turn: Jev is asked first and is too unsure (0.6 < 0.85) to take the step.
   await drain($.turn.step({ ...step, index: 4 }));
-  const report = await runJev($, "report");
-  expect(report).toContain("| Agreement with Claude | **0 / 1** (0%) |");
-  expect(report).toMatch(/\| \d\d:\d\d \| what does src\/app\.ts export\? \| leave to Claude _\(best: read src\/app\.ts\)_ \| 0\.60 \| Read app\.ts \| ⚠ missed \|/);
-  expect(report).toContain("| 0.60 | 1 | 100% |");
-  expect(report).not.toContain("shadow");
+  expect(said).toContain("jev: Claude: Read app.ts · Jev best read src/app.ts ✓");
 });
 
-test("Claude's Bash command cut at 30 chars never leaves a lone surrogate in the report", { options: { takeOnlyForBypass: false } }, async ($, on) => {
+test("Claude's Bash command cut at 30 chars never leaves a lone surrogate in the status line", { options: { takeOnlyForBypass: false } }, async ($, on) => {
   setup(on, {
     messages: [user("what does src/app.ts export?")],
     files: [`${CWD}/src/app.ts`],
@@ -704,12 +698,11 @@ test("Claude's Bash command cut at 30 chars never leaves a lone surrogate in the
     return { turnId: e.turnId, index: e.index, answer: "", toolUses: [{ name: "Bash", input: { command: cmd } }], stopReason: "tool_use", usage: null };
   });
   await drain($.turn.step({ ...step, index: 4 }));
-  const report = await runJev($, "report");
-  expect(report).toContain("| Bash echo aaaaaaaaaaaaaaaaaaaaaaaa | ✓ Claude |");
-  expect(report).not.toMatch(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/);
+  expect(said.join("\n")).toContain("Claude: Bash echo aaaaaaaaaaaaaaaaaaaaaaaa");
+  expect(said.join("\n")).not.toMatch(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/);
 });
 
-test("Passes are logged too: an effort estimate that changes nothing", async ($, on) => {
+test("An effort estimate is said in the status line", async ($, on) => {
   setup(on, {
     messages: [user("refactor the auth module to use JWT")],
     files: [],
@@ -718,9 +711,7 @@ test("Passes are logged too: an effort estimate that changes nothing", async ($,
   claudeBeneath(on, []);
 
   await drain($.turn.step(step));
-  const report = await runJev($, "report");
-  expect(report).toContain("| Effort routing | 1 turns | avg effort score 2.60");
-  expect(report).not.toContain("| Gate |");
+  expect(said.join("\n")).toContain("jev: effort → ");
 });
 
 test("Jev can pick a skill on the first step of a turn", { options: { takeOnlyForBypass: false } }, async ($, on) => {
@@ -876,8 +867,7 @@ for (const [single, expectBypass] of [[0.95, true], [0.3, false]] as const) {
     expect(seen).toHaveLength(0);
     expect(second.chunks).toContainEqual({ kind: "text", index: 0, text: "All 3 tests passed." });
     expect(asked[0]).toContain("# pass 3");
-    const report = await runJev($, "report");
-    expect(report).toContain("| Turns answered without Claude | **1**");
+    expect(said.join("\n")).toContain("answered with");
   });
 }
 
@@ -947,10 +937,9 @@ test("Built-in commands are never offered as skills, and a skill that fails is b
   });
   on("command.list", () => ({
     value: [
-      // All share the prompt's words, so only the name/source filters can drop the first three.
+      // All share the prompt's words, so only the name/source filters can drop the first two.
       { name: "diff", description: "Summarize recent changes", source: "user" },
       { name: "recap", description: "Summarize recent changes", source: "mcp" },
-      { name: "jev", description: "Summarize recent changes", source: "plugin" },
       { name: "changelog", description: "Summarize recent changes", source: "plugin" },
     ],
   }));
@@ -960,7 +949,6 @@ test("Built-in commands are never offered as skills, and a skill that fails is b
   const { chunks } = await drain($.turn.step(step));
   expect(offered[0]).not.toContain("skill diff");
   expect(offered[0]).not.toContain("skill recap");
-  expect(offered[0]).not.toContain("skill jev");
   expect(offered[0]).toContain("skill changelog");
   await $.tool.call({ tool: "Skill", skill: "changelog", tool_use_id: toolId(chunks) });
 
@@ -991,7 +979,6 @@ for (
     const { chunks } = await drain($.turn.step(step));
     expect(offered[0]).toContain("skill changelog");
     await $.tool.call({ tool: "Skill", skill: "changelog", tool_use_id: toolId(chunks) }).catch(() => undefined);
-    expect(await runJev($, "")).toContain(`Skill ${blocked ? "failed" : "ok"}`);
 
     await drain($.turn.step({ ...step, turnId: "t2" }));
     if (blocked) expect(offered[1] ?? []).not.toContain("skill changelog");
@@ -1060,15 +1047,10 @@ test("A big job asked at medium effort runs at xhigh, on an older Opus id too", 
   expect(seen.map((s) => s.effort)).toEqual(["xhigh", "xhigh"]);
 });
 
-test("There is no mode: a stored legacy mode is ignored and /jev off is no command", async ($, on) => {
+test("There is no mode: a stored legacy mode is ignored", async ($, on) => {
   const seen: unknown[] = [];
   const { sent } = setup(on, { messages: [user("what does this project do?")], jev: byId({}), store: { mode: "off" } });
   claudeBeneath(on, seen);
-  const status = await runJev($, "off");
-  expect(status).toContain("Jev pilot: effort routing");
-  expect(status).not.toContain("Jev pilot mode");
-  // Only the first line: the recent-decisions list is module state shared across tests and may mention a model.
-  expect(status.split("\n")[0]).not.toContain("mode");
   await drain($.turn.step(step));
   // One decision: its two questions went to jev-api.
   expect(ids(sent)).toEqual(["effort", "mechanical"]);
@@ -1079,7 +1061,6 @@ test("There is no mode: a stored legacy mode is ignored and /jev off is no comma
 test("session.start registers estimate_effort", async ($, on) => {
   setup(on, { messages: [], jev: () => undefined });
   const registered: Record<string, unknown>[] = [];
-  on("command.register", async () => ({ value: undefined }));
   on("tool.register", async (_$, e) => {
     registered.push(e);
     return { value: { tool: "mcp__jevfort__estimate_effort" } };
@@ -1093,13 +1074,23 @@ test("session.start registers estimate_effort", async ($, on) => {
   });
 });
 
-test("Inverted effort bounds are logged as an error at session start", { options: { minEffort: "high", maxEffort: "low" } }, async ($, on) => {
+test("There is no /jev command: session.start registers none and a /jev run finds no hook", async ($, on) => {
   setup(on, { messages: [], jev: () => undefined });
-  on("command.register", async () => ({ value: undefined }));
+  const commands: unknown[] = [];
+  on("command.register", async (_$, e) => (commands.push(e.name), { value: undefined }));
   on("tool.register", async () => ({ value: { tool: "mcp__jevfort__estimate_effort" } }));
   on("session.start", async () => ({}));
   await $.session.start({ cwd: CWD, surface: "terminal", isInteractive: true });
-  expect(await runJev($, "report")).toContain("1 errors");
+  expect(commands).toEqual([]);
+  await expect($.command.run({ command: "jev", args: "" })).rejects.toThrow();
+});
+
+test("Inverted effort bounds are logged as an error at session start", { options: { minEffort: "high", maxEffort: "low" } }, async ($, on) => {
+  setup(on, { messages: [], jev: () => undefined });
+  on("tool.register", async () => ({ value: { tool: "mcp__jevfort__estimate_effort" } }));
+  on("session.start", async () => ({}));
+  await $.session.start({ cwd: CWD, surface: "terminal", isInteractive: true });
+  expect(said.join("\n")).toContain("invalid effort bounds");
 });
 
 test("Effort routing does not ask Jev the difficulty question", async ($, on) => {
@@ -1136,7 +1127,7 @@ test("A settings ask rule beats the estimate_effort allow", async ($, on) => {
 test("estimate_effort falls back to defaultEffort when Jev is unreachable", async ($, on) => {
   setup(on, { messages: [], jev: () => 401 });
   expect(await estimateCall($)).toEqual({ result: JSON.stringify({ effort: "high", source: "fallback" }) });
-  expect(await runJev($, "")).toContain("estimate (pass): opus: high (fallback, batch: HTTP 401)");
+  expect(said.join("\n")).toContain("opus: high (fallback, batch: HTTP 401)");
 });
 
 test("A null script in the project's package.json does not stop the turn's routing", async ($, on) => {
@@ -1149,25 +1140,10 @@ test("A null script in the project's package.json does not stop the turn's routi
 });
 
 test("A package.json saved with a UTF-8 BOM still offers its scripts", async ($, on) => {
-  setup(on, { messages: [user("run the tests")], packageJson: `\uFEFF${JSON.stringify({ scripts: { test: "vitest run" } })}`, jev: () => undefined });
-  expect(await runJev($, "candidates")).toContain("npm test");
-});
-
-test("/jev candidates lists the step-0 options, not the ones the rest of the turn found", async ($, on) => {
-  const id = "toolu_read";
-  setup(on, {
-    messages: [
-      user("explain src/app.ts"),
-      { role: "assistant", text: "", toolUses: [{ tool_use_id: id, tool: "Read", input: { file_path: `${CWD}/src/app.ts` }, text: "import './util'; see src/util.ts" }] },
-      { role: "user", text: "", toolUses: [], toolResults: [{ tool_use_id: id, text: "see src/util.ts", isError: false }] },
-      { role: "assistant", text: "It wires src/util.ts in.", toolUses: [] },
-    ],
-    files: [`${CWD}/src/app.ts`, `${CWD}/src/util.ts`],
-    jev: () => undefined,
-  });
-  const out = await runJev($, "candidates");
-  expect(out).toContain("`read src/app.ts`");
-  expect(out).not.toContain("src/util.ts");
+  const { sent } = setup(on, { messages: [user("run the tests")], packageJson: `\uFEFF${JSON.stringify({ scripts: { test: "vitest run" } })}`, jev: () => undefined });
+  claudeBeneath(on, []);
+  await drain($.turn.step(step));
+  expect(Object.keys(sent.find((q) => q.id === "next_action")?.criteria ?? {})).toContain("run npm test");
 });
 
 test("A failing store does not fail estimate_effort or a turn step", async ($, on) => {
@@ -1180,32 +1156,12 @@ test("A failing store does not fail estimate_effort or a turn step", async ($, o
   expect(seen).toHaveLength(1);
 });
 
-test("An error text of megabytes is cut before the log and /jev hold it", async ($, on) => {
+test("An error text of megabytes is cut before the status line says it", async ($, on) => {
   setup(on, { messages: [user("what does this project do?")], jev: () => ({ __deny: "x".repeat(500_000) }) });
   claudeBeneath(on, []);
   await drain($.turn.step(step));
-  const status = await runJev($, "");
-  expect(status).toContain("unavailable: xxx");
-  expect(status).toContain("more chars]");
-  expect(status.length).toBeLessThan(5000);
-});
-
-test("/jev export writes a new file and never an existing one (a symlink would be followed)", async ($, on) => {
-  setup(on, { messages: [], jev: () => undefined });
-  const written: string[] = [];
-  on("fs.write", (_$, e) => (written.push(String(e.path)), { value: undefined }));
-  expect(await runJev($, "export")).toMatch(/wrote \d+ entries to \/proj\/\.jev\/decisions-\d+\.jsonl/);
-  expect(written).toHaveLength(1);
-  expect(written[0]).toMatch(/^\/proj\/\.jev\/decisions-\d+\.jsonl$/);
-});
-
-test("/jev export writes nothing when the target exists", async ($, on) => {
-  on("fs.exists", () => ({ value: true }));
-  setup(on, { messages: [], jev: () => undefined });
-  const written: string[] = [];
-  on("fs.write", (_$, e) => (written.push(String(e.path)), { value: undefined }));
-  expect(await runJev($, "export")).toContain("exists, nothing written");
-  expect(written).toHaveLength(0);
+  expect(said.join("\n")).toContain("unavailable: xxx");
+  expect(said.join("\n").length).toBeLessThan(5000);
 });
 
 test("With takeOnlyForBypass a confident skill pick is not taken by Jev (the skill would never run)", async ($, on) => {
@@ -1231,12 +1187,6 @@ test("A refused clock read fails neither estimate_effort nor a turn step", async
   expect(await estimateCall($)).toEqual({ result: JSON.stringify({ effort: "medium", source: "jev" }) });
   await drain($.turn.step(step));
   expect(seen).toHaveLength(1);
-});
-
-test("/jev status still answers when the counters cannot be read", async ($, on) => {
-  on("store.get", () => ({ deny: "EACCES" }));
-  setup(on, { messages: [], jev: () => undefined });
-  expect(await runJev($, "")).toContain("Decisions (all sessions): unreadable=1");
 });
 
 test("A turn's mentioned paths are statted at most 16 per step and each once per turn", async ($, on) => {
@@ -1377,22 +1327,6 @@ test("A mechanical turn runs at minEffort even on a hard score", async ($, on) =
   expect(seen.map((s) => s.effort)).toEqual(["low"]);
 });
 
-// Effort score logging: the effort score and its confidence are logged, to recalibrate the cut points from real turns.
-test("route and estimate log entries carry effortScore and effortConfidence", async ($, on) => {
-  // Registered before setup so it answers `store.set` ahead of the in-memory store; each write then holds one new entry.
-  const log: { kind: string; data?: Record<string, unknown> }[] = [];
-  on("store.set", (_$, e) => (e.key === "log" && log.push(...(e.value as typeof log)), { value: undefined }));
-  setup(on, { messages: [user("what does src/app.ts export?")], jev: byId({ effort: scored(1.6, 0.3), mechanical: mech(0.1) }) });
-  claudeBeneath(on, []);
-  await drain($.turn.step(step));
-  await estimateCall($, { model: "opus" });
-  await runJev($, "report"); // writes the pending decisions
-  for (const kind of ["route", "estimate"]) {
-    const entry = log.find((l) => l.kind === kind);
-    expect(entry?.data).toMatchObject({ effortScore: 1.6, effortConfidence: 0.3 });
-  }
-});
-
 test("maxEffort caps a confident hard estimate", { options: { maxEffort: "medium" } }, async ($, on) => {
   const seen: { effort?: string }[] = [];
   setup(on, { messages: [user("migrate the whole app to TypeScript")], jev: byId({ effort: scored(2.9) }) });
@@ -1454,7 +1388,7 @@ test("A held Haiku effort still applies when Jev fails on a later turn", async (
   await drain($.turn.step(turnStep("t1", "claude-haiku-5-5", "high")));
   await drain($.turn.step(turnStep("t2", "claude-haiku-5-5", "high")));
   expect(new Set(sent.map((q) => q.call))).toEqual(new Set([0, 1]));
-  expect(await runJev($, "")).toContain("unavailable");
+  expect(said.join("\n")).toContain("unavailable");
   expect(seen.map((s) => s.effort)).toEqual(["medium", "medium"]);
 });
 
@@ -1513,7 +1447,6 @@ test("Without a jev-api tool jevfort is inactive: every hook passes through and 
   claudeBeneath(on, seen);
   const submitted = followUps(on);
   const registered: unknown[] = [];
-  on("command.register", async () => ({ value: undefined }));
   on("tool.register", async (_$, e) => {
     registered.push(e);
     return { value: { tool: "mcp__jevfort__estimate_effort" } };
@@ -1545,9 +1478,7 @@ test("Without a jev-api tool jevfort is inactive: every hook passes through and 
   await $.session.compact({ trigger: "manual", messages: [user("fix the failing date test"), { role: "assistant", text: "", toolUses: ["a", "b", "c"].map((x, i) => ({ tool_use_id: `t${i}`, tool: "Bash", input: { command: `step ${x}` }, text: x })) }] });
   expect(sent).toHaveLength(0);
 
-  const status = await runJev($, "");
-  expect(status.startsWith(`${INACTIVE}\nJev pilot: effort routing on`)).toBe(true);
-  expect(status).toContain("error (pass): inactive: jev-api tools missing (mcp__jev-api__batch)");
+  expect(said.join("\n")).toContain("inactive: jev-api tools missing (mcp__jev-api__batch)");
 });
 
 test("A tool listing that fails counts as all jev-api tools missing", async ($, on) => {
@@ -1558,7 +1489,6 @@ test("A tool listing that fails counts as all jev-api tools missing", async ($, 
   await drain($.turn.step(step));
   expect(seen).toEqual([step]);
   expect(sent).toHaveLength(0);
-  expect((await runJev($, "")).split("\n")[0]).toBe(INACTIVE);
 });
 
 test("jev-api registering batch inside session.start's next(e) makes jevfort active, also after a lookup in between", async ($, on) => {
@@ -1566,7 +1496,6 @@ test("jev-api registering batch inside session.start's next(e) makes jevfort act
   const { sent } = setup(on, { messages: [user("what does this project do?")], tools, jev: byId({ effort: easy }) });
   claudeBeneath(on, []);
   const registered: unknown[] = [];
-  on("command.register", async () => ({ value: undefined }));
   on("tool.register", async (_$, e) => {
     registered.push(e.name);
     return { value: { tool: "mcp__jevfort__estimate_effort" } };
@@ -1585,7 +1514,7 @@ test("jev-api registering batch inside session.start's next(e) makes jevfort act
   await drain($.turn.step(step));
   expect(ids(sent)).toEqual(["effort", "mechanical"]);
   // The listing raised beneath next(e) (before jev-api registered) applied nothing: no inactive error was logged.
-  expect(await runJev($, "report")).toContain("· 0 errors |");
+  expect(said.join("\n")).not.toContain("inactive");
 });
 
 test("The jev-api lookup is repeated after each turn", async ($, on) => {
@@ -1617,9 +1546,9 @@ test("The jev-api lookup is repeated after each turn", async ($, on) => {
   expect(sent).toHaveLength(2);
   expect(registered).toEqual(["estimate_effort"]);
   expect(seen.map((s) => s.effort)).toEqual(["high", "high", "low", "high"]);
-  expect((await runJev($, "")).split("\n")[0]).toBe(INACTIVE);
+  expect(said.join("\n")).toContain("inactive: jev-api tools missing");
   // Two inactive errors: one at session start, one at the change.
-  expect(await runJev($, "report")).toContain("· 2 errors |");
+  expect(said.filter((l) => l.includes("inactive: jev-api tools missing"))).toHaveLength(2);
 });
 
 test("estimate_effort is not registered again when jev-api goes away and comes back", async ($, on) => {
@@ -1651,7 +1580,7 @@ test("/jev between turns does not carry its listing into the next turn", async (
   await drain($.turn.step(step));
   await $.turn.complete(answered("t1", "It is a todo app."));
   // The user runs /jev, reads "it looks again at the next turn" and enables jev-api.
-  expect((await runJev($, "")).split("\n")[0]).toBe(INACTIVE);
+  expect(said.join("\n")).toContain("inactive: jev-api tools missing");
   tools.push(...JEV_TOOLS);
   await drain($.turn.step({ ...step, turnId: "t2" }));
   expect(ids(sent)).toEqual(["effort", "mechanical"]);
@@ -1663,7 +1592,6 @@ test("A failed estimate_effort registration is retried by the next turn's listin
   claudeBeneath(on, []);
   followUps(on);
   const attempts: unknown[] = [];
-  on("command.register", async () => ({ value: undefined }));
   on("tool.register", async (_$, e) => {
     attempts.push(e.name);
     if (attempts.length === 1) throw new Error("transient");
@@ -1758,7 +1686,6 @@ test("The Auto button turns the effort choice off until pressed again", async ($
   expect(seen.map((s) => s.effort)).toEqual(["high"]);
   expect(await levelProps(ui, "high")).toEqual({ bold: true });
   expect(await levelProps(ui, "low")).toEqual({ dimColor: true });
-  expect(await runJev($, "")).toContain("Jev pilot: effort routing on (effort auto off), take steps");
 
   await ui.press({ key: "auto" });
   await clock.settle();
@@ -1766,7 +1693,6 @@ test("The Auto button turns the effort choice off until pressed again", async ($
   await drain($.turn.step(turnStep("t2", "claude-opus-5-5", "high")));
   expect(ids(sent)).toEqual(["effort", "mechanical"]);
   expect(seen.map((s) => s.effort)).toEqual(["high", "low"]);
-  expect(await runJev($, "")).not.toContain("(effort auto off)");
 
   // A new session turns Auto back on.
   await ui.press({ key: "auto" });
@@ -1837,16 +1763,6 @@ for (const value of ["model", "off", "effort", "false", "", 0, null]) {
     expect(seen.map((x) => x.effort)).toEqual(["xhigh"]);
   });
 }
-
-test("an unset routing shows effort routing on in /jev", async ($, on) => {
-  setup(on, { messages: [], jev: () => undefined });
-  expect(await runJev($, "")).toContain("Jev pilot: effort routing on, take steps");
-});
-
-test("routing: false shows effort routing off in /jev", { options: { routing: false } }, async ($, on) => {
-  setup(on, { messages: [], jev: () => undefined });
-  expect(await runJev($, "")).toContain("Jev pilot: effort routing off, take steps");
-});
 
 test("routing: false still answers estimate_effort", { options: { routing: false } }, async ($, on) => {
   setup(on, { messages: [], jev: byId({ effort: scored(2.9), mechanical: mech(0.1) }) });
@@ -2057,153 +1973,5 @@ test("A refused /compact lets a later high fill compact again and is logged", as
   await clock.advance(0);
   await $.turn.complete(answered("t2", "Done."));
   expect(compacts).toBe(2);
-  expect(await runJev($, "")).toContain("context compaction refused");
-});
-
-// F06: decisions are buffered and the log and the counters are written once per turn, not once per decision.
-test("A 6-step turn writes the log and the counters once, and /jev export still holds every decision", { options: { takeOnlyForBypass: false } }, async ($, on) => {
-  const sets: string[] = [];
-  on("store.set", (_$, e, next) => (sets.push(String(e.key)), next(e)));
-  setup(on, { messages: [user("what does src/app.ts export?")], files: [`${CWD}/src/app.ts`], jev: finished });
-  followUps(on);
-  claudeBeneath(on, []);
-  let written = "";
-  on("fs.write", (_$, e) => ((written = String(e.text)), { value: undefined }));
-  for (const index of [0, 1, 2, 3, 4, 5]) await drain($.turn.step({ ...step, index }));
-  expect(sets).toEqual([]);
-  await $.turn.complete(answered("t1", "Done."));
-  expect(sets.filter((k) => k === "log")).toHaveLength(1);
-  expect(sets.filter((k) => k === "stats")).toHaveLength(1);
-  expect(await runJev($, "export")).toMatch(/wrote \d+ entries/);
-  const kinds = written.trim().split("\n").map((l) => (JSON.parse(l) as { kind: string }).kind);
-  expect(kinds).toContain("route");
-  expect(kinds.filter((k) => k === "compare")).toHaveLength(6);
-  expect(await runJev($, "")).toMatch(/compare(:pass)?=6/);
-});
-
-test("session.end writes the decisions recorded outside a turn", { options: { minEffort: "high", maxEffort: "low" } }, async ($, on) => {
-  const logs: { kind: string; text: string }[][] = [];
-  on("store.set", (_$, e, next) => (e.key === "log" && logs.push(e.value as { kind: string; text: string }[]), next(e)));
-  setup(on, { messages: [], jev: () => undefined });
-  on("command.register", async () => ({ value: undefined }));
-  on("tool.register", async () => ({ value: { tool: "mcp__jevfort__estimate_effort" } }));
-  on("session.start", async () => ({}));
-  on("session.end", async () => ({}));
-  await $.session.start({ cwd: CWD, surface: "terminal", isInteractive: true });
-  expect(logs).toEqual([]);
-  await $.session.end({ reason: "clear", sessionId: SID, resume: { id: SID } });
-  expect(logs).toHaveLength(1);
-  expect(logs[0]).toContainEqual(expect.objectContaining({ kind: "error", text: expect.stringContaining("invalid effort bounds") }));
-});
-
-test("A flush onto a full log keeps the last 1000 entries, the new decision last", async ($, on) => {
-  const full = Array.from({ length: 1000 }, (_, i) => ({ kind: "turn", text: `old ${i}` }));
-  const logs: { kind: string; text: string }[][] = [];
-  on("store.get", (_$, e, next) => (e.key === "log" ? { value: full } : next(e)));
-  on("store.set", (_$, e, next) => (e.key === "log" && logs.push(e.value as { kind: string; text: string }[]), next(e)));
-  setup(on, { messages: [user("what does src/app.ts export?")], files: [`${CWD}/src/app.ts`], jev: finished });
-  followUps(on);
-  await $.turn.complete(answered("t1", "Done.", { reason: "aborted", isAborted: true }));
-  expect(logs).toHaveLength(1);
-  expect(logs[0]).toHaveLength(1000);
-  expect(logs[0][0].text).not.toBe("old 0");
-  expect(logs[0].at(-1)).not.toMatchObject({ text: "old 999" });
-});
-
-/** A `store.get("log")` stub above `mock.store` that reads first and then waits for `release()`: the read goes stale while a write is in flight. */
-function gatedLog(on: On, logs: unknown[][]) {
-  let release = () => {};
-  const gate = new Promise<void>((r) => (release = r));
-  on("store.get", async (_$, e, next) => {
-    const r = await next(e);
-    if (e.key === "log") await gate;
-    return r;
-  });
-  on("store.set", (_$, e, next) => (e.key === "log" && logs.push(e.value as unknown[]), next(e)));
-  return { release, settle: () => new Promise((r) => setTimeout(r, 20)) };
-}
-
-/** Lets `session.start`/`session.end` and their registrations pass. */
-const lifecycle = (on: On) => {
-  on("command.register", async () => ({ value: undefined }));
-  on("tool.register", async () => ({ value: { tool: "mcp__jevfort__estimate_effort" } }));
-  on("session.start", async () => ({}));
-  on("session.end", async () => ({}));
-};
-
-test("/jev clear waits for an in-flight flush instead of having it write the log back", { options: { minEffort: "high", maxEffort: "low" } }, async ($, on) => {
-  const logs: unknown[][] = [];
-  const g = gatedLog(on, logs);
-  setup(on, { messages: [], jev: () => undefined });
-  lifecycle(on);
-  await $.session.start({ cwd: CWD, surface: "terminal", isInteractive: true });
-  const end = $.session.end({ reason: "clear", sessionId: SID, resume: { id: SID } });
-  await g.settle();
-  const cleared = runJev($, "clear");
-  await g.settle();
-  g.release();
-  await end;
-  expect(await cleared).toBe("Jev pilot: log cleared.");
-  expect(logs.at(-1)).toEqual([]);
-});
-
-test("/jev clear and /clear (session.end) empty the /jev Recent list", { options: { minEffort: "high", maxEffort: "low" } }, async ($, on) => {
-  setup(on, { messages: [], jev: () => undefined });
-  lifecycle(on);
-  await $.session.start({ cwd: CWD, surface: "terminal", isInteractive: true });
-  expect(await runJev($, "")).toContain("invalid effort bounds");
-  await runJev($, "clear");
-  expect(await runJev($, "")).toContain("No decisions this session yet.");
-  await $.session.start({ cwd: CWD, surface: "terminal", isInteractive: true });
-  expect(await runJev($, "")).toContain("invalid effort bounds");
-  await $.session.end({ reason: "clear", sessionId: SID, resume: { id: SID } });
-  expect(await runJev($, "")).toContain("No decisions this session yet.");
-});
-
-test("A flush started while another is in flight keeps both flushes' entries", { options: { minEffort: "high", maxEffort: "low" } }, async ($, on) => {
-  const logs: unknown[][] = [];
-  const g = gatedLog(on, logs);
-  setup(on, { messages: [], jev: () => undefined });
-  lifecycle(on);
-  await $.session.start({ cwd: CWD, surface: "terminal", isInteractive: true });
-  const end = $.session.end({ reason: "clear", sessionId: SID, resume: { id: SID } });
-  await g.settle();
-  await $.session.start({ cwd: CWD, surface: "terminal", isInteractive: true });
-  const status = runJev($, "");
-  await g.settle();
-  g.release();
-  await end;
-  await status;
-  expect(logs.at(-1)).toHaveLength(2);
-});
-
-test("/jev export with nothing pending waits for another hook's flush still in flight", { options: { minEffort: "high", maxEffort: "low" } }, async ($, on) => {
-  const g = gatedLog(on, []);
-  setup(on, { messages: [], jev: () => undefined });
-  lifecycle(on);
-  on("fs.write", () => ({ value: undefined }));
-  await $.session.start({ cwd: CWD, surface: "terminal", isInteractive: true });
-  const end = $.session.end({ reason: "clear", sessionId: SID, resume: { id: SID } });
-  await g.settle();
-  const exported = runJev($, "export");
-  await g.settle();
-  g.release();
-  await end;
-  expect(await exported).toMatch(/wrote 1 entries/);
-});
-
-test("An inactive turn.complete writes the decisions pending from the turn", async ($, on) => {
-  const sets: string[] = [];
-  on("store.set", (_$, e, next) => (sets.push(String(e.key)), next(e)));
-  setup(on, { messages: [user("rename foo to bar")], tools: SINGLE_TOOLS, jev: () => undefined });
-  followUps(on);
-  expect(await estimateCall($)).toEqual({ result: JSON.stringify({ effort: "high", source: "fallback" }) });
-  expect(sets).toEqual([]);
-  await $.turn.complete(answered("t1", "Done."));
-  expect(sets.filter((k) => k === "log")).toHaveLength(1);
-});
-
-pureTest("statsKey counts a passed decision apart from an acted one", () => {
-  expect(statsKey({ kind: "take", applied: true })).toBe("take");
-  expect(statsKey({ kind: "take", applied: false })).toBe("take:pass");
+  expect(said.join("\n")).toContain("context compaction refused");
 });

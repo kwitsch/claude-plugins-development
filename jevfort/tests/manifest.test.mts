@@ -62,7 +62,7 @@ test("hooks.json is exactly the mods module list", () => {
 });
 
 test("the built hooks modules exist", () => {
-  for (const f of ["register", "jev", "policy", "candidates", "context", "log", "report", "agents", "compact", "summarize", "cache"]) {
+  for (const f of ["register", "jev", "policy", "candidates", "context", "agents", "compact", "summarize", "cache"]) {
     assert.ok(existsSync(new URL(`../plugin/hooks/${f}.mjs`, import.meta.url)), f);
   }
 });
