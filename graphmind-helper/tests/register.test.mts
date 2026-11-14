@@ -258,6 +258,18 @@ test("a memory search hit that is a priority entry is not shown again", async ($
   expect(second).toMatch(/about foo_bar/);
 });
 
+test("the same terms are not searched again within three minutes", async ($, on) => {
+  const { runs, calls, clock } = setup(on);
+  await $.session.start({ source: "startup" });
+  await prompt($, "where is foo_bar defined in the code");
+  await prompt($, "where is foo_bar defined in the code");
+  expect(runs.filter((r) => r[2] === "search")).toHaveLength(1);
+  expect(calls.filter((c) => c.tool.endsWith("__gm_search"))).toHaveLength(1);
+  await clock.advance(180_000);
+  await prompt($, "where is foo_bar defined in the code");
+  expect(runs.filter((r) => r[2] === "search")).toHaveLength(2);
+});
+
 test("an empty priority store adds no priority block", async ($, on) => {
   // Real CLI output (graphmind 0.3.7) for a store without priority entries: a notice without an entry id.
   const { prompts } = setup(on, { priority: "No priority memories found.\n" });
