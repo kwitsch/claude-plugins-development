@@ -156,6 +156,17 @@ test("a compaction of the main conversation brings the briefing and priority ent
   expect(after).toMatch(/always use X/);
 });
 
+test("/clear (session.end) briefs the next conversation again", async ($, on) => {
+  const { prompts } = setup(on);
+  await $.session.start({ source: "startup" });
+  await prompt($, "where is foo_bar defined in the code");
+  await $.session.end({ reason: "clear" });
+  await prompt($, "something else entirely about parseConfig here");
+  const after = (prompts[1].context ?? []).join("\n");
+  expect(after).toMatch(/Project indexed and ready/);
+  expect(after).toMatch(/always use X/);
+});
+
 test("a precompute or a subagent's compaction does not brief again", async ($, on) => {
   const { prompts } = setup(on);
   await $.session.start({ source: "startup" });
