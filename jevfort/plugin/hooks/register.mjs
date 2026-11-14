@@ -47,12 +47,10 @@ async function askJev($, state, questions, slow = false) {
 		},
 		ms: await $.clock.now().catch(() => Date.now()) - startedAt
 	});
-	if (startedAt < jevPause.until) {
-		if (startedAt < jevPause.until) return {
-			ok: false,
-			error: `paused for ${Math.ceil((jevPause.until - startedAt) / 1e3)} s after a timeout (${jevPause.error})`
-		};
-	}
+	if (startedAt < jevPause.until) return {
+		ok: false,
+		error: `paused for ${Math.ceil((jevPause.until - startedAt) / 1e3)} s after a timeout (${jevPause.error})`
+	};
 	const [key, base, jevUrl] = await Promise.all([
 		$.env.get("TYPESAFE_API_KEY"),
 		$.env.get("TYPESAFE_BASE_URL"),

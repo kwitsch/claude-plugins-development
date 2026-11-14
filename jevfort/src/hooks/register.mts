@@ -215,10 +215,9 @@ async function askJev($: Engine, state: unknown, questions: Record<string, Quest
   if (startedAt < jevPause.at) Object.assign(jevPause, { until: 0, ms: 0, at: 0, error: "" });
   const done = async (r: { ok: true; answers: Record<string, Answer> } | { ok: false; error: string }): Promise<JevResult> => ({ ...(r.ok ? r : { ok: false as const, error: clip(r.error, MAX_ERROR) }), ms: (await $.clock.now().catch(() => Date.now())) - startedAt });
 
+  // No `ms`: nothing was sent, so the report must not count it as a Jev call.
+  if (startedAt < jevPause.until) return { ok: false, error: `paused for ${Math.ceil((jevPause.until - startedAt) / 1000)} s after a timeout (${jevPause.error})` };
   // Without Jev access jev-api answers through Haiku, which needs a longer budget (jev-api reads the same three variables).
-  if (startedAt < jevPause.until) { // No `ms`: nothing was sent, so the report must not count it as a Jev call.
-    if (startedAt < jevPause.until) return { ok: false, error: `paused for ${Math.ceil((jevPause.until - startedAt) / 1000)} s after a timeout (${jevPause.error})` };
-  }
   const [key, base, jevUrl] = await Promise.all([$.env.get("TYPESAFE_API_KEY"), $.env.get("TYPESAFE_BASE_URL"), $.env.get("JEV_URL")]).catch(() => [undefined, undefined, undefined]);
   const haiku = ![key, base, jevUrl].some((v) => v?.trim());
   const budgetMs = haiku ? HAIKU_TIMEOUT_MS : slow ? COMPACT_TIMEOUT_MS : TIMEOUT_MS;

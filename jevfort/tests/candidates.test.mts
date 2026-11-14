@@ -115,6 +115,13 @@ test("rows that are no request: compaction summary, interrupt, a bang command, a
   expect(splitTurn([typed("what colour?"), reply, typed("")])).toBeUndefined();
 });
 
+test("the report counts a step-0 request once and shows the effort score under the default routing", () => {
+  const e = (kind: string, extra: Record<string, unknown> = {}) => ({ at: 1, kind, applied: true, text: kind, turnId: "t1", ms: 1000, ...extra });
+  const report = buildReport([e("route", { data: { effortScore: 2 } }), e("take"), e("route", { turnId: "t2", ms: 3000, data: { effortScore: 3 } })], 0.85);
+  expect(report).toContain("2000 ms average over 2 calls");
+  expect(report).toContain("avg effort score 2.50");
+});
+
 test("only skills related to the prompt are offered", () => {
   const skills = dedupeSkills(SKILLS);
   expect(relevant("can you show me the full list", skills)).toEqual([]);
