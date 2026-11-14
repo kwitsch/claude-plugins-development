@@ -135,6 +135,19 @@ test("local bin: one that cannot spawn (no exec bit) falls back to npx --yes", (
   assert.ok(!e.lines().some((l) => l.startsWith("local:")));
 });
 
+test("local bin: one that cannot spawn (no exec bit) does not block the npx cache route: the cached bin runs, npx never invoked", () => {
+  const e = makeEnv();
+  e.recStub("npx", 0);
+  stamp(e);
+  localStub(e, CACHED, "markdownlint-cli2", 1);
+  localStub(e, ".", "markdownlint-cli2", 0, false);
+  const f = e.file("a.md", "# T\n");
+  const r = e.run(f, { out: "cache-marker" });
+  assert.match(r.ctx, /cache-marker/);
+  assert.ok(e.lines().includes(`local:${CACHED}/markdownlint-cli2 ${mdArgv(e, f)}`));
+  assert.ok(!e.lines().some((l) => l.startsWith("npx")));
+});
+
 test("local bin: never above cwd (file reached through a symlinked dir outside cwd) -> npx, the above-cwd bin never runs", () => {
   const e = makeEnv();
   const base = path.dirname(e.cwd); // makeEnv base dir: holds bin/, home/, proj/ (= cwd)

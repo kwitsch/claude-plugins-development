@@ -339,7 +339,7 @@ async function spawnBin(bin, argv, spawnOpts) {
 	const code = result.error && "code" in result.error ? result.error.code : undefined;
 	return code === "ENOENT" || code === "EACCES" ? null : result;
 }
-async function runNpx(name, npmSpec, argv, spawnOpts) {
+async function runNpx(name, npmSpec, argv, spawnOpts, failed) {
 	const npx = () => spawnGroup("npx", [
 		"--yes",
 		npmSpec,
@@ -355,7 +355,7 @@ async function runNpx(name, npmSpec, argv, spawnOpts) {
 		}
 	});
 	const rel = path.join("node_modules", ".bin", name);
-	if (walkToRoot(String(spawnOpts.cwd), (d) => configExists(d, rel))) return npx();
+	if (walkToRoot(String(spawnOpts.cwd), (d) => path.join(d, rel) !== failed && configExists(d, rel))) return npx();
 	const key = createHash("sha512").update(npmSpec).digest("hex").slice(0, 16);
 	const dir = path.join(process.env.npm_config_cache || process.env.NPM_CONFIG_CACHE || path.join(homedir(), ".npm"), "_npx", key);
 	const stamp = path.resolve(process.env.CLAUDE_PLUGIN_DATA || tmpdir(), `npx-refreshed-${key}`);
@@ -383,7 +383,7 @@ async function runNpx(name, npmSpec, argv, spawnOpts) {
 async function runLintTool(tool, argv, spawnOpts, local) {
 	const viaLocal = local ? await spawnBin(local, argv, spawnOpts) : null;
 	if (viaLocal) return viaLocal;
-	if (tool.npmSpec && !onPath(tool.name)) return runNpx(tool.name, tool.npmSpec, argv, spawnOpts);
+	if (tool.npmSpec && !onPath(tool.name)) return runNpx(tool.name, tool.npmSpec, argv, spawnOpts, local);
 	const spawnName = tool.spawnAs?.name ?? tool.name;
 	const spawnArgv = tool.spawnAs ? [...tool.spawnAs.args, ...argv] : argv;
 	return spawnGroup(spawnName, spawnArgv, spawnOpts);

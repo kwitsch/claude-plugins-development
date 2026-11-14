@@ -639,7 +639,9 @@ async function spawnBin(bin: string, argv: string[], spawnOpts: SpawnSyncOptions
  * decision), (2) npx holds `<dir>/concurrency.lock` (an install is in progress), or (3) the refresh stamp
  * `${CLAUDE_PLUGIN_DATA || os.tmpdir()}/npx-refreshed-<key>` is missing, older than `NPX_REFRESH_MS` or dated in the future. Every npx run
  * that spawned (no `error`, any exit status) renews the stamp (errors swallowed), except in
- * case (1), whose npx run never touches the cache. The hook only reads the npm cache, never writes it.
+ * case (1), whose npx run never touches the cache. The hook only reads the npm cache, never writes it. `failed`, the
+ * project-local bin that just could not spawn, does not count for (1): the cache route runs past it, but a bare npx
+ * run from that cwd still runs it again (it fails, exit 126/127, read as a skip).
  * Only the bare `npx --yes` spawn carries `npm_config_update_notifier`, `npm_config_fund` and `npm_config_audit` = `false`
  * (F24): npm's notice lines would otherwise land in the finding text. No `npm_config_loglevel` is set, so install
  * errors still reach stderr.
@@ -648,9 +650,10 @@ async function spawnBin(bin: string, argv: string[], spawnOpts: SpawnSyncOptions
  * @param npmSpec - npm package of the chain entry (`LintTool.npmSpec`); also the cache key's input.
  * @param argv - Full argv from buildArgv.
  * @param spawnOpts - Options for spawnGroup; its cwd is npx's cwd and the cached bin's.
+ * @param failed - Project-local bin that could not spawn (ENOENT/EACCES), left out of check (1), or null.
  * @returns The spawn result of the cached bin or of npx.
  */
-async function runNpx(name: string, npmSpec: string, argv: string[], spawnOpts: SpawnSyncOptionsWithStringEncoding): Promise<SpawnSyncReturns<string>> {
+async function runNpx(name: string, npmSpec: string, argv: string[], spawnOpts: SpawnSyncOptionsWithStringEncoding, failed: string | null): Promise<SpawnSyncReturns<string>> {
   /**
    * Run `npx --yes <npmSpec> ...argv` with `spawnOpts`, the longer `NPX_SPAWN_TIMEOUT_MS` budget and npm's
    * update-notifier, fund and audit messages switched off through `npm_config_*` env vars (F24).
@@ -665,7 +668,7 @@ async function runNpx(name: string, npmSpec: string, argv: string[], spawnOpts: 
     });
   // npx runs a node_modules/.bin/<name> from its cwd up to / before its cache (npm 11.19.1 localFileExists): leave that to npx.
   const rel = path.join("node_modules", ".bin", name);
-  if (walkToRoot(String(spawnOpts.cwd), (d) => configExists(d, rel))) return npx();
+  if (walkToRoot(String(spawnOpts.cwd), (d) => path.join(d, rel) !== failed && configExists(d, rel))) return npx();
   // libnpmexec's cache key: sha512 hex of the sorted, newline-joined spec list, first 16 chars (one bare spec hashes as itself).
   const key = createHash("sha512").update(npmSpec).digest("hex").slice(0, 16);
   const dir = path.join(process.env.npm_config_cache || process.env.NPM_CONFIG_CACHE || path.join(homedir(), ".npm"), "_npx", key);
@@ -716,7 +719,7 @@ async function runNpx(name: string, npmSpec: string, argv: string[], spawnOpts: 
 async function runLintTool(tool: LintTool, argv: string[], spawnOpts: SpawnSyncOptionsWithStringEncoding, local: string | null): Promise<SpawnSyncReturns<string>> {
   const viaLocal = local ? await spawnBin(local, argv, spawnOpts) : null;
   if (viaLocal) return viaLocal;
-  if (tool.npmSpec && !onPath(tool.name)) return runNpx(tool.name, tool.npmSpec, argv, spawnOpts);
+  if (tool.npmSpec && !onPath(tool.name)) return runNpx(tool.name, tool.npmSpec, argv, spawnOpts, local);
   // spawnAs decouples "which binary name gates PATH-availability /
   // selectLintTool matching" (tool.name -- probed by onPath/selectLintTool)
   // from "which binary + args are actually spawned". Only the rust chain's
