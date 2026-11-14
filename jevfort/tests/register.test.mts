@@ -399,7 +399,7 @@ test("Jev calls that do not answer within 4000 ms time out and Claude takes the 
   expect(await runJev($, "")).toContain("unavailable: timeout after 4000ms");
 });
 
-test("After a timeout Jev is not asked again for 30 s, then once more; a timeout doubles the pause", async ($, on) => {
+test("After a timeout Jev is not asked again for 30 s, then once more", async ($, on) => {
   const seen: unknown[] = [];
   const { clock, calls } = setup(on, { messages: [user("what does this project do?")], jev: () => new Promise<never>(() => {}), env: { JEV_URL: "https://jev.example/x" } });
   claudeBeneath(on, seen);
@@ -419,6 +419,36 @@ test("After a timeout Jev is not asked again for 30 s, then once more; a timeout
   await clock.advance(4000);
   await run;
   expect(calls()).toBe(2);
+});
+
+test("A second timeout doubles the pause to 60 s and a success resets it", async ($, on) => {
+  let hang = true;
+  const { clock, calls } = setup(on, { messages: [], jev: () => (hang ? new Promise<never>(() => {}) : undefined), env: { JEV_URL: "https://jev.example/x" } });
+  const timeoutAt = async (n: number) => {
+    const p = $.tool.call({ ...ESTIMATE });
+    while (calls() < n) await clock.advance(0);
+    await clock.advance(4000);
+    await p;
+  };
+  const sentAfter = async (wait: number) => {
+    const before = calls();
+    await clock.advance(wait);
+    const p = $.tool.call({ ...ESTIMATE });
+    for (let i = 0; i < 20; i++) await clock.advance(0);
+    const sent = calls() > before;
+    if (sent && hang) await clock.advance(4000);
+    await p;
+    return sent;
+  };
+  await timeoutAt(1); // pause 30 s
+  await clock.advance(30_000);
+  await timeoutAt(2); // the probe times out too: the pause doubles to 60 s
+  expect(await sentAfter(31_000)).toBe(false);
+  hang = false;
+  expect(await sentAfter(30_000)).toBe(true); // 61 s after: sent, answered, resets the pause
+  hang = true;
+  await timeoutAt(4); // the first timeout after a success pauses 30 s again
+  expect(await sentAfter(31_000)).toBe(true);
 });
 
 test("Parallel calls that time out in one outage lengthen the pause once", async ($, on) => {
