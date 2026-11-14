@@ -2229,6 +2229,20 @@ test("session.end writes the decisions recorded outside a turn", { options: { mi
   expect(logs[0]).toContainEqual(expect.objectContaining({ kind: "error", text: expect.stringContaining("invalid effort bounds") }));
 });
 
+test("A flush onto a full log keeps the last 1000 entries, the new decision last", async ($, on) => {
+  const full = Array.from({ length: 1000 }, (_, i) => ({ kind: "turn", text: `old ${i}` }));
+  const logs: { kind: string; text: string }[][] = [];
+  on("store.get", (_$, e, next) => (e.key === "log" ? { value: full } : next(e)));
+  on("store.set", (_$, e, next) => (e.key === "log" && logs.push(e.value as { kind: string; text: string }[]), next(e)));
+  setup(on, { messages: [user("what does src/app.ts export?")], files: [`${CWD}/src/app.ts`], jev: finished });
+  followUps(on);
+  await $.turn.complete(answered("t1", "Done."));
+  expect(logs).toHaveLength(1);
+  expect(logs[0]).toHaveLength(1000);
+  expect(logs[0][0].text).not.toBe("old 0");
+  expect(logs[0].at(-1)).not.toMatchObject({ text: "old 999" });
+});
+
 /** A `store.get("log")` stub above `mock.store` that reads first and then waits for `release()`: the read goes stale while a write is in flight. */
 function gatedLog(on: On, logs: unknown[][]) {
   let release = () => {};
