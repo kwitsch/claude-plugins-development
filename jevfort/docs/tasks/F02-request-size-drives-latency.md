@@ -10,7 +10,7 @@ area: jevfort/src/hooks/register.mts (onPromptSubmit, onTurnStep, checkDone, con
 
 Open. Found in the performance analysis of 2026-11-14 ([../EVALUATION-2026-11-14.md](../EVALUATION-2026-11-14.md)), plugin 0.10.1.
 
-Note (0.12.0): the done check and the `measureSteps` option are gone (the step measurement is always on); the task-end question is its own request. The done-check figures below are history. Re-measured on 0.11.0 ([../EVALUATION-2026-11-14-2.md](../EVALUATION-2026-11-14-2.md)), still open: with every clip full the classifier takes 1100 ms (F01 cut its skill options) and step 0 1548 ms, 2.65 s before the first token; the turn end with done check and task end in one batch (F03) 1771 ms, the step-k measurement 1695 ms. A 4-step turn's done check 644 ms, step 0 617 ms, measurement 729 ms. The ~0.16 ms per byte model still holds.
+Note (0.12.0): the done check, the prompt classifier and the step-k measurement (`measureSteps`) are gone; the task-end question is its own request. The figures below for them are history. Re-measured on 0.11.0 ([../EVALUATION-2026-11-14-2.md](../EVALUATION-2026-11-14-2.md)), still open: with every clip full the classifier takes 1100 ms (F01 cut its skill options) and step 0 1548 ms, 2.65 s before the first token; the turn end with done check and task end in one batch (F03) 1771 ms, the step-k measurement 1695 ms. A 4-step turn's done check 644 ms, step 0 617 ms, measurement 729 ms. The ~0.16 ms per byte model still holds.
 
 ## Problem
 
@@ -20,7 +20,7 @@ System One's latency is about a 45 ms floor plus ~0.16 ms per byte of the reques
 - 4-step turn with 2 KB tool results (state 3.1 KB): done check 659 ms, task end 664 ms, step-k measurement 771 ms; classifier (20 skills) 848-885 ms plus step 0 616 ms = ~1.5 s before the first token.
 - Every clip full: classifier 1442 ms + step 0 1570 ms = ~3.0 s before the first token; done check 1706 ms, task end 1708 ms, measurement 1689 ms.
 
-The step-k measurement (always on since 0.12.0) adds one such request per main-loop step; it is off the critical path, but on a serial endpoint a measurement still running delays the next request behind it.
+The step-k measurement (removed in 0.12.0) added one such request per main-loop step; it was off the critical path, but on a serial endpoint a measurement still running delayed the next request behind it.
 
 ## Evidence
 

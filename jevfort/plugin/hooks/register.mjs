@@ -3,10 +3,9 @@ import { CACHE_TTL, cacheColor, cacheLabel, minutesLeft, nextTtl } from "./cache
 import { absolute, AUTH_TOOL, bash, BUILTIN_COMMANDS, clipScript, coversStep, dedupeSkills, isSafeScript, isSafeToOffer, MAX_READS, MAX_STATS, mentionedPaths, quotedTerms, relevant, SAFE_MAKE, sameCall, SKILL_BLOCKLIST_KEY } from "./candidates.mjs";
 import { COMPACT_MAX_TOKENS, COMPACT_MODEL, COMPACT_SYSTEM, compactInstructions, compactItems, haikuTranscript, RELEVANCE } from "./compact.mjs";
 import { clip, head, splitTurn, summarize, toolCalls } from "./context.mjs";
-import { choice, COMPACT_API_TIMEOUT_S, COMPACT_TIMEOUT_MS, HAIKU_API_TIMEOUT_S, HAIKU_TIMEOUT_MS, isAnswer, JEV_API_TIMEOUT_S, JEV_BATCH, JEV_TOOL_PREFIX, JEV_TOOLS, MAX_CHOICE_OPTIONS, MAX_ERROR, MAX_PAUSE_MS, MEASURE_GRACE_MS, missingJevTools, noul, PAUSE_MS, score, TIMEOUT_MS } from "./jev.mjs";
+import { choice, COMPACT_API_TIMEOUT_S, COMPACT_TIMEOUT_MS, HAIKU_API_TIMEOUT_S, HAIKU_TIMEOUT_MS, isAnswer, JEV_API_TIMEOUT_S, JEV_BATCH, JEV_TOOL_PREFIX, JEV_TOOLS, MAX_CHOICE_OPTIONS, MAX_ERROR, MAX_PAUSE_MS, missingJevTools, noul, PAUSE_MS, score, TIMEOUT_MS } from "./jev.mjs";
 import { forgetRecent, LOG_KEY, MAX_ENTRIES, recentDecisions, remember, statsKey } from "./log.mjs";
 import { bestAction, bounds, EFFORT_ORDER, effortQuestion, ESTIMATE_SPEC, ESTIMATE_TOOL, estimateEffort, EVERY_TURN_MODELS, inBandRange, inScratchpad, isEffort, mechanicalQuestion, modelFamily, nextActionQuestion, parseEstimateInput, pickCandidate, singleActionQuestion, taskEndQuestion } from "./policy.mjs";
-import { hints, NONE, promptQuestions } from "./prompt.mjs";
 import { buildReport, escapePipes } from "./report.mjs";
 import { SUMMARY_MODEL, SYSTEM } from "./summarize.mjs";
 const newScan = () => ({
@@ -494,13 +493,6 @@ function offerableSkills($) {
 		return dedupeSkills(commands.filter((c) => (c.source === "plugin" || c.source === "user") && c.name !== "jev" && !BUILTIN_COMMANDS.has(c.name) && !blocked.has(c.name)));
 	})();
 }
-async function skillOptions($, request) {
-	const skills = relevant(request, await offerableSkills($)).filter((c) => c.name !== NONE);
-	if (!skills.length) return undefined;
-	const criteria = { [NONE]: "No listed skill is meant for this request" };
-	for (const c of skills) criteria[c.name] = clip(c.description, 160);
-	return criteria;
-}
 function summarizeCalls(calls) {
 	if (!calls.length) return "replied";
 	const parts = new Map();
@@ -511,7 +503,7 @@ function summarizeCalls(calls) {
 	}
 	return [...parts].map(([k, n]) => n > 1 ? `${k} ×${n}` : k).join(", ");
 }
-async function recordCompare($, turnId, step, request, answer, candidates, toolUses, measured) {
+async function recordCompare($, turnId, step, request, answer, candidates, toolUses) {
 	const best = bestAction(answer);
 	const claudeCalls = toolUses.map((u) => ({
 		tool: u.name,
@@ -529,7 +521,6 @@ async function recordCompare($, turnId, step, request, answer, candidates, toolU
 		data: {
 			request: clip(request, 120),
 			step,
-			measured,
 			claudeSummary,
 			pick: answer.choice,
 			best: best?.key,
@@ -666,46 +657,6 @@ export const register = (on, options) => {
 		});
 	});
 	let agentTurn = 0;
-	on("prompt.submit", async function onPromptSubmit($, e, next) {
-		if ((await jevMissing($)).length) return next(e);
-		if (e.command || e.isMeta || e.origin?.kind === "task-notification" || e.text.trim().length < 3) return next(e);
-		const skillCriteria = await skillOptions($, e.text);
-		const questions = promptQuestions(skillCriteria);
-		const previous = previousReply(await $.session.messages({}).catch(() => undefined));
-		const r = await askJev($, {
-			request: clip(e.text, 3e3),
-			...previous ? { previous_reply: previous } : {}
-		}, questions);
-		if (!r.ok) return next(e);
-		const kind = choice(r.answers, "kind");
-		const needsPlan = noul(r.answers, "needs_plan");
-		const skillAnswer = choice(r.answers, "skill");
-		const skill = skillAnswer && skillCriteria && Object.hasOwn(skillCriteria, skillAnswer.choice) ? {
-			name: skillAnswer.choice,
-			p: skillAnswer.probabilities[skillAnswer.choice] ?? 0
-		} : undefined;
-		const added = hints(kind?.choice, needsPlan, skill, takeSteps && !takeOnlyForBypass ? takeThreshold : Number.POSITIVE_INFINITY);
-		await record($, {
-			kind: "classify",
-			applied: added.length > 0,
-			text: `${kind?.choice ?? "?"}${needsPlan !== undefined ? `, plan ${needsPlan.toFixed(2)}` : ""}${skill && skill.name !== NONE ? `, skill ${skill.name} ${skill.p.toFixed(2)}` : ""}${added.length ? " → hint" : ""}`,
-			ms: r.ms,
-			data: {
-				request: clip(e.text, 120),
-				kind: kind?.choice,
-				kindP: kind?.confidence,
-				needsPlan,
-				skill: skill?.name,
-				skillP: skill?.p,
-				hints: added.length
-			}
-		});
-		if (!added.length) return next(e);
-		return next({
-			...e,
-			context: [...e.context ?? [], ...added]
-		});
-	});
 	if (options.agentTypes !== false) {
 		const offered = new Map();
 		on("agent.offer", async function onAgentOffer($, e, next) {
@@ -1086,33 +1037,7 @@ export const register = (on, options) => {
 			...step,
 			effort: turn.effort
 		} : step;
-		if (!Object.keys(questions).length) {
-			let measure;
-			let measured = [];
-			if (takeSteps && !ctx.command && e.index > 0 && !e.agentId) {
-				measured = (await buildCandidates($, ctx.request, ctx.steps, calls, e.index, turn.cache)).filter((c) => !(last && sameCall(last, {
-					tool: c.tool,
-					input: c.input
-				})));
-				if (measured.length) {
-					measure = askJev($, {
-						request: clip(ctx.request, 4e3),
-						recent: summarize(ctx.steps),
-						cwd: turn.cache.cwd ??= await $.session.cwd()
-					}, { next_action: nextActionQuestion(measured) });
-				}
-			}
-			const claudeResult = yield* next(routed(e));
-			let measureResult;
-			if (measure) {
-				const grace = deadline($, MEASURE_GRACE_MS);
-				measureResult = await Promise.race([measure, grace.elapsed]).catch(() => undefined);
-				grace.cancel();
-			}
-			const measureAnswer = measureResult?.ok ? choice(measureResult.answers, "next_action") : undefined;
-			if (measureAnswer) await recordCompare($, e.turnId, e.index, ctx.request, measureAnswer, measured, claudeResult.toolUses, true);
-			return claudeResult;
-		}
+		if (!Object.keys(questions).length) return yield* next(routed(e));
 		const previous = e.index === 0 && !e.agentId ? previousReply(messages) : undefined;
 		const state = {
 			request: clip(ctx.request, 4e3),
@@ -1224,7 +1149,7 @@ export const register = (on, options) => {
 			};
 		}
 		const result = yield* next(routed(e));
-		if (answer) await recordCompare($, e.turnId, e.index, ctx.request, answer, candidates, result.toolUses, false);
+		if (answer) await recordCompare($, e.turnId, e.index, ctx.request, answer, candidates, result.toolUses);
 		return result;
 	});
 	on("tool.check", async function onToolCheck($, e, next) {

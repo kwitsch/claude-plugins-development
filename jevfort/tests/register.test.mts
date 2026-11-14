@@ -567,11 +567,14 @@ test("without any Jev variable (Haiku answers in jev-api) the budget is 15000 ms
 
 const userSubmit = ($: Runner, text: string) => $.prompt.submit({ text, wait: false, origin: { kind: "composer" } });
 
-test("A finished background task (origin task-notification) is not classified", async ($, on) => {
-  const { sent } = setup(on, { messages: [], jev: () => undefined });
-  on("prompt.submit", (_$, e) => ({ text: e.text }));
-  await $.prompt.submit({ text: "<task-notification>task done, please look at the output of the build</task-notification>", wait: false, origin: { kind: "task-notification" } });
-  expect(sent).toHaveLength(0);
+test("A submitted prompt is not classified: no Jev request, the prompt goes on unchanged", async ($, on) => {
+  const { sent, calls } = setup(on, { messages: [], jev: () => undefined });
+  const seen: string[] = [];
+  on("prompt.submit", (_$, e) => (seen.push(String(e.text)), { value: {} }));
+  await userSubmit($, "rewrite the storage layer to use IndexedDB");
+  expect(sent).toEqual([]);
+  expect(calls()).toBe(0);
+  expect(seen).toEqual(["rewrite the storage layer to use IndexedDB"]);
 });
 
 // Jev's own calls skip auto mode's classifier: the mod approves them itself, but a settings deny rule beneath still wins.
@@ -663,26 +666,13 @@ test("A turn started by a slash command is left to Claude (no take, no bypass)",
   expect(seen).toHaveLength(1);
 });
 
-test("A later step of a slash-command turn is not measured against Jev either", async ($, on) => {
-  const command = "<command-message>read-file</command-message>\n<command-name>/read-file</command-name>\n<command-args>src/app.ts</command-args>";
-  const { calls } = setup(on, {
-    messages: [user("Thanks!"), { role: "assistant", text: "ok", toolUses: [] }, user(command)],
-    jev: byId({ next_action: { type: "choice", choice: "read src/app.ts", probabilities: { "read src/app.ts": 0.97, claude: 0.03 }, confidence: 0.95 } }),
-    files: [`${CWD}/src/app.ts`],
-  });
-  claudeBeneath(on, []);
-  await drain($.turn.step({ ...step, index: 4 }));
-  expect(calls()).toBe(0);
-  expect(await runJev($, "report")).not.toContain("Agreement with Claude");
-});
-
 // Phase 2: every decision is logged, and Claude's own call is compared with Jev's.
-test("Inside a longer turn Jev's measured top action is compared with Claude's call and reported as agreement", async ($, on) => {
+test("Inside a longer turn Jev's top action is compared with Claude's call and reported as agreement", { options: { takeOnlyForBypass: false } }, async ($, on) => {
   setup(on, {
     messages: [user("what does src/app.ts export?")],
     files: [`${CWD}/src/app.ts`],
     jev: byId({
-      next_action: { type: "choice", choice: "read src/app.ts", probabilities: { "read src/app.ts": 0.92, claude: 0.08 }, confidence: 0.9 },
+      next_action: { type: "choice", choice: "read src/app.ts", probabilities: { "read src/app.ts": 0.6, claude: 0.4 }, confidence: 0.9 },
     }),
   });
   on("turn.step", async function*(_$, e) {
@@ -692,20 +682,20 @@ test("Inside a longer turn Jev's measured top action is compared with Claude's c
     return { turnId: e.turnId, index: e.index, answer: "", toolUses: [{ name: "Read", input: { file_path: `${CWD}/src/app.ts` } }], stopReason: "tool_use", usage: null };
   });
 
-  // A later step of the turn: Jev is asked in parallel (measuring) and never takes the step.
+  // A later step of the turn: Jev is asked first and is too unsure (0.6 < 0.85) to take the step.
   await drain($.turn.step({ ...step, index: 4 }));
   const report = await runJev($, "report");
-  expect(report).toContain("| Agreement with Claude | **1 / 1** (100%) |");
-  expect(report).toMatch(/\| \d\d:\d\d \| what does src\/app\.ts export\? \| read src\/app\.ts \| 0\.92 \| Read app\.ts \| ✓ same \|/);
-  expect(report).toContain("| **0.85 ← current** | 1 | 100% |");
+  expect(report).toContain("| Agreement with Claude | **0 / 1** (0%) |");
+  expect(report).toMatch(/\| \d\d:\d\d \| what does src\/app\.ts export\? \| leave to Claude _\(best: read src\/app\.ts\)_ \| 0\.60 \| Read app\.ts \| ⚠ missed \|/);
+  expect(report).toContain("| 0.60 | 1 | 100% |");
   expect(report).not.toContain("shadow");
 });
 
-test("Claude's Bash command cut at 30 chars never leaves a lone surrogate in the report", async ($, on) => {
+test("Claude's Bash command cut at 30 chars never leaves a lone surrogate in the report", { options: { takeOnlyForBypass: false } }, async ($, on) => {
   setup(on, {
     messages: [user("what does src/app.ts export?")],
     files: [`${CWD}/src/app.ts`],
-    jev: byId({ next_action: { type: "choice", choice: "read src/app.ts", probabilities: { "read src/app.ts": 0.92, claude: 0.08 }, confidence: 0.9 } }),
+    jev: byId({ next_action: { type: "choice", choice: "read src/app.ts", probabilities: { "read src/app.ts": 0.6, claude: 0.4 }, confidence: 0.9 } }),
   });
   // The emoji starts at code unit 29, so the 30-unit cut lands between its surrogates.
   const cmd = "echo aaaaaaaaaaaaaaaaaaaaaaaa\u{1F389} done";
@@ -715,30 +705,8 @@ test("Claude's Bash command cut at 30 chars never leaves a lone surrogate in the
   });
   await drain($.turn.step({ ...step, index: 4 }));
   const report = await runJev($, "report");
-  expect(report).toContain("| Bash echo aaaaaaaaaaaaaaaaaaaaaaaa | ✗ differ |");
+  expect(report).toContain("| Bash echo aaaaaaaaaaaaaaaaaaaaaaaa | ✓ Claude |");
   expect(report).not.toMatch(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/);
-});
-
-test("An answered step measurement leaves no timer pending, the 250 ms grace timer included", async ($, on) => {
-  const started: number[] = [];
-  let cancelled = 0;
-  on("clock.after", (_$, e, next) => {
-    started.push(Number(e.ms));
-    next.signal.addEventListener("abort", () => cancelled++, { once: true });
-    return next(e);
-  });
-  const { clock, sent } = setup(on, {
-    messages: [user("what does src/app.ts export?")],
-    files: [`${CWD}/src/app.ts`],
-    jev: byId({ next_action: { type: "choice", choice: "read src/app.ts", probabilities: { "read src/app.ts": 0.92, claude: 0.08 }, confidence: 0.9 } }),
-  });
-  claudeBeneath(on, []);
-
-  await drain($.turn.step({ ...step, index: 1 }));
-  await clock.advance(0);
-  expect(ids(sent)).toEqual(["next_action"]);
-  expect(started).toContain(250);
-  expect(cancelled).toBe(started.length);
 });
 
 test("Passes are logged too: an effort estimate that changes nothing", async ($, on) => {
@@ -1042,11 +1010,11 @@ test("By default Jev takes no steps inside a longer turn", async ($, on) => {
     }),
   });
   claudeBeneath(on, seen);
-  // A later step of the turn: Jev is only asked in parallel, to measure.
+  // A later step of the turn: Jev is not asked at all.
   const { chunks } = await drain($.turn.step({ ...step, index: 4 }));
   expect(toolId(chunks)).toBe("");
   expect(seen).toHaveLength(1);
-  expect(ids(sent)).toEqual(["next_action"]);
+  expect(ids(sent)).toEqual([]);
 });
 
 test("Effort lowered at step 0 holds for the later steps of the turn", async ($, on) => {
@@ -1283,7 +1251,7 @@ test("A turn's mentioned paths are statted at most 16 per step and each once per
   expect(new Set(statted).size).toBe(statted.length);
 });
 
-test("A file statted by an earlier step is still offered after 16 new paths used up the stat budget", async ($, on) => {
+test("A file statted by an earlier step is still offered after 16 new paths used up the stat budget", { options: { takeOnlyForBypass: false } }, async ($, on) => {
   const missing = Array.from({ length: 20 }, (_, i) => `src/gone${i}.ts`);
   const messages: Msg[] = [user("fix src/a.ts")];
   const { sent } = setup(on, { messages, files: [`${CWD}/src/a.ts`], jev: () => undefined });
@@ -1297,7 +1265,7 @@ test("A file statted by an earlier step is still offered after 16 new paths used
   expect(Object.keys(last?.criteria ?? {})).toContain("read src/a.ts");
 });
 
-test("After a mid-turn compaction the path scan starts over and offers a newly named file", async ($, on) => {
+test("After a mid-turn compaction the path scan starts over and offers a newly named file", { options: { takeOnlyForBypass: false } }, async ($, on) => {
   const bash = (id: string, out: string): Msg[] => [
     { role: "assistant", text: "", toolUses: [{ tool_use_id: id, tool: "Bash", input: { command: "true" }, text: out }] },
     { role: "user", text: "", toolUses: [], toolResults: [{ tool_use_id: id, text: out, isError: false }] },
@@ -1313,7 +1281,7 @@ test("After a mid-turn compaction the path scan starts over and offers a newly n
   expect(Object.keys(last?.criteria ?? {})).toContain("read src/new.ts");
 });
 
-test("The path scan starts over when the transcript has fewer steps under the same request row", async ($, on) => {
+test("The path scan starts over when the transcript has fewer steps under the same request row", { options: { takeOnlyForBypass: false } }, async ($, on) => {
   const said = (text: string): Msg => ({ role: "assistant", text, toolUses: [] });
   const messages: Msg[] = [user("tidy up the helpers"), said("one"), said("two"), said("three")];
   const { sent } = setup(on, { messages, files: [`${CWD}/src/new.ts`], jev: () => undefined });
@@ -1343,7 +1311,7 @@ test("A mid-turn cd moves a later step's Read candidate to the new cwd", { optio
   expect(chunks).toContainEqual({ kind: "input", index: 0, json: JSON.stringify({ file_path: `${CWD}/sub/src/b.ts` }) });
 });
 
-test("A call's result that arrives a step later is still scanned for file paths", async ($, on) => {
+test("A call's result that arrives a step later is still scanned for file paths", { options: { takeOnlyForBypass: false } }, async ($, on) => {
   const call: { tool_use_id: string; tool: string; input: Record<string, unknown>; text?: string } = { tool_use_id: "c1", tool: "Bash", input: { command: "tsc" } };
   const messages: Msg[] = [user("fix the build"), { role: "assistant", text: "", toolUses: [call] }];
   const { sent } = setup(on, { messages, files: [`${CWD}/src/x.ts`], jev: () => undefined });
@@ -1356,7 +1324,7 @@ test("A call's result that arrives a step later is still scanned for file paths"
   expect(Object.keys(last?.criteria ?? {})).toContain("read src/x.ts");
 });
 
-test("One file under several spellings is one Read candidate", async ($, on) => {
+test("One file under several spellings is one Read candidate", { options: { takeOnlyForBypass: false } }, async ($, on) => {
   const out = "./src/app.ts:3:export const useAuth = 1\n/proj/src/app.ts:4: x";
   const messages: Msg[] = [
     user("where is useAuth used? start with src/app.ts"),
@@ -1370,7 +1338,7 @@ test("One file under several spellings is one Read candidate", async ($, on) => 
   expect(Object.keys(last?.criteria ?? {}).filter((k) => k.startsWith("read "))).toEqual(["read src/app.ts"]);
 });
 
-test("A file the turn already read is not offered again under another spelling", async ($, on) => {
+test("A file the turn already read is not offered again under another spelling", { options: { takeOnlyForBypass: false } }, async ($, on) => {
   const messages: Msg[] = [
     user("check src/./app.ts"),
     { role: "assistant", text: "", toolUses: [{ tool_use_id: "r1", tool: "Read", input: { file_path: "src/app.ts" }, text: "1\texport const a = 1" }] },
@@ -1384,18 +1352,6 @@ test("A file the turn already read is not offered again under another spelling",
   await drain($.turn.step({ ...step, index: 2, messageCount: 5 }));
   const last = sent.filter((q) => q.id === "next_action").at(-1);
   expect(Object.keys(last?.criteria ?? {}).filter((k) => k.startsWith("read "))).toEqual([]);
-});
-
-test("A finished step does not wait for a slow step measurement", async ($, on) => {
-  const seen: unknown[] = [];
-  const { sent, clock } = setup(on, { messages: [user("what does src/app.ts export?")], files: ["/proj/src/app.ts"], jev: () => new Promise<never>(() => {}) });
-  claudeBeneath(on, seen);
-  const run = drain($.turn.step({ ...step, index: 4 }));
-  while (sent.length < 1) await clock.advance(0);
-  // The measurement has 4000 ms; the step is let go after 250 ms.
-  await clock.advance(250);
-  await run;
-  expect(seen).toHaveLength(1);
 });
 
 test("estimate_effort rejects invalid input without asking Jev", async ($, on) => {
@@ -1909,15 +1865,6 @@ test("There is no done check: an unfinished-looking answer asks Jev nothing and 
   expect(submitted).toEqual([]);
 });
 
-test("the prompt classifier's jev-api call gets the interactive 4 s timeout", async ($, on) => {
-  const { sent } = setup(on, { messages: [user("x")], jev: () => undefined, env: { TYPESAFE_API_KEY: "k" } });
-  on("command.list", () => ({ value: [] }));
-  on("prompt.submit", (_$, e) => ({ text: e.text }));
-  await $.prompt.submit({ text: "fix the failing date test", wait: false, origin: { kind: "composer" } });
-  expect(sent.length).toBeGreaterThan(0);
-  expect(sent.every((q) => q.timeout === 4)).toBe(true);
-});
-
 test("a blank Jev variable counts as unset, as in jev-api: Haiku budget and timeout 14", async ($, on) => {
   const seen: unknown[] = [];
   const { sent } = setup(on, { messages: [user("what does this project do?")], jev: () => undefined, env: { TYPESAFE_API_KEY: "  ", JEV_URL: " " } });
@@ -1933,11 +1880,10 @@ test("a settings env change between turns counts from the next turn, also after 
   on("command.list", () => ({ value: [] }));
   on("session.usage", () => ({ value: { context: { percent: 85 } } }));
   on("turn.complete", () => ({}));
-  on("prompt.submit", () => ({ value: {} }));
   await $.turn.complete(answered("t1", "It does X."));
   expect(sent.at(-1)?.timeout).toBe(14);
   env.JEV_URL = "https://jev.example/x";
-  await $.prompt.submit({ text: "fix the failing date test", wait: false, origin: { kind: "composer" } });
+  await $.turn.complete(answered("t2", "It does X."));
   expect(sent.at(-1)?.timeout).toBe(4);
 });
 
@@ -2042,7 +1988,7 @@ test("Two concurrent turn ends at 96% fill queue /compact once", async ($, on) =
 });
 
 // F07: facts that do not change within a turn are read from the engine once per turn.
-test("A turn reads the project, env and lists once, the cwd once per step and the transcript once per hook", async ($, on) => {
+test("A turn reads the project, env and lists once, the cwd once at step 0 and the transcript once per hook", async ($, on) => {
   const ops: Record<string, number> = {};
   for (const ev of ["env.get", "fs.exists", "fs.read", "session.cwd", "session.messages", "command.list", "tool.list", "store.get"]) {
     on(ev, (_$, e, next) => {
@@ -2053,9 +1999,7 @@ test("A turn reads the project, env and lists once, the cwd once per step and th
   }
   setup(on, { messages: [user("what does src/app.ts export?")], files: [`${CWD}/src/app.ts`], packageJson: { scripts: { test: "vitest" } }, jev: () => undefined, env: { TYPESAFE_API_KEY: "k" } });
   on("command.list", () => ({ value: [{ name: "export-check", description: "Check what a module exports", source: "user" }] }));
-  on("prompt.submit", () => ({ value: {} }));
   claudeBeneath(on, []);
-  await $.prompt.submit({ text: "what does src/app.ts export?", wait: false, origin: { kind: "composer" } });
   const perHook: Record<string, number>[] = [];
   let before = { ...ops };
   for (const index of [0, 1, 2]) {
@@ -2065,15 +2009,15 @@ test("A turn reads the project, env and lists once, the cwd once per step and th
   }
   // Step 0 reads the transcript once (no second read for the previous reply).
   expect(perHook[0]["session.messages"]).toBe(1);
-  // Later steps probe no project file and read the cwd once (a mid-turn `cd` can move it).
+  // Later steps ask Jev nothing by default: they probe no project file and read no cwd.
   for (const k of [1, 2]) for (const ev of ["fs.exists", "fs.read"]) expect(perHook[k][ev] ?? 0).toBe(0);
-  for (const k of [1, 2]) expect(perHook[k]["session.cwd"]).toBe(1);
-  // Once per turn: the three env values, the command list, the skill blocklist, the tool listing; the cwd once per step.
+  for (const k of [1, 2]) expect(perHook[k]["session.cwd"] ?? 0).toBe(0);
+  // Once per turn: the three env values, the command list, the skill blocklist, the tool listing; the cwd once, at step 0.
   expect(ops["env.get"]).toBe(3);
   expect(ops["command.list"]).toBe(1);
   expect(ops["store.get skillBlocklist"]).toBe(1);
   expect(ops["tool.list"]).toBe(1);
-  expect(ops["session.cwd"]).toBe(3);
+  expect(ops["session.cwd"]).toBe(1);
 });
 
 test("Context compaction is queued once while it waits to run", async ($, on) => {
@@ -2117,7 +2061,7 @@ test("A refused /compact lets a later high fill compact again and is logged", as
 });
 
 // F06: decisions are buffered and the log and the counters are written once per turn, not once per decision.
-test("A 6-step turn writes the log and the counters once, and /jev export still holds every decision", async ($, on) => {
+test("A 6-step turn writes the log and the counters once, and /jev export still holds every decision", { options: { takeOnlyForBypass: false } }, async ($, on) => {
   const sets: string[] = [];
   on("store.set", (_$, e, next) => (sets.push(String(e.key)), next(e)));
   setup(on, { messages: [user("what does src/app.ts export?")], files: [`${CWD}/src/app.ts`], jev: finished });
@@ -2125,7 +2069,6 @@ test("A 6-step turn writes the log and the counters once, and /jev export still 
   claudeBeneath(on, []);
   let written = "";
   on("fs.write", (_$, e) => ((written = String(e.text)), { value: undefined }));
-  await $.prompt.submit({ text: "what does src/app.ts export?", wait: false, origin: { kind: "composer" } });
   for (const index of [0, 1, 2, 3, 4, 5]) await drain($.turn.step({ ...step, index }));
   expect(sets).toEqual([]);
   await $.turn.complete(answered("t1", "Done."));
@@ -2133,7 +2076,6 @@ test("A 6-step turn writes the log and the counters once, and /jev export still 
   expect(sets.filter((k) => k === "stats")).toHaveLength(1);
   expect(await runJev($, "export")).toMatch(/wrote \d+ entries/);
   const kinds = written.trim().split("\n").map((l) => (JSON.parse(l) as { kind: string }).kind);
-  expect(kinds).toContain("classify");
   expect(kinds).toContain("route");
   expect(kinds.filter((k) => k === "compare")).toHaveLength(6);
   expect(await runJev($, "")).toMatch(/compare(:pass)?=6/);
