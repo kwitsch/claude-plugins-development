@@ -465,6 +465,26 @@ test("A second timeout doubles the pause to 60 s and a success resets it", async
   expect(await sentAfter(31_000)).toBe(true);
 });
 
+test("Further timeouts double the pause up to 10 min and no further", async ($, on) => {
+  const { clock, calls } = setup(on, { messages: [], jev: () => new Promise<never>(() => {}), env: { JEV_URL: "https://jev.example/x" } });
+  const timeoutAt = async (n: number) => {
+    const p = $.tool.call({ ...ESTIMATE });
+    for (let i = 0; i < 1000 && calls() < n; i++) await clock.advance(0);
+    expect(calls()).toBe(n);
+    await clock.advance(4000);
+    await p;
+  };
+  // Pauses 30, 60, 120, 240, 480 s, then capped at 600 s twice.
+  await timeoutAt(1);
+  for (const [n, pause] of [[2, 30_000], [3, 60_000], [4, 120_000], [5, 240_000], [6, 480_000], [7, 600_000]] as const) {
+    await clock.advance(pause);
+    await timeoutAt(n);
+  }
+  await clock.advance(600_000);
+  await timeoutAt(8);
+  expect(calls()).toBe(8);
+});
+
 test("Parallel calls that time out in one outage lengthen the pause once", async ($, on) => {
   const { clock, calls } = setup(on, { messages: [], jev: () => new Promise<never>(() => {}), env: { JEV_URL: "https://jev.example/x" } });
   const estimates = [$.tool.call({ ...ESTIMATE }), $.tool.call({ ...ESTIMATE })];
