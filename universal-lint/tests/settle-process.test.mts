@@ -118,6 +118,26 @@ test("a later edit of the line that still has the error: the later edit reports 
   assert.equal(firstRan.stderr, "");
 });
 
+test("a foreign-file-only or unlocated-only finding is not held, a mixed one is", async () => {
+  const s = setup();
+  const edit = payload(s.file, s.e.cwd, { toolName: "Edit", toolResponse: EDIT_L2 });
+  const env = { UNIVERSAL_LINT_SETTLE_MS: "1500" };
+  s.setFindings("other.sh:3:1: note: foreign-marker [SC2086]\n");
+  const foreign = await start(s.e, s.findings, edit, env);
+  s.setFindings("shellcheck: unlocated-marker\n");
+  const unlocated = await start(s.e, s.findings, edit, env);
+  s.setFindings(FINDING_L2 + "\nother.sh:3:1: note: foreign-marker [SC2086]\n");
+  const mixed = await start(s.e, s.findings, edit, env);
+  assert.equal(foreign.status, 2);
+  assert.match(foreign.stderr, /foreign-marker/);
+  assert.ok(foreign.ms < 1000, `foreign ${foreign.ms} ms`);
+  assert.equal(unlocated.status, 2);
+  assert.match(unlocated.stderr, /unlocated-marker/);
+  assert.ok(unlocated.ms < 1000, `unlocated ${unlocated.ms} ms`);
+  assert.equal(mixed.status, 2);
+  assert.ok(mixed.ms >= 1400, `mixed ${mixed.ms} ms`);
+});
+
 test("a later Write drops the earlier findings of the file", async () => {
   const s = setup();
   s.setFindings(FINDING_L2);
