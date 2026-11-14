@@ -3,7 +3,7 @@
 import { spawn, spawnSync } from "node:child_process";
 import { existsSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
-import { join, resolve } from "node:path";
+import { delimiter, dirname, join, resolve } from "node:path";
 import { findGraphmind, registered, setupMcpPresent } from "./common.mjs";
 
 /**
@@ -44,6 +44,8 @@ function main(): void {
     process.stderr.write("graphmind-helper: the graphmind binary was not found, MCP server not started\n");
     process.exit(1);
   }
+  // init writes `command -v graphmind` (else ~/.graphmind/bin/graphmind) into its project server: an off-PATH binary must be found.
+  process.env.PATH = dirname(bin) + delimiter + (process.env.PATH ?? "");
   const cwd = process.cwd();
   // Checked before init: init adds its own project entry to .claude.json, which this session has not loaded.
   const setupPresent = setupMcpPresent();

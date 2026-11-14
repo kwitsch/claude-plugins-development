@@ -153,6 +153,19 @@ test("a directory or non-executable graphmind earlier on PATH does not shadow th
   assert.equal(findGraphmind({ PATH: `${dir}:${plain}:${fakeBin}` }), join(fakeBin, "graphmind"));
 });
 
+test("with the binary off PATH (in ~/.local/bin) init writes a project server whose command exists", () => {
+  const local = join(home, ".local", "bin");
+  mkdirSync(local, { recursive: true });
+  // Like graphmind 0.3.7: the entry's command is `graphmind` from PATH, else ~/.graphmind/bin/graphmind.
+  const fake = FAKE.replace('"mcpServers":{"graphmind":{}}', '"mcpServers":{"graphmind":{"command":"%s"}}').replace('"$PWD" >', '"$PWD" "$(command -v graphmind || echo "$HOME/.graphmind/bin/graphmind")" >');
+  writeFileSync(join(local, "graphmind"), fake);
+  chmodSync(join(local, "graphmind"), 0o755);
+  assert.equal(runWrapper(true).r.status, 0);
+  const cfg = JSON.parse(readFileSync(join(home, ".claude.json"), "utf8")) as { projects: Record<string, { mcpServers: { graphmind: { command: string } } }> };
+  const cmd = Object.values(cfg.projects)[0].mcpServers.graphmind.command;
+  assert.ok(existsSync(cmd), cmd);
+});
+
 test("without the binary the wrapper exits 1; home and non-git folders are not indexable", () => {
   assert.equal(runWrapper(true).r.status, 1);
   assert.equal(indexable(root), undefined);
