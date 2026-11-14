@@ -24,7 +24,7 @@ export function isCodePrompt(prompt) {
 	return CODE_PROMPT.test(prompt);
 }
 export function searchTerms(prompt) {
-	const idents = (prompt.match(/[A-Za-z][A-Za-z0-9]*[a-z0-9][A-Z][A-Za-z0-9]*|[A-Za-z0-9]+(?:_[A-Za-z0-9]+)+|[A-Za-z][A-Za-z0-9]*(?:\.[A-Za-z][A-Za-z0-9]*)+/g) ?? []).map((w) => w.toLowerCase());
+	const idents = (prompt.match(/[A-Za-z][A-Za-z0-9]*(?:\.[A-Za-z][A-Za-z0-9]*)+|[A-Za-z0-9]+(?:_[A-Za-z0-9]+)+|[A-Za-z][A-Za-z0-9]*[a-z0-9][A-Z][A-Za-z0-9]*/g) ?? []).map((w) => w.toLowerCase());
 	const words = prompt.toLowerCase().replace(/[^a-z0-9_]+/g, " ").split(" ").filter((w) => /^[a-z_][a-z0-9_]{2,}$/.test(w) && !STOPWORDS.has(w));
 	return [...new Set([...idents, ...words])].slice(0, 5).join(" ");
 }

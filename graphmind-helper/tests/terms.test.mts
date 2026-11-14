@@ -7,6 +7,10 @@ test("searchTerms puts identifiers first and drops stopwords", () => {
   assert.equal(searchTerms("where is parseConfig and foo_bar defined"), "parseconfig foo_bar defined");
 });
 
+test("searchTerms keeps a dotted identifier with a camelCase first part (grep -oE leftmost-longest)", () => {
+  assert.equal(searchTerms("how does userService.findById work"), "userservice.findbyid userservice findbyid work");
+});
+
 test("isRecallable skips short and system-made prompts", () => {
   assert.equal(isRecallable("short"), false);
   assert.equal(isRecallable("<task-notification> something long enough"), false);
