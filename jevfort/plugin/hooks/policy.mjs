@@ -28,17 +28,6 @@ export const taskEndQuestion = {
 		false: "An intermediate result: work continues, a step is reported, a question awaits the user's answer or more steps of the same task are expected"
 	}
 };
-export function bestAction(answer) {
-	if (!answer) return undefined;
-	let best;
-	for (const [key, p] of Object.entries(answer.probabilities)) {
-		if (key !== CLAUDE && (!best || p > best.p)) best = {
-			key,
-			p
-		};
-	}
-	return best;
-}
 export function pickCandidate(answer, candidates, threshold) {
 	if (!answer || answer.choice === CLAUDE) return undefined;
 	if ((answer.probabilities[answer.choice] ?? 0) < threshold) return undefined;

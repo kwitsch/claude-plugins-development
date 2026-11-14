@@ -23,11 +23,11 @@ subagents load it via ToolSearch), no skills, agents, command hooks or MCP serve
   event), so jev-api appearing or going away takes effect from the next turn; `session.start` lists again after
   `next(e)` as the session's baseline; a failed or malformed listing counts as all missing. `jevApply` applies a
   changed listing once (`jevState` holds the last applied one and stays unset until the baseline, so a listing beneath
-  `session.start`'s `next(e)` applies nothing): going inactive says `inactive: jev-api tools missing (...)` in the status line, becoming
+  `session.start`'s `next(e)` applies nothing): going inactive redraws the band, becoming
   ready registers `estimate_effort`, both redraw the effort band. While the tool is missing (also with jev-api 0.1,
   which has only `noul`/`choice`/`score`) jevfort is inactive: every hook except the render hooks,
   the `estimate_effort` handling and the Jev-free cache countdown, Haiku compaction and auto-compact (next bullet)
-  passes through untouched (also the scratchpad-write allow); the status line says why once.
+  passes through untouched (also the scratchpad-write allow).
   `estimate_effort` is never registered in a session that was never ready; a failed registration is retried by the next
   listing, a registered one is not registered again until the next `session.start` (there is no unregister), so `tool.call` answers and `tool.check` approves it before the readiness guard (while the batch tool is really missing it
   answers its `defaultEffort`, source `fallback`; an inactive state from a failed listing still asks Jev).
@@ -55,14 +55,14 @@ subagents load it via ToolSearch), no skills, agents, command hooks or MCP serve
   prompt-submit phase before it is not covered, so a cold tick there queues `/compact` behind the user's prompt),
   context `$.session.usage().context.percent` at or above it and `coldCompacted` unset (read again after the await,
   ticks overlap), runs `$.command.run({ command: "compact" })` once (the engine queues it until the session is idle and
-  keeps the promise pending until it ran; a refusal goes to `$.ui.status`, not retried); the next response resets
+  keeps the promise pending until it ran; a refusal is not retried); the next response resets
   `coldCompacted`. The countdown state is reset by `resetCache` from `session.start` and `session.end` (the engine
   raises `session.end`, not `session.start`, for /clear and an in-process /resume; `session.end` also resets the
   first-turn estimates, the band and `autoOff`). `session.compact` (always registered, subagents pass): Jev ranking
   (`withJevRanking`, only with jev-api and the `compaction` option), then with `haikuCompact` Haiku's summary as the
   returned `messages` (`precompute` is skipped with `{ skip }`; a failure or a summary of 200 characters or fewer goes
   `next(...)`); `cacheExpires = 0` only once a compaction stands (the Haiku return or a `next(...)` result without
-  `skip`, never for `precompute`). The Haiku outcome and the Jev ranking are said in the status line.
+  `skip`, never for `precompute`).
   Trade-off of the Haiku path (read from the 2.1.322 binary): answering `{ messages }` without `next` skips core's
   compaction step, so classic PreCompact hooks do not run (a blocking one is ignored), PostCompact gets an empty
   summary, recently read files, the plan file and invoked skills are not re-attached, and a lower plugin's
@@ -82,7 +82,7 @@ subagents load it via ToolSearch), no skills, agents, command hooks or MCP serve
   `register*` functions of `agents`/`compact` moved there. Upstream `mode.ts` and `view.ts` have no
   file. The other `src/hooks/*.mts` are pure.
 - No `claude-code` type import: `$`, events and `on` are typed structurally at the top of `register.mts`.
-- No done check, no model routing, no prompt classifier, no step measurement, no `/jev` command (0.12.0): upstream's `Stop` done check (a follow-up message after an answer that looks unfinished), difficulty-based model switching, the `prompt.submit` classifier (kind/plan/skill hints) and the parallel step-k measurement (`next_action` asked next to Claude's step) are removed together with their options (`doneCheck`, `doneThreshold`, `routing: "model"`, `classify`, `measureSteps`). The `/jev` command (status, report, candidates, export, clear) is removed with the decision log behind it (`log.mts`, `report.mts`, the store keys `log` and `stats`, which an older version may have left in `$.store` and which are never read): decisions are only said in the status line by `note`. Compare notes are still said when Jev is asked before a step (step 0, or later steps with `takeOnlyForBypass` off). `routing` is a boolean (`options.routing !== false`, so any invalid value is on): `false` turns off the step-0 effort estimate and the effort row of the band, not the cache countdown, `estimate_effort` or take-steps. The context-fill task-end question (`taskEndQuestion`) is asked by `contextCompact` as its own request.
+- No done check, no model routing, no prompt classifier, no step measurement, no `/jev` command (0.12.0): upstream's `Stop` done check (a follow-up message after an answer that looks unfinished), difficulty-based model switching, the `prompt.submit` classifier (kind/plan/skill hints) and the parallel step-k measurement (`next_action` asked next to Claude's step) are removed together with their options (`doneCheck`, `doneThreshold`, `routing: "model"`, `classify`, `measureSteps`). The `/jev` command (status, report, candidates, export, clear) is removed with the decision log behind it (`log.mts`, `report.mts`, the store keys `log` and `stats`, which an older version may have left in `$.store` and which are never read): and every `$.ui.status` message (the per-decision `jev: ...` lines, `auto-compact failed`) is gone: jevfort writes nothing to the status line. `routing` is a boolean (`options.routing !== false`, so any invalid value is on): `false` turns off the step-0 effort estimate and the effort row of the band, not the cache countdown, `estimate_effort` or take-steps. The context-fill task-end question (`taskEndQuestion`) is asked by `contextCompact` as its own request.
 - Effort routing: the turn's effort comes from the effort estimate (`estimateEffort` in `policy.mts`, shared with the
   `estimate_effort` tool; its two questions go out with the other step-0 questions in the same batch call), not from upstream's difficulty->effort
   mapping, which is gone (so is the difficulty question).
@@ -97,7 +97,7 @@ subagents load it via ToolSearch), no skills, agents, command hooks or MCP serve
   `[^\p{L}\p{M}\p{N}]` so umlauts (also NFD-typed) and vowel signs survive; German prompts still share few words with English skill descriptions.
   Opus/Sonnet sessions are estimated every turn; Haiku/Fable sessions only on each loop's first turn, whose estimate is
   then held while the session effort is unchanged. A model switch starts a new first turn. Bounds: options
-  `minEffort`/`maxEffort`; invalid or inverted values fall back to `low`/`xhigh` with a note in the status line at session start.
+  `minEffort`/`maxEffort`; invalid or inverted values fall back to `low`/`xhigh`.
 
 ## Known limit: session.compact is bypassed (Claude Code 2.1.325)
 

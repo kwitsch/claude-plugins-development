@@ -147,60 +147,6 @@ export function sameCall(a: Call, b: Call): boolean {
 }
 
 /**
- * What a shell command does, for comparison: each `&&`/`;`/newline part, cut at its first pipe (`| tail`,
- * `| grep` only filter the output), without redirections, `cd` and `echo`, reduced to its command words (flags,
- * paths and numbers dropped). `git status; git diff --stat 2>&1 | head` and `git status --short && git diff --stat`
- * both give `git diff|git status`.
- *
- * @param command - The shell command.
- * @returns The sorted command words joined by `|`.
- */
-export function commandKey(command: string): string {
-  const parts = new Set<string>();
-  for (const raw of command.split(/&&|\|\||;|\n/)) {
-    const seg = raw.split(/(?<!\|)\|(?!\|)/)[0].replace(/\d?>&\d|\d?>\s*\/dev\/null/g, "").trim();
-    if (!seg || /^(cd|echo|printf|set|export)\b/.test(seg)) continue;
-    const tokens = seg.split(/\s+/);
-    const words = [tokens[0], ...tokens.slice(1).filter((t) => /^[a-z][\w:-]*$/.test(t))];
-    parts.add(words.slice(0, words[1] === "run" || words[1] === "exec" ? 3 : 2).join(" "));
-  }
-  return [...parts].sort().join("|");
-}
-
-/**
- * Same action: identical, or for shell commands the same `commandKey`.
- *
- * @param a - One call.
- * @param b - The other.
- * @returns Whether they are equivalent.
- */
-export function equivalentCall(a: Call, b: Call): boolean {
-  if (sameCall(a, b)) return true;
-  if (a.tool !== "Bash" || b.tool !== "Bash") return false;
-  const ka = commandKey(commandOf(a));
-  return ka !== "" && ka === commandKey(commandOf(b));
-}
-
-/**
- * The shell command of a Bash call, or `""` when its input has none as text.
- *
- * @param c - A Bash call.
- * @returns The command text.
- */
-const commandOf = (c: Call): string => (typeof c.input.command === "string" ? c.input.command : "");
-
-/**
- * Jev's action would have replaced Claude's whole step: one call, equivalent.
- *
- * @param claude - Claude's calls in the step.
- * @param jev - Jev's action.
- * @returns Whether Jev's action covers the step.
- */
-export function coversStep(claude: readonly Call[], jev: Call): boolean {
-  return claude.length === 1 && equivalentCall(claude[0], jev);
-}
-
-/**
  * A Bash candidate.
  *
  * @param command - The command to run.

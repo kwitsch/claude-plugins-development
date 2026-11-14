@@ -1,7 +1,7 @@
 // Pure tests of the built plugin/hooks/policy.mjs.
 import assert from "node:assert/strict";
 import { test } from "vitest";
-import { bestAction, bounds, effortLevel, estimateEffort, inScratchpad, isEffort, modelFamily, nextActionQuestion, parseEstimateInput } from "../plugin/hooks/policy.mjs";
+import { bounds, effortLevel, estimateEffort, inScratchpad, isEffort, modelFamily, nextActionQuestion, parseEstimateInput } from "../plugin/hooks/policy.mjs";
 
 const ROOTS = ["/tmp"];
 const SP = "/tmp/claude-1000/-proj/sid-1/scratchpad";
@@ -122,10 +122,4 @@ test("nextActionQuestion has string instructions and one string criterion per op
   assert.match(q.instructions, /^An AI coding assistant is working on the user request in `request`; .* pick claude\.$/);
   assert.deepEqual(Object.keys(q.criteria), ["claude", "read a.ts"]);
   assert.equal(q.criteria["read a.ts"], "Read the file a.ts");
-});
-
-test("bestAction: most likely non-claude option, undefined when only claude or no answer", () => {
-  assert.deepEqual(bestAction({ type: "choice", choice: "claude", probabilities: { claude: 0.7, "read a": 0.1, "run:npm test": 0.2 }, confidence: 0.9 }), { key: "run:npm test", p: 0.2 });
-  assert.equal(bestAction({ type: "choice", choice: "claude", probabilities: { claude: 1 }, confidence: 1 }), undefined);
-  assert.equal(bestAction(undefined), undefined);
 });
