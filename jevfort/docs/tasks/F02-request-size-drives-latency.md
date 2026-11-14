@@ -10,6 +10,8 @@ area: jevfort/src/hooks/register.mts (onPromptSubmit, onTurnStep, checkDone, con
 
 Open. Found in the performance analysis of 2026-11-14 ([../EVALUATION-2026-11-14.md](../EVALUATION-2026-11-14.md)), plugin 0.10.1.
 
+Re-measured on 0.11.0 ([../EVALUATION-2026-11-14-2.md](../EVALUATION-2026-11-14-2.md)), still open: with every clip full the classifier takes 1100 ms (F01 cut its skill options) and step 0 1548 ms, 2.65 s before the first token; the turn end with done check and task end in one batch (F03) 1771 ms, the step-k measurement 1695 ms. A 4-step turn's done check 644 ms, step 0 617 ms, measurement 729 ms. The ~0.16 ms per byte model still holds.
+
 ## Problem
 
 System One's latency is about a 45 ms floor plus ~0.16 ms per byte of the request body, and the endpoint answers concurrent requests one after another. jevfort's states were sized for content, not latency: `request` clipped to 3000-4000 characters, `previous_reply` the last 800, `recent` eight summaries of up to 400 (assistant text) or 300 (input) + 400 (result) characters, `final_message` 2000, plus option descriptions. Every turn pays two requests before its first token (classifier in `prompt.submit`, step 0 in `turn.step`) and one done check at its end; with a long prompt and a busy turn the states reach 4-10 KB:

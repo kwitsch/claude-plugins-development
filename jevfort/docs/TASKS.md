@@ -1,6 +1,6 @@
 # jevfort performance tasks
 
-Source: performance analysis of jevfort 0.10.1 (with jev-api 0.3.2) on 2026-11-14, numbers in [EVALUATION-2026-11-14.md](EVALUATION-2026-11-14.md). One document per finding in `tasks/`; read it before working on the task. Proven = measured in the harness or against the real endpoint, or shown by the code; estimated = a derived figure (engine costs, 9P), marked as such in each task.
+Source: performance analysis of jevfort 0.10.1 (with jev-api 0.3.2) on 2026-11-14, numbers in [EVALUATION-2026-11-14.md](EVALUATION-2026-11-14.md). One document per finding in `tasks/`; read it before working on the task. Re-analysis after the worklist (0.11.0, F13 and F14): [EVALUATION-2026-11-14-2.md](EVALUATION-2026-11-14-2.md). Proven = measured in the harness or against the real endpoint, or shown by the code; estimated = a derived figure (engine costs, 9P), marked as such in each task.
 
 Legend: `[x]` finished (done, or closed without code: status `closed` in the task document). `[ ]` not finished; tag = `open` (not started), `partial`, `docs-only` (no code change intended; the remaining action is a documentation sentence).
 
@@ -16,7 +16,9 @@ Legend: `[x]` finished (done, or closed without code: status `closed` in the tas
 
 ## Remaining
 
-- [ ] [F02](tasks/F02-request-size-drives-latency.md) `open` medium: Jev latency follows the request size (~0.16 ms per byte); full clips cost ~3 s before the first token and 1.7 s per done check
+- [ ] [F13](tasks/F13-step0-skill-word-offers-every-skill.md) `open` high: a prompt that says "skill(s)" makes step 0 offer every offerable skill (up to 254 options): 50 skills 1.8 s, 100 skills 2.9 s, 254 skills timeout and `jevPause`; 14% of the real step-0 asks
+- [ ] [F02](tasks/F02-request-size-drives-latency.md) `open` medium: Jev latency follows the request size (~0.16 ms per byte); full clips cost ~3 s before the first token and 1.7 s per done check (0.11.0: 2.65 s and 1.77 s)
+- [ ] [F14](tasks/F14-agent-type-choice-latency.md) `open` medium: the agent-type choice waits ~1.15 s (real median, 103 calls) before every Agent dispatch and switched none; 9% of the calls cannot switch at all
 
 ## Closed without code (measurement records, decided 2026-11-14)
 
@@ -31,4 +33,5 @@ Legend: `[x]` finished (done, or closed without code: status `closed` in the tas
 - F03 and F07 both touch `turn.complete` (`checkDone`, `contextCompact`, `readTurn`): one transcript read and one batch can be done together.
 - F04 and F05 touch `buildCandidates` and the per-step state; a per-turn cache keyed by `turnId` (cleared at `turn.complete`) serves both and F07's project probes.
 - F06 must keep every store call in a hook frame (`.claude/rules/register-hooks.md`, "Storage calls must run in-frame") and the known limit "several sessions share one log" (CLAUDE.md).
+- F13 is F01's failure at step 0 (an option per installed skill); approach 1 is F01's fix. Do F13 first. F14 and F13 both grow with the installation (skills, agent types).
 - Not covered here: the compaction ranking budget and the hook bypass of `session.compact` (jev-api F19, `../../jev-api/docs/tasks/F19-jevfort-compaction-wait-and-hook-budget.md`).
