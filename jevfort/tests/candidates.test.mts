@@ -146,6 +146,11 @@ test("the report counts a step-0 request once and shows the effort score under t
   expect(report).toContain("avg effort score 2.50");
 });
 
+test("the report counts a turn that lowered the model and raised the effort as one applied route", () => {
+  const report = buildReport([{ at: 1, kind: "route", applied: true, text: "route", turnId: "t1", data: { score: 0.5, confidence: 0.9, effort: "high", lowered: true, raised: true } }], 0.85);
+  expect(report).toContain("1 lowered, 1 raised, 1 applied |");
+});
+
 test("only skills related to the prompt are offered", () => {
   const skills = dedupeSkills(SKILLS);
   expect(relevant("can you show me the full list", skills)).toEqual([]);

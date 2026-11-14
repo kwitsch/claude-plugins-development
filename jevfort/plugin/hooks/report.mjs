@@ -109,7 +109,7 @@ export function buildReport(log, threshold) {
 	out.push("", "### Routing and done check");
 	out.push("| Decision | Checked | Result |");
 	out.push("|---|---|---|");
-	out.push(`| Effort routing | ${routes.length} turns | ${scores.length || !effortScores.length ? `avg difficulty ${scores.length ? avgOf(scores) : "—"} (0 trivial … 3 hard)` : `avg effort score ${avgOf(effortScores)} (0 mechanical … 4 hardest)`} · ${lowered.length} lowered, ${raised.length} raised, ${[...lowered, ...raised].filter((e) => e.applied).length} applied |`);
+	out.push(`| Effort routing | ${routes.length} turns | ${scores.length || !effortScores.length ? `avg difficulty ${scores.length ? avgOf(scores) : "—"} (0 trivial … 3 hard)` : `avg effort score ${avgOf(effortScores)} (0 mechanical … 4 hardest)`} · ${lowered.length} lowered, ${raised.length} raised, ${new Set([...lowered, ...raised].filter((e) => e.applied)).size} applied |`);
 	out.push(`| Done check | ${dones.length} stops | ${continued.length} unfinished, ${continued.filter((e) => e.applied).length} sent back |`);
 	const classified = of("classify");
 	if (classified.length) {
