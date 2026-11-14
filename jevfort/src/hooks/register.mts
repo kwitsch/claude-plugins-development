@@ -25,8 +25,8 @@ import { choice, COMPACT_API_TIMEOUT_S, COMPACT_TIMEOUT_MS, HAIKU_API_TIMEOUT_S,
 import type { Answer, ChoiceAnswer, JevResult, Question } from "./jev.mjs";
 import { forgetRecent, LOG_KEY, MAX_ENTRIES, recentDecisions, remember, statsKey } from "./log.mjs";
 import type { Entry } from "./log.mjs";
-import { bestAction, bounds, difficultyQuestion, doneQuestion, EFFORT_ORDER, effortQuestion, ESTIMATE_SPEC, ESTIMATE_TOOL, estimateEffort, EVERY_TURN_MODELS, inBandRange, inScratchpad, isEffort, lowerModel, mechanicalQuestion, modelFamily, nextActionQuestion, parseEstimateInput, pickCandidate, route, shouldContinue, singleActionQuestion, taskEndQuestion } from "./policy.mjs";
-import type { Effort, EstimateBounds, EstimateModel, Route } from "./policy.mjs";
+import { bestAction, bounds, EFFORT_ORDER, effortQuestion, ESTIMATE_SPEC, ESTIMATE_TOOL, estimateEffort, EVERY_TURN_MODELS, inBandRange, inScratchpad, isEffort, mechanicalQuestion, modelFamily, nextActionQuestion, parseEstimateInput, pickCandidate, singleActionQuestion, taskEndQuestion } from "./policy.mjs";
+import type { Effort, EstimateBounds, EstimateModel } from "./policy.mjs";
 import { hints, NONE, promptQuestions } from "./prompt.mjs";
 import { buildReport, escapePipes } from "./report.mjs";
 import { SUMMARY_MODEL, SYSTEM } from "./summarize.mjs";
@@ -99,10 +99,6 @@ type Engine = {
       Button: (props: Record<string, unknown>) => unknown;
     };
   };
-  /** Prompts sent as this plugin. */
-  prompt: { submit(input: { text: string }): Promise<unknown> };
-  /** The session's subagents. */
-  agent: { list(): Promise<{ status: string }[]> };
 };
 /** Continues the hook chain with an event. */
 type Next<E, R> = (e: E) => Promise<R>;
@@ -132,8 +128,8 @@ type ToolResult = { deny?: unknown; isError?: boolean } & Record<string, unknown
 type Check = { tool: string; tool_use_id?: string; agentId?: string; input?: unknown } & Record<string, unknown>;
 /** A `tool.check` result; `rule` is the settings rule that decided, absent for a tool's own check. */
 type Verdict = { decision: string; reason?: string; rule?: string } & Record<string, unknown>;
-/** A `prompt.submit` event; `origin` says who sent it (`{ kind: "plugin", name }` for another plugin's `$.prompt.submit`), `turnId` the running turn for a prompt typed mid-turn (absent while idle). */
-type PromptEvent = { command?: unknown; isMeta?: boolean; text: string; context?: readonly string[]; origin?: { kind?: string; name?: string }; turnId?: string } & Record<string, unknown>;
+/** A `prompt.submit` event; `origin` says who sent it (a background task's notification has kind `task-notification`). */
+type PromptEvent = { command?: unknown; isMeta?: boolean; text: string; context?: readonly string[]; origin?: { kind?: string } } & Record<string, unknown>;
 /** An `agent.offer` event. */
 type OfferEvent = { agent: string; description: string } & Record<string, unknown>;
 /** A `session.compact` event. */
@@ -220,14 +216,6 @@ const SINGLE_ACTION = 0.8;
  * failed run (non-zero exit) does not match and is still summarized.
  */
 const REFUSED = /^(The user doesn't want to proceed with this tool use|Permission for this tool use was denied|Permission to use .*has been denied|Hook '[^']*' blocked)/s;
-/** This plugin's name: the `origin.name` of the prompts it submits itself. */
-const PLUGIN_NAME = "jevfort";
-/** The done check's follow-up message. */
-const DONE_PROMPT = "Jev: the user's request doesn't look finished yet. Continue with what remains. If it is actually complete, say so in one line.";
-
-/** Subagent statuses that mean the work is over (the engine documents `running`, `completed`, `failed`, `killed` and others); any other status counts as still going. */
-const FINISHED = new Set(["completed", "failed", "killed", "idle"]);
-
 /**
  * `String(v)` for a tool-input field, typed `unknown` so the lint's base-to-string check accepts a `?? ""` fallback.
  *
@@ -678,12 +666,7 @@ async function readTurn($: Engine, agentId?: string): Promise<TurnContext | unde
  */
 function turnOf(messages: SessionMessage[] | undefined): TurnContext | undefined {
   if (!Array.isArray(messages)) return undefined;
-  // Jev's own done follow-up is not the user's request.
-  // shortcut: SessionMessage has no origin marker, so the synthetic message is matched by its exact text; a user sending exactly that text loses that one message from the scored request.
-  // The follow-up as stored: the engine wraps a plugin's submitted prompt ("The <plugin> plugin sent a message:\n<text>\n\nThis is how ...").
-  /** Whether a trimmed user row is jevfort's own done follow-up, bare or as the engine wraps it. */
-  const own = (t: string) => t === DONE_PROMPT || t.startsWith(`The ${PLUGIN_NAME} plugin sent a message:\n${DONE_PROMPT}\n`);
-  return splitTurn(messages.filter((m) => !(m.role === "user" && own(m.text.trim()))));
+  return splitTurn(messages);
 }
 
 /**
@@ -1005,27 +988,21 @@ async function blockSkill($: Engine, name: string): Promise<void> {
  * @param $ - Engine interface.
  * @param e - The `turn.complete` event.
  * @param ready - jev-api is usable (the judgement needs it, the forced compaction does not).
- * @param continued - The done check just sent Claude back: the task is not finished.
  * @param fromPercent - Context fill from which a task end compacts; 0 is off.
  * @param forcePercent - Context fill from which any turn end compacts; 0 is off.
- * @param asked - The task-end answer the done check already got in its merged request (`end` undefined: no usable
- * answer, no compaction); absent, the task end is asked here.
  */
-async function contextCompact($: Engine, e: TurnEnd, ready: boolean, continued: boolean, fromPercent: number, forcePercent: number, asked?: { end: number | undefined }): Promise<void> {
+async function contextCompact($: Engine, e: TurnEnd, ready: boolean, fromPercent: number, forcePercent: number): Promise<void> {
   if (e.agentId !== undefined || compactQueued || (fromPercent <= 0 && forcePercent <= 0)) return;
   const percent = await fillPercent($);
   const forced = forcePercent > 0 && percent >= forcePercent;
-  if (!forced && (fromPercent <= 0 || percent < fromPercent || !ready || continued || e.reason !== "answer")) return;
+  if (!forced && (fromPercent <= 0 || percent < fromPercent || !ready || e.reason !== "answer")) return;
   let text = `${percent.toFixed(0)}% full, forced`;
   if (!forced) {
-    let end = asked?.end;
-    if (!asked) {
-      const ctx = await readTurn($);
-      if (!ctx) return;
-      const r = await askJev($, { request: clip(ctx.request, 3000), final_message: clip(e.answer ?? "", 2000), recent: summarize(ctx.steps) }, { end: taskEndQuestion });
-      if (!r.ok) return;
-      end = noul(r.answers, "end");
-    }
+    const ctx = await readTurn($);
+    if (!ctx) return;
+    const r = await askJev($, { request: clip(ctx.request, 3000), final_message: clip(e.answer ?? "", 2000), recent: summarize(ctx.steps) }, { end: taskEndQuestion });
+    if (!r.ok) return;
+    const end = noul(r.answers, "end");
     if (end === undefined || end < 0.5) return;
     text = `${percent.toFixed(0)}% full, task ended (p=${end.toFixed(2)})`;
   }
@@ -1055,70 +1032,24 @@ async function fillPercent($: Engine): Promise<number> {
 }
 
 /**
- * The done check after a main-loop answer: asks Jev whether the request is finished and records the verdict.
- *
- * @remarks
- * Module level because the engine accepts `$` passed only to top-level functions.
- *
- * @param $ - Engine interface.
- * @param e - The `turn.complete` event.
- * @param threshold - The `doneThreshold`: below this `done` probability the request counts as unfinished.
- * @param withEnd - Ask the task-end question in the same request (the turn end is due for a compaction judgement).
- * @returns Whether to send Claude back with a follow-up message, and the task-end answer when it was asked (`end` undefined: asked, no usable answer).
- */
-async function checkDone($: Engine, e: TurnEnd, threshold: number, withEnd: boolean): Promise<{ unfinished: boolean; asked?: { end: number | undefined } }> {
-  // Waiting on background work (a subagent) is not stopping early: that work will wake the session when it finishes.
-  // shortcut: background Bash commands are not exposed to $ (only subagents are), so waiting on one still triggers a follow-up; upgrade when the engine lists background tasks.
-  const agents = await $.agent.list().catch(() => undefined);
-  if (!agents) return { unfinished: false };
-  const waitingOn = agents.filter((a) => !FINISHED.has(a.status)).length;
-  if (waitingOn > 0) {
-    await record($, { kind: "done", applied: false, text: `skipped: waiting on ${waitingOn} background task(s)`, data: { skipped: "background", continued: false } });
-    return { unfinished: false };
-  }
-
-  const ctx = await readTurn($);
-  if (!ctx) return { unfinished: false };
-  const r = await askJev(
-    $,
-    { request: clip(ctx.request, 3000), final_message: clip(e.answer ?? "", 2000), recent: summarize(ctx.steps) },
-    withEnd ? { done: doneQuestion, end: taskEndQuestion } : { done: doneQuestion },
-  );
-  // All or nothing: a failed merged call answers neither question, as two failed calls did.
-  if (!r.ok) return { unfinished: false, asked: withEnd ? { end: undefined } : undefined };
-  const done = noul(r.answers, "done");
-  const unfinished = shouldContinue(done, threshold);
-  await record($, {
-    kind: "done",
-    applied: unfinished,
-    text: unfinished ? `not finished (p=${(done ?? 0).toFixed(2)}), continuing` : `finished (p=${(done ?? 0).toFixed(2)})`,
-    ms: r.ms,
-    data: { p: done, continued: unfinished },
-  });
-  return { unfinished, asked: withEnd ? { end: noul(r.answers, "end") } : undefined };
-}
-
-/**
  * Module entry point called by the engine.
  *
  * @param on - Registers a hook for an event.
  * @param options - The manifest's `userConfig` values.
  */
 export const register = (on: On, options: Options): void => {
-  const routing = options.routing === "model" || options.routing === "off" ? options.routing : "effort";
+  // Only an explicit `false` turns effort routing (and the band's effort row) off: any other value is the default, on.
+  const routing = options.routing !== false;
   const takeSteps = options.takeSteps !== false;
-  const doneCheck = options.doneCheck !== false;
   const takeThreshold = typeof options.takeThreshold === "number" ? options.takeThreshold : 0.85;
   const subagents = options.subagents !== false;
   const bypass = options.bypass !== false;
   // Benchmark (2026-10-14): taking steps inside multi-step coding turns only added turns (+6, +3% cost); taking pays off when the whole turn is bypassed.
   const takeOnlyForBypass = options.takeOnlyForBypass !== false;
-  const measureSteps = options.measureSteps !== false;
   const threshold = (key: string, fallback: number): number => {
     const v = options[key];
     return typeof v === "number" ? v : fallback;
   };
-  const doneThreshold = threshold("doneThreshold", 0.15);
   // The bounds of the turn-start effort estimate; invalid or inverted options fall back to low..xhigh together.
   const configuredRange = bounds(options.minEffort, options.maxEffort);
   const effortRange: { minEffort: Effort; maxEffort: Effort } = configuredRange ?? { minEffort: "low", maxEffort: "xhigh" };
@@ -1145,11 +1076,11 @@ export const register = (on: On, options: Options): void => {
 
   // The effort band above the prompt: the levels between the configured minimum and maximum (plus the session effort when outside), the session effort bold, Jev's choice for the turn blue, and the
   // Auto button, then the cache countdown. Without the effort row (jevfort inactive, also before the session
-  // baseline, or `routing: "off"`) only the countdown shows, above whatever another plugin draws in the band beneath
+  // baseline, or `routing: false`) only the countdown shows, above whatever another plugin draws in the band beneath
   // (the effort row takes the whole band); a survey holds the band.
   on("ui.render", { component: "AbovePrompt" }, async function onRenderBand($: Engine, e: BandEvent, next: (e: BandEvent) => unknown): Promise<unknown> {
     // The cache countdown needs no Jev: it shows also while the effort row is hidden.
-    const effortRow = routing !== "off" && jevState === "";
+    const effortRow = routing && jevState === "";
     if (e.props.hasSurvey || (!effortRow && shownMinutes === null)) return next(e);
     const { Box, Text, Button } = $.ui.resolve(e);
     const color = shownMinutes === null ? undefined : cacheColor(shownMinutes);
@@ -1184,31 +1115,13 @@ export const register = (on: On, options: Options): void => {
     });
   });
 
-  // The next main-loop turn after a done follow-up is exempt, so Jev sends Claude back at most once per request.
-  // Armed only by a prompt this plugin submitted itself (`origin`), cleared by a user's own prompt (`composer`, not meta), so a
-  // user turn neither consumes nor inherits it, a user pasting the follow-up text triggers nothing, and a meta prompt in
-  // between (a background-task notification) does not re-open the follow-up turn to a second check. A hot reload forgets it: at worst one more follow-up.
-  let donePending = false;
-  // Bumped at every session.start and session.end: a done follow-up submitted before a /clear must not land in the new conversation.
-  let sessionEpoch = 0;
-  let followUpEpoch = 0;
-  // Why the last follow-up failed to submit: its rejection arrives after the hook frame ended, so it is logged by the next turn.complete.
-  let lostFollowUp: string | undefined;
   // Bumped at every main-loop turn.complete: the turn an agent type was last offered in (Jev's agent-switch options).
   let agentTurn = 0;
   // Phase 3: classify each prompt as it is sent and, when Jev is confident, add a short hint only Claude reads.
-  // This one hook also notes Jev's own done follow-up passing through, which arms the exemption.
   on("prompt.submit", async function onPromptSubmit($: Engine, e: PromptEvent, next: Next<PromptEvent, unknown>): Promise<unknown> {
     if ((await jevMissing($)).length) return next(e);
-    if (e.origin?.kind === "plugin" && e.origin.name === PLUGIN_NAME) {
-      if (followUpEpoch !== sessionEpoch) return { drop: "jevfort: done follow-up dropped, the conversation was cleared" };
-      donePending = true;
-      return next(e);
-    }
-    // Only a prompt submitted while idle (no `turnId`): one typed during the follow-up turn must not re-open that turn to a second check.
-    if (e.origin?.kind === "composer" && !e.isMeta && e.turnId === undefined) donePending = false;
     // A finished background task arrives as origin `task-notification` (not flagged meta): nothing to classify.
-    if (options.classify === false || e.command || e.isMeta || e.origin?.kind === "task-notification" || e.text.trim().length < 3) return next(e);
+    if (e.command || e.isMeta || e.origin?.kind === "task-notification" || e.text.trim().length < 3) return next(e);
 
     const skillCriteria = await skillOptions($, e.text);
     const questions = promptQuestions(skillCriteria);
@@ -1335,9 +1248,9 @@ export const register = (on: On, options: Options): void => {
     };
   });
 
-  // Per-turn state: the difficulty route, the effort sent on every step of the turn, Jev's takes, the bypass and the
+  // Per-turn state: the effort sent on every step of the turn, Jev's takes, the bypass and the
   // stat results of mentioned paths (dropped with the turn, so a file created later is offered in the next turn).
-  const turns = new Map<string, { route?: Route; effort?: Effort; taken: number; bypassId?: string; bypassAction?: string; cache: TurnCache }>();
+  const turns = new Map<string, { effort?: Effort; taken: number; bypassId?: string; bypassAction?: string; cache: TurnCache }>();
   // What each loop's first turn (key `agentId`, `""` for the main loop) saw and estimated: the session model's family,
   // the session effort (`from`) and the estimate (unset when none was made or Jev failed). Drives the Haiku/Fable hold.
   const firstTurns = new Map<string, { family?: EstimateModel; from: unknown; effort?: Effort }>();
@@ -1357,7 +1270,6 @@ export const register = (on: On, options: Options): void => {
   on("session.start", async function onSessionStart($: Engine, e: unknown, next: Next<unknown, unknown>): Promise<unknown> {
     // A new session (a start, a reload) gets its own first-turn estimate, an empty band, Auto on and a fresh cache
     // countdown; session.end does the same for /clear and /resume, where no session.start follows.
-    sessionEpoch += 1;
     forgetConversation();
     resetCache($);
     // Until the baseline below, a listing raised beneath `next(e)` (before jev-api registered) applies nothing.
@@ -1389,7 +1301,6 @@ export const register = (on: On, options: Options): void => {
    * first-turn estimates, band and Auto switch end here.
    */
   on("session.end", async function onSessionEnd($: Engine, e: unknown, next: Next<unknown, unknown>): Promise<unknown> {
-    sessionEpoch += 1; // /clear raises only session.end (no session.start follows)
     forgetConversation();
     resetCache($);
     await flushLog($);
@@ -1448,7 +1359,7 @@ export const register = (on: On, options: Options): void => {
       return {
         text: [
           ...(missing.length ? [`Jev pilot: inactive, the jev-api tools are missing (${missing.join(", ")}). jevfort needs jev-api 0.2.0 or later and no permissions.deny rule matching its tools; it looks again at the next turn.`] : []),
-          `Jev pilot: routing ${routing}${autoOff ? " (effort auto off)" : ""}, take steps ${takeSteps} (p ≥ ${takeThreshold}), done check ${doneCheck}, subagents ${subagents}`,
+          `Jev pilot: effort routing ${routing ? "on" : "off"}${autoOff ? " (effort auto off)" : ""}, take steps ${takeSteps} (p ≥ ${takeThreshold}), subagents ${subagents}`,
           `Decisions (all sessions): ${counts}`,
           lines.length ? `Recent:\n${lines.join("\n")}` : "No decisions this session yet.",
           "Full analysis: /jev report",
@@ -1469,7 +1380,7 @@ export const register = (on: On, options: Options): void => {
     // (a subagent's completion does not drop it, so a mid-turn listing glitch cannot flap the band).
     if (e.agentId === undefined) dropTurnReads();
     if (missing.length) {
-      await contextCompact($, e, false, false, taskCompactPercent, forceCompactPercent).catch(() => undefined);
+      await contextCompact($, e, false, taskCompactPercent, forceCompactPercent).catch(() => undefined);
       await flushLog($);
       return next(e);
     }
@@ -1477,47 +1388,13 @@ export const register = (on: On, options: Options): void => {
     if (e.reason === "aborted" || e.reason === "error") {
       await record($, { kind: "turn", applied: false, text: `turn ${e.reason}`, turnId: e.turnId, data: { reason: e.reason } });
     }
-    if (lostFollowUp !== undefined) {
-      await record($, { kind: "error", applied: false, text: `done follow-up not sent: ${lostFollowUp}` }).catch(() => undefined);
-      lostFollowUp = undefined;
-    }
     if (lostCompact !== undefined) {
       await record($, { kind: "error", applied: false, text: `context compaction refused: ${lostCompact}` }).catch(() => undefined);
       lostCompact = undefined;
     }
-    let continued = false;
-    let asked: { end: number | undefined } | undefined;
-    // Done check: runs here because cc-plugin-sec-default passes classic.Stop on past every user-tier hook.
-    if (e.agentId === undefined) {
-      const exempt = donePending;
-      donePending = false;
-      if (doneCheck && !exempt && e.reason === "answer") {
-        try {
-          // Read before the await: a /clear that arrives during the check must make the follow-up stale.
-          const epoch = sessionEpoch;
-          // Due at the same fill the compaction judges a task end from (never forced: that asks nothing).
-          const fill = taskCompactPercent > 0 && !compactQueued ? await fillPercent($) : 0;
-          const withEnd = taskCompactPercent > 0 && fill >= taskCompactPercent && !(forceCompactPercent > 0 && fill >= forceCompactPercent);
-          const done = await checkDone($, e, doneThreshold, withEnd);
-          asked = done.asked;
-          if (done.unfinished) {
-            continued = true;
-            // Not awaited: it resolves only once the new turn starts, which waits for this turn to end. No `$` call in the
-            // rejection handler: it runs after this frame, so the next turn.complete logs the error in-frame.
-            followUpEpoch = epoch;
-            $.prompt.submit({ text: DONE_PROMPT }).catch((err: unknown) => {
-              donePending = false;
-              lostFollowUp = String(err);
-            });
-          }
-        } catch (err) {
-          await record($, { kind: "error", applied: false, text: `done check failed: ${String(err)}` }).catch(() => undefined);
-        }
-      }
-    }
-    await contextCompact($, e, true, continued, taskCompactPercent, forceCompactPercent, asked).catch((err: unknown) => record($, { kind: "error", applied: false, text: `context compaction check failed: ${String(err)}` }).catch(() => undefined));
+    await contextCompact($, e, true, taskCompactPercent, forceCompactPercent).catch((err: unknown) => record($, { kind: "error", applied: false, text: `context compaction check failed: ${String(err)}` }).catch(() => undefined));
     await flushLog($); // the turn's decisions, written once instead of per decision (F06)
-    // The done check above re-read the env: drop it again so the next turn reads the settings `env` afresh.
+    // The compaction check above may have read the env: drop it again so the next turn reads the settings `env` afresh.
     if (e.agentId === undefined) haikuPath = undefined;
     return next(e);
   });
@@ -1556,8 +1433,7 @@ export const register = (on: On, options: Options): void => {
   });
 
   // Each model request: Jev may take the step itself, and at step 0 estimates the turn's effort (every turn on
-  // Opus/Sonnet, the loop's first turn only on Haiku/Fable, which then hold it) and rates its difficulty to lower the
-  // model. One Jev request carries all of it. Every answer is logged; when Claude takes the step, its call is compared
+  // Opus/Sonnet, the loop's first turn only on Haiku/Fable, which then hold it). One Jev request carries all of it. Every answer is logged; when Claude takes the step, its call is compared
   // with Jev's top action so the take threshold can be calibrated.
   on("turn.step", async function* onTurnStep($: Engine, e: Step, rawNext: (e: Step) => StepRun): StepRun {
     // Every main-loop response on the chat's own model restarts the cache countdown (the work is jev-api independent).
@@ -1607,13 +1483,11 @@ export const register = (on: On, options: Options): void => {
       candidates = (await buildCandidates($, ctx.request, ctx.steps, calls, e.index, turn.cache)).filter((c) => !(last && sameCall(last, { tool: c.tool, input: c.input })));
       if (candidates.length) questions.next_action = nextActionQuestion(candidates);
     }
-    // Step 0: the difficulty (only for model routing) and the effort estimate, or a Haiku/Fable turn's held first-turn
-    // estimate.
+    // Step 0: the effort estimate, or a Haiku/Fable turn's held first-turn estimate.
     let estimate: EstimateBounds | undefined;
     let held: Effort | undefined;
     let firstTurn: { family?: EstimateModel; from: unknown; effort?: Effort } | undefined;
-    if (routing !== "off" && e.index === 0) {
-      if (routing === "model") questions.difficulty = difficultyQuestion;
+    if (routing && e.index === 0) {
       const sessionEffort = isEffort(e.effort) ? e.effort : undefined;
       if (!e.agentId) {
         // A new main-loop turn: the session effort bold, the last turn's choice cleared.
@@ -1648,12 +1522,7 @@ export const register = (on: On, options: Options): void => {
     }
     if (bypass && e.index === 0 && questions.next_action && !e.agentId) questions.single_action = singleActionQuestion;
     // The turn's effort, set at step 0, holds for every step of the turn whatever model the step runs on.
-    const routed = (step: Step): Step => {
-      if (!turn.route && !turn.effort) return step;
-      const effort = turn.effort;
-      const model = lowerModel(step.model, turn.route?.model);
-      return effort || model ? { ...step, ...(effort ? { effort } : {}), ...(model ? { model } : {}) } : step;
-    };
+    const routed = (step: Step): Step => (turn.effort ? { ...step, effort: turn.effort } : step);
 
     if (!Object.keys(questions).length) {
       // Inside a longer turn Jev doesn't take steps, but is asked in parallel with Claude which action it would
@@ -1661,7 +1530,7 @@ export const register = (on: On, options: Options): void => {
       let measure: Promise<JevResult> | undefined;
       let measured: Candidate[] = [];
       // Not on a slash-command turn either: Jev would be compared on the bare command, whose skill text it cannot see.
-      if (measureSteps && takeSteps && !ctx.command && e.index > 0 && !e.agentId) {
+      if (takeSteps && !ctx.command && e.index > 0 && !e.agentId) {
         measured = (await buildCandidates($, ctx.request, ctx.steps, calls, e.index, turn.cache)).filter((c) => !(last && sameCall(last, { tool: c.tool, input: c.input })));
         if (measured.length) {
           measure = askJev($, { request: clip(ctx.request, 4000), recent: summarize(ctx.steps), cwd: turn.cache.cwd ??= await $.session.cwd() }, { next_action: nextActionQuestion(measured) });
@@ -1696,32 +1565,26 @@ export const register = (on: On, options: Options): void => {
       return yield* next(routed(e));
     }
 
-    if (questions.difficulty || estimate) {
-      const difficulty = questions.difficulty ? score(r.answers, "difficulty") : undefined;
-      turn.route = difficulty ? route(difficulty, "model") : undefined;
-      const model = lowerModel(e.model, turn.route?.model);
+    if (estimate) {
       const mechanical = noul(r.answers, "mechanical");
-      const effortAnswer = estimate ? score(r.answers, "effort") : undefined;
-      const est = estimate ? estimateEffort(effortAnswer, mechanical, estimate) : undefined;
-      if (est) {
-        turn.effort = est.effort !== e.effort ? est.effort : undefined;
-        if (firstTurn) firstTurn.effort = est.effort;
-        if (!e.agentId) {
-          band.chosen = est.effort;
-          $.ui.invalidate("ui.render");
-        }
+      const effortAnswer = score(r.answers, "effort");
+      const est = estimateEffort(effortAnswer, mechanical, estimate);
+      turn.effort = est.effort !== e.effort ? est.effort : undefined;
+      if (firstTurn) firstTurn.effort = est.effort;
+      if (!e.agentId) {
+        band.chosen = est.effort;
+        $.ui.invalidate("ui.render");
       }
       const effort = turn.effort;
       const raised = effort !== undefined && EFFORT_ORDER.indexOf(effort) > (isEffort(e.effort) ? EFFORT_ORDER.indexOf(e.effort) : -1);
-      const lowered = Boolean((effort && !raised) || model);
-      const source = est?.source ?? (held ? "held" : undefined);
+      const lowered = effort !== undefined && !raised;
       await record($, {
         kind: "route",
         applied: lowered || raised,
-        text: `${difficulty ? `difficulty ${difficulty.score.toFixed(2)}` : "effort"} → ${lowered || raised ? `${model ?? e.model}, effort ${effort ?? String(e.effort)}` : "no change"}${source ? ` · ${source}` : ""}`,
+        text: `effort → ${lowered || raised ? `${e.model}, effort ${effort}` : "no change"} · ${est.source}`,
         ms: r.ms,
         turnId: e.turnId,
-        data: { score: difficulty?.score, confidence: difficulty?.confidence, effort, model, lowered, raised, estimate: est?.effort, source, mechanical, effortScore: effortAnswer?.score, effortConfidence: effortAnswer?.confidence },
+        data: { effort, lowered, raised, estimate: est.effort, source: est.source, mechanical, effortScore: effortAnswer?.score, effortConfidence: effortAnswer?.confidence },
       });
     }
 

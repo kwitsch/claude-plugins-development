@@ -1,6 +1,6 @@
 /**
- * `/jev report` as Markdown tables: a summary, Jev vs Claude step by step, the take threshold, then routing and done
- * check. Pure, so tests can feed it entries directly.
+ * `/jev report` as Markdown tables: a summary, Jev vs Claude step by step, the take threshold, then effort routing and the
+ * other decisions. Pure, so tests can feed it entries directly.
  *
  * @packageDocumentation
  */
@@ -206,21 +206,16 @@ export function buildReport(log: readonly Entry[], threshold: number): string {
     }
   }
 
-  // Routing, done check.
+  // Effort routing and the other decisions.
   const routes = of("route");
-  const scores = routes.map((e) => num(e.data?.score)).filter((s): s is number => s !== undefined);
-  // The default routing (effort) has no difficulty score: its own score (0 mechanical … 4 hardest) stands in.
   const effortScores = routes.map((e) => num(e.data?.effortScore)).filter((s): s is number => s !== undefined);
   const avgOf = (xs: number[]) => (xs.reduce((a, b) => a + b, 0) / xs.length).toFixed(2);
   const lowered = routes.filter((e) => e.data?.lowered === true);
   const raised = routes.filter((e) => e.data?.raised === true);
-  const dones = of("done");
-  const continued = dones.filter((e) => e.data?.continued === true);
-  out.push("", "### Routing and done check");
+  out.push("", "### Decisions");
   out.push("| Decision | Checked | Result |");
   out.push("|---|---|---|");
-  out.push(`| Effort routing | ${routes.length} turns | ${scores.length || !effortScores.length ? `avg difficulty ${scores.length ? avgOf(scores) : "—"} (0 trivial … 3 hard)` : `avg effort score ${avgOf(effortScores)} (0 mechanical … 4 hardest)`} · ${lowered.length} lowered, ${raised.length} raised, ${new Set([...lowered, ...raised].filter((e) => e.applied)).size} applied |`);
-  out.push(`| Done check | ${dones.length} stops | ${continued.length} unfinished, ${continued.filter((e) => e.applied).length} sent back |`);
+  out.push(`| Effort routing | ${routes.length} turns | ${effortScores.length ? `avg effort score ${avgOf(effortScores)} (0 mechanical … 4 hardest)` : "avg effort score —"} · ${lowered.length} lowered, ${raised.length} raised, ${new Set([...lowered, ...raised].filter((e) => e.applied)).size} applied |`);
   const classified = of("classify");
   if (classified.length) {
     const kinds = new Map<string, number>();

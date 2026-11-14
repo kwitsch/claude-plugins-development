@@ -9,18 +9,14 @@ import { hints, promptQuestions } from "../plugin/hooks/prompt.mjs";
 
 // The manifest defaults (jevfort/package.json claudePlugin.userConfig): the kit does not fill userConfig defaults.
 const DEFAULTS = {
-  routing: "effort",
+  routing: true,
   takeSteps: true,
-  doneCheck: true,
   takeThreshold: 0.85,
   subagents: true,
-  doneThreshold: 0.15,
   bypass: true,
-  classify: true,
   agentTypes: true,
   compaction: true,
   takeOnlyForBypass: true,
-  measureSteps: true,
 };
 
 const { test, mock } = createKit({ module: new URL("../plugin/hooks/register.mjs", import.meta.url), plugin: "jevfort", options: DEFAULTS });
@@ -299,26 +295,6 @@ test("compaction: false sends no ranking call and no ranking instructions", { op
   await $.session.compact({ trigger: "manual", messages });
   expect(sent).toHaveLength(0);
   expect(instructions).toBeUndefined();
-});
-
-test("session.compact scores relevance against the user's request, not jevfort's done follow-up", async ($, on) => {
-  const done = "Jev: the user's request doesn't look finished yet. Continue with what remains. If it is actually complete, say so in one line.";
-  const messages: Msg[] = [
-    { role: "user", text: "fix the failing date test", toolUses: [] },
-    {
-      role: "assistant",
-      text: "",
-      toolUses: ["a", "b", "c"].map((x, i) => ({ tool_use_id: `t${i}`, tool: "Bash", input: { command: `step ${x}` }, text: x })),
-    },
-    { role: "assistant", text: "Done.", toolUses: [] },
-    { role: "user", text: `The jevfort plugin sent a message:\n${done}\n\nThis is how plugins talk to you.`, toolUses: [] },
-    { role: "assistant", text: "Continuing.", toolUses: [] },
-  ];
-  const sent = base(on, () => ({ type: "score", score: 1.5, probabilities: {}, confidence: 0.8 }));
-  on("session.compact", () => ({ skip: "test" }));
-  await $.session.compact({ trigger: "manual", messages });
-  expect(sent).toHaveLength(3);
-  expect((JSON.parse(sent[0].state) as { request: string }).request).toBe("fix the failing date test");
 });
 
 test("session.compact waits longer for Jev than an interactive call, and tells jev-api so", async ($, on) => {

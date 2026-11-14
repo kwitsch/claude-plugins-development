@@ -5,7 +5,7 @@ import { COMPACT_MAX_TOKENS, COMPACT_MODEL, COMPACT_SYSTEM, compactInstructions,
 import { clip, head, splitTurn, summarize, toolCalls } from "./context.mjs";
 import { choice, COMPACT_API_TIMEOUT_S, COMPACT_TIMEOUT_MS, HAIKU_API_TIMEOUT_S, HAIKU_TIMEOUT_MS, isAnswer, JEV_API_TIMEOUT_S, JEV_BATCH, JEV_TOOL_PREFIX, JEV_TOOLS, MAX_CHOICE_OPTIONS, MAX_ERROR, MAX_PAUSE_MS, MEASURE_GRACE_MS, missingJevTools, noul, PAUSE_MS, score, TIMEOUT_MS } from "./jev.mjs";
 import { forgetRecent, LOG_KEY, MAX_ENTRIES, recentDecisions, remember, statsKey } from "./log.mjs";
-import { bestAction, bounds, difficultyQuestion, doneQuestion, EFFORT_ORDER, effortQuestion, ESTIMATE_SPEC, ESTIMATE_TOOL, estimateEffort, EVERY_TURN_MODELS, inBandRange, inScratchpad, isEffort, lowerModel, mechanicalQuestion, modelFamily, nextActionQuestion, parseEstimateInput, pickCandidate, route, shouldContinue, singleActionQuestion, taskEndQuestion } from "./policy.mjs";
+import { bestAction, bounds, EFFORT_ORDER, effortQuestion, ESTIMATE_SPEC, ESTIMATE_TOOL, estimateEffort, EVERY_TURN_MODELS, inBandRange, inScratchpad, isEffort, mechanicalQuestion, modelFamily, nextActionQuestion, parseEstimateInput, pickCandidate, singleActionQuestion, taskEndQuestion } from "./policy.mjs";
 import { hints, NONE, promptQuestions } from "./prompt.mjs";
 import { buildReport, escapePipes } from "./report.mjs";
 import { SUMMARY_MODEL, SYSTEM } from "./summarize.mjs";
@@ -30,14 +30,6 @@ function settled(base) {
 }
 const SINGLE_ACTION = .8;
 const REFUSED = /^(The user doesn't want to proceed with this tool use|Permission for this tool use was denied|Permission to use .*has been denied|Hook '[^']*' blocked)/s;
-const PLUGIN_NAME = "jevfort";
-const DONE_PROMPT = "Jev: the user's request doesn't look finished yet. Continue with what remains. If it is actually complete, say so in one line.";
-const FINISHED = new Set([
-	"completed",
-	"failed",
-	"killed",
-	"idle"
-]);
 const asText = (v) => String(v);
 const jevPause = {
 	until: 0,
@@ -330,8 +322,7 @@ async function readTurn($, agentId) {
 }
 function turnOf(messages) {
 	if (!Array.isArray(messages)) return undefined;
-	const own = (t) => t === DONE_PROMPT || t.startsWith(`The ${PLUGIN_NAME} plugin sent a message:\n${DONE_PROMPT}\n`);
-	return splitTurn(messages.filter((m) => !(m.role === "user" && own(m.text.trim()))));
+	return splitTurn(messages);
 }
 function previousReply(messages) {
 	if (!Array.isArray(messages)) return undefined;
@@ -557,25 +548,22 @@ async function blockSkill($, name) {
 		skillList = undefined;
 	} catch {}
 }
-async function contextCompact($, e, ready, continued, fromPercent, forcePercent, asked) {
+async function contextCompact($, e, ready, fromPercent, forcePercent) {
 	if (e.agentId !== undefined || compactQueued || fromPercent <= 0 && forcePercent <= 0) return;
 	const percent = await fillPercent($);
 	const forced = forcePercent > 0 && percent >= forcePercent;
-	if (!forced && (fromPercent <= 0 || percent < fromPercent || !ready || continued || e.reason !== "answer")) return;
+	if (!forced && (fromPercent <= 0 || percent < fromPercent || !ready || e.reason !== "answer")) return;
 	let text = `${percent.toFixed(0)}% full, forced`;
 	if (!forced) {
-		let end = asked?.end;
-		if (!asked) {
-			const ctx = await readTurn($);
-			if (!ctx) return;
-			const r = await askJev($, {
-				request: clip(ctx.request, 3e3),
-				final_message: clip(e.answer ?? "", 2e3),
-				recent: summarize(ctx.steps)
-			}, { end: taskEndQuestion });
-			if (!r.ok) return;
-			end = noul(r.answers, "end");
-		}
+		const ctx = await readTurn($);
+		if (!ctx) return;
+		const r = await askJev($, {
+			request: clip(ctx.request, 3e3),
+			final_message: clip(e.answer ?? "", 2e3),
+			recent: summarize(ctx.steps)
+		}, { end: taskEndQuestion });
+		if (!r.ok) return;
+		const end = noul(r.answers, "end");
 		if (end === undefined || end < .5) return;
 		text = `${percent.toFixed(0)}% full, task ended (p=${end.toFixed(2)})`;
 	}
@@ -604,67 +592,17 @@ async function fillPercent($) {
 	const reported = (await $.session.usage().catch(() => undefined))?.context.percent ?? 0;
 	return Number.isFinite(reported) ? reported : 0;
 }
-async function checkDone($, e, threshold, withEnd) {
-	const agents = await $.agent.list().catch(() => undefined);
-	if (!agents) return { unfinished: false };
-	const waitingOn = agents.filter((a) => !FINISHED.has(a.status)).length;
-	if (waitingOn > 0) {
-		await record($, {
-			kind: "done",
-			applied: false,
-			text: `skipped: waiting on ${waitingOn} background task(s)`,
-			data: {
-				skipped: "background",
-				continued: false
-			}
-		});
-		return { unfinished: false };
-	}
-	const ctx = await readTurn($);
-	if (!ctx) return { unfinished: false };
-	const r = await askJev($, {
-		request: clip(ctx.request, 3e3),
-		final_message: clip(e.answer ?? "", 2e3),
-		recent: summarize(ctx.steps)
-	}, withEnd ? {
-		done: doneQuestion,
-		end: taskEndQuestion
-	} : { done: doneQuestion });
-	if (!r.ok) return {
-		unfinished: false,
-		asked: withEnd ? { end: undefined } : undefined
-	};
-	const done = noul(r.answers, "done");
-	const unfinished = shouldContinue(done, threshold);
-	await record($, {
-		kind: "done",
-		applied: unfinished,
-		text: unfinished ? `not finished (p=${(done ?? 0).toFixed(2)}), continuing` : `finished (p=${(done ?? 0).toFixed(2)})`,
-		ms: r.ms,
-		data: {
-			p: done,
-			continued: unfinished
-		}
-	});
-	return {
-		unfinished,
-		asked: withEnd ? { end: noul(r.answers, "end") } : undefined
-	};
-}
 export const register = (on, options) => {
-	const routing = options.routing === "model" || options.routing === "off" ? options.routing : "effort";
+	const routing = options.routing !== false;
 	const takeSteps = options.takeSteps !== false;
-	const doneCheck = options.doneCheck !== false;
 	const takeThreshold = typeof options.takeThreshold === "number" ? options.takeThreshold : .85;
 	const subagents = options.subagents !== false;
 	const bypass = options.bypass !== false;
 	const takeOnlyForBypass = options.takeOnlyForBypass !== false;
-	const measureSteps = options.measureSteps !== false;
 	const threshold = (key, fallback) => {
 		const v = options[key];
 		return typeof v === "number" ? v : fallback;
 	};
-	const doneThreshold = threshold("doneThreshold", .15);
 	const configuredRange = bounds(options.minEffort, options.maxEffort);
 	const effortRange = configuredRange ?? {
 		minEffort: "low",
@@ -687,7 +625,7 @@ export const register = (on, options) => {
 	let band = {};
 	let autoOff = false;
 	on("ui.render", { component: "AbovePrompt" }, async function onRenderBand($, e, next) {
-		const effortRow = routing !== "off" && jevState === "";
+		const effortRow = routing && jevState === "";
 		if (e.props.hasSurvey || !effortRow && shownMinutes === null) return next(e);
 		const { Box, Text, Button } = $.ui.resolve(e);
 		const color = shownMinutes === null ? undefined : cacheColor(shownMinutes);
@@ -727,20 +665,10 @@ export const register = (on, options) => {
 			]
 		});
 	});
-	let donePending = false;
-	let sessionEpoch = 0;
-	let followUpEpoch = 0;
-	let lostFollowUp;
 	let agentTurn = 0;
 	on("prompt.submit", async function onPromptSubmit($, e, next) {
 		if ((await jevMissing($)).length) return next(e);
-		if (e.origin?.kind === "plugin" && e.origin.name === PLUGIN_NAME) {
-			if (followUpEpoch !== sessionEpoch) return { drop: "jevfort: done follow-up dropped, the conversation was cleared" };
-			donePending = true;
-			return next(e);
-		}
-		if (e.origin?.kind === "composer" && !e.isMeta && e.turnId === undefined) donePending = false;
-		if (options.classify === false || e.command || e.isMeta || e.origin?.kind === "task-notification" || e.text.trim().length < 3) return next(e);
+		if (e.command || e.isMeta || e.origin?.kind === "task-notification" || e.text.trim().length < 3) return next(e);
 		const skillCriteria = await skillOptions($, e.text);
 		const questions = promptQuestions(skillCriteria);
 		const previous = previousReply(await $.session.messages({}).catch(() => undefined));
@@ -884,7 +812,6 @@ export const register = (on, options) => {
 		scratchpad = undefined;
 	};
 	on("session.start", async function onSessionStart($, e, next) {
-		sessionEpoch += 1;
 		forgetConversation();
 		resetCache($);
 		jevState = undefined;
@@ -912,7 +839,6 @@ export const register = (on, options) => {
 		return result;
 	});
 	on("session.end", async function onSessionEnd($, e, next) {
-		sessionEpoch += 1;
 		forgetConversation();
 		resetCache($);
 		await flushLog($);
@@ -958,7 +884,7 @@ export const register = (on, options) => {
 			const lines = recentDecisions().slice(-10).map((d) => `- ${d.kind}${d.applied ? "" : " (pass)"}: ${d.text}${d.ms !== undefined ? ` [${Math.round(d.ms)}ms]` : ""}`);
 			return { text: [
 				...missing.length ? [`Jev pilot: inactive, the jev-api tools are missing (${missing.join(", ")}). jevfort needs jev-api 0.2.0 or later and no permissions.deny rule matching its tools; it looks again at the next turn.`] : [],
-				`Jev pilot: routing ${routing}${autoOff ? " (effort auto off)" : ""}, take steps ${takeSteps} (p ≥ ${takeThreshold}), done check ${doneCheck}, subagents ${subagents}`,
+				`Jev pilot: effort routing ${routing ? "on" : "off"}${autoOff ? " (effort auto off)" : ""}, take steps ${takeSteps} (p ≥ ${takeThreshold}), subagents ${subagents}`,
 				`Decisions (all sessions): ${counts}`,
 				lines.length ? `Recent:\n${lines.join("\n")}` : "No decisions this session yet.",
 				"Full analysis: /jev report"
@@ -975,7 +901,7 @@ export const register = (on, options) => {
 		const missing = await jevMissing($);
 		if (e.agentId === undefined) dropTurnReads();
 		if (missing.length) {
-			await contextCompact($, e, false, false, taskCompactPercent, forceCompactPercent).catch(() => undefined);
+			await contextCompact($, e, false, taskCompactPercent, forceCompactPercent).catch(() => undefined);
 			await flushLog($);
 			return next(e);
 		}
@@ -989,14 +915,6 @@ export const register = (on, options) => {
 				data: { reason: e.reason }
 			});
 		}
-		if (lostFollowUp !== undefined) {
-			await record($, {
-				kind: "error",
-				applied: false,
-				text: `done follow-up not sent: ${lostFollowUp}`
-			}).catch(() => undefined);
-			lostFollowUp = undefined;
-		}
 		if (lostCompact !== undefined) {
 			await record($, {
 				kind: "error",
@@ -1005,36 +923,7 @@ export const register = (on, options) => {
 			}).catch(() => undefined);
 			lostCompact = undefined;
 		}
-		let continued = false;
-		let asked;
-		if (e.agentId === undefined) {
-			const exempt = donePending;
-			donePending = false;
-			if (doneCheck && !exempt && e.reason === "answer") {
-				try {
-					const epoch = sessionEpoch;
-					const fill = taskCompactPercent > 0 && !compactQueued ? await fillPercent($) : 0;
-					const withEnd = taskCompactPercent > 0 && fill >= taskCompactPercent && !(forceCompactPercent > 0 && fill >= forceCompactPercent);
-					const done = await checkDone($, e, doneThreshold, withEnd);
-					asked = done.asked;
-					if (done.unfinished) {
-						continued = true;
-						followUpEpoch = epoch;
-						$.prompt.submit({ text: DONE_PROMPT }).catch((err) => {
-							donePending = false;
-							lostFollowUp = String(err);
-						});
-					}
-				} catch (err) {
-					await record($, {
-						kind: "error",
-						applied: false,
-						text: `done check failed: ${String(err)}`
-					}).catch(() => undefined);
-				}
-			}
-		}
-		await contextCompact($, e, true, continued, taskCompactPercent, forceCompactPercent, asked).catch((err) => record($, {
+		await contextCompact($, e, true, taskCompactPercent, forceCompactPercent).catch((err) => record($, {
 			kind: "error",
 			applied: false,
 			text: `context compaction check failed: ${String(err)}`
@@ -1158,8 +1047,7 @@ export const register = (on, options) => {
 		let estimate;
 		let held;
 		let firstTurn;
-		if (routing !== "off" && e.index === 0) {
-			if (routing === "model") questions.difficulty = difficultyQuestion;
+		if (routing && e.index === 0) {
 			const sessionEffort = isEffort(e.effort) ? e.effort : undefined;
 			if (!e.agentId) {
 				band = sessionEffort ? { configured: sessionEffort } : {};
@@ -1195,20 +1083,14 @@ export const register = (on, options) => {
 			}
 		}
 		if (bypass && e.index === 0 && questions.next_action && !e.agentId) questions.single_action = singleActionQuestion;
-		const routed = (step) => {
-			if (!turn.route && !turn.effort) return step;
-			const effort = turn.effort;
-			const model = lowerModel(step.model, turn.route?.model);
-			return effort || model ? {
-				...step,
-				...effort ? { effort } : {},
-				...model ? { model } : {}
-			} : step;
-		};
+		const routed = (step) => turn.effort ? {
+			...step,
+			effort: turn.effort
+		} : step;
 		if (!Object.keys(questions).length) {
 			let measure;
 			let measured = [];
-			if (measureSteps && takeSteps && !ctx.command && e.index > 0 && !e.agentId) {
+			if (takeSteps && !ctx.command && e.index > 0 && !e.agentId) {
 				measured = (await buildCandidates($, ctx.request, ctx.steps, calls, e.index, turn.cache)).filter((c) => !(last && sameCall(last, {
 					tool: c.tool,
 					input: c.input
@@ -1250,40 +1132,31 @@ export const register = (on, options) => {
 			});
 			return yield* next(routed(e));
 		}
-		if (questions.difficulty || estimate) {
-			const difficulty = questions.difficulty ? score(r.answers, "difficulty") : undefined;
-			turn.route = difficulty ? route(difficulty, "model") : undefined;
-			const model = lowerModel(e.model, turn.route?.model);
+		if (estimate) {
 			const mechanical = noul(r.answers, "mechanical");
-			const effortAnswer = estimate ? score(r.answers, "effort") : undefined;
-			const est = estimate ? estimateEffort(effortAnswer, mechanical, estimate) : undefined;
-			if (est) {
-				turn.effort = est.effort !== e.effort ? est.effort : undefined;
-				if (firstTurn) firstTurn.effort = est.effort;
-				if (!e.agentId) {
-					band.chosen = est.effort;
-					$.ui.invalidate("ui.render");
-				}
+			const effortAnswer = score(r.answers, "effort");
+			const est = estimateEffort(effortAnswer, mechanical, estimate);
+			turn.effort = est.effort !== e.effort ? est.effort : undefined;
+			if (firstTurn) firstTurn.effort = est.effort;
+			if (!e.agentId) {
+				band.chosen = est.effort;
+				$.ui.invalidate("ui.render");
 			}
 			const effort = turn.effort;
 			const raised = effort !== undefined && EFFORT_ORDER.indexOf(effort) > (isEffort(e.effort) ? EFFORT_ORDER.indexOf(e.effort) : -1);
-			const lowered = Boolean(effort && !raised || model);
-			const source = est?.source ?? (held ? "held" : undefined);
+			const lowered = effort !== undefined && !raised;
 			await record($, {
 				kind: "route",
 				applied: lowered || raised,
-				text: `${difficulty ? `difficulty ${difficulty.score.toFixed(2)}` : "effort"} → ${lowered || raised ? `${model ?? e.model}, effort ${effort ?? String(e.effort)}` : "no change"}${source ? ` · ${source}` : ""}`,
+				text: `effort → ${lowered || raised ? `${e.model}, effort ${effort}` : "no change"} · ${est.source}`,
 				ms: r.ms,
 				turnId: e.turnId,
 				data: {
-					score: difficulty?.score,
-					confidence: difficulty?.confidence,
 					effort,
-					model,
 					lowered,
 					raised,
-					estimate: est?.effort,
-					source,
+					estimate: est.effort,
+					source: est.source,
 					mechanical,
 					effortScore: effortAnswer?.score,
 					effortConfidence: effortAnswer?.confidence

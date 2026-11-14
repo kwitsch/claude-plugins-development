@@ -37,10 +37,10 @@ subagents load it via ToolSearch), no skills, agents, command hooks or MCP serve
 - Effort band: a `ui.render` hook on `AbovePrompt` (terminal and desktop only) draws the efforts from `minEffort` to `maxEffort` (plus the session effort or the chosen one when outside that range) in one
   row: the main loop's session effort (step-0 `e.effort`) bold, the effort jevfort chose for the current main-loop
   turn (estimate of any source, or the held Haiku/Fable estimate) blue, the rest dim, then a `Jev auto: on/off`
-  Button. Hidden with `routing: "off"`, while inactive or before the session baseline, and while a survey holds the
+  Button. Hidden with `routing: false`, while inactive or before the session baseline, and while a survey holds the
   band. The button flips the closure flag `autoOff` (reset at `session.start`, at `session.end` and by a reload, never stored): while
   off, step 0 skips the effort estimate and the Haiku/Fable hold, so the turn runs at the session effort; take-steps,
-  bypass, `routing: "model"` difficulty and the `estimate_effort` tool are unaffected. `/jev` status shows
+  bypass and the `estimate_effort` tool are unaffected. `/jev` status shows
   `(effort auto off)`. Not ported from effortless: settings, handoff and the other bar features; subagent turns do not
   update the band.
 - Cache countdown, Haiku compaction and auto-compact (0.7.0, ported from HeyCubit/effortless `hooks/register.tsx`,
@@ -86,19 +86,14 @@ subagents load it via ToolSearch), no skills, agents, command hooks or MCP serve
   `register*` functions of `prompt`/`agents`/`compact`/`view` moved there. Upstream `mode.ts` and `view.ts` have no
   file. The other `src/hooks/*.mts` are pure.
 - No `claude-code` type import: `$`, events and `on` are typed structurally at the top of `register.mts`.
-- Upstream blocks `Stop`. Here the done check runs on `turn.complete` (main-loop turns ending with `reason: "answer"`)
-  and sends one framed follow-up message (`DONE_PROMPT`) through `$.prompt.submit`, because `cc-plugin-sec-default`
-  skips user-tier `classic.Stop` hooks. The unfinished answer stays visible. Background Bash work is not detected,
-  only subagents (`$.agent.list()`, waiting = any status but `completed`, `failed`, `killed`, `idle`). The follow-up is
-  recognised by `origin: { kind: "plugin", name: "jevfort" }` in `prompt.submit`, not by its text; a user's own prompt submitted while idle (`origin.kind` `composer`, not meta, no `turnId`) clears the
-  exemption of the next turn, meta prompts keep it. A rejected follow-up is logged by the next `turn.complete`.
+- No done check, no model routing, no `classify`/`measureSteps` options (0.12.0): upstream's `Stop` done check (a follow-up message after an answer that looks unfinished) and difficulty-based model switching are removed with their options (`doneCheck`, `doneThreshold`, `routing: "model"`); the prompt classifier and the parallel step measurement are always on. `routing` is a boolean (`options.routing !== false`, so any invalid value is on): `false` turns off the step-0 effort estimate and the effort row of the band, not the cache countdown, `estimate_effort` or take-steps. The context-fill task-end question (`taskEndQuestion`) is asked by `contextCompact` as its own request.
 - Effort routing: the turn's effort comes from the effort estimate (`estimateEffort` in `policy.mts`, shared with the
   `estimate_effort` tool; its two questions go out with the other step-0 questions in the same batch call), not from upstream's difficulty->effort
-  mapping, which is gone; the difficulty question is asked only with `routing: "model"` and only lowers the model.
+  mapping, which is gone (so is the difficulty question).
   The rule (0.9.0, from the 120-point measurement of 2026-11-13, `tests/fixtures/effort-scores.json`): mechanical from
   p >= `MECHANICAL_FROM` 0.95 gives `minEffort`; a missing or non-finite score gives the unclamped `defaultEffort`; the
   score's confidence is NOT checked (the discarded scores were as accurate as the kept ones, and the threshold dropped
-  every `high`/`xhigh` prompt; `MIN_CONFIDENCE` stays for the difficulty `route()`); otherwise `effortLevel(score)` (piecewise
+  every `high`/`xhigh` prompt); otherwise `effortLevel(score)` (piecewise
   linear, `EFFORT_CUTS` 1.05/1.9/2.5/3.1 land on 0.5/1.5/2.5/3.5, the last cut is provisional), rounded, clamped. There is no model bias (removed in 0.9.0 by user decision: it was
   never validated and shifted the calibrated cuts per model); the tool's `model` input stays for callers and is ignored by
   the rule. The cuts are for `d1-3b`; the Haiku fallback of jev-api is not calibrated either. `route` and `estimate` log entries carry `effortScore` and `effortConfidence` to recalibrate from real turns.
@@ -117,7 +112,7 @@ The built-in `cc-plugin-sec-default` passes `session.compact` on past every user
 
 ## Pause after a timeout
 
-`askJev` keeps a module-level pause (`jevPause`): a timeout (only a timeout, a fast failure costs nothing; jevfort's own clock, or jev-api's `timeout after <n>ms` error when that ends first, as Haiku's 14 s does before the 15 s budget) stops all Jev requests for `PAUSE_MS` 30 s, doubling per further timeout up to `MAX_PAUSE_MS` 10 min; the first call after the pause is the probe, any success resets it. Measured live against a hanging endpoint: +8 s before the first token of every turn (classify 4 s, step 0 4 s), +4 s per Agent call and per subagent, +4 s for the done check. The pause ends when the clock reads earlier than the last timeout (a new session, a test).
+`askJev` keeps a module-level pause (`jevPause`): a timeout (only a timeout, a fast failure costs nothing; jevfort's own clock, or jev-api's `timeout after <n>ms` error when that ends first, as Haiku's 14 s does before the 15 s budget) stops all Jev requests for `PAUSE_MS` 30 s, doubling per further timeout up to `MAX_PAUSE_MS` 10 min; the first call after the pause is the probe, any success resets it. Measured live against a hanging endpoint: +8 s before the first token of every turn (classify 4 s, step 0 4 s), +4 s per Agent call and per subagent, +4 s for the task-end check. The pause ends when the clock reads earlier than the last timeout (a new session, a test).
 
 ## Known limit: `/jev export` through a symlinked `.jev` directory
 
@@ -133,7 +128,7 @@ The built-in `cc-plugin-sec-default` passes `session.compact` on past every user
 
 ## Layout
 
-`package.json` is the only manifest source (`claudePlugin.userConfig`, 18 options). `pnpm build` compiles
+`package.json` is the only manifest source (`claudePlugin.userConfig`, 14 options). `pnpm build` compiles
 `src/**/*.mts` to `plugin/**/*.mjs` (`plugin/hooks/` unmangled and uncompressed) and generates
 `plugin/.claude-plugin/plugin.json`. Tests (`tests/*.test.mts`, vitest + `claude-engine-vitest`) run against `plugin/`.
 
