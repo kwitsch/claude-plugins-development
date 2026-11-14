@@ -38,6 +38,7 @@ test("shouldNudge: searches yes, graphmind itself and exhaustive searches no", (
   assert.equal(shouldNudge({ tool: "Bash", command: "cd src && rg foo" }), true);
   assert.equal(shouldNudge({ tool: "Bash", command: "cd src\nrg foo" }), true);
   assert.equal(shouldNudge({ tool: "Bash", command: "graphmind search foo" }), false);
+  assert.equal(shouldNudge({ tool: "Bash", command: "cd src\ngraphmind search foo\nrg bar" }), false);
   assert.equal(shouldNudge({ tool: "Bash", command: "cat x | grep foo" }), false);
   assert.equal(shouldNudge({ tool: "Bash", command: "grep -rn foo src", description: "find all usages of foo" }), false);
   assert.equal(shouldNudge({ tool: "Bash", command: "grep -rc foo src" }), false);
