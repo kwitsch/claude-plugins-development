@@ -102,8 +102,8 @@ type Engine = {
   };
   /** Model requests: the stand-in for Jev when no System One access is configured. */
   model: {
-    /** Asks a model one question; resolves the reply, or `isAnswered: false` with the reason. */
-    complete(spec: { model: string; system: string; prompt: string; maxTokens: number; timeoutMs: number }): Promise<{ isAnswered: true; text: string } | { isAnswered: false; reason: string }>;
+    /** Asks a model one question; resolves the reply, or `isAnswered: false` with the reason. `options.signal` cuts the call (the request has no such field). */
+    complete(spec: { model: string; system: string; prompt: string; maxTokens: number; timeoutMs: number }, options?: { signal?: AbortSignal }): Promise<{ isAnswered: true; text: string } | { isAnswered: false; reason: string }>;
   };
   /** Tool registry. */
   tool: {
@@ -175,9 +175,6 @@ type On = {
   (event: "tool.call", hook: Hook<ToolCall, ToolResult>): void;
 };
 
-/** Description tail shared by the tools. */
-const NEEDS = " Set TYPESAFE_API_KEY, TYPESAFE_BASE_URL or JEV_URL to use Jev; without any of them Claude Haiku answers instead.";
-
 /** The model that stands in for Jev when none of the System One variables is set. */
 const HAIKU_MODEL = "claude-haiku-5-5";
 
@@ -235,13 +232,31 @@ const MIN_LEVELS = 2;
 /** The most levels a `score` question may have. */
 const MAX_LEVELS = 10;
 
+/** The most output tokens a Haiku fallback call may ask for. */
+const HAIKU_MAX_TOKENS = 16_384;
+
+/** The most characters of an API error reason passed on to the model (a server may send megabytes; cut after the redaction, never before it). */
+const MAX_DETAIL = 1000;
+
+/** How long an owned tool call waits for the tools to register before it goes on (ms; session.start waits five times as long): a registration that never answers must not hold a call. */
+const REGISTER_WAIT_MS = 1000;
+
+/** The longest a failed registration waits for its next try (ms); the first retry is immediate. */
+const MAX_RETRY_MS = 300_000;
+
+/** The delay before the second retry of a refused tool (ms); it doubles for every further one. */
+const RETRY_BASE_MS = 5000;
+
+/** The shortest API key that is replaced in error texts (a shorter one would match ordinary words). */
+const MIN_REDACT_KEY = 6;
+
 /** The engine names a registered tool `mcp__<plugin>__<name>`. */
 const TOOL_PREFIX = "mcp__jev-api__";
 
 /** The tool registrations without their name, keyed by tool name. */
 const SPECS: Record<ToolName, Omit<ToolSpec, "name">> = {
   noul: {
-    description: "Ask TypeSafe Jev a yes/no question about a text; returns the probability (0..1) that the answer is true." + NEEDS,
+    description: "Ask TypeSafe Jev a yes/no question about a text; returns the probability (0..1) that the answer is true.",
     inputSchema: {
       type: "object",
       properties: {
@@ -262,7 +277,7 @@ const SPECS: Record<ToolName, Omit<ToolSpec, "name">> = {
     },
   },
   choice: {
-    description: "Ask TypeSafe Jev to pick one of named options for a text; returns the choice, its confidence and every option's probability." + NEEDS,
+    description: "Ask TypeSafe Jev to pick one of named options for a text; returns the choice, its confidence and every option's probability.",
     inputSchema: {
       type: "object",
       properties: {
@@ -281,8 +296,7 @@ const SPECS: Record<ToolName, Omit<ToolSpec, "name">> = {
     },
   },
   score: {
-    description: "Ask TypeSafe Jev to rate a text along ordered levels; returns the score (the expected level: 0 is the first, values between levels are fractional), its confidence, each level's probability and the legend."
-      + NEEDS,
+    description: "Ask TypeSafe Jev to rate a text along ordered levels; returns the score (the expected level: 0 is the first, values between levels are fractional), its confidence, each level's probability and the legend.",
     inputSchema: {
       type: "object",
       properties: {
@@ -301,8 +315,7 @@ const SPECS: Record<ToolName, Omit<ToolSpec, "name">> = {
     },
   },
   batch: {
-    description: "Ask TypeSafe Jev several noul, choice and score questions about one text in a single request; returns a JSON array of the answers in question order, each as the noul, choice or score tool returns it. One invalid or unanswered question fails the whole call."
-      + NEEDS,
+    description: "Ask TypeSafe Jev several noul, choice and score questions about one text in a single request; returns a JSON array of the answers in question order, each as the noul, choice or score tool returns it. One invalid or unanswered question fails the whole call.",
     inputSchema: {
       type: "object",
       properties: {
@@ -352,11 +365,12 @@ function isOptionalString(v: unknown): v is string | undefined {
  * Parses JSON without throwing.
  *
  * @param text - The raw text.
+ * @param reviver - Optional `JSON.parse` reviver; its third argument carries a primitive's source text where the engine supports it.
  * @returns The parsed value, or undefined when the text is not JSON (valid JSON never parses to undefined).
  */
-function json(text: string): unknown {
+function json(text: string, reviver?: (key: string, value: unknown, context?: { source?: string }) => unknown): unknown {
   try {
-    return JSON.parse(text) as unknown;
+    return JSON.parse(text, reviver) as unknown;
   } catch {
     return undefined;
   }
@@ -400,7 +414,12 @@ function isType(v: unknown): v is QuestionType {
  * @returns Its message, or the value as text.
  */
 function message(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
+  if (err instanceof Error) return err.message;
+  try {
+    return String(err);
+  } catch {
+    return "unknown error"; // a null-prototype object, or one whose toString throws
+  }
 }
 
 /**
@@ -419,6 +438,31 @@ function hide(text: string, url: string, placeholder: string): string {
     // The engine quotes a URL it cannot parse as given.
   }
   return text.replaceAll(href, placeholder).replaceAll(url, placeholder);
+}
+
+/**
+ * Replaces the bare host of a URL in an error text. A DNS failure quotes only the host (`getaddrinfo ENOTFOUND <host>`,
+ * live on 2.1.325), which may be private too. Only whole host names are replaced, ignoring case: the host `jev` must
+ * not turn `jev-latest` or `api.jev`, nor the host `10.0.0.5` turn `110.0.0.5`, into something else.
+ *
+ * @param text - The text.
+ * @param url - The endpoint URL; one that does not parse changes nothing.
+ * @returns The text with the host as `<host>`.
+ */
+function hideHost(text: string, url: string): string {
+  let host = "";
+  try {
+    host = new URL(url).hostname;
+  } catch {
+    return text;
+  }
+  if (!host) return text;
+  // An IPv6 host comes with brackets, an error text quotes the bare address.
+  let t = text;
+  for (const h of new Set([host, host.replace(/^\[(.*)\]$/, "$1")])) {
+    t = t.replace(new RegExp(`(?<![\\w.-])${h.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\w-])`, "gi"), "<host>");
+  }
+  return t;
 }
 
 /**
@@ -510,15 +554,25 @@ function endpoint(jev: string | undefined, base: string | undefined): { ok: true
  * Extracts the API's reason from an error body: its `detail`, else the `message` of its `error` object.
  *
  * @param text - The raw response body.
- * @returns The reason (a string as is, anything else JSON-stringified), or undefined when there is none.
+ * @param redact - Replaces what must not reach the model; applied to every string and object key of the reason before a non-string one is made into JSON text.
+ * @param numbers - Whether a number can carry a secret (the key is made of number characters): only then is every number of the body redacted, which costs seconds on an error body of megabytes of numbers.
+ * @returns The reason redacted (a string as is, anything else JSON-stringified), or undefined when there is none.
  */
-function detail(text: string): string | undefined {
-  const body = json(text);
+function detail(text: string, redact: (s: string) => string, numbers: boolean): string | undefined {
+  // A number is matched on its source text: parsing rounds 20 digits to 17 and drops `.0` and `e0`, so a numeric key would no longer match.
+  const body = json(text, numbers ? (_k, v, c) => (typeof v === "number" && c?.source !== undefined && redact(c.source) !== c.source ? c.source : v) : undefined);
   if (!isRecord(body)) return undefined;
   const error = body["error"];
   const why = body["detail"] ?? (isRecord(error) ? error["message"] : undefined);
   if (why === undefined) return undefined;
-  return typeof why === "string" ? why : JSON.stringify(why);
+  // Redacted per string, number (a numeric key echoed as a JSON number) and object key before the JSON text is made: JSON escapes quotes and backslashes, a secret containing one would no longer match.
+  /** The JSON.stringify replacer: redacts strings, numbers and object keys; other values pass. */
+  const clean = (v: unknown): unknown => {
+    if (typeof v === "string") return redact(v);
+    if (typeof v === "number") return numbers && redact(String(v)) !== String(v) ? redact(String(v)) : v;
+    return isRecord(v) ? Object.fromEntries(Object.entries(v).map(([k, x]) => [redact(k), x])) : v;
+  };
+  return typeof why === "string" ? redact(why) : JSON.stringify(why, (_k, v: unknown) => clean(v));
 }
 
 /**
@@ -566,7 +620,8 @@ function round4(v: number): number {
 
 /**
  * Checks one answer Haiku gave against the System One answer format and rebuilds it without extra fields, calibrated
- * toward Jev: a `noul` is stretched ({@link stretch}) and a score is the mean level index of the probabilities.
+ * toward Jev: a `noul` is stretched ({@link stretch}), a score is the mean level index of the probabilities, and the
+ * probabilities of a `choice` and of a score are normalized to sum 1 (an all-zero set is rejected).
  *
  * @param q - The question.
  * @param a - The answer as parsed from Haiku's reply.
@@ -581,7 +636,10 @@ function checkAnswer(q: Question, a: unknown): Record<string, unknown> | undefin
     const options = Object.keys(q.criteria);
     const picked = a["choice"];
     if (typeof picked !== "string" || !options.includes(picked) || !hasProbabilities(probabilities, options)) return undefined;
-    return { type: "choice", choice: picked, confidence, probabilities: Object.fromEntries(options.map((o) => [o, probabilities[o]])) };
+    // Like System One (and like score below) the probabilities sum to 1: jevfort compares probabilities[choice] with a threshold.
+    const sum = options.reduce((t, o) => t + probabilities[o], 0);
+    if (!(sum > 0)) return undefined;
+    return { type: "choice", choice: picked, confidence, probabilities: Object.fromEntries(options.map((o) => [o, round4(probabilities[o] / sum)])) };
   }
   const levels = q.criteria.map((_, i) => String(i));
   if (!hasProbabilities(probabilities, levels)) return undefined;
@@ -592,6 +650,23 @@ function checkAnswer(q: Question, a: unknown): Record<string, unknown> | undefin
   const normalized = levels.map((l) => probabilities[l] / total);
   const mean = normalized.reduce((sum, p, i) => sum + i * p, 0);
   return { type: "score", score: round4(mean), confidence, legend: Object.fromEntries(q.criteria.map((l, i) => [i, l])), probabilities: Object.fromEntries(levels.map((l, i) => [l, round4(normalized[i])])) };
+}
+
+/**
+ * The output budget of one Haiku call: a base per question plus the tokens of every option or level the answer lists
+ * with its probability (a `choice` with 255 options needs thousands of tokens), capped.
+ *
+ * @param questions - The questions of the call.
+ * @returns The `maxTokens` to ask for.
+ */
+function haikuTokens(questions: Question[]): number {
+  let n = 256;
+  for (const q of questions) {
+    n += 256;
+    if (q.type === "choice") { for (const key of Object.keys(q.criteria)) n += Math.ceil(key.length / 3) + 12; }
+    else if (q.type === "score") n += 16 * q.criteria.length;
+  }
+  return Math.min(HAIKU_MAX_TOKENS, n);
 }
 
 /**
@@ -609,17 +684,25 @@ function checkAnswer(q: Question, a: unknown): Record<string, unknown> | undefin
 async function askHaiku($: Engine, tool: ToolName, state: string, questions: Question[], timeoutMs: number, signal: AbortSignal): Promise<ToolResult> {
   const ids = questions.map((_, i) => (tool === "batch" ? `q${i}` : QUESTION_ID));
   const prompt = `Text:\n${state}\n\nQuestions (JSON):\n${JSON.stringify(Object.fromEntries(ids.map((id, i) => [id, questions[i]])))}`;
+  let onAbort: (() => void) | undefined;
   try {
-    const reply = $.model.complete({ model: HAIKU_MODEL, system: HAIKU_SYSTEM, prompt, maxTokens: Math.min(4096, 256 + 256 * questions.length), timeoutMs });
+    const reply = $.model.complete({ model: HAIKU_MODEL, system: HAIKU_SYSTEM, prompt, maxTokens: haikuTokens(questions), timeoutMs }, { signal });
     reply.catch(() => undefined); // a late rejection after an abort must not go unhandled
     const aborted = new Promise<"aborted">((resolve) => {
       if (signal.aborted) resolve("aborted");
-      else signal.addEventListener("abort", () => resolve("aborted"), { once: true });
+      else {
+        onAbort = () => resolve("aborted");
+        signal.addEventListener("abort", onAbort, { once: true });
+      }
     });
     const r = await Promise.race([reply, aborted]);
     if (r === "aborted") return fail(tool, "the call was abandoned");
-    if (!r.isAnswered) return fail(tool, `fallback: ${r.reason}`);
-    const body = json(r.text.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, ""));
+    if (!r.isAnswered) {
+      if (r.reason !== "aborted") return fail(tool, `fallback: ${r.reason}`);
+      // `aborted` is also how the engine reports its own timeout; the signal tells the two apart (whichever abort path won the race)
+      return fail(tool, signal.aborted ? "the call was abandoned" : `fallback: timeout after ${timeoutMs}ms`);
+    }
+    const body = json(r.text.trim().replace(/^```(?:json)?\s*/i, "").replace(/```$/, ""));
     const answers = isRecord(body) ? body["answers"] : undefined;
     const list: Record<string, unknown>[] = [];
     for (const [i, q] of questions.entries()) {
@@ -630,6 +713,8 @@ async function askHaiku($: Engine, tool: ToolName, state: string, questions: Que
     return { result: JSON.stringify(tool === "batch" ? list : list[0]) };
   } catch (err) {
     return fail(tool, `fallback: ${message(err)}`);
+  } finally {
+    if (onAbort) signal.removeEventListener("abort", onAbort); // a signal shared by many calls must not collect listeners
   }
 }
 
@@ -656,7 +741,16 @@ async function ask($: Engine, tool: ToolName, state: string, questions: Question
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   // The key never travels in cleartext: over plain http the request goes out without it.
   if (key && /^https:/i.test(target.url)) headers["Authorization"] = `Bearer ${key}`;
+  // Text that reaches the model (a fetch error, an error body a server may echo the request into) must not carry the endpoint
+  // or the key: a runtime quotes a header value it rejects (a newline or a non-Latin1 character in the key), whole.
+  const redact = (text: string): string => {
+    // In this order: the URL first (it may contain the key), the key before the host (a key may contain the host text).
+    let t = env.jevUrl ? hide(text, target.url, "<JEV_URL>") : env.base ? hide(text, target.url, "<TYPESAFE_BASE_URL>/v1/systemone") : text;
+    if (key && key.length >= MIN_REDACT_KEY) t = t.replaceAll(key, "<TYPESAFE_API_KEY>"); // not a short key: it would match ordinary words
+    return env.jevUrl || env.base ? hideHost(t, target.url) : t;
+  };
   let timer: { cancel(): void } | undefined;
+  let onAbort: (() => void) | undefined;
   try {
     const request = $.http.fetch(target.url, { method: "POST", headers, body: JSON.stringify({ model, state, questions: Object.fromEntries(ids.map((id, i) => [id, questions[i]])) }) });
     request.catch(() => undefined); // a late rejection after the timeout or an abort won must not go unhandled
@@ -664,14 +758,24 @@ async function ask($: Engine, tool: ToolName, state: string, questions: Question
     const stop = new Promise<"timeout" | "aborted">((resolve) => {
       timer = $.clock.after(timeoutMs, () => resolve("timeout"));
       if (signal.aborted) resolve("aborted");
-      else signal.addEventListener("abort", () => resolve("aborted"), { once: true });
+      else {
+        onAbort = () => resolve("aborted");
+        signal.addEventListener("abort", onAbort, { once: true });
+      }
     });
     const res = await Promise.race([request, stop]);
     if (res === "timeout") return fail(tool, `timeout after ${timeoutMs}ms`);
     if (res === "aborted") return fail(tool, "the call was abandoned");
     if (!res.ok) {
-      const why = detail(res.text);
-      return fail(tool, `HTTP ${res.status}${why === undefined ? "" : `: ${why}`}`);
+      // Only a key made of number characters can sit inside a JSON number's text.
+      const why = detail(res.text, redact, key !== undefined && key.length >= MIN_REDACT_KEY && /^[-+.\deE]+$/.test(key));
+      let text = why === undefined ? "" : why.trim(); // detail() already redacted it: a second pass would nest the host placeholder
+      if (text.length > MAX_DETAIL) {
+        text = text.slice(0, MAX_DETAIL);
+        if (/[\uD800-\uDBFF]$/.test(text)) text = text.slice(0, -1); // not a lone high surrogate
+        text += "…";
+      }
+      return fail(tool, `HTTP ${res.status}${text === "" ? "" : `: ${text}`}`);
     }
     const body = json(res.text);
     if (body === undefined) return fail(tool, `HTTP ${res.status} response was not valid JSON`);
@@ -685,31 +789,93 @@ async function ask($: Engine, tool: ToolName, state: string, questions: Question
     return { result: JSON.stringify(tool === "batch" ? list : list[0]) };
   } catch (err) {
     // The engine's fetch errors quote the URL, whose host, path or query may be private: name the variable instead.
-    const why = message(err);
-    return fail(tool, env.jevUrl ? hide(why, target.url, "<JEV_URL>") : env.base ? hide(why, target.url, "<TYPESAFE_BASE_URL>/v1/systemone") : why);
+    return fail(tool, redact(message(err)));
   } finally {
     timer?.cancel();
+    if (onAbort) signal.removeEventListener("abort", onAbort); // a signal shared by many calls must not collect listeners
+  }
+}
+
+/** The registration state of one module instance: what is registered, under way, refused and hanging. */
+type RegState = {
+  /** Full tool name -> tool: the default names plus what the engine returned. */
+  names: Map<string, ToolName>;
+  /** The tools not registered yet. */
+  missing: Set<ToolName>;
+  /** The tools whose registration is under way. */
+  pending: Map<ToolName, Promise<void>>;
+  /** When a failed tool may be tried again (ms since epoch). */
+  retryAt: Map<ToolName, number>;
+  /** Failed attempts per tool. */
+  failures: Map<ToolName, number>;
+  /** Tools whose registration did not answer within a hook's wait: later hooks do not wait for them again. */
+  stuck: Set<ToolName>;
+};
+
+/**
+ * Registers one tool and records the full name the engine gave it; never rejects.
+ *
+ * @param $ - The engine.
+ * @param st - The registration state.
+ * @param type - The tool to register.
+ */
+async function registerOne($: Engine, st: RegState, type: ToolName): Promise<void> {
+  try {
+    const r = await $.tool.register({ name: type, ...SPECS[type] });
+    // Only a mcp__<plugin>__<type> name: a hook above answering anything else must not make this hook claim another tool.
+    const tool = r?.tool;
+    if (typeof tool === "string" && tool.startsWith("mcp__") && tool.endsWith(`__${type}`)) st.names.set(tool, type);
+    st.missing.delete(type);
+  } catch (err) {
+    const n = (st.failures.get(type) ?? 0) + 1;
+    st.failures.set(type, n);
+    // The first retry is immediate (the next hook), then RETRY_BASE_MS, twice that, ... up to MAX_RETRY_MS: a tool the engine keeps refusing must not cost every call.
+    st.retryAt.set(type, Date.now() + (n === 1 ? 0 : Math.min(MAX_RETRY_MS, RETRY_BASE_MS * 2 ** (n - 2))));
+    // The engine starts a log line with the plugin's name; logging is best effort, and once per tool.
+    if (n === 1) {
+      try {
+        // not awaited: a log call that never settles must not keep the tool pending (and so never retried)
+        void Promise.resolve($.ui.log(`registering ${type} failed: ${message(err)}`)).catch(() => undefined);
+      } catch {
+        // best effort: this function never rejects
+      }
+    }
   }
 }
 
 /**
- * Registers the four tools and records the full name the engine gave each.
+ * Starts the registration of every missing tool that is not under way and not waiting for a retry, then waits for the
+ * ones that did not hang before, at most `ms`. A registration that never answers is waited for once: the tool is marked
+ * stuck, and the other tools and later hooks do not wait for it again.
  *
  * @param $ - The engine.
- * @param names - Full tool name to tool; gains the names the engine returned.
+ * @param st - The registration state.
+ * @param ms - The longest wait.
  */
-async function registerTools($: Engine, names: Map<string, ToolName>): Promise<void> {
-  // One failing registration must not drop the others.
-  const results = await Promise.allSettled(TOOLS.map((type) => $.tool.register({ name: type, ...SPECS[type] })));
-  for (const [i, r] of results.entries()) {
-    const type = TOOLS[i];
-    // The engine starts a log line with the plugin's name; logging is best effort.
-    if (r.status === "rejected") await Promise.resolve($.ui.log(`registering ${type} failed: ${message(r.reason)}`)).catch(() => undefined);
-    else {
-      // Only a mcp__<plugin>__<type> name: a hook above answering anything else must not make this hook claim another tool.
-      const tool = r.value?.tool;
-      if (tool?.startsWith("mcp__") && tool.endsWith(`__${type}`)) names.set(tool, type);
-    }
+async function ensureTools($: Engine, st: RegState, ms: number): Promise<void> {
+  const now = Date.now();
+  for (const type of TOOLS) {
+    if (!st.missing.has(type) || st.pending.has(type) || (st.retryAt.get(type) ?? 0) > now) continue;
+    const p = registerOne($, st, type);
+    st.pending.set(type, p);
+    void p.then(() => {
+      st.pending.delete(type);
+      st.stuck.delete(type); // a tool that hung once is waited for again when it is retried
+    });
+  }
+  const waiting = [...st.pending].filter(([type]) => !st.stuck.has(type));
+  if (waiting.length === 0) return;
+  let timer: { cancel(): void } | undefined;
+  try {
+    const late = await Promise.race([
+      Promise.all(waiting.map(([, p]) => p)).then(() => false),
+      new Promise<boolean>((resolve) => {
+        timer = $.clock.after(ms, () => resolve(true));
+      }),
+    ]);
+    if (late) { for (const [type] of waiting) if (st.pending.has(type)) st.stuck.add(type); }
+  } finally {
+    timer?.cancel();
   }
 }
 
@@ -725,11 +891,16 @@ export function register(on: On, options?: Options): void {
   const fallbackS = seconds(options?.["timeout"]) ?? DEFAULT_TIMEOUT_S;
   // Full tool name -> tool: the default names (a call can reach an instance that saw no session.start), plus what the engine returned.
   const names = new Map<string, ToolName>(TOOLS.map((t) => [TOOL_PREFIX + t, t]));
-  // `$` reaches a module only inside its hooks, so the tools register in the first hook that runs (session.start, or an earlier tool call), once.
-  // The engine accepts `$` only as an argument to a top-level function, hence `registerTools` and the memo spelled out in both hooks.
-  let registering: Promise<void> | undefined;
+  // `$` reaches a module only inside its hooks, so the tools register in the first hook that runs (session.start, or an earlier tool call).
+  // The engine accepts `$` only as an argument to a top-level function, hence `ensureTools` and the state object.
+  // A tool whose registration failed stays in `missing`: the next hook tries it again (after a growing delay), no timers.
+  const st: RegState = { names, missing: new Set<ToolName>(TOOLS), pending: new Map(), retryAt: new Map(), failures: new Map(), stuck: new Set() };
   on("session.start", async function onSessionStart($, e, next) {
-    await (registering ??= registerTools($, names));
+    try {
+      if (st.missing.size > 0) await ensureTools($, st, 5 * REGISTER_WAIT_MS);
+    } catch {
+      // best effort (a hook above refusing $.clock): the session.start chain goes on
+    }
     return next(e);
   });
   on("tool.call", async function onToolCall($, e, next) {
@@ -737,14 +908,26 @@ export function register(on: On, options?: Options): void {
     if (type === undefined) return next(e);
     // Answered on every path, a throw too (a hook above refusing $.env.get): a registered tool that no hook answers fails.
     try {
-      await (registering ??= registerTools($, names)).catch(() => undefined); // best effort: a failed registration must not block the answer
-      // Literal names: the engine's static check only accepts a literal first argument to $.env.get.
-      const [key, base, jevUrl, model] = (await Promise.all([$.env.get("TYPESAFE_API_KEY"), $.env.get("TYPESAFE_BASE_URL"), $.env.get("JEV_URL"), $.env.get("TYPESAFE_DEFAULT_MODEL")])).map((v) => v?.trim() || undefined);
+      // best effort and bounded: a failed or hanging registration must not hold the answer
+      if (st.missing.size > 0) {
+        try {
+          await ensureTools($, st, REGISTER_WAIT_MS);
+        } catch {
+          // best effort (a hook above refusing $.clock): the call is answered anyway
+        }
+      }
+      // Validation needs no env: an invalid call answers before any env read.
       const input = parseInput(type, e);
       if (typeof input === "string") return fail(type, input);
+      // Literal names: the engine's static check only accepts a literal first argument to $.env.get.
+      const [key, base, jevUrl, model] = (await Promise.all([$.env.get("TYPESAFE_API_KEY"), $.env.get("TYPESAFE_BASE_URL"), $.env.get("JEV_URL"), $.env.get("TYPESAFE_DEFAULT_MODEL")])).map((v) => v?.trim() || undefined);
+      // F05: an abandoned call sends nothing
+      if (next.signal.aborted) return fail(type, "the call was abandoned");
       // No Jev access configured: Haiku stands in. A configured Jev that fails stays an error.
-      if (!key && !base && !jevUrl) return await askHaiku($, type, input.state, input.questions, (seconds(e["timeout"]) ?? fallbackS) * 1000, next.signal);
-      return await ask($, type, input.state, input.questions, { key, base, jevUrl, model }, (seconds(e["timeout"]) ?? fallbackS) * 1000, next.signal);
+      // A whole number of milliseconds, at least 1: $.model.complete refuses anything else (2.01 s * 1000 is 2009.9999999999998).
+      const timeoutMs = Math.max(1, Math.round((seconds(e["timeout"]) ?? fallbackS) * 1000));
+      if (!key && !base && !jevUrl) return await askHaiku($, type, input.state, input.questions, timeoutMs, next.signal);
+      return await ask($, type, input.state, input.questions, { key, base, jevUrl, model }, timeoutMs, next.signal);
     } catch (err) {
       return fail(type, message(err));
     }

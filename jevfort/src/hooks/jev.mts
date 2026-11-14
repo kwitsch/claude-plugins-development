@@ -6,6 +6,18 @@
  * @packageDocumentation
  */
 
+/** The first pause after a timeout of Jev, in ms; it doubles with every further timeout up to {@link MAX_PAUSE_MS}. */
+export const PAUSE_MS = 30_000;
+
+/** The longest pause after repeated timeouts of Jev, in ms. */
+export const MAX_PAUSE_MS = 600_000;
+
+/** How long a finished step waits for the parallel step measurement, in ms: it only feeds the log. */
+export const MEASURE_GRACE_MS = 250;
+
+/** The longest error text `askJev` returns (and so the log and `/jev` hold), in characters: an error body of megabytes must not be stored whole. */
+export const MAX_ERROR = 1000;
+
 /** The local budget of one `askJev` (its one batch call) before Claude Code's own behaviour wins, in ms. */
 export const TIMEOUT_MS = 4000;
 
@@ -25,12 +37,19 @@ export type ScoreAnswer = { type: "score"; score: number; probabilities: Record<
 export type Answer = NoulAnswer | ChoiceAnswer | ScoreAnswer;
 
 /** What one `askJev` came back with, and how long it took. */
-export type JevResult = { ok: true; answers: Record<string, Answer>; ms: number } | { ok: false; error: string; ms: number };
+export type JevResult = { ok: true; answers: Record<string, Answer>; ms: number } | { ok: false; error: string; ms?: number };
 
 /** The most options jev-api accepts in one `choice` question. */
 export const MAX_CHOICE_OPTIONS = 255;
-/** The HTTP timeout jevfort gives every jev-api call, in seconds (jev-api's `timeout` input). */
-export const JEV_API_TIMEOUT_S = 5;
+/** The HTTP timeout jevfort gives an interactive jev-api call, in seconds (jev-api's `timeout` input): the {@link TIMEOUT_MS} budget, so the request ends with it and not a second after. */
+export const JEV_API_TIMEOUT_S = 4;
+/**
+ * The `askJev` budget of a compaction ranking in milliseconds. System One answers a batch question by question
+ * (about 140 ms each, 30 compaction-sized questions took 4.1 to 5.1 s), and a compaction is off the interactive path. Kept below the engine's 10 s limit per hook (not the 15 s Haiku budget, which applies whenever Haiku answers: an in-flight `$` call stops that clock, live on 2.1.325).
+ */
+export const COMPACT_TIMEOUT_MS = 9000;
+/** jev-api's `timeout` input in seconds for a compaction ranking: {@link COMPACT_TIMEOUT_MS}. */
+export const COMPACT_API_TIMEOUT_S = 9;
 /** The `askJev` budget in milliseconds while jev-api has no Jev access configured and Haiku answers (a model call, slower than System One). */
 export const HAIKU_TIMEOUT_MS = 15_000;
 /** jev-api's `timeout` input in seconds in that case: just under {@link HAIKU_TIMEOUT_MS}. */
@@ -50,6 +69,30 @@ export const JEV_TOOLS = [JEV_BATCH];
  */
 export function missingJevTools(names: readonly string[]): string[] {
   return JEV_TOOLS.filter((t) => !names.includes(t));
+}
+
+/**
+ * Whether a number is finite.
+ *
+ * @param v - Any value.
+ * @returns True for a finite number.
+ */
+const finite = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);
+
+/**
+ * Whether a batch answer has the asked type and the fields jevfort reads from it.
+ *
+ * @param a - One entry of jev-api's answer array.
+ * @param type - The asked question type.
+ * @returns True when the answer can be used without further checks.
+ */
+export function isAnswer(a: unknown, type: Question["type"]): a is Answer {
+  if (typeof a !== "object" || a === null || (a as { type?: unknown }).type !== type) return false;
+  const r = a as Record<string, unknown>;
+  if (type === "noul") return finite(r["noul"]);
+  const p = r["probabilities"];
+  if (!finite(r["confidence"]) || typeof p !== "object" || p === null || !Object.values(p).every(finite)) return false;
+  return type === "choice" ? typeof r["choice"] === "string" : finite(r["score"]);
 }
 
 /**

@@ -1,7 +1,7 @@
 // Kit tests for the built plugin/hooks/register.mjs of jev-api: the System One tools noul, choice, score and batch.
 import { createKit } from "claude-engine-vitest";
 import type { On } from "claude-engine-vitest";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 const { test, mock } = createKit({ module: new URL("../plugin/hooks/register.mjs", import.meta.url), plugin: "jev-api" });
 
@@ -454,7 +454,9 @@ test("a settled request cancels its timeout timer", async ($, on) => {
   on("clock.after", (_$, e, next) => (signals.push(next.signal), next(e)));
   setup(on, { env: { TYPESAFE_API_KEY: "k" } });
   expect(await call($, "noul")).toEqual({ result: JSON.stringify(ANSWERS.noul) });
-  expect(signals.map((s) => s.aborted)).toEqual([true]);
+  // the lazy registration waits behind a timer of its own: every timer, that one too, is cancelled when its wait ends
+  expect(signals.length).toBeGreaterThan(0);
+  expect(signals.every((s) => s.aborted)).toBe(true);
 });
 
 // Case 13: missing or wrong-type answer.
@@ -545,6 +547,708 @@ it("an abandoned call answers at once instead of waiting for the request", async
   ctl.abort();
   expect(await pending).toEqual({ deny: "noul: the call was abandoned" });
 });
+
+/** The module's hooks driven directly (the kit cannot abandon a dispatch, count listeners or leave a registration pending). */
+async function direct(overrides: Record<string, unknown>) {
+  const { register } = await import("../plugin/hooks/register.mjs");
+  const hooks = new Map<string, (...args: unknown[]) => Promise<unknown>>();
+  register((event: string, hook: (...args: unknown[]) => Promise<unknown>) => void hooks.set(event, hook));
+  const fetched: unknown[] = [];
+  const $ = {
+    env: { get: async (name: string) => (name === "TYPESAFE_API_KEY" ? "k" : undefined) },
+    http: { fetch: (...a: unknown[]) => (fetched.push(a), Promise.resolve({ status: 200, ok: true, headers: {}, text: JSON.stringify({ answers: { answer: ANSWERS["noul"] } }) })) },
+    clock: { after: () => ({ cancel() {} }) },
+    ...overrides,
+  };
+  const run = (type: string, signal: unknown = new AbortController().signal) => hooks.get("tool.call")?.($, { tool: TOOL(type), ...BASE[type] }, Object.assign(async () => ({}), { signal })) as Promise<{ result?: string; deny?: string }>;
+  return { run, fetched, hooks, $ };
+}
+
+// F02: a tool whose registration failed is registered again by the next hook, the others are not registered twice.
+it("a failed registration is retried by the next call, only for the tools still missing", async () => {
+  const tries: string[] = [];
+  let failBatch = true;
+  const { run } = await direct({
+    tool: {
+      register: async (spec: { name: string }) => {
+        tries.push(spec.name);
+        if (spec.name === "batch" && failBatch) throw new Error("boom");
+        return { tool: TOOL(spec.name) };
+      },
+    },
+    ui: { log: async () => undefined },
+  });
+  await run("noul");
+  expect(tries).toEqual(["noul", "choice", "score", "batch"]);
+  failBatch = false;
+  await run("noul");
+  expect(tries).toEqual(["noul", "choice", "score", "batch", "batch"]);
+  await run("noul");
+  expect(tries).toHaveLength(5); // nothing is missing any more
+});
+
+// F03: a registration that never answers must not hold the call.
+it("a registration that never answers does not hold the call", async () => {
+  const { run, fetched } = await direct({
+    tool: { register: () => new Promise(() => {}) },
+    clock: {
+      after: (ms: number, fn: () => void) => {
+        const t = ms === 1000 ? setTimeout(fn, 0) : undefined;
+        return { cancel: () => clearTimeout(t) };
+      },
+    },
+  });
+  expect(await run("noul")).toEqual({ result: JSON.stringify(ANSWERS["noul"]) });
+  expect(fetched).toHaveLength(1);
+});
+
+// F16: one tool whose registration hangs is waited for once; the other tools and later calls do not wait for it again.
+it("a hanging registration of one tool is waited for once, not by every call", async () => {
+  const waits: number[] = [];
+  const { run } = await direct({
+    tool: { register: (spec: { name: string }) => (spec.name === "score" ? new Promise(() => {}) : Promise.resolve({ tool: TOOL(spec.name) })) },
+    clock: {
+      after: (ms: number, fn: () => void) => {
+        waits.push(ms);
+        const t = ms === 1000 ? setTimeout(fn, 0) : undefined;
+        return { cancel: () => clearTimeout(t) };
+      },
+    },
+  });
+  for (let i = 0; i < 4; i++) expect(await run("noul")).toEqual({ result: JSON.stringify(ANSWERS["noul"]) });
+  expect(waits.filter((ms) => ms === 1000)).toHaveLength(1);
+});
+
+// F17: a tool the engine keeps refusing is retried once at once, then with a growing delay, and logged once.
+it("a permanently failing registration is retried with back-off and logged once", async () => {
+  const tries: string[] = [];
+  const logs: string[] = [];
+  const { run } = await direct({
+    tool: {
+      register: async (spec: { name: string }) => {
+        tries.push(spec.name);
+        if (spec.name === "batch") throw new Error("refused");
+        return { tool: TOOL(spec.name) };
+      },
+    },
+    ui: { log: async (text: string) => void logs.push(text) },
+  });
+  vi.useFakeTimers({ toFake: ["Date"] });
+  try {
+    for (let i = 0; i < 20; i++) await run("noul");
+    expect(tries.filter((n) => n === "batch")).toHaveLength(2); // the first try and the immediate retry
+    vi.setSystemTime(Date.now() + 6000);
+    await run("noul");
+    expect(tries.filter((n) => n === "batch")).toHaveLength(3); // after 5 s the next try
+    for (let i = 0; i < 5; i++) await run("noul");
+    expect(tries.filter((n) => n === "batch")).toHaveLength(3); // the next delay is 10 s
+  } finally {
+    vi.useRealTimers();
+  }
+  expect(logs).toHaveLength(1);
+});
+
+// F18: the Haiku call carries the abort signal as an option of $.model.complete (the second argument; the request has no signal field).
+it("the Haiku call gets the abort signal as an option", async () => {
+  const calls: unknown[][] = [];
+  const { run } = await direct({
+    env: { get: async () => undefined },
+    model: { complete: (...a: unknown[]) => (calls.push(a), Promise.resolve({ isAnswered: true, text: "{}", usage: {} })) },
+    tool: { register: async (s: { name: string }) => ({ tool: TOOL(s.name) }) },
+  });
+  const ctl = new AbortController();
+  await run("noul", ctl.signal);
+  expect(calls).toHaveLength(1);
+  expect((calls[0][0] as Record<string, unknown>)["signal"]).toBeUndefined();
+  expect((calls[0][1] as { signal?: AbortSignal }).signal).toBe(ctl.signal);
+});
+
+// A Haiku choice answer is normalized like a score: the probabilities sum to 1.
+test("Haiku choice probabilities are normalized", async ($, on) => {
+  haiku(on, () => said(JSON.stringify({ answers: { answer: { type: "choice", choice: "greeting", confidence: 0.8, probabilities: { greeting: 0.97, question: 0.195 } } } })));
+  mock.env(on, {});
+  const r = await call($, "choice");
+  const answer = JSON.parse(r.result ?? "{}") as { probabilities: Record<string, number> };
+  expect(answer.probabilities["greeting"]).toBeCloseTo(0.8325, 3);
+  expect(answer.probabilities["greeting"] + answer.probabilities["question"]).toBeCloseTo(1, 3);
+});
+
+// D3: $.model.complete refuses a timeoutMs that is not a positive whole number; 2.01 s * 1000 is 2009.9999999999998.
+test("the Haiku timeout is a whole number of milliseconds", async ($, on) => {
+  const asked = haiku(on, () => said("{}"));
+  mock.env(on, {});
+  await call($, "noul", { timeout: 2.01 });
+  await call($, "noul", { timeout: 0.0004 });
+  expect(asked.map((r) => r["timeoutMs"])).toEqual([2010, 1]);
+});
+
+// D1: the key never reaches the model, not even in the text of a runtime that rejects the header value.
+it("an error that quotes the bearer key is redacted", async () => {
+  const key = "sk-SECRET-1234567890";
+  const { run } = await direct({
+    env: { get: async (n: string) => (n === "JEV_URL" ? "https://jev.example/x" : n === "TYPESAFE_API_KEY" ? key : undefined) },
+    http: { fetch: () => Promise.reject(new Error(`Header 'Authorization' has invalid value: 'Bearer ${key}\nX'`)) },
+    tool: { register: async (s: { name: string }) => ({ tool: TOOL(s.name) }) },
+  });
+  const r = await run("noul");
+  expect(r.deny).toMatch(/^noul: /);
+  expect(r.deny).not.toContain(key);
+  expect(r.deny).toContain("<TYPESAFE_API_KEY>");
+});
+
+// D4: a DNS failure quotes the bare host of the endpoint (live on 2.1.325), which is redacted too.
+it("a DNS error that quotes the bare host is redacted", async () => {
+  const { run } = await direct({
+    env: { get: async (n: string) => (n === "JEV_URL" ? "https://secret-host-zq82.invalid/route/sys?token=TOK" : n === "TYPESAFE_API_KEY" ? "k" : undefined) },
+    http: { fetch: () => Promise.reject(new Error("$.http.fetch(https://secret-host-zq82.invalid/route/sys?token=TOK) failed: getaddrinfo ENOTFOUND secret-host-zq82.invalid")) },
+    tool: { register: async (s: { name: string }) => ({ tool: TOOL(s.name) }) },
+  });
+  const r = await run("noul");
+  expect(r.deny).not.toContain("secret-host-zq82");
+  expect(r.deny).not.toContain("TOK");
+  expect(r.deny).toContain("ENOTFOUND <host>");
+});
+
+// D5: the redaction order and reach: a key that contains the host text, and a host that is part of ordinary words.
+it("redaction: a key containing the host is replaced whole, a host inside other words is kept", async () => {
+  const key = "sk-jev-9f8e7d6c5b4a";
+  const { run } = await direct({
+    env: { get: async (n: string) => (n === "JEV_URL" ? "https://jev/v1/systemone" : n === "TYPESAFE_API_KEY" ? key : undefined) },
+    http: { fetch: () => Promise.resolve({ status: 400, ok: false, headers: {}, text: JSON.stringify({ detail: `bad token Bearer ${key} for model 'jev-latest' on 110.0.0.5, host jev` }) }) },
+    tool: { register: async (s: { name: string }) => ({ tool: TOOL(s.name) }) },
+  });
+  const r = await run("noul");
+  expect(r.deny).toBe("noul: HTTP 400: bad token Bearer <TYPESAFE_API_KEY> for model 'jev-latest' on 110.0.0.5, host <host>");
+});
+
+// D5 (order): the host step must come after the key step, and the host lookbehind keeps `api.jev` as it is.
+it("redaction: a key like jev.<rest> is replaced whole before the host step; api.jev stays", async () => {
+  const key = "jev.9f8e7d6c5b4a";
+  const { run } = await direct({
+    env: { get: async (n: string) => (n === "JEV_URL" ? "https://jev/v1/systemone" : n === "TYPESAFE_API_KEY" ? key : undefined) },
+    http: { fetch: () => Promise.resolve({ status: 400, ok: false, headers: {}, text: JSON.stringify({ detail: `bad token Bearer ${key} via api.jev, host jev` }) }) },
+    tool: { register: async (s: { name: string }) => ({ tool: TOOL(s.name) }) },
+  });
+  expect((await run("noul")).deny).toBe("noul: HTTP 400: bad token Bearer <TYPESAFE_API_KEY> via api.jev, host <host>");
+});
+
+// IPv6 endpoint: the host carries brackets, the error text quotes the bare address.
+it("redaction: an IPv6 endpoint host is hidden without its brackets", async () => {
+  const { run } = await direct({
+    env: { get: async (n: string) => (n === "JEV_URL" ? "http://[2001:db8::7]:8080/v1/systemone" : undefined) },
+    http: { fetch: () => Promise.reject(new Error("connect ECONNREFUSED 2001:db8::7:8080")) },
+    tool: { register: async (s: { name: string }) => ({ tool: TOOL(s.name) }) },
+  });
+  expect((await run("noul")).deny).not.toContain("2001:db8");
+});
+
+// F06 (Haiku path): the abort listener is removed there too.
+it("settled Haiku calls leave no abort listeners on a shared signal", async () => {
+  const { run } = await direct({
+    env: { get: async () => undefined },
+    model: { complete: () => Promise.resolve({ isAnswered: true, text: "{}", usage: {} }) },
+    tool: { register: async (s: { name: string }) => ({ tool: TOOL(s.name) }) },
+  });
+  let listeners = 0;
+  const signal = { aborted: false, addEventListener: () => void listeners++, removeEventListener: () => void listeners-- };
+  for (let i = 0; i < 5; i++) await run("noul", signal);
+  expect(listeners).toBe(0);
+});
+
+// The engine reports its own model timeout as `aborted`: the model must read a timeout, not an interrupt.
+it("a Haiku timeout reads as a timeout, an abandoned call as abandoned", async () => {
+  const { run } = await direct({
+    env: { get: async () => undefined },
+    model: { complete: () => Promise.resolve({ isAnswered: false, reason: "aborted" }) },
+    tool: { register: async (s: { name: string }) => ({ tool: TOOL(s.name) }) },
+  });
+  expect((await run("noul")).deny).toMatch(/^noul: fallback: timeout after \d+ms$/);
+  const ctl = new AbortController();
+  const pending = run("noul", ctl.signal);
+  ctl.abort();
+  expect((await pending).deny).toBe("noul: the call was abandoned");
+});
+
+// The Haiku reply cleanup must not take quadratic time on a long whitespace run.
+test("a Haiku reply with a long whitespace run is cleaned in linear time", async ($, on) => {
+  const pad = " ".repeat(80_000);
+  haiku(on, () => said(`{"answers":{"answer":{"type":"noul","noul":0.5}${pad}}}`));
+  mock.env(on, {});
+  const t0 = Date.now();
+  const r = await call($, "noul");
+  expect(r.result).toBeDefined();
+  expect(Date.now() - t0).toBeLessThan(1000);
+});
+
+// D2: an error body a server fills with the request URL is redacted like a fetch error.
+it("an error body that echoes the endpoint is redacted", async () => {
+  const url = "https://private.example/tenant-42/systemone?token=SECRET";
+  const { run } = await direct({
+    env: { get: async (n: string) => (n === "JEV_URL" ? url : undefined) },
+    http: { fetch: () => Promise.resolve({ status: 404, ok: false, headers: {}, text: JSON.stringify({ detail: `no route for POST ${url}` }) }) },
+    tool: { register: async (s: { name: string }) => ({ tool: TOOL(s.name) }) },
+  });
+  const r = await run("noul");
+  expect(r.deny).toBe("noul: HTTP 404: no route for POST <JEV_URL>");
+});
+
+// F05: an already abandoned call sends nothing.
+it("an already abandoned call sends no request", async () => {
+  const { run, fetched } = await direct({ tool: { register: async (s: { name: string }) => ({ tool: TOOL(s.name) }) } });
+  const ctl = new AbortController();
+  ctl.abort();
+  expect(await run("noul", ctl.signal)).toEqual({ deny: "noul: the call was abandoned" });
+  expect(fetched).toHaveLength(0);
+});
+
+// F06: the abort listeners of settled calls are removed from a signal shared by many calls.
+it("settled calls leave no abort listeners on a shared signal", async () => {
+  const { run } = await direct({ tool: { register: async (s: { name: string }) => ({ tool: TOOL(s.name) }) } });
+  let listeners = 0;
+  const signal = { aborted: false, addEventListener: () => void listeners++, removeEventListener: () => void listeners-- };
+  for (let i = 0; i < 5; i++) await run("noul", signal);
+  expect(listeners).toBe(0);
+});
+
+// F07: invalid input is answered before any env read.
+it("an invalid call reads no env variable", async () => {
+  let reads = 0;
+  const { hooks, $ } = await direct({ tool: { register: async (s: { name: string }) => ({ tool: TOOL(s.name) }) }, env: { get: async () => (reads++, undefined) } });
+  const r = (await hooks.get("tool.call")?.($, { tool: TOOL("noul"), state: 1 }, Object.assign(async () => ({}), { signal: new AbortController().signal }))) as { deny?: string };
+  expect(r.deny).toMatch(/^noul: /);
+  expect(reads).toBe(0);
+});
+
+// F04: the Haiku output budget grows with the options a choice answer has to list.
+test("the Haiku output budget covers a choice with many options", async ($, on) => {
+  const asked = haiku(on, () => said("{}"));
+  mock.env(on, {});
+  const criteria = Object.fromEntries(Array.from({ length: 255 }, (_, i) => [`option number ${i}`, "d"]));
+  await call($, "choice", { criteria });
+  await call($, "noul");
+  expect(Number(asked[0]["maxTokens"])).toBeGreaterThan(4096);
+  expect(Number(asked[1]["maxTokens"])).toBe(512); // unchanged for a noul question
+});
+
+test("the Haiku output budget grows with the levels of a score", async ($, on) => {
+  const asked = haiku(on, () => said("{}"));
+  mock.env(on, {});
+  await call($, "score", { criteria: Array.from({ length: 10 }, (_, i) => `level ${i}`) });
+  await call($, "score", { criteria: ["low", "high"] });
+  expect(Number(asked[0]["maxTokens"])).toBeGreaterThan(Number(asked[1]["maxTokens"]));
+});
+
+// Gaps found by mutation testing (round 6a): each test kills at least one mutant of the shipped code.
+it("a hanging registration is not started again by later calls", async () => {
+  const tries: string[] = [];
+  const { run } = await direct({
+    tool: { register: (spec: { name: string }) => (tries.push(spec.name), spec.name === "score" ? new Promise(() => {}) : Promise.resolve({ tool: TOOL(spec.name) })) },
+    clock: {
+      after: (ms: number, fn: () => void) => {
+        const t = ms === 1000 ? setTimeout(fn, 0) : undefined;
+        return { cancel: () => clearTimeout(t) };
+      },
+    },
+  });
+  for (let i = 0; i < 3; i++) await run("noul");
+  expect(tries.filter((n) => n === "score")).toHaveLength(1);
+});
+
+it("a key inside JEV_URL: the whole URL still becomes <JEV_URL>", async () => {
+  const key = "sk-SECRET-1234567890";
+  const url = `https://jev.example/tenant-7?key=${key}`;
+  const { run } = await direct({
+    env: { get: async (n: string) => (n === "JEV_URL" ? url : n === "TYPESAFE_API_KEY" ? key : undefined) },
+    http: { fetch: () => Promise.reject(new Error(`$.http.fetch(${url}) failed: ECONNREFUSED`)) },
+    tool: { register: async (s: { name: string }) => ({ tool: TOOL(s.name) }) },
+  });
+  expect((await run("noul")).deny).toBe("noul: $.http.fetch(<JEV_URL>) failed: ECONNREFUSED");
+});
+
+it("the bare host is hidden whatever its case", async () => {
+  const { run } = await direct({
+    env: { get: async (n: string) => (n === "JEV_URL" ? "https://secret-host-zq82.invalid/x" : undefined) },
+    http: { fetch: () => Promise.reject(new Error("getaddrinfo ENOTFOUND SECRET-HOST-ZQ82.invalid")) },
+    tool: { register: async (s: { name: string }) => ({ tool: TOOL(s.name) }) },
+  });
+  expect((await run("noul")).deny).toBe("noul: getaddrinfo ENOTFOUND <host>");
+});
+
+test("a Haiku choice whose probabilities are all 0 is an error", async ($, on) => {
+  setup(on, { env: {} });
+  haiku(on, () => said(JSON.stringify({ answers: { answer: { type: "choice", choice: "greeting", confidence: 1, probabilities: { greeting: 0, question: 0 } } } })));
+  expect((await call($, "choice")).deny).toMatch(/^choice: fallback/);
+});
+
+it("a URL quoted as given (not as the parser spells it) becomes <JEV_URL>", async () => {
+  const url = "https://jev.example/a/../tenant-7";
+  const { run } = await direct({
+    env: { get: async (n: string) => (n === "JEV_URL" ? url : undefined) },
+    http: { fetch: () => Promise.reject(new Error(`$.http.fetch(${url}) failed: ECONNREFUSED`)) },
+    tool: { register: async (s: { name: string }) => ({ tool: TOOL(s.name) }) },
+  });
+  expect((await run("noul")).deny).toBe("noul: $.http.fetch(<JEV_URL>) failed: ECONNREFUSED");
+});
+
+it("a Haiku call that rejects after it was abandoned raises no unhandled rejection", async () => {
+  let rejectIt: ((e: Error) => void) | undefined;
+  const { run } = await direct({
+    env: { get: async () => undefined },
+    model: { complete: () => new Promise((_, rej) => (rejectIt = rej)) },
+    tool: { register: async (s: { name: string }) => ({ tool: TOOL(s.name) }) },
+  });
+  const ctl = new AbortController();
+  const pending = run("noul", ctl.signal);
+  while (!rejectIt) await new Promise((r) => setImmediate(r));
+  ctl.abort();
+  expect((await pending).deny).toBe("noul: the call was abandoned");
+  const seen: unknown[] = [];
+  const h = (e: unknown) => void seen.push(e);
+  process.prependListener("unhandledRejection", h);
+  rejectIt(new Error("late"));
+  await new Promise((r) => setTimeout(r, 20));
+  process.off("unhandledRejection", h);
+  expect(seen).toHaveLength(0);
+});
+
+test("the Haiku output budget is capped at 16384", async ($, on) => {
+  const asked = haiku(on, () => said("{}"));
+  mock.env(on, {});
+  const criteria = Object.fromEntries(Array.from({ length: 255 }, (_, i) => [`${"x".repeat(200)}${i}`, "d"]));
+  await call($, "choice", { criteria });
+  expect(asked[0]["maxTokens"]).toBe(16384);
+});
+
+it("the registration back-off stops growing at 5 minutes", async () => {
+  const tries: string[] = [];
+  const { run } = await direct({
+    tool: {
+      register: async (spec: { name: string }) => {
+        tries.push(spec.name);
+        if (spec.name === "batch") throw new Error("refused");
+        return { tool: TOOL(spec.name) };
+      },
+    },
+    ui: { log: async () => undefined },
+  });
+  vi.useFakeTimers({ toFake: ["Date"] });
+  try {
+    const t0 = Date.now();
+    for (let i = 0; i < 12; i++) {
+      vi.setSystemTime(t0 + 300_001 * i);
+      await run("noul");
+    }
+    expect(tries.filter((n) => n === "batch")).toHaveLength(12); // the delay stops growing
+    vi.setSystemTime(t0 + 300_001 * 11 + 200_000);
+    await run("noul");
+    expect(tries.filter((n) => n === "batch")).toHaveLength(12); // and it is 5 minutes, not less
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+it("the first delayed retry waits 5 s, not less", async () => {
+  const tries: string[] = [];
+  const { run } = await direct({
+    tool: {
+      register: async (spec: { name: string }) => {
+        tries.push(spec.name);
+        if (spec.name === "batch") throw new Error("refused");
+        return { tool: TOOL(spec.name) };
+      },
+    },
+    ui: { log: async () => undefined },
+  });
+  vi.useFakeTimers({ toFake: ["Date"] });
+  try {
+    await run("noul");
+    await run("noul"); // immediate retry
+    vi.setSystemTime(Date.now() + 4000);
+    await run("noul");
+  } finally {
+    vi.useRealTimers();
+  }
+  expect(tries.filter((n) => n === "batch")).toHaveLength(2);
+});
+
+it("session.start waits up to 5 s for a registration", async () => {
+  const waits: number[] = [];
+  const { hooks, $ } = await direct({
+    tool: { register: () => new Promise(() => {}) },
+    clock: {
+      after: (ms: number, fn: () => void) => {
+        waits.push(ms);
+        const t = setTimeout(fn, 0);
+        return { cancel: () => clearTimeout(t) };
+      },
+    },
+  });
+  await hooks.get("session.start")?.($, { cwd: "/p" }, async () => ({}));
+  expect(waits).toEqual([5000]);
+});
+
+it("a key shorter than 6 characters is not redacted", async () => {
+  const { run } = await direct({
+    env: { get: async (n: string) => (n === "JEV_URL" ? "https://jev.example/x" : n === "TYPESAFE_API_KEY" ? "abc" : undefined) },
+    http: { fetch: () => Promise.resolve({ status: 400, ok: false, headers: {}, text: JSON.stringify({ detail: "abc is wrong" }) }) },
+    tool: { register: async (s: { name: string }) => ({ tool: TOOL(s.name) }) },
+  });
+  expect((await run("noul")).deny).toBe("noul: HTTP 400: abc is wrong");
+});
+
+// An error body of megabytes reaches the model cut, and a key at the cut is gone whole.
+it("an oversized error reason is cut after the redaction", async () => {
+  const key = "sk-SECRET-1234567890";
+  const { run } = await direct({
+    env: { get: async (n: string) => (n === "JEV_URL" ? "https://jev.example/x" : n === "TYPESAFE_API_KEY" ? key : undefined) },
+    http: { fetch: () => Promise.resolve({ status: 500, ok: false, headers: {}, text: JSON.stringify({ detail: "x".repeat(995) + key + "y".repeat(5_000_000) }) }) },
+    tool: { register: async (s: { name: string }) => ({ tool: TOOL(s.name) }) },
+  });
+  const r = await run("noul");
+  expect(r.deny?.length).toBeLessThanOrEqual("noul: HTTP 500: ".length + 1001);
+  expect(r.deny).not.toContain("sk-SECRET");
+  expect(r.deny).toContain("<TYPESAFE_API_KEY>".slice(0, 5));
+});
+
+// A blank reason has no dangling colon, the cut leaves no lone surrogate.
+it("a blank error reason adds nothing, a cut astral text stays valid", async () => {
+  const reply = (detail: string) =>
+    direct({
+      env: { get: async (n: string) => (n === "JEV_URL" ? "https://jev.example/x" : undefined) },
+      http: { fetch: () => Promise.resolve({ status: 500, ok: false, headers: {}, text: JSON.stringify({ detail }) }) },
+      tool: { register: async (s: { name: string }) => ({ tool: TOOL(s.name) }) },
+    }).then(({ run }) => run("noul"));
+  expect((await reply("  ")).deny).toBe("noul: HTTP 500");
+  const cut = (await reply("x" + "😀".repeat(1500))).deny ?? "";
+  expect(cut).not.toMatch(/[\uD800-\uDBFF]…$/);
+});
+
+// An engine that resolves `aborted` first on an abandoned call still reads as abandoned.
+it("a Haiku reply `aborted` with the signal aborted reads as abandoned", async () => {
+  const ctl = new AbortController();
+  const { run } = await direct({
+    env: { get: async () => undefined },
+    model: { complete: () => (ctl.abort(), Promise.resolve({ isAnswered: false, reason: "aborted" })) },
+    tool: { register: async (s: { name: string }) => ({ tool: TOOL(s.name) }) },
+  });
+  expect((await run("noul", ctl.signal)).deny).toBe("noul: the call was abandoned");
+});
+
+// A log call that never settles must not keep a refused tool from being retried.
+it("a hanging ui.log does not keep a failed registration pending", async () => {
+  const tries: string[] = [];
+  let fail = true;
+  const { run } = await direct({
+    tool: { register: async (s: { name: string }) => (tries.push(s.name), s.name === "batch" && fail ? Promise.reject(new Error("refused")) : { tool: TOOL(s.name) }) },
+    ui: { log: () => new Promise(() => {}) },
+  });
+  await run("noul");
+  fail = false;
+  await run("noul");
+  expect(tries.filter((n) => n === "batch")).toHaveLength(2);
+});
+
+// A tool that hangs, is marked stuck and later fails is waited for again when it is retried (once per retry, not per call).
+it("a tool that hung once is waited for again at its next retry", async () => {
+  const waits: number[] = [];
+  let rejectFirst: (() => void) | undefined;
+  let tries = 0;
+  const { run } = await direct({
+    tool: {
+      register: (spec: { name: string }) => {
+        if (spec.name !== "score") return Promise.resolve({ tool: TOOL(spec.name) });
+        tries++;
+        return tries === 1 ? new Promise((_, rej) => (rejectFirst = () => rej(new Error("late")))) : new Promise(() => {});
+      },
+    },
+    ui: { log: async () => undefined },
+    clock: {
+      after: (ms: number, fn: () => void) => {
+        waits.push(ms);
+        const t = ms === 1000 ? setTimeout(fn, 0) : undefined;
+        return { cancel: () => clearTimeout(t) };
+      },
+    },
+  });
+  await run("noul"); // the first wait: score hangs, is marked stuck
+  rejectFirst?.();
+  await new Promise((r) => setTimeout(r, 5));
+  await run("noul"); // the retry is waited for again
+  expect(waits.filter((ms) => ms === 1000)).toHaveLength(2);
+});
+
+// A hook above refusing $.clock must not stop the session.start chain.
+it("session.start goes on when waiting for the registration throws", async () => {
+  const { hooks, $ } = await direct({
+    tool: { register: () => new Promise(() => {}) },
+    clock: {
+      after: () => {
+        throw new Error("refused");
+      },
+    },
+  });
+  let called = false;
+  await hooks.get("session.start")?.($, { cwd: "/p" }, Object.assign(async () => ((called = true), { cwd: "/p" }), { signal: new AbortController().signal }));
+  expect(called).toBe(true);
+});
+
+// The cut reason ends with an ellipsis.
+it("an oversized error reason ends with an ellipsis", async () => {
+  const { run } = await direct({
+    env: { get: async (n: string) => (n === "JEV_URL" ? "https://jev.example/x" : undefined) },
+    http: { fetch: () => Promise.resolve({ status: 500, ok: false, headers: {}, text: JSON.stringify({ detail: "z".repeat(5000) }) }) },
+    tool: { register: async (s: { name: string }) => ({ tool: TOOL(s.name) }) },
+  });
+  expect((await run("noul")).deny).toMatch(/z…$/);
+});
+
+// A key or URL with a quote or backslash inside an object reason: JSON would escape it, so the strings are redacted first.
+it("a key containing a quote is redacted inside an object error reason", async () => {
+  const key = "tok\"en12345";
+  const { run } = await direct({
+    env: { get: async (n: string) => (n === "JEV_URL" ? "https://jev.internal/x" : n === "TYPESAFE_API_KEY" ? key : undefined) },
+    http: { fetch: () => Promise.resolve({ status: 401, ok: false, headers: {}, text: JSON.stringify({ detail: { msg: `bad key: Bearer ${key}` } }) }) },
+    tool: { register: async (s: { name: string }) => ({ tool: TOOL(s.name) }) },
+  });
+  const r = await run("noul");
+  expect(r.deny).not.toContain("en12345");
+  expect(r.deny).toContain("<TYPESAFE_API_KEY>");
+});
+
+// An object KEY holding the secret is redacted too, and a host named like a word is replaced once (no nested placeholder).
+it("a secret used as an object key in an error reason is redacted, the host placeholder is not nested", async () => {
+  const key = "tok\"en12345";
+  const { run } = await direct({
+    env: { get: async (n: string) => (n === "JEV_URL" ? "https://host/x" : n === "TYPESAFE_API_KEY" ? key : undefined) },
+    http: { fetch: () => Promise.resolve({ status: 401, ok: false, headers: {}, text: JSON.stringify({ detail: { [`Bearer ${key}`]: "rejected" } }) }) },
+    tool: { register: async (s: { name: string }) => ({ tool: TOOL(s.name) }) },
+  });
+  expect((await run("noul")).deny).toBe("noul: HTTP 401: {\"Bearer <TYPESAFE_API_KEY>\":\"rejected\"}");
+  const plain = await direct({
+    env: { get: async (n: string) => (n === "JEV_URL" ? "https://host/x" : undefined) },
+    http: { fetch: () => Promise.resolve({ status: 401, ok: false, headers: {}, text: JSON.stringify({ detail: "cannot reach host" }) }) },
+    tool: { register: async (s: { name: string }) => ({ tool: TOOL(s.name) }) },
+  });
+  expect((await plain.run("noul")).deny).toBe("noul: HTTP 401: cannot reach <host>");
+});
+
+// A numeric key echoed as a JSON number is redacted too (numbers are not strings, the replacer must look at them).
+it("a numeric key echoed as a JSON number in an error reason is redacted", async () => {
+  const { run } = await direct({
+    env: { get: async (n: string) => (n === "JEV_URL" ? "https://host/x" : n === "TYPESAFE_API_KEY" ? "12345678" : undefined) },
+    http: { fetch: () => Promise.resolve({ status: 400, ok: false, headers: {}, text: JSON.stringify({ detail: { token: 12345678, list: [912345678] } }) }) },
+    tool: { register: async (s: { name: string }) => ({ tool: TOOL(s.name) }) },
+  });
+  const r = await run("noul");
+  expect(r.deny).not.toContain("12345678");
+  expect(r.deny).toContain("<TYPESAFE_API_KEY>");
+});
+
+// JSON.parse rounds a 20-digit number and drops `.0` and `e0`: the key is matched on the number's source text.
+it("a numeric key echoed with more digits than a double holds, or as 123456.0, is redacted", async () => {
+  for (const [key, spelled] of [["12345678901234567890", "12345678901234567890"], ["123456.0", "123456.0"], ["1234567e0", "1234567e0"]]) {
+    const { run } = await direct({
+      env: { get: async (n: string) => (n === "JEV_URL" ? "https://host/x" : n === "TYPESAFE_API_KEY" ? key : undefined) },
+      http: { fetch: () => Promise.resolve({ status: 400, ok: false, headers: {}, text: `{"detail":{"key":${spelled}}}` }) },
+      tool: { register: async (s: { name: string }) => ({ tool: TOOL(s.name) }) },
+    });
+    const r = await run("noul");
+    expect(r.deny).toBe("noul: HTTP 400: {\"key\":\"<TYPESAFE_API_KEY>\"}");
+  }
+});
+
+// The reviver redacts every number of the body: a key that is no number cannot sit in one, so an error body of many numbers must not pay for it (1M numbers took 4 s).
+it("an error body of many numbers is not redacted number by number when the key is no number", async () => {
+  const { run } = await direct({
+    env: { get: async (n: string) => (n === "JEV_URL" ? "https://host/x" : n === "TYPESAFE_API_KEY" ? "sk-SECRET-1234567890" : undefined) },
+    http: { fetch: () => Promise.resolve({ status: 500, ok: false, headers: {}, text: JSON.stringify({ detail: "down", items: Array.from({ length: 600_000 }, (_, i) => i + 100_000) }) }) },
+    tool: { register: async (s: { name: string }) => ({ tool: TOOL(s.name) }) },
+  });
+  const t = performance.now();
+  expect((await run("noul")).deny).toBe("noul: HTTP 500: down");
+  expect(performance.now() - t).toBeLessThan(1500);
+});
+
+// A rejection value that cannot be made into text must not leave the call unanswered.
+it("a call is answered when the env read rejects with a value that cannot be stringified", async () => {
+  const { run } = await direct({
+    env: { get: () => Promise.reject(Object.create(null) as Error) },
+    tool: { register: async (s: { name: string }) => ({ tool: TOOL(s.name) }) },
+  });
+  expect((await run("noul")).deny).toBe("noul: unknown error");
+});
+
+// A registration answer without a string tool name is a registration, not a failure.
+it("a registration answering a non-string tool is not retried", async () => {
+  const tries: string[] = [];
+  const { run } = await direct({ tool: { register: async (s: { name: string }) => (tries.push(s.name), { tool: 42 }) } });
+  await run("noul");
+  await run("noul");
+  expect(tries).toHaveLength(4);
+});
+
+// A hook above refusing $.clock must not fail an owned call (the Haiku path needs no clock).
+it("an owned call is answered when waiting for the registration throws", async () => {
+  const { run } = await direct({
+    env: { get: async () => undefined },
+    model: { complete: () => Promise.resolve({ isAnswered: true, text: JSON.stringify({ answers: { answer: { type: "noul", noul: 0.5 } } }), usage: {} }) },
+    tool: { register: () => new Promise(() => {}) },
+    clock: {
+      after: () => {
+        throw new Error("clock refused");
+      },
+    },
+  });
+  expect((await run("noul")).result).toBeDefined();
+});
+
+// Gaps found by the second mutation round (round 7a).
+it("a DNS error that quotes the bare host of TYPESAFE_BASE_URL is redacted", async () => {
+  const { run } = await direct({
+    env: { get: async (n: string) => (n === "TYPESAFE_BASE_URL" ? "https://secret-base-zq82.invalid" : undefined) },
+    http: { fetch: () => Promise.reject(new Error("getaddrinfo ENOTFOUND secret-base-zq82.invalid")) },
+    tool: { register: async (s: { name: string }) => ({ tool: TOOL(s.name) }) },
+  });
+  expect((await run("noul")).deny).toBe("noul: getaddrinfo ENOTFOUND <host>");
+});
+
+it("a key of exactly 6 characters is redacted", async () => {
+  const key = "k9Q2x7";
+  const { run } = await direct({
+    env: { get: async (n: string) => (n === "JEV_URL" ? "https://jev.example/x" : n === "TYPESAFE_API_KEY" ? key : undefined) },
+    http: { fetch: () => Promise.reject(new Error(`Header 'Authorization' has invalid value: 'Bearer ${key}\nX'`)) },
+    tool: { register: async (s: { name: string }) => ({ tool: TOOL(s.name) }) },
+  });
+  const r = await run("noul");
+  expect(r.deny).not.toContain(key);
+  expect(r.deny).toContain("<TYPESAFE_API_KEY>");
+});
+
+it("a JEV_URL without a host is an error, not a request", async () => {
+  const fetched: string[] = [];
+  const { run } = await direct({
+    env: { get: async (n: string) => (n === "JEV_URL" ? "https:///v1/systemone" : n === "TYPESAFE_API_KEY" ? "sk-SECRET-1234567890" : undefined) },
+    http: { fetch: (url: string) => (fetched.push(url), Promise.reject(new Error("x"))) },
+    tool: { register: async (s: { name: string }) => ({ tool: TOOL(s.name) }) },
+  });
+  expect((await run("noul")).deny).toBe("noul: JEV_URL must be an http(s) URL");
+  expect(fetched).toHaveLength(0);
+});
+
+test("a blank TYPESAFE_DEFAULT_MODEL counts as unset: jev-latest", async ($, on) => {
+  const { fetched } = setup(on, { env: { JEV_URL: "https://jev.example/x", TYPESAFE_DEFAULT_MODEL: "  " } });
+  await call($, "noul");
+  expect(fetched[0]?.body.model).toBe("jev-latest");
+});
+
+for (const [label, wrap] of [["a fenced reply with a trailing newline", (j: string) => "```json\n" + j + "\n```\n"], ["a bare fence", (j: string) => "```\n" + j + "\n```"]] as const) {
+  test(`JJ Haiku: ${label} is read`, async ($, on) => {
+    setup(on, { env: {} });
+    haiku(on, () => said(wrap(JSON.stringify({ answers: { answer: HAIKU_ANSWERS["noul"] } }))));
+    const r = await call($, "noul");
+    expect(JSON.parse(r.result ?? "null")).toMatchObject(CALIBRATED["noul"] as object);
+  });
+}
 
 // Live smoke tests (opt-in): run against the System One server named by JEV_URL in the shell; skipped without it.
 // Nothing is hardcoded: the URL, key and model come only from the environment.

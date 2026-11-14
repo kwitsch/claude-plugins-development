@@ -39,6 +39,14 @@ export const doneQuestion = {
 		false: "Stopped partway: steps it said it would do are not done, it asks permission to continue work it could just do, or the request is only partly handled"
 	}
 };
+export const taskEndQuestion = {
+	type: "noul",
+	instructions: "An AI coding assistant just ended a turn. Did it close a whole task for the user (the request in `request` is done and nothing it announced remains), judging from `final_message` and `recent`?",
+	criteria: {
+		true: "A task is complete: the result is delivered and the next message would start something new",
+		false: "An intermediate result: work continues, a step is reported, a question awaits the user's answer or more steps of the same task are expected"
+	}
+};
 export function bestAction(answer) {
 	if (!answer) return undefined;
 	let best;
@@ -226,7 +234,7 @@ export function shouldContinue(done, threshold = .15) {
 	return done !== undefined && done < threshold;
 }
 export function inScratchpad(file, sessionId, roots) {
-	if (!file.startsWith("/") || !sessionId) return false;
+	if (!file.startsWith("/") || file.startsWith("//") || file.includes("\\") || !sessionId) return false;
 	const segs = file.split("/");
 	if (segs.includes("..")) return false;
 	const path = `/${segs.filter((seg) => seg !== "" && seg !== ".").join("/")}`;

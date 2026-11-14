@@ -238,7 +238,9 @@ export function relevant<T extends { name: string; description: string }>(prompt
     const name = words(item.name.replace(/^mcp__/, "").replace(/[_:]+/g, " "));
     const desc = words(item.description);
     let score = 0;
-    for (const w of want) score += name.has(w) ? 2 : desc.has(w) ? 1 : 0;
+    // The item's few words, not the prompt's: a pasted log has 100k distinct words (prompt x items took 1.7 s at 2 MB). A word in both name and description counts once, as 2.
+    for (const w of name) if (want.has(w)) score += 2;
+    for (const w of desc) if (want.has(w) && !name.has(w)) score += 1;
     return { item, score };
   });
   return scored

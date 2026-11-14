@@ -1,6 +1,6 @@
 {
   "name": "jevfort",
-  "version": "0.9.0",
+  "version": "0.10.1",
   "private": true,
   "description": "Lets TypeSafe Jev take routine steps, route effort and check that work is done (port of nim-f/jev-pilot; asks Jev through the jev-api plugin's tools).",
   "keywords": [
@@ -58,7 +58,7 @@
       "subagents": {
         "type": "boolean",
         "title": "Subagents",
-        "description": "Also take steps and route effort inside subagent loops.",
+        "description": "Also route effort inside subagent loops, and take steps there when takeOnlyForBypass is off.",
         "default": true
       },
       "doneThreshold": {
@@ -105,6 +105,22 @@
         "max": 100,
         "default": 60
       },
+      "taskCompactPercent": {
+        "type": "number",
+        "title": "Compact at task end from context fill (%)",
+        "description": "From this context fill, the first turn Jev judges to have closed a task (not an intermediate result) ends with a compaction. 0 turns it off.",
+        "min": 0,
+        "max": 100,
+        "default": 80
+      },
+      "forceCompactPercent": {
+        "type": "number",
+        "title": "Force compaction from context fill (%)",
+        "description": "From this context fill, the next turn end compacts without asking Jev, when no task end came before. 0 turns it off.",
+        "min": 0,
+        "max": 100,
+        "default": 95
+      },
       "takeOnlyForBypass": {
         "type": "boolean",
         "title": "Take steps only for whole-turn answers",
@@ -114,7 +130,7 @@
       "measureSteps": {
         "type": "boolean",
         "title": "Measure steps inside a turn",
-        "description": "While Claude takes a step inside a longer turn, ask Jev in parallel which listed action it would take, and log whether it matches. Adds no delay; costs one Jev request per step. Never takes the step.",
+        "description": "While Claude takes a step inside a longer turn, ask Jev in parallel which listed action it would take, and log whether it matches. Adds at most about 250 ms per step; costs one Jev request per step. Never takes the step.",
         "default": true
       },
       "minEffort": {
