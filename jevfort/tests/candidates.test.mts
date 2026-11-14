@@ -301,6 +301,33 @@ test("summarize walks from the end: same last entries, old rows are never serial
   expect(summarize(steps.slice(2, 4))).toHaveLength(4);
 });
 
+test("summarize keeps the README size caps: last 8 entries, inputs 300 and results 400 chars, isError kept", () => {
+  const big = "x".repeat(5000);
+  const wide = (n: number) => ({
+    role: "assistant" as const,
+    text: `t${n}`,
+    toolUses: [
+      { tool: "Read", input: { big }, text: big },
+      { tool: "Bash", input: { big }, text: big, isError: true },
+      { tool: "Grep", input: { big }, text: big },
+    ],
+  });
+  const small = { role: "assistant" as const, text: "s", toolUses: [{ tool: "Read", input: {}, text: "r" }] };
+  // 4 + 2 + 4 entries from the end: the loop overshoots 8, only the slice trims it.
+  const out = summarize([wide(0), small, wide(1)]);
+  expect(out).toHaveLength(8);
+  expect(out[0]).toMatchObject({ tool: "Bash" });
+  const note = (s: string) => /… \[\d+ more chars\]$/.exec(s)?.[0].length ?? 0;
+  const tools = out.filter((e) => "tool" in e) as { input: string; result?: string; isError?: true }[];
+  for (const e of tools.filter((t) => t.input.length > 2)) {
+    expect(note(e.input)).toBeGreaterThan(0);
+    expect(e.input.length).toBeLessThanOrEqual(300 + note(e.input));
+    expect(note(e.result!)).toBeGreaterThan(0);
+    expect(e.result!.length).toBeLessThanOrEqual(400 + note(e.result!));
+  }
+  expect(tools.filter((t) => t.isError)).toHaveLength(2);
+});
+
 test("SAFE_MAKE takes only whole safe Makefile target names", () => {
   for (const t of ["test", "tests", "check", "lint", "build", "typecheck"]) expect(SAFE_MAKE.test(t), t).toBe(true);
   for (const t of ["lint-fix", "test-update", "build-and-push", "testwatch", "deploy", "pre-test"]) expect(SAFE_MAKE.test(t), t).toBe(false);
