@@ -206,7 +206,7 @@ async function onSessionStart($, e, next) {
 	state = fresh();
 	const r = await next(e);
 	void $.clock.now().then((now) => graphmindBin($, now)).then((bin) => {
-		if (!bin) $.ui.toast("graphmind-helper: the graphmind binary was not found (PATH, ~/.graphmind/bin, ~/.local/bin); the plugin's recall, nudge and MCP server stay off until it is installed (https://github.com/aouicher/graphmind)", { timeoutMs: TOAST_MS });
+		if (!bin) $.ui.toast("graphmind-helper: the graphmind binary was not found (PATH, ~/.graphmind/bin, ~/.local/bin, /usr/local/bin); the plugin's recall, nudge and MCP server stay off until it is installed (https://github.com/aouicher/graphmind)", { timeoutMs: TOAST_MS });
 	}).catch(() => {});
 	return r;
 }

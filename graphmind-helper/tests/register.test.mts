@@ -366,6 +366,7 @@ test("session start toasts when no graphmind binary exists", async ($, on) => {
   await clock.settle();
   expect(toasts).toHaveLength(1);
   expect(toasts[0]).toMatch(/graphmind binary was not found/);
+  expect(toasts[0]).toContain("(PATH, ~/.graphmind/bin, ~/.local/bin, /usr/local/bin)");
 });
 
 test("a directory named graphmind is not the binary", async ($, on) => {
