@@ -1227,6 +1227,16 @@ test("A turn's mentioned paths are statted at most 16 per step and each once per
   expect(new Set(statted).size).toBe(statted.length);
 });
 
+test("turn.complete drops the turn's state: a path statted in the turn is statted again by a later turn with the same id", async ($, on) => {
+  const { statted } = setup(on, { messages: [user("fix src/gone.ts")], jev: () => undefined });
+  claudeBeneath(on, []);
+  followUps(on);
+  await drain($.turn.step(step));
+  await $.turn.complete(answered("t1", "Done."));
+  await drain($.turn.step(step));
+  expect(statted.filter((p) => p === `${CWD}/src/gone.ts`)).toHaveLength(2);
+});
+
 test("A file statted by an earlier step is still offered after 16 new paths used up the stat budget", { options: { takeOnlyForBypass: false } }, async ($, on) => {
   const missing = Array.from({ length: 20 }, (_, i) => `src/gone${i}.ts`);
   const messages: Msg[] = [user("fix src/a.ts")];
