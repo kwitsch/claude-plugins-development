@@ -24,7 +24,7 @@ Live validation (2026-11-14, real endpoint, the built hooks module driven by a h
 
 In a real Claude Code session (2.1.325, `claude -p --plugin-dir jev-api/plugin --setting-sources project`) the split modules load and `mcp__jev-api__noul` answers `{"type":"noul","noul":0.978...}`.
 
-Not run live: the `haiku` mode (the harness has no model) and an abandoned call during a retry (kit tests only).
+Not run live: the `haiku` mode (the harness has no model) and an abandoned call during a retry (covered by the direct hook tests "an abandoned truncate call sends no retry after ..." in `tests/register.test.mts`).
 
 Earlier state: Open, nothing implemented; this document held the measurements and the proposed reaction below.
 
@@ -54,21 +54,21 @@ All proven live (real endpoint, requests built like the plugin builds them; `usa
 
 Measured by repeating a sample to over 250 KB and reading `n_prompt_tokens` of the rejection (26 overhead tokens subtracted). Characters are UTF-16 code units (`String.length`).
 
-| Content                          | chars/token                                     | chars at 32767 tokens |
-| -------------------------------- | ----------------------------------------------- | --------------------- |
-| repeated `a`                     | 8.0                                             | ~260k                 |
-| English prose                    | 4.8                                             | ~157k                 |
-| German prose                     | 3.8                                             | ~125k                 |
-| Markdown (this repo's CLAUDE.md) | 3.6                                             | ~118k                 |
-| TypeScript, JSON                 | 3.7                                             | ~122k                 |
-| minified JS                      | 3.3                                             | ~107k                 |
-| Cyrillic prose                   | 3.5                                             | ~115k                 |
-| ANSI-coloured error log          | 2.9                                             | ~95k                  |
-| CJK / Korean                     | 2.15                                            | ~70k                  |
-| hashes and paths                 | 1.9                                             | ~62k                  |
-| hex                              | 1.7                                             | ~57k                  |
-| base64                           | 1.5                                             | ~50k                  |
-| `ä€漢` text                      | 1.0                                             | ~32k                  |
+| Content                          | chars/token                                | chars at 32767 tokens |
+| -------------------------------- | ------------------------------------------ | --------------------- |
+| repeated `a`                     | 8.0                                        | ~260k                 |
+| English prose                    | 4.8                                        | ~157k                 |
+| German prose                     | 3.8                                        | ~125k                 |
+| Markdown (this repo's CLAUDE.md) | 3.6                                        | ~118k                 |
+| TypeScript, JSON                 | 3.7                                        | ~122k                 |
+| minified JS                      | 3.3                                        | ~107k                 |
+| Cyrillic prose                   | 3.5                                        | ~115k                 |
+| ANSI-coloured error log          | 2.9                                        | ~95k                  |
+| CJK / Korean                     | 2.15                                       | ~70k                  |
+| hashes and paths                 | 1.9                                        | ~62k                  |
+| hex                              | 1.7                                        | ~57k                  |
+| base64                           | 1.5                                        | ~50k                  |
+| `ä€漢` text                      | 1.0                                        | ~32k                  |
 | emoji                            | 1.0 (2 tokens per emoji, a surrogate pair) | ~32k                  |
 
 In every sample the token count was at most the string length (UTF-16 units), never below 1.0 chars/token. A byte or character limit cannot be exact.
