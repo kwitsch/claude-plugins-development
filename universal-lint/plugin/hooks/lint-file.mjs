@@ -1278,15 +1278,24 @@ export async function settleFindings(findings, resolved, rec, d0, d1) {
 	let later;
 	try {
 		const dir = settleDir();
-		const recs = readdirSync(dir).filter((n) => n.startsWith(`${rec.key}-`) && n.endsWith(".json")).sort().map((n) => JSON.parse(readFileSync(path.join(dir, n), "utf8")));
+		const recs = readdirSync(dir).filter((n) => n.startsWith(`${rec.key}-`) && n.endsWith(".json")).sort().map((n) => ({
+			name: n,
+			...JSON.parse(readFileSync(path.join(dir, n), "utf8"))
+		}));
 		if (recs.some((r) => r.hunks !== null && !Array.isArray(r.hunks))) return findings;
 		let at = -1;
 		recs.forEach((r, i) => {
 			if (r.digest === d0) at = i;
 		});
-		if (at === -1 || at === recs.length - 1) return findings;
-		for (let i = at + 1; i < recs.length; i++) if (recs[i].hunks !== null && recs[i].before !== recs[i - 1].digest) return findings;
-		later = recs.slice(at + 1).map((r) => r.hunks);
+		if (at === -1) return findings;
+		const after = recs.slice(at + 1).filter((r) => r.name !== rec.name);
+		if (after.length === 0) return findings;
+		let prev = recs[at].digest;
+		for (const r of after) {
+			if (r.hunks !== null && r.before !== prev) return findings;
+			prev = r.digest;
+		}
+		later = after.map((r) => r.hunks);
 	} catch {
 		return findings;
 	}

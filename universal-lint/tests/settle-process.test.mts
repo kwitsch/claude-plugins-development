@@ -262,6 +262,19 @@ test("two later edits whose hooks journal out of edit order: the held finding is
   assert.match(firstRan.stderr, /line3-marker/);
 });
 
+test("a Write whose hook journals after a later Edit's hook: its own record is no later edit, the finding is reported", async () => {
+  const s = setup(); // disk holds SH4 (= A): the Write wrote X, the Edit of line 4 then turned X into A
+  s.setFindings(FINDING_L2);
+  const edit = await start(s.e, s.findings, payload(s.file, s.e.cwd, { toolName: "Edit", toolResponse: SET_L4 }), { UNIVERSAL_LINT_SETTLE_MS: "300" });
+  assert.equal(edit.status, 0, "the Edit's range gate drops line 2");
+  const write = JSON.parse(payload(s.file, s.e.cwd)) as { tool_input: { content: string } };
+  write.tool_input.content = SET_L4.originalFile;
+  const late = await start(s.e, s.findings, JSON.stringify(write), { UNIVERSAL_LINT_SETTLE_MS: "300" });
+  assert.equal(journal(s.e).length, 2);
+  assert.equal(late.status, 2);
+  assert.match(late.stderr, /line2-marker/);
+});
+
 test("a later edit after a non-parse finding on another line: that finding is still reported", async () => {
   const s = setup();
   s.setFindings("a.sh:4:6: note: line4-marker [SC2086]\n");

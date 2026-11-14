@@ -2377,11 +2377,13 @@ function journalTail(rec: EditRecord | null): string | null {
  *
  * @remarks
  * Coordinates: the finding's lines are those of the file as the linter read it, whose digest is `d0`. The reference
- * is the last journal record with `digest === d0`; only the records after it are later edits. A file that changed
- * during the lint (`d0 !== d1`), no matching record, no later record, a later record with hunks whose `before` is not
- * the digest of the record before it (an unjournaled change in between, or records journaled out of edit order: its
- * hunks are in other coordinates), a missing or
- * unreadable journal or record all mean "cannot tell":the findings are returned as they are (fail open, reported). Nothing is held when there is
+ * is the last journal record with `digest === d0`; only the records after it are later edits, except the lint's own
+ * record (`rec`): a hook that journals late sorts its own record after a later edit's, but that record never changed
+ * the content the lint read (the lint reads the disk after journaling), so it would drop every own-file line as a
+ * whole-file edit. A file that changed during the lint (`d0 !== d1`), no matching record, no later record, a later
+ * record with hunks whose `before` is not the digest of the later record before it (an unjournaled change in between,
+ * or records journaled out of edit order: its hunks are in other coordinates), a missing or
+ * unreadable journal or record all mean "cannot tell": the findings are returned as they are (fail open, reported). Nothing is held when there is
  * nothing to report, no own record, or nothing the filter could drop (foreign or unlocated findings only).
  *
  * @param findings - The gated findings of the lint.
@@ -2407,16 +2409,23 @@ export async function settleFindings(findings: Finding[], resolved: string, rec:
     const recs = readdirSync(dir)
       .filter((n) => n.startsWith(`${rec.key}-`) && n.endsWith(".json"))
       .sort()
-      .map((n) => JSON.parse(readFileSync(path.join(dir, n), "utf8")) as { hunks: EditHunk[] | null; digest: string; before?: string | null });
+      .map((n) => ({ name: n, ...(JSON.parse(readFileSync(path.join(dir, n), "utf8")) as { hunks: EditHunk[] | null; digest: string; before?: string | null }) }));
     if (recs.some((r) => r.hunks !== null && !Array.isArray(r.hunks))) return findings;
     let at = -1;
     recs.forEach((r, i) => {
       if (r.digest === d0) at = i;
     });
-    if (at === -1 || at === recs.length - 1) return findings;
+    if (at === -1) return findings;
+    // The own record never changed what this lint read (it read the disk after journaling): a late hook's own record is no later edit.
+    const after = recs.slice(at + 1).filter((r) => r.name !== rec.name);
+    if (after.length === 0) return findings;
     // Hunks are in the coordinates of the content they were cut from: a change nobody journaled breaks the chain.
-    for (let i = at + 1; i < recs.length; i++) if (recs[i].hunks !== null && recs[i].before !== recs[i - 1].digest) return findings;
-    later = recs.slice(at + 1).map((r) => r.hunks);
+    let prev = recs[at].digest;
+    for (const r of after) {
+      if (r.hunks !== null && r.before !== prev) return findings;
+      prev = r.digest;
+    }
+    later = after.map((r) => r.hunks);
   } catch {
     return findings;
   }
