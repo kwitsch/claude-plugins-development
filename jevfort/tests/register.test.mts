@@ -269,6 +269,21 @@ test("An unsure Jev hands the step to Claude, with effort lowered for an easy tu
   expect(seen[0]).toMatchObject({ effort: "low", model: "claude-opus-5-5" });
 });
 
+test("takeSteps: false never offers Jev a next action, so a confident Read goes to Claude", { options: { takeOnlyForBypass: false, takeSteps: false } }, async ($, on) => {
+  const seen: unknown[] = [];
+  const { sent } = setup(on, {
+    messages: [user("what does src/app.ts export?")],
+    files: [`${CWD}/src/app.ts`],
+    jev: byId({ next_action: { type: "choice", choice: "read src/app.ts", probabilities: { "read src/app.ts": 0.95, claude: 0.05 }, confidence: 0.9 } }),
+  });
+  claudeBeneath(on, seen);
+
+  const { chunks } = await drain($.turn.step(step));
+  expect(ids(sent)).not.toContain("next_action");
+  expect(seen).toHaveLength(1);
+  expect(toolId(chunks)).toBe("");
+});
+
 test("subagents: false leaves a subagent step to Claude without asking Jev", { options: { subagents: false } }, async ($, on) => {
   const seen: unknown[] = [];
   const { calls } = setup(on, { messages: [user("what does this project do?")], jev: byId({ difficulty: easy, effort: easy }) });
@@ -648,6 +663,15 @@ test("The done check sends Claude back once when work is unfinished", { options:
   expect(sent).toHaveLength(2);
 });
 
+test("doneCheck: false asks no done question and sends no follow-up for an unfinished answer", { options: { classify: false, doneCheck: false } }, async ($, on) => {
+  const { sent } = setup(on, { messages: [user("rename foo to bar in all files")], jev: unfinished });
+  const submitted = followUps(on);
+
+  await $.turn.complete(answered("t1", "I renamed it in one file. Want me to do the rest?"));
+  expect(ids(sent)).not.toContain("done");
+  expect(submitted).toHaveLength(0);
+});
+
 test("A user pasting the follow-up text neither arms nor consumes the exemption", { options: { classify: false } }, async ($, on) => {
   const { sent } = setup(on, { messages: [user("rename foo to bar in all files")], jev: unfinished });
   followUps(on);
@@ -890,6 +914,20 @@ test("Inside a longer turn Jev's measured top action is compared with Claude's c
   expect(report).not.toContain("shadow");
 });
 
+test("measureSteps: false sends no Jev call for a later step of the turn", { options: { measureSteps: false } }, async ($, on) => {
+  const seen: unknown[] = [];
+  const { calls } = setup(on, {
+    messages: [user("what does src/app.ts export?")],
+    files: [`${CWD}/src/app.ts`],
+    jev: byId({ next_action: { type: "choice", choice: "read src/app.ts", probabilities: { "read src/app.ts": 0.92, claude: 0.08 }, confidence: 0.9 } }),
+  });
+  claudeBeneath(on, seen);
+
+  await drain($.turn.step({ ...step, index: 4 }));
+  expect(calls()).toBe(0);
+  expect(seen).toHaveLength(1);
+});
+
 test("Claude's Bash command cut at 30 chars never leaves a lone surrogate in the report", async ($, on) => {
   setup(on, {
     messages: [user("what does src/app.ts export?")],
@@ -1082,6 +1120,24 @@ for (const [single, expectBypass] of [[0.95, true], [0.3, false]] as const) {
     expect(report).toContain("| Turns answered without Claude | **1**");
   });
 }
+
+test("bypass: false asks no single_action question and leaves a one-action request to Claude", { options: { bypass: false } }, async ($, on) => {
+  const seen: unknown[] = [];
+  const { sent } = setup(on, {
+    messages: [user("run the tests")],
+    packageJson: { scripts: { test: "node --test" } },
+    jev: byId({
+      next_action: { type: "choice", choice: "run npm test", probabilities: { "run npm test": 0.95, claude: 0.05 }, confidence: 0.9 },
+      single_action: { type: "noul", noul: 0.95 },
+    }),
+  });
+  claudeBeneath(on, seen);
+
+  const { chunks } = await drain($.turn.step(step));
+  expect(ids(sent)).not.toContain("single_action");
+  expect(toolId(chunks)).toBe("");
+  expect(seen).toHaveLength(1);
+});
 
 // A bypass take the user rejected (or a rule/hook denied) is Claude's to answer: the feedback must reach it.
 for (

@@ -184,6 +184,21 @@ test("A general-purpose subagent is switched only when Jev is confident; an expl
   expect(sent[0].criteria).toEqual({ "general-purpose": "General tasks", Explore: "Read-only codebase search" });
 });
 
+test("agentTypes: false never asks Jev about an Agent call and keeps its type", { options: { agentTypes: false } }, async ($, on) => {
+  const sent = base(on, () => ({ type: "choice", choice: "Explore", probabilities: { Explore: 0.95, "general-purpose": 0.05 }, confidence: 0.9 }));
+  on("agent.offer", () => ({ isOffered: true }));
+  const spawned: unknown[] = [];
+  on("tool.call", (_$, e) => {
+    spawned.push(e.subagent_type);
+    return { result: undefined };
+  });
+  await $.agent.offer({ agent: "general-purpose", description: "General tasks", source: "built-in" });
+  await $.agent.offer({ agent: "Explore", description: "Read-only codebase search", source: "built-in" });
+  await $.tool.call({ tool: "Agent", description: "find usages", prompt: "Find every caller of addTodo", tool_use_id: "a1" });
+  expect(sent).toHaveLength(0);
+  expect(spawned).toEqual([undefined]);
+});
+
 test("An agent type a hook beneath withholds is not one of Jev's options", async ($, on) => {
   const sent = base(on, () => ({ type: "choice", choice: "Explore", probabilities: { Explore: 0.92, "general-purpose": 0.08 }, confidence: 0.85 }));
   on("agent.offer", (_$, e) => ({ isOffered: e.agent !== "lab:runner" }));
@@ -267,6 +282,23 @@ test("session.compact passes the ranking to the summarizer", async ($, on) => {
   await $.session.compact({ trigger: "manual", messages });
   expect(instructions).toContain("Keep exact details (paths, errors, decisions, values) from: Bash step a.");
   expect(sent.map((q) => q.type)).toEqual(["score", "score", "score"]);
+});
+
+test("compaction: false sends no ranking call and no ranking instructions", { options: { compaction: false } }, async ($, on) => {
+  const messages: Msg[] = [
+    { role: "user", text: "fix the failing date test", toolUses: [] },
+    // Three results: the fewest withJevRanking ranks.
+    { role: "assistant", text: "", toolUses: ["a", "b", "c"].map((x, i) => ({ tool_use_id: `t${i}`, tool: "Bash", input: { command: `step ${x}` }, text: x })) },
+  ];
+  const sent = base(on, () => ({ type: "score", score: 2.8, probabilities: {}, confidence: 0.8 }));
+  let instructions: unknown;
+  on("session.compact", (_$, e) => {
+    instructions = e.instructions;
+    return { skip: "test" };
+  });
+  await $.session.compact({ trigger: "manual", messages });
+  expect(sent).toHaveLength(0);
+  expect(instructions).toBeUndefined();
 });
 
 test("session.compact scores relevance against the user's request, not jevfort's done follow-up", async ($, on) => {
