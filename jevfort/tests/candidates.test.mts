@@ -141,6 +141,14 @@ test("a skill listed under two names is offered once, unprefixed", () => {
   expect(dedupeSkills(SKILLS).map((s) => s.name)).toEqual(["youtube-metadata", "pdf", "i-have-adhd:i-have-adhd", "chrome-browser"]);
 });
 
+test("two plugins' skills sharing a base name are both kept", () => {
+  const skills = [
+    { name: "git-tools:review", description: "Review a pull request diff for correctness bugs" },
+    { name: "docs-kit:review", description: "Proofread markdown documentation for typos and grammar" },
+  ];
+  expect(dedupeSkills(skills).map((s) => s.name)).toEqual(["git-tools:review", "docs-kit:review"]);
+});
+
 test("relevant scores a name word 2 (once, also when the description repeats it), a description word 1, and stays fast on a pasted log", () => {
   const items = [{ name: "pdf-merge", description: "merge pdf files" }, { name: "other", description: "merge things into one" }];
   expect(relevant("merge pdf", items).map((i) => i.name)).toEqual(["pdf-merge"]);

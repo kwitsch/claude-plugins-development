@@ -275,13 +275,19 @@ export function relevant<T extends { name: string; description: string }>(prompt
 /**
  * One entry per skill: `anthropic-skills:pdf` and `pdf`, or `youtube-metadata` and
  * `youtube-plugin:youtube-metadata`, are the same skill listed twice. The unprefixed name wins.
+ * A prefixed name collapses only onto a listed unprefixed one: `git-tools:review` and `docs-kit:review`
+ * are different skills and both stay.
  *
  * @typeParam T - A named item.
  * @param skills - The listed skills.
  * @returns The skills without duplicates.
  */
 export function dedupeSkills<T extends { name: string }>(skills: readonly T[]): T[] {
-  const base = (n: string) => n.slice(n.lastIndexOf(":") + 1);
+  const bare = new Set(skills.filter((s) => !s.name.includes(":")).map((s) => s.name));
+  const base = (n: string) => {
+    const b = n.slice(n.lastIndexOf(":") + 1);
+    return bare.has(b) ? b : n;
+  };
   const byBase = new Map<string, T>();
   for (const s of skills) {
     const kept = byBase.get(base(s.name));

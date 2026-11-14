@@ -101,7 +101,11 @@ export function relevant(prompt, items) {
 	return scored.filter((s) => s.score >= 2).sort((a, b) => b.score - a.score).slice(0, MAX_RELATED).map((s) => s.item);
 }
 export function dedupeSkills(skills) {
-	const base = (n) => n.slice(n.lastIndexOf(":") + 1);
+	const bare = new Set(skills.filter((s) => !s.name.includes(":")).map((s) => s.name));
+	const base = (n) => {
+		const b = n.slice(n.lastIndexOf(":") + 1);
+		return bare.has(b) ? b : n;
+	};
 	const byBase = new Map();
 	for (const s of skills) {
 		const kept = byBase.get(base(s.name));
