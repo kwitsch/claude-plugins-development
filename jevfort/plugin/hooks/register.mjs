@@ -1005,6 +1005,7 @@ export const register = (on, options) => {
 			text: `context compaction check failed: ${String(err)}`
 		}).catch(() => undefined));
 		await flushLog($);
+		if (e.agentId === undefined) haikuPath = undefined;
 		return next(e);
 	});
 	on("tool.call", async function onToolCall($, e, next) {

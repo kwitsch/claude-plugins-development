@@ -1576,6 +1576,20 @@ test("a blank Jev variable counts as unset, as in jev-api: Haiku budget and time
   expect(sent.every((q) => q.timeout === 14)).toBe(true);
 });
 
+test("a settings env change between turns counts from the next turn, also after the done check read the env", async ($, on) => {
+  const env: Record<string, string> = {};
+  const { sent } = setup(on, { messages: [user("what does this project do?"), { role: "assistant", text: "It does X.", toolUses: [] }], jev: () => undefined, env });
+  on("command.list", () => ({ value: [] }));
+  on("session.usage", () => ({ value: { context: { percent: 10 } } }));
+  on("turn.complete", () => ({}));
+  on("prompt.submit", () => ({ value: {} }));
+  await $.turn.complete(answered("t1", "It does X."));
+  expect(sent.at(-1)?.timeout).toBe(14);
+  env.JEV_URL = "https://jev.example/x";
+  await $.prompt.submit({ text: "fix the failing date test", wait: false, origin: { kind: "composer" } });
+  expect(sent.at(-1)?.timeout).toBe(4);
+});
+
 // Context-fill compaction: from taskCompactPercent the first judged task end compacts, from forceCompactPercent any turn end does.
 const finished = byId({ done: { type: "noul", noul: 0.9 }, end: { type: "noul", noul: 0.9 } });
 const intermediate = byId({ done: { type: "noul", noul: 0.9 }, end: { type: "noul", noul: 0.1 } });

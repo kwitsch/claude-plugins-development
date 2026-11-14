@@ -1427,6 +1427,8 @@ export const register = (on: On, options: Options): void => {
     }
     await contextCompact($, e, true, continued, taskCompactPercent, forceCompactPercent, asked).catch((err: unknown) => record($, { kind: "error", applied: false, text: `context compaction check failed: ${String(err)}` }).catch(() => undefined));
     await flushLog($); // the turn's decisions, written once instead of per decision (F06)
+    // The done check above re-read the env: drop it again so the next turn reads the settings `env` afresh.
+    if (e.agentId === undefined) haikuPath = undefined;
     return next(e);
   });
 
