@@ -2260,6 +2260,23 @@ function digestOrNull(fp: string): string | null {
   }
 }
 
+/**
+ * Whether the file holds a line break that the Edit's `structuredPatch` (jsdiff: `\n` and `\r\n` only) does not count
+ * but a linter may (tsc: U+2028/U+2029, eslint: those and a lone `\r`, markdownlint: a lone `\r`). Then the linter's
+ * line numbers and the patch's differ below it, so neither the edit-range gate nor the settle window can place a
+ * finding.
+ *
+ * @param fp - Path of the file to read.
+ * @returns True on such a line break or a read error (cannot tell: report whole-file).
+ */
+function hasForeignLineBreak(fp: string): boolean {
+  try {
+    return /\r(?!\n)|[\u2028\u2029]/.test(readFileSync(fp, "utf8"));
+  } catch {
+    return true;
+  }
+}
+
 /** Handle of the journal record a lint wrote for its own edit (F34). */
 export interface EditRecord {
   /** `hashPath` of the file's real path: the record files of one file share this prefix. */
@@ -2536,13 +2553,15 @@ export async function lintFileHandler(args: PostToolUseHookInput, scoped: { fp: 
     // the tool's content, not the disk: a change landing before this hook must not be folded into the edit's record
     const wc = writtenContent(args);
     const rec = recordEdit(resolved, scoped.real, editHunks(args), before, wc === null ? null : createHash("sha256").update(wc).digest("base64"));
+    // a line break the patch does not count shifts the linter's lines: no gate, no supersession (report whole-file)
+    const odd = hasForeignLineBreak(resolved);
     const d0 = digestOrNull(resolved);
     const t0 = journalTail(rec);
     // `await` inside the try is load-bearing: a rejected promise must land in the catch (fail open).
-    const kept = await lintResolved(resolved, args.cwd, ranges, "PostToolUse");
+    const kept = await lintResolved(resolved, args.cwd, odd ? null : ranges, "PostToolUse");
     // only a held finding needs the second digest; a record journaled during the lint (A->B->A) counts as a change
     const d1 = kept.length > 0 && journalTail(rec) === t0 ? digestOrNull(resolved) : null;
-    return formatFindings(await settleFindings(kept, resolved, rec, d0, d1), "PostToolUse", "universal-lint");
+    return formatFindings(await settleFindings(kept, resolved, odd ? null : rec, d0, d1), "PostToolUse", "universal-lint");
   } catch {
     return {};
   }
@@ -2886,7 +2905,9 @@ export async function fileChangedHandler(args: PostToolUseHookInput): Promise<Ho
     let kept: Finding[] = [];
     let d0: string | null = null;
     let d1: string | null = null;
+    let odd = false;
     try {
+      odd = hasForeignLineBreak(s.fp); // later edits' hunks would be placed in other line numbers: no supersession
       d0 = digestOrNull(s.fp);
       const t0 = journalTail(rec);
       kept = await lintResolved(s.fp, cwd, null, "FileChanged", typeof args.session_id === "string" ? args.session_id : "");
@@ -2900,7 +2921,7 @@ export async function fileChangedHandler(args: PostToolUseHookInput): Promise<Ho
       }
     }
     // The hold comes after the slot release: a held finding must not keep one of the K slots busy.
-    return formatFindings(await settleFindings(kept, s.fp, rec, d0, d1), "FileChanged", "universal-lint (changed outside Write/Edit)");
+    return formatFindings(await settleFindings(kept, s.fp, odd ? null : rec, d0, d1), "FileChanged", "universal-lint (changed outside Write/Edit)");
   } catch {
     return {};
   }

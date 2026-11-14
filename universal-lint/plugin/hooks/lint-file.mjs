@@ -1218,6 +1218,13 @@ function digestOrNull(fp) {
 		return null;
 	}
 }
+function hasForeignLineBreak(fp) {
+	try {
+		return /\r(?!\n)|[\u2028\u2029]/.test(readFileSync(fp, "utf8"));
+	} catch {
+		return true;
+	}
+}
 function settleDir() {
 	return path.resolve(process.env.CLAUDE_PLUGIN_DATA || tmpdir(), "settle");
 }
@@ -1365,11 +1372,12 @@ export async function lintFileHandler(args, scoped = postToolScope(args)) {
 		const before = typeof original === "string" ? createHash("sha256").update(original).digest("base64") : null;
 		const wc = writtenContent(args);
 		const rec = recordEdit(resolved, scoped.real, editHunks(args), before, wc === null ? null : createHash("sha256").update(wc).digest("base64"));
+		const odd = hasForeignLineBreak(resolved);
 		const d0 = digestOrNull(resolved);
 		const t0 = journalTail(rec);
-		const kept = await lintResolved(resolved, args.cwd, ranges, "PostToolUse");
+		const kept = await lintResolved(resolved, args.cwd, odd ? null : ranges, "PostToolUse");
 		const d1 = kept.length > 0 && journalTail(rec) === t0 ? digestOrNull(resolved) : null;
-		return formatFindings(await settleFindings(kept, resolved, rec, d0, d1), "PostToolUse", "universal-lint");
+		return formatFindings(await settleFindings(kept, resolved, odd ? null : rec, d0, d1), "PostToolUse", "universal-lint");
 	} catch {
 		return {};
 	}
@@ -1600,7 +1608,9 @@ export async function fileChangedHandler(args) {
 		let kept = [];
 		let d0 = null;
 		let d1 = null;
+		let odd = false;
 		try {
+			odd = hasForeignLineBreak(s.fp);
 			d0 = digestOrNull(s.fp);
 			const t0 = journalTail(rec);
 			kept = await lintResolved(s.fp, cwd, null, "FileChanged", typeof args.session_id === "string" ? args.session_id : "");
@@ -1610,7 +1620,7 @@ export async function fileChangedHandler(args) {
 				if (slot) rmSync(slot, { force: true });
 			} catch {}
 		}
-		return formatFindings(await settleFindings(kept, s.fp, rec, d0, d1), "FileChanged", "universal-lint (changed outside Write/Edit)");
+		return formatFindings(await settleFindings(kept, s.fp, odd ? null : rec, d0, d1), "FileChanged", "universal-lint (changed outside Write/Edit)");
 	} catch {
 		return {};
 	}

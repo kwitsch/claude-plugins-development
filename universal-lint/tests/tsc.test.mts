@@ -86,6 +86,18 @@ test("tsc Edit: a diagnostic only outside the edited line -> exit 0", () => {
   assert.equal(r.ctx, "");
 });
 
+test("tsc Edit: a U+2028 above the edit shifts tsc's lines past the patch's -> reported whole-file, exit 2", () => {
+  const e = makeEnv();
+  e.file("tsconfig.json", "{\"compilerOptions\":{\"noEmit\":true},\"include\":[\"*.ts\"]}");
+  const l1 = "export const s = \"a\u2028b\";";
+  const a = e.file("a.ts", `${l1}\nexport const x: number = 1;\nexport const y: number = "s";\n`);
+  e.recStub("tsc", 2);
+  const patch = [{ oldStart: 1, oldLines: 3, newStart: 1, newLines: 3, lines: [` ${l1}`, " export const x: number = 1;", "-export const y: number = 2;", "+export const y: number = \"s\";"] }];
+  const r = e.run(a, { toolName: "Edit", toolResponse: { structuredPatch: patch }, out: "a.ts(4,14): error TS2322: u2028-marker" });
+  assert.equal(r.status, 2);
+  assert.match(r.ctx, /u2028-marker/);
+});
+
 /** A tsconfig.json that governs `*.ts` in the project root. */
 const TSCONFIG = "{\"compilerOptions\":{\"noEmit\":true},\"include\":[\"*.ts\"]}";
 const TS = "const x: number = 1;\n";
