@@ -162,12 +162,18 @@ test("relevant scores a name word 2 (once, also when the description repeats it)
   // A scores 2 (description repeats the name word), B 3; counting "pdf" twice ties them 3:3 and keeps A first.
   const order = [{ name: "pdf", description: "pdf", id: "A" }, { name: "pdf", description: "merge", id: "B" }];
   expect(relevant("merge pdf", order).map((i) => i.id)).toEqual(["B", "A"]);
-  // 300 items against 2 MB of distinct words took 1.7 s when the loop ran over the prompt's words.
+  // 300 items against 2 MB of distinct words took ~10x the prompt's own split when the loop ran over the prompt's words.
+  // Relative to relevant(prompt, []) (only words(prompt)), so CPU load slows both sides alike; best of 3 against noise.
   const many = Array.from({ length: 300 }, (_, i) => ({ name: `tool-${i}`, description: `does thing ${i} with files` }));
-  const log = Array.from({ length: 200_000 }, (_, i) => `req${i.toString(36)}x`).join(" ");
-  const t = performance.now();
-  relevant(`look at this log ${log}`, many);
-  expect(performance.now() - t).toBeLessThan(800);
+  const prompt = `look at this log ${Array.from({ length: 200_000 }, (_, i) => `req${i.toString(36)}x`).join(" ")}`;
+  const best = (items: typeof many) =>
+    Math.min(...[0, 1, 2].map(() => {
+      const t = performance.now();
+      relevant(prompt, items);
+      return performance.now() - t;
+    }));
+  const base = best([]);
+  expect(best(many)).toBeLessThan(3 * base);
 });
 
 test("a slash command that started a turn is the request, a local command is not", () => {
