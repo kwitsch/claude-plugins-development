@@ -166,6 +166,18 @@ test("a Haiku summary of 200 characters or fewer falls through to Claude Code", 
   expect(r.messages).toBeUndefined();
 });
 
+test("a subagent's compaction is left to Claude Code", async ($, on) => {
+  const asked = haikuSetup(on, "S".repeat(300));
+  let beneath = 0;
+  on("session.compact", () => {
+    beneath++;
+    return { skip: "test" };
+  });
+  await $.session.compact({ trigger: "auto", agentId: "a1", messages: MESSAGES });
+  expect(asked).toHaveLength(0);
+  expect(beneath).toBe(1);
+});
+
 test("a precompute is skipped while Haiku compacts", async ($, on) => {
   const asked = haikuSetup(on, "S".repeat(300));
   const r = (await $.session.compact({ trigger: "precompute", messages: MESSAGES })) as { skip?: string };
