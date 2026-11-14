@@ -20,12 +20,19 @@ test("an empty log gives a hint, not a crash", () => {
 });
 
 test("shell output and slash-command rows are not taken as the request", () => {
+  // Live (2.1.325): a `!` command starts a turn of its own, so the prompt before it is not what that turn answers.
   const turn = splitTurn([
     { role: "user", text: "delete the folder /tmp/x", toolUses: [] },
     { role: "user", text: "<bash-input>mkdir -p /tmp/x</bash-input>", toolUses: [] },
     { role: "user", text: "<bash-stdout>(Bash completed with no output)</bash-stdout>", toolUses: [] },
   ]);
-  expect(turn?.request).toBe("delete the folder /tmp/x");
+  expect(turn).toBeUndefined();
+  // Output of a local command (no bash-input) is skipped and the prompt before it stands.
+  const local = splitTurn([
+    { role: "user", text: "delete the folder /tmp/x", toolUses: [] },
+    { role: "user", text: "<local-command-stdout>Total cost: $0.01</local-command-stdout>", toolUses: [] },
+  ]);
+  expect(local?.request).toBe("delete the folder /tmp/x");
 });
 
 test("times show HH:MM, with the date when not on the latest entry's day", () => {
@@ -67,6 +74,62 @@ const SKILLS = [
 
 test("a skill listed under two names is offered once, unprefixed", () => {
   expect(dedupeSkills(SKILLS).map((s) => s.name)).toEqual(["youtube-metadata", "pdf", "i-have-adhd:i-have-adhd", "chrome-browser"]);
+});
+
+test("relevant scores a name word 2 (once, also when the description repeats it), a description word 1, and stays fast on a pasted log", () => {
+  const items = [{ name: "pdf-merge", description: "merge pdf files" }, { name: "other", description: "merge things into one" }];
+  expect(relevant("merge pdf", items).map((i) => i.name)).toEqual(["pdf-merge"]);
+  // 300 items against 2 MB of distinct words took 1.7 s when the loop ran over the prompt's words.
+  const many = Array.from({ length: 300 }, (_, i) => ({ name: `tool-${i}`, description: `does thing ${i} with files` }));
+  const log = Array.from({ length: 200_000 }, (_, i) => `req${i.toString(36)}x`).join(" ");
+  const t = performance.now();
+  relevant(`look at this log ${log}`, many);
+  expect(performance.now() - t).toBeLessThan(800);
+});
+
+test("a slash command that started a turn is the request, a local command is not", () => {
+  const typed = (text: string) => ({ role: "user" as const, text, toolUses: [] });
+  const skill = typed("<command-message>audit</command-message>\n<command-name>/audit</command-name>\n<command-args>src</command-args>");
+  expect(splitTurn([typed("Thanks!"), { role: "assistant", text: "ok", toolUses: [] }, skill])?.request).toBe("/audit src");
+  // Arguments are raw text: a `<` in them must not cut them.
+  const angle = typed("<command-message>fix</command-message>\n<command-name>/fix</command-name>\n<command-args>the <Button> props, Map<string, number></command-args>");
+  expect(splitTurn([typed("Thanks!"), angle])?.request).toBe("/fix the <Button> props, Map<string, number>");
+  // A prompt the person typed that merely starts with a pasted tag is their request; `</command-args>` inside arguments stays.
+  expect(splitTurn([typed("Thanks!"), typed("<system-reminder>x</system-reminder>\nWhy is this added?")])?.request).toBe("<system-reminder>x</system-reminder>\nWhy is this added?");
+  const closing = typed("<command-message>fix</command-message>\n<command-name>/fix</command-name>\n<command-args>why does </command-args> end it</command-args>");
+  expect(splitTurn([typed("Thanks!"), closing])?.request).toBe("/fix why does </command-args> end it");
+  expect(splitTurn([typed("Thanks!"), typed("<system-reminder>x</system-reminder><task-notification>y</task-notification>\nWhy did this happen?")])?.request).toContain("Why did this happen?");
+  // A local command (`<command-name>` first) starts no turn, whether the last row is it or a notice after it.
+  const local = typed("<command-name>/jev</command-name>\n<command-args></command-args>");
+  expect(splitTurn([typed("Thanks!"), { role: "assistant", text: "ok", toolUses: [] }, local])?.request).toBe("Thanks!");
+  expect(splitTurn([typed("Thanks!"), { role: "assistant", text: "ok", toolUses: [] }, local, typed("<task-notification>done</task-notification>")])?.request).toBe("Thanks!");
+});
+
+test("a command row with a long run of blanks in its name is read in linear time, blanks around the name are trimmed", () => {
+  const typed = (text: string) => ({ role: "user" as const, text, toolUses: [] });
+  // A lazy name group beside `\s*` took 2 s at 2000 blanks and grows cubically: a pasted prompt could hang the hook.
+  const t = performance.now();
+  expect(splitTurn([typed("Thanks!"), typed(`<command-message>x</command-message><command-name>${" ".repeat(20_000)}y`)])?.request).toBe("Thanks!");
+  expect(performance.now() - t).toBeLessThan(500);
+  expect(splitTurn([typed("<command-message>f</command-message>\n<command-name> /f\n</command-name>\n<command-args> a </command-args>")])?.request).toBe("/f a");
+});
+
+test("rows that are no request: compaction summary, interrupt, a bang command, an image-only prompt", () => {
+  const typed = (text: string) => ({ role: "user" as const, text, toolUses: [] });
+  const reply = { role: "assistant" as const, text: "ok", toolUses: [] };
+  const summary = typed("This session is being continued from a previous conversation that ran out of context. The summary below covers...");
+  expect(splitTurn([typed("fix the bug"), reply, summary])?.request).toBe("fix the bug");
+  expect(splitTurn([summary, reply])?.request).toContain("This session is being continued");
+  expect(splitTurn([typed("fix the bug"), reply, typed("[Request interrupted by user]")])).toBeUndefined();
+  expect(splitTurn([typed("fix the bug"), reply, typed("<bash-input>echo hi</bash-input>"), typed("<bash-stdout>hi</bash-stdout><bash-stderr></bash-stderr>")])).toBeUndefined();
+  expect(splitTurn([typed("what colour?"), reply, typed("")])).toBeUndefined();
+});
+
+test("the report counts a step-0 request once and shows the effort score under the default routing", () => {
+  const e = (kind: string, extra: Record<string, unknown> = {}) => ({ at: 1, kind, applied: true, text: kind, turnId: "t1", ms: 1000, ...extra });
+  const report = buildReport([e("route", { data: { effortScore: 2 } }), e("take"), e("route", { turnId: "t2", ms: 3000, data: { effortScore: 3 } })], 0.85);
+  expect(report).toContain("2000 ms average over 2 calls");
+  expect(report).toContain("avg effort score 2.50");
 });
 
 test("only skills related to the prompt are offered", () => {
