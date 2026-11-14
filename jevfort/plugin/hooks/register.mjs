@@ -61,6 +61,7 @@ async function askJev($, state, questions, slow = false) {
 		ok: false,
 		error: `paused for ${Math.ceil((jevPause.until - startedAt) / 1e3)} s after a timeout (${jevPause.error})`
 	};
+	if (!haikuPath && !turnRunning) readBetweenTurns = true;
 	const haiku = await (haikuPath ??= Promise.all([
 		$.env.get("TYPESAFE_API_KEY"),
 		$.env.get("TYPESAFE_BASE_URL"),
@@ -134,7 +135,9 @@ let jevTools;
 let toolListing;
 let skillList;
 let haikuPath;
+let readBetweenTurns = false;
 function dropTurnReads() {
+	readBetweenTurns = false;
 	jevTools = undefined;
 	toolListing = undefined;
 	skillList = undefined;
@@ -226,6 +229,7 @@ async function withJevRanking($, e) {
 	} : e;
 }
 function jevMissing($) {
+	if (!jevTools && !turnRunning) readBetweenTurns = true;
 	return jevTools ??= (toolListing = $.tool.list()).then((t) => missingJevTools(t.map((x) => x.name))).catch(() => [...JEV_TOOLS]).then(async (missing) => {
 		if (jevState !== undefined) await jevApply($, missing);
 		return missing;
@@ -628,6 +632,7 @@ export const register = (on, options) => {
 		const result = await next(e);
 		dropTurnReads();
 		await jevApply($, await jevMissing($));
+		readBetweenTurns = false;
 		toolListing = undefined;
 		return result;
 	});
@@ -675,7 +680,10 @@ export const register = (on, options) => {
 		return result;
 	});
 	on("turn.step", async function* onTurnStep($, e, rawNext) {
-		if (e.agentId === undefined) turnRunning = true;
+		if (e.agentId === undefined) {
+			if (!turnRunning && readBetweenTurns) dropTurnReads();
+			turnRunning = true;
+		}
 		const next = (request) => cacheWatch($, e, rawNext(request));
 		if ((await jevMissing($)).length) return yield* next(e);
 		if (e.agentId && !subagents) return yield* next(e);

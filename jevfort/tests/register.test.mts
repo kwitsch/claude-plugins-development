@@ -2178,3 +2178,21 @@ test("A background subagent that completes between turns drops its env read befo
   expect(sent.length).toBeGreaterThan(before);
   expect(sent.at(-1)?.timeout).toBe(4);
 });
+
+test("A background subagent's step between turns does not carry its env read into the next main turn", async ($, on) => {
+  const env: Record<string, string> = {};
+  const { sent } = setup(on, { messages: [user("what does this project do?"), { role: "assistant", text: "It does X.", toolUses: [] }], jev: () => undefined, env });
+  on("command.list", () => ({ value: [] }));
+  on("turn.complete", () => ({}));
+  claudeBeneath(on, []);
+  await drain($.turn.step({ ...step, turnId: "t1" }));
+  await $.turn.complete(answered("t1", "It does X."));
+  // A background agent started in t1 runs on after t1 ended, without completing before t2; no Jev variable: Haiku path.
+  await drain($.turn.step({ ...step, turnId: "bg1", agentId: "bg" }));
+  expect(sent.at(-1)?.timeout).toBe(14);
+  env.JEV_URL = "https://jev.example/x";
+  const before = sent.length;
+  await drain($.turn.step({ ...step, turnId: "t2" }));
+  expect(sent.length).toBeGreaterThan(before);
+  expect(sent.at(-1)?.timeout).toBe(4);
+});
