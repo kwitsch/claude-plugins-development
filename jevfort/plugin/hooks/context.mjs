@@ -1,4 +1,4 @@
-const head = (text, n) => text.slice(0, n).replace(/[\uD800-\uDBFF]$/, "");
+export const head = (text, n) => text.slice(0, n).replace(/[\uD800-\uDBFF]$/, "");
 export const clip = (text, max) => {
 	if (text.length <= max) return text;
 	const kept = head(text, max);

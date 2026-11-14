@@ -5,6 +5,7 @@
  *
  * @packageDocumentation
  */
+import { head } from "./context.mjs";
 
 /** One action Jev may take. */
 export type Candidate = {
@@ -253,4 +254,4 @@ export function dedupeSkills<T extends { name: string }>(skills: readonly T[]): 
  * @param s - The text.
  * @returns The clipped text.
  */
-export const clipScript = (s: string): string => (s.length > 80 ? `${s.slice(0, 80).replace(/[\uD800-\uDBFF]$/, "")}…` : s);
+export const clipScript = (s: string): string => (s.length > 80 ? `${head(s, 80)}…` : s);

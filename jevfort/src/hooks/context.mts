@@ -61,7 +61,7 @@ export type StepSummary = { assistant?: string; tool?: string; input?: string; r
  * @param n - The length kept.
  * @returns The cut text.
  */
-const head = (text: string, n: number): string => text.slice(0, n).replace(/[\uD800-\uDBFF]$/, "");
+export const head = (text: string, n: number): string => text.slice(0, n).replace(/[\uD800-\uDBFF]$/, "");
 
 /**
  * `text` cut to `max` characters with a note of what was dropped.
