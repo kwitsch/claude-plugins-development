@@ -442,17 +442,16 @@ async function cacheTick($: Engine, autoCompactPercent: number): Promise<void> {
 
 /**
  * Passes a step's chunks through and, when a main-loop response on the chat's own model reports usage, restarts the
- * cache countdown. A request on another model (routing) leaves the chat's own cache as it was.
+ * cache countdown.
  *
  * @param $ - Engine interface.
  * @param original - The step event as the engine raised it.
- * @param request - The step event as sent (model possibly lowered).
  * @param run - The step run to watch.
  * @returns The same run.
  */
-async function* cacheWatch($: Engine, original: Step, request: Step, run: StepRun): StepRun {
+async function* cacheWatch($: Engine, original: Step, run: StepRun): StepRun {
   const result = yield* run;
-  if (original.agentId === undefined && result.usage && request.model === original.model) {
+  if (original.agentId === undefined && result.usage) {
     // A cosmetic feature must never fail the model step whose result is already in (the engine rethrows a hook's error after the request ran).
     try {
       const now = await $.clock.now();
@@ -1436,9 +1435,9 @@ export const register = (on: On, options: Options): void => {
   // Opus/Sonnet, the loop's first turn only on Haiku/Fable, which then hold it). One Jev request carries all of it. Every answer is logged; when Claude takes the step, its call is compared
   // with Jev's top action so the take threshold can be calibrated.
   on("turn.step", async function* onTurnStep($: Engine, e: Step, rawNext: (e: Step) => StepRun): StepRun {
-    // Every main-loop response on the chat's own model restarts the cache countdown (the work is jev-api independent).
+    // Every main-loop response restarts the cache countdown (the work is jev-api independent).
     if (e.agentId === undefined) turnRunning = true;
-    const next = (request: Step): StepRun => cacheWatch($, e, request, rawNext(request));
+    const next = (request: Step): StepRun => cacheWatch($, e, rawNext(request));
     if ((await jevMissing($)).length) return yield* next(e);
     if (e.agentId && !subagents) return yield* next(e);
 
@@ -1485,7 +1484,6 @@ export const register = (on: On, options: Options): void => {
     }
     // Step 0: the effort estimate, or a Haiku/Fable turn's held first-turn estimate.
     let estimate: EstimateBounds | undefined;
-    let held: Effort | undefined;
     let firstTurn: { family?: EstimateModel; from: unknown; effort?: Effort } | undefined;
     if (routing && e.index === 0) {
       const sessionEffort = isEffort(e.effort) ? e.effort : undefined;
@@ -1512,7 +1510,7 @@ export const register = (on: On, options: Options): void => {
           questions.mechanical = mechanicalQuestion;
         }
         // Haiku/Fable after the first turn: hold the first turn's estimate while model and session effort are unchanged.
-        held = !estimate && first?.effort && first.family === family && first.from === e.effort ? first.effort : undefined;
+        const held = !estimate && first?.effort && first.family === family && first.from === e.effort ? first.effort : undefined;
         if (held && held !== e.effort) turn.effort = held;
         if (held && !e.agentId) {
           band.chosen = held;
@@ -1521,7 +1519,7 @@ export const register = (on: On, options: Options): void => {
       }
     }
     if (bypass && e.index === 0 && questions.next_action && !e.agentId) questions.single_action = singleActionQuestion;
-    // The turn's effort, set at step 0, holds for every step of the turn whatever model the step runs on.
+    // The turn's effort, set at step 0, holds for every step of the turn.
     const routed = (step: Step): Step => (turn.effort ? { ...step, effort: turn.effort } : step);
 
     if (!Object.keys(questions).length) {
@@ -1580,8 +1578,8 @@ export const register = (on: On, options: Options): void => {
       const lowered = effort !== undefined && !raised;
       await record($, {
         kind: "route",
-        applied: lowered || raised,
-        text: `effort → ${lowered || raised ? `${e.model}, effort ${effort}` : "no change"} · ${est.source}`,
+        applied: effort !== undefined,
+        text: `effort → ${effort !== undefined ? `${e.model}, effort ${effort}` : "no change"} · ${est.source}`,
         ms: r.ms,
         turnId: e.turnId,
         data: { effort, lowered, raised, estimate: est.effort, source: est.source, mechanical, effortScore: effortAnswer?.score, effortConfidence: effortAnswer?.confidence },

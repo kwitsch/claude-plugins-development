@@ -47,8 +47,8 @@ subagents load it via ToolSearch), no skills, agents, command hooks or MCP serve
   none needs jev-api, so their work runs before the readiness guard of `turn.step`/`turn.complete`, and `session.compact`
   has none except around the Jev ranking): `cache.mts` (pure: TTL detection, minutes, label,
   colour) and the Haiku transcript/prompt in `compact.mts`. `register.mts` wraps `next` in
-  `turn.step` with `cacheWatch`: a main-loop response with `usage` on the session's own model (`request.model ===
-  e.model`) sets `cacheExpires = now + TTL` (in a try/catch: a cosmetic feature never fails the step). The lifetime is
+  `turn.step` with `cacheWatch`: a main-loop response with `usage` (the step always runs on the chat's own model, jevfort no longer switches it)
+  sets `cacheExpires = now + TTL` (in a try/catch: a cosmetic feature never fails the step). The lifetime is
   the assumed 1 hour: Claude Code 2.1.322 reports a step's usage as the four token counts plus `model`, without
   `cache_creation`, so `cacheTtlOf` stays dormant and a 5-minute cache (API key, Bedrock/Vertex/Foundry, a subscription
   past its limit) is not detected: its countdown and auto-compact wait run 55 minutes long (not fixed: inferring 5m

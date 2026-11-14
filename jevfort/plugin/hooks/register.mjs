@@ -189,9 +189,9 @@ async function cacheTick($, autoCompactPercent) {
 		args: ""
 	}).catch((err) => $.ui.status(`jev: auto-compact failed: ${String(err)}`.slice(0, 80)));
 }
-async function* cacheWatch($, original, request, run) {
+async function* cacheWatch($, original, run) {
 	const result = yield* run;
-	if (original.agentId === undefined && result.usage && request.model === original.model) {
+	if (original.agentId === undefined && result.usage) {
 		try {
 			const now = await $.clock.now();
 			cacheTtl = nextTtl(result.usage, cacheTtl, lastResponseAt === undefined ? undefined : now - lastResponseAt);
@@ -979,7 +979,7 @@ export const register = (on, options) => {
 	});
 	on("turn.step", async function* onTurnStep($, e, rawNext) {
 		if (e.agentId === undefined) turnRunning = true;
-		const next = (request) => cacheWatch($, e, request, rawNext(request));
+		const next = (request) => cacheWatch($, e, rawNext(request));
 		if ((await jevMissing($)).length) return yield* next(e);
 		if (e.agentId && !subagents) return yield* next(e);
 		const turn = turns.get(e.turnId) ?? {
@@ -1045,7 +1045,6 @@ export const register = (on, options) => {
 			if (candidates.length) questions.next_action = nextActionQuestion(candidates);
 		}
 		let estimate;
-		let held;
 		let firstTurn;
 		if (routing && e.index === 0) {
 			const sessionEffort = isEffort(e.effort) ? e.effort : undefined;
@@ -1074,7 +1073,7 @@ export const register = (on, options) => {
 					questions.effort = effortQuestion;
 					questions.mechanical = mechanicalQuestion;
 				}
-				held = !estimate && first?.effort && first.family === family && first.from === e.effort ? first.effort : undefined;
+				const held = !estimate && first?.effort && first.family === family && first.from === e.effort ? first.effort : undefined;
 				if (held && held !== e.effort) turn.effort = held;
 				if (held && !e.agentId) {
 					band.chosen = held;
@@ -1147,8 +1146,8 @@ export const register = (on, options) => {
 			const lowered = effort !== undefined && !raised;
 			await record($, {
 				kind: "route",
-				applied: lowered || raised,
-				text: `effort → ${lowered || raised ? `${e.model}, effort ${effort}` : "no change"} · ${est.source}`,
+				applied: effort !== undefined,
+				text: `effort → ${effort !== undefined ? `${e.model}, effort ${effort}` : "no change"} · ${est.source}`,
 				ms: r.ms,
 				turnId: e.turnId,
 				data: {
