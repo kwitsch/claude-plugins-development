@@ -13,6 +13,8 @@ layout. jevfort makes no network request of its own: it asks Jev through the too
 
 The **jev-api** plugin, installed and enabled together with jevfort. jevfort declares it as a plugin dependency, so Claude Code keeps jevfort disabled while jev-api is missing or disabled. jevfort asks Jev only through jev-api's tool `mcp__jev-api__batch` (jev-api 0.2.0 or later): one call, and one request, per decision.
 
+Coming from 0.9.0: `/jev export` writes a new `decisions-<time>.jsonl` per export instead of `decisions.jsonl`; with `takeOnlyForBypass` (the default) Jev takes only a Read or Bash step and a confident skill match is passed on to Claude as a hint; `estimate_effort` reports invalid input as an error result; a turn started by a slash command is judged by that command, not by the prompt before it.
+
 The endpoint and the key are configured for jev-api, not for jevfort: its environment variables `TYPESAFE_API_KEY`, `TYPESAFE_BASE_URL`, `JEV_URL` and `TYPESAFE_DEFAULT_MODEL` are described in the jev-api README. Coming from jevfort 0.4, which sent its own request: jev-api sends the key only to an `https://` endpoint (an `http://` `JEV_URL` now gets no `Authorization` header), and it also reads `TYPESAFE_BASE_URL` and `TYPESAFE_DEFAULT_MODEL`, which jevfort 0.4 ignored.
 
 Without jev-api's batch tool in a session (for example denied by a permission rule), jevfort stops using Jev: it changes no event on Jev's account, does not register `estimate_effort` (once registered, `estimate_effort` keeps answering its default effort), and `/jev` says so. The cache countdown, Haiku compaction and auto-compact (below) need no Jev and keep working (Haiku compaction: currently not running, see below). jevfort looks the tool up again at every turn, so jev-api appearing or going away (for example through a permission rule added later) takes effect from the next turn. When jev-api fails or does not answer a decision within 4 seconds (9 seconds for the compaction ranking, 15 seconds while Haiku answers), jevfort leaves that decision to Claude Code's own behaviour: a turn step logs it as `unavailable`, an `estimate_effort` call answers its default effort.
@@ -44,13 +46,13 @@ Ported from [HeyCubit/effortless](https://github.com/HeyCubit/effortless). None 
 
 `estimate_effort` (model-visible name `mcp__jevfort__estimate_effort`, deferred: load it with ToolSearch `select:mcp__jevfort__estimate_effort`) estimates the reasoning effort a prompt most likely needs; Skills and subagents can call it. Claude Code runs it without a permission prompt; a deny rule for `mcp__jevfort__estimate_effort` withholds it.
 
-| Input           | Values                                  | Meaning                                                         |
-| --------------- | --------------------------------------- | --------------------------------------------------------------- |
-| `model`         | `haiku`, `sonnet`, `opus`, `fable`      | The model that will run the prompt; a stronger model needs less |
-| `defaultEffort` | `low`, `medium`, `high`, `xhigh`, `max` | Returned unchanged when Jev is unreachable or gives no score    |
-| `minEffort`     | `low`, `medium`, `high`, `xhigh`, `max` | Lowest effort to return; the answer for a mechanical prompt     |
-| `maxEffort`     | `low`, `medium`, `high`, `xhigh`, `max` | Highest effort to return                                        |
-| `prompt`        | text                                    | The prompt to estimate                                          |
+| Input           | Values                                  | Meaning                                                                              |
+| --------------- | --------------------------------------- | ------------------------------------------------------------------------------------ |
+| `model`         | `haiku`, `sonnet`, `opus`, `fable`      | The model that will run the prompt; Accepted for callers; does not change the result |
+| `defaultEffort` | `low`, `medium`, `high`, `xhigh`, `max` | Returned unchanged when Jev is unreachable or gives no score                         |
+| `minEffort`     | `low`, `medium`, `high`, `xhigh`, `max` | Lowest effort to return; the answer for a mechanical prompt                          |
+| `maxEffort`     | `low`, `medium`, `high`, `xhigh`, `max` | Highest effort to return                                                             |
+| `prompt`        | text                                    | The prompt to estimate                                                               |
 
 The result is JSON `{"effort": "<level>", "source": "jev" | "mechanical" | "fallback"}`: a purely mechanical prompt gets `minEffort`; otherwise Jev's effort score (mapped onto the levels by calibrated cut points, no confidence threshold) (the same for every model: there is no model bias, the `model` input is accepted but does not change the result), kept within `minEffort`..`maxEffort`; when Jev is unreachable or gives no score, `defaultEffort`. A prompt counts as mechanical from a probability of 0.95. Invalid input is a tool error and sends no Jev request. The turn-start routing uses the same logic with the session model, the session effort as `defaultEffort` and the `minEffort`/`maxEffort` options.
 

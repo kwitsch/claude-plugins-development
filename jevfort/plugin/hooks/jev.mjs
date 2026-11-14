@@ -1,3 +1,4 @@
+export const MEASURE_GRACE_MS = 250;
 export const MAX_ERROR = 1e3;
 export const TIMEOUT_MS = 4e3;
 export const MAX_CHOICE_OPTIONS = 255;

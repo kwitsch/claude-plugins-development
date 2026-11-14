@@ -88,6 +88,9 @@ function setup(on: On, opts: { messages: Msg[]; jev: Jev; files?: string[]; pack
     const asked = (e.questions as { type: string; instructions: string; criteria?: unknown }[]).map((b): Asked => ({ ...b, id: QUESTION_IDS.get(b.instructions) ?? b.instructions, state: String(e.state), timeout: e.timeout, call }));
     sent.push(...asked);
     const answers = await Promise.all(asked.map(async (q) => opts.jev(q)));
+    // `{ __deny: text }` makes the batch deny with that text (an error body of any size).
+    const denied = answers.find((a) => typeof a === "object" && a !== null && "__deny" in a) as { __deny: string } | undefined;
+    if (denied) return { value: { deny: denied.__deny } };
     const status = answers.find((a) => typeof a === "number");
     if (status !== undefined) return { value: { deny: `batch: HTTP ${status}` } };
     const raw = answers.find((a) => typeof a === "string");
@@ -843,11 +846,13 @@ test("A failing store does not fail estimate_effort or a turn step", async ($, o
 });
 
 test("An error text of megabytes is cut before the log and /jev hold it", async ($, on) => {
-  setup(on, { messages: [user("what does this project do?")], jev: () => undefined });
-  on("tool.call", (_$, e, next) => (e.tool === JEV_BATCH ? { value: { result: "x".repeat(500_000), isError: true } } : next(e)));
+  setup(on, { messages: [user("what does this project do?")], jev: () => ({ __deny: "x".repeat(500_000) }) });
   claudeBeneath(on, []);
   await drain($.turn.step(step));
-  expect((await runJev($, "")).length).toBeLessThan(5000);
+  const status = await runJev($, "");
+  expect(status).toContain("unavailable: xxx");
+  expect(status).toContain("more chars]");
+  expect(status.length).toBeLessThan(5000);
 });
 
 test("/jev export writes a new file and never an existing one (a symlink would be followed)", async ($, on) => {
@@ -868,7 +873,7 @@ test("/jev export writes nothing when the target exists", async ($, on) => {
   expect(written).toHaveLength(0);
 });
 
-test("With takeOnlyForBypass a confident skill pick is not taken by Jev (the skill would never run) and gets the hint", async ($, on) => {
+test("With takeOnlyForBypass a confident skill pick is not taken by Jev (the skill would never run)", async ($, on) => {
   const seen: unknown[] = [];
   setup(on, {
     messages: [user("write the release notes for this version")],
@@ -897,6 +902,30 @@ test("/jev status still answers when the counters cannot be read", async ($, on)
   on("store.get", () => ({ deny: "EACCES" }));
   setup(on, { messages: [], jev: () => undefined });
   expect(await runJev($, "")).toContain("Decisions (all sessions): unreadable=1");
+});
+
+test("A finished step does not wait for a slow step measurement", async ($, on) => {
+  const seen: unknown[] = [];
+  const { sent, clock } = setup(on, { messages: [user("what does src/app.ts export?")], files: ["/proj/src/app.ts"], jev: () => new Promise<never>(() => {}) });
+  claudeBeneath(on, seen);
+  const run = drain($.turn.step({ ...step, index: 4 }));
+  while (sent.length < 1) await clock.advance(0);
+  // The measurement has 4000 ms; the step is let go after 250 ms.
+  await clock.advance(250);
+  await run;
+  expect(seen).toHaveLength(1);
+});
+
+test("An answer with a mistyped choice or score field fails the decision", async ($, on) => {
+  const seen: unknown[] = [];
+  const bad: Record<string, Record<string, unknown>> = {
+    next_action: { type: "choice", choice: 5, probabilities: { claude: 1 }, confidence: 0.9 },
+    effort: { type: "score", score: "x", probabilities: {}, confidence: 0.9 },
+  };
+  setup(on, { messages: [user("what does this project do?")], jev: (q) => bad[q.id] });
+  claudeBeneath(on, seen);
+  await drain($.turn.step(step));
+  expect(await runJev($, "")).toMatch(/unavailable: batch: no valid (choice|score) answer/);
 });
 
 test("estimate_effort rejects invalid input without asking Jev", async ($, on) => {

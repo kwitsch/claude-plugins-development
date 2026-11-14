@@ -80,6 +80,15 @@ test("relevant scores a name word 2 (once, also when the description repeats it)
   expect(performance.now() - t).toBeLessThan(800);
 });
 
+test("a slash command that started a turn is the request, a local command is not", () => {
+  const typed = (text: string) => ({ role: "user" as const, text, toolUses: [] });
+  const skill = typed("<command-message>audit</command-message>\n<command-name>/audit</command-name>\n<command-args>src</command-args>");
+  expect(splitTurn([typed("Thanks!"), { role: "assistant", text: "ok", toolUses: [] }, skill])?.request).toBe("/audit src");
+  const local = typed("<command-name>/jev</command-name>\n<command-args></command-args>");
+  const output = typed("<local-command-stdout>Jev pilot: ...</local-command-stdout>");
+  expect(splitTurn([typed("Thanks!"), local, output])?.request).toBe("Thanks!");
+});
+
 test("only skills related to the prompt are offered", () => {
   const skills = dedupeSkills(SKILLS);
   expect(relevant("can you show me the full list", skills)).toEqual([]);

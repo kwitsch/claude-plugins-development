@@ -830,6 +830,14 @@ test("the Haiku output budget covers a choice with many options", async ($, on) 
   expect(Number(asked[1]["maxTokens"])).toBe(512); // unchanged for a noul question
 });
 
+test("the Haiku output budget grows with the levels of a score", async ($, on) => {
+  const asked = haiku(on, () => said("{}"));
+  mock.env(on, {});
+  await call($, "score", { criteria: Array.from({ length: 10 }, (_, i) => `level ${i}`) });
+  await call($, "score", { criteria: ["low", "high"] });
+  expect(Number(asked[0]["maxTokens"])).toBeGreaterThan(Number(asked[1]["maxTokens"]));
+});
+
 // Gaps found by mutation testing (round 6a): each test kills at least one mutant of the shipped code.
 it("a hanging registration is not started again by later calls", async () => {
   const tries: string[] = [];

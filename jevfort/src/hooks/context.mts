@@ -67,8 +67,25 @@ export const clip = (text: string, max: number): string => text.length > max ? `
  */
 const TRANSCRIPT_ONLY = /^\s*<(bash-input|bash-stdout|bash-stderr|local-command-stdout|local-command-caveat|command-name|command-message|system-reminder|task-notification)>/;
 
+/** A slash command's row: its name and arguments in tags (a skill typed as `/name args`). */
+const COMMAND_ROW = /^\s*<command-(?:message|name)>/;
+
 /**
- * The last user message that carries text and no tool results is the request.
+ * The slash command a row stands for, as typed.
+ *
+ * @param text - The row's text.
+ * @returns `/name args`, or `undefined` when the row has no command name.
+ */
+function typedCommand(text: string): string | undefined {
+  const name = /<command-name>\s*([^<]*?)\s*<\/command-name>/.exec(text)?.[1];
+  if (!name) return undefined;
+  const args = /<command-args>([^<]*)<\/command-args>/.exec(text)?.[1]?.trim();
+  return args ? `${name} ${args}` : name;
+}
+
+/**
+ * The last user message that carries text and no tool results is the request; a slash command that started a turn
+ * (no local-command output row right after it, as `/jev` has) is the request as typed, not the prompt before it.
  *
  * @param messages - The transcript.
  * @returns The request and the steps after it, or `undefined` without a request.
@@ -76,9 +93,13 @@ const TRANSCRIPT_ONLY = /^\s*<(bash-input|bash-stdout|bash-stderr|local-command-
 export function splitTurn(messages: readonly SessionMessage[]): TurnContext | undefined {
   for (let i = messages.length - 1; i >= 0; i--) {
     const m = messages[i];
-    if (m.role === "user" && m.text.trim() !== "" && !m.toolResults?.length && !TRANSCRIPT_ONLY.test(m.text)) {
-      return { request: m.text, steps: messages.slice(i + 1) };
+    if (m.role !== "user" || m.text.trim() === "" || m.toolResults?.length) continue;
+    if (COMMAND_ROW.test(m.text)) {
+      const typed = typedCommand(m.text);
+      if (typed && !/^\s*<local-command-(stdout|caveat)>/.test(messages[i + 1]?.text ?? "")) return { request: typed, steps: messages.slice(i + 1) };
+      continue;
     }
+    if (!TRANSCRIPT_ONLY.test(m.text)) return { request: m.text, steps: messages.slice(i + 1) };
   }
   return undefined;
 }

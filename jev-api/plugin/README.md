@@ -25,7 +25,7 @@ The timeout of a call is its `timeout` input when that is a number above 0; othe
 
 Each tool is registered at session start and called by its full name, `mcp__jev-api__<type>`. `instructions` and `state` are text; `criteria` is an object or an array depending on the type; `batch` takes its questions as a required array of objects; the optional `timeout` is a number of seconds.
 
-The plugin answers these calls itself, before Claude Code's permission check: there is no permission prompt, `ask` rules and PreToolUse hooks do not apply, and the text goes to the configured endpoint as soon as Claude calls a tool. A `permissions.deny` rule for `mcp__jev-api` (or `mcp__jev-api__<type>`), removes the tools (`--disallowedTools mcp__jev-api__batch` removes only `batch`).
+The plugin answers these calls itself, before Claude Code's permission check: there is no permission prompt, `ask` rules and PreToolUse hooks do not apply, and the text goes to the configured endpoint as soon as Claude calls a tool. A `permissions.deny` rule for `mcp__jev-api` (or `mcp__jev-api__<type>`) removes the tools (`--disallowedTools mcp__jev-api__batch` removes only `batch`).
 
 ### `mcp__jev-api__noul`
 
@@ -83,4 +83,4 @@ Errors come back as a tool error (Claude reads it as an error result) whose text
 - HTTP 4xx/5xx: `HTTP <status>` plus the API's reason (its `detail`, or its `error.message`) when there is one.
 - No answer of the asked type in the response, a network error or an unparsable body: the reason. Where Claude Code's error quotes the endpoint, the text shows `<JEV_URL>` or `<TYPESAFE_BASE_URL>/v1/systemone` instead of the configured URL.
 - A request taking longer than its timeout (default 20 seconds): `timeout after <ms>ms`, or Claude Code's own limit on one request (`... aborted: no complete answer within 30000ms`) when that comes first.
-- A call that is interrupted while it waits answers at once; the request itself still runs to its end.
+- A call that is interrupted while it waits answers at once; the request itself still runs to its end (in `claude -p` and other headless runs the process, and the next prompt, may wait for it, up to Claude Code's own 30 seconds per request).

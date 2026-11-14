@@ -6,6 +6,9 @@
  * @packageDocumentation
  */
 
+/** How long a finished step waits for the parallel step measurement, in ms: it only feeds the log. */
+export const MEASURE_GRACE_MS = 250;
+
 /** The longest error text `askJev` returns (and so the log and `/jev` hold), in characters: an error body of megabytes must not be stored whole. */
 export const MAX_ERROR = 1000;
 

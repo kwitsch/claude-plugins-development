@@ -82,6 +82,23 @@ test("The prompt classifier adds a hint only Claude reads", async ($, on) => {
   expect(Object.keys(sent[2].criteria as object)).toEqual(["none", "aws-diagrams", "constructor"]);
 });
 
+test("A confident skill keeps its hint where step 0 cannot take it (takeOnlyForBypass is on by default)", async ($, on) => {
+  const answers: Record<string, Record<string, unknown>> = {
+    kind: { type: "choice", choice: "task", probabilities: { task: 0.9, question: 0.1 }, confidence: 0.8 },
+    needs_plan: { type: "noul", noul: 0.1 },
+    skill: { type: "choice", choice: "aws-diagrams", probabilities: { "aws-diagrams": 0.95, none: 0.05 }, confidence: 0.9 },
+  };
+  base(on, (q) => answers[PROMPT_IDS.get(q.instructions) ?? ""]);
+  on("command.list", () => ({ value: [{ name: "aws-diagrams", description: "Draw AWS diagrams", source: "plugin" }] }));
+  let seen: readonly string[] | undefined;
+  on("prompt.submit", (_$, e) => {
+    seen = e.context as readonly string[] | undefined;
+    return { text: e.text };
+  });
+  await $.prompt.submit({ text: "draw the aws diagram of the storage layer", wait: false, origin: { kind: "composer" } });
+  expect(seen?.join("\n") ?? "").toContain("the skill \"aws-diagrams\"");
+});
+
 test("The classifier offers at most 255 skill options, none first, each name once", async ($, on) => {
   // Only the questions sent matter here, not the answers.
   const sent = base(on, () => ({}));
