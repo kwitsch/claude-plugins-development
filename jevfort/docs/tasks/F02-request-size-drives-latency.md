@@ -15,7 +15,7 @@ Note (0.12.0): the done check, the prompt classifier and the step-k measurement 
 Checked against 0.12.0 (2026-11-14), still open, waiting for a user decision; no code changed. What is left of the task:
 
 - One request before the first token: the `turn.step` hook's step-0 batch (effort + mechanical, plus `next_action` with take-steps) with the state `request` (`clip(ctx.request, 4000)`), `previous_reply` (800), `recent` (`summarize(ctx.steps)`, empty at step 0 of a fresh turn) and `cwd`. With take-steps (default on, `takeOnlyForBypass` decides where) later steps send the same state with a full `recent`.
-- The task-end question in `contextCompact`, only at >= `compactAtTaskEnd` fill and `reason: "answer"`: `clip(ctx.request, 3000)`, `final_message` 2000, `recent`.
+- The task-end question in `contextCompact`, only at >= `taskCompactPercent` fill and `reason: "answer"`: `clip(ctx.request, 3000)`, `final_message` 2000, `recent`.
 - No change is free: the step-0 state is what the effort rule was calibrated on (`EFFORT_CUTS`, `MECHANICAL_FROM`), and `next_action` and the task-end question read `recent`. `tests/fixtures/effort-scores.json` holds only the recorded scores, not the 60 prompts, so approach 3 (re-run A1-A5 with shorter states) cannot run from this repository; the prompts would have to be recovered or a new prompt set measured. Trimming `recent` for the task end (approach 1) saves at most ~0.5 s on a rare path (high context fill) without an accuracy measurement either.
 - Decision needed (user, or a decision agent with the prompt set): whether to accept an unmeasured accuracy risk for ~0.16 ms per byte, or to close F02 as a measurement record. Without the calibration prompts the recommendation is to leave the states as they are.
 
