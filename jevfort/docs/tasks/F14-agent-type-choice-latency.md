@@ -1,14 +1,16 @@
 ---
 id: F14
 title: The agent-type choice waits ~1.15 s before every Agent dispatch and switched no type in 103 real calls
-status: open
+status: partial
 priority: medium
 area: jevfort/src/hooks/register.mts (onAgentCall, onAgentOffer), jevfort/src/hooks/agents.mts (GENERAL, SWITCH_AT)
 ---
 
 ## Status
 
-Open. Found in the performance analysis after the worklist ([../EVALUATION-2026-11-14-2.md](../EVALUATION-2026-11-14-2.md)), plugin 0.11.0, from the real decision log of the installed 0.10.1 (the code is unchanged since the port, `ca6b468`). F01's decision left the agent-type choice as is (30 synthetic types 1.04 s, below the budget); the real log adds its benefit side.
+Partial: approach 1 shipped in 0.12.0 (an Agent call with a specific type, `!GENERAL.has(claudeType)`, makes no Jev request; the 9% that could never switch no longer wait). Approaches 2 and 3 (smaller request, lower `SWITCH_AT` or drop the feature) stay open and need a decision; the `agent` decision log entries mentioned below were removed in 0.12.0 with the log.
+
+Earlier state: open. Found in the performance analysis after the worklist ([../EVALUATION-2026-11-14-2.md](../EVALUATION-2026-11-14-2.md)), plugin 0.11.0, from the real decision log of the installed 0.10.1 (the code is unchanged since the port, `ca6b468`). F01's decision left the agent-type choice as is (30 synthetic types 1.04 s, below the budget); the real log adds its benefit side.
 
 ## Problem
 
@@ -39,6 +41,10 @@ Cheapest first:
 Recommendation: 1 now (no behaviour change: a specific type was never switched); 3 as a decision.
 
 ## Verification
+
+Shipped in 0.12.0: `tests/phase3.test.mts` "An Agent call with a specific type makes no Jev request" (subagent_type `Plan`, two offered types, no batch call, dispatched unchanged) fails on the previous build (one batch call) and passes now; the older switch test now expects 3 asks for its 4 calls. Not measured live: the saving is the skipped ask (real median 1152 ms for 9 of 103 calls).
+
+Planned verification:
 
 - Kit test (`tests/phase3.test.mts`): an Agent call with `subagent_type: "Explore"` and several offered types makes no batch call and dispatches unchanged; fails on 0.11.0 (one batch call).
 - In a new dated evaluation: the share of Agent calls that ask, and the median ask latency from fresh log entries.

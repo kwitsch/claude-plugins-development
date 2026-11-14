@@ -17,7 +17,7 @@ Legend: `[x]` finished (done, or closed without code: status `closed` in the tas
 
 ## Remaining
 
-- [ ] [F14](tasks/F14-agent-type-choice-latency.md) `open` medium: the agent-type choice waits ~1.15 s (real median, 103 calls) before every Agent dispatch and switched none; 9% of the calls cannot switch at all
+- [ ] [F14](tasks/F14-agent-type-choice-latency.md) `partial` medium (0.12.0 skips the ask for a specific type): the agent-type choice still waits ~1.15 s (real median, 103 calls) before a general Agent dispatch and switched none; a smaller request or dropping the feature needs a decision
 
 ## Closed without code (measurement records, decided 2026-11-14)
 
