@@ -25,6 +25,7 @@ test("inScratchpad rejects other sessions, the directory itself, traversal, rela
   assert.equal(inScratchpad(`${SP}/../../../../etc/x`, "sid-1", ROOTS), false);
   assert.equal(inScratchpad(`${SP}/x/../notes.md`, "sid-1", ROOTS), false);
   assert.equal(inScratchpad("scratchpad/x", "sid-1", ROOTS), false);
+  assert.equal(inScratchpad("tmp/claude-1000/-proj/sid-1/scratchpad/x", "sid-1", ROOTS), false);
   assert.equal(inScratchpad("", "sid-1", ROOTS), false);
   assert.equal(inScratchpad("/home/u/claude-1000/-proj/sid-1/scratchpad/x", "sid-1", ROOTS), false);
   assert.equal(inScratchpad("/tmp/claude-abc/-proj/sid-1/scratchpad/x", "sid-1", ROOTS), false);
