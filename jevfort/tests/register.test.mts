@@ -2013,6 +2013,23 @@ test("A /compact that ran without the session.compact hook lets a later high fil
   expect(state.compacts).toBe(2);
 });
 
+test("A refused /compact lets a later high fill compact again and is logged", { options: { classify: false } }, async ($, on) => {
+  const { clock } = setup(on, { messages: [user("rename foo to bar")], jev: intermediate });
+  followUps(on);
+  let compacts = 0;
+  on("session.usage", () => ({ value: { context: { tokens: 1, window: 100, percent: 96 } } }));
+  on("command.run", (_$, e, next) => {
+    if (e.command !== "compact") return next(e);
+    compacts++;
+    throw new Error("compaction disabled");
+  });
+  await $.turn.complete(answered("t1", "Done."));
+  await clock.advance(0);
+  await $.turn.complete(answered("t2", "Done."));
+  expect(compacts).toBe(2);
+  expect(await runJev($, "")).toContain("context compaction refused");
+});
+
 // F06: decisions are buffered and the log and the counters are written once per turn, not once per decision.
 test("A 6-step turn writes the log and the counters once, and /jev export still holds every decision", async ($, on) => {
   const sets: string[] = [];
