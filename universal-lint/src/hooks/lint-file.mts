@@ -2280,13 +2280,14 @@ function settleDir(): string {
  * (name timestamp more than `HOOK_TIMEOUT_MS` ago or ahead, temp leftovers too) are pruned first, so a live reader
  * still finds everything a hook run can need. Fails open to null (the lint then reports at once).
  *
- * @param fp - Lexical path of the edited file (read for the digest).
+ * @param fp - Lexical path of the edited file (read for the digest when `written` is not given).
  * @param real - Real path of the file (the key).
  * @param hunks - The edit's hunks, null when the whole file counts as edited.
  * @param before - Digest of the content the hunks apply to, or null (unknown, or no hunks).
+ * @param written - Digest of the content the tool wrote (null: unknown); omitted, the disk is hashed (FileChanged).
  * @returns The record handle, or null on any error.
  */
-export function recordEdit(fp: string, real: string, hunks: EditHunk[] | null, before?: string | null): EditRecord | null {
+export function recordEdit(fp: string, real: string, hunks: EditHunk[] | null, before?: string | null, written?: string | null): EditRecord | null {
   try {
     const dir = settleDir();
     mkdirSync(dir, { recursive: true });
@@ -2296,7 +2297,7 @@ export function recordEdit(fp: string, real: string, hunks: EditHunk[] | null, b
     const key = hashPath(real);
     const name = `${key}-${String(now).padStart(15, "0")}-${process.pid}.json`;
     const tmp = path.join(dir, `${name}.tmp`);
-    writeFileSync(tmp, JSON.stringify({ hunks, digest: fileDigest(fp), before: before ?? null }));
+    writeFileSync(tmp, JSON.stringify({ hunks, digest: written === undefined ? fileDigest(fp) : written, before: before ?? null }));
     renameSync(tmp, path.join(dir, name));
     return { key, name };
   } catch {
@@ -2527,7 +2528,9 @@ export async function lintFileHandler(args: PostToolUseHookInput, scoped: { fp: 
     if (ranges?.length === 0) return {}; // the Edit changed nothing
     const original = args.tool_response?.originalFile;
     const before = typeof original === "string" ? createHash("sha256").update(original).digest("base64") : null;
-    const rec = recordEdit(resolved, scoped.real, editHunks(args), before);
+    // the tool's content, not the disk: a change landing before this hook must not be folded into the edit's record
+    const wc = writtenContent(args);
+    const rec = recordEdit(resolved, scoped.real, editHunks(args), before, wc === null ? null : createHash("sha256").update(wc).digest("base64"));
     const d0 = digestOrNull(resolved);
     const t0 = journalTail(rec);
     // `await` inside the try is load-bearing: a rejected promise must land in the catch (fail open).

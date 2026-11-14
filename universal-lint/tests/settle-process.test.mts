@@ -16,6 +16,10 @@ const SH4_FIXED = "echo a\necho \"$1\"\necho b\necho $2\n";
 const EDIT_L2 = { structuredPatch: [{ oldStart: 1, oldLines: 4, newStart: 1, newLines: 4, lines: [" echo a", "-echo $1", "+echo \"$1\"", " echo b", " echo $2"] }] };
 /** Edit hunks replacing line 4. */
 const EDIT_L4 = { structuredPatch: [{ oldStart: 3, oldLines: 2, newStart: 3, newLines: 2, lines: [" echo b", "-echo $2", "+echo \"$2\""] }] };
+/** An Edit of line 2 whose result is SH4 (the file on disk), so the journal's written digest matches the disk. */
+const SET_L2 = { structuredPatch: [{ oldStart: 1, oldLines: 4, newStart: 1, newLines: 4, lines: [" echo a", "-echo $x", "+echo $1", " echo b", " echo $2"] }], originalFile: SH4.replace("$1", "$x") };
+/** An Edit of line 4 whose result is SH4. */
+const SET_L4 = { structuredPatch: [{ oldStart: 3, oldLines: 2, newStart: 3, newLines: 2, lines: [" echo b", "-echo $x", "+echo $2"] }], originalFile: SH4.replace("$2", "$x") };
 /** What the stub shellcheck reports for line 2. */
 const FINDING_L2 = "a.sh:2:6: note: line2-marker [SC2086]\n";
 
@@ -78,7 +82,7 @@ test("a finding is held for the settle window, a clean lint is not", async () =>
 test("a later edit that rewrote the finding's line without reproducing the error: the first finding is not reported", async () => {
   const s = setup();
   s.setFindings(FINDING_L2);
-  const first = start(s.e, s.findings, payload(s.file, s.e.cwd, { toolName: "Edit", toolResponse: EDIT_L2 }), { UNIVERSAL_LINT_SETTLE_MS: "3000" });
+  const first = start(s.e, s.findings, payload(s.file, s.e.cwd, { toolName: "Edit", toolResponse: SET_L2 }), { UNIVERSAL_LINT_SETTLE_MS: "3000" });
   await intoHold(s.e);
   writeFileSync(s.file, SH4_FIXED);
   s.setFindings("");
@@ -93,7 +97,7 @@ test("a later edit that rewrote the finding's line without reproducing the error
 test("a later edit elsewhere: the first finding is still reported", async () => {
   const s = setup();
   s.setFindings(FINDING_L2);
-  const first = start(s.e, s.findings, payload(s.file, s.e.cwd, { toolName: "Edit", toolResponse: EDIT_L2 }), { UNIVERSAL_LINT_SETTLE_MS: "2000" });
+  const first = start(s.e, s.findings, payload(s.file, s.e.cwd, { toolName: "Edit", toolResponse: SET_L2 }), { UNIVERSAL_LINT_SETTLE_MS: "2000" });
   await intoHold(s.e);
   writeFileSync(s.file, SH4.replace("$2", "\"$2\""));
   s.setFindings("");
@@ -107,7 +111,7 @@ test("a later edit elsewhere: the first finding is still reported", async () => 
 test("a later edit of the line that still has the error: the later edit reports it, the first one is dropped", async () => {
   const s = setup();
   s.setFindings(FINDING_L2);
-  const first = start(s.e, s.findings, payload(s.file, s.e.cwd, { toolName: "Edit", toolResponse: EDIT_L2 }), { UNIVERSAL_LINT_SETTLE_MS: "2000" });
+  const first = start(s.e, s.findings, payload(s.file, s.e.cwd, { toolName: "Edit", toolResponse: SET_L2 }), { UNIVERSAL_LINT_SETTLE_MS: "2000" });
   await intoHold(s.e);
   writeFileSync(s.file, SH4_FIXED);
   const second = await start(s.e, s.findings, payload(s.file, s.e.cwd, { toolName: "Edit", toolResponse: { ...EDIT_L2, originalFile: SH4 } }), {});
@@ -141,7 +145,7 @@ test("a foreign-file-only or unlocated-only finding is not held, a mixed one is"
 test("a later Write drops the earlier findings of the file", async () => {
   const s = setup();
   s.setFindings(FINDING_L2);
-  const first = start(s.e, s.findings, payload(s.file, s.e.cwd, { toolName: "Edit", toolResponse: EDIT_L2 }), { UNIVERSAL_LINT_SETTLE_MS: "2000" });
+  const first = start(s.e, s.findings, payload(s.file, s.e.cwd, { toolName: "Edit", toolResponse: SET_L2 }), { UNIVERSAL_LINT_SETTLE_MS: "2000" });
   await intoHold(s.e);
   writeFileSync(s.file, "echo rewritten\n");
   s.setFindings("");
@@ -153,7 +157,7 @@ test("a later Write drops the earlier findings of the file", async () => {
 test("FileChanged outside Write/Edit supersedes a held finding", async () => {
   const s = setup();
   s.setFindings(FINDING_L2);
-  const first = start(s.e, s.findings, payload(s.file, s.e.cwd, { toolName: "Edit", toolResponse: EDIT_L2 }), { UNIVERSAL_LINT_SETTLE_MS: "2000" });
+  const first = start(s.e, s.findings, payload(s.file, s.e.cwd, { toolName: "Edit", toolResponse: SET_L2 }), { UNIVERSAL_LINT_SETTLE_MS: "2000" });
   await intoHold(s.e);
   writeFileSync(s.file, "echo changed by a formatter\n");
   s.setFindings("");
@@ -214,7 +218,7 @@ test("a FileChanged lint does not hold its slot while the findings settle", asyn
 test("a later edit that fixed the cause of a held parse error on another line: the parse error is not reported", async () => {
   const s = setup();
   s.setFindings("a.sh:4:1: error: Couldn't find end of string [SC1009]\n");
-  const first = start(s.e, s.findings, payload(s.file, s.e.cwd, { toolName: "Edit", toolResponse: EDIT_L4 }), { UNIVERSAL_LINT_SETTLE_MS: "2000" });
+  const first = start(s.e, s.findings, payload(s.file, s.e.cwd, { toolName: "Edit", toolResponse: SET_L4 }), { UNIVERSAL_LINT_SETTLE_MS: "2000" });
   await intoHold(s.e);
   writeFileSync(s.file, SH4_FIXED);
   s.setFindings("");
@@ -228,7 +232,7 @@ test("a later edit that fixed the cause of a held parse error on another line: t
 test("a later edit elsewhere that leaves the parse error: the later lint reports it, the held one is dropped", async () => {
   const s = setup();
   s.setFindings("a.sh:4:1: error: Couldn't find end of string [SC1009]\n");
-  const first = start(s.e, s.findings, payload(s.file, s.e.cwd, { toolName: "Edit", toolResponse: EDIT_L4 }), { UNIVERSAL_LINT_SETTLE_MS: "2000" });
+  const first = start(s.e, s.findings, payload(s.file, s.e.cwd, { toolName: "Edit", toolResponse: SET_L4 }), { UNIVERSAL_LINT_SETTLE_MS: "2000" });
   await intoHold(s.e);
   writeFileSync(s.file, SH4_FIXED);
   const second = await start(s.e, s.findings, payload(s.file, s.e.cwd, { toolName: "Edit", toolResponse: { ...EDIT_L2, originalFile: SH4 } }), {});
@@ -243,7 +247,7 @@ test("two later edits whose hooks journal out of edit order: the held finding is
   writeFileSync(s.file, "echo a\necho b\necho $1\necho c\n");
   s.setFindings("a.sh:3:6: note: line3-marker [SC2086]\n");
   const editA = { structuredPatch: [{ oldStart: 1, oldLines: 4, newStart: 1, newLines: 4, lines: [" echo a", " echo b", "-echo $2", "+echo $1", " echo c"] }] };
-  const first = start(s.e, s.findings, payload(s.file, s.e.cwd, { toolName: "Edit", toolResponse: editA }), { UNIVERSAL_LINT_SETTLE_MS: "2500" });
+  const first = start(s.e, s.findings, payload(s.file, s.e.cwd, { toolName: "Edit", toolResponse: { ...editA, originalFile: "echo a\necho b\necho $2\necho c\n" } }), { UNIVERSAL_LINT_SETTLE_MS: "2500" });
   await intoHold(s.e);
   // B inserts a line at the top (the error moves to line 4), C rewrites `echo b` (line 3 after B); both land first
   writeFileSync(s.file, "echo new\necho a\necho B\necho $1\necho c\n");
@@ -261,7 +265,7 @@ test("two later edits whose hooks journal out of edit order: the held finding is
 test("a later edit after a non-parse finding on another line: that finding is still reported", async () => {
   const s = setup();
   s.setFindings("a.sh:4:6: note: line4-marker [SC2086]\n");
-  const first = start(s.e, s.findings, payload(s.file, s.e.cwd, { toolName: "Edit", toolResponse: EDIT_L4 }), { UNIVERSAL_LINT_SETTLE_MS: "2000" });
+  const first = start(s.e, s.findings, payload(s.file, s.e.cwd, { toolName: "Edit", toolResponse: SET_L4 }), { UNIVERSAL_LINT_SETTLE_MS: "2000" });
   await intoHold(s.e);
   writeFileSync(s.file, SH4_FIXED);
   s.setFindings("");
@@ -328,4 +332,26 @@ test("a change nobody journaled between the held lint and a later Edit: the held
   const firstRan = await first;
   assert.equal(firstRan.status, 2);
   assert.match(firstRan.stderr, /line2-marker/);
+});
+
+test("a change nobody journaled that lands before a later Edit's hook runs: the held finding is reported, not lost", async () => {
+  const s = setup();
+  const A1 = "echo a\necho b\n\necho c\necho $1\necho d\n";
+  writeFileSync(s.file, A1);
+  s.setFindings("a.sh:5:6: note: line5-marker [SC2086]\n");
+  const first = start(s.e, s.findings, payload(s.file, s.e.cwd), { UNIVERSAL_LINT_SETTLE_MS: "2500" });
+  await intoHold(s.e);
+  // E2 rewrites line 2; before its hook runs, another program deletes the blank line 3 (`echo $1` moves to line 4)
+  const A2x = "echo a\necho B\necho c\necho $1\necho d\n";
+  writeFileSync(s.file, A2x);
+  s.setFindings("a.sh:4:6: note: line4-marker [SC2086]\n");
+  const e2 = { structuredPatch: [{ oldStart: 1, oldLines: 3, newStart: 1, newLines: 3, lines: [" echo a", "-echo b", "+echo B", " "] }], originalFile: A1 };
+  assert.equal((await start(s.e, s.findings, payload(s.file, s.e.cwd, { toolName: "Edit", toolResponse: e2 }), {})).status, 0, "line 4 is outside E2");
+  // E3 rewrites line 5 of A2x (`echo d`), the line `echo $1` had in A1
+  writeFileSync(s.file, A2x.replace("echo d", "echo D"));
+  const e3 = { structuredPatch: [{ oldStart: 3, oldLines: 3, newStart: 3, newLines: 3, lines: [" echo c", " echo $1", "-echo d", "+echo D"] }], originalFile: A2x };
+  assert.equal((await start(s.e, s.findings, payload(s.file, s.e.cwd, { toolName: "Edit", toolResponse: e3 }), {})).status, 0, "line 4 is outside E3");
+  const firstRan = await first;
+  assert.equal(firstRan.status, 2);
+  assert.match(firstRan.stderr, /line5-marker/);
 });

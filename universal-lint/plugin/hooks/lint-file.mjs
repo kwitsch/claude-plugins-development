@@ -1221,7 +1221,7 @@ function digestOrNull(fp) {
 function settleDir() {
 	return path.resolve(process.env.CLAUDE_PLUGIN_DATA || tmpdir(), "settle");
 }
-export function recordEdit(fp, real, hunks, before) {
+export function recordEdit(fp, real, hunks, before, written) {
 	try {
 		const dir = settleDir();
 		mkdirSync(dir, { recursive: true });
@@ -1232,7 +1232,7 @@ export function recordEdit(fp, real, hunks, before) {
 		const tmp = path.join(dir, `${name}.tmp`);
 		writeFileSync(tmp, JSON.stringify({
 			hunks,
-			digest: fileDigest(fp),
+			digest: written === undefined ? fileDigest(fp) : written,
 			before: before ?? null
 		}));
 		renameSync(tmp, path.join(dir, name));
@@ -1363,7 +1363,8 @@ export async function lintFileHandler(args, scoped = postToolScope(args)) {
 		if (ranges?.length === 0) return {};
 		const original = args.tool_response?.originalFile;
 		const before = typeof original === "string" ? createHash("sha256").update(original).digest("base64") : null;
-		const rec = recordEdit(resolved, scoped.real, editHunks(args), before);
+		const wc = writtenContent(args);
+		const rec = recordEdit(resolved, scoped.real, editHunks(args), before, wc === null ? null : createHash("sha256").update(wc).digest("base64"));
 		const d0 = digestOrNull(resolved);
 		const t0 = journalTail(rec);
 		const kept = await lintResolved(resolved, args.cwd, ranges, "PostToolUse");
