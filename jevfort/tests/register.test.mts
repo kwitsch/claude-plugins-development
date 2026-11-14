@@ -1557,6 +1557,18 @@ test("A switch from Opus to Haiku starts a new first turn with its own estimate"
   expect(seen.map((s) => s.effort)).toEqual(["low", "medium", "medium"]);
 });
 
+test("A /clear (session.end) starts a new Haiku first turn with its own estimate", async ($, on) => {
+  const seen: { effort?: string }[] = [];
+  const { sent } = setup(on, { messages: [user("what does this project do?")], jev: inOrder({ difficulty: easy, effort: scored(1.6) }, { difficulty: easy, effort: scored(2.9) }) });
+  on("session.end", () => ({}));
+  claudeBeneath(on, seen);
+  await drain($.turn.step(turnStep("t1", "claude-haiku-5-5", "high")));
+  await $.session.end({ reason: "clear", sessionId: "s1", resume: { id: "s1" } });
+  await drain($.turn.step(turnStep("t2", "claude-haiku-5-5", "high")));
+  expect(ids(sent)).toEqual(["effort", "mechanical", "effort", "mechanical"]);
+  expect(seen.map((s) => s.effort)).toEqual(["medium", "xhigh"]);
+});
+
 // Self-disable: without jev-api's batch tool in the listing (here jev-api 0.1's three tools), every hook but /jev passes through untouched.
 test("Without a jev-api tool jevfort is inactive: every hook passes through and /jev says why", async ($, on) => {
   const seen: unknown[] = [];
