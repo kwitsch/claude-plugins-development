@@ -22,7 +22,12 @@ plugin's own tested hook logic through a colocated driver — no new linting log
 
 1. **Resolve `$file_scope` into a concrete file list**, deterministically, yourself:
    - an explicit list ("these files: a b c") → use the named paths as-is;
-   - "all files in <folder-or-glob>" → the `Glob` tool;
+   - "all files in <folder-or-glob>" → in a git repo
+     `git -c core.quotePath=false ls-files --cached --others --exclude-standard -- <folder>` (a glob
+     goes in as `':(glob)<glob>'`; paths come out cwd-relative, with no cap). Outside a repo use the
+     `Glob` tool, which lists at most 100 files: when its result says it shows only part of the
+     matches, split the pattern by subdirectory until no result is truncated — never pass a
+     truncated list on;
    - "files changed in PR <N>" → run `gh auth status` first (it exits non-zero for both a
      missing PR and a dead token, so auth is checked before the diff), then
      `gh pr diff <N> --name-only`;

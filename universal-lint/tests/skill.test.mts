@@ -48,6 +48,12 @@ test("SKILL.md makes repo-root-relative git/gh paths resolvable from a subdirect
   assert.doesNotMatch(skillMd, /git diff --name-only/);
 });
 
+test("SKILL.md resolves a folder scope without the Glob tool's 100-file cap", () => {
+  assert.ok(skillMd.includes("git -c core.quotePath=false ls-files --cached --others --exclude-standard -- <folder>"));
+  assert.ok(skillMd.includes("never pass a\n     truncated list on"));
+  assert.doesNotMatch(skillMd, /<folder-or-glob>" → the `Glob` tool;/);
+});
+
 test("SKILL.md writes the list as a new file in a mktemp -d directory (Write refuses an unread existing file)", () => {
   assert.ok(skillMd.includes("`mktemp -d`"));
   assert.ok(skillMd.includes("<dir>/list.txt"));
