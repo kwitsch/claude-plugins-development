@@ -160,6 +160,32 @@ test("lint-files.mjs runs tsc once per tsconfig", () => {
   assert.match(r.stdout, /universal-lint: 1 block\(s\) with findings\./);
 });
 
+/**
+ * Project with a typeCheck oxlint config, a tsconfig, an oxlint stub exiting `oxlintExit` and a tsc stub; runs the driver on two .ts files.
+ *
+ * @param oxlintExit - Exit code of the oxlint stub.
+ * @returns The recorded oxlint and tsc call counts.
+ */
+function oxlintTypeCheck(oxlintExit: number): { oxlint: number; tsc: number } {
+  const e = makeEnv();
+  e.file(".oxlintrc.json", "{\"options\":{\"typeAware\":true,\"typeCheck\":true}}");
+  e.file("tsconfig.json", "{\"compilerOptions\":{\"noEmit\":true}}");
+  e.recStub("oxlint", oxlintExit);
+  e.recStub("tsc", 2);
+  driver(e, [e.file("a.ts", "export const x: number = 1;\n"), e.file("b.ts", "export const y: number = 1;\n")], "a.ts(1,1): error TS2322: x");
+  const calls = e.lines();
+  return { oxlint: calls.filter((l) => l.startsWith("oxlint ")).length, tsc: calls.filter((l) => l.startsWith("tsc ")).length };
+}
+
+test("lint-files.mjs skips tsc for files oxlint type-checked (typeCheck true, oxlint issues verdict)", () => {
+  assert.deepEqual(oxlintTypeCheck(1), { oxlint: 1, tsc: 0 });
+});
+
+test("lint-files.mjs runs tsc once when oxlint's typeCheck run is a skip verdict (exit 2)", () => {
+  const c = oxlintTypeCheck(2);
+  assert.equal(c.tsc, 1);
+});
+
 test("lint-files.mjs reruns files singly when the batch run is a skip", () => {
   const e = makeEnv();
   e.recStub("shellcheck", 2);
