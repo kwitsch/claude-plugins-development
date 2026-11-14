@@ -1,6 +1,6 @@
 import { GENERAL, SWITCH_AT } from "./agents.mjs";
 import { CACHE_TTL, cacheColor, cacheLabel, minutesLeft, nextTtl } from "./cache.mjs";
-import { absolute, AUTH_TOOL, bash, BUILTIN_COMMANDS, clipScript, coversStep, dedupeSkills, isSafeToOffer, MAX_READS, MAX_STATS, mentionedPaths, quotedTerms, relevant, SAFE_MAKE, SAFE_SCRIPT, sameCall, SKILL_BLOCKLIST_KEY } from "./candidates.mjs";
+import { absolute, AUTH_TOOL, bash, BUILTIN_COMMANDS, clipScript, coversStep, dedupeSkills, isSafeScript, isSafeToOffer, MAX_READS, MAX_STATS, mentionedPaths, quotedTerms, relevant, SAFE_MAKE, sameCall, SKILL_BLOCKLIST_KEY } from "./candidates.mjs";
 import { COMPACT_MAX_TOKENS, COMPACT_MODEL, COMPACT_SYSTEM, compactInstructions, compactItems, haikuTranscript, RELEVANCE } from "./compact.mjs";
 import { clip, splitTurn, summarize, toolCalls } from "./context.mjs";
 import { choice, COMPACT_API_TIMEOUT_S, COMPACT_TIMEOUT_MS, HAIKU_API_TIMEOUT_S, HAIKU_TIMEOUT_MS, isAnswer, JEV_API_TIMEOUT_S, JEV_BATCH, JEV_TOOL_PREFIX, JEV_TOOLS, MAX_CHOICE_OPTIONS, MAX_ERROR, MAX_PAUSE_MS, MEASURE_GRACE_MS, missingJevTools, noul, PAUSE_MS, score, TIMEOUT_MS } from "./jev.mjs";
@@ -370,7 +370,7 @@ async function projectCommands($, cwd) {
 			scripts = JSON.parse(pkg).scripts ?? {};
 		} catch {}
 		const runner = await packageRunner($, cwd);
-		for (const name of Object.keys(scripts).filter((n) => SAFE_SCRIPT.test(n) && typeof scripts[n] === "string")) {
+		for (const name of Object.keys(scripts).filter((n) => isSafeScript(n) && typeof scripts[n] === "string")) {
 			const command = name === "test" ? `${runner} test` : `${runner} run ${name}`;
 			out.push(bash(command, `Run the project's "${name}" script (${clipScript(scripts[name])})`));
 		}

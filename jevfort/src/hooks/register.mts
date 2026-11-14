@@ -16,7 +16,7 @@
 import { GENERAL, SWITCH_AT } from "./agents.mjs";
 import { CACHE_TTL, cacheColor, cacheLabel, minutesLeft, nextTtl } from "./cache.mjs";
 import type { CacheTtl } from "./cache.mjs";
-import { absolute, AUTH_TOOL, bash, BUILTIN_COMMANDS, clipScript, coversStep, dedupeSkills, isSafeToOffer, MAX_READS, MAX_STATS, mentionedPaths, quotedTerms, relevant, SAFE_MAKE, SAFE_SCRIPT, sameCall, SKILL_BLOCKLIST_KEY } from "./candidates.mjs";
+import { absolute, AUTH_TOOL, bash, BUILTIN_COMMANDS, clipScript, coversStep, dedupeSkills, isSafeScript, isSafeToOffer, MAX_READS, MAX_STATS, mentionedPaths, quotedTerms, relevant, SAFE_MAKE, sameCall, SKILL_BLOCKLIST_KEY } from "./candidates.mjs";
 import type { Candidate } from "./candidates.mjs";
 import { COMPACT_MAX_TOKENS, COMPACT_MODEL, COMPACT_SYSTEM, compactInstructions, compactItems, haikuTranscript, RELEVANCE } from "./compact.mjs";
 import { clip, splitTurn, summarize, toolCalls } from "./context.mjs";
@@ -712,7 +712,7 @@ async function projectCommands($: Engine, cwd: string): Promise<Candidate[]> {
       // a malformed package.json offers no scripts
     }
     const runner = await packageRunner($, cwd);
-    for (const name of Object.keys(scripts).filter((n) => SAFE_SCRIPT.test(n) && typeof scripts[n] === "string")) {
+    for (const name of Object.keys(scripts).filter((n) => isSafeScript(n) && typeof scripts[n] === "string")) {
       const command = name === "test" ? `${runner} test` : `${runner} run ${name}`;
       out.push(bash(command, `Run the project's "${name}" script (${clipScript(scripts[name])})`));
     }

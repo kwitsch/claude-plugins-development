@@ -1,6 +1,6 @@
 // Pure logic of the built plugin/hooks/{candidates,report,context,policy}.mjs: upstream jev-pilot tests/candidates.test.ts.
 import { expect, test } from "vitest";
-import { commandKey, coversStep, dedupeSkills, isSafeToOffer, mentionedPaths, quotedTerms, relevant, SAFE_SCRIPT, words } from "../plugin/hooks/candidates.mjs";
+import { commandKey, coversStep, dedupeSkills, isSafeScript, isSafeToOffer, mentionedPaths, quotedTerms, relevant, words } from "../plugin/hooks/candidates.mjs";
 import { clip, splitTurn, summarize } from "../plugin/hooks/context.mjs";
 import { route } from "../plugin/hooks/policy.mjs";
 import { buildReport, when } from "../plugin/hooks/report.mjs";
@@ -239,7 +239,7 @@ test("summarize walks from the end: same last entries, old rows are never serial
   expect(summarize(steps.slice(2, 4))).toHaveLength(4);
 });
 
-test("SAFE_SCRIPT refuses scripts that rewrite files or never exit", () => {
-  for (const n of ["lint:fix", "lint:write", "lint:prettier:fix", "test:update", "test:u", "test:update-snapshots", "test:watch", "test:dev"]) expect(SAFE_SCRIPT.test(n), n).toBe(false);
-  for (const n of ["test", "lint", "build", "test:unit", "lint:types", "test:e2e"]) expect(SAFE_SCRIPT.test(n), n).toBe(true);
+test("isSafeScript refuses scripts that rewrite files or never exit", () => {
+  for (const n of ["lint:fix", "lint:write", "lint:prettier:fix", "test:update", "test:u", "test:update-snapshots", "test:watch", "test:dev", "test:watchAll", "lint:autofix", "lint:fixAll", "lint:eslint_fix", "test:e2e:ui", "test:UI", "test:open", "test:debug", "test:updateSnapshot"]) expect(isSafeScript(n), n).toBe(false);
+  for (const n of ["test", "lint", "build", "test:unit", "lint:types", "test:e2e", "test:unit:ci", "type-check", "test:typesOnly"]) expect(isSafeScript(n), n).toBe(true);
 });

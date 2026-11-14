@@ -24,8 +24,20 @@ export const MAX_READS = 8;
 export const MAX_STATS = 16;
 /** How many quoted-term searches a turn may be offered. */
 const MAX_SEARCHES = 3;
-/** package.json script names safe to run unasked; a segment that rewrites files (`fix`, `update`, `u`) or never exits (`watch`, `dev`) is refused. */
-export const SAFE_SCRIPT = /^(?!.*(?:^|[:-])(?:fix|write|format|update|u|watch|dev|serve)(?:$|[:-]))(test|tests|lint|build|typecheck|type-check|check|test:[\w:-]+|lint:[\w:-]+)$/;
+/** package.json script names that may run unasked if no word of them is in {@link UNSAFE_WORD}. */
+const SCRIPT_HEAD = /^(?:test|tests|lint|build|typecheck|type-check|check|test:[\w:-]+|lint:[\w:-]+)$/;
+/** Script name words (lowercased) that rewrite files (`fix`, `autofix`, `update`, `u`) or never exit (`watch`, `dev`, `ui`, `open`, `debug`). */
+const UNSAFE_WORD = /^(?:(?:auto)?fix|write|format|update|u|watch|dev|serve|ui|open|debug)$/;
+
+/**
+ * Whether a package.json script is safe to run unasked.
+ *
+ * @param name - The script name.
+ * @returns True for an allowlisted name none of whose words (split at `:`, `-`, `_` and camelCase humps) is in {@link UNSAFE_WORD}.
+ */
+export function isSafeScript(name: string): boolean {
+  return SCRIPT_HEAD.test(name) && !name.split(/[:_-]|(?<=[a-z\d])(?=[A-Z])/).some((w) => UNSAFE_WORD.test(w.toLowerCase()));
+}
 /**
  * Built-in CLI commands the command list can report as user commands but the Skill tool refuses (`/diff` did).
  * Failed skills are also blocklisted at run time.
