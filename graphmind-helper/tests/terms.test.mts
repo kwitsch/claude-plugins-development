@@ -20,6 +20,15 @@ test("isRecallable skips short and system-made prompts", () => {
 test("isCodePrompt matches exploration and implementation prompts", () => {
   assert.equal(isCodePrompt("how does the cache work"), true);
   assert.equal(isCodePrompt("thanks, that is fine with me"), false);
+  assert.equal(isCodePrompt("please add a guard to the parser"), true);
+  assert.equal(isCodePrompt("fix\nin"), false);
+  assert.equal(isCodePrompt("ok fix it, then fix the bug in x"), true);
+});
+
+test("isCodePrompt is linear on a long one-line prompt", () => {
+  const start = performance.now();
+  assert.equal(isCodePrompt("add ".repeat(80000)), false);
+  assert.ok(performance.now() - start < 100);
 });
 
 test("shouldNudge: searches yes, graphmind itself and exhaustive searches no", () => {

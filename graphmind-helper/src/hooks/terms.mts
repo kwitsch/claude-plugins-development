@@ -24,7 +24,8 @@ const STOPWORDS = new Set(
 const NOT_TYPED = ["<task-notification", "<cross-session-message", "<command-", "<local-command", "<system-reminder"];
 
 /** A prompt about code (explore or implement): worth a code pre-fetch. */
-const CODE_PROMPT = /comment (fonctionne|marche)|how does|where is|où est|show me|montre|architecture|structure|schema|diagram|explique|explain|what does|qui appelle|who calls|trace|flow|parcour|find|cherche|search|look|refactor|implement|ajoute|add.*to|modify|change.*in|fix.*in|debug|implémente|créer|create/i;
+// `^(?=(?<x>.*?w))\k<x>` pins each gap pattern to the first `w` per line (an atomic group): linear, not quadratic, on long lines.
+const CODE_PROMPT = /comment (fonctionne|marche)|how does|where is|où est|show me|montre|architecture|structure|schema|diagram|explique|explain|what does|qui appelle|who calls|trace|flow|parcour|find|cherche|search|look|refactor|implement|ajoute|^(?=(?<a>.*?add))\k<a>.*to|modify|^(?=(?<c>.*?change))\k<c>.*in|^(?=(?<f>.*?fix))\k<f>.*in|debug|implémente|créer|create/im;
 
 /** A search command starts a command line segment: at a line start (multiline, as grep reads the setup script's pattern), or after `&&`, `||` or `;` (not after a pipe, which filters output). */
 const SEG = String.raw`(^|&&|\|\||;)\s*(rtk\s+)?`;
