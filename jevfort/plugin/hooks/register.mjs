@@ -741,7 +741,8 @@ export const register = (on, options) => {
 		}
 		if (e.origin?.kind === "composer" && !e.isMeta && e.turnId === undefined) donePending = false;
 		if (options.classify === false || e.command || e.isMeta || e.origin?.kind === "task-notification" || e.text.trim().length < 3) return next(e);
-		const questions = promptQuestions(await skillOptions($, e.text));
+		const skillCriteria = await skillOptions($, e.text);
+		const questions = promptQuestions(skillCriteria);
 		const previous = previousReply(await $.session.messages({}).catch(() => undefined));
 		const r = await askJev($, {
 			request: clip(e.text, 3e3),
@@ -751,7 +752,7 @@ export const register = (on, options) => {
 		const kind = choice(r.answers, "kind");
 		const needsPlan = noul(r.answers, "needs_plan");
 		const skillAnswer = choice(r.answers, "skill");
-		const skill = skillAnswer ? {
+		const skill = skillAnswer && skillCriteria && Object.hasOwn(skillCriteria, skillAnswer.choice) ? {
 			name: skillAnswer.choice,
 			p: skillAnswer.probabilities[skillAnswer.choice] ?? 0
 		} : undefined;

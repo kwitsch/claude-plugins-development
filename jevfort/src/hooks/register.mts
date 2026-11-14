@@ -1184,14 +1184,16 @@ export const register = (on: On, options: Options): void => {
     // A finished background task arrives as origin `task-notification` (not flagged meta): nothing to classify.
     if (options.classify === false || e.command || e.isMeta || e.origin?.kind === "task-notification" || e.text.trim().length < 3) return next(e);
 
-    const questions = promptQuestions(await skillOptions($, e.text));
+    const skillCriteria = await skillOptions($, e.text);
+    const questions = promptQuestions(skillCriteria);
     const previous = previousReply(await $.session.messages({}).catch(() => undefined));
     const r = await askJev($, { request: clip(e.text, 3000), ...(previous ? { previous_reply: previous } : {}) }, questions);
     if (!r.ok) return next(e);
     const kind = choice(r.answers, "kind");
     const needsPlan = noul(r.answers, "needs_plan");
     const skillAnswer = choice(r.answers, "skill");
-    const skill = skillAnswer ? { name: skillAnswer.choice, p: skillAnswer.probabilities[skillAnswer.choice] ?? 0 } : undefined;
+    // An answer outside the offered options (blocklisted, built in, made up) is no hint: jev-api checks only its Haiku answers.
+    const skill = skillAnswer && skillCriteria && Object.hasOwn(skillCriteria, skillAnswer.choice) ? { name: skillAnswer.choice, p: skillAnswer.probabilities[skillAnswer.choice] ?? 0 } : undefined;
     // A confident skill is left to step 0 only where step 0 can take it: takeSteps on and not takeOnlyForBypass.
     const added = hints(kind?.choice, needsPlan, skill, takeSteps && !takeOnlyForBypass ? takeThreshold : Number.POSITIVE_INFINITY);
 

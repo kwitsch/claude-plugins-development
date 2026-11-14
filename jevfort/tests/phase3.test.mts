@@ -101,6 +101,24 @@ test("A confident skill keeps its hint where step 0 cannot take it (takeOnlyForB
   expect(seen?.join("\n") ?? "").toContain("the skill \"aws-diagrams\"");
 });
 
+test("A skill Jev answers that was never offered gets no hint", async ($, on) => {
+  const answers: Record<string, Record<string, unknown>> = {
+    kind: { type: "choice", choice: "task", probabilities: { task: 0.9, question: 0.1 }, confidence: 0.8 },
+    needs_plan: { type: "noul", noul: 0.1 },
+    skill: { type: "choice", choice: "deploy-prod", probabilities: { "deploy-prod": 0.7, none: 0.3 }, confidence: 0.9 },
+  };
+  const sent = base(on, (q) => answers[PROMPT_IDS.get(q.instructions) ?? ""]);
+  on("command.list", () => ({ value: [{ name: "aws-diagrams", description: "Draw AWS diagrams", source: "plugin" }] }));
+  let seen: readonly string[] | undefined;
+  on("prompt.submit", (_$, e) => {
+    seen = e.context as readonly string[] | undefined;
+    return { text: e.text };
+  });
+  await $.prompt.submit({ text: "draw the aws diagram of the storage layer", wait: false, origin: { kind: "composer" } });
+  expect(Object.keys(sent[2].criteria as object)).toEqual(["none", "aws-diagrams"]);
+  expect(seen?.join("\n") ?? "").not.toContain("deploy-prod");
+});
+
 test("The classifier offers only the related skills (at most 8, deduped), none first; no related skill, no skill question", async ($, on) => {
   // Only the questions sent matter here, not the answers.
   const sent = base(on, () => ({}));
