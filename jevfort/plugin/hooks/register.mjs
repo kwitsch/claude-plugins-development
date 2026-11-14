@@ -798,12 +798,14 @@ export const register = (on, options) => {
 			const mechanical = noul(r.answers, "mechanical");
 			const effortAnswer = score(r.answers, "effort");
 			const est = estimateEffort(effortAnswer, mechanical, estimate);
-			turn.effort = est.effort !== e.effort ? est.effort : undefined;
 			if (firstTurn) firstTurn.effort = est.effort;
 			debugEffort($, e, `${est.source}${effortAnswer ? ` (score ${effortAnswer.score.toFixed(2)})` : ""}`, est.effort);
-			if (!e.agentId) {
-				band.chosen = est.effort;
-				$.ui.invalidate("ui.render");
+			if (!autoOff) {
+				turn.effort = est.effort !== e.effort ? est.effort : undefined;
+				if (!e.agentId) {
+					band.chosen = est.effort;
+					$.ui.invalidate("ui.render");
+				}
 			}
 		}
 		const answer = choice(r.answers, "next_action");

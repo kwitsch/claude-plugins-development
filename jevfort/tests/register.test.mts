@@ -1755,6 +1755,29 @@ test("The Auto button turns the effort choice off until pressed again", async ($
   await ui.unmount();
 });
 
+test("Auto pressed off while step 0 waits for Jev keeps the session effort", async ($, on) => {
+  const seen: { effort?: string }[] = [];
+  let release!: () => void;
+  const gate = new Promise<void>((r) => (release = r));
+  const { sent, clock } = setup(on, { messages: [user("what does this project do?")], jev: (async (q: Asked) => (await gate, q.id === "effort" ? easy : undefined)) as never });
+  claudeBeneath(on, seen);
+  sessionStubs(on);
+  await $.session.start(START);
+  const ui = await $.ui.mount(BAND);
+
+  const run = drain($.turn.step(turnStep("t1", "claude-opus-5-5", "high")));
+  for (let i = 0; i < 50 && sent.length === 0; i++) await clock.settle();
+  expect(ids(sent)).toEqual(["effort", "mechanical"]);
+  await ui.press({ key: "auto" });
+  release();
+  await run;
+  await clock.settle();
+  expect(seen.map((s) => s.effort)).toEqual(["high"]);
+  expect(await levelProps(ui, "low")).toEqual({ dimColor: true });
+  expect(await autoLabel(ui)).toBe("Jev auto: off");
+  await ui.unmount();
+});
+
 test("The band passes before the session baseline and while jevfort is inactive", async ($, on) => {
   const { clock } = setup(on, { messages: [], tools: SINGLE_TOOLS, jev: () => undefined });
   sessionStubs(on);
