@@ -8,7 +8,7 @@ area: jevfort/src/hooks/register.mts (onTurnStep, buildCandidates), jevfort/src/
 
 ## Status
 
-Done in 0.11.0. `summarize` walks the steps from the end and stops after `limit` entries; `buildCandidates` keeps a per-turn `PathScan` (in the turn state next to the stat cache) and scans only the request once, new step texts, and call results not scanned yet (a call counts once its text exists, as results can arrive a step later); `mentionedPaths(texts, seen)` extends the turn's set. The path order is first-discovery order, not request-then-steps-then-calls order. Not re-measured in a dated evaluation. Earlier state: open. Found in the performance analysis of 2026-11-14 ([../EVALUATION-2026-11-14.md](../EVALUATION-2026-11-14.md)), plugin 0.10.1.
+Done in 0.11.0. `summarize` walks the steps from the end and stops after `limit` entries; `buildCandidates` keeps a per-turn `PathScan` (in the turn state next to the stat cache) and scans only the request once, new step texts, and call results not scanned yet (a call counts once its text exists, as results can arrive a step later); a new request row or a shorter step list (a mid-turn compaction, a delivered message) starts a new scan of the whole transcript (fix b83c50f, pinned by the test "After a mid-turn compaction the path scan starts over and offers a newly named file"); `mentionedPaths(texts, seen)` extends the turn's set. The path order is first-discovery order, not request-then-steps-then-calls order. Not re-measured in a dated evaluation. Earlier state: open. Found in the performance analysis of 2026-11-14 ([../EVALUATION-2026-11-14.md](../EVALUATION-2026-11-14.md)), plugin 0.10.1.
 
 ## Problem
 

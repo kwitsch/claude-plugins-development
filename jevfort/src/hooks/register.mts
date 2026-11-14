@@ -734,7 +734,8 @@ async function projectCommands($: Engine, cwd: string): Promise<Candidate[]> {
  * @param calls - The turn's tool calls so far.
  * @param stepIndex - The step within the turn.
  * @param cache - The turn's shared reads, filled here (a fresh one by default, so nothing outlives the turn): the stat
- * results by absolute path (at most `MAX_STATS` new paths per call), the path scan (only new rows are scanned), the cwd
+ * results by absolute path (at most `MAX_STATS` new paths per call), the path scan (only new rows are scanned; a new request
+ * row or a shorter step list, as after a mid-turn compaction or a delivered message, starts a new scan), the cwd
  * (read again every call) and the project's commands (dropped when the cwd changed).
  * @returns At most `MAX_CHOICE_OPTIONS - 1` candidates (one of jev-api's choice options is `claude`).
  */
