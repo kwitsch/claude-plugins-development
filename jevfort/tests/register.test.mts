@@ -1085,6 +1085,19 @@ test("After a mid-turn compaction the path scan starts over and offers a newly n
   expect(Object.keys(last?.criteria ?? {})).toContain("read src/new.ts");
 });
 
+test("A call's result that arrives a step later is still scanned for file paths", async ($, on) => {
+  const call: { tool_use_id: string; tool: string; input: Record<string, unknown>; text?: string } = { tool_use_id: "c1", tool: "Bash", input: { command: "tsc" } };
+  const messages: Msg[] = [user("fix the build"), { role: "assistant", text: "", toolUses: [call] }];
+  const { sent } = setup(on, { messages, files: [`${CWD}/src/x.ts`], jev: () => undefined });
+  claudeBeneath(on, []);
+  await drain($.turn.step({ ...step, index: 1 }));
+  // The result lands on the call already seen without text; no new row names the file.
+  call.text = "error TS2304 in src/x.ts";
+  await drain($.turn.step({ ...step, index: 2 }));
+  const last = sent.filter((q) => q.id === "next_action").at(-1);
+  expect(Object.keys(last?.criteria ?? {})).toContain("read src/x.ts");
+});
+
 test("A finished step does not wait for a slow step measurement", async ($, on) => {
   const seen: unknown[] = [];
   const { sent, clock } = setup(on, { messages: [user("what does src/app.ts export?")], files: ["/proj/src/app.ts"], jev: () => new Promise<never>(() => {}) });
