@@ -1036,6 +1036,14 @@ test("gateFinding: shellcheck tty `In <file> line N:` block", () => {
   assert.equal(gateFinding(gf(text), [[0, 0]], resolved), null);
 });
 
+test("gateFinding: a code-frame source line like `ok.pow(2)` is no foreign location (rustc miss dropped)", () => {
+  const crate = path.join(GATE_DIR, "crate-frame");
+  const rs = path.join(crate, "src", "main.rs");
+  const text = "error: unused variable: `unused` frame-marker\n --> src/main.rs:4:9\n  |\n4 |     let unused = ok.pow(2);\n  |         ^^^^^^ help: prefix it\n";
+  assert.equal(gateFinding(gf(text, crate), [[2, 2]], rs), null);
+  assert.match(gateFinding(gf(text, crate), [[3, 3]], rs)?.text ?? "", /frame-marker/);
+});
+
 test("gateFinding: cargo `--> src/a.rs:L` against the crate directory hits", () => {
   const crate = path.join(GATE_DIR, "crate");
   mkdirSync(path.join(crate, "src"), { recursive: true });

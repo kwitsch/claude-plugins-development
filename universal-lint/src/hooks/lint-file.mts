@@ -2033,6 +2033,8 @@ const LOC_PATH_RE = /(?<![^\s:()[\]'"])(?<path>[^\s:()[\]'"]+\.[A-Za-z0-9]+)[:(]
 const LOC_ROW_RE = /^\s*(?<line>\d+):\d+\s/;
 /** Location regex C: shellcheck's default tty header `In <file> line <line>:` (path-less: the edited file is its only target). */
 const LOC_SHELLCHECK_RE = /^In .+ line (?<line>\d+):/;
+/** Code-frame gutter line (`4 |     v.push(1);`, rustc/cargo, ruff full, oxlint): never a location, checked before A-C. */
+const CODE_FRAME_RE = /^\s*\d*\s*[|│]/;
 
 /**
  * Parse/syntax error wording (plus rustc's unnumbered `error: expected ...` header, tsc's TS1xxx and shellcheck's SC1xxx
@@ -2074,6 +2076,7 @@ export function gateFinding(finding: Finding, ranges: Array<[number, number]> | 
   const hit = (line: number): "hit" | "miss" => (ranges === null || (typeof ranges === "function" ? ranges(line - 1) : ranges.some(([s, e]) => s <= line - 1 && line - 1 <= e)) ? "hit" : "miss");
   const classify = (raw: string): "hit" | "miss" | "foreign" | null => {
     const plain = raw.replace(ANSI_SGR_RE, "");
+    if (CODE_FRAME_RE.test(plain)) return null; // a source line in a code frame: `ok.pow(2` is no location
     const row = LOC_ROW_RE.exec(plain); // a stylish row first: its message text can look like `foo.bar(3)`
     if (row?.groups) return hit(Number(row.groups.line));
     const a = LOC_PATH_RE.exec(plain);
