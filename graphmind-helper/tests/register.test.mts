@@ -67,7 +67,8 @@ function setup(on: Parameters<typeof mock.clock>[0], w: World = {}) {
     calls.push({ ...e, tool });
     if (tool.endsWith("__gm_status") && w.unregistered) return { value: { deny: "Project is not registered" } };
     const text = tool.endsWith("__gm_status") ? "Project: p\nGraph: 1 symbols" : tool.endsWith("__gm_map") ? ">> map\n  top file" : tool.endsWith("__gm_memory_list") ? ">> 1\n  [decision] recent one (id: x)" : "  foo [Function] a.ts:1";
-    return tool.includes("graphmind") ? { value: { result: text } } : next(e);
+    // The shape of a real MCP tool result (live, Claude Code 2.1.325): text parts under `result` and the joined text.
+    return tool.includes("graphmind") ? { value: { result: [{ type: "text", text }], text } } : next(e);
   });
   return { prompts, toasts, calls, runs, clock };
 }

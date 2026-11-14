@@ -20,6 +20,13 @@
 - Dedupe: the module adds nothing when `~/.claude/settings.json` names the setup's scripts (read once per conversation).
 - `$.tool.call` and `$.process.run` run in-frame of a hook (permission checks otherwise prompt); all of them are awaited inside `prompt.submit`/`tool.call`. Every failure fails open (the prompt or result passes unchanged).
 
+## Live-verified (`claude -p`, Claude Code 2.1.325, 2026-11-14; setup hooks kept out by a temp `HOME` plus `CLAUDE_CONFIG_DIR` and `--setting-sources project`)
+
+- The module loads (`graphmind-helper@inline`, events session.start/session.end/prompt.submit/tool.call) and the plugin's MCP server connects as `plugin:graphmind-helper:graphmind`; `$.tool.call` reaches its tools as `mcp__plugin_graphmind-helper_graphmind__gm_*`.
+- A real MCP tool result is `{ result: [{ type: "text", text }], text }`, not a string (a first build read only strings and silently added nothing): `textOf` reads `text`, then a string `result`, then the text parts.
+- The first-prompt briefing (a `context` entry returned from `prompt.submit`) reaches the model verbatim. The nudge (`context` on a `tool.call` result) reaches it too, shown to the model as "tool.call hook additional context".
+- Not exercised live: a `graphmind setup` server (name `mcp__graphmind__*`, only in the kit test), the setup-hooks dedupe, an unregistered project and init, the 10th-prompt checkpoint.
+
 ## Tests
 
 `tests/register.test.mts` drives the built module with `createKit` (stubs for tool list/calls, `process.run`, fs, env, cwd, toast); `tests/terms.test.mts` the pure helpers; `tests/mcp.test.mts` spawns the built wrapper with a fake `graphmind` shell script on `PATH` and a temp `HOME`.

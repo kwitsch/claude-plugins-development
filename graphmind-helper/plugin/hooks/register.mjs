@@ -17,7 +17,12 @@ function fresh() {
 	};
 }
 function textOf(r) {
-	return r.deny === undefined && r.isError !== true && typeof r.result === "string" ? r.result : undefined;
+	if (r.deny !== undefined || r.isError === true) return undefined;
+	if (typeof r.text === "string") return r.text;
+	if (typeof r.result === "string") return r.result;
+	if (!Array.isArray(r.result)) return undefined;
+	const parts = r.result.map((p) => p && typeof p === "object" && typeof p.text === "string" ? p.text : "");
+	return parts.join("\n");
 }
 async function binaryCandidates($) {
 	const [home, pathVar] = await Promise.all([$.env.get("HOME"), $.env.get("PATH")]);

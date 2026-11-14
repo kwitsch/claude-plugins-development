@@ -18,7 +18,7 @@ import type { GmTools } from "./terms.mjs";
 /** One entry of `$.tool.list()`. */
 type ToolInfo = { name: string };
 /** A `tool.call` result. */
-type ToolResult = { deny?: unknown; isError?: boolean; result?: unknown; context?: unknown } & Record<string, unknown>;
+type ToolResult = { deny?: unknown; isError?: boolean; result?: unknown; text?: unknown; context?: unknown } & Record<string, unknown>;
 /** The part of the engine interface `$` this module uses. */
 type Engine = {
   /** Time. */
@@ -103,13 +103,19 @@ function fresh(): State {
 }
 
 /**
- * The text of a tool result.
+ * The text of a tool result. A real MCP tool answers (live, Claude Code 2.1.325) `{ result: [{ type: "text", text }], text }`;
+ * a tool registered through `$.tool.register` answers `{ result: "<text>" }`.
  *
  * @param r - The `$.tool.call` result.
- * @returns The text, `undefined` for a deny, an error or a non-text result.
+ * @returns The text, `undefined` for a deny, an error or a result without text.
  */
 function textOf(r: ToolResult): string | undefined {
-  return r.deny === undefined && r.isError !== true && typeof r.result === "string" ? r.result : undefined;
+  if (r.deny !== undefined || r.isError === true) return undefined;
+  if (typeof r.text === "string") return r.text;
+  if (typeof r.result === "string") return r.result;
+  if (!Array.isArray(r.result)) return undefined;
+  const parts = (r.result as unknown[]).map((p) => (p && typeof p === "object" && typeof (p as { text?: unknown }).text === "string" ? (p as { text: string }).text : ""));
+  return parts.join("\n");
 }
 
 /**
