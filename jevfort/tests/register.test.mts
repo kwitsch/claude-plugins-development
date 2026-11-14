@@ -2090,6 +2090,24 @@ for (const [percent, jev, runs, label] of [[85, finished, 1, "a task end"], [85,
   });
 }
 
+// `0` turns either threshold off; a custom value is used and compacts from (>=) that fill.
+for (
+  const [options, percent, jev, runs] of [
+    [{ forceCompactPercent: 0 }, 99, intermediate, 0],
+    [{ taskCompactPercent: 0 }, 85, finished, 0],
+    [{ taskCompactPercent: 50 }, 50, finished, 1],
+    [{ forceCompactPercent: 90 }, 90, intermediate, 1],
+  ] as const
+) {
+  test(`Context at ${percent}% with ${JSON.stringify(options)}: /compact runs ${runs}x`, { options: { classify: false, ...options } }, async ($, on) => {
+    setup(on, { messages: [user("rename foo to bar")], jev });
+    followUps(on);
+    const state = compactStubs(on, percent);
+    await $.turn.complete(answered("t1", "Done."));
+    expect(state.compacts).toBe(runs);
+  });
+}
+
 // F03: the done check and the task end share one request and one transcript read.
 for (const [percent, ids] of [[85, ["done", "end"]], [30, ["done"]]] as const) {
   test(`Turn end at ${percent}% fill: one batch call (${ids.join("+")}), one transcript read`, { options: { classify: false } }, async ($, on) => {
