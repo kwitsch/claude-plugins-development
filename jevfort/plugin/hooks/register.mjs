@@ -800,7 +800,7 @@ export const register = (on, options) => {
 			const effortAnswer = score(r.answers, "effort");
 			const est = estimateEffort(effortAnswer, mechanical, estimate);
 			if (firstTurn) firstTurn.effort = est.effort;
-			debugEffort($, e, `${est.source}${effortAnswer ? ` (score ${effortAnswer.score.toFixed(2)})` : ""}`, est.effort);
+			debugEffort($, e, `${est.source}${effortAnswer ? ` (score ${effortAnswer.score.toFixed(2)})` : ""}${autoOff ? " · auto off" : ""}`, autoOff ? undefined : est.effort);
 			if (!autoOff) {
 				turn.effort = est.effort !== e.effort ? est.effort : undefined;
 				if (!e.agentId) {
