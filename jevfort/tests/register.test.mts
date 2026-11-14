@@ -1024,6 +1024,14 @@ test("estimate_effort returns Jev's estimate", async ($, on) => {
   expect(stateOf(sent, 0).request).toBe(ESTIMATE.prompt);
 });
 
+// Rewording a settings allow makes cc-plugin-sec-default warn the user.
+test("estimate_effort keeps a settings allow verdict untouched", async ($, on) => {
+  setup(on, { messages: [], jev: () => undefined });
+  const base = { decision: "allow", rule: "mcp__jevfort__estimate_effort", reason: "settings rule" };
+  on("tool.check", () => base);
+  expect(await $.tool.check({ tool: ESTIMATE.tool, input: {}, tool_use_id: "toolu_1" })).toEqual(base);
+});
+
 test("estimate_effort falls back to defaultEffort when Jev is unreachable", async ($, on) => {
   setup(on, { messages: [], jev: () => 401 });
   expect(await estimateCall($)).toEqual({ result: JSON.stringify({ effort: "high", source: "fallback" }) });

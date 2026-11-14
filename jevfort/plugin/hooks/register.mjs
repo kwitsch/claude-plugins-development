@@ -1348,7 +1348,7 @@ export const register = (on, options) => {
 	on("tool.check", async function onToolCheck($, e, next) {
 		if (e.tool === ESTIMATE_TOOL) {
 			const base = await next(e);
-			return base.decision !== "deny" ? {
+			return base.decision !== "deny" && base.decision !== "allow" ? {
 				...base,
 				decision: "allow",
 				reason: "jevfort: estimate_effort is answered locally"

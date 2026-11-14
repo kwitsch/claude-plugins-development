@@ -1719,10 +1719,11 @@ export const register = (on: On, options: Options): void => {
 
   // Permission check: approves Jev's own vetted calls and writes into this session's scratchpad; every other verdict stays Claude Code's.
   on("tool.check", async function onToolCheck($: Engine, e: Check, next: Next<Check, Verdict>): Promise<Verdict> {
-    // The estimate tool is answered by the tool.call hook, also while inactive, so there is nothing to prompt for. A settings deny rule still wins.
+    // The estimate tool is answered by the tool.call hook, also while inactive, so there is nothing to prompt for. A settings deny rule still wins;
+    // an existing allow is returned unchanged (rewording it makes the security plugin warn the user).
     if (e.tool === ESTIMATE_TOOL) {
       const base = await next(e);
-      return base.decision !== "deny" ? { ...base, decision: "allow", reason: "jevfort: estimate_effort is answered locally" } : base;
+      return base.decision !== "deny" && base.decision !== "allow" ? { ...base, decision: "allow", reason: "jevfort: estimate_effort is answered locally" } : base;
     }
     if ((await jevMissing($)).length) return next(e);
     const base = await next(e);
