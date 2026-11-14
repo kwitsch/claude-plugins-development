@@ -2181,8 +2181,9 @@ export function recordEdit(fp: string, real: string, hunks: EditHunk[] | null): 
  * @remarks
  * Coordinates: the finding's lines are those of the file as the linter read it, whose digest is `d0`. The reference
  * is the last journal record with `digest === d0`; only the records after it are later edits. A file that changed
- * during the lint (`d0 !== d1`), no matching record, no later record, a missing or unreadable journal or record
- * all mean "cannot tell": the findings are returned as they are (fail open, reported). Nothing is held when there is
+ * during the lint (`d0 !== d1`), no matching record, no later record, two later records with one digest (a hook read
+ * the file after a later edit landed, so the file order of the records may not be the edit order), a missing or
+ * unreadable journal or record all mean "cannot tell":the findings are returned as they are (fail open, reported). Nothing is held when there is
  * nothing to report, no own record, or nothing the filter could drop (foreign or unlocated findings only).
  *
  * @param findings - The gated findings of the lint.
@@ -2215,6 +2216,8 @@ export async function settleFindings(findings: Finding[], resolved: string, rec:
       if (r.digest === d0) at = i;
     });
     if (at === -1 || at === recs.length - 1) return findings;
+    // A hook journaled after a later edit landed (two later records hold one digest): file order may not be edit order.
+    if (new Set(recs.slice(at + 1).map((r) => r.digest)).size < recs.length - at - 1) return findings;
     later = recs.slice(at + 1).map((r) => r.hunks);
   } catch {
     return findings;
