@@ -1081,6 +1081,43 @@ for (const [single, expectBypass] of [[0.95, true], [0.3, false]] as const) {
   });
 }
 
+// A bypass take the user rejected (or a rule/hook denied) is Claude's to answer: the feedback must reach it.
+for (
+  const refusal of [
+    "The user doesn't want to proceed with this tool use. The tool use was rejected. To tell you how to proceed, the user said: run only the unit tests with pnpm test:unit",
+    "Permission for this tool use was denied. Try a different approach or report the limitation to complete your task",
+  ]
+) {
+  test(`Whole-turn bypass leaves a refused take to Claude: ${refusal.slice(0, 40)}`, async ($, on) => {
+    const messages: Msg[] = [user("run the tests")];
+    const seen: unknown[] = [];
+    setup(on, {
+      messages,
+      packageJson: { scripts: { test: "node --test" } },
+      jev: byId({
+        next_action: { type: "choice", choice: "run npm test", probabilities: { "run npm test": 0.95, claude: 0.05 }, confidence: 0.9 },
+        difficulty: easy,
+        single_action: { type: "noul", noul: 0.95 },
+      }),
+    });
+    const asked: string[] = [];
+    on("model.complete", (_$, e) => {
+      asked.push(String(e.prompt));
+      return { value: { isAnswered: true, text: "The test run was rejected.", usage: { input_tokens: 1, output_tokens: 1 } } };
+    });
+    claudeBeneath(on, seen);
+
+    const id = toolId((await drain($.turn.step(step))).chunks);
+    expect(id).not.toBe("");
+    messages.push({ role: "assistant", text: "", toolUses: [{ tool_use_id: id, tool: "Bash", input: { command: "npm test" }, text: refusal, isError: true }] });
+    messages.push({ role: "user", text: "", toolUses: [], toolResults: [{ tool_use_id: id, text: refusal, isError: true }] });
+    await drain($.turn.step({ ...step, index: 1, messageCount: 3 }));
+
+    expect(seen).toHaveLength(1);
+    expect(asked).toHaveLength(0);
+  });
+}
+
 test("Built-in commands are never offered as skills, and a skill that fails is blocklisted", { options: { takeOnlyForBypass: false } }, async ($, on) => {
   const offered: string[][] = [];
   setup(on, {

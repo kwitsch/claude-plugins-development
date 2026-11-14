@@ -29,6 +29,7 @@ function settled(base) {
 	return base.decision === "deny" || base.decision === "allow" || base.decision === "ask" && base.rule !== undefined;
 }
 const SINGLE_ACTION = .8;
+const REFUSED = /^(The user doesn't want to proceed with this tool use|Permission for this tool use was denied|Permission to use .*has been denied|Hook '[^']*' blocked)/s;
 const PLUGIN_NAME = "jevfort";
 const DONE_PROMPT = "Jev: the user's request doesn't look finished yet. Continue with what remains. If it is actually complete, say so in one line.";
 const FINISHED = new Set([
@@ -1105,7 +1106,7 @@ export const register = (on, options) => {
 			const id = turn.bypassId;
 			turn.bypassId = undefined;
 			const done = calls.find((c) => c.tool_use_id === id);
-			if (done?.text !== undefined) {
+			if (done?.text !== undefined && !(done.isError && REFUSED.test(done.text))) {
 				const s = await summarizeResult($, ctx.request, turn.bypassAction ?? done.tool, done.text);
 				await record($, {
 					kind: "bypass",

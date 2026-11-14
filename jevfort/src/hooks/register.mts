@@ -196,6 +196,12 @@ function settled(base: Verdict): boolean {
 }
 /** From this `single_action` probability on, a taken step bypasses the whole turn. */
 const SINGLE_ACTION = 0.8;
+/**
+ * Claude Code's error texts (2.1.325) for a call that never ran: rejected or denied by the user, a rule or a hook.
+ * A bypass take refused this way goes back to Claude, which carries the user's feedback or tries another way; a
+ * failed run (non-zero exit) does not match and is still summarized.
+ */
+const REFUSED = /^(The user doesn't want to proceed with this tool use|Permission for this tool use was denied|Permission to use .*has been denied|Hook '[^']*' blocked)/s;
 /** This plugin's name: the `origin.name` of the prompts it submits itself. */
 const PLUGIN_NAME = "jevfort";
 /** The done check's follow-up message. */
@@ -1547,7 +1553,7 @@ export const register = (on: On, options: Options): void => {
       const id = turn.bypassId;
       turn.bypassId = undefined;
       const done = calls.find((c) => c.tool_use_id === id);
-      if (done?.text !== undefined) {
+      if (done?.text !== undefined && !(done.isError && REFUSED.test(done.text))) {
         const s = await summarizeResult($, ctx.request, turn.bypassAction ?? done.tool, done.text);
         await record($, {
           kind: "bypass",
