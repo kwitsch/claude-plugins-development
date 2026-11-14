@@ -773,8 +773,12 @@ async function recordCompare($: Engine, turnId: string, step: number, request: s
  * @param name - The skill.
  */
 async function blockSkill($: Engine, name: string): Promise<void> {
-  const list = ((await $.store.get(SKILL_BLOCKLIST_KEY)) as string[] | undefined) ?? [];
-  if (!list.includes(name)) await $.store.set(SKILL_BLOCKLIST_KEY, [...list, name]);
+  try {
+    const list = ((await $.store.get(SKILL_BLOCKLIST_KEY)) as string[] | undefined) ?? [];
+    if (!list.includes(name)) await $.store.set(SKILL_BLOCKLIST_KEY, [...list, name]);
+  } catch {
+    // A failing store (over its cap, a full disk) must not fail the tool call hook after the call ran.
+  }
 }
 
 /**
@@ -950,8 +954,11 @@ export const register = (on: On, options: Options): void => {
 
     on("agent.offer", async function onAgentOffer($: Engine, e: OfferEvent, next: Next<OfferEvent, unknown>): Promise<unknown> {
       if ((await jevMissing($)).length) return next(e);
-      offered.set(e.agent, e.description);
-      return next(e);
+      const r = await next(e);
+      // Only types the model is really offered are Jev's options: a hook beneath may withhold one, and its dispatch is then refused.
+      if ((r as { isOffered?: boolean } | undefined)?.isOffered === false) offered.delete(e.agent);
+      else offered.set(e.agent, e.description);
+      return r;
     });
 
     on("tool.call", { tool: "Agent" }, async function onAgentCall($: Engine, e: AgentCall, next: Next<AgentCall, ToolResult>): Promise<ToolResult> {

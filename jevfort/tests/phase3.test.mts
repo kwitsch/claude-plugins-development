@@ -114,6 +114,17 @@ test("A general-purpose subagent is switched only when Jev is confident; an expl
   expect(sent[0].criteria).toEqual({ "general-purpose": "General tasks", Explore: "Read-only codebase search" });
 });
 
+test("An agent type a hook beneath withholds is not one of Jev's options", async ($, on) => {
+  const sent = base(on, () => ({ type: "choice", choice: "Explore", probabilities: { Explore: 0.92, "general-purpose": 0.08 }, confidence: 0.85 }));
+  on("agent.offer", (_$, e) => ({ isOffered: e.agent !== "lab:runner" }));
+  on("tool.call", () => ({ result: undefined }));
+  await $.agent.offer({ agent: "general-purpose", description: "General tasks", source: "built-in" });
+  await $.agent.offer({ agent: "Explore", description: "Read-only codebase search", source: "built-in" });
+  await $.agent.offer({ agent: "lab:runner", description: "Runner only", source: "plugin" });
+  await $.tool.call({ tool: "Agent", description: "find usages", prompt: "Find every caller of addTodo", tool_use_id: "a1" });
+  expect(Object.keys(sent[0].criteria as object)).toEqual(["general-purpose", "Explore"]);
+});
+
 pureTest("Compaction instructions keep relevant results and mark stale ones", () => {
   const messages = [
     { role: "user", text: "fix the failing date test", toolUses: [] },

@@ -448,8 +448,10 @@ async function recordCompare($, turnId, step, request, answer, candidates, toolU
 	});
 }
 async function blockSkill($, name) {
-	const list = await $.store.get(SKILL_BLOCKLIST_KEY) ?? [];
-	if (!list.includes(name)) await $.store.set(SKILL_BLOCKLIST_KEY, [...list, name]);
+	try {
+		const list = await $.store.get(SKILL_BLOCKLIST_KEY) ?? [];
+		if (!list.includes(name)) await $.store.set(SKILL_BLOCKLIST_KEY, [...list, name]);
+	} catch {}
 }
 async function checkDone($, e, threshold) {
 	const agents = await $.agent.list().catch(() => undefined);
@@ -613,8 +615,10 @@ export const register = (on, options) => {
 		const offered = new Map();
 		on("agent.offer", async function onAgentOffer($, e, next) {
 			if ((await jevMissing($)).length) return next(e);
-			offered.set(e.agent, e.description);
-			return next(e);
+			const r = await next(e);
+			if (r?.isOffered === false) offered.delete(e.agent);
+			else offered.set(e.agent, e.description);
+			return r;
 		});
 		on("tool.call", { tool: "Agent" }, async function onAgentCall($, e, next) {
 			if ((await jevMissing($)).length) return next(e);
