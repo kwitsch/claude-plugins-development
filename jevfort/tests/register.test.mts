@@ -1152,6 +1152,35 @@ test("Built-in commands are never offered as skills, and a skill that fails is b
   expect(offered[1] ?? []).not.toContain("skill changelog");
 });
 
+for (const [name, answer, blocked] of [
+  ["succeeds", { result: "ok" }, false],
+  ["is denied", { deny: "Skill: changelog is not a skill" }, true],
+] as const) {
+  test(`A skill Jev ran itself that ${name} is ${blocked ? "" : "not "}blocklisted`, { options: { takeOnlyForBypass: false } }, async ($, on) => {
+    const offered: string[][] = [];
+    setup(on, {
+      messages: [user("summarize the recent changes")],
+      jev: (q) => {
+        if (q.id !== "next_action") return q.id === "difficulty" ? easy : undefined;
+        offered.push(Object.keys(q.criteria as object));
+        return { type: "choice", choice: "skill changelog", probabilities: { "skill changelog": 0.95, claude: 0.05 }, confidence: 0.9 };
+      },
+    });
+    on("command.list", () => ({ value: [{ name: "changelog", description: "Summarize recent changes", source: "plugin" }] }));
+    on("tool.call", () => answer);
+    claudeBeneath(on, []);
+
+    const { chunks } = await drain($.turn.step(step));
+    expect(offered[0]).toContain("skill changelog");
+    await $.tool.call({ tool: "Skill", skill: "changelog", tool_use_id: toolId(chunks) }).catch(() => undefined);
+    expect(await runJev($, "")).toContain(`Skill ${blocked ? "failed" : "ok"}`);
+
+    await drain($.turn.step({ ...step, turnId: "t2" }));
+    if (blocked) expect(offered[1] ?? []).not.toContain("skill changelog");
+    else expect(offered[1]).toContain("skill changelog");
+  });
+}
+
 test("The done check stays quiet while background work is running", async ($, on) => {
   const { sent } = setup(on, {
     messages: [user("find every localStorage use with a subagent")],
