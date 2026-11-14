@@ -311,9 +311,9 @@ export const REGISTRY: Record<string, LangEntry> = {
   },
   rust: {
     chain: [
-      // name/onPath gates on the standalone cargo-clippy driver binary --
-      // its presence on PATH is how the clippy rustup component is detected
-      // (see `.claude/rules/languages.md`, "Rust"). But
+      // name/onPath gates on the standalone cargo-clippy binary (rustup puts
+      // its proxy on PATH even without the clippy component; `runPlan` then
+      // falls back to cargo check, see `.claude/rules/languages.md`, "Rust"). But
       // that bare binary does NOT accept --manifest-path (it belongs to
       // cargo/its clippy subcommand, not the driver clippy-driver itself
       // invokes) -- spawnAs runs the actually-selected tool as `cargo
@@ -718,10 +718,11 @@ async function runLintTool(tool: LintTool, argv: string[], spawnOpts: SpawnSyncO
   // spawnAs decouples "which binary name gates PATH-availability /
   // selectLintTool matching" (tool.name -- probed by onPath/selectLintTool)
   // from "which binary + args are actually spawned". Only the rust chain's
-  // clippy entry sets it today: it probes the standalone cargo-clippy driver
-  // binary (whose presence signals the clippy rustup component is installed)
+  // clippy entry sets it today: it probes the standalone cargo-clippy binary
   // but must actually run via the `cargo clippy` subcommand, since the bare
-  // driver binary rejects buildArgv's --manifest-path.
+  // driver binary rejects buildArgv's --manifest-path. (rustup's cargo-clippy
+  // proxy is on PATH even without the clippy component; `runPlan` falls back
+  // to `cargo check` on rustup's "not installed" error.)
   const spawnName = tool.spawnAs?.name ?? tool.name;
   const spawnArgv = tool.spawnAs ? [...tool.spawnAs.args, ...argv] : argv;
   return spawnGroup(spawnName, spawnArgv, spawnOpts);
@@ -1610,6 +1611,28 @@ function planChainLint(lang: LangEntry, resolved: string, cwd: string): ChainPla
   return { tool, local: sel.local, argv, spawnCwd, timeout, manifest };
 }
 
+/** rustup's proxy message when the active toolchain lacks the clippy component (its `cargo-clippy` proxy is on PATH anyway). */
+const CLIPPY_MISSING_RE = /'cargo-clippy' is not installed for/;
+
+/**
+ * Spawn a planned chain-tool run (shared by `runChainLint` and `lintFilesHandler`). When the selected tool is
+ * `cargo-clippy` and rustup reports the clippy component missing (`CLIPPY_MISSING_RE`, non-zero exit), the next rust
+ * chain entry (`cargo check`) runs instead with the same manifest, spawn cwd and timeout.
+ *
+ * @param plan - The plan from `planChainLint`.
+ * @param argv - The argv to run (`plan.argv`, or a batch argv for file-scoped tools).
+ * @param resolved - Absolute path of a file the plan covers (for the fallback's argv).
+ * @param cwd - Project root.
+ * @returns The tool that actually ran and its spawn result.
+ */
+async function runPlan(plan: ChainPlan, argv: string[], resolved: string, cwd: string): Promise<{ tool: LintTool; result: SpawnSyncReturns<string> }> {
+  const spawnOpts = buildSpawnOpts(plan.spawnCwd, plan.timeout);
+  const result = await runLintTool(plan.tool, argv, spawnOpts, plan.local);
+  const next = REGISTRY.rust.chain[REGISTRY.rust.chain.indexOf(plan.tool) + 1];
+  if (plan.tool.name !== "cargo-clippy" || !next || result.error || result.signal || result.status === 0 || !CLIPPY_MISSING_RE.test(result.stderr ?? "") || !onPath(next.name)) return { tool: plan.tool, result };
+  return { tool: next, result: await runLintTool(next, buildArgv(next, resolved, cwd, plan.manifest, plan.spawnCwd), spawnOpts, null) };
+}
+
 /**
  * Classify one chain-tool spawn result (shared by `runChainLint` and `lintFilesHandler`): checkstyle by its stripped
  * stdout (`classifyCheckstyleOutput`), every other tool by exit code (`classifyExit`) with stdout and stderr joined.
@@ -1658,9 +1681,13 @@ async function runChainLint(lang: LangEntry, resolved: string, cwd: string, rel:
   const none = NO_CHAIN;
   const plan = planChainLint(lang, resolved, cwd);
   if (!plan) return none;
-  const { tool, argv, timeout, spawnCwd, manifest } = plan;
-  const spawnOpts = buildSpawnOpts(spawnCwd, timeout);
-  const spawnTool = (): Promise<SpawnSyncReturns<string>> => runLintTool(tool, argv, spawnOpts, plan.local);
+  const { argv, timeout, spawnCwd, manifest } = plan;
+  let tool = plan.tool;
+  const spawnTool = async (): Promise<SpawnSyncReturns<string>> => {
+    const ran = await runPlan(plan, argv, resolved, cwd);
+    tool = ran.tool;
+    return ran.result;
+  };
   // Directory- and crate-scoped tools check the whole package/crate: one run per FileChanged burst covers every file.
   const key = coalesce ? (tool.targetsDir ? hashPath(`${tool.name}:${path.dirname(resolved)}`) : manifest ? hashPath(`${tool.name}:${manifest}`) : null) : null;
   const result = key ? await coalesceProjectCheck(key, resolved, timeout, spawnTool) : await spawnTool();
@@ -2538,12 +2565,18 @@ export async function lintFilesHandler(cwd: string, files: readonly string[]): P
 
   const ran = new Set<string>();
   const chainBlocks: string[] = [];
-  const spawnPlan = async (plan: ChainPlan, argv: string[]): Promise<ReturnType<typeof chainOutcome>> => chainOutcome(plan.tool, await runLintTool(plan.tool, argv, buildSpawnOpts(plan.spawnCwd, plan.timeout), plan.local));
-  const record = (members: Array<{ fp: string; plan: ChainPlan }>, out: ReturnType<typeof chainOutcome>): void => {
+  type Outcome = (NonNullable<ReturnType<typeof chainOutcome>> & { tool: LintTool }) | null;
+  const spawnPlan = async (plan: ChainPlan, argv: string[], fp: string): Promise<Outcome> => {
+    const { tool, result } = await runPlan(plan, argv, fp, cwd);
+    const out = chainOutcome(tool, result);
+    return out && { ...out, tool };
+  };
+  const record = (members: Array<{ fp: string; plan: ChainPlan }>, out: Outcome): void => {
     if (!out || out.verdict === "skip") return;
     for (const m of members) ran.add(m.fp);
     if (out.verdict !== "issues") return;
-    const { tool, manifest } = members[0].plan;
+    const { tool } = out;
+    const { manifest } = members[0].plan;
     const targets = new Set(members.map(({ fp }) => chainTarget(tool, manifest, cwd, fp)));
     // One block now carries up to BATCH_MAX_FILES files: keep the old per-file budget so later files' findings are not cut.
     chainBlocks.push(`universal-lint: ${tool.name} found issues in ${[...targets].join(", ")}:\n${truncate(out.text, MAX_CONTEXT_CHARS * members.length)}`);
@@ -2556,12 +2589,12 @@ export async function lintFilesHandler(cwd: string, files: readonly string[]): P
       const chunk = group.slice(i, i + step);
       try {
         const argv = fileScoped ? [...plan.argv.slice(0, -1), ...chunk.map((m) => m.fp)] : plan.argv;
-        const out = await spawnPlan(plan, argv);
+        const out = await spawnPlan(plan, argv, chunk[0].fp);
         // Per-file fail-open: one unparsable or pathological file, a tool crash, kill or timeout must not drop the other files' findings.
         if ((!out || out.verdict === "skip") && fileScoped && chunk.length > 1) {
           for (const m of chunk) {
             try {
-              record([m], await spawnPlan(m.plan, m.plan.argv));
+              record([m], await spawnPlan(m.plan, m.plan.argv, m.fp));
             } catch {
               // fail open: drop this file only
             }

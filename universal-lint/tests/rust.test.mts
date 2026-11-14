@@ -30,6 +30,19 @@ test("rust: cargo-clippy on PATH gates selection, but the actual run is 'cargo c
   assert.ok(!e.lines().some((l) => l.startsWith("cargo-clippy "))); // the bare driver was only probed
 });
 
+test("rust: rustup's cargo-clippy proxy without the clippy component -> falls back to cargo check, no finding", () => {
+  const { e, main } = crate();
+  e.recStub("cargo-clippy", 1);
+  e.stub(
+    "cargo",
+    `printf "cargo %s\\n" "$*" >> "$RECORD"`,
+    `if [ "$1" = clippy ]; then echo "error: 'cargo-clippy' is not installed for the toolchain 'stable-x86_64-unknown-linux-gnu'." >&2; exit 1; fi`,
+    "exit 0",
+  );
+  assert.deepEqual(e.run(main).result, {});
+  assert.ok(e.lines().some((l) => l.includes(`cargo check --manifest-path ${e.cwd}/Cargo.toml`)));
+});
+
 test("rust: .rs with no Cargo.toml anywhere -> {} and the stub is never invoked (manifest gate)", () => {
   const e = makeEnv();
   e.recStub("cargo", 101);

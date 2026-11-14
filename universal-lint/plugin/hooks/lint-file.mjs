@@ -849,6 +849,20 @@ function planChainLint(lang, resolved, cwd) {
 		manifest
 	};
 }
+const CLIPPY_MISSING_RE = /'cargo-clippy' is not installed for/;
+async function runPlan(plan, argv, resolved, cwd) {
+	const spawnOpts = buildSpawnOpts(plan.spawnCwd, plan.timeout);
+	const result = await runLintTool(plan.tool, argv, spawnOpts, plan.local);
+	const next = REGISTRY.rust.chain[REGISTRY.rust.chain.indexOf(plan.tool) + 1];
+	if (plan.tool.name !== "cargo-clippy" || !next || result.error || result.signal || result.status === 0 || !CLIPPY_MISSING_RE.test(result.stderr ?? "") || !onPath(next.name)) return {
+		tool: plan.tool,
+		result
+	};
+	return {
+		tool: next,
+		result: await runLintTool(next, buildArgv(next, resolved, cwd, plan.manifest, plan.spawnCwd), spawnOpts, null)
+	};
+}
 function chainOutcome(tool, result) {
 	if (!result || result.error || result.signal) return null;
 	let verdict;
@@ -870,9 +884,13 @@ async function runChainLint(lang, resolved, cwd, rel, coalesce = false) {
 	const none = NO_CHAIN;
 	const plan = planChainLint(lang, resolved, cwd);
 	if (!plan) return none;
-	const { tool, argv, timeout, spawnCwd, manifest } = plan;
-	const spawnOpts = buildSpawnOpts(spawnCwd, timeout);
-	const spawnTool = () => runLintTool(tool, argv, spawnOpts, plan.local);
+	const { argv, timeout, spawnCwd, manifest } = plan;
+	let tool = plan.tool;
+	const spawnTool = async () => {
+		const ran = await runPlan(plan, argv, resolved, cwd);
+		tool = ran.tool;
+		return ran.result;
+	};
 	const key = coalesce ? tool.targetsDir ? hashPath(`${tool.name}:${path.dirname(resolved)}`) : manifest ? hashPath(`${tool.name}:${manifest}`) : null : null;
 	const result = key ? await coalesceProjectCheck(key, resolved, timeout, spawnTool) : await spawnTool();
 	const outcome = chainOutcome(tool, result);
@@ -1367,12 +1385,20 @@ export async function lintFilesHandler(cwd, files) {
 	}
 	const ran = new Set();
 	const chainBlocks = [];
-	const spawnPlan = async (plan, argv) => chainOutcome(plan.tool, await runLintTool(plan.tool, argv, buildSpawnOpts(plan.spawnCwd, plan.timeout), plan.local));
+	const spawnPlan = async (plan, argv, fp) => {
+		const { tool, result } = await runPlan(plan, argv, fp, cwd);
+		const out = chainOutcome(tool, result);
+		return out && {
+			...out,
+			tool
+		};
+	};
 	const record = (members, out) => {
 		if (!out || out.verdict === "skip") return;
 		for (const m of members) ran.add(m.fp);
 		if (out.verdict !== "issues") return;
-		const { tool, manifest } = members[0].plan;
+		const { tool } = out;
+		const { manifest } = members[0].plan;
 		const targets = new Set(members.map(({ fp }) => chainTarget(tool, manifest, cwd, fp)));
 		chainBlocks.push(`universal-lint: ${tool.name} found issues in ${[...targets].join(", ")}:\n${truncate(out.text, MAX_CONTEXT_CHARS * members.length)}`);
 	};
@@ -1384,11 +1410,11 @@ export async function lintFilesHandler(cwd, files) {
 			const chunk = group.slice(i, i + step);
 			try {
 				const argv = fileScoped ? [...plan.argv.slice(0, -1), ...chunk.map((m) => m.fp)] : plan.argv;
-				const out = await spawnPlan(plan, argv);
+				const out = await spawnPlan(plan, argv, chunk[0].fp);
 				if ((!out || out.verdict === "skip") && fileScoped && chunk.length > 1) {
 					for (const m of chunk) {
 						try {
-							record([m], await spawnPlan(m.plan, m.plan.argv));
+							record([m], await spawnPlan(m.plan, m.plan.argv, m.fp));
 						} catch {}
 					}
 				} else {
