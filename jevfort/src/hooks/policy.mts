@@ -67,6 +67,16 @@ export const doneQuestion: Question = {
   },
 };
 
+/** Whether the turn that just ended closed a task (a good moment to compact) or only reached an intermediate result. */
+export const taskEndQuestion: Question = {
+  type: "noul",
+  instructions: "An AI coding assistant just ended a turn. Did it close a whole task for the user (the request in `request` is done and nothing it announced remains), judging from `final_message` and `recent`?",
+  criteria: {
+    true: "A task is complete: the result is delivered and the next message would start something new",
+    false: "An intermediate result: work continues, a step is reported, a question awaits the user's answer or more steps of the same task are expected",
+  },
+};
+
 /**
  * The most likely option other than claude, with its probability.
  *
