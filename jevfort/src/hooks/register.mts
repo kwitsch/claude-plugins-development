@@ -469,7 +469,7 @@ async function withJevRanking($: Engine, e: CompactEvent): Promise<CompactEvent>
   const items = compactItems(e.messages);
   if (items.length < 3) return e;
 
-  const request = splitTurn(e.messages)?.request ?? "";
+  const request = turnOf([...e.messages])?.request ?? "";
   const questions: Record<string, Question> = {};
   items.forEach((it, i) => {
     questions[`item_${i}`] = {

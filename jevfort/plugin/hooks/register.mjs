@@ -215,7 +215,7 @@ async function withJevRanking($, e) {
 	if (e.trigger !== "manual" && e.trigger !== "auto") return e;
 	const items = compactItems(e.messages);
 	if (items.length < 3) return e;
-	const request = splitTurn(e.messages)?.request ?? "";
+	const request = turnOf([...e.messages])?.request ?? "";
 	const questions = {};
 	items.forEach((it, i) => {
 		questions[`item_${i}`] = {
