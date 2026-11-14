@@ -59,7 +59,16 @@ test("markdownlint-cli2 absent but npx present -> npx --yes markdownlint-cli2 fa
   const f = e.file("a.md", "# hi\n");
   const r = e.run(f, { out: OUT });
   assert.match(r.ctx, /MD041/);
-  assert.ok(e.lines().some((l) => l.includes(`npx --yes markdownlint-cli2 --no-globs --config ${path.join(e.data, "markdownlint-no-line-length.json")} ${f}`)));
+  assert.ok(e.lines().some((l) => l.includes(`npx --yes markdownlint-cli2 --no-globs --config ${path.join(e.data, "markdownlint-no-line-length.json")} :${f}`)));
+});
+
+test("markdownlint-cli2 gets its literal-path prefix, so a file name with glob characters is linted (not matched as a pattern)", () => {
+  const e = makeEnv();
+  e.file(".markdownlint.json", "{}\n");
+  e.recStub("markdownlint-cli2", 0);
+  const f = e.file("notes (1).md", "# hi\n");
+  e.run(f);
+  assert.ok(e.lines().some((l) => l.endsWith(`markdownlint-cli2 --no-globs :${f}`)));
 });
 
 test("markdown: no project markdownlint config -> --config <MD013-off file> in recorded argv, and the file disables only MD013", () => {
@@ -78,5 +87,5 @@ test("markdown: project .markdownlint.json present -> no --config override, only
   const f = e.file("a.md", "# hi\n");
   e.run(f);
   assert.ok(!e.lines().some((l) => l.includes("markdownlint-no-line-length.json")));
-  assert.ok(e.lines().some((l) => l.includes(`markdownlint-cli2 --no-globs ${f}`)));
+  assert.ok(e.lines().some((l) => l.includes(`markdownlint-cli2 --no-globs :${f}`)));
 });

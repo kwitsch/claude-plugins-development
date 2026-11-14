@@ -69,7 +69,7 @@ function stamp(e: LintEnv, ageMs = 0): string {
  * @returns The space-joined argv.
  */
 function mdArgv(e: LintEnv, f: string): string {
-  return `--no-globs --config ${path.join(e.data, "markdownlint-no-line-length.json")} ${f}`;
+  return `--no-globs --config ${path.join(e.data, "markdownlint-no-line-length.json")} :${f}`;
 }
 
 test("eslint absent but npx present -> npx --yes eslint fallback runs, issues surfaced", () => {

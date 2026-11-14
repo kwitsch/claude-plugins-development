@@ -600,7 +600,7 @@ test("buildArgv: markdownlint-cli2 gets --config <MD013-off file in CLAUDE_PLUGI
   try {
     const argv = buildArgv(markdownlintCli2, path.join(dir, "a.md"), dir);
     const cfg = path.join(dataDir, "markdownlint-no-line-length.json");
-    assert.deepEqual(argv, ["--no-globs", "--config", cfg, path.join(dir, "a.md")]);
+    assert.deepEqual(argv, ["--no-globs", "--config", cfg, `:${path.join(dir, "a.md")}`]);
     assert.deepEqual(JSON.parse(readFileSync(cfg, "utf8")), { MD013: false });
   } finally {
     if (prev === undefined) delete process.env.CLAUDE_PLUGIN_DATA;
@@ -612,7 +612,7 @@ test("buildArgv: markdownlint-cli2 runs with only --no-globs when a project conf
   const markdownlintCli2 = REGISTRY.markdown.chain[0];
   const dir = mkdtempSync(path.join(tmpdir(), "ul-md-"));
   writeFileSync(path.join(dir, ".markdownlint.json"), "{}");
-  assert.deepEqual(buildArgv(markdownlintCli2, path.join(dir, "a.md"), dir), ["--no-globs", path.join(dir, "a.md")]);
+  assert.deepEqual(buildArgv(markdownlintCli2, path.join(dir, "a.md"), dir), ["--no-globs", `:${path.join(dir, "a.md")}`]);
 });
 
 test("buildArgv: classic markdownlint runs bare with a .markdownlintrc (rc config) above the file; cli2 keeps its guard", () => {
@@ -626,7 +626,7 @@ test("buildArgv: classic markdownlint runs bare with a .markdownlintrc (rc confi
   process.env.CLAUDE_PLUGIN_DATA = dataDir;
   try {
     assert.deepEqual(buildArgv(REGISTRY.markdown.chain[1], file, root), [file]);
-    assert.deepEqual(buildArgv(REGISTRY.markdown.chain[0], file, root), ["--no-globs", "--config", path.join(dataDir, "markdownlint-no-line-length.json"), file]);
+    assert.deepEqual(buildArgv(REGISTRY.markdown.chain[0], file, root), ["--no-globs", "--config", path.join(dataDir, "markdownlint-no-line-length.json"), `:${file}`]);
   } finally {
     if (prev === undefined) delete process.env.CLAUDE_PLUGIN_DATA;
     else process.env.CLAUDE_PLUGIN_DATA = prev;
