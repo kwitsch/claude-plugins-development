@@ -23,6 +23,7 @@ import type { RegState } from "./registry.mjs";
 import { cutState, DEFAULT_CONTEXT_TOKENS, DEFAULT_DENSITY, loadKnowledge } from "./size.mjs";
 import type { Knowledge } from "./size.mjs";
 import { TOOL_PREFIX } from "./tools.mjs";
+import { newLink, SERVER_TOOL_PREFIX } from "./transport.mjs";
 import { DEFAULT_OVERFLOW, TOOLS } from "./types.mjs";
 import type { On, Options, ToolName } from "./types.mjs";
 import { DEFAULT_TIMEOUT_S, fail, isOverflow, message, seconds } from "./util.mjs";
@@ -48,6 +49,8 @@ export function register(on: On, options?: Options): void {
   const st: RegState = { names, missing: new Set<ToolName>(TOOLS), pending: new Map(), retryAt: new Map(), failures: new Map(), stuck: new Set() };
   // What this instance learned about System One's size limits; the density comes back from the store in the first call that needs it.
   const know: Knowledge = { density: DEFAULT_DENSITY, persisted: DEFAULT_DENSITY, samples: 0, nctx: DEFAULT_CONTEXT_TOKENS, loaded: undefined };
+  // The HTTP transport: the plugin's MCP server while it is available, `$.http.fetch` while it is not (see transport.mts).
+  const link = newLink();
   on("session.start", async function onSessionStart($, e, next) {
     try {
       if (st.missing.size > 0) await ensureTools($, st, 5 * REGISTER_WAIT_MS);
@@ -82,9 +85,16 @@ export function register(on: On, options?: Options): void {
       if (!key && !base && !jevUrl) return await askHaiku($, type, cutState(input.state, HAIKU_MAX_CHARS), input.questions, timeoutMs, next.signal);
       await loadKnowledge($, know);
       if (next.signal.aborted) return fail(type, "the call was abandoned");
-      return await answerJev($, type, input, input.overflow ?? defaultOverflow, { key, base, jevUrl, model }, timeoutMs, next.signal, know);
+      return await answerJev($, type, input, input.overflow ?? defaultOverflow, { key, base, jevUrl, model }, timeoutMs, next.signal, know, link);
     } catch (err) {
       return fail(type, message(err));
     }
+  });
+  // The model must not use the transport server's tools (a tool the mod can call cannot be hidden from the model: `$.mcp.call`
+  // does not reach a tool with `_meta.ui.visibility` without `model`). The mod's own calls carry this plugin as origin.
+  on("tool.check", async function onToolCheck(_$, e, next) {
+    if (!e.tool.startsWith(SERVER_TOOL_PREFIX)) return next(e);
+    if (next.origin?.plugin === "jev-api") return { decision: "allow", reason: "jev-api's own HTTP transport" };
+    return { decision: "deny", reason: "this tool is the internal HTTP transport of the jev-api plugin; use mcp__jev-api__noul, mcp__jev-api__choice, mcp__jev-api__score or mcp__jev-api__batch" };
   });
 }

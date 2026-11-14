@@ -307,6 +307,17 @@ describe("timeout and cancel", () => {
     assert.equal(await closed(s, 1), 1);
   });
 
+  test("a second request with the id of a running one is refused and the first one is not disturbed", async () => {
+    const { s, c } = await boot({}, { delayMs: 400 });
+    const first = c.request({ callId: "dup" });
+    await s.arrived(1);
+    const second = await c.request({ callId: "dup" });
+    assert.equal(second["result"].isError, true);
+    assert.match(second["result"].content[0].text, /^request: callId is already in use/);
+    assert.equal(outcomeOf(await first)["kind"], "ok");
+    assert.equal(s.seen.length, 1);
+  });
+
   test("cancel of an unknown or finished id answers false", async () => {
     const { c } = await boot();
     assert.deepEqual((await c.call("cancel", { callId: "never" }))["result"].structuredContent, { cancelled: false });

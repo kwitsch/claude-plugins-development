@@ -76,6 +76,15 @@ export type Engine = {
   clock: {
     /** Runs `fn` once after `ms` milliseconds; the handle cancels the pending run. */
     after(ms: number, fn: () => unknown): { cancel(): void };
+    /** The current time in milliseconds since the epoch (the engine's clock: tests set it). */
+    now(): Promise<number>;
+  };
+  /** MCP servers: the plugin's own HTTP transport server (`.mcp.json` key `http`). */
+  mcp: {
+    /** Connects to a server of this plugin by its `.mcp.json` key; waits for the connection. `server` is the namespaced name `call` takes. */
+    connect(key: string): Promise<{ isConnected: boolean; server?: string; message?: string }>;
+    /** Calls a tool of a connected server; resolves the MCP tool result. Neither a timeout nor a signal can be given, and the dispatch's abandonment does not cancel it (measured live, 2.1.325). */
+    call(server: string, tool: string, args: Record<string, unknown>): Promise<{ isError?: boolean; content?: { type: string; text?: string }[]; structuredContent?: unknown }>;
   };
   /** User-visible output. */
   ui: {
@@ -120,6 +129,8 @@ export type Engine = {
 export type Next<E, R> = ((e: E) => Promise<R>) & {
   /** Aborts when the dispatch is abandoned (the user interrupted, a hook above settled first). */
   readonly signal: AbortSignal;
+  /** Which hook raised the event: `{ plugin: "<own name>", tier: "user" }` for this plugin's own `$.mcp.call`, `{ plugin: "engine", tier: "core" }` for the model's direct call. Present on `tool.check`. */
+  readonly origin?: { readonly plugin: string; readonly tier?: string };
 };
 
 /**
@@ -172,6 +183,13 @@ export type On = {
    * @param hook - The hook.
    */
   (event: "tool.call", hook: Hook<ToolCall, ToolResult>): void;
+  /**
+   * Hooks `tool.check`: the permission step of a tool call, answered with an allow or deny decision or passed on.
+   *
+   * @param event - The event name.
+   * @param hook - The hook.
+   */
+  (event: "tool.check", hook: Hook<{ tool: string }, unknown>): void;
 };
 
 /** What a call does when its prompt cannot be answered by System One: refuse with the numbers, cut the state, or ask Haiku. */

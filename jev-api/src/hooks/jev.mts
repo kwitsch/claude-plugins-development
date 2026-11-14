@@ -5,11 +5,11 @@
  * @packageDocumentation
  */
 
-import { sendRequest } from "../shared/http.mjs";
 import { askHaiku, HAIKU_MAX_CHARS } from "./haiku.mjs";
 import { cutState, DEFAULT_DENSITY, estimateTokens, isTooBig, learn, MAX_DENSITY, OPTIMISTIC_FACTOR, preflightError, refusedDensity, stateForBudget, timeBudgetTokens, tooBigError } from "./size.mjs";
 import type { Knowledge, TooBig } from "./size.mjs";
-import { fetchViaEngine } from "./transport.mjs";
+import { sendOutcome } from "./transport.mjs";
+import type { Link } from "./transport.mjs";
 import type { Engine, Env, Overflow, Question, ToolName, ToolResult } from "./types.mjs";
 import { fail, isRecord, json, questionId, questionsBody } from "./util.mjs";
 
@@ -26,16 +26,17 @@ import { fail, isRecord, json, questionId, questionsBody } from "./util.mjs";
  * @param questionsChars - The characters of the questions as the request body carries them (`JSON.stringify` of {@link questionsBody}): with the state they are the prompt.
  * @param onSample - Told the characters of the prompt and the tokens the server counted for it (an answer's
  * `usage.input_tokens`, or a context refusal's `n_prompt_tokens`), whatever the outcome of the call.
+ * @param link - The transport state: the request goes through the plugin's MCP server while it is available.
  * @returns The answer object as JSON (for `batch` the array of answers in question order), an error answer
  * prefixed with the tool name, or the server's refusal of a prompt over its context window ({@link TooBig}).
  */
-export async function ask($: Engine, tool: ToolName, state: string, questions: Question[], env: Env, timeoutMs: number, signal: AbortSignal, questionsChars: number, onSample: (chars: number, tokens: unknown) => void): Promise<ToolResult | TooBig> {
+export async function ask($: Engine, tool: ToolName, state: string, questions: Question[], env: Env, timeoutMs: number, signal: AbortSignal, questionsChars: number, onSample: (chars: number, tokens: unknown) => void, link: Link): Promise<ToolResult | TooBig> {
   // The id of each question in the request and of its answer in the response.
   const ids = questions.map((_, i) => questionId(tool, i));
   const questionsObject = questionsBody(tool, questions);
   // The prompt the server tokenizes is the state plus the questions: both count for the density and the limit.
   const chars = state.length + questionsChars;
-  const outcome = await sendRequest(env, state, questionsObject, fetchViaEngine($, timeoutMs, signal));
+  const outcome = await sendOutcome($, link, env, state, questionsObject, timeoutMs, signal);
   if (outcome.kind === "error") return fail(tool, outcome.message);
   if (outcome.kind === "http") {
     if (outcome.refusal) {
@@ -71,13 +72,14 @@ export async function ask($: Engine, tool: ToolName, state: string, questions: Q
  * @param timeoutMs - The request timeout.
  * @param signal - Aborts when the call is abandoned.
  * @param know - What the module learned about the size limits; updated.
+ * @param link - The transport state, passed on to every request.
  * @returns The tool result.
  */
-export async function answerJev($: Engine, tool: ToolName, input: { state: string; questions: Question[] }, mode: Overflow, env: Env, timeoutMs: number, signal: AbortSignal, know: Knowledge): Promise<ToolResult> {
+export async function answerJev($: Engine, tool: ToolName, input: { state: string; questions: Question[] }, mode: Overflow, env: Env, timeoutMs: number, signal: AbortSignal, know: Knowledge, link: Link): Promise<ToolResult> {
   const questionsChars = JSON.stringify(questionsBody(tool, input.questions)).length;
   // A refusal also tells the server's context window: remembered for the rest of the instance.
   const send = async (state: string) => {
-    const answer = await ask($, tool, state, input.questions, env, timeoutMs, signal, questionsChars, (chars, tokens) => learn($, know, chars, tokens));
+    const answer = await ask($, tool, state, input.questions, env, timeoutMs, signal, questionsChars, (chars, tokens) => learn($, know, chars, tokens), link);
     if (isTooBig(answer)) know.nctx = answer.tooBig.limit + 1;
     return answer;
   };
