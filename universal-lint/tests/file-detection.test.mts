@@ -265,6 +265,10 @@ test("FileChanged: skipped while the content matches the Write/Edit digest, lint
   writeFileSync(a, "echo $2\n");
   assert.equal(changed(e, a).status, 2);
   assert.equal(e.lines().length, 2);
+  // the stale digest is gone: an outside restore of the written bytes lints
+  writeFileSync(a, "echo $1\n");
+  assert.equal(changed(e, a).status, 2);
+  assert.equal(e.lines().length, 3);
 });
 
 test("FileChanged: a stale digest that cannot be removed (read-only store) still lints the change", () => {
