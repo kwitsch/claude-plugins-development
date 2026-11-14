@@ -1273,11 +1273,15 @@ export const register = (on: On, options: Options): void => {
   const firstTurns = new Map<string, { family?: EstimateModel; from: unknown; effort?: Effort }>();
   // Calls Jev made itself: `tool.check` approves them, their commands come from a vetted list.
   const ownCalls = new Set<string>();
-  /** Forgets what belongs to one conversation: its first-turn estimates, the band and the Auto switch. */
+  // The scratchpad lookups, resolved once per conversation: /clear and an in-process /resume give the session a new id
+  // and with it a new scratchpad directory.
+  let scratchpad: { roots: string[]; sid: string } | undefined;
+  /** Forgets what belongs to one conversation: its first-turn estimates, the band, the Auto switch and the scratchpad lookups. */
   const forgetConversation = (): void => {
     firstTurns.clear();
     band = {};
     autoOff = false;
+    scratchpad = undefined;
   };
   on("session.start", async function onSessionStart($: Engine, e: unknown, next: Next<unknown, unknown>): Promise<unknown> {
     // A new session (a start, a reload) gets its own first-turn estimate, an empty band, Auto on and a fresh cache
@@ -1689,8 +1693,6 @@ export const register = (on: On, options: Options): void => {
     return result;
   });
 
-  // The scratchpad lookups, resolved once: neither the temp roots nor the session id change within a session.
-  let scratchpad: { roots: string[]; sid: string } | undefined;
   // Permission check: approves Jev's own vetted calls and writes into this session's scratchpad; every other verdict stays Claude Code's.
   on("tool.check", async function onToolCheck($: Engine, e: Check, next: Next<Check, Verdict>): Promise<Verdict> {
     // The estimate tool is answered by the tool.call hook, also while inactive, so there is nothing to prompt for. A settings deny rule still wins.

@@ -794,6 +794,19 @@ test("A settings ask rule beats the scratchpad allow", async ($, on) => {
   expect(await decision($, { tool: "Write", input: { file_path: `${SP}/x` }, tool_use_id: "toolu_sp4" })).toBe("ask");
 });
 
+test("After /clear (session.end and a new session id) the new scratchpad is allowed and the old one is not", async ($, on) => {
+  let sid = SID;
+  on("session.id", () => ({ value: sid })); // before setup's: the first stub answers
+  setup(on, { messages: [user("anything")], jev: () => undefined });
+  on("tool.check", () => ({ decision: "ask" }));
+  on("session.end", () => ({}));
+  expect(await decision($, { tool: "Write", input: { file_path: `${SP}/x` }, tool_use_id: "toolu_sp5" })).toBe("allow");
+  await $.session.end({ reason: "clear", sessionId: SID, resume: { id: SID } });
+  sid = "sid-2";
+  expect(await decision($, { tool: "Write", input: { file_path: "/tmp/claude-1000/-proj/sid-2/scratchpad/x" }, tool_use_id: "toolu_sp6" })).toBe("allow");
+  expect(await decision($, { tool: "Write", input: { file_path: `${SP}/x` }, tool_use_id: "toolu_sp7" })).toBe("ask");
+});
+
 // Phase 3: a simple request is answered by Jev's action plus a small-model summary.
 for (const [single, expectBypass] of [[0.95, true], [0.3, false]] as const) {
   test(`Whole-turn bypass ${expectBypass ? "answers" : "does not answer"} when single_action=${single}`, async ($, on) => {

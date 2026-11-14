@@ -854,10 +854,12 @@ export const register = (on, options) => {
 	const turns = new Map();
 	const firstTurns = new Map();
 	const ownCalls = new Set();
+	let scratchpad;
 	const forgetConversation = () => {
 		firstTurns.clear();
 		band = {};
 		autoOff = false;
+		scratchpad = undefined;
 	};
 	on("session.start", async function onSessionStart($, e, next) {
 		sessionEpoch += 1;
@@ -1324,7 +1326,6 @@ export const register = (on, options) => {
 		if (answer) await recordCompare($, e.turnId, e.index, ctx.request, answer, candidates, result.toolUses, false);
 		return result;
 	});
-	let scratchpad;
 	on("tool.check", async function onToolCheck($, e, next) {
 		if (e.tool === ESTIMATE_TOOL) {
 			const base = await next(e);
