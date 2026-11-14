@@ -89,3 +89,33 @@ test("markdown: project .markdownlint.json present -> no --config override, only
   assert.ok(!e.lines().some((l) => l.includes("markdownlint-no-line-length.json")));
   assert.ok(e.lines().some((l) => l.includes(`markdownlint-cli2 --no-globs :${f}`)));
 });
+
+/** Classic markdownlint rc places (line-length-guard.md): label, setup returning the env, whether --config stays. */
+const RC_CASES: [string, (home: string) => Record<string, string>, boolean][] = [
+  ["none", () => ({}), true],
+  ["$markdownlint_config", (home) => {
+    writeFileSync(path.join(home, "rc.json"), "{}\n");
+    return { markdownlint_config: path.join(home, "rc.json") };
+  }, false],
+  ["~/.config/markdownlint/config", (home) => {
+    mkdirSync(path.join(home, ".config", "markdownlint"), { recursive: true });
+    writeFileSync(path.join(home, ".config", "markdownlint", "config"), "{}\n");
+    return {};
+  }, false],
+  ["~/.markdownlintrc", (home) => {
+    writeFileSync(path.join(home, ".markdownlintrc"), "{}\n");
+    return {};
+  }, false],
+  ["~/.config/markdownlint/config is a directory", (home) => {
+    mkdirSync(path.join(home, ".config", "markdownlint", "config"), { recursive: true });
+    return {};
+  }, true],
+];
+for (const [label, setup, guard] of RC_CASES) {
+  test(`markdownlint rc: ${label} -> --config guard ${guard ? "stays" : "dropped"}`, () => {
+    const e = makeEnv();
+    e.recStub("markdownlint", 0);
+    e.run(e.file("a.md", "# hi\n"), { env: setup(e.home) });
+    assert.equal(e.lines().some((l) => l.includes("markdownlint-no-line-length.json")), guard);
+  });
+}

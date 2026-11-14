@@ -200,6 +200,15 @@ test("tsc: absent from PATH but present at node_modules/.bin/tsc -> that absolut
   assert.ok(e.lines().some((l) => l.startsWith("localtsc ")));
 });
 
+test("tsc: on PATH and at node_modules/.bin/tsc -> the PATH one runs", () => {
+  const { e, a } = proj();
+  e.recStub("tsc", 0);
+  chmodSync(e.file("node_modules/.bin/tsc", "#!/usr/bin/env bash\necho localtsc >> \"$RECORD\"\n"), 0o755);
+  e.run(a);
+  assert.ok(e.lines().some((l) => l.startsWith("tsc ")));
+  assert.ok(!e.lines().includes("localtsc"));
+});
+
 test("tsc: absent from PATH and no node_modules/.bin/tsc -> {}, no candidate", () => {
   const { e, a } = proj();
   assert.deepEqual(e.run(a).result, {});

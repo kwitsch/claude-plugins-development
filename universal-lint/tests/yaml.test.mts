@@ -66,3 +66,28 @@ test("yaml Edit: a U+0085 (NEL) above the edit shifts yamllint's lines past the 
   assert.equal(r.status, 2);
   assert.match(r.ctx, /key-duplicates/);
 });
+
+/** User-global yamllint config places (line-length-guard.md): label, setup returning the env, whether -d stays. */
+const YAML_GLOBAL_CASES: [string, (home: string) => Record<string, string>, boolean][] = [
+  ["$YAMLLINT_CONFIG_FILE=~/y.yaml (~ expanded)", (home) => {
+    writeFileSync(path.join(home, "y.yaml"), "extends: relaxed\n");
+    return { YAMLLINT_CONFIG_FILE: "~/y.yaml" };
+  }, false],
+  ["$XDG_CONFIG_HOME/yamllint/config", (home) => {
+    mkdirSync(path.join(home, "xdg", "yamllint"), { recursive: true });
+    writeFileSync(path.join(home, "xdg", "yamllint", "config"), "extends: relaxed\n");
+    return { XDG_CONFIG_HOME: path.join(home, "xdg") };
+  }, false],
+  ["~/.config/yamllint/config is a directory", (home) => {
+    mkdirSync(path.join(home, ".config", "yamllint", "config"), { recursive: true });
+    return {};
+  }, true],
+];
+for (const [label, setup, guard] of YAML_GLOBAL_CASES) {
+  test(`yaml: user-global ${label} -> -d guard ${guard ? "stays" : "dropped"}`, () => {
+    const e = makeEnv();
+    e.recStub("yamllint", 0);
+    e.run(e.file("a.yaml", "a: 1\n"), { env: setup(e.home) });
+    assert.equal(e.lines().some((l) => l.includes("rules: {line-length: disable}")), guard);
+  });
+}

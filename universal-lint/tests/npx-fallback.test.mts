@@ -294,3 +294,14 @@ test("npx env: the cached-bin direct route gets no npm_config vars (env belongs 
   assert.ok(e.lines().includes("env:,,"));
   assert.ok(!e.lines().some((l) => l.startsWith("npx")));
 });
+
+test("local bin: its relative paths resolve against the package root it ran in (Finding.base), so a same-named cwd file stays apart", () => {
+  const e = makeEnv();
+  e.file(".oxlintrc.json", "{}");
+  e.file("a.js", "x\n");
+  localStub(e, "pkg", "oxlint", 1);
+  const f = e.file("pkg/a.js", "a\nb\nc\n");
+  const patch = [{ oldStart: 1, oldLines: 3, newStart: 1, newLines: 3, lines: ["-z", "+a", " b", " c"] }];
+  // pkg/a.js:3 lies outside the edited line 1 -> dropped; resolved against cwd it would be cwd/a.js (foreign, kept).
+  assert.equal(e.run(f, { toolName: "Edit", toolResponse: { structuredPatch: patch }, out: "a.js:3:1 far-marker" }).status, 0);
+});
