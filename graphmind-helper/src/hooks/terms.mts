@@ -157,7 +157,8 @@ export function fit(head: string, blocks: Block[], max: number = MAX_CHARS): Fit
       text += block;
       for (const l of b.lines) whole.add(l);
     } else if (room > 300) {
-      const kept = block.slice(0, room - 60);
+      // drop a high surrogate the cut split from its pair (emoji): a lone one breaks the JSON the API gets
+      const kept = block.slice(0, room - 60).replace(/[\uD800-\uDBFF]$/, "");
       // a line made it in whole when it ends inside the cut, even if its newline was cut off
       let end = b.title ? b.title.length + 1 : 0;
       for (const l of b.lines) {

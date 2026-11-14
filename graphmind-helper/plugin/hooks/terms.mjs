@@ -60,7 +60,7 @@ export function fit(head, blocks, max = MAX_CHARS) {
 			text += block;
 			for (const l of b.lines) whole.add(l);
 		} else if (room > 300) {
-			const kept = block.slice(0, room - 60);
+			const kept = block.slice(0, room - 60).replace(/[\uD800-\uDBFF]$/, "");
 			let end = b.title ? b.title.length + 1 : 0;
 			for (const l of b.lines) {
 				end += l.length;

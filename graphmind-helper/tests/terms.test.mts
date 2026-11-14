@@ -61,6 +61,15 @@ test("fit counts a full line as whole when the cut removes only its newline", ()
   assert.deepEqual([...out.whole], [l1, l2]);
 });
 
+test("fit never splits an astral character at the cut", () => {
+  const lines = Array.from({ length: 20 }, () => `  ★ xxxxxxxx [pattern] note ${"🚀".repeat(230)}`);
+  for (const max of [8999, 9000]) {
+    const out = fit("", [{ title: "★ Priority context (always active):", lines }], max);
+    assert.match(out.text, /cut to fit the hook output limit/);
+    assert.ok(out.text.isWellFormed());
+  }
+});
+
 test("fit puts a title-less block in as plain text", () => {
   assert.equal(fit("H\n", [{ title: "", lines: ["footer line"] }]).text, "H\nfooter line\n\n");
 });
