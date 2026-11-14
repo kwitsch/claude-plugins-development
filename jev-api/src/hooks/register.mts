@@ -5,10 +5,12 @@
  *
  * @remarks
  * EARLY ACCESS API. No engine type import (the engine typings are not in the repo): the used `$` members and
- * events are typed structurally in `types.mts`. `development/scripts/build-plugin.mts` keeps `hooks/*.mjs` unmangled and
- * uncompressed, since the engine's static check wants `$`/`on` spelled as such and no `$.<noun>` passed as a bare
- * value; every hook is a named function literal. Only this file is listed in `hooks.json`; it imports its siblings
- * (`types`, `util`, `tools`, `input`, `haiku`, `size`, `jev`, `registry`), and HTTP goes through `$.http.fetch`.
+ * events are typed structurally in `types.mts`. Only this file is listed in `hooks.json`, and
+ * `development/scripts/build-plugin.mts` (`pluginBuild.bundleHooksLib`) keeps only `register.mjs` unmangled,
+ * uncompressed and with its whitespace, since the engine's static check wants `$`/`on` spelled as such and no
+ * `$.<noun>` passed as a bare value; every hook is a named function literal. Its siblings (`types`, `util`, `tools`,
+ * `input`, `haiku`, `size`, `jev`, `registry`) are bundled into one `./lib.mjs` (compressed and stripped of
+ * whitespace, not mangled) that `register.mjs` imports everything from. HTTP goes through `$.http.fetch`.
  *
  * @packageDocumentation
  */
