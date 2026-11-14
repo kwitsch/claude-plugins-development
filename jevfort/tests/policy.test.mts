@@ -126,6 +126,8 @@ test("nextActionQuestion has string instructions and one string criterion per op
 test("lowerModel only lowers the model: a cheaper tier passes, an equal, higher, unknown or missing one does not", () => {
   assert.equal(lowerModel("claude-opus-5-5", "claude-haiku-5-5"), "claude-haiku-5-5");
   assert.equal(lowerModel("claude-opus-5-5", "claude-sonnet-5-5"), "claude-sonnet-5-5");
+  assert.equal(lowerModel("claude-fable-5", "claude-sonnet-5-5"), "claude-sonnet-5-5");
+  assert.equal(lowerModel("claude-fable-5", "claude-opus-5-5"), undefined);
   assert.equal(lowerModel("claude-haiku-5-5", "claude-sonnet-5-5"), undefined);
   assert.equal(lowerModel("claude-sonnet-5-5", "claude-sonnet-5-5"), undefined);
   assert.equal(lowerModel("some-model", "claude-haiku-5-5"), undefined);
