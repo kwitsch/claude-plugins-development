@@ -16,7 +16,9 @@ Does for Claude Code, from the plugin, what [`graphmind setup`](https://github.c
 
 - The module adds nothing when Claude Code's user settings (`~/.claude/settings.json`, or `$CLAUDE_CONFIG_DIR/settings.json` when that is set) name the setup's `graphmind-*.sh` scripts, so nothing is injected twice.
 - The plugin's MCP server is skipped when Claude Code's global config (`~/.claude.json`, or `$CLAUDE_CONFIG_DIR/.claude.json` when that is set) already holds a `graphmind` server (init still runs); the module then uses that server's tools. To use the plugin's server instead, remove that entry (`claude mcp remove graphmind`).
-- The plugin's own code never edits these files, but `graphmind init` (graphmind 0.3.x, run by the wrapper in a new repo) runs graphmind's one-time auto-setup. It writes setup's hooks to `~/.claude/settings.json`, the hook scripts, the `gm-*` skills and `~/.claude/CLAUDE.md`, and adds a project `graphmind` server to `~/.claude.json`. From the next session the module stays silent (dedupe above) and setup's hooks and server take over. `graphmind register` does the same, so no subcommand avoids it.
+- The plugin's own code never edits these files, but `graphmind init` (graphmind 0.3.x, run by the wrapper in a new repo) does, and `graphmind register` does the same, so no subcommand avoids it:
+  - The first init runs graphmind's one-time auto-setup (stamp `~/.graphmind/auto-setup.stamp`). It writes setup's hooks to `~/.claude/settings.json`, the hook scripts, the `gm-*` skills and `~/.claude/CLAUDE.md`. From the next session the module stays silent (dedupe above) and setup's hooks take over.
+  - Every init (once per new repo) adds a project-scoped `graphmind` server for that repo to `~/.claude.json`. From that repo's next session the plugin's server steps aside and the module uses that server's tools. `claude mcp remove graphmind`, run in the repo, brings back the plugin's server for that repo only.
 
 ## Requirements
 
