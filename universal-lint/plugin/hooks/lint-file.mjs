@@ -1164,7 +1164,7 @@ export async function settleFindings(findings, resolved, rec, d0, d1) {
 	let later;
 	try {
 		const dir = settleDir();
-		const recs = readdirSync(dir).filter((n) => n.startsWith(`${rec.key}-`) && n.endsWith(".json")).sort((a, b) => a < b ? -1 : a > b ? 1 : 0).map((n) => JSON.parse(readFileSync(path.join(dir, n), "utf8")));
+		const recs = readdirSync(dir).filter((n) => n.startsWith(`${rec.key}-`) && n.endsWith(".json")).sort().map((n) => JSON.parse(readFileSync(path.join(dir, n), "utf8")));
 		if (recs.some((r) => r.hunks !== null && !Array.isArray(r.hunks))) return findings;
 		let at = -1;
 		recs.forEach((r, i) => {
