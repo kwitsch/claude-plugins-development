@@ -666,13 +666,13 @@ function turnOf(messages: SessionMessage[] | undefined): TurnContext | undefined
  * The end of the assistant's last reply, so short follow-ups are judged in context.
  *
  * @param messages - The main loop's transcript as `$.session.messages` answered it (the caller's one read per hook).
- * @returns The last 800 characters of the reply, or `undefined`.
+ * @returns The last 800 characters of the reply (a low surrogate left by the cut dropped), or `undefined`.
  */
 function previousReply(messages: SessionMessage[] | undefined): string | undefined {
   if (!Array.isArray(messages)) return undefined;
   for (let i = messages.length - 1; i >= 0; i--) {
     const m = messages[i];
-    if (m.role === "assistant" && m.text.trim()) return m.text.length > 800 ? `…${m.text.slice(-800)}` : m.text;
+    if (m.role === "assistant" && m.text.trim()) return m.text.length > 800 ? `…${m.text.slice(-800).replace(/^[\uDC00-\uDFFF]/, "")}` : m.text;
   }
   return undefined;
 }

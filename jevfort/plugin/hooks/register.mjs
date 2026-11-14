@@ -336,7 +336,7 @@ function previousReply(messages) {
 	if (!Array.isArray(messages)) return undefined;
 	for (let i = messages.length - 1; i >= 0; i--) {
 		const m = messages[i];
-		if (m.role === "assistant" && m.text.trim()) return m.text.length > 800 ? `…${m.text.slice(-800)}` : m.text;
+		if (m.role === "assistant" && m.text.trim()) return m.text.length > 800 ? `…${m.text.slice(-800).replace(/^[\uDC00-\uDFFF]/, "")}` : m.text;
 	}
 	return undefined;
 }

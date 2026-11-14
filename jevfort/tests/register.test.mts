@@ -1163,6 +1163,18 @@ test("Effort routing sees the reply a short follow-up answers", async ($, on) =>
   expect(state.previous_reply).toBe("Here is the plan: 1. … Want me to build it?");
 });
 
+test("A long previous reply cut at an emoji stays well-formed", async ($, on) => {
+  const { sent } = setup(on, {
+    messages: [user("add a sync layer"), { role: "assistant", text: "🚀" + "x".repeat(799), toolUses: [] }, user("yes")],
+    jev: byId({ difficulty: easy }),
+  });
+  claudeBeneath(on, []);
+  await drain($.turn.step(step));
+  const reply = String(stateOf(sent, 0).previous_reply);
+  expect(reply).not.toMatch(/(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/);
+  expect(reply).toBe(`…${"x".repeat(799)}`);
+});
+
 test("A big job asked at medium effort runs at xhigh, on an older Opus id too", async ($, on) => {
   const seen: { effort?: string }[] = [];
   const hard = { type: "score", score: 2.9, probabilities: {}, confidence: 0.95 };
