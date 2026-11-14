@@ -437,6 +437,18 @@ test("coalesceProjectCheck: a .last stamp newer than the file's ctime and not in
   });
 });
 
+test("coalesceProjectCheck: a future-dated .last stamp never covers, the check runs (F13)", async () => {
+  await withDataDir(async (dataDir) => {
+    const file = path.join(dataDir, "a.ts");
+    writeFileSync(file, "export const a = 1;\n");
+    mkdirSync(path.join(dataDir, "fc-locks"), { recursive: true });
+    writeFileSync(lockPath(dataDir, "k12", ".last"), String(Date.now() + 3600000));
+    const { run, calls } = stubRun();
+    assert.equal((await coalesceProjectCheck("k12", file, 45000, run))?.status, 0);
+    assert.equal(calls.n, 1);
+  });
+});
+
 test("coalesceProjectCheck: without a stamp it runs once, stamps the run's start and releases the lock (F13, async F18)", async () => {
   await withDataDir(async (dataDir) => {
     const file = path.join(dataDir, "a.ts");
