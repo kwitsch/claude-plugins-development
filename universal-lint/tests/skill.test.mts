@@ -26,9 +26,10 @@ test("SKILL.md exists and is non-empty", () => {
   assert.ok(statSync(path.join(SKILL, "SKILL.md")).size > 0);
 });
 
-test("SKILL.md frontmatter: user-only, arguments file_scope, scoped allowed-tools (no bare Bash)", () => {
+test("SKILL.md frontmatter: user-only, full text via $ARGUMENTS (a named arg binds the first word only), scoped allowed-tools (no bare Bash)", () => {
   assert.match(frontmatter, /disable-model-invocation: true/);
-  assert.match(frontmatter, /arguments: file_scope/);
+  assert.doesNotMatch(frontmatter, /^arguments:/m);
+  assert.ok(skillMd.includes("$ARGUMENTS"));
   assert.ok(frontmatter.includes("\"Glob\""));
   assert.ok(frontmatter.includes("\"AskUserQuestion\""));
   assert.ok(frontmatter.includes("\"Bash(git:*)\""));

@@ -6,7 +6,6 @@ description: >-
   plugin's Write/Edit hook would — read-only, no autofix — printing one aggregated findings
   report. Self-contained: depends on no other plugin.
 argument-hint: "[files description, e.g. 'all files in src/' or 'files changed in PR 123']"
-arguments: file_scope
 allowed-tools: ["Glob", "Read", "Write", "AskUserQuestion", "Bash(git:*)", "Bash(gh:*)", "Bash(node:*)", "Bash(mktemp:*)"]
 disable-model-invocation: true
 ---
@@ -15,12 +14,12 @@ disable-model-invocation: true
 
 Lints every file you name — in natural language — exactly as this plugin's always-on
 `Write`/`Edit` hook would: each language's standard linter, read-only, findings only, never a
-change to any file. The whole trailing text of the command binds to `$file_scope`. Reuses the
+change to any file. The whole trailing text of the command binds to `$ARGUMENTS`. Reuses the
 plugin's own tested hook logic through a colocated driver — no new linting logic, no other plugin.
 
 ## Steps
 
-1. **Resolve `$file_scope` into a concrete file list**, deterministically, yourself:
+1. **Resolve `$ARGUMENTS` into a concrete file list**, deterministically, yourself:
    - an explicit list ("these files: a b c") → use the named paths as-is;
    - "all files in <folder-or-glob>" → in a git repo
      `git -c core.quotePath=false ls-files --cached --others --exclude-standard -- <folder>` (a glob
@@ -46,7 +45,7 @@ plugin's own tested hook logic through a colocated driver — no new linting log
    - `gh pr diff` and `git status --porcelain` print repo-root-relative paths, but the driver
      resolves each path against the cwd: put `$(git rev-parse --show-toplevel)/` in front of each
      of their paths (absolute) before writing the list;
-   - empty or genuinely ambiguous `$file_scope` → ask with `AskUserQuestion` (offer 2-3 example
+   - empty or genuinely ambiguous `$ARGUMENTS` → ask with `AskUserQuestion` (offer 2-3 example
      scopes as options; the real answer arrives via "Other"). Never guess a scope.
 
    If a `gh`/`git` command fails (no auth, PR not found, not a repo), surface its own error and
