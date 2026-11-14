@@ -314,6 +314,15 @@ describe("request", () => {
     assert.equal(outcomeOf(await c.request({ callId: "c2" }))["kind"], "ok");
   });
 
+  test("an error answer over 1 MiB keeps its status", async () => {
+    for (const status of [400, 503]) {
+      const { c } = await boot({}, { status, body: JSON.stringify({ detail: "x".repeat(1_100_000) }) });
+      const o = outcomeOf(await c.request());
+      assert.equal(o["kind"], "http");
+      assert.equal(o["status"], status);
+    }
+  });
+
   test("a state or question text with U+2028 or U+2029 is answered (readline would cut the line there)", async () => {
     const { s, c } = await boot({}, { body: "{\"answers\":{}}" });
     for (const [i, ch] of [" ", " "].entries()) {

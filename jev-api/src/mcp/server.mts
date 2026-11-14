@@ -155,8 +155,8 @@ function field(v: unknown): string | undefined {
  * Reads a response body up to {@link MAX_BODY_BYTES}.
  *
  * @param res - The response.
- * @returns The body text.
- * @throws When the body is longer than the limit (`response too large`), or when the request is aborted while reading.
+ * @returns The body text; an error status (not `res.ok`) with a body over the limit is cut there, so its status survives.
+ * @throws When a 2xx body is longer than the limit (`response too large`), or when the request is aborted while reading.
  */
 async function readBody(res: Response): Promise<string> {
   const reader = res.body?.getReader();
@@ -169,7 +169,10 @@ async function readBody(res: Response): Promise<string> {
     total += value.length;
     if (total > MAX_BODY_BYTES) {
       await reader.cancel().catch(() => undefined);
-      throw new Error("response too large");
+      if (res.ok) throw new Error("response too large");
+      // an error body is only read for its status and reason: keep the prefix
+      chunks.push(value.subarray(0, value.length - (total - MAX_BODY_BYTES)));
+      break;
     }
     chunks.push(value);
   }
