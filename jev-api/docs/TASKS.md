@@ -18,6 +18,7 @@ Legend: `[x]` finished (done, or closed without code: status `closed` in the tas
 - [x] [F17](tasks/F17-registration-retry-without-backoff.md) low: a failing registration is retried on every owned call (1 attempt + 1 log line per call), no back-off
 
 - [x] [F21](tasks/F21-oversized-state-sent-blindly.md) medium: a state too large for System One (hard limit 32767 prompt tokens, timeout-bound already at ~15k to ~21k) was sent anyway; since 0.4.0 a preflight estimate, the server's exact refusal and the overflow modes `error`, `truncate`, `haiku` (option `overflow`, default `haiku`) react, with the density learned across sessions in `$.store`
+- [x] [F22](tasks/F22-http-through-mcp-server.md) medium: `$.http.fetch` has no signal or timeout and `$.mcp.call` is not cancelled by the dispatch signal (measured live); since 0.5.0 the request goes through a bundled MCP server that enforces the per-call timeout and cancels on abandonment, with `$.http.fetch` as fallback
 
 ## Remaining
 

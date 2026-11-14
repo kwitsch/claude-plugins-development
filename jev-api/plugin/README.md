@@ -91,6 +91,14 @@ Result: `{"type":"score","score":<expected level>,"confidence":<0..1>,"legend":{
 
 All questions go out in one System One request. Result: a JSON array of the answers in question order, each exactly as the matching single tool returns it. The call is all or nothing: an invalid question (the error names it, `questions[<index>]: ...`), an HTTP error or a missing answer fails the whole call.
 
+## HTTP transport
+
+The System One request is made by a small MCP server of this plugin (`mcp/server.mjs`, started by Claude Code through `.mcp.json` with `node`), not by Claude Code's own `$.http.fetch`: that one can neither be given a timeout nor be cancelled, and a request that timed out or was abandoned kept running and slowed later ones. The server enforces each call's timeout (at most 30 seconds) and closes the connection at once when it expires or when the call is abandoned, and it reads `TYPESAFE_API_KEY`, `TYPESAFE_BASE_URL`, `JEV_URL` and `TYPESAFE_DEFAULT_MODEL` from the environment Claude Code runs in (the shell and the settings' `env` block), so the key is never part of a tool call.
+
+- **Two more tools show up in the tool list** (deferred behind ToolSearch): `mcp__plugin_jev-api_http__request` and `mcp__plugin_jev-api_http__cancel`. They are the plugin's internal transport; the plugin refuses every call that does not come from itself (a tool the plugin calls cannot be hidden from the model, so it is refused instead). Use the four tools above.
+- **Node must be on the `PATH`** of Claude Code for the server. When the server cannot start, answers nothing or fails, the plugin falls back to `$.http.fetch` (without cancellation and with the engine's own 30 second cap), logs `jev-api: HTTP server not available, using $.http.fetch: <reason>` once and tries the server again after 60 seconds.
+- The server needs no configuration of its own and no extra permission; the endpoint rules, the redaction of errors and the "key only to https" rule are unchanged.
+
 ## Where the text goes
 
 The `state`, instructions and options of every call go to the configured endpoint (or to Haiku without one). A project's `.claude/settings.json` `env` overrides yours: a repository that sets `JEV_URL` or `TYPESAFE_BASE_URL` receives your `TYPESAFE_API_KEY` (over https only) and that text. The reason an endpoint gives for an HTTP error, and every fetch error text, reach the model with a configured `JEV_URL` / `TYPESAFE_BASE_URL`, its host and a key of 6 or more characters replaced (the default endpoint is not hidden); the endpoint's reason is also cut after 1000 characters.
@@ -105,4 +113,4 @@ Errors come back as a tool error (Claude reads it as an error result) whose text
 - HTTP 4xx/5xx: `HTTP <status>` plus the API's reason (its `detail`, or its `error.message`) when there is one.
 - No answer of the asked type in the response, a network error or an unparsable body: the reason. Where Claude Code's error quotes the endpoint, the text shows `<JEV_URL>` or `<TYPESAFE_BASE_URL>/v1/systemone` instead of the configured URL.
 - A request taking longer than its timeout (default 20 seconds): `timeout after <ms>ms`, or Claude Code's own limit on one request (`... aborted: no complete answer within 30000ms`) when that comes first.
-- A call that is interrupted while it waits answers at once; the request itself still runs to its end (in `claude -p` and other headless runs the process, and the next prompt, may wait for it, up to Claude Code's own 30 seconds per request).
+- A call that is interrupted while it waits answers at once and the server closes the request's connection; only on the fallback path (see HTTP transport) the request itself still runs to its end (in `claude -p` and other headless runs the process, and the next prompt, may wait for it, up to Claude Code's own 30 seconds per request).
