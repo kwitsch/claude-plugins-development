@@ -1001,6 +1001,7 @@ const scratch: { name: string; tool: string; key: string; path: string; beneath:
   { name: "Write escaping the scratchpad with ..", tool: "Write", key: "file_path", path: `${SP}/../../../../etc/x`, beneath: "ask", expected: "ask" },
   { name: "Write below a non-tmp root", tool: "Write", key: "file_path", path: "/home/u/claude-1000/-proj/sid-1/scratchpad/x", beneath: "ask", expected: "ask" },
   { name: "Write to the scratchpad directory itself", tool: "Write", key: "file_path", path: SP, beneath: "ask", expected: "ask" },
+  { name: "a non-write tool with a scratchpad file_path", tool: "mcp__x__upload", key: "file_path", path: `${SP}/notes.md`, beneath: "ask", expected: "ask" },
   { name: "Write below TMPDIR", tool: "Write", key: "file_path", path: "/var/folders/T/claude-501/-proj/sid-1/scratchpad/x", beneath: "ask", expected: "allow", env: { TMPDIR: "/var/folders/T/" } },
 ];
 for (const c of scratch) {
