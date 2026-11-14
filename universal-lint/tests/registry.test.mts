@@ -1014,6 +1014,8 @@ test("editRanges: a pure deletion gives the two lines around the deletion point"
 test("editRanges: several hunks and runs each give a range; `\\ No newline` is not a line", () => {
   const hunks = [{ newStart: 1, lines: ["+x", " a", "-b", "+y", "\\ No newline at end of file"] }, { newStart: 20, lines: [" c", "+z"] }];
   assert.deepEqual(editRanges(editArgs(hunks)), [[0, 0], [2, 2], [20, 20]]);
+  // mid-hunk marker (old last line replaced): counting it as a line would widen and shift the range
+  assert.deepEqual(editRanges(editArgs([{ newStart: 1, lines: [" a", "-b", "\\ No newline at end of file", "+B", "\\ No newline at end of file"] }])), [[1, 1]]);
 });
 
 test("editRanges: Write, a missing or a malformed patch gives null (whole file)", () => {
