@@ -1801,10 +1801,12 @@ test("a settings env change between turns counts from the next turn, also after 
   on("command.list", () => ({ value: [] }));
   on("session.usage", () => ({ value: { context: { percent: 85 } } }));
   on("turn.complete", () => ({}));
+  claudeBeneath(on, []);
   await $.turn.complete(answered("t1", "It does X."));
   expect(sent.at(-1)?.timeout).toBe(14);
   env.JEV_URL = "https://jev.example/x";
-  await $.turn.complete(answered("t2", "It does X."));
+  // The next turn's step 0, not another turn end: every main-loop turn end re-reads the env itself.
+  await drain($.turn.step({ ...step, turnId: "t2" }));
   expect(sent.at(-1)?.timeout).toBe(4);
 });
 
