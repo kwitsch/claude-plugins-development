@@ -17,12 +17,12 @@ subagents load it via ToolSearch), no skills, agents, command hooks or MCP serve
   `askJev` raises one `$.tool.call` with all questions of the decision (one System One request, needs jev-api >= 0.2.0),
   with a 4 s budget per `askJev` (`TIMEOUT_MS`; a compaction ranking, off the interactive path, gets 9 s, below the engine's 10 s per hook, `COMPACT_TIMEOUT_MS`: System One answers a batch question by question, 30 compaction-sized questions took 4.1 to 5.1 s), all or nothing. Every call gives jev-api a `timeout` equal to its budget (on the Haiku path 14 s, just under its 15 s; seconds, `JEV_API_TIMEOUT_S` 4, `COMPACT_API_TIMEOUT_S` 9), so jev-api stops waiting when jevfort does, not after its default 20 s
   (the HTTP request itself cannot be aborted and runs on until it settles or the engine's 30 s cap). jevfort makes no network request and reads no
-  endpoint or key: those are jev-api's environment (with none of the three set jev-api answers through Haiku, so `askJev` reads them through `$.env.get` and uses a 15 s budget, `HAIKU_TIMEOUT_MS`, and `timeout: 14`, instead of 4 s and 4) (`TYPESAFE_API_KEY`, `TYPESAFE_BASE_URL`, `JEV_URL`,
+  endpoint or key: those are jev-api's environment (with none of the three set jev-api answers through Haiku, so `askJev` reads them through `$.env.get`, once per turn (`haikuPath`, dropped with `jevTools`; a settings `env` change counts from the next turn), and uses a 15 s budget, `HAIKU_TIMEOUT_MS`, and `timeout: 14`, instead of 4 s and 4) (`TYPESAFE_API_KEY`, `TYPESAFE_BASE_URL`, `JEV_URL`,
   `TYPESAFE_DEFAULT_MODEL`). No `userConfig` entry for any of it.
 - jev-api is a declared plugin dependency (`claudePlugin.dependencies: ["jev-api"]` in `package.json`, copied into
   `plugin.json`; bare name, no version range): Claude Code keeps jevfort disabled while jev-api is missing or disabled.
   At runtime `jevMissing($)` looks the batch tool up in `$.tool.list()` once per turn: the listing (`jevTools`) is
-  shared by the turn's hooks and dropped at every main-loop `turn.complete` (subagent completions keep it; Claude Code 2.1.322 has no tool-list-changed
+  shared by the turn's hooks (with the whole listing `toolListing`, which step 0 offers its deferred tools from, the offerable skills `skillList` of the classifier and step 0, and `haikuPath`; `dropTurnReads`) and dropped at every main-loop `turn.complete` (subagent completions keep it; Claude Code 2.1.322 has no tool-list-changed
   event), so jev-api appearing or going away takes effect from the next turn; `session.start` lists again after
   `next(e)` as the session's baseline; a failed or malformed listing counts as all missing. `jevApply` applies a
   changed listing once (`jevState` holds the last applied one and stays unset until the baseline, so a listing beneath

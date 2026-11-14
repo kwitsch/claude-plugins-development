@@ -143,11 +143,16 @@ type RenderEvent = { props: { isErrored?: boolean; text: string } } & Record<str
 type BandEvent = { props: { hasSurvey: boolean } } & Record<string, unknown>;
 /** A `turn.complete` event. */
 type TurnEnd = { turnId: string; reason?: string; agentId?: string; answer?: string } & Record<string, unknown>;
-/** A turn's `$.fs.stat` results by absolute path (`undefined`: missing or refused). */
 /** What `buildCandidates` already scanned for paths this turn: the request, `steps` rows, and the calls by index. */
 type PathScan = { request: boolean; steps: number; calls: Set<number>; paths: Set<string> };
+/** An empty path scan. */
 const newScan = (): PathScan => ({ request: false, steps: 0, calls: new Set(), paths: new Set() });
+/** A turn's `$.fs.stat` results by absolute path (`undefined`: missing or refused). */
 type StatCache = Map<string, { kind: string; size: number } | undefined>;
+/** What one turn's `buildCandidates` calls share (dropped with the turn): stat results, the path scan, the cwd and the project's commands. */
+type TurnCache = { statted: StatCache; scan: PathScan; cwd?: string; project?: Candidate[] };
+/** An empty turn cache. */
+const newCache = (): TurnCache => ({ statted: new Map(), scan: newScan() });
 /** A `command.run` event. */
 type CommandEvent = { args: string } & Record<string, unknown>;
 /** The `on` the engine passes to `register`, one overload per hooked event. */
@@ -242,8 +247,8 @@ async function askJev($: Engine, state: unknown, questions: Record<string, Quest
   // No `ms`: nothing was sent, so the report must not count it as a Jev call.
   if (startedAt < jevPause.until) return { ok: false, error: `paused for ${Math.ceil((jevPause.until - startedAt) / 1000)} s after a timeout (${jevPause.error})` };
   // Without Jev access jev-api answers through Haiku, which needs a longer budget (jev-api reads the same three variables).
-  const [key, base, jevUrl] = await Promise.all([$.env.get("TYPESAFE_API_KEY"), $.env.get("TYPESAFE_BASE_URL"), $.env.get("JEV_URL")]).catch(() => [undefined, undefined, undefined]);
-  const haiku = ![key, base, jevUrl].some((v) => v?.trim());
+  // Read once per turn (`haikuPath`): a settings `env` change takes effect from the next turn.
+  const haiku = await (haikuPath ??= Promise.all([$.env.get("TYPESAFE_API_KEY"), $.env.get("TYPESAFE_BASE_URL"), $.env.get("JEV_URL")]).then((vals) => !vals.some((v) => v?.trim()), () => true));
   const budgetMs = haiku ? HAIKU_TIMEOUT_MS : slow ? COMPACT_TIMEOUT_MS : TIMEOUT_MS;
   const apiTimeoutS = haiku ? HAIKU_API_TIMEOUT_S : slow ? COMPACT_API_TIMEOUT_S : JEV_API_TIMEOUT_S;
   const entries = Object.entries(questions);
@@ -292,6 +297,20 @@ async function askJev($: Engine, state: unknown, questions: Record<string, Quest
 
 /** This turn's jev-api listing, shared by concurrent hooks; dropped at every main-loop `turn.complete` and at `session.start`. */
 let jevTools: Promise<string[]> | undefined;
+/** The whole `$.tool.list()` answer behind `jevTools`: step 0 offers its deferred tools without a second listing. */
+let toolListing: Promise<ToolInfo[]> | undefined;
+/** This turn's offerable skills (listed, not built in, not blocklisted, deduped), shared by the classifier and step 0; dropped with `jevTools` and by a new block. */
+let skillList: Promise<CommandInfo[]> | undefined;
+/** This turn's "none of jev-api's three env values is set, Haiku answers" decision; dropped with `jevTools`. */
+let haikuPath: Promise<boolean> | undefined;
+
+/** Drops the per-turn engine reads shared across hooks: at every main-loop `turn.complete` and at `session.start`'s baseline. */
+function dropTurnReads(): void {
+  jevTools = undefined;
+  toolListing = undefined;
+  skillList = undefined;
+  haikuPath = undefined;
+}
 /** The missing tools of the last applied listing joined by ", " ("" = ready); undefined until `session.start` set the session's baseline. */
 let jevState: string | undefined;
 /** Whether `estimate_effort` is registered in this session; a failed registration is retried by the next listing. */
@@ -454,7 +473,7 @@ async function withJevRanking($: Engine, e: CompactEvent): Promise<CompactEvent>
  * @returns The missing full tool names, empty when jevfort can ask Jev.
  */
 function jevMissing($: Engine): Promise<string[]> {
-  return (jevTools ??= $.tool.list()
+  return (jevTools ??= (toolListing = $.tool.list())
     .then((t) => missingJevTools(t.map((x) => x.name)))
     .catch(() => [...JEV_TOOLS])
     .then(async (missing) => {
@@ -568,7 +587,16 @@ async function clearLog($: Engine): Promise<void> {
  * @returns The request and the steps so far, or `undefined` without a request.
  */
 async function readTurn($: Engine, agentId?: string): Promise<TurnContext | undefined> {
-  const messages = await $.session.messages(agentId ? { agentId } : {});
+  return turnOf(await $.session.messages(agentId ? { agentId } : {}));
+}
+
+/**
+ * The current turn of a transcript already read.
+ *
+ * @param messages - What `$.session.messages` answered.
+ * @returns The request and the steps so far, or `undefined` without a request.
+ */
+function turnOf(messages: SessionMessage[] | undefined): TurnContext | undefined {
   if (!Array.isArray(messages)) return undefined;
   // Jev's own done follow-up is not the user's request.
   // shortcut: SessionMessage has no origin marker, so the synthetic message is matched by its exact text; a user sending exactly that text loses that one message from the scored request.
@@ -581,11 +609,10 @@ async function readTurn($: Engine, agentId?: string): Promise<TurnContext | unde
 /**
  * The end of the assistant's last reply, so short follow-ups are judged in context.
  *
- * @param $ - Engine interface.
+ * @param messages - The main loop's transcript as `$.session.messages` answered it (the caller's one read per hook).
  * @returns The last 800 characters of the reply, or `undefined`.
  */
-async function previousReply($: Engine): Promise<string | undefined> {
-  const messages = await $.session.messages({}).catch(() => undefined);
+function previousReply(messages: SessionMessage[] | undefined): string | undefined {
   if (!Array.isArray(messages)) return undefined;
   for (let i = messages.length - 1; i >= 0; i--) {
     const m = messages[i];
@@ -602,10 +629,64 @@ async function previousReply($: Engine): Promise<string | undefined> {
  * @returns `pnpm`, `yarn`, `bun` or `npm`.
  */
 async function packageRunner($: Engine, cwd: string): Promise<string> {
-  for (const [file, runner] of [["pnpm-lock.yaml", "pnpm"], ["yarn.lock", "yarn"], ["bun.lockb", "bun"], ["bun.lock", "bun"]] as const) {
-    if (await $.fs.exists(`${cwd}/${file}`).catch(() => false)) return runner;
+  const locks = [["pnpm-lock.yaml", "pnpm"], ["yarn.lock", "yarn"], ["bun.lockb", "bun"], ["bun.lock", "bun"]] as const;
+  const found = await Promise.all(locks.map(([file]) => $.fs.exists(`${cwd}/${file}`).catch(() => false)));
+  return locks.find((_, i) => found[i])?.[1] ?? "npm";
+}
+
+/**
+ * The project's read-only git commands, safe scripts, Makefile targets and test runners; the probes run in parallel.
+ *
+ * @param $ - Engine interface.
+ * @param cwd - The project directory.
+ * @returns The candidates, in the order git, scripts, make, cargo, go, pytest.
+ */
+async function projectCommands($: Engine, cwd: string): Promise<Candidate[]> {
+  const out: Candidate[] = [];
+  const has = (file: string) => $.fs.exists(`${cwd}/${file}`).catch(() => false);
+  const read = (file: string) => $.fs.read(`${cwd}/${file}`).catch(() => undefined);
+  const [git, pkg, makefile, cargo, gomod, pytestIni, conftest, pyproject] = await Promise.all([has(".git"), read("package.json"), read("Makefile"), has("Cargo.toml"), has("go.mod"), has("pytest.ini"), has("conftest.py"), read("pyproject.toml")]);
+
+  // Read-only git commands.
+  if (git) {
+    // One "what changed" option: status and diff --stat as two options split Jev's probability (0.75/0.24 live); merged it reaches 0.93.
+    out.push(bash("git status --short && git diff --stat", "Show what changed: which files are modified, staged or untracked, with a per-file count of changed lines"));
+    out.push(bash("git diff", "Show the full line-by-line diff of unstaged changes"));
+    out.push(bash("git log --oneline -n 15", "Show the 15 most recent commits"));
   }
-  return "npm";
+
+  // The project's own safe scripts and test runners.
+  if (typeof pkg === "string") {
+    let scripts: Record<string, string> = {};
+    try {
+      scripts = (JSON.parse(pkg) as { scripts?: Record<string, string> }).scripts ?? {};
+    } catch {
+      // a malformed package.json offers no scripts
+    }
+    const runner = await packageRunner($, cwd);
+    for (const name of Object.keys(scripts).filter((n) => SAFE_SCRIPT.test(n) && typeof scripts[n] === "string")) {
+      const command = name === "test" ? `${runner} test` : `${runner} run ${name}`;
+      out.push(bash(command, `Run the project's "${name}" script (${clipScript(scripts[name])})`));
+    }
+  }
+  if (typeof makefile === "string") {
+    const targets = new Set([...makefile.matchAll(/^([A-Za-z][\w-]*):(?!=)/gm)].map((m) => m[1]));
+    for (const t of [...targets].filter((t) => SAFE_MAKE.test(t))) out.push(bash(`make ${t}`, `Run the Makefile's "${t}" target`));
+  }
+  if (cargo) {
+    out.push(bash("cargo test", "Run the Rust tests"));
+    out.push(bash("cargo check", "Type-check the Rust project"));
+    out.push(bash("cargo clippy", "Lint the Rust project"));
+  }
+  if (gomod) {
+    out.push(bash("go test ./...", "Run the Go tests"));
+    out.push(bash("go vet ./...", "Vet the Go code"));
+    out.push(bash("go build ./...", "Build the Go packages"));
+  }
+  if (pytestIni || conftest || /\[tool\.pytest/.test(String(pyproject ?? ""))) {
+    out.push(bash("python -m pytest -q", "Run the Python tests"));
+  }
+  return out;
 }
 
 /**
@@ -617,15 +698,15 @@ async function packageRunner($: Engine, cwd: string): Promise<string> {
  * @param steps - The turn's steps so far.
  * @param calls - The turn's tool calls so far.
  * @param stepIndex - The step within the turn.
- * @param statted - The turn's stat results by absolute path, filled here; at most `MAX_STATS` new paths per call (a
- * fresh map by default, so nothing outlives the turn).
- * @param scan - What this turn's earlier calls scanned for paths, extended here, so only new rows are scanned.
+ * @param cache - The turn's shared reads, filled here (a fresh one by default, so nothing outlives the turn): the stat
+ * results by absolute path (at most `MAX_STATS` new paths per call), the path scan (only new rows are scanned), the cwd
+ * and the project's commands.
  * @returns At most `MAX_CHOICE_OPTIONS - 1` candidates (one of jev-api's choice options is `claude`).
  */
-async function buildCandidates($: Engine, request: string, steps: readonly SessionMessage[], calls: readonly ToolUse[], stepIndex: number, statted: StatCache = new Map(), scan: PathScan = newScan()): Promise<Candidate[]> {
-  const cwd = await $.session.cwd();
+async function buildCandidates($: Engine, request: string, steps: readonly SessionMessage[], calls: readonly ToolUse[], stepIndex: number, cache: TurnCache = newCache()): Promise<Candidate[]> {
+  const { statted, scan } = cache;
+  const cwd = (cache.cwd ??= await $.session.cwd());
   const out: Candidate[] = [];
-  const has = (file: string) => $.fs.exists(`${cwd}/${file}`).catch(() => false);
 
   // Files named in the request or the turn's text/tool output, not yet read this turn.
   // Rows are final once seen, except a call's result, which may arrive a step later: calls count once they have text.
@@ -661,55 +742,12 @@ async function buildCandidates($: Engine, request: string, steps: readonly Sessi
     out.push(bash(`grep -rnF --exclude-dir=node_modules --exclude-dir=.git -- '${term}' .`, `Search the project for the text "${term}"`));
   }
 
-  // Read-only git commands.
-  if (await has(".git")) {
-    // One "what changed" option: status and diff --stat as two options split Jev's probability (0.75/0.24 live); merged it reaches 0.93.
-    out.push(bash("git status --short && git diff --stat", "Show what changed: which files are modified, staged or untracked, with a per-file count of changed lines"));
-    out.push(bash("git diff", "Show the full line-by-line diff of unstaged changes"));
-    out.push(bash("git log --oneline -n 15", "Show the 15 most recent commits"));
-  }
-
-  // The project's own safe scripts and test runners.
-  const pkg = await $.fs.read(`${cwd}/package.json`).catch(() => undefined);
-  if (typeof pkg === "string") {
-    let scripts: Record<string, string> = {};
-    try {
-      scripts = (JSON.parse(pkg) as { scripts?: Record<string, string> }).scripts ?? {};
-    } catch {
-      // a malformed package.json offers no scripts
-    }
-    const runner = await packageRunner($, cwd);
-    for (const name of Object.keys(scripts).filter((n) => SAFE_SCRIPT.test(n) && typeof scripts[n] === "string")) {
-      const command = name === "test" ? `${runner} test` : `${runner} run ${name}`;
-      out.push(bash(command, `Run the project's "${name}" script (${clipScript(scripts[name])})`));
-    }
-  }
-  const makefile = await $.fs.read(`${cwd}/Makefile`).catch(() => undefined);
-  if (typeof makefile === "string") {
-    const targets = new Set([...makefile.matchAll(/^([A-Za-z][\w-]*):(?!=)/gm)].map((m) => m[1]));
-    for (const t of [...targets].filter((t) => SAFE_MAKE.test(t))) out.push(bash(`make ${t}`, `Run the Makefile's "${t}" target`));
-  }
-  if (await has("Cargo.toml")) {
-    out.push(bash("cargo test", "Run the Rust tests"));
-    out.push(bash("cargo check", "Type-check the Rust project"));
-    out.push(bash("cargo clippy", "Lint the Rust project"));
-  }
-  if (await has("go.mod")) {
-    out.push(bash("go test ./...", "Run the Go tests"));
-    out.push(bash("go vet ./...", "Vet the Go code"));
-    out.push(bash("go build ./...", "Build the Go packages"));
-  }
-  if ((await has("pytest.ini")) || (await has("conftest.py")) || /\[tool\.pytest/.test(String(await $.fs.read(`${cwd}/pyproject.toml`).catch(() => "")))) {
-    out.push(bash("python -m pytest -q", "Run the Python tests"));
-  }
+  // The project's git commands, scripts and test runners: probed once per turn (a file created later counts next turn).
+  out.push(...(cache.project ??= await projectCommands($, cwd)));
 
   // First move of a turn only: a skill to invoke, or a deferred tool to load.
   if (stepIndex === 0) {
-    const commands = await $.command.list().catch(() => []);
-    const blocked = new Set(((await $.store.get(SKILL_BLOCKLIST_KEY).catch(() => undefined)) as string[] | undefined) ?? []);
-    const allSkills = dedupeSkills(
-      commands.filter((c) => (c.source === "plugin" || c.source === "user") && c.name !== "jev" && !BUILTIN_COMMANDS.has(c.name) && !blocked.has(c.name)),
-    );
+    const allSkills = await offerableSkills($);
     // Every skill when the prompt is about skills; otherwise only related ones.
     const skills = /\bskills?\b/i.test(request) ? allSkills : relevant(request, allSkills);
     for (const c of skills) {
@@ -717,7 +755,7 @@ async function buildCandidates($: Engine, request: string, steps: readonly Sessi
     }
     const loaded = new Set(calls.filter((c) => c.tool === "ToolSearch").map((c) => String(c.input.query)));
     // jev-api's tools are jevfort's own Jev back end, never a tool for Claude to load.
-    const tools = (await $.tool.list().catch(() => [])).filter((t) => t.mcp && !AUTH_TOOL.test(t.name) && !t.name.startsWith(JEV_TOOL_PREFIX) && !loaded.has(`select:${t.name}`));
+    const tools = (await (toolListing ?? $.tool.list()).catch(() => [])).filter((t) => t.mcp && !AUTH_TOOL.test(t.name) && !t.name.startsWith(JEV_TOOL_PREFIX) && !loaded.has(`select:${t.name}`));
     for (const t of relevant(request, tools)) {
       out.push({ key: `load ${t.name}`, description: `Load the tool ${t.name}: ${clipScript(t.description)}`, tool: "ToolSearch", input: { query: `select:${t.name}`, max_results: 1 } });
     }
@@ -750,6 +788,21 @@ async function summarizeResult($: Engine, request: string, action: string, outpu
 }
 
 /**
+ * The plugin and user skills Jev may offer: listed, not built in, not `jev`, not blocklisted, deduped. Read once per turn
+ * (`skillList`), shared by the classifier and step 0; never rejects.
+ *
+ * @param $ - Engine interface.
+ * @returns The skills.
+ */
+function offerableSkills($: Engine): Promise<CommandInfo[]> {
+  return (skillList ??= (async () => {
+    const commands = await $.command.list().catch(() => []);
+    const blocked = new Set(((await $.store.get(SKILL_BLOCKLIST_KEY).catch(() => undefined)) as string[] | undefined) ?? []);
+    return dedupeSkills(commands.filter((c) => (c.source === "plugin" || c.source === "user") && c.name !== "jev" && !BUILTIN_COMMANDS.has(c.name) && !blocked.has(c.name)));
+  })());
+}
+
+/**
  * The skill options of the prompt classifier: `none` plus the listed plugin or user skills that are not built in or
  * blocklisted and share words with the request (`relevant`, at most 8, best first, after `dedupeSkills`). System One's
  * latency grows ~32 ms per option: every listed skill crossed the 4 s budget from ~120 skills (F01).
@@ -759,9 +812,7 @@ async function summarizeResult($: Engine, request: string, action: string, outpu
  * @returns The options, or `undefined` when no listed skill is related.
  */
 async function skillOptions($: Engine, request: string): Promise<Record<string, string> | undefined> {
-  const commands = await $.command.list().catch(() => []);
-  const blocked = new Set(((await $.store.get(SKILL_BLOCKLIST_KEY).catch(() => undefined)) as string[] | undefined) ?? []);
-  const skills = relevant(request, dedupeSkills(commands.filter((c) => (c.source === "plugin" || c.source === "user") && c.name !== "jev" && !BUILTIN_COMMANDS.has(c.name) && !blocked.has(c.name))));
+  const skills = relevant(request, await offerableSkills($));
   if (!skills.length) return undefined;
   const criteria: Record<string, string> = { [NONE]: "No listed skill is meant for this request" };
   for (const c of skills) criteria[c.name] = clip(c.description, 160);
@@ -842,6 +893,7 @@ async function blockSkill($: Engine, name: string): Promise<void> {
   try {
     const list = ((await $.store.get(SKILL_BLOCKLIST_KEY)) as string[] | undefined) ?? [];
     if (!list.includes(name)) await $.store.set(SKILL_BLOCKLIST_KEY, [...list, name]);
+    skillList = undefined;
   } catch {
     // A failing store (over its cap, a full disk) must not fail the tool call hook after the call ran.
   }
@@ -1051,7 +1103,7 @@ export const register = (on: On, options: Options): void => {
     if (options.classify === false || e.command || e.isMeta || e.origin?.kind === "task-notification" || e.text.trim().length < 3) return next(e);
 
     const questions = promptQuestions(await skillOptions($, e.text));
-    const previous = await previousReply($);
+    const previous = previousReply(await $.session.messages({}).catch(() => undefined));
     const r = await askJev($, { request: clip(e.text, 3000), ...(previous ? { previous_reply: previous } : {}) }, questions);
     if (!r.ok) return next(e);
     const kind = choice(r.answers, "kind");
@@ -1170,7 +1222,7 @@ export const register = (on: On, options: Options): void => {
 
   // Per-turn state: the difficulty route, the effort sent on every step of the turn, Jev's takes, the bypass and the
   // stat results of mentioned paths (dropped with the turn, so a file created later is offered in the next turn).
-  const turns = new Map<string, { route?: Route; effort?: Effort; taken: number; bypassId?: string; bypassAction?: string; statted: StatCache; scan: PathScan }>();
+  const turns = new Map<string, { route?: Route; effort?: Effort; taken: number; bypassId?: string; bypassAction?: string; cache: TurnCache }>();
   // What each loop's first turn (key `agentId`, `""` for the main loop) saw and estimated: the session model's family,
   // the session effort (`from`) and the estimate (unset when none was made or Jev failed). Drives the Haiku/Fable hold.
   const firstTurns = new Map<string, { family?: EstimateModel; from: unknown; effort?: Effort }>();
@@ -1205,7 +1257,7 @@ export const register = (on: On, options: Options): void => {
     const result = await next(e);
     // The session's baseline, listed only now: a jevfort hook raised inside `next(e)` (another plugin's session.start
     // making a tool call) may have cached a listing from before jev-api registered. Logs inactive or registers estimate_effort.
-    jevTools = undefined;
+    dropTurnReads();
     await jevApply($, await jevMissing($));
     return result;
   });
@@ -1284,7 +1336,7 @@ export const register = (on: On, options: Options): void => {
     const missing = await jevMissing($);
     // No engine event reports a changed tool list: the next main-loop turn's first hook lists the jev-api tools again
     // (a subagent's completion does not drop it, so a mid-turn listing glitch cannot flap the band).
-    if (e.agentId === undefined) jevTools = undefined;
+    if (e.agentId === undefined) dropTurnReads();
     if (missing.length) {
       await contextCompact($, e, false, false, taskCompactPercent, forceCompactPercent).catch(() => undefined);
       return next(e);
@@ -1379,10 +1431,12 @@ export const register = (on: On, options: Options): void => {
     if ((await jevMissing($)).length) return yield* next(e);
     if (e.agentId && !subagents) return yield* next(e);
 
-    const turn = turns.get(e.turnId) ?? { taken: 0, statted: new Map() as StatCache, scan: newScan() };
+    const turn = turns.get(e.turnId) ?? { taken: 0, cache: newCache() };
     turns.set(e.turnId, turn);
 
-    const ctx = await readTurn($, e.agentId);
+    // One transcript read per step: the turn and, at main-loop step 0, the previous reply.
+    const messages = await $.session.messages(e.agentId ? { agentId: e.agentId } : {});
+    const ctx = turnOf(messages);
     if (!ctx) return yield* next(e);
     const calls = toolCalls(ctx.steps);
     const last = calls.at(-1);
@@ -1415,7 +1469,7 @@ export const register = (on: On, options: Options): void => {
     let candidates: Candidate[] = [];
     // Not on a slash-command turn: its skill text is not in the transcript, so Jev (and the Haiku summary) would answer the bare command and the skill never runs.
     if (takeSteps && !ctx.command && turn.taken < MAX_TAKES_PER_TURN && (!takeOnlyForBypass || (bypass && e.index === 0 && !e.agentId))) {
-      candidates = (await buildCandidates($, ctx.request, ctx.steps, calls, e.index, turn.statted, turn.scan)).filter((c) => !(last && sameCall(last, { tool: c.tool, input: c.input })));
+      candidates = (await buildCandidates($, ctx.request, ctx.steps, calls, e.index, turn.cache)).filter((c) => !(last && sameCall(last, { tool: c.tool, input: c.input })));
       if (candidates.length) questions.next_action = nextActionQuestion(candidates);
     }
     // Step 0: the difficulty (only for model routing) and the effort estimate, or a Haiku/Fable turn's held first-turn
@@ -1473,9 +1527,9 @@ export const register = (on: On, options: Options): void => {
       let measured: Candidate[] = [];
       // Not on a slash-command turn either: Jev would be compared on the bare command, whose skill text it cannot see.
       if (measureSteps && takeSteps && !ctx.command && e.index > 0 && !e.agentId) {
-        measured = (await buildCandidates($, ctx.request, ctx.steps, calls, e.index, turn.statted, turn.scan)).filter((c) => !(last && sameCall(last, { tool: c.tool, input: c.input })));
+        measured = (await buildCandidates($, ctx.request, ctx.steps, calls, e.index, turn.cache)).filter((c) => !(last && sameCall(last, { tool: c.tool, input: c.input })));
         if (measured.length) {
-          measure = askJev($, { request: clip(ctx.request, 4000), recent: summarize(ctx.steps), cwd: await $.session.cwd() }, { next_action: nextActionQuestion(measured) });
+          measure = askJev($, { request: clip(ctx.request, 4000), recent: summarize(ctx.steps), cwd: turn.cache.cwd ??= await $.session.cwd() }, { next_action: nextActionQuestion(measured) });
         }
       }
       const claudeResult = yield* next(routed(e));
@@ -1489,12 +1543,12 @@ export const register = (on: On, options: Options): void => {
 
     // A short follow-up ("yes", "do it") is only rated with confidence when Jev sees what it answers: 0.0–0.2
     // without, 0.5–0.8 with.
-    const previous = e.index === 0 && !e.agentId ? await previousReply($) : undefined;
+    const previous = e.index === 0 && !e.agentId ? previousReply(messages) : undefined;
     const state = {
       request: clip(ctx.request, 4000),
       ...(previous ? { previous_reply: previous } : {}),
       recent: summarize(ctx.steps),
-      cwd: await $.session.cwd(),
+      cwd: turn.cache.cwd ??= await $.session.cwd(),
     };
     const r = await askJev($, state, questions);
     if (!r.ok) {

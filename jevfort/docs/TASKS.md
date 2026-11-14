@@ -10,12 +10,12 @@ Legend: `[x]` finished (done, or closed without code: status `closed` in the tas
 - [x] [F03](tasks/F03-turn-end-two-jev-requests.md) medium (0.11.0): at >= 80% fill the done check and the task end go out as one Jev request after one transcript read
 - [x] [F04](tasks/F04-unbounded-stat-probes.md) medium (0.11.0): `buildCandidates` stats at most 16 not yet statted paths per call and caches stat results per turn: 32 instead of 4000 stats at step 40 of a 40 x 50-missing-path turn, each path once per turn ([EVALUATION-2026-11-14-F04.md](EVALUATION-2026-11-14-F04.md))
 - [x] [F05](tasks/F05-per-step-whole-turn-rescan.md) low (0.11.0): `summarize` walks from the end and `buildCandidates` scans only new rows per turn (`mentionedPaths(texts, seen)`), no longer quadratic over a turn
+- [x] [F07](tasks/F07-repeated-static-engine-reads.md) low (0.11.0): project probes, cwd, env values, the tool and skill lists are read once per turn and the transcript once per step: a later step 20 -> 3 counted ops, step 0 28 -> 20
 
 ## Remaining
 
 - [ ] [F02](tasks/F02-request-size-drives-latency.md) `open` medium: Jev latency follows the request size (~0.16 ms per byte); full clips cost ~3 s before the first token and 1.7 s per done check
 - [ ] [F06](tasks/F06-record-rewrites-whole-log.md) `open` low: `record()` rewrites the whole log (321 KB at the cap) and the stats per decision: 20 `store.set` per 6-step turn, three of them before the first model request
-- [ ] [F07](tasks/F07-repeated-static-engine-reads.md) `open` low: repeated engine reads of static facts (10 project probes per step, 3 env reads per ask, lists and the transcript read twice per turn): 28-43 ops per step
 - [ ] [F08](tasks/F08-uncancelled-budget-sleeps.md) `open` low: `askJev`'s budget sleep and the 250 ms measurement grace are never cancelled; each ask leaves an engine timer pending for 4-15 s
 
 ## Closed without code (measurement records, decided 2026-11-14)

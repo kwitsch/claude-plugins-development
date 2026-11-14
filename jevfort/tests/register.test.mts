@@ -1545,6 +1545,40 @@ for (const [percent, ids] of [[85, ["done", "end"]], [30, ["done"]]] as const) {
   });
 }
 
+// F07: facts that do not change within a turn are read from the engine once per turn.
+test("A turn reads the project, env, lists and cwd once and the transcript once per hook", async ($, on) => {
+  const ops: Record<string, number> = {};
+  for (const ev of ["env.get", "fs.exists", "fs.read", "session.cwd", "session.messages", "command.list", "tool.list", "store.get"]) {
+    on(ev, (_$, e, next) => {
+      const key = ev === "store.get" ? `store.get ${String(e.key)}` : ev;
+      ops[key] = (ops[key] ?? 0) + 1;
+      return next(e);
+    });
+  }
+  setup(on, { messages: [user("what does src/app.ts export?")], files: [`${CWD}/src/app.ts`], packageJson: { scripts: { test: "vitest" } }, jev: () => undefined, env: { TYPESAFE_API_KEY: "k" } });
+  on("command.list", () => ({ value: [{ name: "export-check", description: "Check what a module exports", source: "user" }] }));
+  on("prompt.submit", () => ({ value: {} }));
+  claudeBeneath(on, []);
+  await $.prompt.submit({ text: "what does src/app.ts export?", wait: false, origin: { kind: "composer" } });
+  const perHook: Record<string, number>[] = [];
+  let before = { ...ops };
+  for (const index of [0, 1, 2]) {
+    await drain($.turn.step({ ...step, index }));
+    perHook.push(Object.fromEntries(Object.entries(ops).map(([k, v]) => [k, v - (before[k] ?? 0)])));
+    before = { ...ops };
+  }
+  // Step 0 reads the transcript once (no second read for the previous reply).
+  expect(perHook[0]["session.messages"]).toBe(1);
+  // Later steps probe no project file and read no cwd.
+  for (const k of [1, 2]) for (const ev of ["fs.exists", "fs.read", "session.cwd"]) expect(perHook[k][ev] ?? 0).toBe(0);
+  // Once per turn: the three env values, the command list, the skill blocklist, the tool listing, the cwd.
+  expect(ops["env.get"]).toBe(3);
+  expect(ops["command.list"]).toBe(1);
+  expect(ops["store.get skillBlocklist"]).toBe(1);
+  expect(ops["tool.list"]).toBe(1);
+  expect(ops["session.cwd"]).toBe(1);
+});
+
 test("A done follow-up at 85% fill queues no compaction", { options: { classify: false } }, async ($, on) => {
   const { calls } = setup(on, { messages: [user("rename foo to bar")], jev: byId({ done: { type: "noul", noul: 0 }, end: { type: "noul", noul: 0.9 } }) });
   const submitted = followUps(on);

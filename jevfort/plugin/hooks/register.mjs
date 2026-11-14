@@ -15,6 +15,10 @@ const newScan = () => ({
 	calls: new Set(),
 	paths: new Set()
 });
+const newCache = () => ({
+	statted: new Map(),
+	scan: newScan()
+});
 const CACHE_TICK_MS = 15e3;
 const MAX_TAKES_PER_TURN = 3;
 const WRITE_TOOLS = new Set([
@@ -65,20 +69,11 @@ async function askJev($, state, questions, slow = false) {
 		ok: false,
 		error: `paused for ${Math.ceil((jevPause.until - startedAt) / 1e3)} s after a timeout (${jevPause.error})`
 	};
-	const [key, base, jevUrl] = await Promise.all([
+	const haiku = await (haikuPath ??= Promise.all([
 		$.env.get("TYPESAFE_API_KEY"),
 		$.env.get("TYPESAFE_BASE_URL"),
 		$.env.get("JEV_URL")
-	]).catch(() => [
-		undefined,
-		undefined,
-		undefined
-	]);
-	const haiku = ![
-		key,
-		base,
-		jevUrl
-	].some((v) => v?.trim());
+	]).then((vals) => !vals.some((v) => v?.trim()), () => true));
 	const budgetMs = haiku ? HAIKU_TIMEOUT_MS : slow ? COMPACT_TIMEOUT_MS : TIMEOUT_MS;
 	const apiTimeoutS = haiku ? HAIKU_API_TIMEOUT_S : slow ? COMPACT_API_TIMEOUT_S : JEV_API_TIMEOUT_S;
 	const entries = Object.entries(questions);
@@ -132,6 +127,15 @@ async function askJev($, state, questions, slow = false) {
 	}
 }
 let jevTools;
+let toolListing;
+let skillList;
+let haikuPath;
+function dropTurnReads() {
+	jevTools = undefined;
+	toolListing = undefined;
+	skillList = undefined;
+	haikuPath = undefined;
+}
 let jevState;
 let estimateRegistered = false;
 let bandStale = false;
@@ -228,7 +232,7 @@ async function withJevRanking($, e) {
 	} : e;
 }
 function jevMissing($) {
-	return jevTools ??= $.tool.list().then((t) => missingJevTools(t.map((x) => x.name))).catch(() => [...JEV_TOOLS]).then(async (missing) => {
+	return jevTools ??= (toolListing = $.tool.list()).then((t) => missingJevTools(t.map((x) => x.name))).catch(() => [...JEV_TOOLS]).then(async (missing) => {
 		if (jevState !== undefined) await jevApply($, missing);
 		return missing;
 	});
@@ -297,13 +301,14 @@ async function clearLog($) {
 	await run;
 }
 async function readTurn($, agentId) {
-	const messages = await $.session.messages(agentId ? { agentId } : {});
+	return turnOf(await $.session.messages(agentId ? { agentId } : {}));
+}
+function turnOf(messages) {
 	if (!Array.isArray(messages)) return undefined;
 	const own = (t) => t === DONE_PROMPT || t.startsWith(`The ${PLUGIN_NAME} plugin sent a message:\n${DONE_PROMPT}\n`);
 	return splitTurn(messages.filter((m) => !(m.role === "user" && own(m.text.trim()))));
 }
-async function previousReply($) {
-	const messages = await $.session.messages({}).catch(() => undefined);
+function previousReply(messages) {
 	if (!Array.isArray(messages)) return undefined;
 	for (let i = messages.length - 1; i >= 0; i--) {
 		const m = messages[i];
@@ -312,20 +317,68 @@ async function previousReply($) {
 	return undefined;
 }
 async function packageRunner($, cwd) {
-	for (const [file, runner] of [
+	const locks = [
 		["pnpm-lock.yaml", "pnpm"],
 		["yarn.lock", "yarn"],
 		["bun.lockb", "bun"],
 		["bun.lock", "bun"]
-	]) {
-		if (await $.fs.exists(`${cwd}/${file}`).catch(() => false)) return runner;
-	}
-	return "npm";
+	];
+	const found = await Promise.all(locks.map(([file]) => $.fs.exists(`${cwd}/${file}`).catch(() => false)));
+	return locks.find((_, i) => found[i])?.[1] ?? "npm";
 }
-async function buildCandidates($, request, steps, calls, stepIndex, statted = new Map(), scan = newScan()) {
-	const cwd = await $.session.cwd();
+async function projectCommands($, cwd) {
 	const out = [];
 	const has = (file) => $.fs.exists(`${cwd}/${file}`).catch(() => false);
+	const read = (file) => $.fs.read(`${cwd}/${file}`).catch(() => undefined);
+	const [git, pkg, makefile, cargo, gomod, pytestIni, conftest, pyproject] = await Promise.all([
+		has(".git"),
+		read("package.json"),
+		read("Makefile"),
+		has("Cargo.toml"),
+		has("go.mod"),
+		has("pytest.ini"),
+		has("conftest.py"),
+		read("pyproject.toml")
+	]);
+	if (git) {
+		out.push(bash("git status --short && git diff --stat", "Show what changed: which files are modified, staged or untracked, with a per-file count of changed lines"));
+		out.push(bash("git diff", "Show the full line-by-line diff of unstaged changes"));
+		out.push(bash("git log --oneline -n 15", "Show the 15 most recent commits"));
+	}
+	if (typeof pkg === "string") {
+		let scripts = {};
+		try {
+			scripts = JSON.parse(pkg).scripts ?? {};
+		} catch {}
+		const runner = await packageRunner($, cwd);
+		for (const name of Object.keys(scripts).filter((n) => SAFE_SCRIPT.test(n) && typeof scripts[n] === "string")) {
+			const command = name === "test" ? `${runner} test` : `${runner} run ${name}`;
+			out.push(bash(command, `Run the project's "${name}" script (${clipScript(scripts[name])})`));
+		}
+	}
+	if (typeof makefile === "string") {
+		const targets = new Set([...makefile.matchAll(/^([A-Za-z][\w-]*):(?!=)/gm)].map((m) => m[1]));
+		for (const t of [...targets].filter((t) => SAFE_MAKE.test(t))) out.push(bash(`make ${t}`, `Run the Makefile's "${t}" target`));
+	}
+	if (cargo) {
+		out.push(bash("cargo test", "Run the Rust tests"));
+		out.push(bash("cargo check", "Type-check the Rust project"));
+		out.push(bash("cargo clippy", "Lint the Rust project"));
+	}
+	if (gomod) {
+		out.push(bash("go test ./...", "Run the Go tests"));
+		out.push(bash("go vet ./...", "Vet the Go code"));
+		out.push(bash("go build ./...", "Build the Go packages"));
+	}
+	if (pytestIni || conftest || /\[tool\.pytest/.test(String(pyproject ?? ""))) {
+		out.push(bash("python -m pytest -q", "Run the Python tests"));
+	}
+	return out;
+}
+async function buildCandidates($, request, steps, calls, stepIndex, cache = newCache()) {
+	const { statted, scan } = cache;
+	const cwd = cache.cwd ??= await $.session.cwd();
+	const out = [];
 	const texts = scan.request ? [] : [request];
 	scan.request = true;
 	for (; scan.steps < steps.length; scan.steps++) texts.push(steps[scan.steps].text);
@@ -360,45 +413,9 @@ async function buildCandidates($, request, steps, calls, stepIndex, statted = ne
 	for (const term of quotedTerms(request)) {
 		out.push(bash(`grep -rnF --exclude-dir=node_modules --exclude-dir=.git -- '${term}' .`, `Search the project for the text "${term}"`));
 	}
-	if (await has(".git")) {
-		out.push(bash("git status --short && git diff --stat", "Show what changed: which files are modified, staged or untracked, with a per-file count of changed lines"));
-		out.push(bash("git diff", "Show the full line-by-line diff of unstaged changes"));
-		out.push(bash("git log --oneline -n 15", "Show the 15 most recent commits"));
-	}
-	const pkg = await $.fs.read(`${cwd}/package.json`).catch(() => undefined);
-	if (typeof pkg === "string") {
-		let scripts = {};
-		try {
-			scripts = JSON.parse(pkg).scripts ?? {};
-		} catch {}
-		const runner = await packageRunner($, cwd);
-		for (const name of Object.keys(scripts).filter((n) => SAFE_SCRIPT.test(n) && typeof scripts[n] === "string")) {
-			const command = name === "test" ? `${runner} test` : `${runner} run ${name}`;
-			out.push(bash(command, `Run the project's "${name}" script (${clipScript(scripts[name])})`));
-		}
-	}
-	const makefile = await $.fs.read(`${cwd}/Makefile`).catch(() => undefined);
-	if (typeof makefile === "string") {
-		const targets = new Set([...makefile.matchAll(/^([A-Za-z][\w-]*):(?!=)/gm)].map((m) => m[1]));
-		for (const t of [...targets].filter((t) => SAFE_MAKE.test(t))) out.push(bash(`make ${t}`, `Run the Makefile's "${t}" target`));
-	}
-	if (await has("Cargo.toml")) {
-		out.push(bash("cargo test", "Run the Rust tests"));
-		out.push(bash("cargo check", "Type-check the Rust project"));
-		out.push(bash("cargo clippy", "Lint the Rust project"));
-	}
-	if (await has("go.mod")) {
-		out.push(bash("go test ./...", "Run the Go tests"));
-		out.push(bash("go vet ./...", "Vet the Go code"));
-		out.push(bash("go build ./...", "Build the Go packages"));
-	}
-	if (await has("pytest.ini") || await has("conftest.py") || /\[tool\.pytest/.test(String(await $.fs.read(`${cwd}/pyproject.toml`).catch(() => "")))) {
-		out.push(bash("python -m pytest -q", "Run the Python tests"));
-	}
+	out.push(...cache.project ??= await projectCommands($, cwd));
 	if (stepIndex === 0) {
-		const commands = await $.command.list().catch(() => []);
-		const blocked = new Set(await $.store.get(SKILL_BLOCKLIST_KEY).catch(() => undefined) ?? []);
-		const allSkills = dedupeSkills(commands.filter((c) => (c.source === "plugin" || c.source === "user") && c.name !== "jev" && !BUILTIN_COMMANDS.has(c.name) && !blocked.has(c.name)));
+		const allSkills = await offerableSkills($);
 		const skills = /\bskills?\b/i.test(request) ? allSkills : relevant(request, allSkills);
 		for (const c of skills) {
 			out.push({
@@ -409,7 +426,7 @@ async function buildCandidates($, request, steps, calls, stepIndex, statted = ne
 			});
 		}
 		const loaded = new Set(calls.filter((c) => c.tool === "ToolSearch").map((c) => String(c.input.query)));
-		const tools = (await $.tool.list().catch(() => [])).filter((t) => t.mcp && !AUTH_TOOL.test(t.name) && !t.name.startsWith(JEV_TOOL_PREFIX) && !loaded.has(`select:${t.name}`));
+		const tools = (await (toolListing ?? $.tool.list()).catch(() => [])).filter((t) => t.mcp && !AUTH_TOOL.test(t.name) && !t.name.startsWith(JEV_TOOL_PREFIX) && !loaded.has(`select:${t.name}`));
 		for (const t of relevant(request, tools)) {
 			out.push({
 				key: `load ${t.name}`,
@@ -446,10 +463,15 @@ async function summarizeResult($, request, action, output) {
 		reason: "empty-reply"
 	};
 }
+function offerableSkills($) {
+	return skillList ??= (async () => {
+		const commands = await $.command.list().catch(() => []);
+		const blocked = new Set(await $.store.get(SKILL_BLOCKLIST_KEY).catch(() => undefined) ?? []);
+		return dedupeSkills(commands.filter((c) => (c.source === "plugin" || c.source === "user") && c.name !== "jev" && !BUILTIN_COMMANDS.has(c.name) && !blocked.has(c.name)));
+	})();
+}
 async function skillOptions($, request) {
-	const commands = await $.command.list().catch(() => []);
-	const blocked = new Set(await $.store.get(SKILL_BLOCKLIST_KEY).catch(() => undefined) ?? []);
-	const skills = relevant(request, dedupeSkills(commands.filter((c) => (c.source === "plugin" || c.source === "user") && c.name !== "jev" && !BUILTIN_COMMANDS.has(c.name) && !blocked.has(c.name))));
+	const skills = relevant(request, await offerableSkills($));
 	if (!skills.length) return undefined;
 	const criteria = { [NONE]: "No listed skill is meant for this request" };
 	for (const c of skills) criteria[c.name] = clip(c.description, 160);
@@ -499,6 +521,7 @@ async function blockSkill($, name) {
 	try {
 		const list = await $.store.get(SKILL_BLOCKLIST_KEY) ?? [];
 		if (!list.includes(name)) await $.store.set(SKILL_BLOCKLIST_KEY, [...list, name]);
+		skillList = undefined;
 	} catch {}
 }
 async function contextCompact($, e, ready, continued, fromPercent, forcePercent, asked) {
@@ -683,7 +706,7 @@ export const register = (on, options) => {
 		if (e.origin?.kind === "composer" && !e.isMeta) donePending = false;
 		if (options.classify === false || e.command || e.isMeta || e.origin?.kind === "task-notification" || e.text.trim().length < 3) return next(e);
 		const questions = promptQuestions(await skillOptions($, e.text));
-		const previous = await previousReply($);
+		const previous = previousReply(await $.session.messages({}).catch(() => undefined));
 		const r = await askJev($, {
 			request: clip(e.text, 3e3),
 			...previous ? { previous_reply: previous } : {}
@@ -838,7 +861,7 @@ export const register = (on, options) => {
 			text: `/jev not registered: ${err instanceof Error ? err.message : String(err)}`
 		}).catch(() => undefined));
 		const result = await next(e);
-		jevTools = undefined;
+		dropTurnReads();
 		await jevApply($, await jevMissing($));
 		return result;
 	});
@@ -896,7 +919,7 @@ export const register = (on, options) => {
 	on("turn.complete", async function onTurnComplete($, e, next) {
 		if (e.agentId === undefined) turnRunning = false;
 		const missing = await jevMissing($);
-		if (e.agentId === undefined) jevTools = undefined;
+		if (e.agentId === undefined) dropTurnReads();
 		if (missing.length) {
 			await contextCompact($, e, false, false, taskCompactPercent, forceCompactPercent).catch(() => undefined);
 			return next(e);
@@ -1015,11 +1038,11 @@ export const register = (on, options) => {
 		if (e.agentId && !subagents) return yield* next(e);
 		const turn = turns.get(e.turnId) ?? {
 			taken: 0,
-			statted: new Map(),
-			scan: newScan()
+			cache: newCache()
 		};
 		turns.set(e.turnId, turn);
-		const ctx = await readTurn($, e.agentId);
+		const messages = await $.session.messages(e.agentId ? { agentId: e.agentId } : {});
+		const ctx = turnOf(messages);
 		if (!ctx) return yield* next(e);
 		const calls = toolCalls(ctx.steps);
 		const last = calls.at(-1);
@@ -1069,7 +1092,7 @@ export const register = (on, options) => {
 		const questions = {};
 		let candidates = [];
 		if (takeSteps && !ctx.command && turn.taken < MAX_TAKES_PER_TURN && (!takeOnlyForBypass || bypass && e.index === 0 && !e.agentId)) {
-			candidates = (await buildCandidates($, ctx.request, ctx.steps, calls, e.index, turn.statted, turn.scan)).filter((c) => !(last && sameCall(last, {
+			candidates = (await buildCandidates($, ctx.request, ctx.steps, calls, e.index, turn.cache)).filter((c) => !(last && sameCall(last, {
 				tool: c.tool,
 				input: c.input
 			})));
@@ -1129,7 +1152,7 @@ export const register = (on, options) => {
 			let measure;
 			let measured = [];
 			if (measureSteps && takeSteps && !ctx.command && e.index > 0 && !e.agentId) {
-				measured = (await buildCandidates($, ctx.request, ctx.steps, calls, e.index, turn.statted, turn.scan)).filter((c) => !(last && sameCall(last, {
+				measured = (await buildCandidates($, ctx.request, ctx.steps, calls, e.index, turn.cache)).filter((c) => !(last && sameCall(last, {
 					tool: c.tool,
 					input: c.input
 				})));
@@ -1137,7 +1160,7 @@ export const register = (on, options) => {
 					measure = askJev($, {
 						request: clip(ctx.request, 4e3),
 						recent: summarize(ctx.steps),
-						cwd: await $.session.cwd()
+						cwd: turn.cache.cwd ??= await $.session.cwd()
 					}, { next_action: nextActionQuestion(measured) });
 				}
 			}
@@ -1147,12 +1170,12 @@ export const register = (on, options) => {
 			if (measureAnswer) await recordCompare($, e.turnId, e.index, ctx.request, measureAnswer, measured, claudeResult.toolUses, true);
 			return claudeResult;
 		}
-		const previous = e.index === 0 && !e.agentId ? await previousReply($) : undefined;
+		const previous = e.index === 0 && !e.agentId ? previousReply(messages) : undefined;
 		const state = {
 			request: clip(ctx.request, 4e3),
 			...previous ? { previous_reply: previous } : {},
 			recent: summarize(ctx.steps),
-			cwd: await $.session.cwd()
+			cwd: turn.cache.cwd ??= await $.session.cwd()
 		};
 		const r = await askJev($, state, questions);
 		if (!r.ok) {
