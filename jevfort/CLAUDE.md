@@ -116,6 +116,10 @@ The built-in `cc-plugin-sec-default` passes `session.compact` on past every user
 
 `askJev` keeps a module-level pause (`jevPause`): a timeout (only a timeout, a fast failure costs nothing; jevfort's own clock, or jev-api's `timeout after <n>ms` error when that ends first, as Haiku's 14 s does before the 15 s budget) stops all Jev requests for `PAUSE_MS` 30 s, doubling per further timeout up to `MAX_PAUSE_MS` 10 min; the first call after the pause is the probe, any success resets it. Measured live against a hanging endpoint: +8 s before the first token of every turn (classify 4 s, step 0 4 s), +4 s per Agent call and per subagent, +4 s for the done check. The pause ends when the clock reads earlier than the last timeout (a new session, a test).
 
+## Known limit: `/jev export` through a symlinked `.jev` directory
+
+`/jev export` never overwrites (a new `decisions-<time>.jsonl` after an `exists` check), but `$.fs` has no realpath or lstat and `$.fs.write` follows symlinks: a committed `.jev` symlink to another directory still receives the new file there. Not closable inside the engine's `$.fs`; the directory is the one the command always used.
+
 ## Known limit: several sessions share one log
 
 `record()` reads and writes the whole `log` and `stats` values and is serialized only inside one process: two Claude processes on the same plugin store can overwrite each other's entries, so `/jev` counts and `/jev report` undercount while several sessions run at once. Behaviour is unaffected. A per-session key merged at read time would fix it; not done.

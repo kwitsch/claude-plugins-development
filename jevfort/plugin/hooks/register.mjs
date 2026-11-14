@@ -906,9 +906,10 @@ export const register = (on, options) => {
 			donePending = false;
 			if (doneCheck && !exempt && e.reason === "answer") {
 				try {
+					const epoch = sessionEpoch;
 					if (await checkDone($, e, doneThreshold)) {
 						continued = true;
-						followUpEpoch = sessionEpoch;
+						followUpEpoch = epoch;
 						$.prompt.submit({ text: DONE_PROMPT }).catch((err) => {
 							donePending = false;
 							lostFollowUp = String(err);

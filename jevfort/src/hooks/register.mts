@@ -1280,11 +1280,13 @@ export const register = (on: On, options: Options): void => {
       donePending = false;
       if (doneCheck && !exempt && e.reason === "answer") {
         try {
+          // Read before the await: a /clear that arrives during the check must make the follow-up stale.
+          const epoch = sessionEpoch;
           if (await checkDone($, e, doneThreshold)) {
             continued = true;
             // Not awaited: it resolves only once the new turn starts, which waits for this turn to end. No `$` call in the
             // rejection handler: it runs after this frame, so the next turn.complete logs the error in-frame.
-            followUpEpoch = sessionEpoch;
+            followUpEpoch = epoch;
             $.prompt.submit({ text: DONE_PROMPT }).catch((err: unknown) => {
               donePending = false;
               lostFollowUp = String(err);

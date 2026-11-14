@@ -7,7 +7,7 @@ function isTranscriptOnly(text) {
 	const end = text.lastIndexOf(close);
 	if (end < 0) return true;
 	const rest = text.slice(end + close.length).trim();
-	return rest === "" || TRANSCRIPT_ONLY.test(rest);
+	return rest === "" || isTranscriptOnly(rest);
 }
 const COMMAND_ROW = /^\s*<command-message>[\s\S]*?<\/command-message>\s*<command-name>([^<]*)<\/command-name>\s*(?:<command-args>([\s\S]*)<\/command-args>\s*)?$/;
 const COMPACT_SUMMARY = "This session is being continued from a previous conversation that ran out of context.";

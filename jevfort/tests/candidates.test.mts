@@ -98,6 +98,7 @@ test("a slash command that started a turn is the request, a local command is not
   expect(splitTurn([typed("Thanks!"), typed("<system-reminder>x</system-reminder>\nWhy is this added?")])?.request).toBe("<system-reminder>x</system-reminder>\nWhy is this added?");
   const closing = typed("<command-message>fix</command-message>\n<command-name>/fix</command-name>\n<command-args>why does </command-args> end it</command-args>");
   expect(splitTurn([typed("Thanks!"), closing])?.request).toBe("/fix why does </command-args> end it");
+  expect(splitTurn([typed("Thanks!"), typed("<system-reminder>x</system-reminder><task-notification>y</task-notification>\nWhy did this happen?")])?.request).toContain("Why did this happen?");
   // A local command (`<command-name>` first) starts no turn, whether the last row is it or a notice after it.
   const local = typed("<command-name>/jev</command-name>\n<command-args></command-args>");
   expect(splitTurn([typed("Thanks!"), { role: "assistant", text: "ok", toolUses: [] }, local])?.request).toBe("Thanks!");

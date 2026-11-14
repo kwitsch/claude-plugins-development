@@ -84,7 +84,8 @@ function isTranscriptOnly(text: string): boolean {
   const end = text.lastIndexOf(close);
   if (end < 0) return true;
   const rest = text.slice(end + close.length).trim();
-  return rest === "" || TRANSCRIPT_ONLY.test(rest);
+  // What follows must itself be notices all the way: a question after two pasted tags is the person's.
+  return rest === "" || isTranscriptOnly(rest);
 }
 
 /**
