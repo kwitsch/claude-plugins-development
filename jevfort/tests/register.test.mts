@@ -902,6 +902,25 @@ test("Built-in commands are never offered as skills, and a skill that fails is b
   expect(offered[1] ?? []).not.toContain("skill changelog");
 });
 
+// F13: a prompt that says "skill" offered every listed skill at step 0 (255 options with 300 skills, a timeout).
+test('A prompt that says "skill" offers at most 8 related skills at step 0', async ($, on) => {
+  const offered: string[][] = [];
+  setup(on, {
+    messages: [user("update the release notes skill")],
+    jev: (q) => {
+      if (q.id === "next_action") offered.push(Object.keys(q.criteria as object));
+      return undefined;
+    },
+  });
+  on("command.list", () => ({ value: Array.from({ length: 300 }, (_, i) => ({ name: `notes-${i}`, description: "Write release notes", source: "plugin" })) }));
+  claudeBeneath(on, []);
+
+  await drain($.turn.step(step));
+  const skills = (offered[0] ?? []).filter((k) => k.startsWith("skill "));
+  expect(skills.length).toBeGreaterThan(0);
+  expect(skills.length).toBeLessThanOrEqual(8);
+});
+
 for (
   const [name, answer, blocked] of [
     ["succeeds", { result: "ok" }, false],

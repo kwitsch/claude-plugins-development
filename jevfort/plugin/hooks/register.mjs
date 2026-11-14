@@ -368,9 +368,7 @@ async function buildCandidates($, request, steps, calls, stepIndex, cache = newC
 	}
 	out.push(...cache.project ??= await projectCommands($, cwd));
 	if (stepIndex === 0) {
-		const allSkills = await offerableSkills($);
-		const skills = /\bskills?\b/i.test(request) ? allSkills : relevant(request, allSkills);
-		for (const c of skills) {
+		for (const c of relevant(request, await offerableSkills($))) {
 			out.push({
 				key: `skill ${c.name}`,
 				description: `Use the skill or command "${c.name}": ${clipScript(c.description)}`,

@@ -13,10 +13,10 @@ Legend: `[x]` finished (done, or closed without code: status `closed` in the tas
 - [x] [F06](tasks/F06-record-rewrites-whole-log.md) low (0.11.0): `record()` buffers decisions and `flushLog` writes the log and the counters once per turn (`turn.complete`, `session.end`, `/jev`): a 6-step turn 2 `store.set` instead of 20, none before the first model request
 - [x] [F07](tasks/F07-repeated-static-engine-reads.md) low (0.11.0): project probes, cwd, env values, the tool and skill lists are read once per turn and the transcript once per step: a later step 20 -> 3 counted ops, step 0 28 -> 20
 - [x] [F08](tasks/F08-uncancelled-budget-sleeps.md) low (0.11.0): the budget race and the measurement grace use `$.clock.after` and cancel it once the race settled: no timer stays pending for 4-15 s
+- [x] [F13](tasks/F13-step0-skill-word-offers-every-skill.md) high (0.12.0): step 0 offers only the related skills (at most 8) also when the prompt says "skill(s)": 300 skills 8 options instead of 254
 
 ## Remaining
 
-- [ ] [F13](tasks/F13-step0-skill-word-offers-every-skill.md) `open` high: a prompt that says "skill(s)" makes step 0 offer every offerable skill (up to 254 options): 50 skills 1.8 s, 100 skills 2.9 s, 254 skills timeout and `jevPause`; 14% of the real step-0 asks
 - [ ] [F02](tasks/F02-request-size-drives-latency.md) `open` medium: Jev latency follows the request size (~0.16 ms per byte); full clips cost ~3 s before the first token and 1.7 s per done check (0.11.0: 2.65 s and 1.77 s)
 - [ ] [F14](tasks/F14-agent-type-choice-latency.md) `open` medium: the agent-type choice waits ~1.15 s (real median, 103 calls) before every Agent dispatch and switched none; 9% of the calls cannot switch at all
 

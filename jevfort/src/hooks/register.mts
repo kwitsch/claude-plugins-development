@@ -708,10 +708,8 @@ async function buildCandidates($: Engine, request: string, steps: readonly Sessi
 
   // First move of a turn only: a skill to invoke, or a deferred tool to load.
   if (stepIndex === 0) {
-    const allSkills = await offerableSkills($);
-    // Every skill when the prompt is about skills; otherwise only related ones.
-    const skills = /\bskills?\b/i.test(request) ? allSkills : relevant(request, allSkills);
-    for (const c of skills) {
+    // Only related skills, also when the prompt says "skill": every listed skill made the request outgrow the budget (F13).
+    for (const c of relevant(request, await offerableSkills($))) {
       out.push({ key: `skill ${c.name}`, description: `Use the skill or command "${c.name}": ${clipScript(c.description)}`, tool: "Skill", input: { skill: c.name } });
     }
     const loaded = new Set(calls.filter((c) => c.tool === "ToolSearch").map((c) => String(c.input.query)));
