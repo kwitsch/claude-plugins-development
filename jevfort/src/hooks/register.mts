@@ -1138,6 +1138,8 @@ export const register = (on: On, options: Options): void => {
   let followUpEpoch = 0;
   // Why the last follow-up failed to submit: its rejection arrives after the hook frame ended, so it is logged by the next turn.complete.
   let lostFollowUp: string | undefined;
+  // Bumped at every main-loop turn.complete: the turn an agent type was last offered in (Jev's agent-switch options).
+  let agentTurn = 0;
   // Phase 3: classify each prompt as it is sent and, when Jev is confident, add a short hint only Claude reads.
   // This one hook also notes Jev's own done follow-up passing through, which arms the exemption.
   on("prompt.submit", async function onPromptSubmit($: Engine, e: PromptEvent, next: Next<PromptEvent, unknown>): Promise<unknown> {
@@ -1175,26 +1177,30 @@ export const register = (on: On, options: Options): void => {
 
   // Phase 3: when Claude starts a general-purpose subagent, Jev may pick a more specialised agent type.
   if (options.agentTypes !== false) {
-    // Agent types as the engine offers them to the model, with their descriptions.
-    const offered = new Map<string, string>();
+    // Agent types as the engine offers them to the model, with their descriptions and the main-loop turn of the offer.
+    const offered = new Map<string, { description: string; turn: number }>();
 
     on("agent.offer", async function onAgentOffer($: Engine, e: OfferEvent, next: Next<OfferEvent, unknown>): Promise<unknown> {
       if ((await jevMissing($)).length) return next(e);
       const r = await next(e);
       // Only types the model is really offered are Jev's options: a hook beneath may withhold one, and its dispatch is then refused.
       if ((r as { isOffered?: boolean } | undefined)?.isOffered === false) offered.delete(e.agent);
-      else offered.set(e.agent, e.description);
+      else offered.set(e.agent, { description: e.description, turn: agentTurn });
       return r;
     });
 
     on("tool.call", { tool: "Agent" }, async function onAgentCall($: Engine, e: AgentCall, next: Next<AgentCall, ToolResult>): Promise<ToolResult> {
       if ((await jevMissing($)).length) return next(e);
       const claudeType = e.subagent_type ?? "";
+      // The engine offers its whole agent listing anew every turn: a type missing from the latest listing is gone
+      // (its plugin unloaded, its agent file removed) and must not become a switch target.
+      const latest = Math.max(...[...offered.values()].map((o) => o.turn));
+      for (const [name, o] of offered) if (o.turn < latest) offered.delete(name);
       if (offered.size < 2 || claudeType === "fork") return next(e);
 
       const criteria: Record<string, string> = {};
       // shortcut: past jev-api's choice limit later-offered agent types are left out; rank them if users hit it.
-      for (const [name, description] of [...offered].slice(0, MAX_CHOICE_OPTIONS)) criteria[name] = clip(description, 200);
+      for (const [name, o] of [...offered].slice(0, MAX_CHOICE_OPTIONS)) criteria[name] = clip(o.description, 200);
       const r = await askJev(
         $,
         { task: clip(e.prompt, 3000), description: e.description },
@@ -1204,7 +1210,8 @@ export const register = (on: On, options: Options): void => {
       const answer = choice(r.answers, "agent_type");
       if (!answer) return next(e);
       const p = answer.probabilities[answer.choice] ?? 0;
-      const canSwitch = GENERAL.has(claudeType) && !GENERAL.has(answer.choice) && p >= SWITCH_AT;
+      // Only to a type Jev was offered: an answer outside `criteria` may name one that is gone.
+      const canSwitch = GENERAL.has(claudeType) && !GENERAL.has(answer.choice) && Object.hasOwn(criteria, answer.choice) && p >= SWITCH_AT;
       await record($, {
         kind: "agent",
         applied: canSwitch,
@@ -1387,7 +1394,10 @@ export const register = (on: On, options: Options): void => {
   });
 
   on("turn.complete", async function onTurnComplete($: Engine, e: TurnEnd, next: Next<TurnEnd, unknown>): Promise<unknown> {
-    if (e.agentId === undefined) turnRunning = false;
+    if (e.agentId === undefined) {
+      turnRunning = false;
+      agentTurn += 1;
+    }
     const missing = await jevMissing($);
     // No engine event reports a changed tool list: the next main-loop turn's first hook lists the jev-api tools again
     // (a subagent's completion does not drop it, so a mid-turn listing glitch cannot flap the band).

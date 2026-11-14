@@ -166,6 +166,27 @@ test("An agent type a hook beneath withholds is not one of Jev's options", async
   expect(Object.keys(sent[0].criteria as object)).toEqual(["general-purpose", "Explore"]);
 });
 
+test("An agent type no longer offered in a later turn is not a switch target", async ($, on) => {
+  const sent = base(on, () => ({ type: "choice", choice: "lab:runner", probabilities: { "lab:runner": 0.95, "general-purpose": 0.05 }, confidence: 0.9 }));
+  on("agent.offer", () => ({ isOffered: true }));
+  const spawned: unknown[] = [];
+  on("tool.call", (_$, e) => {
+    spawned.push(e.subagent_type);
+    return { result: undefined };
+  });
+  on("turn.complete", () => ({}));
+  await $.agent.offer({ agent: "general-purpose", description: "General tasks", source: "built-in" });
+  await $.agent.offer({ agent: "Explore", description: "Read-only codebase search", source: "built-in" });
+  await $.agent.offer({ agent: "lab:runner", description: "Runs a spec", source: "plugin" });
+  await $.turn.complete({ turnId: "t1", reason: "aborted" });
+  // The next turn's listing, after the lab plugin was unloaded.
+  await $.agent.offer({ agent: "general-purpose", description: "General tasks", source: "built-in" });
+  await $.agent.offer({ agent: "Explore", description: "Read-only codebase search", source: "built-in" });
+  await $.tool.call({ tool: "Agent", description: "run", prompt: "Run the spec", subagent_type: "general-purpose", tool_use_id: "a1" });
+  expect(spawned).toEqual(["general-purpose"]);
+  expect(Object.keys(sent[0].criteria as object)).toEqual(["general-purpose", "Explore"]);
+});
+
 pureTest("Compaction instructions keep relevant results and mark stale ones", () => {
   const messages = [
     { role: "user", text: "fix the failing date test", toolUses: [] },

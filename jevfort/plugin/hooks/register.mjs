@@ -719,6 +719,7 @@ export const register = (on, options) => {
 	let sessionEpoch = 0;
 	let followUpEpoch = 0;
 	let lostFollowUp;
+	let agentTurn = 0;
 	on("prompt.submit", async function onPromptSubmit($, e, next) {
 		if ((await jevMissing($)).length) return next(e);
 		if (e.origin?.kind === "plugin" && e.origin.name === PLUGIN_NAME) {
@@ -770,15 +771,20 @@ export const register = (on, options) => {
 			if ((await jevMissing($)).length) return next(e);
 			const r = await next(e);
 			if (r?.isOffered === false) offered.delete(e.agent);
-			else offered.set(e.agent, e.description);
+			else offered.set(e.agent, {
+				description: e.description,
+				turn: agentTurn
+			});
 			return r;
 		});
 		on("tool.call", { tool: "Agent" }, async function onAgentCall($, e, next) {
 			if ((await jevMissing($)).length) return next(e);
 			const claudeType = e.subagent_type ?? "";
+			const latest = Math.max(...[...offered.values()].map((o) => o.turn));
+			for (const [name, o] of offered) if (o.turn < latest) offered.delete(name);
 			if (offered.size < 2 || claudeType === "fork") return next(e);
 			const criteria = {};
-			for (const [name, description] of [...offered].slice(0, MAX_CHOICE_OPTIONS)) criteria[name] = clip(description, 200);
+			for (const [name, o] of [...offered].slice(0, MAX_CHOICE_OPTIONS)) criteria[name] = clip(o.description, 200);
 			const r = await askJev($, {
 				task: clip(e.prompt, 3e3),
 				description: e.description
@@ -791,7 +797,7 @@ export const register = (on, options) => {
 			const answer = choice(r.answers, "agent_type");
 			if (!answer) return next(e);
 			const p = answer.probabilities[answer.choice] ?? 0;
-			const canSwitch = GENERAL.has(claudeType) && !GENERAL.has(answer.choice) && p >= SWITCH_AT;
+			const canSwitch = GENERAL.has(claudeType) && !GENERAL.has(answer.choice) && Object.hasOwn(criteria, answer.choice) && p >= SWITCH_AT;
 			await record($, {
 				kind: "agent",
 				applied: canSwitch,
@@ -944,7 +950,10 @@ export const register = (on, options) => {
 		].join("\n") };
 	});
 	on("turn.complete", async function onTurnComplete($, e, next) {
-		if (e.agentId === undefined) turnRunning = false;
+		if (e.agentId === undefined) {
+			turnRunning = false;
+			agentTurn += 1;
+		}
 		const missing = await jevMissing($);
 		if (e.agentId === undefined) dropTurnReads();
 		if (missing.length) {
