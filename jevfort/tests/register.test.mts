@@ -57,7 +57,7 @@ type Runner = Parameters<Parameters<typeof test>[2]>[0];
 // Answers every call the mod makes on `$`. The batch tool is listed and answered from `jev`; a mod's `$.tool.call`
 // resolves to the stub's `value`: the tool result `{ result }`, or `{ deny }` as the real engine resolves a deny (a bare
 // `{ deny }` stub answer would make the kit reject instead). Other tools go on to the test's own `tool.call` stub.
-function setup(on: On, opts: { messages: Msg[]; jev: Jev; cwd?: () => string; files?: string[]; links?: string[]; packageJson?: object | string; env?: Record<string, string>; store?: Record<string, unknown>; tools?: { name: string; description: string; mcp: boolean }[] | null }) {
+function setup(on: On, opts: { messages: Msg[]; jev: Jev; cwd?: () => string; files?: string[]; links?: string[]; packageJson?: object | string; env?: Record<string, string>; store?: Record<string, unknown>; existsDenied?: boolean; tools?: { name: string; description: string; mcp: boolean }[] | null }) {
   const sent: Asked[] = [];
   let batchCalls = 0;
   let reads = 0;
@@ -71,7 +71,8 @@ function setup(on: On, opts: { messages: Msg[]; jev: Jev; cwd?: () => string; fi
   });
   on("session.cwd", () => ({ value: opts.cwd?.() ?? CWD }));
   on("session.id", () => ({ value: SID }));
-  on("fs.exists", (_$, e) => ({ value: Boolean(opts.packageJson) && e.path === `${CWD}/package.json` }));
+  // `existsDenied` refuses every `fs.exists` probe, as a hook above or the engine may.
+  on("fs.exists", (_$, e) => (opts.existsDenied ? { deny: "EACCES" } : { value: Boolean(opts.packageJson) && e.path === `${CWD}/package.json` }));
   on("fs.stat", (_$, e) => {
     statted.push(String(e.path));
     const isLink = (opts.links ?? []).includes(String(e.path));
@@ -1157,6 +1158,15 @@ test("A settings ask rule beats the estimate_effort allow", async ($, on) => {
   setup(on, { messages: [], jev: () => undefined });
   on("tool.check", () => ({ decision: "ask", rule: "mcp__jevfort__estimate_effort" }));
   expect(await decision($, { tool: ESTIMATE.tool, input: {}, tool_use_id: "toolu_1" })).toBe("ask");
+});
+
+test("A refused fs.exists probe does not stop the turn's routing", async ($, on) => {
+  const seen: unknown[] = [];
+  setup(on, { messages: [user("run the tests please")], packageJson: { scripts: { test: "node --test" } }, existsDenied: true, jev: byId({ effort: easy }) });
+  claudeBeneath(on, seen);
+
+  await drain($.turn.step(step));
+  expect(seen[0]).toMatchObject({ effort: "low" });
 });
 
 test("estimate_effort falls back to defaultEffort when Jev is unreachable", async ($, on) => {
