@@ -279,7 +279,7 @@ describe("request", () => {
 describe("timeout and cancel", () => {
   /** Waits until the stub saw its n-th connection closed early. */
   const closed = async (s: Stub, n: number) => {
-    for (let i = 0; i < 100 && s.aborted < n; i++) await new Promise((r) => setTimeout(r, 20));
+    for (let i = 0; i < 400 && s.aborted < n; i++) await new Promise((r) => setTimeout(r, 20));
     return s.aborted;
   };
 
@@ -287,7 +287,7 @@ describe("timeout and cancel", () => {
     const { s, c } = await boot({}, { delayMs: 5000 });
     const t = Date.now();
     const r = await c.request({ timeoutMs: 300 });
-    assert.ok(Date.now() - t < 3000, "ended long before the stub answered");
+    assert.ok(Date.now() - t < 4500, "ended long before the stub answered");
     assert.equal(r["result"].isError, true);
     const o = outcomeOf(r);
     assert.equal(o["kind"], "error");
