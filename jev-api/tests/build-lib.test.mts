@@ -64,6 +64,19 @@ test("the entry rewrite keeps blank lines inside literals and leaves no blank li
   assert.match(r.entry, /^import \{ one, two \} from "\.\/lib\.mjs";\nconst T/m);
 });
 
+test("import- and export-like lines inside a helper's or an entry's template literal stay where they are", () => {
+  const T = "`first line\nimport { x } from \"./b.mjs\";\nimport the data\nexport const y = 1;\nlast`";
+  const r = build({
+    "a.mts": `export const TEXT = ${T};\n`,
+    "b.mts": `export const x = 1;\n`,
+    "register.mts": `import { TEXT } from "./a.mjs";\nconst E = ${T};\nexport function register(on: unknown): string { return TEXT + E; }\n`,
+  });
+  assert.equal(r.status, 0, r.stderr);
+  assert.ok(r.lib.includes(T), r.lib);
+  assert.ok(r.entry.includes(T), r.entry);
+  assert.match(r.entry, /^import \{ TEXT \} from "\.\/lib\.mjs";$/m);
+});
+
 test("overlapping hoisted imports of one source merge into one import per name", () => {
   const r = build({
     "a.mts": `import { join } from "node:path";\nexport const one = join("a");\n`,
