@@ -43,7 +43,8 @@ type Engine = {
   /** Time. */
   clock: {
     now(): Promise<number>;
-    sleep(ms: number): Promise<unknown>;
+    /** Calls `fn` once after `ms` unless cancelled (the budget races cancel it: `sleep` has no cancel and stays pending). */
+    after(ms: number, fn: () => void): { cancel(): void };
     /** Calls `fn` every `ms` until cancelled; the engine does not wait for `fn`, so a slow call overlaps the next. */
     every(ms: number, fn: () => void): { cancel(): void };
   };
@@ -274,7 +275,10 @@ async function askJev($: Engine, state: unknown, questions: Record<string, Quest
   })();
   // A call abandoned at the timeout must not raise an unhandled rejection.
   call.catch(() => undefined);
-  const timeout = $.clock.sleep(budgetMs).then(() => undefined);
+  let timer: { cancel(): void } | undefined;
+  const timeout = new Promise<undefined>((resolve) => {
+    timer = $.clock.after(budgetMs, () => resolve(undefined));
+  });
 
   try {
     const answers = await Promise.race([call, timeout]);
@@ -292,6 +296,8 @@ async function askJev($: Engine, state: unknown, questions: Record<string, Quest
     const timedOut = API_TIMEOUT.exec(error);
     if (timedOut) pauseAfterTimeout(startedAt, budgetMs, timedOut[0]);
     return done({ ok: false, error });
+  } finally {
+    timer?.cancel();
   }
 }
 
@@ -1556,7 +1562,9 @@ export const register = (on: On, options: Options): void => {
       const claudeResult = yield* next(routed(e));
       // Claude's step is done: wait only a moment for the measurement (it only logs; a late one is not recorded), never the rest of its budget.
       // A refused clock must not fail the step whose result is already in: the measurement is dropped.
-      const measureResult = await Promise.race([measure, $.clock.sleep(MEASURE_GRACE_MS).then(() => undefined, () => undefined)]);
+      let grace: { cancel(): void } | undefined;
+      const measureResult = await Promise.race([measure, new Promise<undefined>((resolve) => (grace = $.clock.after(MEASURE_GRACE_MS, () => resolve(undefined))))]);
+      grace?.cancel();
       const measureAnswer = measureResult?.ok ? choice(measureResult.answers, "next_action") : undefined;
       if (measureAnswer) await recordCompare($, e.turnId, e.index, ctx.request, measureAnswer, measured, claudeResult.toolUses, true);
       return claudeResult;

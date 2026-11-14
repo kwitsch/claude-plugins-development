@@ -1,14 +1,14 @@
 ---
 id: F08
 title: askJev's budget sleep and the measurement grace are never cancelled
-status: open
+status: done
 priority: low
 area: jevfort/src/hooks/register.mts (askJev, onTurnStep measurement grace, Engine.clock type)
 ---
 
 ## Status
 
-Open. Found in the performance analysis of 2026-11-14 ([../EVALUATION-2026-11-14.md](../EVALUATION-2026-11-14.md)), plugin 0.10.1.
+Done in 0.11.0. Found in the performance analysis of 2026-11-14 ([../EVALUATION-2026-11-14.md](../EVALUATION-2026-11-14.md)), plugin 0.10.1.
 
 ## Problem
 
@@ -29,6 +29,10 @@ Proven (harness, Node timers standing in for the engine's): 2000 sleeps still pe
 Pass an own `AbortController`'s signal (`$.clock.sleep(budgetMs, { signal })`) and abort it in a `finally` once the race settled; catch the abort rejection. Extend the structural `Engine` type with the option. Alternative: `$.clock.after` with `cancel()` resolving a promise, as jev-api does. First check live (skill `live-verify`) whether a pending sleep holds a `claude -p` run open after the done check: that decides the priority.
 
 ## Verification
+
+Done: `askJev` and the measurement grace use `$.clock.after` with `cancel()` (as jev-api does) instead of `$.clock.sleep`; the budget timer is cancelled in a `finally`, the grace right after the race. The kit's `clock.sleep` ignores an abort signal, so the `{ signal }` route could not be tested; `after` can. Test `An answered Jev call leaves no budget timer pending` (register.test.mts): every `clock.after` started during an answered turn step is cancelled (fails without the change: no `after` call). Not run: the live `claude -p` timing and the harness burst count. Known limit: a clock that refuses `after` never fires the timer, so the measurement grace would wait for the measurement itself (the old `sleep` fell back to dropping it); the engine has no known refusal of `after`.
+
+Planned checks:
 
 - Kit test (if the kit supports the sleep signal): after an answered `askJev` no sleep is pending; otherwise a unit-level check of the abort call.
 - Harness: 0 pending sleeps after a burst of turns; a live `claude -p` run timed with and without the change.

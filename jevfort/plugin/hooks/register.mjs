@@ -100,7 +100,10 @@ async function askJev($, state, questions, slow = false) {
 		}));
 	})();
 	call.catch(() => undefined);
-	const timeout = $.clock.sleep(budgetMs).then(() => undefined);
+	let timer;
+	const timeout = new Promise((resolve) => {
+		timer = $.clock.after(budgetMs, () => resolve(undefined));
+	});
 	try {
 		const answers = await Promise.race([call, timeout]);
 		if (!answers) {
@@ -124,6 +127,8 @@ async function askJev($, state, questions, slow = false) {
 			ok: false,
 			error
 		});
+	} finally {
+		timer?.cancel();
 	}
 }
 let jevTools;
@@ -1173,7 +1178,9 @@ export const register = (on, options) => {
 				}
 			}
 			const claudeResult = yield* next(routed(e));
-			const measureResult = await Promise.race([measure, $.clock.sleep(MEASURE_GRACE_MS).then(() => undefined, () => undefined)]);
+			let grace;
+			const measureResult = await Promise.race([measure, new Promise((resolve) => grace = $.clock.after(MEASURE_GRACE_MS, () => resolve(undefined)))]);
+			grace?.cancel();
 			const measureAnswer = measureResult?.ok ? choice(measureResult.answers, "next_action") : undefined;
 			if (measureAnswer) await recordCompare($, e.turnId, e.index, ctx.request, measureAnswer, measured, claudeResult.toolUses, true);
 			return claudeResult;

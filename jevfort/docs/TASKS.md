@@ -12,11 +12,11 @@ Legend: `[x]` finished (done, or closed without code: status `closed` in the tas
 - [x] [F05](tasks/F05-per-step-whole-turn-rescan.md) low (0.11.0): `summarize` walks from the end and `buildCandidates` scans only new rows per turn (`mentionedPaths(texts, seen)`), no longer quadratic over a turn
 - [x] [F06](tasks/F06-record-rewrites-whole-log.md) low (0.11.0): `record()` buffers decisions and `flushLog` writes the log and the counters once per turn (`turn.complete`, `session.end`, `/jev`): a 6-step turn 2 `store.set` instead of 20, none before the first model request
 - [x] [F07](tasks/F07-repeated-static-engine-reads.md) low (0.11.0): project probes, cwd, env values, the tool and skill lists are read once per turn and the transcript once per step: a later step 20 -> 3 counted ops, step 0 28 -> 20
+- [x] [F08](tasks/F08-uncancelled-budget-sleeps.md) low (0.11.0): the budget race and the measurement grace use `$.clock.after` and cancel it once the race settled: no timer stays pending for 4-15 s
 
 ## Remaining
 
 - [ ] [F02](tasks/F02-request-size-drives-latency.md) `open` medium: Jev latency follows the request size (~0.16 ms per byte); full clips cost ~3 s before the first token and 1.7 s per done check
-- [ ] [F08](tasks/F08-uncancelled-budget-sleeps.md) `open` low: `askJev`'s budget sleep and the 250 ms measurement grace are never cancelled; each ask leaves an engine timer pending for 4-15 s
 
 ## Closed without code (measurement records, decided 2026-11-14)
 

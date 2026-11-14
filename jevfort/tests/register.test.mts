@@ -365,6 +365,23 @@ for (const [name, answer, error] of [["of another type", mech(0.5), "batch: no v
   });
 }
 
+test("An answered Jev call leaves no budget timer pending", async ($, on) => {
+  let started = 0;
+  let cancelled = 0;
+  on("clock.after", (_$, e, next) => {
+    started++;
+    next.signal.addEventListener("abort", () => cancelled++, { once: true });
+    return next(e);
+  });
+  const { clock } = setup(on, { messages: [user("what does this project do?")], jev: () => undefined, env: { TYPESAFE_API_KEY: "k" } });
+  claudeBeneath(on, []);
+
+  await drain($.turn.step(step));
+  await clock.advance(0);
+  expect(started).toBeGreaterThan(0);
+  expect(cancelled).toBe(started);
+});
+
 test("Jev calls that do not answer within 4000 ms time out and Claude takes the step", async ($, on) => {
   const seen: unknown[] = [];
   const { sent, clock } = setup(on, { messages: [user("what does this project do?")], jev: () => new Promise<never>(() => {}), env: { JEV_URL: "https://jev.example/x" } });
