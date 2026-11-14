@@ -283,12 +283,16 @@ test("the questions count towards the preflight", async ($, on) => {
   expect(fetched).toHaveLength(1);
 });
 
-test("a learned dense density tightens the edge, a learned sparse one widens it (capped at 8)", async ($, on) => {
-  const dense = setup(on, { store: { density: { v: 1.2, n: 9 } } });
-  // Optimistic density 2.4: a state that default 3.0 (optimistic 6) sends is refused.
-  const r = await call($, "noul", { state: "a".repeat(Math.floor(edgeState(budgetTokens(20), 6))), timeout: 20, overflow: "error" });
-  expect(r.deny).toMatch(/^noul: state too large for the timeout of 20 s/);
-  expect(dense.fetched).toHaveLength(0);
+test("a learned dense density does not tighten the edge below the default's optimistic 6", async ($, on) => {
+  // Live: emoji and hex calls lowered the stored density, then a 70000-character prose state (12692 real tokens) was refused at 20 s.
+  const { fetched } = setup(on, { store: { density: { v: 1, n: 9 } } });
+  expect((await call($, "noul", { state: "a".repeat(70_000), timeout: 20, overflow: "error" })).deny).toBeUndefined();
+  expect(fetched).toHaveLength(1);
+  const edge = Math.floor(edgeState(budgetTokens(20), 6));
+  expect((await call($, "noul", { state: "a".repeat(edge), timeout: 20, overflow: "error" })).deny).toBeUndefined();
+  expect(fetched).toHaveLength(2);
+  expect((await call($, "noul", { state: "a".repeat(edge + 1), timeout: 20, overflow: "error" })).deny).toMatch(/^noul: state too large for the timeout of 20 s/);
+  expect(fetched).toHaveLength(2);
 });
 
 test("a learned sparse density widens the edge up to 8 characters per token", async ($, on) => {

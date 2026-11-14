@@ -43,7 +43,7 @@ export const CUT_MARGIN_TOKENS = 64;
 /** The `error.type` System One answers a prompt over its context window with (HTTP 400). */
 export const CONTEXT_ERROR = "exceed_context_size_error";
 
-/** The reject test assumes at most this many times the learned characters per token (capped at {@link MAX_DENSITY}): a call is refused before sending only when even this optimistic estimate does not fit. */
+/** The reject test assumes at most this many times the learned characters per token, never less than {@link DEFAULT_DENSITY} (capped at {@link MAX_DENSITY}): a call is refused before sending only when even this optimistic estimate does not fit. */
 export const OPTIMISTIC_FACTOR = 2;
 
 /**

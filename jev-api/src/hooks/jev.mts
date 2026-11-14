@@ -5,7 +5,7 @@
  */
 
 import { askHaiku, HAIKU_MAX_CHARS } from "./haiku.mjs";
-import { contextRefusal, cutState, estimateTokens, isTooBig, learn, MAX_DENSITY, OPTIMISTIC_FACTOR, preflightError, refusedDensity, stateForBudget, timeBudgetTokens, tooBigError } from "./size.mjs";
+import { contextRefusal, cutState, DEFAULT_DENSITY, estimateTokens, isTooBig, learn, MAX_DENSITY, OPTIMISTIC_FACTOR, preflightError, refusedDensity, stateForBudget, timeBudgetTokens, tooBigError } from "./size.mjs";
 import type { Knowledge, TooBig } from "./size.mjs";
 import type { Engine, Env, Overflow, Question, ToolName, ToolResult } from "./types.mjs";
 import { fail, hide, hideHost, isRecord, json, message, questionId, questionsBody } from "./util.mjs";
@@ -185,7 +185,8 @@ export async function answerJev($: Engine, tool: ToolName, input: { state: strin
   const limit = know.nctx - 1;
   const budget = Math.min(limit, timeBudgetTokens(timeoutMs));
   // Only what does not fit even at an optimistic density is refused before sending: a wrong refusal costs a valid call, a late one a fast 400.
-  const estimate = estimateTokens(input.state.length + questionsChars, Math.min(MAX_DENSITY, OPTIMISTIC_FACTOR * know.density));
+  // The learned density is a mix over earlier states (hex, emoji), so it never makes this test stricter than the default's; it only sizes cuts.
+  const estimate = estimateTokens(input.state.length + questionsChars, Math.min(MAX_DENSITY, OPTIMISTIC_FACTOR * Math.max(DEFAULT_DENSITY, know.density)));
   let refused: TooBig["tooBig"] | undefined;
   if (estimate <= budget) {
     const first = await send(input.state);
