@@ -55,6 +55,11 @@ export function recentDecisions(): Entry[] {
   return recent.slice();
 }
 
+/** Empties this session's `/jev` view: `/jev clear` and a conversation's end (/clear, /resume). */
+export function forgetRecent(): void {
+  recent.length = 0;
+}
+
 /**
  * The counter a decision increments: its kind, with `:pass` when it changed nothing.
  *

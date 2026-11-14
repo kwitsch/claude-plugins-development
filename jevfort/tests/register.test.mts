@@ -1837,6 +1837,19 @@ test("/jev clear waits for an in-flight flush instead of having it write the log
   expect(logs.at(-1)).toEqual([]);
 });
 
+test("/jev clear and /clear (session.end) empty the /jev Recent list", { options: { minEffort: "high", maxEffort: "low" } }, async ($, on) => {
+  setup(on, { messages: [], jev: () => undefined });
+  lifecycle(on);
+  await $.session.start({ cwd: CWD, surface: "terminal", isInteractive: true });
+  expect(await runJev($, "")).toContain("invalid effort bounds");
+  await runJev($, "clear");
+  expect(await runJev($, "")).toContain("No decisions this session yet.");
+  await $.session.start({ cwd: CWD, surface: "terminal", isInteractive: true });
+  expect(await runJev($, "")).toContain("invalid effort bounds");
+  await $.session.end({ reason: "clear", sessionId: SID, resume: { id: SID } });
+  expect(await runJev($, "")).toContain("No decisions this session yet.");
+});
+
 test("A flush started while another is in flight keeps both flushes' entries", { options: { minEffort: "high", maxEffort: "low" } }, async ($, on) => {
   const logs: unknown[][] = [];
   const g = gatedLog(on, logs);

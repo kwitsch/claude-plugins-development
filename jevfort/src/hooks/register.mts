@@ -23,7 +23,7 @@ import { clip, splitTurn, summarize, toolCalls } from "./context.mjs";
 import type { SessionMessage, ToolUse, TurnContext } from "./context.mjs";
 import { choice, COMPACT_API_TIMEOUT_S, COMPACT_TIMEOUT_MS, HAIKU_API_TIMEOUT_S, HAIKU_TIMEOUT_MS, isAnswer, JEV_API_TIMEOUT_S, JEV_BATCH, JEV_TOOL_PREFIX, JEV_TOOLS, MAX_CHOICE_OPTIONS, MAX_ERROR, MAX_PAUSE_MS, MEASURE_GRACE_MS, missingJevTools, noul, PAUSE_MS, score, TIMEOUT_MS } from "./jev.mjs";
 import type { Answer, ChoiceAnswer, JevResult, Question } from "./jev.mjs";
-import { LOG_KEY, MAX_ENTRIES, recentDecisions, remember, statsKey } from "./log.mjs";
+import { forgetRecent, LOG_KEY, MAX_ENTRIES, recentDecisions, remember, statsKey } from "./log.mjs";
 import type { Entry } from "./log.mjs";
 import { bestAction, bounds, difficultyQuestion, doneQuestion, EFFORT_ORDER, effortQuestion, ESTIMATE_SPEC, ESTIMATE_TOOL, estimateEffort, EVERY_TURN_MODELS, inBandRange, inScratchpad, isEffort, lowerModel, mechanicalQuestion, modelFamily, nextActionQuestion, parseEstimateInput, pickCandidate, route, shouldContinue, singleActionQuestion, taskEndQuestion } from "./policy.mjs";
 import type { Effort, EstimateBounds, EstimateModel, Route } from "./policy.mjs";
@@ -606,6 +606,7 @@ async function flushLog($: Engine): Promise<void> {
  */
 async function clearLog($: Engine): Promise<void> {
   pending.length = 0;
+  forgetRecent();
   // In the same queue as flushLog(): one still in flight would otherwise write the cleared log back.
   const run = storeQueue.then(async () => {
     await $.store.set(LOG_KEY, []);
@@ -1287,9 +1288,10 @@ export const register = (on: On, options: Options): void => {
   // The scratchpad lookups, resolved once per conversation: /clear and an in-process /resume give the session a new id
   // and with it a new scratchpad directory.
   let scratchpad: { roots: string[]; sid: string } | undefined;
-  /** Forgets what belongs to one conversation: its first-turn estimates, the band, the Auto switch and the scratchpad lookups. */
+  /** Forgets what belongs to one conversation: its first-turn estimates, the band, the Auto switch, the scratchpad lookups and the `/jev` recent list. */
   const forgetConversation = (): void => {
     firstTurns.clear();
+    forgetRecent();
     band = {};
     autoOff = false;
     scratchpad = undefined;
