@@ -1651,6 +1651,26 @@ test("The band shows the session effort bold and Jev's choice blue", async ($, o
   await ui.unmount();
 });
 
+// A subagent's step 0 (estimated, or a held Haiku turn) leaves the main loop's bold and blue levels alone.
+for (const model of ["claude-opus-5-5", "claude-haiku-5-5"]) {
+  test(`A subagent's step 0 leaves the main loop's band (${model})`, async ($, on) => {
+    const { clock } = setup(on, { messages: [user("what does this project do?")], jev: inOrder({ effort: easy }, { effort: scored(2.9) }) });
+    claudeBeneath(on, []);
+    sessionStubs(on);
+    await $.session.start(START);
+    const ui = await $.ui.mount(BAND);
+    await drain($.turn.step(step));
+    await drain($.turn.step({ ...step, turnId: "a-t1", agentId: "a1", model, effort: "medium" }));
+    // On Haiku the subagent's second turn holds its first estimate (xhigh).
+    await drain($.turn.step({ ...step, turnId: "a-t2", agentId: "a1", model, effort: "medium" }));
+    await clock.settle();
+    expect(await levelProps(ui, "low")).toEqual({ color: "blue" });
+    expect(await levelProps(ui, "high")).toEqual({ bold: true });
+    for (const level of ["medium", "xhigh"]) expect(await levelProps(ui, level)).toEqual({ dimColor: true });
+    await ui.unmount();
+  });
+}
+
 test("A main-loop turn without a request clears the last turn's choice from the band", async ($, on) => {
   const messages = [user("what does this project do?")];
   const { clock } = setup(on, { messages, jev: byId({ effort: easy }) });
