@@ -1,14 +1,20 @@
 ---
 id: F21
-title: A state too large for System One is sent anyway: it fails with a 400, or runs into the timeout and keeps burning server time
-  status: open
-  priority: medium
-  area: jev-api/src/hooks/register.mts (parseInput, ask), jev-solver/plugin/skills/solve/SKILL.md (state = the whole task text)
+title: "A state too large for System One is sent anyway: it fails with a 400, or runs into the timeout and keeps burning server time"
+status: done
+priority: medium
+area: jev-api/src/hooks (jev.mts answerJev and ask, size.mts, input.mts, register.mts), jev-solver/plugin/skills/solve/SKILL.md (state = the whole task text)
 ---
 
 ## Status
 
-Open. Found in the live analysis of 2026-11-14 against the real endpoint (jev-api 0.3.2, model `jev-latest`, answered by `d1-3b`). Nothing is implemented; this document holds the measurements and the proposed reaction.
+Done in jev-api 0.4.0 (live validation at the end of this section). Found in the live analysis of 2026-11-14 against the real endpoint (jev-api 0.3.2, model `jev-latest`, answered by `d1-3b`).
+
+What shipped (`CLAUDE.md` "Oversized state" has the details): `answerJev` refuses or reacts before sending when the optimistic estimate does not fit `min(n_ctx - 1, time budget)`, reads the server's `exceed_context_size_error` as exact numbers, and handles an oversized prompt per overflow mode (`error`, `truncate`, `haiku`; per-call input over the `overflow` userConfig option, default `haiku`). The characters per token are learned from every answer and refusal and kept across sessions in `$.store`, not in the plugin data dir: live on Claude Code 2.1.325 a mod cannot read `CLAUDE_PLUGIN_DATA` (`$.env.get` answers undefined), while `$.store` persisted between two `claude -p` runs. Tests: `jev-api/tests/overflow.test.mts` (both sides of every bound; a hand mutation of the preflight edge fails 5 of them). The source was split into modules (`types`, `util`, `tools`, `input`, `haiku`, `size`, `jev`, `registry`, `register`) at the same time.
+
+Not done, follow-up: jevfort passes no `overflow`, so an oversized call of it would be answered by Haiku within its short budget; it may want `overflow: "error"`.
+
+Earlier state: Open, nothing implemented; this document held the measurements and the proposed reaction below.
 
 ## Problem
 

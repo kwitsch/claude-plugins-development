@@ -433,6 +433,17 @@ test("after the server's refusal truncate retries once with the exact cut and an
   expect(fetched[1].body.state).toBe(cut(state, keep));
 });
 
+test("after a refusal the cut also respects the timeout, sized with the exact density the refusal gave", async ($, on) => {
+  // 80070 prompt characters over 47000 - 26 tokens: 1.70 characters per token, far denser than the learned 3.0.
+  const state = "a".repeat(80_000);
+  const { fetched } = setup(on, { replies: [tooBig(47_000), okReply()] });
+  const r = await call($, "noul", { state, timeout: 20, overflow: "truncate" });
+  expect(r.deny).toBeUndefined();
+  expect(fetched).toHaveLength(2);
+  const keep = Math.floor(((state.length + NOUL_QUESTION_CHARS) * (budgetTokens(20) - 26 - 64)) / (47_000 - 26)) - NOUL_QUESTION_CHARS;
+  expect(fetched[1].body.state).toBe(cut(state, keep));
+});
+
 test("a second refusal after the retry is answered with the numbers and nothing is sent a third time", async ($, on) => {
   const { fetched } = setup(on, { replies: [tooBig(40025, 8192), tooBig(9000, 8192)] });
   const r = await call($, "noul", { state: "a".repeat(100_000), timeout: 30, overflow: "truncate" });
