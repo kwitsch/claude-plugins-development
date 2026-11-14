@@ -209,14 +209,15 @@ const STOPWORDS = new Set(
 );
 
 /**
- * Lowercase content words, light-stemmed so changes/changed/change match.
+ * Lowercase content words, light-stemmed so changes/changed/change match. NFC-normalized and split only at
+ * characters that are no letter, combining mark or digit, so NFD umlauts and vowel signs stay inside their words.
  *
  * @param text - Any text.
  * @returns The content words.
  */
 export function words(text: string): Set<string> {
   const out = new Set<string>();
-  for (const w of text.toLowerCase().split(/[^\p{L}\p{N}]+/u)) {
+  for (const w of text.normalize("NFC").toLowerCase().split(/[^\p{L}\p{M}\p{N}]+/u)) {
     if (w.length < 3 || STOPWORDS.has(w) || /^\d+$/.test(w)) continue;
     const stem = w.replace(/(ing|ed|es|e|s)$/, "");
     out.add(stem.length >= 3 && !w.endsWith("ss") ? stem : w);

@@ -102,8 +102,8 @@ subagents load it via ToolSearch), no skills, agents, command hooks or MCP serve
   linear, `EFFORT_CUTS` 1.05/1.9/2.5/3.1 land on 0.5/1.5/2.5/3.5, the last cut is provisional), rounded, clamped. There is no model bias (removed in 0.9.0 by user decision: it was
   never validated and shifted the calibrated cuts per model); the tool's `model` input stays for callers and is ignored by
   the rule. The cuts are for `d1-3b`; the Haiku fallback of jev-api is not calibrated either. `route` and `estimate` log entries carry `effortScore` and `effortConfidence` to recalibrate from real turns.
-  `tests/effort-fixture.test.mts` pins the acceptance numbers (A1 to A5). `words()` in `candidates.mts` splits at
-  `[^\p{L}\p{N}]` so umlauts survive; German prompts still share few words with English skill descriptions.
+  `tests/effort-fixture.test.mts` pins the acceptance numbers (A1 to A5). `words()` in `candidates.mts` normalizes to NFC and splits at
+  `[^\p{L}\p{M}\p{N}]` so umlauts (also NFD-typed) and vowel signs survive; German prompts still share few words with English skill descriptions.
   The prompt classifier's `skill` question (`skillOptions`, 0.11.0, F01) offers only `relevant(request, dedupeSkills(...))` (at most 8) plus
   `none`, and is left out when no listed skill is related: System One costs ~32 ms per option, and every listed skill crossed the 4 s budget
   (and tripped `jevPause`) from ~120 skills. A related skill without a shared word (German prompt) gets no classifier hint.

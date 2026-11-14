@@ -201,6 +201,15 @@ test("words keeps umlauts whole instead of splitting at them", () => {
   expect([...words("ändere die Größe")]).toEqual(expect.arrayContaining(["änder", "größ"]));
 });
 
+test("words keeps combining marks inside words (NFD umlauts, Devanagari vowel signs)", () => {
+  const skills = [{ name: "übersetzung", description: "Prüfe Übersetzungen gründlich" }];
+  const nfd = "Übersetzung gründlich prüfen".normalize("NFD");
+  expect([...words(nfd)]).toEqual(["übersetzung", "gründlich", "prüfen"]);
+  expect(relevant(nfd, skills).map((s) => s.name)).toEqual(["übersetzung"]);
+  expect([...words("हिन्दी अनुवाद जाँचें")]).toEqual(["हिन्दी", "अनुवाद", "जाँचें"]);
+  expect(relevant("हिन्दी अनुवाद जाँचें", [{ name: "anuvad", description: "हिन्दी अनुवाद जाँचें" }]).map((s) => s.name)).toEqual(["anuvad"]);
+});
+
 test("mentionedPaths extends the turn's set, so only new rows need scanning", () => {
   const seen = new Set<string>();
   expect(mentionedPaths(["see a/one.ts"], seen)).toEqual(["a/one.ts"]);
