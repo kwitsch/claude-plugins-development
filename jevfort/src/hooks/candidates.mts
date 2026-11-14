@@ -249,4 +249,4 @@ export function dedupeSkills<T extends { name: string }>(skills: readonly T[]): 
  * @param s - The text.
  * @returns The clipped text.
  */
-export const clipScript = (s: string): string => (s.length > 80 ? `${s.slice(0, 80)}…` : s);
+export const clipScript = (s: string): string => (s.length > 80 ? `${s.slice(0, 80).replace(/[\uD800-\uDBFF]$/, "")}…` : s);

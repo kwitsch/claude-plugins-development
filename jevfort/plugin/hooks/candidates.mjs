@@ -92,4 +92,4 @@ export function dedupeSkills(skills) {
 	}
 	return skills.filter((s) => byBase.get(base(s.name)) === s);
 }
-export const clipScript = (s) => s.length > 80 ? `${s.slice(0, 80)}…` : s;
+export const clipScript = (s) => s.length > 80 ? `${s.slice(0, 80).replace(/[\uD800-\uDBFF]$/, "")}…` : s;
