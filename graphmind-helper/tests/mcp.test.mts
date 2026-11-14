@@ -14,12 +14,12 @@ let home = "";
 let proj = "";
 let fakeBin = "";
 
-/** A fake graphmind: logs every call, `which` follows the REGISTERED file, `init` creates it. */
+/** A fake graphmind: logs every call, `which` follows the REGISTERED file, `init` creates it and, like the real one, adds a project server to .claude.json. */
 const FAKE = `#!/bin/sh
 echo "$@" >> "$FAKE_LOG"
 case "$1" in
   which) [ -f "$FAKE_REGISTERED" ] && echo slug && exit 0; exit 1 ;;
-  init) touch "$FAKE_REGISTERED"; exit 0 ;;
+  init) touch "$FAKE_REGISTERED"; printf '{"projects":{"%s":{"mcpServers":{"graphmind":{}}}}}' "$PWD" > "\${CLAUDE_CONFIG_DIR:-$HOME}/.claude.json"; exit 0 ;;
 esac
 exit 0
 `;

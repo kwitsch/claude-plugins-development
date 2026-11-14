@@ -45,6 +45,8 @@ function main(): void {
     process.exit(1);
   }
   const cwd = process.cwd();
+  // Checked before init: init adds its own project entry to .claude.json, which this session has not loaded.
+  const setupPresent = setupMcpPresent();
   if (indexable(cwd) && !registered(bin)) {
     // Registration and git hooks are fast; the graph build of a large repo could outlast the MCP startup timeout.
     const init = spawnSync(bin, ["init", "--skip-build"], { cwd, stdio: ["ignore", "ignore", "inherit"], timeout: 30_000 });
@@ -52,7 +54,7 @@ function main(): void {
     if (init.status === 0) spawn(bin, ["build"], { cwd, detached: true, stdio: "ignore" }).on("error", () => {}).unref();
   }
   // The user's own `graphmind setup` server (same tools) stays the one in use.
-  if (setupMcpPresent()) process.exit(0);
+  if (setupPresent) process.exit(0);
   const child = spawn(bin, ["mcp"], { cwd, stdio: "inherit" });
   child.on("exit", (code) => process.exit(code ?? 1));
   child.on("error", () => process.exit(1));
