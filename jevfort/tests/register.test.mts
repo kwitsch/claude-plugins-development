@@ -328,17 +328,31 @@ test("One wrong answer discards the other answers of the same decision", async (
   expect(await runJev($, "")).toContain("unavailable: batch: no valid noul answer for questions[1]");
 });
 
-test("An answer whose fields jevfort reads are missing or mistyped fails the decision instead of crashing a hook", async ($, on) => {
-  const seen: unknown[] = [];
-  // A choice without probabilities and a noul given as text: both would throw inside the hooks (or read "1" as >= 0.95).
-  const bad: Record<string, Record<string, unknown>> = { next_action: { type: "choice", choice: "claude", confidence: 0.9 }, mechanical: { type: "noul", noul: "1" } };
-  setup(on, { messages: [user("what does this project do?")], jev: (q) => bad[q.id] ?? (q.id === "effort" ? scored(0.2) : undefined) });
-  claudeBeneath(on, seen);
+// One malformed answer per case, every other answer valid, so only the field under test can fail the decision.
+const choiceOk = { type: "choice", choice: "claude", probabilities: { claude: 1 }, confidence: 0.9 };
+for (
+  const [name, id, answer, error] of [
+    ["a choice without probabilities", "next_action", { type: "choice", choice: "claude", confidence: 0.9 }, "no valid choice answer for questions[0]"],
+    ["a choice with a non-finite probability", "next_action", { ...choiceOk, probabilities: { claude: "1" } }, "no valid choice answer for questions[0]"],
+    ["a choice without confidence", "next_action", { type: "choice", choice: "claude", probabilities: { claude: 1 } }, "no valid choice answer for questions[0]"],
+    ["a choice whose choice is not text", "next_action", { ...choiceOk, choice: 5 }, "no valid choice answer for questions[0]"],
+    ["a score whose score is not a number", "effort", { type: "score", score: "x", probabilities: {}, confidence: 0.9 }, "no valid score answer for questions[1]"],
+    ["a noul given as text", "mechanical", { type: "noul", noul: "1" }, "no valid noul answer for questions[2]"],
+  ] as const
+) {
+  test(`An answer with ${name} fails the decision instead of crashing a hook`, async ($, on) => {
+    const seen: unknown[] = [];
+    // Each would throw inside the hooks (bestAction, pickCandidate) or read "1" as >= 0.95.
+    // A readable file makes step 0 ask next_action (questions[0]) ahead of effort and mechanical.
+    setup(on, { messages: [user("what does src/app.ts export?")], files: [`${CWD}/src/app.ts`], jev: (q) => (q.id === id ? answer : q.id === "effort" ? scored(0.2) : undefined) });
+    claudeBeneath(on, seen);
 
-  await drain($.turn.step(step));
-  expect(seen[0]).toMatchObject({ effort: "high" });
-  expect(await runJev($, "")).toMatch(/unavailable: batch: no valid (noul|choice) answer for questions\[\d+\]/);
-});
+    await drain($.turn.step(step));
+    expect(seen[0]).toMatchObject({ effort: "high" });
+    // The newest /jev row: the recent list is module state, so an older case's identical row must not satisfy this one.
+    expect((await runJev($, "")).split("\n").filter((l) => l.startsWith("- ")).at(-1)).toContain(`unavailable: batch: ${error}`);
+  });
+}
 
 test("Core's error result for the batch call fails the decision with a batch: prefix", async ($, on) => {
   const seen: unknown[] = [];
@@ -1267,18 +1281,6 @@ test("A finished step does not wait for a slow step measurement", async ($, on) 
   await clock.advance(250);
   await run;
   expect(seen).toHaveLength(1);
-});
-
-test("An answer with a mistyped choice or score field fails the decision", async ($, on) => {
-  const seen: unknown[] = [];
-  const bad: Record<string, Record<string, unknown>> = {
-    next_action: { type: "choice", choice: 5, probabilities: { claude: 1 }, confidence: 0.9 },
-    effort: { type: "score", score: "x", probabilities: {}, confidence: 0.9 },
-  };
-  setup(on, { messages: [user("what does this project do?")], jev: (q) => bad[q.id] });
-  claudeBeneath(on, seen);
-  await drain($.turn.step(step));
-  expect(await runJev($, "")).toMatch(/unavailable: batch: no valid (choice|score) answer/);
 });
 
 test("estimate_effort rejects invalid input without asking Jev", async ($, on) => {
