@@ -1,12 +1,16 @@
 ---
 id: F19
 title: jevfort compaction now waits ~4.6 s for the ranking, and its 12 s / 15 s budgets exceed the engine's 10 s hook budget
-status: partial
+status: closed
 priority: medium
 area: jevfort/src/hooks/register.mts (askJev, withJevRanking, onCompact), jevfort/src/hooks/jev.mts
 ---
 
 ## Status
+
+Closed 2026-11-15 without code, checked against the current jevfort: `askJev` no longer races `$.clock.sleep`; its budget is `deadline()` (`$.clock.after` resolving a promise, cancelled in `finally`), which is Approach step 2 and not a hook wait, so the 10 s hook budget cannot cut the 12 s / 15 s budgets through the overlapping sleep. The compaction ranking budget is 9 s (`COMPACT_TIMEOUT_MS`) anyway. The live check (Approach step 1) cannot run: in Claude Code 2.1.325 `cc-plugin-sec-default` bypasses every user-tier `session.compact` hook (jevfort/CLAUDE.md), so there is nothing to measure. Keeping the ~4.6 s ranking wait is the standing default (a ranking ahead of a summary that takes longer anyway); lowering it is a product choice for the user, to be taken up when the bypass ends. No jev-api change; no version bump.
+
+Earlier status:
 
 Partly done, in jevfort 0.9.1 by sizing, not by a live check (the 15 s budget while Haiku answers is unchanged). Found live in the bug hunt: a 30 s in-flight `$.tool.call` inside `prompt.submit` was not cut at 10 s (which supports leaving the 15 s), but a live check of the compaction path itself is impossible for now, because in Claude Code 2.1.325 the built-in `cc-plugin-sec-default` bypasses every user-tier `session.compact` hook, so the ranking and Haiku compaction do not run at all for now (see jevfort/CLAUDE.md): the compaction ranking budget is 9 s (`COMPACT_TIMEOUT_MS`), below the engine's 10 s per hook in case the overlapping `$.clock.sleep` counts against it; a ranking takes about 4.6 s with 30 items. A live check of the hook time limit was not run.
 
@@ -34,7 +38,7 @@ Proven (`chain.mjs`, jevfort's built `session.compact` hook -> jev-api's built h
 
 ## Verification
 
-Live result in a new dated evaluation; a kit test only for the chosen budget constants.
+Closed by code reading (`deadline` in jevfort/src/hooks/register.mts), no new test: the constants are already covered by jevfort's tests. Live result in a new dated evaluation; a kit test only for the chosen budget constants.
 
 ## Constraints
 
