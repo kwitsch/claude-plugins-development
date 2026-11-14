@@ -57,7 +57,7 @@ type Runner = Parameters<Parameters<typeof test>[2]>[0];
 // Answers every call the mod makes on `$`. The batch tool is listed and answered from `jev`; a mod's `$.tool.call`
 // resolves to the stub's `value`: the tool result `{ result }`, or `{ deny }` as the real engine resolves a deny (a bare
 // `{ deny }` stub answer would make the kit reject instead). Other tools go on to the test's own `tool.call` stub.
-function setup(on: On, opts: { messages: Msg[]; jev: Jev; cwd?: () => string; files?: string[]; links?: string[]; packageJson?: object | string; env?: Record<string, string>; store?: Record<string, unknown>; existsDenied?: boolean; sizes?: Record<string, number>; tools?: { name: string; description: string; mcp: boolean }[] | null }) {
+function setup(on: On, opts: { messages: Msg[]; jev: Jev; cwd?: () => string; files?: string[]; links?: string[]; packageJson?: object | string; env?: Record<string, string>; store?: Record<string, unknown>; existsDenied?: boolean; locks?: string[]; sizes?: Record<string, number>; tools?: { name: string; description: string; mcp: boolean }[] | null }) {
   const sent: Asked[] = [];
   let batchCalls = 0;
   let reads = 0;
@@ -71,8 +71,8 @@ function setup(on: On, opts: { messages: Msg[]; jev: Jev; cwd?: () => string; fi
   });
   on("session.cwd", () => ({ value: opts.cwd?.() ?? CWD }));
   on("session.id", () => ({ value: SID }));
-  // `existsDenied` refuses every `fs.exists` probe, as a hook above or the engine may.
-  on("fs.exists", (_$, e) => (opts.existsDenied ? { deny: "EACCES" } : { value: Boolean(opts.packageJson) && e.path === `${CWD}/package.json` }));
+  // `existsDenied` refuses every `fs.exists` probe, as a hook above or the engine may; `locks` are the project's lock files.
+  on("fs.exists", (_$, e) => (opts.existsDenied ? { deny: "EACCES" } : { value: (Boolean(opts.packageJson) && e.path === `${CWD}/package.json`) || (opts.locks ?? []).some((f) => e.path === `${CWD}/${f}`) }));
   on("fs.stat", (_$, e) => {
     statted.push(String(e.path));
     const isLink = (opts.links ?? []).includes(String(e.path));
@@ -1203,6 +1203,15 @@ test("A package.json saved with a UTF-8 BOM still offers its scripts", async ($,
   await drain($.turn.step(step));
   expect(Object.keys(sent.find((q) => q.id === "next_action")?.criteria ?? {})).toContain("run npm test");
 });
+
+for (const [lock, runner] of [["pnpm-lock.yaml", "pnpm"], ["yarn.lock", "yarn"], ["bun.lockb", "bun"], ["bun.lock", "bun"], [undefined, "npm"]] as const) {
+  test(`${lock ?? "No lock file"} offers the test script as ${runner} test`, async ($, on) => {
+    const { sent } = setup(on, { messages: [user("run the tests")], packageJson: { scripts: { test: "vitest" } }, locks: lock ? [lock] : [], jev: () => undefined });
+    claudeBeneath(on, []);
+    await drain($.turn.step(step));
+    expect(Object.keys(sent.find((q) => q.id === "next_action")?.criteria ?? {})).toContain(`run ${runner} test`);
+  });
+}
 
 test("A failing store does not fail estimate_effort or a turn step", async ($, on) => {
   on("store.set", () => ({ deny: "store over 4 MiB of JSON text" }));
