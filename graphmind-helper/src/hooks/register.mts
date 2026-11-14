@@ -446,7 +446,8 @@ async function onToolCall($: Engine, e: ToolCall, next: Next<ToolCall, ToolResul
   try {
     if (!(await usable($))) return r;
     // Parallel searches all pass the first check while `usable` is awaited: only the first one nudges.
-    if (state.nudged) return r;
+    // An abandoned dispatch delivers nothing, so it must not spend the nudge.
+    if (next.signal?.aborted || state.nudged) return r;
     state.nudged = true;
     return { ...r, context: [...(Array.isArray(r.context) ? r.context as unknown[] : []), NUDGE] };
   } catch {

@@ -297,6 +297,27 @@ test("parallel code searches get one nudge between them", async ($, on) => {
   expect(results.filter((r) => r.context?.length)).toHaveLength(1);
 });
 
+test("an abandoned first search does not cost the conversation its nudge", {
+  plugins: [{
+    name: "above",
+    tier: "prepend",
+    register(on) {
+      on("tool.call", (_$, e, next) => {
+        if (!abandonNext || e.tool !== "Grep") return next(e);
+        abandonNext = false;
+        return Promise.race([next(e), Promise.resolve({ result: "above" })]);
+      });
+    },
+  }],
+}, async ($, on) => {
+  const { clock } = setup(on);
+  await $.session.start({ source: "startup" });
+  abandonNext = true;
+  expect((await toolCall($, { tool: "Grep" })).context).toBeUndefined();
+  await clock.settle();
+  expect(String(((await toolCall($, { tool: "Grep" })).context ?? [])[0])).toMatch(/graphmind-indexed/);
+});
+
 test("no nudge while the project is not registered", async ($, on) => {
   setup(on, { unregistered: true });
   await $.session.start({ source: "startup" });

@@ -244,7 +244,7 @@ async function onToolCall($, e, next) {
 	if (state.nudged || !shouldNudge(e)) return r;
 	try {
 		if (!await usable($)) return r;
-		if (state.nudged) return r;
+		if (next.signal?.aborted || state.nudged) return r;
 		state.nudged = true;
 		return {
 			...r,
