@@ -1070,8 +1070,9 @@ export const register = (on: On, options: Options): void => {
     }
     const missing = await jevMissing($);
     // No engine event reports a changed tool list: the next main-loop turn's first hook lists the jev-api tools again
-    // (a subagent's completion does not drop it, so a mid-turn listing glitch cannot flap the band).
-    if (e.agentId === undefined) dropTurnReads();
+    // (a subagent's completion mid-turn does not drop it, so a mid-turn listing glitch cannot flap the band; one that
+    // completes between turns drops what it read there, or the next main-loop turn would reuse it).
+    if (e.agentId === undefined || !turnRunning) dropTurnReads();
     if (missing.length) {
       await contextCompact($, e, false, taskCompactPercent, forceCompactPercent).catch(() => undefined);
       return next(e);
@@ -1080,7 +1081,7 @@ export const register = (on: On, options: Options): void => {
     await contextCompact($, e, true, taskCompactPercent, forceCompactPercent).catch(() => undefined);
     // The compaction check above may have read the env and, through the batch call's own `tool.call` guard, listed the
     // tools again: drop the turn's reads again so the next turn reads the settings `env` and the tool listing afresh.
-    if (e.agentId === undefined) dropTurnReads();
+    if (e.agentId === undefined || !turnRunning) dropTurnReads();
     return next(e);
   });
 
