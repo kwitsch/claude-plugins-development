@@ -736,7 +736,7 @@ export const register = (on, options) => {
 			donePending = true;
 			return next(e);
 		}
-		if (e.origin?.kind === "composer" && !e.isMeta) donePending = false;
+		if (e.origin?.kind === "composer" && !e.isMeta && e.turnId === undefined) donePending = false;
 		if (options.classify === false || e.command || e.isMeta || e.origin?.kind === "task-notification" || e.text.trim().length < 3) return next(e);
 		const questions = promptQuestions(await skillOptions($, e.text));
 		const previous = previousReply(await $.session.messages({}).catch(() => undefined));

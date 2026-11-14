@@ -645,6 +645,20 @@ test("A user turn between the follow-up and its turn clears the exemption", { op
   expect(sent).toHaveLength(1);
 });
 
+test("A prompt typed during the follow-up turn keeps that turn exempt", { options: { classify: false } }, async ($, on) => {
+  const { sent } = setup(on, { messages: [user("rename foo to bar in all files")], jev: unfinished });
+  const submitted = followUps(on);
+  await $.turn.complete(answered("t1", "I renamed it in one file. Want me to do the rest?"));
+  await expect.poll(() => submitted.length).toBe(1);
+  await ownSubmit($);
+  // Typed while t2 runs: prompt.submit fires at Enter with the running turn's id.
+  await $.prompt.submit({ text: "also update the docs afterwards", wait: true, turnId: "t2", origin: { kind: "composer" } });
+  await $.turn.complete(answered("t2", "Renamed in two more files."));
+  for (let i = 0; i < 20; i++) await Promise.resolve();
+  // One done question; the submits are the one follow-up, the test's ownSubmit and the typed prompt (no second follow-up).
+  expect({ doneCalls: ids(sent).filter((x) => x === "done").length, submits: submitted.length }).toEqual({ doneCalls: 1, submits: 3 });
+});
+
 test("A follow-up that failed to submit exempts nothing", { options: { classify: false } }, async ($, on) => {
   let release = () => {};
   const gate = new Promise<void>((resolve) => (release = resolve));

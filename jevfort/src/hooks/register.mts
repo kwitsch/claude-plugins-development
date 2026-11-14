@@ -132,8 +132,8 @@ type ToolResult = { deny?: unknown; isError?: boolean } & Record<string, unknown
 type Check = { tool: string; tool_use_id?: string; agentId?: string; input?: unknown } & Record<string, unknown>;
 /** A `tool.check` result; `rule` is the settings rule that decided, absent for a tool's own check. */
 type Verdict = { decision: string; reason?: string; rule?: string } & Record<string, unknown>;
-/** A `prompt.submit` event; `origin` says who sent it (`{ kind: "plugin", name }` for another plugin's `$.prompt.submit`). */
-type PromptEvent = { command?: unknown; isMeta?: boolean; text: string; context?: readonly string[]; origin?: { kind?: string; name?: string } } & Record<string, unknown>;
+/** A `prompt.submit` event; `origin` says who sent it (`{ kind: "plugin", name }` for another plugin's `$.prompt.submit`), `turnId` the running turn for a prompt typed mid-turn (absent while idle). */
+type PromptEvent = { command?: unknown; isMeta?: boolean; text: string; context?: readonly string[]; origin?: { kind?: string; name?: string }; turnId?: string } & Record<string, unknown>;
 /** An `agent.offer` event. */
 type OfferEvent = { agent: string; description: string } & Record<string, unknown>;
 /** A `session.compact` event. */
@@ -1167,7 +1167,8 @@ export const register = (on: On, options: Options): void => {
       donePending = true;
       return next(e);
     }
-    if (e.origin?.kind === "composer" && !e.isMeta) donePending = false;
+    // Only a prompt submitted while idle (no `turnId`): one typed during the follow-up turn must not re-open that turn to a second check.
+    if (e.origin?.kind === "composer" && !e.isMeta && e.turnId === undefined) donePending = false;
     // A finished background task arrives as origin `task-notification` (not flagged meta): nothing to classify.
     if (options.classify === false || e.command || e.isMeta || e.origin?.kind === "task-notification" || e.text.trim().length < 3) return next(e);
 

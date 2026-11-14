@@ -90,7 +90,7 @@ subagents load it via ToolSearch), no skills, agents, command hooks or MCP serve
   and sends one framed follow-up message (`DONE_PROMPT`) through `$.prompt.submit`, because `cc-plugin-sec-default`
   skips user-tier `classic.Stop` hooks. The unfinished answer stays visible. Background Bash work is not detected,
   only subagents (`$.agent.list()`, waiting = any status but `completed`, `failed`, `killed`, `idle`). The follow-up is
-  recognised by `origin: { kind: "plugin", name: "jevfort" }` in `prompt.submit`, not by its text; a user's own prompt (`origin.kind` `composer`, not meta) clears the
+  recognised by `origin: { kind: "plugin", name: "jevfort" }` in `prompt.submit`, not by its text; a user's own prompt submitted while idle (`origin.kind` `composer`, not meta, no `turnId`) clears the
   exemption of the next turn, meta prompts keep it. A rejected follow-up is logged by the next `turn.complete`.
 - Effort routing: the turn's effort comes from the effort estimate (`estimateEffort` in `policy.mts`, shared with the
   `estimate_effort` tool; its two questions go out with the other step-0 questions in the same batch call), not from upstream's difficulty->effort
