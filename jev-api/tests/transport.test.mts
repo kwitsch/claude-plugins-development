@@ -314,6 +314,18 @@ describe("fallback to $.http.fetch", () => {
     expect(t.fetched).toHaveLength(1);
   });
 
+  it("a call abandoned while the connect is pending is answered at once and sends nothing", async () => {
+    const t = await rig({ connect: NEVER });
+    const ac = new AbortController();
+    const pending = t.run("noul", {}, ac.signal);
+    for (let i = 0; i < 100 && !t.timers.some((x) => x.ms === 3000); i++) await new Promise((r) => setImmediate(r));
+    ac.abort();
+    expect(await pending).toEqual({ deny: "noul: the call was abandoned" });
+    t.fire(3000);
+    await new Promise((r) => setImmediate(r));
+    expect(t.fetched).toHaveLength(0);
+  });
+
   it("a throwing request call falls back for that call, marks the link down and logs once", async () => {
     const t = await rig({ onCall: () => Promise.reject(new Error("transport closed")) });
     expect(JSON.parse((await t.run()).result ?? "null")).toEqual(NOUL_ANSWER);

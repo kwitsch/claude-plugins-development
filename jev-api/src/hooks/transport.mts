@@ -356,7 +356,17 @@ async function callServer($: Engine, server: string, callId: string, state: stri
  * @returns The outcome; never rejects.
  */
 export async function sendOutcome($: Engine, link: Link, env: HttpEnv, state: string, questionsObject: Record<string, unknown>, timeoutMs: number, signal: AbortSignal): Promise<Outcome> {
-  const server = await ensureServer($, link);
+  // the shared connect runs on in the background when the call is abandoned while it is pending
+  let onAbort = (): void => {};
+  const abandoned = new Promise<"aborted">((resolve) => {
+    if (signal.aborted) resolve("aborted");
+    else {
+      onAbort = () => resolve("aborted");
+      signal.addEventListener("abort", onAbort, { once: true });
+    }
+  });
+  const server = await Promise.race([ensureServer($, link), abandoned]).finally(() => signal.removeEventListener("abort", onAbort));
+  if (server === "aborted") return ABANDONED;
   if (server !== undefined) {
     /** The configuration, then the request. */
     const attempt = async (): Promise<Outcome | { down: string }> => {
@@ -382,7 +392,8 @@ export async function sendOutcome($: Engine, link: Link, env: HttpEnv, state: st
       return outcome;
     }
     await markDown($, link, outcome.down);
-    if (signal.aborted) return ABANDONED;
   }
+  // after every await above: an abandoned dispatch sends nothing, the fetch cannot be cancelled
+  if (signal.aborted) return ABANDONED;
   return sendRequest(env, state, questionsObject, fetchViaEngine($, timeoutMs, signal));
 }
