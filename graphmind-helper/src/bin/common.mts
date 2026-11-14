@@ -49,8 +49,14 @@ export function registered(bin: string): boolean {
  * @returns Absolute real path.
  */
 export function claudeProjectKey(cwd: string): string {
-  const r = spawnSync("git", ["rev-parse", "--path-format=absolute", "--show-toplevel", "--git-dir", "--git-common-dir"], { cwd, encoding: "utf8", timeout: 10_000 });
-  const [top, gitDir, common] = r.status === 0 ? r.stdout.trim().split("\n") : [];
+  // One call per value: a path may hold newlines or trailing spaces, so only git's own final newline is cut.
+  const rp = (opt: string) => {
+    const r = spawnSync("git", ["rev-parse", "--path-format=absolute", opt], { cwd, encoding: "utf8", timeout: 10_000 });
+    return r.status === 0 ? r.stdout.slice(0, -1) : undefined;
+  };
+  const top = rp("--show-toplevel");
+  const gitDir = top && rp("--git-dir");
+  const common = top && rp("--git-common-dir");
   // A linked worktree's git dir differs from the common one; a submodule's does not (its root is its own top level).
   const key = top ? (common && gitDir !== common ? dirname(common) : top) : cwd;
   try {

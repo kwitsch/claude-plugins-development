@@ -123,6 +123,16 @@ test("only the project entry Claude Code loads counts: git root, main checkout o
   assert.equal(setupMcpPresent(home, join(inner, "sub")), true);
 });
 
+test("a repo path with a newline or trailing space is its own project key, not its parent folder", () => {
+  for (const name of ["a\nb", "c "]) {
+    const repo = join(root, name);
+    mkdirSync(repo);
+    assert.equal(spawnSync("git", ["init", "-q"], { cwd: repo }).status, 0);
+    writeFileSync(join(home, ".claude.json"), JSON.stringify({ projects: { [repo]: { mcpServers: { graphmind: {} } } } }));
+    assert.equal(setupMcpPresent(home, repo), true, JSON.stringify(name));
+  }
+});
+
 test("a directory or non-executable graphmind earlier on PATH does not shadow the binary", () => {
   const dir = join(root, "a");
   const plain = join(root, "p");
