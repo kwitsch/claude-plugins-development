@@ -2015,6 +2015,15 @@ test("With routing off the band passes", { options: { routing: "off" } }, async 
   await ui.unmount();
 });
 
+test("With routing off step 0 asks no effort questions and keeps Claude's effort", { options: { routing: "off" } }, async ($, on) => {
+  const seen: { effort?: string }[] = [];
+  const { sent } = setup(on, { messages: [user("migrate the whole app to TypeScript")], jev: byId({ difficulty: easy, effort: scored(2.9), mechanical: mech(0.1) }) });
+  claudeBeneath(on, seen);
+  await drain($.turn.step(step));
+  expect(ids(sent).filter((id) => ["effort", "mechanical", "difficulty"].includes(id))).toEqual([]);
+  expect(seen.map((s) => s.effort)).toEqual(["high"]);
+});
+
 // JJ tests (round 7a).
 test("the done check's jev-api call gets the interactive 4 s timeout", { options: { classify: false } }, async ($, on) => {
   const { sent } = setup(on, { messages: [user("rename foo to bar in all files")], jev: unfinished, env: { TYPESAFE_API_KEY: "k" } });
