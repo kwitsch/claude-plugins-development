@@ -287,6 +287,16 @@ test("a timeout below the smallest budget never refuses a small state (the call 
   expect(fetched).toHaveLength(1);
 });
 
+test("below the smallest budget a state at the 1000-token floor is sent and one character more is refused", async ($, on) => {
+  // At 0.05 s the time budget alone is about 55 tokens: only the floor lets this state through.
+  const edge = Math.floor(edgeState(1000, 6));
+  const { fetched } = setup(on);
+  expect((await call($, "noul", { state: "a".repeat(edge), timeout: 0.05, overflow: "error" })).deny).toBeUndefined();
+  expect(fetched).toHaveLength(1);
+  expect((await call($, "noul", { state: "a".repeat(edge + 1), timeout: 0.05, overflow: "error" })).deny).toMatch(/^noul: state too large for the timeout of 0\.05 s/);
+  expect(fetched).toHaveLength(1);
+});
+
 test("the questions count towards the preflight", async ($, on) => {
   // 100 options of 100 characters add about 11 KB to the prompt: a state that fits alone no longer does.
   const criteria = Object.fromEntries(Array.from({ length: 100 }, (_, i) => [`option-${i}`, "d".repeat(100)]));
@@ -435,7 +445,7 @@ test("truncate mode never leaves half of a surrogate pair at a cut", async ($, o
 });
 
 test("truncate mode with a state that cannot keep a character still sends the marker alone", async ($, on) => {
-  // 1 s budget floor of 1000 tokens: the 255 long options leave no room for any state at all.
+  // 1 s time budget of about 1069 tokens: the 255 long options leave no room for any state at all.
   const criteria = Object.fromEntries(Array.from({ length: 255 }, (_, i) => [`option-${i}`, "d".repeat(200)]));
   const { fetched } = setup(on, { replies: [okReply()] });
   await call($, "choice", { state: "x".repeat(20_000), criteria, timeout: 1, overflow: "truncate" });
