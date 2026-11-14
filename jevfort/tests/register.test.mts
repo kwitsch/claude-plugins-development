@@ -1813,6 +1813,8 @@ test("Auto pressed off while step 0 waits for Jev keeps the session effort", asy
   const { sent, clock } = setup(on, { messages: [user("what does this project do?")], jev: (async (q: Asked) => (await gate, q.id === "effort" ? easy : undefined)) as never });
   claudeBeneath(on, seen);
   sessionStubs(on);
+  const logged: string[] = [];
+  on("ui.log", (_$, e) => (logged.push(String(e.text)), { value: undefined }));
   await $.session.start(START);
   const ui = await $.ui.mount(BAND);
 
@@ -1824,6 +1826,7 @@ test("Auto pressed off while step 0 waits for Jev keeps the session effort", asy
   await run;
   await clock.settle();
   expect(seen.map((s) => s.effort)).toEqual(["high"]);
+  expect(logged).toEqual(["effort claude-opus-5-5: session high → unchanged · jev (score 0.20) · auto off"]);
   expect(await levelProps(ui, "low")).toEqual({ dimColor: true });
   expect(await autoLabel(ui)).toBe("Jev auto: off");
   await ui.unmount();
