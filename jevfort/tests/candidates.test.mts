@@ -1,6 +1,6 @@
 // Pure logic of the built plugin/hooks/{candidates,report,context,policy}.mjs: upstream jev-pilot tests/candidates.test.ts.
 import { expect, test } from "vitest";
-import { dedupeSkills, isSafeScript, isSafeToOffer, mentionedPaths, quotedTerms, relevant, SAFE_MAKE, sameCall, words } from "../plugin/hooks/candidates.mjs";
+import { clipScript, dedupeSkills, isSafeScript, isSafeToOffer, mentionedPaths, quotedTerms, relevant, SAFE_MAKE, sameCall, words } from "../plugin/hooks/candidates.mjs";
 import { clip, splitTurn, summarize } from "../plugin/hooks/context.mjs";
 
 test("quoted terms become searches, file names do not", () => {
@@ -261,4 +261,11 @@ test("SAFE_MAKE takes only whole safe Makefile target names", () => {
 test("isSafeScript refuses scripts that rewrite files or never exit", () => {
   for (const n of ["lint:fix", "lint:write", "lint:prettier:fix", "test:update", "test:u", "test:update-snapshots", "test:watch", "test:dev", "test:watchAll", "lint:autofix", "lint:fixAll", "lint:eslint_fix", "test:e2e:ui", "test:UI", "test:open", "test:debug", "test:updateSnapshot", "lint:CSSFix", "test:E2EWatch"]) expect(isSafeScript(n), n).toBe(false);
   for (const n of ["test", "lint", "build", "test:unit", "lint:types", "test:e2e", "test:unit:ci", "type-check", "test:typesOnly"]) expect(isSafeScript(n), n).toBe(true);
+});
+
+test("clipScript never leaves a lone surrogate when the cut falls inside an emoji", () => {
+  const out = clipScript(`${"x".repeat(79)}\u{1F680} tail`);
+  expect(out).toBe(`${"x".repeat(79)}…`);
+  expect(out.isWellFormed()).toBe(true);
+  expect(clipScript("short")).toBe("short");
 });
