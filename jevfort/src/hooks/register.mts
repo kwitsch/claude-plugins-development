@@ -1076,8 +1076,9 @@ export const register = (on: On, options: Options): void => {
     }
     turns.delete(e.turnId);
     await contextCompact($, e, true, taskCompactPercent, forceCompactPercent).catch(() => undefined);
-    // The compaction check above may have read the env: drop it again so the next turn reads the settings `env` afresh.
-    if (e.agentId === undefined) haikuPath = undefined;
+    // The compaction check above may have read the env and, through the batch call's own `tool.call` guard, listed the
+    // tools again: drop the turn's reads again so the next turn reads the settings `env` and the tool listing afresh.
+    if (e.agentId === undefined) dropTurnReads();
     return next(e);
   });
 

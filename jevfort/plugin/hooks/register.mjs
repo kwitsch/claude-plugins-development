@@ -648,7 +648,7 @@ export const register = (on, options) => {
 		}
 		turns.delete(e.turnId);
 		await contextCompact($, e, true, taskCompactPercent, forceCompactPercent).catch(() => undefined);
-		if (e.agentId === undefined) haikuPath = undefined;
+		if (e.agentId === undefined) dropTurnReads();
 		return next(e);
 	});
 	on("tool.call", async function onToolCall($, e, next) {

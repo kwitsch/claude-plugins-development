@@ -1879,6 +1879,28 @@ test("a settings env change between turns counts from the next turn, also after 
   expect(sent.at(-1)?.timeout).toBe(4);
 });
 
+test("the task-end check's tool listing is dropped too: the next turn lists again and sees jev-api gone", async ($, on) => {
+  const tools = [...JEV_TOOLS];
+  let lists = 0;
+  on("tool.list", (_$, e, next) => {
+    lists++;
+    return next(e);
+  });
+  const { calls } = setup(on, { messages: [user("what does this project do?"), { role: "assistant", text: "It does X.", toolUses: [] }], jev: () => undefined, tools });
+  on("command.list", () => ({ value: [] }));
+  on("session.usage", () => ({ value: { context: { percent: 85 } } }));
+  on("turn.complete", () => ({}));
+  claudeBeneath(on, []);
+  await $.turn.complete(answered("t1", "It does X."));
+  const before = { lists, calls: calls() };
+  expect(before.calls).toBe(1);
+  // Between turns jev-api goes away: the next turn's step 0 must list again and ask nothing.
+  tools.length = 0;
+  await drain($.turn.step({ ...step, turnId: "t2" }));
+  expect(lists).toBeGreaterThan(before.lists);
+  expect(calls()).toBe(before.calls);
+});
+
 // Context-fill compaction: from taskCompactPercent the first judged task end compacts, from forceCompactPercent any turn end does.
 const finished = byId({ end: { type: "noul", noul: 0.9 } });
 const intermediate = byId({ end: { type: "noul", noul: 0.1 } });
