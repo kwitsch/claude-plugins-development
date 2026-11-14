@@ -1166,6 +1166,33 @@ test("A call's result that arrives a step later is still scanned for file paths"
   expect(Object.keys(last?.criteria ?? {})).toContain("read src/x.ts");
 });
 
+test("One file under several spellings is one Read candidate", async ($, on) => {
+  const out = "./src/app.ts:3:export const useAuth = 1\n/proj/src/app.ts:4: x";
+  const messages: Msg[] = [
+    user("where is useAuth used? start with src/app.ts"),
+    { role: "assistant", text: "", toolUses: [{ tool_use_id: "c1", tool: "Bash", input: { command: "grep -rn useAuth ." }, text: out }] },
+    { role: "user", text: "", toolUses: [], toolResults: [{ tool_use_id: "c1", text: out, isError: false }] },
+  ];
+  const { sent } = setup(on, { messages, files: [`${CWD}/src/app.ts`], jev: () => undefined });
+  claudeBeneath(on, []);
+  await drain($.turn.step({ ...step, index: 1, messageCount: 3 }));
+  const last = sent.filter((q) => q.id === "next_action").at(-1);
+  expect(Object.keys(last?.criteria ?? {}).filter((k) => k.startsWith("read "))).toEqual(["read src/app.ts"]);
+});
+
+test("A file the turn already read is not offered again under another spelling", async ($, on) => {
+  const messages: Msg[] = [
+    user("check src/./app.ts"),
+    { role: "assistant", text: "", toolUses: [{ tool_use_id: "r1", tool: "Read", input: { file_path: "/proj/src/app.ts" }, text: "1\texport const a = 1" }] },
+    { role: "user", text: "", toolUses: [], toolResults: [{ tool_use_id: "r1", text: "1\texport const a = 1", isError: false }] },
+  ];
+  const { sent } = setup(on, { messages, files: [`${CWD}/src/./app.ts`, `${CWD}/src/app.ts`], jev: () => undefined });
+  claudeBeneath(on, []);
+  await drain($.turn.step({ ...step, index: 1, messageCount: 3 }));
+  const last = sent.filter((q) => q.id === "next_action").at(-1);
+  expect(Object.keys(last?.criteria ?? {}).filter((k) => k.startsWith("read "))).toEqual([]);
+});
+
 test("A finished step does not wait for a slow step measurement", async ($, on) => {
   const seen: unknown[] = [];
   const { sent, clock } = setup(on, { messages: [user("what does src/app.ts export?")], files: ["/proj/src/app.ts"], jev: () => new Promise<never>(() => {}) });

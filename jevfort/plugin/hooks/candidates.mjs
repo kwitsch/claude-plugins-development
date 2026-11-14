@@ -28,7 +28,7 @@ export function quotedTerms(text) {
 const UNSAFE_PATH = /(^|\/)(tmp|private\/tmp|private\/var\/folders|var\/folders)\/|\/\.claude\/|\/tasks\/[^/]+\.output$|\.output$|\.jsonl$/;
 const TRANSCRIPT = /\/tasks\/[^/]+\.output$|\.output$|\.jsonl$/;
 export const isSafeToOffer = (file, cwd) => cwd && file.startsWith(`${cwd}/`) ? !TRANSCRIPT.test(file) : !UNSAFE_PATH.test(file);
-export const absolute = (cwd, p) => p.startsWith("/") ? p : `${cwd}/${p.replace(/^\.\//, "")}`;
+export const absolute = (cwd, p) => (p.startsWith("/") ? p : `${cwd}/${p}`).replace(/\/(?:\.\/)+/g, "/");
 export function sameCall(a, b) {
 	if (a.tool !== b.tool) return false;
 	if (a.tool === "Read") return a.input.file_path === b.input.file_path;

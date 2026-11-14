@@ -764,14 +764,16 @@ async function buildCandidates($: Engine, request: string, steps: readonly Sessi
     scan.calls.add(i);
     texts.push(c.text);
   });
-  const alreadyRead = new Set(calls.filter((c) => c.tool === "Read").map((c) => String(c.input.file_path)));
+  const alreadyRead = new Set(calls.filter((c) => c.tool === "Read").map((c) => absolute(cwd, String(c.input.file_path))));
+  // Files offered in this build: one Read candidate per file, whatever spelling named it.
+  const offered = new Set<string>();
   let reads = 0;
   let probes = 0;
   for (const p of mentionedPaths(texts, scan.paths)) {
     if (reads >= MAX_READS) break;
     if (p.startsWith("~")) continue;
     const file = absolute(cwd, p);
-    if (alreadyRead.has(file) || !isSafeToOffer(file, cwd)) continue;
+    if (offered.has(file) || alreadyRead.has(file) || !isSafeToOffer(file, cwd)) continue;
     if (!statted.has(file)) {
       if (probes >= MAX_STATS) break;
       probes += 1;
@@ -780,6 +782,7 @@ async function buildCandidates($: Engine, request: string, steps: readonly Sessi
     const stat = statted.get(file);
     if (stat?.kind !== "file" || stat.size > 2_000_000) continue;
     out.push({ key: `read ${p}`, description: `Read the file ${p}`, tool: "Read", input: { file_path: file } });
+    offered.add(file);
     reads += 1;
   }
 

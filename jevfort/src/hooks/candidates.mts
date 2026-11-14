@@ -99,13 +99,13 @@ const TRANSCRIPT = /\/tasks\/[^/]+\.output$|\.output$|\.jsonl$/;
 export const isSafeToOffer = (file: string, cwd?: string): boolean => (cwd && file.startsWith(`${cwd}/`) ? !TRANSCRIPT.test(file) : !UNSAFE_PATH.test(file));
 
 /**
- * `p` as an absolute path under `cwd`.
+ * `p` as an absolute path under `cwd`, with `.` segments removed, so spellings of one file compare equal.
  *
  * @param cwd - The project directory.
  * @param p - A path as written.
  * @returns The absolute path.
  */
-export const absolute = (cwd: string, p: string): string => (p.startsWith("/") ? p : `${cwd}/${p.replace(/^\.\//, "")}`);
+export const absolute = (cwd: string, p: string): string => (p.startsWith("/") ? p : `${cwd}/${p}`).replace(/\/(?:\.\/)+/g, "/");
 
 /** A tool call, for comparison. */
 type Call = { tool: string; input: Record<string, unknown> };
