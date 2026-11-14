@@ -68,10 +68,14 @@ type Runner = Parameters<Parameters<typeof test>[2]>[0];
 function setup(on: On, opts: { messages: Msg[]; jev: Jev; files?: string[]; packageJson?: object; env?: Record<string, string>; agents?: { status: string }[]; store?: Record<string, unknown>; tools?: { name: string; description: string; mcp: boolean }[] | null }) {
   const sent: Asked[] = [];
   let batchCalls = 0;
+  let reads = 0;
   mock.env(on, opts.env ?? {});
   mock.store(on, opts.store ?? {});
   const clock = mock.clock(on);
-  on("session.messages", () => ({ value: [...opts.messages] }));
+  on("session.messages", () => {
+    reads++;
+    return { value: [...opts.messages] };
+  });
   on("session.cwd", () => ({ value: CWD }));
   on("session.id", () => ({ value: SID }));
   on("fs.exists", (_$, e) => ({ value: Boolean(opts.packageJson) && e.path === `${CWD}/package.json` }));
@@ -97,7 +101,7 @@ function setup(on: On, opts: { messages: Msg[]; jev: Jev; files?: string[]; pack
     const raw = answers.find((a) => typeof a === "string");
     return { value: { result: raw ?? JSON.stringify(answers.map((a, i) => a ?? NEUTRAL[asked[i].type])) } };
   });
-  return { sent, clock, calls: () => batchCalls };
+  return { sent, clock, calls: () => batchCalls, reads: () => reads };
 }
 
 // Stubs beneath the done check: the turn's end, and the follow-up messages the mod submits (their texts).
@@ -1511,6 +1515,29 @@ for (const [percent, jev, runs, label] of [[85, finished, 1, "a task end"], [85,
     expect(state.compacts).toBe(runs);
   });
 }
+
+// F03: the done check and the task end share one request and one transcript read.
+for (const [percent, ids] of [[85, ["done", "end"]], [30, ["done"]]] as const) {
+  test(`Turn end at ${percent}% fill: one batch call (${ids.join("+")}), one transcript read`, { options: { classify: false } }, async ($, on) => {
+    const { sent, calls, reads } = setup(on, { messages: [user("rename foo to bar")], jev: finished });
+    followUps(on);
+    compactStubs(on, percent);
+    await $.turn.complete(answered("t1", "Done."));
+    expect(sent.map((q) => q.id)).toEqual(ids);
+    expect(calls()).toBe(1);
+    expect(reads()).toBe(1);
+  });
+}
+
+test("A done follow-up at 85% fill queues no compaction", { options: { classify: false } }, async ($, on) => {
+  const { calls } = setup(on, { messages: [user("rename foo to bar")], jev: byId({ done: { type: "noul", noul: 0 }, end: { type: "noul", noul: 0.9 } }) });
+  const submitted = followUps(on);
+  const state = compactStubs(on, 85);
+  await $.turn.complete(answered("t1", "Half done."));
+  expect(submitted).toHaveLength(1);
+  expect(state.compacts).toBe(0);
+  expect(calls()).toBe(1);
+});
 
 test("Context compaction is queued once per fill period", { options: { classify: false } }, async ($, on) => {
   setup(on, { messages: [user("rename foo to bar")], jev: finished });

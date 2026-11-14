@@ -7,11 +7,11 @@ Legend: `[x]` finished (done, or closed without code: status `closed` in the tas
 ## Done
 
 - [x] [F01](tasks/F01-classifier-skill-list-latency.md) high (0.11.0): the prompt classifier offers only the related skills (at most 8, deduped) and no skill question without one: 254 skills 495 ms instead of a timeout ([EVALUATION-2026-11-14-F01.md](EVALUATION-2026-11-14-F01.md))
+- [x] [F03](tasks/F03-turn-end-two-jev-requests.md) medium (0.11.0): at >= 80% fill the done check and the task end go out as one Jev request after one transcript read
 
 ## Remaining
 
 - [ ] [F02](tasks/F02-request-size-drives-latency.md) `open` medium: Jev latency follows the request size (~0.16 ms per byte); full clips cost ~3 s before the first token and 1.7 s per done check
-- [ ] [F03](tasks/F03-turn-end-two-jev-requests.md) `open` medium: at >= 80% context fill the turn end asks Jev twice with the same state (1341 ms vs 762 ms as one batch) and reads the transcript twice
 - [ ] [F04](tasks/F04-unbounded-stat-probes.md) `open` medium: `buildCandidates` stats every mentioned path of the whole turn one after another until 8 files qualify; missing paths are probed again at every step (2001 stats per step measured)
 - [ ] [F05](tasks/F05-per-step-whole-turn-rescan.md) `open` low: every step re-scans the whole turn (`mentionedPaths`, `summarize`): 17 ms per step at a 10 MB turn, quadratic over a turn
 - [ ] [F06](tasks/F06-record-rewrites-whole-log.md) `open` low: `record()` rewrites the whole log (321 KB at the cap) and the stats per decision: 20 `store.set` per 6-step turn, three of them before the first model request

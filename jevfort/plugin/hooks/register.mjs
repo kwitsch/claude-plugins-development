@@ -486,23 +486,25 @@ async function blockSkill($, name) {
 		if (!list.includes(name)) await $.store.set(SKILL_BLOCKLIST_KEY, [...list, name]);
 	} catch {}
 }
-async function contextCompact($, e, ready, continued, fromPercent, forcePercent) {
+async function contextCompact($, e, ready, continued, fromPercent, forcePercent, asked) {
 	if (e.agentId !== undefined || compactQueued || fromPercent <= 0 && forcePercent <= 0) return;
-	const reported = (await $.session.usage().catch(() => undefined))?.context.percent ?? 0;
-	const percent = Number.isFinite(reported) ? reported : 0;
+	const percent = await fillPercent($);
 	const forced = forcePercent > 0 && percent >= forcePercent;
 	if (!forced && (fromPercent <= 0 || percent < fromPercent || !ready || continued || e.reason !== "answer")) return;
 	let text = `${percent.toFixed(0)}% full, forced`;
 	if (!forced) {
-		const ctx = await readTurn($);
-		if (!ctx) return;
-		const r = await askJev($, {
-			request: clip(ctx.request, 3e3),
-			final_message: clip(e.answer ?? "", 2e3),
-			recent: summarize(ctx.steps)
-		}, { end: taskEndQuestion });
-		if (!r.ok) return;
-		const end = noul(r.answers, "end");
+		let end = asked?.end;
+		if (!asked) {
+			const ctx = await readTurn($);
+			if (!ctx) return;
+			const r = await askJev($, {
+				request: clip(ctx.request, 3e3),
+				final_message: clip(e.answer ?? "", 2e3),
+				recent: summarize(ctx.steps)
+			}, { end: taskEndQuestion });
+			if (!r.ok) return;
+			end = noul(r.answers, "end");
+		}
 		if (end === undefined || end < .5) return;
 		text = `${percent.toFixed(0)}% full, task ended (p=${end.toFixed(2)})`;
 	}
@@ -525,9 +527,13 @@ async function contextCompact($, e, ready, continued, fromPercent, forcePercent)
 		lostCompact = String(err);
 	});
 }
-async function checkDone($, e, threshold) {
+async function fillPercent($) {
+	const reported = (await $.session.usage().catch(() => undefined))?.context.percent ?? 0;
+	return Number.isFinite(reported) ? reported : 0;
+}
+async function checkDone($, e, threshold, withEnd) {
 	const agents = await $.agent.list().catch(() => undefined);
-	if (!agents) return false;
+	if (!agents) return { unfinished: false };
 	const waitingOn = agents.filter((a) => !FINISHED.has(a.status)).length;
 	if (waitingOn > 0) {
 		await record($, {
@@ -539,16 +545,22 @@ async function checkDone($, e, threshold) {
 				continued: false
 			}
 		});
-		return false;
+		return { unfinished: false };
 	}
 	const ctx = await readTurn($);
-	if (!ctx) return false;
+	if (!ctx) return { unfinished: false };
 	const r = await askJev($, {
 		request: clip(ctx.request, 3e3),
 		final_message: clip(e.answer ?? "", 2e3),
 		recent: summarize(ctx.steps)
-	}, { done: doneQuestion });
-	if (!r.ok) return false;
+	}, withEnd ? {
+		done: doneQuestion,
+		end: taskEndQuestion
+	} : { done: doneQuestion });
+	if (!r.ok) return {
+		unfinished: false,
+		asked: withEnd ? { end: undefined } : undefined
+	};
 	const done = noul(r.answers, "done");
 	const unfinished = shouldContinue(done, threshold);
 	await record($, {
@@ -561,7 +573,10 @@ async function checkDone($, e, threshold) {
 			continued: unfinished
 		}
 	});
-	return unfinished;
+	return {
+		unfinished,
+		asked: withEnd ? { end: noul(r.answers, "end") } : undefined
+	};
 }
 export const register = (on, options) => {
 	const routing = options.routing === "model" || options.routing === "off" ? options.routing : "effort";
@@ -898,13 +913,18 @@ export const register = (on, options) => {
 			lostCompact = undefined;
 		}
 		let continued = false;
+		let asked;
 		if (e.agentId === undefined) {
 			const exempt = donePending;
 			donePending = false;
 			if (doneCheck && !exempt && e.reason === "answer") {
 				try {
 					const epoch = sessionEpoch;
-					if (await checkDone($, e, doneThreshold)) {
+					const fill = taskCompactPercent > 0 && !compactQueued ? await fillPercent($) : 0;
+					const withEnd = taskCompactPercent > 0 && fill >= taskCompactPercent && !(forceCompactPercent > 0 && fill >= forceCompactPercent);
+					const done = await checkDone($, e, doneThreshold, withEnd);
+					asked = done.asked;
+					if (done.unfinished) {
 						continued = true;
 						followUpEpoch = epoch;
 						$.prompt.submit({ text: DONE_PROMPT }).catch((err) => {
@@ -921,7 +941,7 @@ export const register = (on, options) => {
 				}
 			}
 		}
-		await contextCompact($, e, true, continued, taskCompactPercent, forceCompactPercent).catch((err) => record($, {
+		await contextCompact($, e, true, continued, taskCompactPercent, forceCompactPercent, asked).catch((err) => record($, {
 			kind: "error",
 			applied: false,
 			text: `context compaction check failed: ${String(err)}`

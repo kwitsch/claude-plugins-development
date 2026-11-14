@@ -840,20 +840,21 @@ async function blockSkill($: Engine, name: string): Promise<void> {
  * @param fromPercent - Context fill from which a task end compacts; 0 is off.
  * @param forcePercent - Context fill from which any turn end compacts; 0 is off.
  */
-async function contextCompact($: Engine, e: TurnEnd, ready: boolean, continued: boolean, fromPercent: number, forcePercent: number): Promise<void> {
+async function contextCompact($: Engine, e: TurnEnd, ready: boolean, continued: boolean, fromPercent: number, forcePercent: number, asked?: { end: number | undefined }): Promise<void> {
   if (e.agentId !== undefined || compactQueued || (fromPercent <= 0 && forcePercent <= 0)) return;
-  // A non-finite fill (0/0, an empty window) is no fill: `Infinity >= x` would force a compaction.
-  const reported = (await $.session.usage().catch(() => undefined))?.context.percent ?? 0;
-  const percent = Number.isFinite(reported) ? reported : 0;
+  const percent = await fillPercent($);
   const forced = forcePercent > 0 && percent >= forcePercent;
   if (!forced && (fromPercent <= 0 || percent < fromPercent || !ready || continued || e.reason !== "answer")) return;
   let text = `${percent.toFixed(0)}% full, forced`;
   if (!forced) {
-    const ctx = await readTurn($);
-    if (!ctx) return;
-    const r = await askJev($, { request: clip(ctx.request, 3000), final_message: clip(e.answer ?? "", 2000), recent: summarize(ctx.steps) }, { end: taskEndQuestion });
-    if (!r.ok) return;
-    const end = noul(r.answers, "end");
+    let end = asked?.end;
+    if (!asked) {
+      const ctx = await readTurn($);
+      if (!ctx) return;
+      const r = await askJev($, { request: clip(ctx.request, 3000), final_message: clip(e.answer ?? "", 2000), recent: summarize(ctx.steps) }, { end: taskEndQuestion });
+      if (!r.ok) return;
+      end = noul(r.answers, "end");
+    }
     if (end === undefined || end < 0.5) return;
     text = `${percent.toFixed(0)}% full, task ended (p=${end.toFixed(2)})`;
   }
@@ -868,6 +869,12 @@ async function contextCompact($: Engine, e: TurnEnd, ready: boolean, continued: 
   });
 }
 
+/** The context fill in percent; a non-finite fill (0/0, an empty window) is no fill: `Infinity >= x` would force a compaction. */
+async function fillPercent($: Engine): Promise<number> {
+  const reported = (await $.session.usage().catch(() => undefined))?.context.percent ?? 0;
+  return Number.isFinite(reported) ? reported : 0;
+}
+
 /**
  * The done check after a main-loop answer: asks Jev whether the request is finished and records the verdict.
  *
@@ -877,27 +884,29 @@ async function contextCompact($: Engine, e: TurnEnd, ready: boolean, continued: 
  * @param $ - Engine interface.
  * @param e - The `turn.complete` event.
  * @param threshold - The `doneThreshold`: below this `done` probability the request counts as unfinished.
- * @returns Whether to send Claude back with a follow-up message.
+ * @param withEnd - Ask the task-end question in the same request (the turn end is due for a compaction judgement).
+ * @returns Whether to send Claude back with a follow-up message, and the task-end answer when it was asked (`end` undefined: asked, no usable answer).
  */
-async function checkDone($: Engine, e: TurnEnd, threshold: number): Promise<boolean> {
+async function checkDone($: Engine, e: TurnEnd, threshold: number, withEnd: boolean): Promise<{ unfinished: boolean; asked?: { end: number | undefined } }> {
   // Waiting on background work (a subagent) is not stopping early: that work will wake the session when it finishes.
   // shortcut: background Bash commands are not exposed to $ (only subagents are), so waiting on one still triggers a follow-up; upgrade when the engine lists background tasks.
   const agents = await $.agent.list().catch(() => undefined);
-  if (!agents) return false;
+  if (!agents) return { unfinished: false };
   const waitingOn = agents.filter((a) => !FINISHED.has(a.status)).length;
   if (waitingOn > 0) {
     await record($, { kind: "done", applied: false, text: `skipped: waiting on ${waitingOn} background task(s)`, data: { skipped: "background", continued: false } });
-    return false;
+    return { unfinished: false };
   }
 
   const ctx = await readTurn($);
-  if (!ctx) return false;
+  if (!ctx) return { unfinished: false };
   const r = await askJev(
     $,
     { request: clip(ctx.request, 3000), final_message: clip(e.answer ?? "", 2000), recent: summarize(ctx.steps) },
-    { done: doneQuestion },
+    withEnd ? { done: doneQuestion, end: taskEndQuestion } : { done: doneQuestion },
   );
-  if (!r.ok) return false;
+  // All or nothing: a failed merged call answers neither question, as two failed calls did.
+  if (!r.ok) return { unfinished: false, asked: withEnd ? { end: undefined } : undefined };
   const done = noul(r.answers, "done");
   const unfinished = shouldContinue(done, threshold);
   await record($, {
@@ -907,7 +916,7 @@ async function checkDone($: Engine, e: TurnEnd, threshold: number): Promise<bool
     ms: r.ms,
     data: { p: done, continued: unfinished },
   });
-  return unfinished;
+  return { unfinished, asked: withEnd ? { end: noul(r.answers, "end") } : undefined };
 }
 
 /**
@@ -1270,6 +1279,7 @@ export const register = (on: On, options: Options): void => {
       lostCompact = undefined;
     }
     let continued = false;
+    let asked: { end: number | undefined } | undefined;
     // Done check: runs here because cc-plugin-sec-default passes classic.Stop on past every user-tier hook.
     if (e.agentId === undefined) {
       const exempt = donePending;
@@ -1278,7 +1288,12 @@ export const register = (on: On, options: Options): void => {
         try {
           // Read before the await: a /clear that arrives during the check must make the follow-up stale.
           const epoch = sessionEpoch;
-          if (await checkDone($, e, doneThreshold)) {
+          // Due at the same fill the compaction judges a task end from (never forced: that asks nothing).
+          const fill = taskCompactPercent > 0 && !compactQueued ? await fillPercent($) : 0;
+          const withEnd = taskCompactPercent > 0 && fill >= taskCompactPercent && !(forceCompactPercent > 0 && fill >= forceCompactPercent);
+          const done = await checkDone($, e, doneThreshold, withEnd);
+          asked = done.asked;
+          if (done.unfinished) {
             continued = true;
             // Not awaited: it resolves only once the new turn starts, which waits for this turn to end. No `$` call in the
             // rejection handler: it runs after this frame, so the next turn.complete logs the error in-frame.
@@ -1293,7 +1308,7 @@ export const register = (on: On, options: Options): void => {
         }
       }
     }
-    await contextCompact($, e, true, continued, taskCompactPercent, forceCompactPercent).catch((err: unknown) => record($, { kind: "error", applied: false, text: `context compaction check failed: ${String(err)}` }).catch(() => undefined));
+    await contextCompact($, e, true, continued, taskCompactPercent, forceCompactPercent, asked).catch((err: unknown) => record($, { kind: "error", applied: false, text: `context compaction check failed: ${String(err)}` }).catch(() => undefined));
     return next(e);
   });
 

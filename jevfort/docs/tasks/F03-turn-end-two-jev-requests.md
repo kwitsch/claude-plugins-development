@@ -1,14 +1,14 @@
 ---
 id: F03
 title: At >= 80% context fill the turn end asks Jev twice with the same state and reads the transcript twice
-status: open
+status: done
 priority: medium
 area: jevfort/src/hooks/register.mts (onTurnComplete, checkDone, contextCompact, readTurn)
 ---
 
 ## Status
 
-Open. Found in the performance analysis of 2026-11-14 ([../EVALUATION-2026-11-14.md](../EVALUATION-2026-11-14.md)), plugin 0.10.1 (the task-end compaction came with 0.10.0).
+Done in 0.11.0. Found in the performance analysis of 2026-11-14 ([../EVALUATION-2026-11-14.md](../EVALUATION-2026-11-14.md)), plugin 0.10.1 (the task-end compaction came with 0.10.0).
 
 ## Problem
 
@@ -29,6 +29,10 @@ Proven: fake `$`, `turn.complete` at 85% fill: 31 ops, 2 batch calls, 2 `session
 Ask both questions in one batch when both are due: read the fill (`$.session.usage()`) first, then one `readTurn` and one `askJev` with `{ done, end }` when the done check runs and the fill is at or above `taskCompactPercent`; `contextCompact` takes the `end` answer (and the shared turn context) instead of asking. Keep the current order of effects: a done follow-up (`continued`) still suppresses the task-end compaction; a forced compaction (>= `forceCompactPercent`) still asks nothing; the done check's `exempt`/`donePending` logic and the background-agent skip stay as they are (when the done check is skipped for a waiting subagent, the task end is not due either: today it is asked; decide and document).
 
 ## Verification
+
+Done (0.11.0). `onTurnComplete` reads the fill first; from `taskCompactPercent` and below `forceCompactPercent` the done check asks `{ done, end }` in one `askJev` after one `readTurn`, and `contextCompact` takes the `end` answer instead of asking. Decisions: a done follow-up still suppresses the compaction; when the done check is skipped for a waiting subagent nothing is merged and `contextCompact` asks the end question itself, as before; a failed merged call answers neither (no follow-up, no compaction). Tests in `tests/register.test.mts`: "Turn end at 85% fill: one batch call (done+end), one transcript read" (failed before the change: 2 calls, 2 reads), the 30% case (done only), "A done follow-up at 85% fill queues no compaction"; the existing compaction tests stay green (199 tests). Not re-measured against the real endpoint (the 43% figure above stands as the expected gain).
+
+Plan:
 
 - Kit test: at 85% fill one `turn.complete` makes exactly one batch call carrying both questions and one `session.messages` read; at 30% one call with the done question only; with a done follow-up the compaction is not queued.
 - Existing done-check and context-compaction tests stay green.
