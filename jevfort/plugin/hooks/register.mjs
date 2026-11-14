@@ -2,7 +2,7 @@ import { GENERAL, SWITCH_AT } from "./agents.mjs";
 import { CACHE_TTL, cacheColor, cacheLabel, minutesLeft, nextTtl } from "./cache.mjs";
 import { absolute, AUTH_TOOL, bash, BUILTIN_COMMANDS, clipScript, coversStep, dedupeSkills, isSafeScript, isSafeToOffer, MAX_READS, MAX_STATS, mentionedPaths, quotedTerms, relevant, SAFE_MAKE, sameCall, SKILL_BLOCKLIST_KEY } from "./candidates.mjs";
 import { COMPACT_MAX_TOKENS, COMPACT_MODEL, COMPACT_SYSTEM, compactInstructions, compactItems, haikuTranscript, RELEVANCE } from "./compact.mjs";
-import { clip, splitTurn, summarize, toolCalls } from "./context.mjs";
+import { clip, head, splitTurn, summarize, toolCalls } from "./context.mjs";
 import { choice, COMPACT_API_TIMEOUT_S, COMPACT_TIMEOUT_MS, HAIKU_API_TIMEOUT_S, HAIKU_TIMEOUT_MS, isAnswer, JEV_API_TIMEOUT_S, JEV_BATCH, JEV_TOOL_PREFIX, JEV_TOOLS, MAX_CHOICE_OPTIONS, MAX_ERROR, MAX_PAUSE_MS, MEASURE_GRACE_MS, missingJevTools, noul, PAUSE_MS, score, TIMEOUT_MS } from "./jev.mjs";
 import { forgetRecent, LOG_KEY, MAX_ENTRIES, recentDecisions, remember, statsKey } from "./log.mjs";
 import { bestAction, bounds, difficultyQuestion, doneQuestion, EFFORT_ORDER, effortQuestion, ESTIMATE_SPEC, ESTIMATE_TOOL, estimateEffort, EVERY_TURN_MODELS, inBandRange, inScratchpad, isEffort, lowerModel, mechanicalQuestion, modelFamily, nextActionQuestion, parseEstimateInput, pickCandidate, route, shouldContinue, singleActionQuestion, taskEndQuestion } from "./policy.mjs";
@@ -300,7 +300,7 @@ async function record($, d) {
 	};
 	remember(entry);
 	pending.push(entry);
-	if (d.kind !== "outcome" && d.kind !== "turn") void $.ui.status(`jev: ${d.text}`.slice(0, 80).replace(/[\uD800-\uDBFF]$/, ""));
+	if (d.kind !== "outcome" && d.kind !== "turn") void $.ui.status(head(`jev: ${d.text}`, 80));
 }
 async function flushLog($) {
 	if (!pending.length) return storeQueue;
@@ -428,7 +428,7 @@ async function buildCandidates($, request, steps, calls, stepIndex, cache = newC
 		const file = absolute(cwd, p);
 		if (offered.has(file) || alreadyRead.has(file) || !isSafeToOffer(file, cwd)) continue;
 		if (!statted.has(file)) {
-			if (probes >= MAX_STATS) break;
+			if (probes >= MAX_STATS) continue;
 			probes += 1;
 			statted.set(file, await $.fs.stat(file).catch(() => undefined));
 		}
@@ -514,7 +514,7 @@ function summarizeCalls(calls) {
 	if (!calls.length) return "replied";
 	const parts = new Map();
 	for (const c of calls) {
-		const target = typeof c.input.file_path === "string" ? c.input.file_path.split("/").pop() : typeof c.input.command === "string" ? c.input.command.replace(/\s+/g, " ").slice(0, 30).replace(/[\uD800-\uDBFF]$/, "") : typeof c.input.skill === "string" ? c.input.skill : "";
+		const target = typeof c.input.file_path === "string" ? c.input.file_path.split("/").pop() : typeof c.input.command === "string" ? head(c.input.command.replace(/\s+/g, " "), 30) : typeof c.input.skill === "string" ? c.input.skill : "";
 		const key = target ? `${c.tool} ${target}` : c.tool;
 		parts.set(key, (parts.get(key) ?? 0) + 1);
 	}
@@ -908,6 +908,7 @@ export const register = (on, options) => {
 		const result = await next(e);
 		dropTurnReads();
 		await jevApply($, await jevMissing($));
+		toolListing = undefined;
 		return result;
 	});
 	on("session.end", async function onSessionEnd($, e, next) {

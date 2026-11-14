@@ -1012,6 +1012,27 @@ test("Jev can pick a skill on the first step of a turn", { options: { takeOnlyFo
   expect(chunks).toContainEqual({ kind: "input", index: 0, json: JSON.stringify({ skill: "write-release-notes" }) });
 });
 
+test("An MCP server that connects after session.start is offered at the first step 0", { options: { takeOnlyForBypass: false } }, async ($, on) => {
+  const offered: string[] = [];
+  const opts = {
+    messages: [user("what is the weather like today")],
+    tools: [...JEV_TOOLS],
+    jev: (q: Asked) => {
+      if (q.id === "next_action") offered.push(...Object.keys(q.criteria as object));
+      return undefined;
+    },
+  };
+  setup(on, opts);
+  sessionStubs(on);
+  on("command.list", () => ({ value: [] }));
+  claudeBeneath(on, []);
+  await $.session.start(START);
+  // A new array: the baseline listing must not see the server through a shared reference.
+  opts.tools = [...JEV_TOOLS, { name: "mcp__weather__ask", description: "Ask a question about the weather", mcp: true }];
+  await drain($.turn.step(step));
+  expect(offered).toContain("load mcp__weather__ask");
+});
+
 test("The jev-api tools are never offered to Jev as tools to load", { options: { takeOnlyForBypass: false } }, async ($, on) => {
   const offered: string[] = [];
   setup(on, {
@@ -1514,6 +1535,20 @@ test("A turn's mentioned paths are statted at most 16 per step and each once per
   await drain($.turn.step({ ...step, index: 1 }));
   expect(statted.length - first).toBeLessThanOrEqual(16);
   expect(new Set(statted).size).toBe(statted.length);
+});
+
+test("A file statted by an earlier step is still offered after 16 new paths used up the stat budget", async ($, on) => {
+  const missing = Array.from({ length: 20 }, (_, i) => `src/gone${i}.ts`);
+  const messages: Msg[] = [user("fix src/a.ts")];
+  const { sent } = setup(on, { messages, files: [`${CWD}/src/a.ts`], jev: () => undefined });
+  claudeBeneath(on, []);
+  await drain($.turn.step({ ...step, index: 1 }));
+  const before = sent.length;
+  // A mid-turn compaction starts a new scan but keeps the turn's stat results: the new paths now come first.
+  messages.splice(0, messages.length, user(`This session is being continued from a previous conversation that ran out of context. Summary: tsc says ${missing.join(" ")}, fix src/a.ts`));
+  await drain($.turn.step({ ...step, index: 2 }));
+  const last = sent.slice(before).filter((q) => q.id === "next_action").at(-1);
+  expect(Object.keys(last?.criteria ?? {})).toContain("read src/a.ts");
 });
 
 test("After a mid-turn compaction the path scan starts over and offers a newly named file", async ($, on) => {

@@ -25,7 +25,7 @@ First action, before reading anything: check whether the session already is in a
 
 ## Step 2: jobs (Workflow, sequential)
 
-Run the script below with `Workflow`, `args = { mode: "jobs", plugin, worktree, date, jobs: [{ id, file, title, model, effort }] }`. Jobs run one after the other in the same worktree (no `isolation`; they all edit the same files). Every job commits and pushes itself. A `blocked` job stops the run; report it and leave the rest open.
+Run the script below with `Workflow`, `args = { mode: "jobs", plugin, worktree, date, jobs: [{ id, file, title, model, effort }] }`. Every cache, buffer or merged request a job adds names its invalidation points and gets one test per point (`.claude/rules/hook-caches-and-tests.md`): in the jevfort run most later bugs were regressions of exactly these. Jobs run one after the other in the same worktree (no `isolation`; they all edit the same files). Every job commits and pushes itself. A `blocked` job stops the run; report it and leave the rest open.
 
 After the last job and before the analysis, a review job runs (when at least one job shipped code or docs): `/simplify` once, then `/code-review high --fix` on the branch, then build, lint and tests again, commit and push of what changed (`opus`/`high`; `high` is the ceiling here, never `max`). A blocked review also skips the analysis.
 

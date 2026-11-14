@@ -4,6 +4,7 @@
  *
  * @packageDocumentation
  */
+import { head } from "./context.mjs";
 import type { Entry } from "./log.mjs";
 
 /** The take thresholds the threshold table shows. */
@@ -56,8 +57,7 @@ export const escapePipes = (s: string): string => s.replace(/(\\*)\|/g, "$1$1\\|
  */
 const cell = (s: string, max = 48): string => {
   const one = escapePipes(s.replace(/\s+/g, " ")).trim();
-  // never end on a high surrogate: a split astral character renders as U+FFFD
-  return one.length > max ? `${one.slice(0, max - 1).replace(/[\uD800-\uDBFF]$/, "")}…` : one;
+  return one.length > max ? `${head(one, max - 1)}…` : one;
 };
 /**
  * A text bar of `n` of `of`.

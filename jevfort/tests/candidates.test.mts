@@ -36,7 +36,7 @@ test("cutting text never splits an emoji into a lone surrogate", () => {
   const request = `${"x".repeat(38)}🚀 rest of request`;
   const report = buildReport([{ at: 0, kind: "compare", applied: false, text: "", data: { request, best: "read:a", bestP: 0.9, agree: true } }], 0.85);
   expect(report).toContain(`| ${"x".repeat(38)}… |`);
-  expect(clip(request, 39)).toBe(`${"x".repeat(38)}… [${request.length - 39} more chars]`);
+  expect(clip(request, 39)).toBe(`${"x".repeat(38)}… [${request.length - 38} more chars]`);
 });
 
 test("a backslash before a pipe in a cell does not split the table row", () => {

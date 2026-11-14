@@ -19,7 +19,7 @@ import type { CacheTtl } from "./cache.mjs";
 import { absolute, AUTH_TOOL, bash, BUILTIN_COMMANDS, clipScript, coversStep, dedupeSkills, isSafeScript, isSafeToOffer, MAX_READS, MAX_STATS, mentionedPaths, quotedTerms, relevant, SAFE_MAKE, sameCall, SKILL_BLOCKLIST_KEY } from "./candidates.mjs";
 import type { Candidate } from "./candidates.mjs";
 import { COMPACT_MAX_TOKENS, COMPACT_MODEL, COMPACT_SYSTEM, compactInstructions, compactItems, haikuTranscript, RELEVANCE } from "./compact.mjs";
-import { clip, splitTurn, summarize, toolCalls } from "./context.mjs";
+import { clip, head, splitTurn, summarize, toolCalls } from "./context.mjs";
 import type { SessionMessage, ToolUse, TurnContext } from "./context.mjs";
 import { choice, COMPACT_API_TIMEOUT_S, COMPACT_TIMEOUT_MS, HAIKU_API_TIMEOUT_S, HAIKU_TIMEOUT_MS, isAnswer, JEV_API_TIMEOUT_S, JEV_BATCH, JEV_TOOL_PREFIX, JEV_TOOLS, MAX_CHOICE_OPTIONS, MAX_ERROR, MAX_PAUSE_MS, MEASURE_GRACE_MS, missingJevTools, noul, PAUSE_MS, score, TIMEOUT_MS } from "./jev.mjs";
 import type { Answer, ChoiceAnswer, JevResult, Question } from "./jev.mjs";
@@ -145,13 +145,31 @@ type BandEvent = { props: { hasSurvey: boolean } } & Record<string, unknown>;
 /** A `turn.complete` event. */
 type TurnEnd = { turnId: string; reason?: string; agentId?: string; answer?: string } & Record<string, unknown>;
 /** What `buildCandidates` already scanned for paths this turn: the request text, `steps` rows, and the calls by index. */
-type PathScan = { request?: string; steps: number; calls: Set<number>; paths: Set<string> };
+type PathScan = {
+  /** The request the scan belongs to; unset before the first scan. */
+  request?: string;
+  /** How many `steps` rows were scanned. */
+  steps: number;
+  /** Indexes of the calls whose result text was scanned. */
+  calls: Set<number>;
+  /** The paths found so far, as written. */
+  paths: Set<string>;
+};
 /** An empty path scan. */
 const newScan = (): PathScan => ({ steps: 0, calls: new Set(), paths: new Set() });
 /** A turn's `$.fs.stat` results by absolute path (`undefined`: missing or refused). */
 type StatCache = Map<string, { kind: string; size: number; isLink?: boolean } | undefined>;
 /** What one turn's `buildCandidates` calls share (dropped with the turn): stat results, the path scan, the cwd and the project's commands. */
-type TurnCache = { statted: StatCache; scan: PathScan; cwd?: string; project?: Candidate[] };
+type TurnCache = {
+  /** Stat results by absolute path. */
+  statted: StatCache;
+  /** The path scan. */
+  scan: PathScan;
+  /** The cwd of the last build. */
+  cwd?: string;
+  /** The project's commands for `cwd`. */
+  project?: Candidate[];
+};
 /** An empty turn cache. */
 const newCache = (): TurnCache => ({ statted: new Map(), scan: newScan() });
 /** A `command.run` event. */
@@ -596,7 +614,7 @@ async function record($: Engine, d: Omit<Entry, "at">): Promise<void> {
   const entry: Entry = { ...d, at: await $.clock.now().catch(() => Date.now()) };
   remember(entry);
   pending.push(entry);
-  if (d.kind !== "outcome" && d.kind !== "turn") void $.ui.status(`jev: ${d.text}`.slice(0, 80).replace(/[\uD800-\uDBFF]$/, ""));
+  if (d.kind !== "outcome" && d.kind !== "turn") void $.ui.status(head(`jev: ${d.text}`, 80));
 }
 
 /**
@@ -800,7 +818,8 @@ async function buildCandidates($: Engine, request: string, steps: readonly Sessi
     const file = absolute(cwd, p);
     if (offered.has(file) || alreadyRead.has(file) || !isSafeToOffer(file, cwd)) continue;
     if (!statted.has(file)) {
-      if (probes >= MAX_STATS) break;
+      // Past the budget only paths statted by an earlier step are still offered.
+      if (probes >= MAX_STATS) continue;
       probes += 1;
       statted.set(file, await $.fs.stat(file).catch(() => undefined));
     }
@@ -908,7 +927,7 @@ function summarizeCalls(calls: readonly { tool: string; input: Record<string, un
     const target = typeof c.input.file_path === "string"
       ? c.input.file_path.split("/").pop()
       : typeof c.input.command === "string"
-      ? c.input.command.replace(/\s+/g, " ").slice(0, 30).replace(/[\uD800-\uDBFF]$/, "")
+      ? head(c.input.command.replace(/\s+/g, " "), 30)
       : typeof c.input.skill === "string"
       ? c.input.skill
       : "";
@@ -989,6 +1008,8 @@ async function blockSkill($: Engine, name: string): Promise<void> {
  * @param continued - The done check just sent Claude back: the task is not finished.
  * @param fromPercent - Context fill from which a task end compacts; 0 is off.
  * @param forcePercent - Context fill from which any turn end compacts; 0 is off.
+ * @param asked - The task-end answer the done check already got in its merged request (`end` undefined: no usable
+ * answer, no compaction); absent, the task end is asked here.
  */
 async function contextCompact($: Engine, e: TurnEnd, ready: boolean, continued: boolean, fromPercent: number, forcePercent: number, asked?: { end: number | undefined }): Promise<void> {
   if (e.agentId !== undefined || compactQueued || (fromPercent <= 0 && forcePercent <= 0)) return;
@@ -1022,7 +1043,12 @@ async function contextCompact($: Engine, e: TurnEnd, ready: boolean, continued: 
   });
 }
 
-/** The context fill in percent; a non-finite fill (0/0, an empty window) is no fill: `Infinity >= x` would force a compaction. */
+/**
+ * The context fill in percent; a non-finite fill (0/0, an empty window) is no fill: `Infinity >= x` would force a compaction.
+ *
+ * @param $ - Engine interface.
+ * @returns The fill, 0 when unreadable or not finite.
+ */
 async function fillPercent($: Engine): Promise<number> {
   const reported = (await $.session.usage().catch(() => undefined))?.context.percent ?? 0;
   return Number.isFinite(reported) ? reported : 0;
@@ -1353,6 +1379,8 @@ export const register = (on: On, options: Options): void => {
     // making a tool call) may have cached a listing from before jev-api registered. Logs inactive or registers estimate_effort.
     dropTurnReads();
     await jevApply($, await jevMissing($));
+    // MCP servers may still be connecting: the first step 0 lists the deferred tools itself.
+    toolListing = undefined;
     return result;
   });
 

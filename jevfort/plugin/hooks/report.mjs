@@ -1,3 +1,4 @@
+import { head } from "./context.mjs";
 const THRESHOLDS = [
 	.6,
 	.7,
@@ -14,7 +15,7 @@ const p2 = (v) => v === undefined ? "—" : v.toFixed(2);
 export const escapePipes = (s) => s.replace(/(\\*)\|/g, "$1$1\\|");
 const cell = (s, max = 48) => {
 	const one = escapePipes(s.replace(/\s+/g, " ")).trim();
-	return one.length > max ? `${one.slice(0, max - 1).replace(/[\uD800-\uDBFF]$/, "")}…` : one;
+	return one.length > max ? `${head(one, max - 1)}…` : one;
 };
 const bar = (n, of, width = 10) => {
 	const filled = of ? Math.round(n / of * width) : 0;

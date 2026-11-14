@@ -1,4 +1,9 @@
-export const clip = (text, max) => text.length > max ? `${text.slice(0, max).replace(/[\uD800-\uDBFF]$/, "")}… [${text.length - max} more chars]` : text;
+export const head = (text, n) => text.slice(0, n).replace(/[\uD800-\uDBFF]$/, "");
+export const clip = (text, max) => {
+	if (text.length <= max) return text;
+	const kept = head(text, max);
+	return `${kept}… [${text.length - kept.length} more chars]`;
+};
 const TRANSCRIPT_ONLY = /^\s*<(bash-input|bash-stdout|bash-stderr|local-command-stdout|local-command-caveat|command-name|command-message|command-args|system-reminder|task-notification)>/;
 function isTranscriptOnly(text) {
 	const m = TRANSCRIPT_ONLY.exec(text);
