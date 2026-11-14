@@ -1345,7 +1345,7 @@ test("One file under several spellings is one Read candidate", async ($, on) => 
 test("A file the turn already read is not offered again under another spelling", async ($, on) => {
   const messages: Msg[] = [
     user("check src/./app.ts"),
-    { role: "assistant", text: "", toolUses: [{ tool_use_id: "r1", tool: "Read", input: { file_path: "/proj/src/app.ts" }, text: "1\texport const a = 1" }] },
+    { role: "assistant", text: "", toolUses: [{ tool_use_id: "r1", tool: "Read", input: { file_path: "src/app.ts" }, text: "1\texport const a = 1" }] },
     { role: "user", text: "", toolUses: [], toolResults: [{ tool_use_id: "r1", text: "1\texport const a = 1", isError: false }] },
   ];
   const { sent } = setup(on, { messages, files: [`${CWD}/src/./app.ts`, `${CWD}/src/app.ts`], jev: () => undefined });
