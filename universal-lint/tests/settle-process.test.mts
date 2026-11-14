@@ -323,6 +323,30 @@ test("an edit and its exact undo while the linter runs (A->B->A): the held findi
 test("an edit and its exact undo while a FileChanged lint runs (A->B->A): the held finding is reported, not lost", () =>
   editAndUndoDuringLint((file, cwd) => JSON.stringify({ hook_event_name: "FileChanged", cwd, file_path: file, event: "change" })));
 
+/** A U+2028 above a finding (`first` builds the held lint's payload) and a later Edit of the line the linter numbers it; asserts it is reported. */
+async function foreignBreakAboveFinding(first: (file: string, cwd: string) => string): Promise<void> {
+  const s = setup();
+  // patch lines: 1 `# x<U+2028>y`, 2 `echo $1`, 3 `echo b`; the linter counts U+2028 and reports `echo $1` on line 3
+  const A = "# x y\necho $1\necho b\necho c\n";
+  writeFileSync(s.file, A);
+  s.setFindings("a.sh:3:6: note: ls-marker [SC2086]\n");
+  const firstRun = start(s.e, s.findings, first(s.file, s.e.cwd), { UNIVERSAL_LINT_SETTLE_MS: "2000" });
+  await intoHold(s.e);
+  // the later Edit rewrites patch line 3 (`echo b`), not the flagged line
+  writeFileSync(s.file, A.replace("echo b", "echo 'b'"));
+  s.setFindings("");
+  const edit = { structuredPatch: [{ oldStart: 2, oldLines: 3, newStart: 2, newLines: 3, lines: [" echo $1", "-echo b", "+echo 'b'", " echo c"] }], originalFile: A };
+  assert.equal((await start(s.e, s.findings, payload(s.file, s.e.cwd, { toolName: "Edit", toolResponse: edit }), {})).status, 0);
+  const firstRan = await firstRun;
+  assert.equal(firstRan.status, 2);
+  assert.match(firstRan.stderr, /ls-marker/);
+}
+
+test("a U+2028 above a held finding and a later Edit of the line the linter numbers it: the finding is reported", () => foreignBreakAboveFinding((file, cwd) => payload(file, cwd)));
+
+test("a U+2028 above a held FileChanged finding and a later Edit of the line the linter numbers it: the finding is reported", () =>
+  foreignBreakAboveFinding((file, cwd) => JSON.stringify({ hook_event_name: "FileChanged", cwd, file_path: file, event: "change" })));
+
 test("a change nobody journaled between the held lint and a later Edit: the held finding is reported, not lost", async () => {
   const s = setup();
   s.setFindings(FINDING_L2);
