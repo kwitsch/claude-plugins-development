@@ -253,16 +253,22 @@ test("a setup user's server (mcp__graphmind__*) works the same", async ($, on) =
   expect((prompts[0].context ?? []).join("\n")).toMatch(/Project indexed and ready/);
 });
 
-test("nothing is added when the project is not registered, the prompt is short or from a plugin", async ($, on) => {
+test("nothing is added when the project is not registered", async ($, on) => {
   const a = setup(on, { unregistered: true });
   await $.session.start({ source: "startup" });
   await prompt($, "where is foo_bar defined in the code");
   expect(a.prompts[0].context).toBeUndefined();
-  await prompt($, "short");
-  expect(a.prompts[1].context).toBeUndefined();
-  await prompt($, "where is foo_bar defined in the code", { origin: { kind: "plugin", name: "jevfort" } });
-  expect(a.prompts[2].context).toBeUndefined();
   expect(a.runs).toHaveLength(0);
+});
+
+test("a short, plugin, meta or command prompt passes untouched in a registered project", async ($, on) => {
+  const { prompts } = setup(on);
+  await $.session.start({ source: "startup" });
+  await prompt($, "where is foo_bar defined in the code", { origin: { kind: "plugin", name: "jevfort" } });
+  await prompt($, "short");
+  await prompt($, "where is foo_bar defined in the code", { isMeta: true });
+  await prompt($, "where is foo_bar defined in the code", { command: "x" });
+  expect(prompts.map((p) => p.context)).toEqual([undefined, undefined, undefined, undefined]);
 });
 
 test("without the server's tools in the list nothing is added", async ($, on) => {
