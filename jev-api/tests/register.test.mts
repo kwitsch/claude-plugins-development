@@ -257,12 +257,14 @@ test("tool.call answers the tool names the engine returned", async ($, on) => {
 
 // Only an mcp__<plugin>__<type> answer is followed: anything else must not make the hook claim (or crash on) another tool.
 test("session.start ignores a tool.register answer that names no own tool", async ($, on) => {
-  const answers: Record<string, unknown> = { noul: { tool: "Bash" }, choice: undefined, score: { tool: "mcp__other__score" } };
+  const answers: Record<string, unknown> = { noul: { tool: "x__noul" }, choice: undefined, score: { tool: "mcp__other__score" } };
   on("tool.register", async (_$, e) => ({ value: answers[String(e.name)] }));
   setup(on, { env: { JEV_URL: "https://jev.test/v1/systemone" } });
   on("tool.call", async () => ({ result: "from-next" }));
   await $.session.start({ cwd: "/proj", surface: "terminal", isInteractive: true });
   expect(await $.tool.call({ tool: "Bash", command: "ls" })).toEqual({ result: "from-next" });
+  // Ends with __noul but lacks the mcp__ prefix: only that prefix check keeps the hook from claiming it.
+  expect(await $.tool.call({ tool: "x__noul", ...BASE.noul })).toEqual({ result: "from-next" });
   expect(await $.tool.call({ tool: "mcp__other__score", ...BASE.score })).toEqual({ result: JSON.stringify(ANSWERS.score) });
 });
 
