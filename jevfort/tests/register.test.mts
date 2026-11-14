@@ -462,6 +462,21 @@ test("A user message quoting the follow-up text stays the scored request", { opt
   expect(stateOf(sent, 0).request).toContain("rename baz");
 });
 
+test("The done follow-up as the engine stores it (wrapped) is not the request of its own turn", { options: { classify: false } }, async ($, on) => {
+  const wrapped = `The jevfort plugin sent a message:\n${FOLLOW_UP}\n\nThis is how Claude Code surfaces a prompt a plugin submits between turns — it starts this turn in the user's place. Address the message above.`;
+  const { sent } = setup(on, { messages: [user("rename foo to bar in all files"), { role: "assistant", text: "One file.", toolUses: [] }, user(wrapped)], jev: byId({ done: { type: "noul", noul: 0.9 } }) });
+  followUps(on);
+  await $.turn.complete(answered("t1", "Renamed."));
+  expect(stateOf(sent, 0).request).toBe("rename foo to bar in all files");
+});
+
+test("A finished background task (origin task-notification) is not classified", async ($, on) => {
+  const { sent } = setup(on, { messages: [], jev: () => undefined });
+  on("prompt.submit", (_$, e) => ({ text: e.text }));
+  await $.prompt.submit({ text: "<task-notification>task done, please look at the output of the build</task-notification>", wait: false, origin: { kind: "task-notification" } });
+  expect(sent).toHaveLength(0);
+});
+
 for (const [status, asked] of [["completed", 1], ["failed", 1], ["killed", 1], ["idle", 1], ["running", 0], ["pending", 0], ["starting", 0]] as const) {
   test(`The done check with a ${status} subagent asks Jev ${asked} time(s)`, async ($, on) => {
     const { sent } = setup(on, { messages: [user("rename foo to bar in all files")], jev: unfinished, agents: [{ status }] });

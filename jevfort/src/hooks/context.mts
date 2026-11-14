@@ -65,24 +65,46 @@ export const clip = (text: string, max: number): string => text.length > max ? `
 
 /**
  * Rows the person didn't type as a request: `!` shell runs, slash-command output, and the engine's notices
- * (background task results, reminders).
+ * (background task results, reminders). See {@link isTranscriptOnly}.
  */
-const TRANSCRIPT_ONLY = /^\s*<(bash-input|bash-stdout|bash-stderr|local-command-stdout|local-command-caveat|command-name|command-message|system-reminder|task-notification)>/;
+const TRANSCRIPT_ONLY = /^\s*<(bash-input|bash-stdout|bash-stderr|local-command-stdout|local-command-caveat|command-name|command-message|command-args|system-reminder|task-notification)>/;
 
-/** The row of a slash command that started a turn (a skill typed as `/name args`): `<command-message>` comes first. A local command such as `/jev` starts with `<command-name>` and starts no turn. */
-const COMMAND_ROW = /^\s*<command-message>/;
+/**
+ * Whether a row is the engine's own notice rather than something the person typed: it starts with one of those
+ * tags and, after that tag's last closing tag, holds nothing or another tag. Text typed after a pasted tag makes the
+ * row the person's request; an unclosed tag (a cut notice) stays a notice.
+ *
+ * @param text - The row's text.
+ * @returns True for a transcript-only row.
+ */
+function isTranscriptOnly(text: string): boolean {
+  const m = TRANSCRIPT_ONLY.exec(text);
+  if (!m) return false;
+  const close = `</${m[1]}>`;
+  const end = text.lastIndexOf(close);
+  if (end < 0) return true;
+  const rest = text.slice(end + close.length).trim();
+  return rest === "" || TRANSCRIPT_ONLY.test(rest);
+}
+
+/**
+ * The row of a slash command that started a turn (a skill typed as `/name args`): `<command-message>` first, then the
+ * name and optional arguments, nothing else. The arguments group is greedy, so the row's last closing tag ends it
+ * whatever the arguments contain. A local command such as `/jev` starts with `<command-name>` and starts no turn.
+ */
+const COMMAND_ROW = /^\s*<command-message>[\s\S]*?<\/command-message>\s*<command-name>\s*([^<]*?)\s*<\/command-name>\s*(?:<command-args>([\s\S]*)<\/command-args>\s*)?$/;
 
 /**
  * The slash command a row stands for, as typed.
  *
  * @param text - The row's text.
- * @returns `/name args`, or `undefined` when the row has no command name.
+ * @returns `/name args`, or `undefined` when the row is not a command row.
  */
 function typedCommand(text: string): string | undefined {
-  const name = /<command-name>\s*([^<]*?)\s*<\/command-name>/.exec(text)?.[1];
-  if (!name) return undefined;
-  const args = /<command-args>([\s\S]*?)<\/command-args>/.exec(text)?.[1]?.trim();
-  return args ? `${name} ${args}` : name;
+  const m = COMMAND_ROW.exec(text);
+  if (!m?.[1]) return undefined;
+  const args = m[2]?.trim();
+  return args ? `${m[1]} ${args}` : m[1];
 }
 
 /**
@@ -97,12 +119,9 @@ export function splitTurn(messages: readonly SessionMessage[]): TurnContext | un
   for (let i = messages.length - 1; i >= 0; i--) {
     const m = messages[i];
     if (m.role !== "user" || m.text.trim() === "" || m.toolResults?.length) continue;
-    if (COMMAND_ROW.test(m.text)) {
-      const typed = typedCommand(m.text);
-      if (typed) return { request: typed, command: true, steps: messages.slice(i + 1) };
-      continue;
-    }
-    if (!TRANSCRIPT_ONLY.test(m.text)) return { request: m.text, steps: messages.slice(i + 1) };
+    const typed = typedCommand(m.text);
+    if (typed) return { request: typed, command: true, steps: messages.slice(i + 1) };
+    if (!isTranscriptOnly(m.text)) return { request: m.text, steps: messages.slice(i + 1) };
   }
   return undefined;
 }

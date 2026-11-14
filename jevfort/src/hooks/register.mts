@@ -523,7 +523,9 @@ async function readTurn($: Engine, agentId?: string): Promise<TurnContext | unde
   if (!Array.isArray(messages)) return undefined;
   // Jev's own done follow-up is not the user's request.
   // shortcut: SessionMessage has no origin marker, so the synthetic message is matched by its exact text; a user sending exactly that text loses that one message from the scored request.
-  return splitTurn(messages.filter((m) => !(m.role === "user" && m.text.trim() === DONE_PROMPT)));
+  // The follow-up as stored: the engine wraps a plugin's submitted prompt ("The <plugin> plugin sent a message:\n<text>\n\nThis is how ...").
+  const own = (t: string) => t === DONE_PROMPT || t.startsWith(`The ${PLUGIN_NAME} plugin sent a message:\n${DONE_PROMPT}\n`);
+  return splitTurn(messages.filter((m) => !(m.role === "user" && own(m.text.trim()))));
 }
 
 /**
@@ -924,7 +926,8 @@ export const register = (on: On, options: Options): void => {
       return next(e);
     }
     if (e.origin?.kind === "composer" && !e.isMeta) donePending = false;
-    if (options.classify === false || e.command || e.isMeta || e.text.trim().length < 3) return next(e);
+    // A finished background task arrives as origin `task-notification` (not flagged meta): nothing to classify.
+    if (options.classify === false || e.command || e.isMeta || e.origin?.kind === "task-notification" || e.text.trim().length < 3) return next(e);
 
     const questions = promptQuestions(await skillOptions($));
     const previous = await previousReply($);

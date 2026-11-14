@@ -258,7 +258,8 @@ async function clearLog($) {
 async function readTurn($, agentId) {
 	const messages = await $.session.messages(agentId ? { agentId } : {});
 	if (!Array.isArray(messages)) return undefined;
-	return splitTurn(messages.filter((m) => !(m.role === "user" && m.text.trim() === DONE_PROMPT)));
+	const own = (t) => t === DONE_PROMPT || t.startsWith(`The ${PLUGIN_NAME} plugin sent a message:\n${DONE_PROMPT}\n`);
+	return splitTurn(messages.filter((m) => !(m.role === "user" && own(m.text.trim()))));
 }
 async function previousReply($) {
 	const messages = await $.session.messages({}).catch(() => undefined);
@@ -574,7 +575,7 @@ export const register = (on, options) => {
 			return next(e);
 		}
 		if (e.origin?.kind === "composer" && !e.isMeta) donePending = false;
-		if (options.classify === false || e.command || e.isMeta || e.text.trim().length < 3) return next(e);
+		if (options.classify === false || e.command || e.isMeta || e.origin?.kind === "task-notification" || e.text.trim().length < 3) return next(e);
 		const questions = promptQuestions(await skillOptions($));
 		const previous = await previousReply($);
 		const r = await askJev($, {
