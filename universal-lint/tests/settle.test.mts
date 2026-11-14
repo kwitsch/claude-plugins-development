@@ -376,7 +376,7 @@ test("settleFindings: an unreadable journal, a corrupt or an unreadable record m
 test("settleFindings: a record with malformed hunks means report, never a lost finding", async () => {
   const w = world();
   const { rec, d0 } = await lay(w, []);
-  writeFileSync(path.join(w.journal, `${rec.key}-${"9".repeat(15)}-2.json`), JSON.stringify({ hunks: [null], digest: "x" }));
+  writeFileSync(path.join(w.journal, `${rec.key}-${"9".repeat(15)}-2.json`), JSON.stringify({ hunks: [null], digest: "x", before: d0 }));
   const f = [found(w.proj, [3])];
   assert.equal(await settleFindings(f, w.file, rec, d0, d0), f);
 });
