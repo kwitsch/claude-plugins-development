@@ -663,6 +663,15 @@ test("The done check sends Claude back once when work is unfinished", { options:
   expect(sent).toHaveLength(2);
 });
 
+test("doneThreshold: 0.3 sends Claude back at a done probability of 0.2, which the 0.15 default lets pass", { options: { classify: false, doneThreshold: 0.3 } }, async ($, on) => {
+  setup(on, { messages: [user("rename foo to bar in all files")], jev: byId({ done: { type: "noul", noul: 0.2 } }) });
+  const submitted = followUps(on);
+
+  await $.turn.complete(answered("t1", "I renamed it in one file. Want me to do the rest?"));
+  await expect.poll(() => submitted.length).toBe(1);
+  expect(submitted[0]).toContain("doesn't look finished yet");
+});
+
 test("doneCheck: false asks no done question and sends no follow-up for an unfinished answer", { options: { classify: false, doneCheck: false } }, async ($, on) => {
   const { sent } = setup(on, { messages: [user("rename foo to bar in all files")], jev: unfinished });
   const submitted = followUps(on);
