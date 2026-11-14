@@ -1,14 +1,14 @@
 ---
 id: F05
 title: Every step re-scans the whole turn (mentionedPaths, summarize), quadratic over a turn
-status: open
+status: done
 priority: low
 area: jevfort/src/hooks/register.mts (onTurnStep, buildCandidates), jevfort/src/hooks/context.mts (summarize, toolCalls), jevfort/src/hooks/candidates.mts (mentionedPaths)
 ---
 
 ## Status
 
-Open. Found in the performance analysis of 2026-11-14 ([../EVALUATION-2026-11-14.md](../EVALUATION-2026-11-14.md)), plugin 0.10.1.
+Done in 0.11.0. `summarize` walks the steps from the end and stops after `limit` entries; `buildCandidates` keeps a per-turn `PathScan` (in the turn state next to the stat cache) and scans only the request once, new step texts, and call results not scanned yet (a call counts once its text exists, as results can arrive a step later); `mentionedPaths(texts, seen)` extends the turn's set. The path order is first-discovery order, not request-then-steps-then-calls order. Not re-measured in a dated evaluation. Earlier state: open. Found in the performance analysis of 2026-11-14 ([../EVALUATION-2026-11-14.md](../EVALUATION-2026-11-14.md)), plugin 0.10.1.
 
 ## Problem
 
@@ -30,6 +30,8 @@ Proven (fake `$`, step k > 0 until the request, median of 7): 10 steps with 2 KB
 2. `mentionedPaths`: scan only rows not scanned before in this turn (per-turn cache of found paths and the number of rows seen, in the per-turn state), or scan only the newest N rows / the last K characters of each result.
 
 ## Verification
+
+- Done: `tests/candidates.test.mts`, "mentionedPaths extends the turn's set" and "summarize walks from the end" (rows with a throwing `toJSON` before the last 8 entries; both fail on the old code). Suite 202 tests green.
 
 - Pure tests: `summarize` returns the same entries as today for turns shorter and longer than the limit; the path cache yields the same paths as a full scan.
 - Re-measure the evaluation's `bench2.mjs` 50 KB rows in a new dated evaluation.

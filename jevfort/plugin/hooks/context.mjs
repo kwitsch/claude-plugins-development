@@ -51,17 +51,20 @@ export function toolCalls(steps) {
 }
 export function summarize(steps, limit = 8) {
 	const out = [];
-	for (const m of steps) {
+	for (let i = steps.length - 1; i >= 0 && out.length < limit; i--) {
+		const m = steps[i];
 		if (m.role !== "assistant") continue;
-		if (m.text.trim()) out.push({ assistant: clip(m.text, 400) });
+		const row = [];
+		if (m.text.trim()) row.push({ assistant: clip(m.text, 400) });
 		for (const use of m.toolUses) {
-			out.push({
+			row.push({
 				tool: use.tool,
 				input: clip(JSON.stringify(use.input), 300),
 				...use.text !== undefined ? { result: clip(use.text, 400) } : {},
 				...use.isError ? { isError: true } : {}
 			});
 		}
+		out.unshift(...row);
 	}
 	return out.slice(-limit);
 }

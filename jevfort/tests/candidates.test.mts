@@ -1,7 +1,7 @@
 // Pure logic of the built plugin/hooks/{candidates,report,context,policy}.mjs: upstream jev-pilot tests/candidates.test.ts.
 import { expect, test } from "vitest";
 import { commandKey, coversStep, dedupeSkills, isSafeToOffer, mentionedPaths, quotedTerms, relevant, words } from "../plugin/hooks/candidates.mjs";
-import { splitTurn } from "../plugin/hooks/context.mjs";
+import { splitTurn, summarize } from "../plugin/hooks/context.mjs";
 import { route } from "../plugin/hooks/policy.mjs";
 import { buildReport, when } from "../plugin/hooks/report.mjs";
 
@@ -169,4 +169,21 @@ test("route: in model mode trivial goes to Haiku and routine to Sonnet; effort m
 
 test("words keeps umlauts whole instead of splitting at them", () => {
   expect([...words("ändere die Größe")]).toEqual(expect.arrayContaining(["änder", "größ"]));
+});
+
+test("mentionedPaths extends the turn's set, so only new rows need scanning", () => {
+  const seen = new Set<string>();
+  expect(mentionedPaths(["see a/one.ts"], seen)).toEqual(["a/one.ts"]);
+  expect(mentionedPaths(["and b/two.ts, a/one.ts"], seen)).toEqual(["a/one.ts", "b/two.ts"]);
+});
+
+test("summarize walks from the end: same last entries, old rows are never serialized", () => {
+  const poison = { toJSON: () => { throw new Error("old row serialized"); } };
+  const row = (n: number, input: unknown = { n }) => ({ role: "assistant" as const, text: `t${n}`, toolUses: [{ tool: "Read", input: input as Record<string, unknown>, text: `r${n}` }] });
+  const steps = [row(0, poison), row(1, poison), ...Array.from({ length: 5 }, (_, i) => row(i + 2))];
+  const out = summarize(steps);
+  expect(out).toHaveLength(8);
+  expect(out[0]).toEqual({ assistant: "t3" });
+  expect(out[7]).toEqual({ tool: "Read", input: '{"n":6}', result: "r6" });
+  expect(summarize(steps.slice(2, 4))).toHaveLength(4);
 });

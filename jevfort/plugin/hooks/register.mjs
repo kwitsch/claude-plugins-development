@@ -9,6 +9,12 @@ import { bestAction, bounds, difficultyQuestion, doneQuestion, EFFORT_ORDER, eff
 import { hints, NONE, promptQuestions } from "./prompt.mjs";
 import { buildReport } from "./report.mjs";
 import { SUMMARY_MODEL, SYSTEM } from "./summarize.mjs";
+const newScan = () => ({
+	request: false,
+	steps: 0,
+	calls: new Set(),
+	paths: new Set()
+});
 const CACHE_TICK_MS = 15e3;
 const MAX_TAKES_PER_TURN = 3;
 const WRITE_TOOLS = new Set([
@@ -316,19 +322,22 @@ async function packageRunner($, cwd) {
 	}
 	return "npm";
 }
-async function buildCandidates($, request, steps, calls, stepIndex, statted = new Map()) {
+async function buildCandidates($, request, steps, calls, stepIndex, statted = new Map(), scan = newScan()) {
 	const cwd = await $.session.cwd();
 	const out = [];
 	const has = (file) => $.fs.exists(`${cwd}/${file}`).catch(() => false);
-	const texts = [
-		request,
-		...steps.map((m) => m.text),
-		...calls.map((c) => c.text ?? "")
-	];
+	const texts = scan.request ? [] : [request];
+	scan.request = true;
+	for (; scan.steps < steps.length; scan.steps++) texts.push(steps[scan.steps].text);
+	calls.forEach((c, i) => {
+		if (c.text === undefined || scan.calls.has(i)) return;
+		scan.calls.add(i);
+		texts.push(c.text);
+	});
 	const alreadyRead = new Set(calls.filter((c) => c.tool === "Read").map((c) => String(c.input.file_path)));
 	let reads = 0;
 	let probes = 0;
-	for (const p of mentionedPaths(texts)) {
+	for (const p of mentionedPaths(texts, scan.paths)) {
 		if (reads >= MAX_READS) break;
 		if (p.startsWith("~")) continue;
 		const file = absolute(cwd, p);
@@ -1006,7 +1015,8 @@ export const register = (on, options) => {
 		if (e.agentId && !subagents) return yield* next(e);
 		const turn = turns.get(e.turnId) ?? {
 			taken: 0,
-			statted: new Map()
+			statted: new Map(),
+			scan: newScan()
 		};
 		turns.set(e.turnId, turn);
 		const ctx = await readTurn($, e.agentId);
@@ -1059,7 +1069,7 @@ export const register = (on, options) => {
 		const questions = {};
 		let candidates = [];
 		if (takeSteps && !ctx.command && turn.taken < MAX_TAKES_PER_TURN && (!takeOnlyForBypass || bypass && e.index === 0 && !e.agentId)) {
-			candidates = (await buildCandidates($, ctx.request, ctx.steps, calls, e.index, turn.statted)).filter((c) => !(last && sameCall(last, {
+			candidates = (await buildCandidates($, ctx.request, ctx.steps, calls, e.index, turn.statted, turn.scan)).filter((c) => !(last && sameCall(last, {
 				tool: c.tool,
 				input: c.input
 			})));
@@ -1119,7 +1129,7 @@ export const register = (on, options) => {
 			let measure;
 			let measured = [];
 			if (measureSteps && takeSteps && !ctx.command && e.index > 0 && !e.agentId) {
-				measured = (await buildCandidates($, ctx.request, ctx.steps, calls, e.index, turn.statted)).filter((c) => !(last && sameCall(last, {
+				measured = (await buildCandidates($, ctx.request, ctx.steps, calls, e.index, turn.statted, turn.scan)).filter((c) => !(last && sameCall(last, {
 					tool: c.tool,
 					input: c.input
 				})));

@@ -50,10 +50,10 @@ const QUOTED = /`([^`\n]{3,60})`|"([^"\n]{3,60})"/g;
  * File paths mentioned in `texts`, deduplicated, without versions, URLs and `..` paths.
  *
  * @param texts - The request and the turn's texts.
- * @returns The paths as written.
+ * @param seen - Paths found by earlier calls of the turn, extended here (a fresh set by default).
+ * @returns The paths as written, the earlier ones first.
  */
-export function mentionedPaths(texts: readonly string[]): string[] {
-  const seen = new Set<string>();
+export function mentionedPaths(texts: readonly string[], seen: Set<string> = new Set()): string[] {
   for (const text of texts) {
     for (const m of text.matchAll(PATH)) {
       const p = m[1];

@@ -7,8 +7,7 @@ export const SKILL_BLOCKLIST_KEY = "skillBlocklist";
 export const SAFE_MAKE = /^(test|tests|check|lint|build|typecheck)$/;
 const PATH = /(?:^|[\s`'"([])((?:~|\.{1,2})?\/?[\w@.-]+(?:\/[\w@.-]+)*\.[A-Za-z][A-Za-z0-9]{0,7})(?=$|[\s`'"),:;\]])/g;
 const QUOTED = /`([^`\n]{3,60})`|"([^"\n]{3,60})"/g;
-export function mentionedPaths(texts) {
-	const seen = new Set();
+export function mentionedPaths(texts, seen = new Set()) {
 	for (const text of texts) {
 		for (const m of text.matchAll(PATH)) {
 			const p = m[1];
