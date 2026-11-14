@@ -5,7 +5,7 @@
  */
 
 import type { Engine, ToolName, ToolResult } from "./types.mjs";
-import { MAX_TIMEOUT_S, fail, isRecord, json } from "./util.mjs";
+import { fail, isRecord, json, MAX_TIMEOUT_S } from "./util.mjs";
 
 /** The context window of System One in tokens (`n_ctx`, measured live 2026-11-14: a prompt of this many tokens is refused, one less passes). The server's own `n_ctx` replaces it once a rejection reports it. */
 export const DEFAULT_CONTEXT_TOKENS = 32768;
@@ -279,11 +279,11 @@ export function tooBigError(tool: ToolName, refused: TooBig["tooBig"], budget: n
  * @param limit - The server's limit in tokens (its `n_ctx` minus one).
  * @param timeoutMs - The request timeout.
  * @param aim - The state size to aim for, in characters.
- * @returns The error answer; it names the timeout when the timeout, not the server's limit, set the budget.
+ * @returns The error answer; it names the timeout when the timeout, not the server's limit, set the budget, and names no state size when the budget is the floor {@link MIN_BUDGET_TOKENS}.
  */
 export function preflightError(tool: ToolName, estimate: number, budget: number, limit: number, timeoutMs: number, aim: number): ToolResult {
   if (budget >= limit) return fail(tool, `state too large for System One: at least ${estimate} tokens, the limit is ${limit}; shorten the state to about ${aimHundreds(aim)} characters`);
-  // At the floor the timeout allows fewer tokens than the budget, so naming the budget as what fits would be false.
-  const fit = budget > MIN_BUDGET_TOKENS ? `, about ${budget} fit` : "";
-  return fail(tool, `state too large for the timeout of ${timeoutMs / 1000} s: at least ${estimate} tokens${fit}; shorten the state to about ${aimHundreds(aim)} characters or raise the timeout (at most ${MAX_TIMEOUT_S} s)`);
+  // At the floor the timeout allows fewer tokens than the budget, so neither the budget nor a size taken from it fits: only a longer timeout helps.
+  if (budget <= MIN_BUDGET_TOKENS) return fail(tool, `state too large for the timeout of ${timeoutMs / 1000} s: at least ${estimate} tokens; raise the timeout (at most ${MAX_TIMEOUT_S} s)`);
+  return fail(tool, `state too large for the timeout of ${timeoutMs / 1000} s: at least ${estimate} tokens, about ${budget} fit; shorten the state to about ${aimHundreds(aim)} characters or raise the timeout (at most ${MAX_TIMEOUT_S} s)`);
 }
