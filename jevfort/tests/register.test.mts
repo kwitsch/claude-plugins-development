@@ -2071,6 +2071,31 @@ test("A failed done+end call at 85% fill sends no second request and queues no c
   expect(state.compacts).toBe(0);
 });
 
+test("A subagent's turn end at 96% fill runs no /compact", { options: { classify: false } }, async ($, on) => {
+  setup(on, { messages: [user("rename foo to bar")], jev: intermediate });
+  followUps(on);
+  const state = compactStubs(on, 96);
+  await $.turn.complete(answered("s1", "Done.", { agentId: "a1" }));
+  expect(state.compacts).toBe(0);
+});
+
+test("An aborted main-loop turn at 85% fill asks no end question and runs no /compact", { options: { classify: false } }, async ($, on) => {
+  const { sent } = setup(on, { messages: [user("rename foo to bar")], jev: finished });
+  followUps(on);
+  const state = compactStubs(on, 85);
+  await $.turn.complete(answered("t1", "Done.", { reason: "aborted", isAborted: true }));
+  expect(sent.map((q) => q.id)).not.toContain("end");
+  expect(state.compacts).toBe(0);
+});
+
+test("Two concurrent turn ends at 96% fill queue /compact once", { options: { classify: false } }, async ($, on) => {
+  setup(on, { messages: [user("rename foo to bar")], jev: intermediate });
+  followUps(on);
+  const state = compactStubs(on, 96, true);
+  await Promise.all([$.turn.complete(answered("t1", "Done.")), $.turn.complete(answered("t2", "Done."))]);
+  expect(state.compacts).toBe(1);
+});
+
 test("Turn end at 96% fill asks only the done question and still compacts", { options: { classify: false } }, async ($, on) => {
   const { sent } = setup(on, { messages: [user("rename foo to bar")], jev: intermediate });
   followUps(on);
