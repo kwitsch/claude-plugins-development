@@ -209,3 +209,10 @@ test("a dotfiles repo in a symlinked HOME does not make a plain folder below it 
     process.env.HOME = saved;
   }
 });
+
+test("the README's Requirements name the runtime .mcp.json starts the wrapper with", () => {
+  const { command } = JSON.parse(readFileSync(new URL("../plugin/.mcp.json", import.meta.url), "utf8")).mcpServers.graphmind;
+  const readme = readFileSync(new URL("../plugin/README.md", import.meta.url), "utf8");
+  const requirements = readme.split("## Requirements")[1]?.split("\n## ")[0] ?? "";
+  assert.match(requirements, new RegExp(`\`${command}\` on \`PATH\``));
+});
