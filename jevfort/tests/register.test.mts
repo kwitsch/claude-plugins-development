@@ -276,6 +276,34 @@ test("model routing moves a trivial turn to Haiku", { options: { routing: "model
   expect(seen[0]).toMatchObject({ effort: "low", model: "claude-haiku-5-5" });
 });
 
+test("a step model routing lowered to Haiku leaves the countdown of the chat's own cache", { options: { routing: "model" } }, async ($, on) => {
+  let difficulty: Record<string, unknown> = scored(3);
+  const { clock } = setup(on, { messages: [user("what does this project do?")], jev: (q) => (q.id === "difficulty" ? difficulty : undefined) });
+  const seen: { model: string }[] = [];
+  const usage = { input_tokens: 5, output_tokens: 5, cache_read_input_tokens: 0, cache_creation_input_tokens: 900 };
+  on("turn.step", async function*(_$, e) {
+    seen.push(e as { model: string });
+    yield { kind: "stop", stopReason: "end_turn", usage };
+    return { turnId: e.turnId, index: e.index, answer: "ok", toolUses: [], stopReason: "end_turn", usage };
+  });
+  sessionStubs(on);
+  await $.session.start(START);
+  const ui = await $.ui.mount(BAND);
+  const label = async () => ((await ui.find({ type: "Text", text: /cache/ })) as { children?: unknown[] } | undefined)?.children?.[0];
+  // A response on the chat's own model starts the countdown.
+  await drain($.turn.step(step));
+  expect(seen.at(-1)?.model).toBe("claude-opus-5-5");
+  await clock.advance(59 * 60_000 + 30_000);
+  expect(await label()).toBe(" cache <1m");
+  // A trivial step sent to Haiku writes Haiku's cache, not the Opus one: the Opus countdown still runs out.
+  difficulty = easy;
+  await drain($.turn.step({ ...step, turnId: "t2" }));
+  expect(seen.at(-1)?.model).toBe("claude-haiku-5-5");
+  await clock.advance(60_000);
+  expect(await label()).toBe(" cache cold");
+  await ui.unmount();
+});
+
 test("When Jev is unreachable the step goes to Claude unchanged", async ($, on) => {
   const seen: unknown[] = [];
   setup(on, { messages: [user("what does src/app.ts export?")], files: [`${CWD}/src/app.ts`], jev: () => 401 });
