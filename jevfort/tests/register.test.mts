@@ -1689,8 +1689,10 @@ test("A subagent's turn.complete does not drop the jev-api listing", async ($, o
 
   await $.session.start(START);
   tools.push(...JEV_TOOLS);
-  await $.turn.complete(answered("s1", "Found it.", { agentId: "a1" }));
   await drain($.turn.step({ ...step, turnId: "t2" }));
+  await $.turn.complete(answered("s1", "Found it.", { agentId: "a1" }));
+  // Another subagent of the same main-loop turn still sees the turn's listing (no jev-api): it asks nothing.
+  await drain($.turn.step({ ...step, turnId: "s2", agentId: "a2" }));
   expect(sent).toHaveLength(0);
   await $.turn.complete(answered("t2", "It is a todo app."));
   await drain($.turn.step({ ...step, turnId: "t3" }));
@@ -2157,4 +2159,22 @@ test("A refused /compact lets a later high fill compact again", async ($, on) =>
   await clock.advance(0);
   await $.turn.complete(answered("t2", "Done."));
   expect(compacts).toBe(2);
+});
+
+test("A background subagent that completes between turns drops its env read before the next main turn", async ($, on) => {
+  const env: Record<string, string> = {};
+  const { sent } = setup(on, { messages: [user("what does this project do?"), { role: "assistant", text: "It does X.", toolUses: [] }], jev: () => undefined, env });
+  on("command.list", () => ({ value: [] }));
+  on("turn.complete", () => ({}));
+  claudeBeneath(on, []);
+  await $.turn.complete(answered("t1", "It does X."));
+  // No Jev variable: the subagent asks on the Haiku path.
+  await drain($.turn.step({ ...step, turnId: "bg-t1", agentId: "bg" }));
+  expect(sent.at(-1)?.timeout).toBe(14);
+  await $.turn.complete(answered("bg-t1", "Found it.", { agentId: "bg" }));
+  env.JEV_URL = "https://jev.example/x";
+  const before = sent.length;
+  await drain($.turn.step({ ...step, turnId: "t2" }));
+  expect(sent.length).toBeGreaterThan(before);
+  expect(sent.at(-1)?.timeout).toBe(4);
 });

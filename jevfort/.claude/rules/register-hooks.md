@@ -37,7 +37,7 @@ the shapes below: `inline-headroom/docs/claude-code-verification.md`.
   it; `session.compact` guards only the Jev ranking inside `withJevRanking`); `tool.call` and `tool.check` handle
   `ESTIMATE_TOOL` before it. `jevMissing`, `jevApply` and their state `jevTools`/`jevState` are
   module level (`$` may only be passed to top-level functions). `jevTools` is one `$.tool.list()` per turn, shared by
-  concurrent hooks: a main-loop `turn.complete` (no `agentId`) drops it after its own guard listing (no engine event reports a changed tool
+  concurrent hooks: a main-loop `turn.complete` (no `agentId`, or a subagent's while no main-loop turn runs) drops it after its own guard listing (no engine event reports a changed tool
   list), `session.start` drops it right after `next(e)` and lists the session's baseline (a jevfort hook raised inside
   `next(e)` may have cached a listing from before jev-api registered). A rejected or malformed listing counts as the
   tool missing. `jevApply` applies a listing whose missing set differs from `jevState` once: becoming ready registers `estimate_effort` (`estimateRegistered`: a failed registration is retried by the next
