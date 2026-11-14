@@ -382,11 +382,26 @@ function saveProbeStore(file: string, store: ProbeStore): void {
 }
 
 /**
+ * Whether a path is an executable regular file, as `command -v` checks (a directory passes `X_OK` alone).
+ *
+ * @param p - Candidate path.
+ * @returns True when `p` (symlinks followed) is a file the process may execute.
+ */
+function isExecutableFile(p: string): boolean {
+  try {
+    accessSync(p, fsConstants.X_OK);
+    return statSync(p).isFile();
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Whether a tool is executable on PATH (memoized per process, persisted across processes in the probe file).
  *
  * @param tool - Binary name to look for.
  * @returns True when an executable of that name sits in a PATH directory.
- * @remarks A stored hit is re-validated with one `accessSync` on its directory; a stored miss is trusted while
+ * @remarks A stored hit is re-validated with `isExecutableFile` on its directory; a stored miss is trusted while
  * `0 <= Date.now() - at < PROBE_MISS_TTL_MS` (a future-dated miss is expired); otherwise PATH is scanned and the
  * result written back. Residuals: (1) a newly installed tool is not seen for up to 10 min after a persisted miss,
  * also an earlier chain tool (a later chain tool, a local bin or npx runs meanwhile); (2) a copy added to an
@@ -402,13 +417,10 @@ function onPath(tool: string): boolean {
   probeStore ??= loadProbeStore(file);
   const known = probeStore.hits[tool];
   if (typeof known === "string" && path.isAbsolute(known)) {
-    try {
-      accessSync(path.join(known, tool), fsConstants.X_OK);
+    if (isExecutableFile(path.join(known, tool))) {
       probeCache.set(tool, true);
       return true;
-    } catch {
-      /* gone or no longer executable: probe PATH again */
-    }
+    } // gone or no longer executable: probe PATH again
   }
   const at = probeStore.misses[tool];
   if (typeof at === "number") {
@@ -422,12 +434,9 @@ function onPath(tool: string): boolean {
   let foundDir: string | null = null;
   for (const dir of (process.env.PATH || "").split(path.delimiter)) {
     if (!dir) continue;
-    try {
-      accessSync(path.join(dir, tool), fsConstants.X_OK);
+    if (isExecutableFile(path.join(dir, tool))) {
       foundDir = dir;
       break;
-    } catch {
-      /* keep looking */
     }
   }
   // a hit through a relative PATH entry depends on the cwd: memoize it for this process only

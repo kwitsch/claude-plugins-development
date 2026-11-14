@@ -165,6 +165,14 @@ function saveProbeStore(file, store) {
 		renameSync(tmp, file);
 	} catch {}
 }
+function isExecutableFile(p) {
+	try {
+		accessSync(p, fsConstants.X_OK);
+		return statSync(p).isFile();
+	} catch {
+		return false;
+	}
+}
 function onPath(tool) {
 	const cached = probeCache.get(tool);
 	if (cached !== undefined) return cached;
@@ -172,11 +180,10 @@ function onPath(tool) {
 	probeStore ??= loadProbeStore(file);
 	const known = probeStore.hits[tool];
 	if (typeof known === "string" && path.isAbsolute(known)) {
-		try {
-			accessSync(path.join(known, tool), fsConstants.X_OK);
+		if (isExecutableFile(path.join(known, tool))) {
 			probeCache.set(tool, true);
 			return true;
-		} catch {}
+		}
 	}
 	const at = probeStore.misses[tool];
 	if (typeof at === "number") {
@@ -189,11 +196,10 @@ function onPath(tool) {
 	let foundDir = null;
 	for (const dir of (process.env.PATH || "").split(path.delimiter)) {
 		if (!dir) continue;
-		try {
-			accessSync(path.join(dir, tool), fsConstants.X_OK);
+		if (isExecutableFile(path.join(dir, tool))) {
 			foundDir = dir;
 			break;
-		} catch {}
+		}
 	}
 	if (foundDir === null || path.isAbsolute(foundDir)) {
 		Reflect.deleteProperty(probeStore.hits, tool);

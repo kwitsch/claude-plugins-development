@@ -1,9 +1,10 @@
 // markdownlint / markdownlint-cli2 chain, npx fallback and the MD013 guard; ported from test/universal-lint/markdown.bats.
 // The MD013-off config is written to CLAUDE_PLUGIN_DATA on first use (it cannot ship as a loose file in plugin/).
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "vitest";
+import { hashPath } from "../plugin/hooks/lint-file.mjs";
 import { makeEnv } from "./support/lint-hook.mts";
 
 const OUT = "a.md:1 MD041/first-line-heading";
@@ -25,6 +26,21 @@ test("markdown fallback: markdownlint-cli2 present -> wins over markdownlint (ch
   assert.match(r.ctx, /MD041/);
   assert.ok(e.lines().some((l) => l.startsWith("markdownlint-cli2 ")));
   assert.ok(!e.lines().some((l) => l.startsWith("markdownlint ")));
+});
+
+test("markdown: a directory named markdownlint-cli2 earlier on PATH is no hit, fresh or stored -> markdownlint runs", () => {
+  const e = makeEnv();
+  const early = path.join(e.data, "..", "early-bin");
+  mkdirSync(path.join(early, "markdownlint-cli2"), { recursive: true });
+  e.recStub("markdownlint", 1);
+  const PATH = [early, e.bin].join(path.delimiter);
+  const f = e.file("a.md", "# hi\n");
+  assert.match(e.run(f, { out: OUT, env: { PATH } }).ctx, /MD041/);
+  assert.ok(e.lines().some((l) => l.startsWith("markdownlint ")));
+  // a stored directory hit must not be re-validated as present either
+  const probe = path.join(e.data, `probe-${hashPath(PATH)}.json`);
+  writeFileSync(probe, JSON.stringify({ hits: { "markdownlint-cli2": early }, misses: {} }));
+  assert.match(e.run(f, { out: OUT, env: { PATH } }).ctx, /MD041/);
 });
 
 test("markdown: markdownlint on PATH, markdownlint-cli2 absent, npx present -> markdownlint wins (PATH beats npx-only)", () => {
