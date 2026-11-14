@@ -404,6 +404,43 @@ test("a precompute or a vetoed compaction leaves the countdown, a compaction tha
   await ui.unmount();
 });
 
+test("a Haiku-written compaction clears the countdown, and the old cold period does not compact the new chat", async ($, on) => {
+  const { clock, state } = chatSetup(on, 70);
+  on("model.complete", () => ({ value: { isAnswered: true, text: "S".repeat(300), usage: { input_tokens: 1, output_tokens: 1 } } }));
+  on("ui.render", () => BENEATH);
+  await $.session.start(START);
+  const ui = await $.ui.mount(BAND);
+  await respond($);
+  await clock.advance(30_000);
+  expect(await label(ui)).toMatch(/^ cache \d+m$/);
+  const r = (await $.session.compact({ trigger: "manual", messages: MESSAGES })) as { messages?: unknown[] };
+  expect(r.messages).toHaveLength(1);
+  await clock.advance(30_000);
+  expect(await label(ui)).toBeUndefined();
+  await clock.advance(CACHE_TTL["1h"]);
+  expect(state.compacts).toBe(0);
+  await ui.unmount();
+});
+
+// A context-fill /compact still queued (its command.run pending) is done once a compaction stands: the next turn end may queue again.
+for (const [path, options, answer] of [["Haiku", {}, "S".repeat(300)], ["Claude Code", { haikuCompact: false }, undefined]] as const) {
+  test(`a compaction that stands (${path}) lets the next forced turn end queue /compact again`, { options }, async ($, on) => {
+    // 96% is above forceCompactPercent 95: every turn end compacts, Jev or not.
+    const { state } = chatSetup(on, 96, () => new Promise(() => {}));
+    on("session.compact", () => ({ messages: [] }));
+    on("model.complete", () => ({ value: answer === undefined ? { isAnswered: false, reason: "down" } : { isAnswered: true, text: answer, usage: { input_tokens: 1, output_tokens: 1 } } }));
+    await $.session.start(START);
+    await respond($);
+    expect(state.compacts).toBe(1);
+    // Still queued: the next turn end does not queue a second one.
+    await respond($);
+    expect(state.compacts).toBe(1);
+    await $.session.compact({ trigger: "manual", messages: MESSAGES });
+    await respond($);
+    expect(state.compacts).toBe(2);
+  });
+}
+
 test("a precompute that Claude Code's own compaction answers leaves the countdown", { options: { haikuCompact: false } }, async ($, on) => {
   const { clock } = chatSetup(on, 70);
   on("session.compact", () => ({ messages: [] }));
@@ -446,6 +483,22 @@ test("a /clear (session.end, no session.start follows) starts the countdown over
   await clock.settle();
   expect(await label(ui)).toBeUndefined();
   // The old chat's cold period does not compact the new one.
+  await clock.advance(CACHE_TTL["1h"] + 120_000);
+  expect(state.compacts).toBe(0);
+  await ui.unmount();
+});
+
+test("a session.start (reload) after a response starts the countdown over", async ($, on) => {
+  const { clock, state } = chatSetup(on, 70);
+  on("ui.render", () => BENEATH);
+  await $.session.start(START);
+  const ui = await $.ui.mount(BAND);
+  await respond($);
+  await clock.settle();
+  expect(await label(ui)).toBe(" cache 59m");
+  await $.session.start(START);
+  await clock.settle();
+  expect(await label(ui)).toBeUndefined();
   await clock.advance(CACHE_TTL["1h"] + 120_000);
   expect(state.compacts).toBe(0);
   await ui.unmount();
