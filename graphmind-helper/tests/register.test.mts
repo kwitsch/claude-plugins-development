@@ -24,6 +24,10 @@ type World = {
   dirs?: string[];
   /** Contents of settings.json when it exists. */
   settings?: string;
+  /** Path of that settings.json (default: `~/.claude/settings.json`). */
+  settingsPath?: string;
+  /** Value of `CLAUDE_CONFIG_DIR` (default: unset). */
+  configDir?: string;
   /** `gm_status` fails (project not registered). */
   unregistered?: boolean;
   /** Output of `graphmind memory search`. */
@@ -50,11 +54,12 @@ function setup(on: Parameters<typeof mock.clock>[0], w: World = {}) {
   const runs: string[][] = [];
   const clock = mock.clock(on);
   const files = w.files ?? [BIN];
-  on("env.get", (_$, e) => ({ value: e.name === "HOME" ? "/home/u" : e.name === "PATH" ? "/usr/bin" : undefined }));
+  const settings = w.settingsPath ?? SETTINGS;
+  on("env.get", (_$, e) => ({ value: e.name === "HOME" ? "/home/u" : e.name === "PATH" ? "/usr/bin" : e.name === "CLAUDE_CONFIG_DIR" ? w.configDir : undefined }));
   on("session.cwd", () => ({ value: CWD }));
-  on("fs.exists", (_$, e) => ({ value: files.includes(String(e.path)) || w.dirs?.includes(String(e.path)) || (w.settings !== undefined && e.path === SETTINGS) }));
+  on("fs.exists", (_$, e) => ({ value: files.includes(String(e.path)) || w.dirs?.includes(String(e.path)) || (w.settings !== undefined && e.path === settings) }));
   on("fs.stat", (_$, e) => (files.includes(String(e.path)) ? { value: { kind: "file", size: 1, mtimeMs: 0 } } : w.dirs?.includes(String(e.path)) ? { value: { kind: "dir", size: 0, mtimeMs: 0 } } : { deny: "ENOENT" }));
-  on("fs.read", (_$, e) => (e.path === SETTINGS && w.settings !== undefined ? { value: w.settings } : { deny: "ENOENT" }));
+  on("fs.read", (_$, e) => (e.path === settings && w.settings !== undefined ? { value: w.settings } : { deny: "ENOENT" }));
   on("tool.list", () => ({ value: w.tools ?? OWN }));
   on("process.run", (_$, e) => {
     const argv = [...(e.argv as string[])];
@@ -284,6 +289,20 @@ test("when graphmind setup's own hooks are in settings.json the module adds noth
   await prompt($, "where is foo_bar defined in the code");
   expect(prompts[0].context).toBeUndefined();
   expect((await toolCall($, { tool: "Grep" })).context).toBeUndefined();
+});
+
+test("with CLAUDE_CONFIG_DIR set, setup's hooks in $CLAUDE_CONFIG_DIR/settings.json turn the module off", async ($, on) => {
+  const { prompts } = setup(on, { configDir: "/cfg", settingsPath: "/cfg/settings.json", settings: "{\"hooks\":{\"x\":\"/h/graphmind-session.sh\"}}" });
+  await $.session.start({ source: "startup" });
+  await prompt($, "where is foo_bar defined in the code");
+  expect(prompts[0].context).toBeUndefined();
+});
+
+test("with CLAUDE_CONFIG_DIR set, setup's hooks only in ~/.claude/settings.json do not turn the module off", async ($, on) => {
+  const { prompts } = setup(on, { configDir: "/cfg", settings: "{\"hooks\":{\"x\":\"/h/graphmind-session.sh\"}}" });
+  await $.session.start({ source: "startup" });
+  await prompt($, "where is foo_bar defined in the code");
+  expect(prompts[0].context?.length).toBeGreaterThan(0);
 });
 
 test("a code search gets the nudge once; other tools and graphmind itself get none", async ($, on) => {
