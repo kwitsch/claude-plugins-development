@@ -1597,10 +1597,13 @@ for (const model of ["claude-haiku-5-5", "claude-fable-5"]) {
 
 test("A held Haiku effort still applies when Jev fails on a later turn", async ($, on) => {
   const seen: { effort?: string }[] = [];
-  setup(on, { messages: [user("what does this project do?")], jev: inOrder({ difficulty: easy, effort: scored(1.6) }, 401) });
+  // A named file gives the held t2 a step-0 question, so its 401 reaches the failure branch.
+  const { sent } = setup(on, { messages: [user("explain src/app.ts")], files: [`${CWD}/src/app.ts`], jev: inOrder({ difficulty: easy, effort: scored(1.6) }, 401) });
   claudeBeneath(on, seen);
   await drain($.turn.step(turnStep("t1", "claude-haiku-5-5", "high")));
   await drain($.turn.step(turnStep("t2", "claude-haiku-5-5", "high")));
+  expect(new Set(sent.map((q) => q.call))).toEqual(new Set([0, 1]));
+  expect(await runJev($, "")).toContain("unavailable");
   expect(seen.map((s) => s.effort)).toEqual(["medium", "medium"]);
 });
 
