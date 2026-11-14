@@ -23,11 +23,8 @@ import { clip, head, splitTurn, summarize, toolCalls } from "./context.mjs";
 import type { SessionMessage, ToolUse, TurnContext } from "./context.mjs";
 import { choice, COMPACT_API_TIMEOUT_S, COMPACT_TIMEOUT_MS, HAIKU_API_TIMEOUT_S, HAIKU_TIMEOUT_MS, isAnswer, JEV_API_TIMEOUT_S, JEV_BATCH, JEV_TOOL_PREFIX, JEV_TOOLS, MAX_CHOICE_OPTIONS, MAX_ERROR, MAX_PAUSE_MS, missingJevTools, noul, PAUSE_MS, score, TIMEOUT_MS } from "./jev.mjs";
 import type { Answer, ChoiceAnswer, JevResult, Question } from "./jev.mjs";
-import { forgetRecent, LOG_KEY, MAX_ENTRIES, recentDecisions, remember, statsKey } from "./log.mjs";
-import type { Entry } from "./log.mjs";
 import { bestAction, bounds, EFFORT_ORDER, effortQuestion, ESTIMATE_SPEC, ESTIMATE_TOOL, estimateEffort, EVERY_TURN_MODELS, inBandRange, inScratchpad, isEffort, mechanicalQuestion, modelFamily, nextActionQuestion, parseEstimateInput, pickCandidate, singleActionQuestion, taskEndQuestion } from "./policy.mjs";
 import type { Effort, EstimateBounds, EstimateModel } from "./policy.mjs";
-import { buildReport, escapePipes } from "./report.mjs";
 import { SUMMARY_MODEL, SYSTEM } from "./summarize.mjs";
 import type { ModelUsage, Summary } from "./summarize.mjs";
 
@@ -64,11 +61,9 @@ type Engine = {
     exists(path: string): Promise<boolean>;
     stat(path: string): Promise<{ kind: string; size: number; isLink?: boolean }>;
     read(path: string): Promise<string>;
-    write(path: string, text: string): Promise<unknown>;
   };
   /** Slash commands. */
   command: {
-    register(spec: { name: string; description: string }): Promise<unknown>;
     list(): Promise<CommandInfo[]>;
     /** Runs a slash command as if typed: queued until the session is idle, resolves once it ran, rejects when refused. */
     run(spec: { command: string; args: string }): Promise<unknown>;
@@ -85,11 +80,10 @@ type Engine = {
   /** User interface. */
   ui: {
     status(text: string): Promise<unknown>;
-    /** Redraws the render sites of an event (the effort band, an open `/jev` output). */
+    /** Redraws the render sites of an event (the effort band). */
     invalidate(event: "ui.render"): void;
-    // The element factories are plain functions, called detached from the object (`const { Markdown } = …`).
+    // The element factories are plain functions, called detached from the object (`const { Box } = …`).
     resolve(e: unknown): {
-      Markdown: (props: { text: string }) => unknown;
       /** Layout container. */
       Box: (props: Record<string, unknown>) => unknown;
       /** Styled text run. */
@@ -131,8 +125,6 @@ type Verdict = { decision: string; reason?: string; rule?: string } & Record<str
 type OfferEvent = { agent: string; description: string } & Record<string, unknown>;
 /** A `session.compact` event. */
 type CompactEvent = { agentId?: string; trigger: string; messages: readonly SessionMessage[]; instructions?: string } & Record<string, unknown>;
-/** A `ui.render` event of the `/jev` command output. */
-type RenderEvent = { props: { isErrored?: boolean; text: string } } & Record<string, unknown>;
 /** A `ui.render` event of the band above the prompt. */
 type BandEvent = { props: { hasSurvey: boolean } } & Record<string, unknown>;
 /** A `turn.complete` event. */
@@ -165,14 +157,11 @@ type TurnCache = {
 };
 /** An empty turn cache. */
 const newCache = (): TurnCache => ({ statted: new Map(), scan: newScan() });
-/** A `command.run` event. */
-type CommandEvent = { args: string } & Record<string, unknown>;
 /** The `on` the engine passes to `register`, one overload per hooked event. */
 type On = {
   (event: "session.start", hook: Hook<unknown, unknown>): void;
   /** Raised for /clear and an in-process /resume, where no `session.start` follows. */
   (event: "session.end", hook: Hook<unknown, unknown>): void;
-  (event: "command.run", matcher: { command: "jev" }, hook: ($: Engine, e: CommandEvent) => Promise<{ text: string }>): void;
   (event: "turn.complete", hook: Hook<TurnEnd, unknown>): void;
   (event: "tool.call", hook: Hook<ToolCall, ToolResult>): void;
   (event: "tool.call", matcher: { tool: "Agent" }, hook: Hook<AgentCall, ToolResult>): void;
@@ -180,7 +169,6 @@ type On = {
   (event: "tool.check", hook: Hook<Check, Verdict>): void;
   (event: "agent.offer", hook: Hook<OfferEvent, unknown>): void;
   (event: "session.compact", hook: Hook<CompactEvent, unknown>): void;
-  (event: "ui.render", matcher: { component: "CommandOutput"; props: { command: "jev" } }, hook: ($: Engine, e: RenderEvent, next: (e: RenderEvent) => unknown) => unknown): void;
   /** Registers the effort band render hook for the `AbovePrompt` site. */
   (event: "ui.render", matcher: { component: "AbovePrompt" }, hook: ($: Engine, e: BandEvent, next: (e: BandEvent) => unknown) => unknown): void;
 };
@@ -236,7 +224,7 @@ const API_TIMEOUT = /\btimeout after \d+ms\b/;
  *
  * @param startedAt - When the timed-out call started.
  * @param budgetMs - The call's budget.
- * @param error - The timeout text `/jev` shows while the pause lasts.
+ * @param error - The timeout text the paused answer reports.
  */
 function pauseAfterTimeout(startedAt: number, budgetMs: number, error: string): void {
   if (startedAt < jevPause.until) return;
@@ -341,7 +329,7 @@ let skillList: Promise<CommandInfo[]> | undefined;
 /** This turn's "none of jev-api's three env values is set, Haiku answers" decision; dropped with `jevTools`. */
 let haikuPath: Promise<boolean> | undefined;
 
-/** Drops the per-turn engine reads shared across hooks: at every main-loop `turn.complete`, at `session.start`'s baseline and after a `/jev` between turns. */
+/** Drops the per-turn engine reads shared across hooks: at every main-loop `turn.complete`, at `session.start`'s baseline. */
 function dropTurnReads(): void {
   jevTools = undefined;
   toolListing = undefined;
@@ -492,19 +480,13 @@ async function withJevRanking($: Engine, e: CompactEvent): Promise<CompactEvent>
   const keep = scores.filter((s) => (s ?? 0) >= 2.2).length;
   const drop = scores.filter((s) => s !== undefined && s < 0.8).length;
   // A failing log write must not cost the compaction its ranking.
-  await record($, {
-    kind: "compact",
-    applied: added !== undefined,
-    text: `${e.trigger} compaction: ${items.length} results scored, keep ${keep}, drop ${drop}`,
-    ms: r.ms,
-    data: { trigger: e.trigger, items: items.length, keep, drop },
-  }).catch(() => undefined);
+  note($, `${e.trigger} compaction: ${items.length} results scored, keep ${keep}, drop ${drop}`);
   return added ? { ...e, instructions: e.instructions ? `${e.instructions}\n\n${added}` : added } : e;
 }
 
 /**
  * The needed jev-api tools that are not listed; a non-empty answer turns jevfort's use of Jev off: every hook that
- * needs Jev passes through untouched. `/jev`, the render hooks, `estimate_effort` and the work that needs no Jev (the
+ * needs Jev passes through untouched. The render hooks, `estimate_effort` and the work that needs no Jev (the
  * cache countdown, the Haiku compaction, the auto-compact timer) go on. Listed once per turn (`jevTools`); a listing
  * that differs from the last applied one is applied by {@link jevApply}. A failed or malformed listing counts as all
  * missing, so the shared promise never rejects.
@@ -548,98 +530,25 @@ async function jevApply($: Engine, missing: string[]): Promise<void> {
     $.ui.invalidate("ui.render");
   } catch { /* no mounted render site (headless): the band just is not redrawn */ }
   if (key) {
-    await record($, { kind: "error", applied: false, text: `inactive: jev-api tools missing (${key})` }).catch(() => undefined);
+    note($, `inactive: jev-api tools missing (${key})`);
     return;
   }
   try {
     if (!estimateRegistered) await $.tool.register(ESTIMATE_SPEC);
     estimateRegistered = true;
   } catch (err) {
-    await record($, { kind: "error", applied: false, text: `estimate_effort not registered: ${String(err)}` }).catch(() => undefined);
+    note($, `estimate_effort not registered: ${String(err)}`);
   }
 }
 
 /**
- * The stored log, oldest first.
+ * Says a decision in the status line.
  *
  * @param $ - Engine interface.
- * @returns The entries.
+ * @param text - What was decided.
  */
-async function readLog($: Engine): Promise<Entry[]> {
-  return ((await $.store.get(LOG_KEY)) as Entry[] | undefined) ?? [];
-}
-
-/**
- * The decision counters.
- *
- * @param $ - Engine interface.
- * @returns Counts by stats key.
- */
-async function stats($: Engine): Promise<Record<string, number>> {
-  return ((await $.store.get("stats")) as Record<string, number> | undefined) ?? {};
-}
-/** Tail of the queue that serializes flushLog()'s store writes. */
-let storeQueue: Promise<void> = Promise.resolve();
-/**
- * Decisions recorded since the last {@link flushLog}, oldest first.
- *
- * @remarks shortcut: unbounded between flushes (every turn.complete flushes), cap it if one turn can record thousands.
- */
-const pending: Entry[] = [];
-
-/**
- * Logs a decision: this session's buffer, the pending store entries ({@link flushLog} writes them), and the status line.
- *
- * @param $ - Engine interface.
- * @param d - The decision without its time.
- */
-async function record($: Engine, d: Omit<Entry, "at">): Promise<void> {
-  const entry: Entry = { ...d, at: await $.clock.now().catch(() => Date.now()) };
-  remember(entry);
-  pending.push(entry);
-  if (d.kind !== "outcome" && d.kind !== "turn") void $.ui.status(head(`jev: ${d.text}`, 80));
-}
-
-/**
- * Writes the pending decisions into the capped store log and the counters: one read and one write of each per call.
- * Called in-frame from `turn.complete`, `session.end` and `/jev`; a hook that never completes loses its own entries.
- * With nothing pending it still waits for the flushes already queued, so a store read after it sees their entries.
- *
- * @param $ - Engine interface.
- */
-async function flushLog($: Engine): Promise<void> {
-  // Nothing of its own: still wait for another hook's flush, /jev reads the store next.
-  if (!pending.length) return storeQueue;
-  const entries = pending.splice(0);
-  // Serialized: parallel hooks would otherwise read the same log and tally and lose each other's writes.
-  const run = storeQueue.then(async () => {
-    const log = await readLog($);
-    await $.store.set(LOG_KEY, [...log, ...entries].slice(-MAX_ENTRIES));
-
-    const tally = await stats($);
-    for (const key of entries.map(statsKey)) tally[key] = (tally[key] ?? 0) + 1;
-    await $.store.set("stats", tally);
-  });
-  storeQueue = run.catch(() => undefined);
-  // A failing store (over its 4 MiB cap, a full disk) must not fail a hook: the entries are dropped, as one record() used to drop its own.
-  await storeQueue;
-}
-
-/**
- * Empties the log, the counters and the pending decisions.
- *
- * @param $ - Engine interface.
- */
-async function clearLog($: Engine): Promise<void> {
-  pending.length = 0;
-  forgetRecent();
-  // In the same queue as flushLog(): one still in flight would otherwise write the cleared log back.
-  const run = storeQueue.then(async () => {
-    await $.store.set(LOG_KEY, []);
-    await $.store.set("stats", {});
-  });
-  storeQueue = run.catch(() => undefined);
-  await run;
+function note($: Engine, text: string): void {
+  void $.ui.status(head(`jev: ${text}`, 80));
 }
 
 /**
@@ -870,7 +779,7 @@ function offerableSkills($: Engine): Promise<CommandInfo[]> {
   return (skillList ??= (async () => {
     const commands = await $.command.list().catch(() => []);
     const blocked = new Set(((await $.store.get(SKILL_BLOCKLIST_KEY).catch(() => undefined)) as string[] | undefined) ?? []);
-    return dedupeSkills(commands.filter((c) => (c.source === "plugin" || c.source === "user") && c.name !== "jev" && !BUILTIN_COMMANDS.has(c.name) && !blocked.has(c.name)));
+    return dedupeSkills(commands.filter((c) => (c.source === "plugin" || c.source === "user") && !BUILTIN_COMMANDS.has(c.name) && !blocked.has(c.name)));
   })());
 }
 
@@ -898,42 +807,20 @@ function summarizeCalls(calls: readonly { tool: string; input: Record<string, un
 }
 
 /**
- * Logs Claude's step next to Jev's top action. `agree` means Jev's action would have replaced Claude's whole step
- * (one call, same command once output filters and flags are set aside), so taking it saves one Claude request.
+ * Says Claude's step next to Jev's top action. `agree` means Jev's action would have replaced Claude's whole step
+ * (one call, same command once output filters and flags are set aside), so taking it would have saved one Claude request.
  *
  * @param $ - Engine interface.
- * @param turnId - The turn.
- * @param step - The step index.
- * @param request - The user's request.
  * @param answer - Jev's next-action answer.
  * @param candidates - The candidates Jev was offered.
  * @param toolUses - Claude's calls in the step.
  */
-async function recordCompare($: Engine, turnId: string, step: number, request: string, answer: ChoiceAnswer, candidates: readonly Candidate[], toolUses: readonly { name: string; input?: unknown }[]): Promise<void> {
+function noteCompare($: Engine, answer: ChoiceAnswer, candidates: readonly Candidate[], toolUses: readonly { name: string; input?: unknown }[]): void {
   const best = bestAction(answer);
   const claudeCalls = toolUses.map((u) => ({ tool: u.name, input: (u.input ?? {}) as Record<string, unknown> }));
   const bestCandidate = candidates.find((c) => c.key === best?.key);
   const agree = Boolean(bestCandidate && coversStep(claudeCalls, bestCandidate));
-  const claudeUsedCandidate = claudeCalls.some((c) => candidates.some((k) => coversStep([c], k)));
-  const claudeSummary = summarizeCalls(claudeCalls);
-  await record($, {
-    kind: "compare",
-    applied: false,
-    text: `Claude: ${claudeSummary} · Jev best ${best?.key ?? "none"}${agree ? " ✓" : ""}`,
-    turnId,
-    data: {
-      request: clip(request, 120),
-      step,
-      claudeSummary,
-      pick: answer.choice,
-      best: best?.key,
-      bestP: best?.p,
-      claude: claudeCalls.map((c) => c.tool),
-      claudeCalls: claudeCalls.map((c) => clip(asText(c.input.command ?? c.input.file_path ?? c.input.skill ?? c.input.query ?? ""), 200)),
-      agree,
-      claudeUsedCandidate,
-    },
-  });
+  note($, `Claude: ${summarizeCalls(claudeCalls)} · Jev best ${best?.key ?? "none"}${agree ? " ✓" : ""}`);
 }
 
 /**
@@ -984,7 +871,7 @@ async function contextCompact($: Engine, e: TurnEnd, ready: boolean, fromPercent
   // Re-read after the awaits: a concurrent turn end may have queued it.
   if (compactQueued) return;
   compactQueued = true;
-  await record($, { kind: "autocompact", applied: true, text, data: { percent, forced } }).catch(() => undefined);
+  note($, text);
   // Not awaited: it resolves only once the compaction ran, after this turn ended. No `$` call in the handlers. The
   // resolve clears the flag too: cc-plugin-sec-default bypasses the session.compact hook that would (2.1.325).
   $.command.run({ command: "compact", args: "" }).then(() => {
@@ -1036,13 +923,6 @@ export const register = (on: On, options: Options): void => {
   const autoCompactPercent = threshold("autoCompactPercent", 60);
   const taskCompactPercent = threshold("taskCompactPercent", 80);
   const forceCompactPercent = threshold("forceCompactPercent", 95);
-
-  // Draws `/jev` output as Markdown, so the report's tables render as tables.
-  on("ui.render", { component: "CommandOutput", props: { command: "jev" } }, function onRenderJev($: Engine, e: RenderEvent, next: (e: RenderEvent) => unknown): unknown {
-    if (e.props.isErrored) return next(e);
-    const { Markdown } = $.ui.resolve(e);
-    return Markdown({ text: e.props.text });
-  });
 
   /** The effort band: the session effort and Jev's chosen effort seen at the last main-loop turn's step 0. */
   let band: { configured?: Effort; chosen?: Effort } = {};
@@ -1129,13 +1009,7 @@ export const register = (on: On, options: Options): void => {
       const p = answer.probabilities[answer.choice] ?? 0;
       // Only to a type Jev was offered: an answer outside `criteria` may name one that is gone.
       const canSwitch = GENERAL.has(claudeType) && !GENERAL.has(answer.choice) && Object.hasOwn(criteria, answer.choice) && p >= SWITCH_AT;
-      await record($, {
-        kind: "agent",
-        applied: canSwitch,
-        text: `Claude ${claudeType || "(default)"} · Jev ${answer.choice} p=${p.toFixed(2)}${canSwitch ? " → switched" : ""}`,
-        ms: r.ms,
-        data: { claude: claudeType || "general-purpose", jev: answer.choice, p, switched: canSwitch, agree: answer.choice === (claudeType || "general-purpose") },
-      });
+      note($, `Claude ${claudeType || "(default)"} · Jev ${answer.choice} p=${p.toFixed(2)}${canSwitch ? " → switched" : ""}`);
       return canSwitch ? next({ ...e, subagent_type: answer.choice }) : next(e);
     });
   }
@@ -1164,11 +1038,11 @@ export const register = (on: On, options: Options): void => {
     if (e.trigger === "precompute") return { skip: "jevfort compacts with Haiku when it is time" };
     const transcript = haikuTranscript(ranked.messages);
     if (transcript === undefined) return passOn();
-    const note = ranked.instructions?.trim();
+    const focus = ranked.instructions?.trim();
     const r = await $.model.complete({
       model: COMPACT_MODEL,
       system: COMPACT_SYSTEM,
-      prompt: `${transcript}\n\n---\nWrite the summary now.${note ? `\nThe summary should keep or stress: ${note}` : ""}`,
+      prompt: `${transcript}\n\n---\nWrite the summary now.${focus ? `\nThe summary should keep or stress: ${focus}` : ""}`,
       maxTokens: COMPACT_MAX_TOKENS,
       timeoutMs: 240_000,
     }).catch((err: unknown): Completion => ({ isAnswered: false, reason: String(err).slice(0, 80) }));
@@ -1176,11 +1050,7 @@ export const register = (on: On, options: Options): void => {
     // A usable summary: shorter ones are an empty reply, one that used all its tokens was cut off.
     const written = text.length > 200 && r.isAnswered && r.usage.output_tokens < COMPACT_MAX_TOKENS;
     // A failing log write must not throw away the summary that was just paid for.
-    await record($, {
-      kind: "summary",
-      applied: written,
-      text: written ? `${e.trigger} compaction written by ${COMPACT_MODEL}` : `${COMPACT_MODEL} could not compact (${r.isAnswered ? "empty or cut-off summary" : r.reason}), Claude Code does it`,
-    }).catch(() => undefined);
+    note($, written ? `${e.trigger} compaction written by ${COMPACT_MODEL}` : `${COMPACT_MODEL} could not compact (${r.isAnswered ? "empty or cut-off summary" : r.reason}), Claude Code does it`);
     if (!written) return passOn();
     cacheExpires = 0;
     compactQueued = false;
@@ -1204,10 +1074,9 @@ export const register = (on: On, options: Options): void => {
   // The scratchpad lookups, resolved once per conversation: /clear and an in-process /resume give the session a new id
   // and with it a new scratchpad directory.
   let scratchpad: { roots: string[]; sid: string } | undefined;
-  /** Forgets what belongs to one conversation: its first-turn estimates, the band, the Auto switch, the scratchpad lookups and the `/jev` recent list. */
+  /** Forgets what belongs to one conversation: its first-turn estimates, the band, the Auto switch, and the scratchpad lookups. */
   const forgetConversation = (): void => {
     firstTurns.clear();
-    forgetRecent();
     band = {};
     autoOff = false;
     scratchpad = undefined;
@@ -1224,12 +1093,7 @@ export const register = (on: On, options: Options): void => {
     // The cache tick's timer lives here: one started inside a request ends with it.
     cacheTimer?.cancel();
     cacheTimer = $.clock.every(CACHE_TICK_MS, () => void cacheTick($, autoCompactPercent).catch(() => undefined));
-    if (badRange) await record($, { kind: "error", applied: false, text: `invalid effort bounds (${badRange}): using low..xhigh` }).catch(() => undefined);
-    // Refused: the rest of the session start (baseline, estimate_effort, the band) must still run.
-    await $.command.register({
-      name: "jev",
-      description: "Jev pilot: status, /jev report, /jev candidates, /jev export, /jev clear",
-    }).catch((err: unknown) => record($, { kind: "error", applied: false, text: `/jev not registered: ${err instanceof Error ? err.message : String(err)}` }).catch(() => undefined));
+    if (badRange) note($, `invalid effort bounds (${badRange}): using low..xhigh`);
     // After `next(e)`: jev-api registers its tools in its own session.start, which may run beneath this hook.
     const result = await next(e);
     // The session's baseline, listed only now: a jevfort hook raised inside `next(e)` (another plugin's session.start
@@ -1248,71 +1112,7 @@ export const register = (on: On, options: Options): void => {
   on("session.end", async function onSessionEnd($: Engine, e: unknown, next: Next<unknown, unknown>): Promise<unknown> {
     forgetConversation();
     resetCache($);
-    await flushLog($);
     return next(e);
-  });
-
-  on("command.run", { command: "jev" }, async function onJevCommand($: Engine, e: CommandEvent): Promise<{ text: string }> {
-    // /jev runs between turns too: what it listed must not stand in for the next turn's own listing (mid-turn it stays the turn's).
-    try {
-      const arg = e.args.trim();
-      await flushLog($); // report, export and the counters read the store
-      if (arg === "report") {
-        return { text: buildReport(await readLog($), takeThreshold) };
-      }
-      if (arg === "candidates") {
-        // Exactly what Jev is offered at step 0 for the last prompt: step 0 sees no steps or calls yet.
-        const ctx = await readTurn($);
-        const list = await buildCandidates($, ctx?.request ?? "", [], [], 0);
-        const kind = (c: Candidate) => (c.tool === "Skill" ? "Skills" : c.tool === "ToolSearch" ? "Tools to load" : c.tool === "Read" ? "File reads" : "Commands");
-        const groups = new Map<string, Candidate[]>();
-        for (const c of list) groups.set(kind(c), [...(groups.get(kind(c)) ?? []), c]);
-        const sections = [...groups].map(
-          ([name, items]) =>
-            `### ${name} (${items.length})\n\n| Option | Description |\n|---|---|\n`
-            + items.map((c) => `| \`${escapePipes(c.key)}\` | ${escapePipes(c.description).replace(/\s+/g, " ")} |`).join("\n"),
-        );
-        return {
-          text: [
-            `## Jev candidates: ${list.length + 1} options`,
-            `_For the last prompt: "${clip(ctx?.request ?? "(none)", 60)}". Plus \`claude\`: leave the step to Claude._`,
-            ...sections,
-          ].join("\n\n"),
-        };
-      }
-      if (arg === "clear") {
-        await clearLog($);
-        return { text: "Jev pilot: log cleared." };
-      }
-      if (arg === "export") {
-        const log = await readLog($);
-        // A new file per export: $.fs.write follows symlinks (live, 2.1.325), so a committed `.jev/decisions.jsonl` symlink would make an overwrite land outside the cwd.
-        const path = `${await $.session.cwd()}/.jev/decisions-${await $.clock.now().catch(() => Date.now())}.jsonl`;
-        try {
-          if (await $.fs.exists(path)) return { text: `Jev pilot: ${path} exists, nothing written` };
-          await $.fs.write(path, log.map((entry) => JSON.stringify(entry)).join("\n") + "\n");
-          return { text: `Jev pilot: wrote ${log.length} entries to ${path}` };
-        } catch (err) {
-          return { text: `Jev pilot: could not write ${path}: ${err instanceof Error ? err.message : String(err)}` };
-        }
-      }
-      const missing = await jevMissing($);
-      const counts = Object.entries(await stats($).catch(() => ({ unreadable: 1 }))).map(([k, v]) => `${k}=${v}`).join(", ") || "none yet";
-      const lines = recentDecisions()
-        .slice(-10)
-        .map((d) => `- ${d.kind}${d.applied ? "" : " (pass)"}: ${d.text}${d.ms !== undefined ? ` [${Math.round(d.ms)}ms]` : ""}`);
-      return {
-        text: [
-          ...(missing.length ? [`Jev pilot: inactive, the jev-api tools are missing (${missing.join(", ")}). jevfort needs jev-api 0.2.0 or later and no permissions.deny rule matching its tools; it looks again at the next turn.`] : []),
-          `Jev pilot: effort routing ${routing ? "on" : "off"}${autoOff ? " (effort auto off)" : ""}, take steps ${takeSteps} (p ≥ ${takeThreshold}), subagents ${subagents}`,
-          `Decisions (all sessions): ${counts}`,
-          lines.length ? `Recent:\n${lines.join("\n")}` : "No decisions this session yet.",
-          "Full analysis: /jev report",
-        ].join("\n"),
-      };
-    } finally {
-      if (!turnRunning) dropTurnReads();
-    }
   });
 
   on("turn.complete", async function onTurnComplete($: Engine, e: TurnEnd, next: Next<TurnEnd, unknown>): Promise<unknown> {
@@ -1326,19 +1126,14 @@ export const register = (on: On, options: Options): void => {
     if (e.agentId === undefined) dropTurnReads();
     if (missing.length) {
       await contextCompact($, e, false, taskCompactPercent, forceCompactPercent).catch(() => undefined);
-      await flushLog($);
       return next(e);
     }
     turns.delete(e.turnId);
-    if (e.reason === "aborted" || e.reason === "error") {
-      await record($, { kind: "turn", applied: false, text: `turn ${e.reason}`, turnId: e.turnId, data: { reason: e.reason } });
-    }
     if (lostCompact !== undefined) {
-      await record($, { kind: "error", applied: false, text: `context compaction refused: ${lostCompact}` }).catch(() => undefined);
+      note($, `context compaction refused: ${lostCompact}`);
       lostCompact = undefined;
     }
-    await contextCompact($, e, true, taskCompactPercent, forceCompactPercent).catch((err: unknown) => record($, { kind: "error", applied: false, text: `context compaction check failed: ${String(err)}` }).catch(() => undefined));
-    await flushLog($); // the turn's decisions, written once instead of per decision (F06)
+    await contextCompact($, e, true, taskCompactPercent, forceCompactPercent).catch((err: unknown) => note($, `context compaction check failed: ${String(err)}`));
     // The compaction check above may have read the env: drop it again so the next turn reads the settings `env` afresh.
     if (e.agentId === undefined) haikuPath = undefined;
     return next(e);
@@ -1354,14 +1149,7 @@ export const register = (on: On, options: Options): void => {
       const r = await askJev($, { request: clip(input.prompt, 4000) }, { effort: effortQuestion, mechanical: mechanicalQuestion });
       const effortAnswer = r.ok ? score(r.answers, "effort") : undefined;
       const est = estimateEffort(effortAnswer, r.ok ? noul(r.answers, "mechanical") : undefined, input);
-      await record($, {
-        kind: "estimate",
-        applied: est.source !== "fallback",
-        text: `${input.model}: ${est.effort} (${est.source}${r.ok ? "" : `, ${r.error}`})`,
-        ms: r.ms,
-        // effortScore/effortConfidence: raw material to recalibrate EFFORT_CUTS from real turns.
-        data: { model: input.model, effort: est.effort, source: est.source, error: r.ok ? undefined : r.error, effortScore: effortAnswer?.score, effortConfidence: effortAnswer?.confidence },
-      });
+      note($, `${input.model}: ${est.effort} (${est.source}${r.ok ? "" : `, ${r.error}`})`);
       return { result: JSON.stringify(est) };
     }
     if ((await jevMissing($)).length) return next(e);
@@ -1369,7 +1157,6 @@ export const register = (on: On, options: Options): void => {
     if (e.tool_use_id && ownCalls.has(e.tool_use_id)) {
       const isError = result.deny !== undefined || result.isError === true;
       ownCalls.delete(e.tool_use_id);
-      await record($, { kind: "outcome", applied: true, text: `${e.tool} ${isError ? "failed" : "ok"}`, data: { id: e.tool_use_id, isError } });
       // A skill the Skill tool refused is never offered to Jev again.
       const skill = e.skill;
       if (isError && e.tool === "Skill" && typeof skill === "string") await blockSkill($, skill);
@@ -1405,13 +1192,7 @@ export const register = (on: On, options: Options): void => {
       const done = calls.find((c) => c.tool_use_id === id);
       if (done?.text !== undefined && !(done.isError && REFUSED.test(done.text))) {
         const s = await summarizeResult($, ctx.request, turn.bypassAction ?? done.tool, done.text);
-        await record($, {
-          kind: "bypass",
-          applied: s.ok,
-          text: s.ok ? `answered with ${SUMMARY_MODEL} after ${turn.bypassAction}` : `summary failed (${s.reason}), Claude answers`,
-          turnId: e.turnId,
-          data: { action: turn.bypassAction, model: SUMMARY_MODEL, ...(s.ok ? { usage: s.usage } : { reason: s.reason }) },
-        });
+        note($, s.ok ? `answered with ${SUMMARY_MODEL} after ${turn.bypassAction}` : `summary failed (${s.reason}), Claude answers`);
         if (s.ok) {
           const usage = { ...s.usage, model: SUMMARY_MODEL };
           yield { kind: "text", index: 0, text: s.text };
@@ -1481,7 +1262,7 @@ export const register = (on: On, options: Options): void => {
     };
     const r = await askJev($, state, questions);
     if (!r.ok) {
-      await record($, { kind: "error", applied: false, text: `unavailable: ${r.error}`, ms: r.ms, turnId: e.turnId });
+      note($, `unavailable: ${r.error}`);
       return yield* next(routed(e));
     }
 
@@ -1496,16 +1277,7 @@ export const register = (on: On, options: Options): void => {
         $.ui.invalidate("ui.render");
       }
       const effort = turn.effort;
-      const raised = effort !== undefined && EFFORT_ORDER.indexOf(effort) > (isEffort(e.effort) ? EFFORT_ORDER.indexOf(e.effort) : -1);
-      const lowered = effort !== undefined && !raised;
-      await record($, {
-        kind: "route",
-        applied: effort !== undefined,
-        text: `effort → ${effort !== undefined ? `${e.model}, effort ${effort}` : "no change"} · ${est.source}`,
-        ms: r.ms,
-        turnId: e.turnId,
-        data: { effort, lowered, raised, estimate: est.effort, source: est.source, mechanical, effortScore: effortAnswer?.score, effortConfidence: effortAnswer?.confidence },
-      });
+      note($, `effort → ${effort !== undefined ? `${e.model}, effort ${effort}` : "no change"} · ${est.source}`);
     }
 
     const answer = choice(r.answers, "next_action");
@@ -1516,23 +1288,7 @@ export const register = (on: On, options: Options): void => {
     const pick = takeOnlyForBypass && (singleAction < SINGLE_ACTION || (picked?.tool !== "Read" && picked?.tool !== "Bash")) ? undefined : picked;
     if (answer) {
       const p = answer.probabilities[answer.choice] ?? 0;
-      await record($, {
-        kind: "take",
-        applied: pick !== undefined,
-        text: `${answer.choice} (p=${p.toFixed(2)})${pick ? "" : best ? `; best action ${best.key} p=${best.p.toFixed(2)}` : ""}`,
-        ms: r.ms,
-        turnId: e.turnId,
-        data: {
-          pick: answer.choice,
-          p,
-          best: best?.key,
-          bestP: best?.p,
-          candidates: candidates.length,
-          threshold: takeThreshold,
-          singleAction: noul(r.answers, "single_action"),
-          agentId: e.agentId,
-        },
-      });
+      note($, `${answer.choice} (p=${p.toFixed(2)})${pick ? "" : best ? `; best action ${best.key} p=${best.p.toFixed(2)}` : ""}`);
     }
 
     if (pick) {
@@ -1552,7 +1308,7 @@ export const register = (on: On, options: Options): void => {
     const result = yield* next(routed(e));
 
     // Compare Claude's own next call with Jev's top action.
-    if (answer) await recordCompare($, e.turnId, e.index, ctx.request, answer, candidates, result.toolUses);
+    if (answer) noteCompare($, answer, candidates, result.toolUses);
     return result;
   });
 

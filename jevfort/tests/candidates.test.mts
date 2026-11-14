@@ -2,7 +2,6 @@
 import { expect, test } from "vitest";
 import { commandKey, coversStep, dedupeSkills, isSafeScript, isSafeToOffer, mentionedPaths, quotedTerms, relevant, SAFE_MAKE, sameCall, words } from "../plugin/hooks/candidates.mjs";
 import { clip, splitTurn, summarize } from "../plugin/hooks/context.mjs";
-import { buildReport, escapePipes, verdict, when } from "../plugin/hooks/report.mjs";
 
 test("quoted terms become searches, file names do not", () => {
   expect(quotedTerms("where is `useAuth` used? and \"TODO: fix\" in `src/app.ts`")).toEqual(["useAuth", "TODO: fix"]);
@@ -17,47 +16,9 @@ test("a path at the end of a sentence is found", () => {
   for (const s of ["explain src/app.ts.", "what is in src/app.ts?", "src/app.ts!", "see (src/app.ts)."]) expect(mentionedPaths([s])).toEqual(["src/app.ts"]);
 });
 
-test("the report verdict follows the take threshold, agreement and Claude's own pick", () => {
-  const e = (data: Record<string, unknown>) => ({ at: 0, kind: "compare" as const, applied: false, text: "", data: { best: "read a", ...data } });
-  expect(verdict(e({ bestP: 0.9, agree: true }), 0.85)).toBe("match");
-  expect(verdict(e({ bestP: 0.9, agree: false }), 0.85)).toBe("differ");
-  expect(verdict(e({ bestP: 0.5, claudeUsedCandidate: true }), 0.85)).toBe("missed");
-  expect(verdict(e({ bestP: 0.5 }), 0.85)).toBe("both-claude");
-  expect(verdict(e({ bestP: 0.9, agree: true }), 0.95)).toBe("both-claude");
-});
-
-test("an empty log gives a hint, not a crash", () => {
-  expect(buildReport([], 0.85)).toContain("the log is empty");
-  expect(buildReport([], 0.85)).not.toContain("shadow");
-});
-
 test("cutting text never splits an emoji into a lone surrogate", () => {
   const request = `${"x".repeat(38)}🚀 rest of request`;
-  const report = buildReport([{ at: 0, kind: "compare", applied: false, text: "", data: { request, best: "read:a", bestP: 0.9, agree: true } }], 0.85);
-  expect(report).toContain(`| ${"x".repeat(38)}… |`);
   expect(clip(request, 39)).toBe(`${"x".repeat(38)}… [${request.length - 38} more chars]`);
-});
-
-test("a backslash before a pipe in a cell does not split the table row", () => {
-  const report = buildReport([{ at: 0, kind: "compare", applied: false, text: "", data: { request: "find a\\|b", best: "run:git status", bestP: 0.3, claudeSummary: "Bash: grep -rn 'foo\\|bar' src", claudeUsedCandidate: false } }], 0.85);
-  const row = report.split("\n").find((l) => l.includes("grep"));
-  // unescaped pipe = preceded by an even number of backslashes
-  expect(row?.match(/(?<!\\)(?:\\\\)*\|/g)).toHaveLength(7);
-  expect(escapePipes("a\\|b")).toBe("a\\\\\\|b");
-});
-
-test("the report header shows the first entry in local time, like the rows", () => {
-  const tz = process.env.TZ;
-  process.env.TZ = "Europe/Berlin";
-  try {
-    const at = Date.UTC(2026, 10, 14, 9, 0);
-    const report = buildReport([{ at, kind: "compare", applied: false, text: "", turnId: "t1", data: { request: "x", best: "read a", bestP: 0.5 } }], 0.9);
-    expect(report).toContain("since 2026-11-14 10:00 ");
-    expect(report).toContain("| 10:00 |");
-  } finally {
-    if (tz === undefined) delete process.env.TZ;
-    else process.env.TZ = tz;
-  }
 });
 
 test("shell output and slash-command rows are not taken as the request", () => {
@@ -74,12 +35,6 @@ test("shell output and slash-command rows are not taken as the request", () => {
     { role: "user", text: "<local-command-stdout>Total cost: $0.01</local-command-stdout>", toolUses: [] },
   ]);
   expect(local?.request).toBe("delete the folder /tmp/x");
-});
-
-test("times show HH:MM, with the date when not on the latest entry's day", () => {
-  const latest = new Date(2026, 9, 14, 15, 30).getTime();
-  expect(when(new Date(2026, 9, 14, 9, 5).getTime(), latest)).toBe("09:05");
-  expect(when(new Date(2026, 9, 13, 23, 59).getTime(), latest)).toBe("10-13 23:59");
 });
 
 test("temp, task-output and Claude config paths are never offered for reading", () => {
@@ -211,59 +166,6 @@ test("rows that are no request: compaction summary, interrupt, a bang command, a
   expect(splitTurn([typed("fix the bug"), reply, typed("[Request interrupted by user]")])).toBeUndefined();
   expect(splitTurn([typed("fix the bug"), reply, typed("<bash-input>echo hi</bash-input>"), typed("<bash-stdout>hi</bash-stdout><bash-stderr></bash-stderr>")])).toBeUndefined();
   expect(splitTurn([typed("what colour?"), reply, typed("")])).toBeUndefined();
-});
-
-test("the report counts a step-0 request once and shows the effort score under the default routing", () => {
-  const e = (kind: string, extra: Record<string, unknown> = {}) => ({ at: 1, kind, applied: true, text: kind, turnId: "t1", ms: 1000, ...extra });
-  const report = buildReport([e("route", { data: { effortScore: 2 } }), e("take"), e("route", { turnId: "t2", ms: 3000, data: { effortScore: 3 } })], 0.85);
-  expect(report).toContain("2000 ms average over 2 calls");
-  expect(report).toContain("avg effort score 2.50");
-});
-
-test("the report counts a turn that is both lowered and raised as one applied route", () => {
-  const report = buildReport([{ at: 1, kind: "route", applied: true, text: "route", turnId: "t1", data: { effort: "high", lowered: true, raised: true } }], 0.85);
-  expect(report).toContain("1 lowered, 1 raised, 1 applied |");
-});
-
-test("the report counts summary rows, the newest 15 steps, the take threshold and the routing rows", () => {
-  const e = (kind: string, applied: boolean, data: Record<string, unknown> = {}) => ({ at: 1, kind, applied, text: kind, data });
-  const c = (i: number, data: Record<string, unknown>) => ({ ...e("compare", false, { request: `ask ${i}`, best: "read a", ...data }), at: 1 + i });
-  const log = [
-    e("take", true),
-    e("take", false),
-    e("outcome", true, { isError: true }),
-    e("outcome", true, { isError: false }),
-    e("bypass", true),
-    e("bypass", false),
-    c(0, { bestP: 0.95, agree: true }),
-    c(1, { bestP: 0.9, agree: false, claude: ["Read", "Grep", "Read"] }),
-    c(2, { bestP: 0.6, agree: true, claudeUsedCandidate: true }),
-    ...Array.from({ length: 13 }, (_, i) => c(3 + i, { bestP: 0.5 })),
-    e("agent", true, { switched: true, agree: false }),
-    e("agent", false, { switched: false, agree: true }),
-    e("agent", false, { switched: true }),
-    e("compact", true, { items: 10, keep: 3, drop: 4 }),
-    e("compact", true, { items: 5, keep: 1, drop: 2 }),
-    e("turn", false, { reason: "aborted" }),
-    e("turn", false, { reason: "answer" }),
-  ];
-  const report = buildReport(log, 0.85);
-  expect(report).toContain("| Steps Jev took itself | **1** (≈ 1 Claude requests saved, 1 failed) |");
-  expect(report).toContain("| Turns answered without Claude | **1** (Jev's action + Haiku summary) |");
-  expect(report).toContain("| Agreement with Claude | **14 / 16** (88%) |");
-  expect(report).toContain("### Jev vs Claude, step by step (last 15)");
-  expect(report).not.toContain("| ask 0 |");
-  expect(report).toContain("| ask 15 |");
-  expect(report).toContain("| ask 1 | read a | 0.90 | Read ×2, Grep | ✗ differ |");
-  expect(report).toContain("| ask 2 | leave to Claude _(best: read a)_ | 0.60 | replied | ⚠ missed |");
-  for (const row of ["| 0.60 | 3 | 67% | `███████░░░` |", "| 0.70 | 2 | 50% | `█████░░░░░` |", "| **0.85 ← current** | 2 | 50% |", "| 0.90 | 2 | 50% |", "| 0.95 | 1 | 100% | `██████████` |"]) {
-    expect(report).toContain(row);
-  }
-  expect(report).not.toContain("Done check");
-  expect(report).not.toContain("Prompt classifier");
-  expect(report).toContain("| Subagent type | 3 spawns | 1 agreed with Claude · 2 switched, 1 applied |");
-  expect(report).toContain("| Compaction | 2 runs | 15 results scored · 4 kept in detail · 6 marked droppable |");
-  expect(report).toContain("_1 interrupted turn(s)._");
 });
 
 test("only skills related to the prompt are offered", () => {
