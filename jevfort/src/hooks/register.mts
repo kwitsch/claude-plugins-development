@@ -1126,7 +1126,26 @@ export const register = (on: On, options: Options): void => {
     // One transcript read per step: the turn and, at main-loop step 0, the previous reply.
     const messages = await $.session.messages(e.agentId ? { agentId: e.agentId } : {});
     const ctx = turnOf(messages);
-    if (!ctx) return yield* next(e);
+    // The turn's effort, set at step 0, holds for every step of the turn.
+    const routed = (step: Step): Step => (turn.effort ? { ...step, effort: turn.effort } : step);
+    // Haiku/Fable after the first turn: hold the first turn's estimate while model and session effort are unchanged.
+    const hold = (): void => {
+      const first = firstTurns.get(e.agentId ?? "");
+      const family = modelFamily(e.model);
+      const held = family && !EVERY_TURN_MODELS.includes(family) && first?.effort && first.family === family && first.from === e.effort ? first.effort : undefined;
+      if (!held) return;
+      if (held !== e.effort) turn.effort = held;
+      debugEffort($, e, "held", held);
+      if (!e.agentId) {
+        band.chosen = held;
+        $.ui.invalidate("ui.render");
+      }
+    };
+    // A turn without a request (image-only prompt, interrupt marker) asks Jev nothing but still keeps the hold, so the prompt cache stays.
+    if (!ctx) {
+      if (routing && e.index === 0 && !autoOff) hold();
+      return yield* next(routed(e));
+    }
     const calls = toolCalls(ctx.steps);
     const last = calls.at(-1);
 
@@ -1176,19 +1195,10 @@ export const register = (on: On, options: Options): void => {
           questions.effort = effortQuestion;
           questions.mechanical = mechanicalQuestion;
         }
-        // Haiku/Fable after the first turn: hold the first turn's estimate while model and session effort are unchanged.
-        const held = !estimate && first?.effort && first.family === family && first.from === e.effort ? first.effort : undefined;
-        if (held && held !== e.effort) turn.effort = held;
-        if (held) debugEffort($, e, "held", held);
-        if (held && !e.agentId) {
-          band.chosen = held;
-          $.ui.invalidate("ui.render");
-        }
+        if (!estimate) hold();
       }
     }
     if (bypass && e.index === 0 && questions.next_action && !e.agentId) questions.single_action = singleActionQuestion;
-    // The turn's effort, set at step 0, holds for every step of the turn.
-    const routed = (step: Step): Step => (turn.effort ? { ...step, effort: turn.effort } : step);
 
     if (!Object.keys(questions).length) return yield* next(routed(e));
 

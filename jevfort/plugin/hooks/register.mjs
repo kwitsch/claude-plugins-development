@@ -689,7 +689,26 @@ export const register = (on, options) => {
 		}
 		const messages = await $.session.messages(e.agentId ? { agentId: e.agentId } : {});
 		const ctx = turnOf(messages);
-		if (!ctx) return yield* next(e);
+		const routed = (step) => turn.effort ? {
+			...step,
+			effort: turn.effort
+		} : step;
+		const hold = () => {
+			const first = firstTurns.get(e.agentId ?? "");
+			const family = modelFamily(e.model);
+			const held = family && !EVERY_TURN_MODELS.includes(family) && first?.effort && first.family === family && first.from === e.effort ? first.effort : undefined;
+			if (!held) return;
+			if (held !== e.effort) turn.effort = held;
+			debugEffort($, e, "held", held);
+			if (!e.agentId) {
+				band.chosen = held;
+				$.ui.invalidate("ui.render");
+			}
+		};
+		if (!ctx) {
+			if (routing && e.index === 0 && !autoOff) hold();
+			return yield* next(routed(e));
+		}
 		const calls = toolCalls(ctx.steps);
 		const last = calls.at(-1);
 		if (turn.bypassId && e.index > 0) {
@@ -758,20 +777,10 @@ export const register = (on, options) => {
 					questions.effort = effortQuestion;
 					questions.mechanical = mechanicalQuestion;
 				}
-				const held = !estimate && first?.effort && first.family === family && first.from === e.effort ? first.effort : undefined;
-				if (held && held !== e.effort) turn.effort = held;
-				if (held) debugEffort($, e, "held", held);
-				if (held && !e.agentId) {
-					band.chosen = held;
-					$.ui.invalidate("ui.render");
-				}
+				if (!estimate) hold();
 			}
 		}
 		if (bypass && e.index === 0 && questions.next_action && !e.agentId) questions.single_action = singleActionQuestion;
-		const routed = (step) => turn.effort ? {
-			...step,
-			effort: turn.effort
-		} : step;
 		if (!Object.keys(questions).length) return yield* next(routed(e));
 		const previous = e.index === 0 && !e.agentId ? previousReply(messages) : undefined;
 		const state = {
