@@ -14,7 +14,7 @@ Before anything else check whether the session already is in a linked git worktr
 
 ## Round
 
-1. **Split the plugin into areas** (protocol/server, core logic, scripts/skills, hooks wiring + docs). One read-only reviewer per area, run in parallel (`Agent`, `subagent_type: general-purpose`, `model: opus`, effort high).
+1. **Split the plugin into areas** (protocol/server, core logic, scripts/skills, hooks wiring + docs). One read-only reviewer per area, run in parallel (`Agent`, `subagent_type: general-purpose`, `model: opus`, effort medium); fixes and the closing pass, when delegated to agents, run on `model: sonnet`, effort medium.
 2. **Brief each reviewer**: worktree path, plugin name, what was already fixed (so it does not re-report), the area, "READ-ONLY on the repo", scratch dir under the session scratchpad, **report only CONFIRMED defects with a repro and its output, severity and a minimal fix; say 'none found' with the list of what you checked**; "high bar: no style, speculation or documented limitations". Ask for real tools where possible (real dprint/git/node, the built `plugin/` output, the test stub of the plugin) instead of reading alone.
 3. **Triage each finding yourself** (read the code, rerun the repro). Fix the root cause once in the shared code. **Add a test that fails without the fix** (revert the line to check); a regression test that passes on the old code proves nothing. Rebuild, `pnpm lint`, `pnpm --filter <plugin> test`.
 4. **Commit and push after each batch** only when the task authorizes repository changes (a request for a PR or for fixes); a pure review or verification request stays read-only and reports findings. Bump the version once per PR.
