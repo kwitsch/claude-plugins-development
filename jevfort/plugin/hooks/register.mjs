@@ -423,6 +423,9 @@ function offerableSkills($) {
 		return dedupeSkills(commands.filter((c) => (c.source === "plugin" || c.source === "user") && !BUILTIN_COMMANDS.has(c.name) && !blocked.has(c.name)));
 	})();
 }
+function debugEffort($, e, source, chosen) {
+	void $.ui.log(`effort ${e.agentId ? `(agent ${e.agentId}) ` : ""}${String(e.model)}: session ${String(e.effort)} → ${chosen ?? "unchanged"} · ${source}`).catch(() => undefined);
+}
 async function blockSkill($, name) {
 	try {
 		const list = await $.store.get(SKILL_BLOCKLIST_KEY) ?? [];
@@ -757,6 +760,7 @@ export const register = (on, options) => {
 				}
 				const held = !estimate && first?.effort && first.family === family && first.from === e.effort ? first.effort : undefined;
 				if (held && held !== e.effort) turn.effort = held;
+				if (held) debugEffort($, e, "held", held);
 				if (held && !e.agentId) {
 					band.chosen = held;
 					$.ui.invalidate("ui.render");
@@ -777,13 +781,17 @@ export const register = (on, options) => {
 			cwd: turn.cache.cwd ??= await $.session.cwd()
 		};
 		const r = await askJev($, state, questions);
-		if (!r.ok) return yield* next(routed(e));
+		if (!r.ok) {
+			if (estimate) debugEffort($, e, `jev unavailable (${r.error})`, undefined);
+			return yield* next(routed(e));
+		}
 		if (estimate) {
 			const mechanical = noul(r.answers, "mechanical");
 			const effortAnswer = score(r.answers, "effort");
 			const est = estimateEffort(effortAnswer, mechanical, estimate);
 			turn.effort = est.effort !== e.effort ? est.effort : undefined;
 			if (firstTurn) firstTurn.effort = est.effort;
+			debugEffort($, e, `${est.source}${effortAnswer ? ` (score ${effortAnswer.score.toFixed(2)})` : ""}`, est.effort);
 			if (!e.agentId) {
 				band.chosen = est.effort;
 				$.ui.invalidate("ui.render");

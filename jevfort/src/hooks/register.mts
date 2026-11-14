@@ -79,6 +79,8 @@ type Engine = {
   model: { complete(spec: { model: string; system: string; prompt: string; maxTokens: number; timeoutMs: number }): Promise<Completion> };
   /** User interface. */
   ui: {
+    /** Writes a line to Claude Code's debug log (`--debug`), nowhere else. */
+    log(text: string): Promise<unknown>;
     /** Redraws the render sites of an event (the effort band). */
     invalidate(event: "ui.render"): void;
     // The element factories are plain functions, called detached from the object (`const { Box } = …`).
@@ -762,6 +764,18 @@ function offerableSkills($: Engine): Promise<CommandInfo[]> {
 }
 
 /**
+ * Writes the effort chosen for a turn to the debug log: one line per estimate, the only line jevfort logs.
+ *
+ * @param $ - Engine interface.
+ * @param e - The step event: its model and session effort.
+ * @param source - Where the effort came from (`jev`, `mechanical`, `fallback`, `held`, or why Jev gave none).
+ * @param chosen - The effort jevfort set for the turn, `undefined` when it left the session effort.
+ */
+function debugEffort($: Engine, e: Step, source: string, chosen: string | undefined): void {
+  void $.ui.log(`effort ${e.agentId ? `(agent ${e.agentId}) ` : ""}${String(e.model)}: session ${String(e.effort)} → ${chosen ?? "unchanged"} · ${source}`).catch(() => undefined);
+}
+
+/**
  * Never offers skill `name` again (the Skill tool refused it).
  *
  * @param $ - Engine interface.
@@ -1161,6 +1175,7 @@ export const register = (on: On, options: Options): void => {
         // Haiku/Fable after the first turn: hold the first turn's estimate while model and session effort are unchanged.
         const held = !estimate && first?.effort && first.family === family && first.from === e.effort ? first.effort : undefined;
         if (held && held !== e.effort) turn.effort = held;
+        if (held) debugEffort($, e, "held", held);
         if (held && !e.agentId) {
           band.chosen = held;
           $.ui.invalidate("ui.render");
@@ -1183,7 +1198,10 @@ export const register = (on: On, options: Options): void => {
       cwd: turn.cache.cwd ??= await $.session.cwd(),
     };
     const r = await askJev($, state, questions);
-    if (!r.ok) return yield* next(routed(e));
+    if (!r.ok) {
+      if (estimate) debugEffort($, e, `jev unavailable (${r.error})`, undefined);
+      return yield* next(routed(e));
+    }
 
     if (estimate) {
       const mechanical = noul(r.answers, "mechanical");
@@ -1191,6 +1209,7 @@ export const register = (on: On, options: Options): void => {
       const est = estimateEffort(effortAnswer, mechanical, estimate);
       turn.effort = est.effort !== e.effort ? est.effort : undefined;
       if (firstTurn) firstTurn.effort = est.effort;
+      debugEffort($, e, `${est.source}${effortAnswer ? ` (score ${effortAnswer.score.toFixed(2)})` : ""}`, est.effort);
       if (!e.agentId) {
         band.chosen = est.effort;
         $.ui.invalidate("ui.render");
