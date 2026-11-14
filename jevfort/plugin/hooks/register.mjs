@@ -47,10 +47,12 @@ async function askJev($, state, questions, slow = false) {
 		},
 		ms: await $.clock.now().catch(() => Date.now()) - startedAt
 	});
-	if (startedAt < jevPause.until) return done({
-		ok: false,
-		error: `paused for ${Math.ceil((jevPause.until - startedAt) / 1e3)} s after a timeout (${jevPause.error})`
-	});
+	if (startedAt < jevPause.until) {
+		if (startedAt < jevPause.until) return {
+			ok: false,
+			error: `paused for ${Math.ceil((jevPause.until - startedAt) / 1e3)} s after a timeout (${jevPause.error})`
+		};
+	}
 	const [key, base, jevUrl] = await Promise.all([
 		$.env.get("TYPESAFE_API_KEY"),
 		$.env.get("TYPESAFE_BASE_URL"),
@@ -95,13 +97,15 @@ async function askJev($, state, questions, slow = false) {
 	try {
 		const answers = await Promise.race([call, timeout]);
 		if (!answers) {
-			jevPause.ms = jevPause.ms ? Math.min(jevPause.ms * 2, MAX_PAUSE_MS) : PAUSE_MS;
-			jevPause.until = startedAt + budgetMs + jevPause.ms;
-			jevPause.at = startedAt;
-			jevPause.error = `timeout after ${budgetMs}ms`;
+			if (startedAt >= jevPause.until) {
+				jevPause.ms = jevPause.ms ? Math.min(jevPause.ms * 2, MAX_PAUSE_MS) : PAUSE_MS;
+				jevPause.until = startedAt + budgetMs + jevPause.ms;
+				jevPause.at = startedAt;
+				jevPause.error = `timeout after ${budgetMs}ms`;
+			}
 			return done({
 				ok: false,
-				error: jevPause.error
+				error: `timeout after ${budgetMs}ms`
 			});
 		}
 		jevPause.ms = 0;
@@ -760,6 +764,7 @@ export const register = (on, options) => {
 		return result;
 	});
 	on("session.end", async function onSessionEnd($, e, next) {
+		sessionEpoch += 1;
 		forgetConversation();
 		resetCache($);
 		return next(e);

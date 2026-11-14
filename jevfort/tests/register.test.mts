@@ -395,6 +395,30 @@ test("After a timeout Jev is not asked again for 30 s, then once more; a timeout
   expect(calls()).toBe(2);
 });
 
+test("Parallel calls that time out in one outage lengthen the pause once", async ($, on) => {
+  const { clock, calls } = setup(on, { messages: [], jev: () => new Promise<never>(() => {}), env: { JEV_URL: "https://jev.example/x" } });
+  const estimates = [$.tool.call({ ...ESTIMATE }), $.tool.call({ ...ESTIMATE })];
+  while (calls() < 2) await clock.advance(0);
+  await clock.advance(4000);
+  await Promise.all(estimates);
+  // One 30 s pause, not 30 s doubled by the second timeout: 31 s later a call goes out again.
+  await clock.advance(31_000);
+  const again = $.tool.call({ ...ESTIMATE });
+  while (calls() < 3) await clock.advance(0);
+  await clock.advance(4000);
+  await again;
+  expect(calls()).toBe(3);
+});
+
+test("a /clear (session.end) drops the done follow-up that was submitted before it", async ($, on) => {
+  setup(on, { messages: [], jev: () => undefined });
+  on("session.end", () => ({}));
+  on("prompt.submit", (_$, e) => ({ text: e.text }));
+  await $.session.end({ reason: "clear", sessionId: "s1", resume: { id: "s1" } });
+  const r = await $.prompt.submit({ text: FOLLOW_UP, wait: false, origin: { kind: "plugin", name: "jevfort" } });
+  expect(JSON.stringify(r)).toContain("conversation was cleared");
+});
+
 test("without any Jev variable (Haiku answers in jev-api) the budget is 15000 ms", async ($, on) => {
   const seen: unknown[] = [];
   const { sent, clock } = setup(on, { messages: [user("what does this project do?")], jev: () => new Promise<never>(() => {}) });

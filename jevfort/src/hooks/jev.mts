@@ -37,7 +37,7 @@ export type ScoreAnswer = { type: "score"; score: number; probabilities: Record<
 export type Answer = NoulAnswer | ChoiceAnswer | ScoreAnswer;
 
 /** What one `askJev` came back with, and how long it took. */
-export type JevResult = { ok: true; answers: Record<string, Answer>; ms: number } | { ok: false; error: string; ms: number };
+export type JevResult = { ok: true; answers: Record<string, Answer>; ms: number } | { ok: false; error: string; ms?: number };
 
 /** The most options jev-api accepts in one `choice` question. */
 export const MAX_CHOICE_OPTIONS = 255;

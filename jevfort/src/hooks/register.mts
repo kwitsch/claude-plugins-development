@@ -216,7 +216,9 @@ async function askJev($: Engine, state: unknown, questions: Record<string, Quest
   const done = async (r: { ok: true; answers: Record<string, Answer> } | { ok: false; error: string }): Promise<JevResult> => ({ ...(r.ok ? r : { ok: false as const, error: clip(r.error, MAX_ERROR) }), ms: (await $.clock.now().catch(() => Date.now())) - startedAt });
 
   // Without Jev access jev-api answers through Haiku, which needs a longer budget (jev-api reads the same three variables).
-  if (startedAt < jevPause.until) return done({ ok: false, error: `paused for ${Math.ceil((jevPause.until - startedAt) / 1000)} s after a timeout (${jevPause.error})` });
+  if (startedAt < jevPause.until) { // No `ms`: nothing was sent, so the report must not count it as a Jev call.
+    if (startedAt < jevPause.until) return { ok: false, error: `paused for ${Math.ceil((jevPause.until - startedAt) / 1000)} s after a timeout (${jevPause.error})` };
+  }
   const [key, base, jevUrl] = await Promise.all([$.env.get("TYPESAFE_API_KEY"), $.env.get("TYPESAFE_BASE_URL"), $.env.get("JEV_URL")]).catch(() => [undefined, undefined, undefined]);
   const haiku = ![key, base, jevUrl].some((v) => v?.trim());
   const budgetMs = haiku ? HAIKU_TIMEOUT_MS : slow ? COMPACT_TIMEOUT_MS : TIMEOUT_MS;
@@ -249,12 +251,15 @@ async function askJev($: Engine, state: unknown, questions: Record<string, Quest
   try {
     const answers = await Promise.race([call, timeout]);
     if (!answers) {
-      // Only a timeout pauses (a refused or failing endpoint answers fast and costs nothing).
-      jevPause.ms = jevPause.ms ? Math.min(jevPause.ms * 2, MAX_PAUSE_MS) : PAUSE_MS;
-      jevPause.until = startedAt + budgetMs + jevPause.ms;
-      jevPause.at = startedAt;
-      jevPause.error = `timeout after ${budgetMs}ms`;
-      return done({ ok: false, error: jevPause.error });
+      // Only a timeout pauses (a refused or failing endpoint answers fast and costs nothing), and only a call that started
+      // after the previous pause lengthens it: parallel calls of one outage time out together and count once.
+      if (startedAt >= jevPause.until) {
+        jevPause.ms = jevPause.ms ? Math.min(jevPause.ms * 2, MAX_PAUSE_MS) : PAUSE_MS;
+        jevPause.until = startedAt + budgetMs + jevPause.ms;
+        jevPause.at = startedAt;
+        jevPause.error = `timeout after ${budgetMs}ms`;
+      }
+      return done({ ok: false, error: `timeout after ${budgetMs}ms` });
     }
     jevPause.ms = 0;
     jevPause.until = 0;
@@ -1111,6 +1116,7 @@ export const register = (on: On, options: Options): void => {
    * first-turn estimates, band and Auto switch end here.
    */
   on("session.end", async function onSessionEnd($: Engine, e: unknown, next: Next<unknown, unknown>): Promise<unknown> {
+    sessionEpoch += 1; // /clear raises only session.end (no session.start follows)
     forgetConversation();
     resetCache($);
     return next(e);
