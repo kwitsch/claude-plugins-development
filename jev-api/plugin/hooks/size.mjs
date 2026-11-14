@@ -71,9 +71,11 @@ export function cutState(state, keep) {
 	const headLength = Math.round(keep * HEAD_SHARE);
 	const tailLength = keep - headLength;
 	let head = state.slice(0, headLength);
-	if (/[\uD800-\uDBFF]$/.test(head)) head = head.slice(0, -1);
+	const last = head.charCodeAt(head.length - 1);
+	if (last >= 55296 && last <= 56319) head = head.slice(0, -1);
 	let tail = tailLength > 0 ? state.slice(-tailLength) : "";
-	if (/^[\uDC00-\uDFFF]/.test(tail)) tail = tail.slice(1);
+	const first = tail.charCodeAt(0);
+	if (first >= 56320 && first <= 57343) tail = tail.slice(1);
 	return `${head}\n[... ${state.length - head.length - tail.length} characters omitted ...]\n${tail}`;
 }
 export function stateForBudget(budget, density, questionsChars) {
@@ -91,16 +93,17 @@ export function contextRefusal(text) {
 		nctx
 	};
 }
-export function stateThatFits(refused, budget = refused.limit) {
-	const prompt = Math.floor(refused.chars * (Math.min(budget, refused.limit) - PROMPT_OVERHEAD_TOKENS - CUT_MARGIN_TOKENS) / (refused.tokens - PROMPT_OVERHEAD_TOKENS));
-	return Math.max(0, prompt - refused.questionsChars);
+export function refusedDensity(refused) {
+	return refused.chars / (refused.tokens - PROMPT_OVERHEAD_TOKENS);
+}
+export function aimHundreds(chars) {
+	return Math.floor(chars / 100) * 100;
 }
 export function tooBigError(tool, refused) {
-	const aim = Math.floor(stateThatFits(refused) / 100) * 100;
+	const aim = aimHundreds(stateForBudget(refused.limit, refusedDensity(refused), refused.questionsChars));
 	return fail(tool, `state too large for System One: the request has ${refused.tokens} tokens, the limit is ${refused.limit}; shorten the state to about ${aim} characters`);
 }
 export function preflightError(tool, estimate, budget, limit, timeoutMs, aim) {
-	const aimHundreds = Math.floor(aim / 100) * 100;
-	if (budget >= limit) return fail(tool, `state too large for System One: at least ${estimate} tokens, the limit is ${limit}; shorten the state to about ${aimHundreds} characters`);
-	return fail(tool, `state too large for the timeout of ${timeoutMs / 1e3} s: at least ${estimate} tokens, about ${budget} fit; shorten the state to about ${aimHundreds} characters or raise the timeout (at most ${MAX_TIMEOUT_S} s)`);
+	if (budget >= limit) return fail(tool, `state too large for System One: at least ${estimate} tokens, the limit is ${limit}; shorten the state to about ${aimHundreds(aim)} characters`);
+	return fail(tool, `state too large for the timeout of ${timeoutMs / 1e3} s: at least ${estimate} tokens, about ${budget} fit; shorten the state to about ${aimHundreds(aim)} characters or raise the timeout (at most ${MAX_TIMEOUT_S} s)`);
 }

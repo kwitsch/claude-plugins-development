@@ -206,7 +206,7 @@ test("a call with no System One access (Haiku) never touches the store", async (
 
 /** The state characters the translated error allows: the limit minus overhead and margin, scaled, minus the questions, in hundreds. */
 const allowedState = (f: Fetched, tokens: number, limit: number) => {
-  const prompt = Math.floor((promptChars(f) * (limit - 26 - 64)) / (tokens - 26));
+  const prompt = Math.floor((limit - 26 - 64) * (promptChars(f) / (tokens - 26)));
   return Math.max(0, Math.floor((prompt - JSON.stringify(f.body.questions).length) / 100)) * 100;
 };
 
@@ -429,7 +429,7 @@ test("after the server's refusal truncate retries once with the exact cut and an
   const r = await call($, "noul", { state, timeout: 30, overflow: "truncate" });
   expect(r.deny).toBeUndefined();
   expect(fetched).toHaveLength(2);
-  const keep = Math.max(0, Math.floor(((state.length + NOUL_QUESTION_CHARS) * (8191 - 26 - 64)) / (40025 - 26)) - NOUL_QUESTION_CHARS);
+  const keep = Math.max(0, Math.floor((8191 - 26 - 64) * ((state.length + NOUL_QUESTION_CHARS) / (40025 - 26))) - NOUL_QUESTION_CHARS);
   expect(fetched[1].body.state).toBe(cut(state, keep));
 });
 
@@ -440,7 +440,7 @@ test("after a refusal the cut also respects the timeout, sized with the exact de
   const r = await call($, "noul", { state, timeout: 20, overflow: "truncate" });
   expect(r.deny).toBeUndefined();
   expect(fetched).toHaveLength(2);
-  const keep = Math.floor(((state.length + NOUL_QUESTION_CHARS) * (budgetTokens(20) - 26 - 64)) / (47_000 - 26)) - NOUL_QUESTION_CHARS;
+  const keep = Math.floor((budgetTokens(20) - 26 - 64) * ((state.length + NOUL_QUESTION_CHARS) / (47_000 - 26))) - NOUL_QUESTION_CHARS;
   expect(fetched[1].body.state).toBe(cut(state, keep));
 });
 

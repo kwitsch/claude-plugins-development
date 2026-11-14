@@ -199,9 +199,11 @@ export function cutState(state: string, keep: number): string {
   const headLength = Math.round(keep * HEAD_SHARE);
   const tailLength = keep - headLength;
   let head = state.slice(0, headLength);
-  if (/[\uD800-\uDBFF]$/.test(head)) head = head.slice(0, -1);
+  const last = head.charCodeAt(head.length - 1);
+  if (last >= 0xd800 && last <= 0xdbff) head = head.slice(0, -1); // not a lone high surrogate
   let tail = tailLength > 0 ? state.slice(-tailLength) : "";
-  if (/^[\uDC00-\uDFFF]/.test(tail)) tail = tail.slice(1);
+  const first = tail.charCodeAt(0);
+  if (first >= 0xdc00 && first <= 0xdfff) tail = tail.slice(1); // not a lone low surrogate
   return `${head}\n[... ${state.length - head.length - tail.length} characters omitted ...]\n${tail}`;
 }
 
@@ -235,16 +237,24 @@ export function contextRefusal(text: string): { tokens: number; nctx: number } |
 }
 
 /**
- * The characters of the state that fit a token limit, from the exact ratio the server's count gives, the margin
- * {@link CUT_MARGIN_TOKENS} kept free and the questions taken off.
+ * The exact characters per token of a prompt the server refused: its characters over the tokens it counted, less the
+ * fixed overhead.
  *
  * @param refused - The server's refusal with the prompt's size.
- * @param budget - The tokens the prompt may have when something tighter than the server's limit applies (the timeout); never more than the server's limit.
- * @returns Whole characters, at least 0.
+ * @returns Characters per token; use it with {@link stateForBudget} instead of the learned density.
  */
-export function stateThatFits(refused: TooBig["tooBig"], budget: number = refused.limit): number {
-  const prompt = Math.floor((refused.chars * (Math.min(budget, refused.limit) - PROMPT_OVERHEAD_TOKENS - CUT_MARGIN_TOKENS)) / (refused.tokens - PROMPT_OVERHEAD_TOKENS));
-  return Math.max(0, prompt - refused.questionsChars);
+export function refusedDensity(refused: TooBig["tooBig"]): number {
+  return refused.chars / (refused.tokens - PROMPT_OVERHEAD_TOKENS);
+}
+
+/**
+ * A state size to name in an error: rounded down to whole hundreds of characters.
+ *
+ * @param chars - The characters that fit.
+ * @returns Whole hundreds, at least 0.
+ */
+export function aimHundreds(chars: number): number {
+  return Math.floor(chars / 100) * 100;
 }
 
 /**
@@ -255,7 +265,7 @@ export function stateThatFits(refused: TooBig["tooBig"], budget: number = refuse
  * @returns The error answer: the exact numbers and the state size to aim for (in hundreds of characters).
  */
 export function tooBigError(tool: ToolName, refused: TooBig["tooBig"]): ToolResult {
-  const aim = Math.floor(stateThatFits(refused) / 100) * 100;
+  const aim = aimHundreds(stateForBudget(refused.limit, refusedDensity(refused), refused.questionsChars));
   return fail(tool, `state too large for System One: the request has ${refused.tokens} tokens, the limit is ${refused.limit}; shorten the state to about ${aim} characters`);
 }
 
@@ -271,7 +281,6 @@ export function tooBigError(tool: ToolName, refused: TooBig["tooBig"]): ToolResu
  * @returns The error answer; it names the timeout when the timeout, not the server's limit, set the budget.
  */
 export function preflightError(tool: ToolName, estimate: number, budget: number, limit: number, timeoutMs: number, aim: number): ToolResult {
-  const aimHundreds = Math.floor(aim / 100) * 100;
-  if (budget >= limit) return fail(tool, `state too large for System One: at least ${estimate} tokens, the limit is ${limit}; shorten the state to about ${aimHundreds} characters`);
-  return fail(tool, `state too large for the timeout of ${timeoutMs / 1000} s: at least ${estimate} tokens, about ${budget} fit; shorten the state to about ${aimHundreds} characters or raise the timeout (at most ${MAX_TIMEOUT_S} s)`);
+  if (budget >= limit) return fail(tool, `state too large for System One: at least ${estimate} tokens, the limit is ${limit}; shorten the state to about ${aimHundreds(aim)} characters`);
+  return fail(tool, `state too large for the timeout of ${timeoutMs / 1000} s: at least ${estimate} tokens, about ${budget} fit; shorten the state to about ${aimHundreds(aim)} characters or raise the timeout (at most ${MAX_TIMEOUT_S} s)`);
 }

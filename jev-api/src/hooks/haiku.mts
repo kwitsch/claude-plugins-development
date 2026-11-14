@@ -5,7 +5,7 @@
  */
 
 import type { Engine, Question, ToolName, ToolResult } from "./types.mjs";
-import { QUESTION_ID, fail, isRecord, json, message } from "./util.mjs";
+import { fail, isRecord, json, message, questionId, questionsBody } from "./util.mjs";
 
 /** The model that stands in for Jev when none of the System One variables is set. */
 export const HAIKU_MODEL = "claude-haiku-5-5";
@@ -138,8 +138,8 @@ export function haikuTokens(questions: Question[]): number {
  * @returns The answers as {@link ask} returns them, or an error answer.
  */
 export async function askHaiku($: Engine, tool: ToolName, state: string, questions: Question[], timeoutMs: number, signal: AbortSignal): Promise<ToolResult> {
-  const ids = questions.map((_, i) => (tool === "batch" ? `q${i}` : QUESTION_ID));
-  const prompt = `Text:\n${state}\n\nQuestions (JSON):\n${JSON.stringify(Object.fromEntries(ids.map((id, i) => [id, questions[i]])))}`;
+  const ids = questions.map((_, i) => questionId(tool, i));
+  const prompt = `Text:\n${state}\n\nQuestions (JSON):\n${JSON.stringify(questionsBody(tool, questions))}`;
   let onAbort: (() => void) | undefined;
   try {
     const reply = $.model.complete({ model: HAIKU_MODEL, system: HAIKU_SYSTEM, prompt, maxTokens: haikuTokens(questions), timeoutMs }, { signal });

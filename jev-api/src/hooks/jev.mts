@@ -4,8 +4,8 @@
  * @packageDocumentation
  */
 
-import { HAIKU_MAX_CHARS, askHaiku } from "./haiku.mjs";
-import { MAX_DENSITY, OPTIMISTIC_FACTOR, contextRefusal, cutState, estimateTokens, isTooBig, learn, preflightError, stateForBudget, stateThatFits, timeBudgetTokens, tooBigError } from "./size.mjs";
+import { askHaiku, HAIKU_MAX_CHARS } from "./haiku.mjs";
+import { contextRefusal, cutState, estimateTokens, isTooBig, learn, MAX_DENSITY, OPTIMISTIC_FACTOR, preflightError, refusedDensity, stateForBudget, timeBudgetTokens, tooBigError } from "./size.mjs";
 import type { Knowledge, TooBig } from "./size.mjs";
 import type { Engine, Env, Overflow, Question, ToolName, ToolResult } from "./types.mjs";
 import { fail, hide, hideHost, isRecord, json, message, questionId, questionsBody } from "./util.mjs";
@@ -78,17 +78,17 @@ export function detail(text: string, redact: (s: string) => string, numbers: boo
  * @param env - The env values, trimmed, undefined when unset or blank.
  * @param timeoutMs - How long the request may take before the tool reports a timeout.
  * @param signal - Aborts when the call is abandoned; the hook then answers at once.
+ * @param questionsChars - The characters of the questions as the request body carries them (`JSON.stringify` of {@link questionsBody}): with the state they are the prompt.
  * @param onSample - Told the characters of the prompt and the tokens the server counted for it (an answer's
  * `usage.input_tokens`, or a context refusal's `n_prompt_tokens`), whatever the outcome of the call.
  * @returns The answer object as JSON (for `batch` the array of answers in question order), an error answer
  * prefixed with the tool name, or the server's refusal of a prompt over its context window ({@link TooBig}).
  */
-export async function ask($: Engine, tool: ToolName, state: string, questions: Question[], env: Env, timeoutMs: number, signal: AbortSignal, onSample: (chars: number, tokens: unknown) => void): Promise<ToolResult | TooBig> {
+export async function ask($: Engine, tool: ToolName, state: string, questions: Question[], env: Env, timeoutMs: number, signal: AbortSignal, questionsChars: number, onSample: (chars: number, tokens: unknown) => void): Promise<ToolResult | TooBig> {
   // The id of each question in the request and of its answer in the response.
   const ids = questions.map((_, i) => questionId(tool, i));
   const questionsObject = questionsBody(tool, questions);
   // The prompt the server tokenizes is the state plus the questions: both count for the density and the limit.
-  const questionsChars = JSON.stringify(questionsObject).length;
   const chars = state.length + questionsChars;
   const target = endpoint(env.jevUrl, env.base);
   if (!target.ok) return fail(tool, target.error);
@@ -175,8 +175,13 @@ export async function ask($: Engine, tool: ToolName, state: string, questions: Q
  * @returns The tool result.
  */
 export async function answerJev($: Engine, tool: ToolName, input: { state: string; questions: Question[] }, mode: Overflow, env: Env, timeoutMs: number, signal: AbortSignal, know: Knowledge): Promise<ToolResult> {
-  const send = (state: string) => ask($, tool, state, input.questions, env, timeoutMs, signal, (chars, tokens) => learn($, know, chars, tokens));
   const questionsChars = JSON.stringify(questionsBody(tool, input.questions)).length;
+  // A refusal also tells the server's context window: remembered for the rest of the instance.
+  const send = async (state: string) => {
+    const answer = await ask($, tool, state, input.questions, env, timeoutMs, signal, questionsChars, (chars, tokens) => learn($, know, chars, tokens));
+    if (isTooBig(answer)) know.nctx = answer.tooBig.limit + 1;
+    return answer;
+  };
   const limit = know.nctx - 1;
   const budget = Math.min(limit, timeBudgetTokens(timeoutMs));
   // Only what does not fit even at an optimistic density is refused before sending: a wrong refusal costs a valid call, a late one a fast 400.
@@ -185,15 +190,12 @@ export async function answerJev($: Engine, tool: ToolName, input: { state: strin
   if (estimate <= budget) {
     const first = await send(input.state);
     if (!isTooBig(first)) return first;
-    know.nctx = first.tooBig.limit + 1;
     refused = first.tooBig;
     if (signal.aborted) return fail(tool, "the call was abandoned");
   }
   if (mode === "error") return refused ? tooBigError(tool, refused) : preflightError(tool, estimate, budget, limit, timeoutMs, stateForBudget(budget, know.density, questionsChars));
   if (mode === "haiku") return await askHaiku($, tool, cutState(input.state, HAIKU_MAX_CHARS), input.questions, timeoutMs, signal);
   // truncate: what the budget (the limit and the timeout) allows, at the learned density, or after a refusal at the exact density its count gave
-  const second = await send(cutState(input.state, refused ? stateThatFits(refused, budget) : stateForBudget(budget, know.density, questionsChars)));
-  if (!isTooBig(second)) return second;
-  know.nctx = second.tooBig.limit + 1;
-  return tooBigError(tool, second.tooBig);
+  const second = await send(cutState(input.state, stateForBudget(refused ? Math.min(budget, refused.limit) : budget, refused ? refusedDensity(refused) : know.density, questionsChars)));
+  return isTooBig(second) ? tooBigError(tool, second.tooBig) : second;
 }

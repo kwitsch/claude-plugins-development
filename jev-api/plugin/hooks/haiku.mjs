@@ -1,4 +1,4 @@
-import { QUESTION_ID, fail, isRecord, json, message } from "./util.mjs";
+import { fail, isRecord, json, message, questionId, questionsBody } from "./util.mjs";
 export const HAIKU_MODEL = "claude-haiku-5-5";
 export const HAIKU_SYSTEM = `You stand in for a text classifier. Answer every question about the given text and reply with JSON only (no prose, no code fence): {"answers":{"<id>":<answer>}} with one answer per question id.
 An answer is, by question type:
@@ -68,8 +68,8 @@ export function haikuTokens(questions) {
 	return Math.min(HAIKU_MAX_TOKENS, n);
 }
 export async function askHaiku($, tool, state, questions, timeoutMs, signal) {
-	const ids = questions.map((_, i) => tool === "batch" ? `q${i}` : QUESTION_ID);
-	const prompt = `Text:\n${state}\n\nQuestions (JSON):\n${JSON.stringify(Object.fromEntries(ids.map((id, i) => [id, questions[i]])))}`;
+	const ids = questions.map((_, i) => questionId(tool, i));
+	const prompt = `Text:\n${state}\n\nQuestions (JSON):\n${JSON.stringify(questionsBody(tool, questions))}`;
 	let onAbort;
 	try {
 		const reply = $.model.complete({

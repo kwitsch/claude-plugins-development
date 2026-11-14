@@ -1,5 +1,5 @@
-import { HAIKU_MAX_CHARS, askHaiku } from "./haiku.mjs";
-import { MAX_DENSITY, OPTIMISTIC_FACTOR, contextRefusal, cutState, estimateTokens, isTooBig, learn, preflightError, stateForBudget, stateThatFits, timeBudgetTokens, tooBigError } from "./size.mjs";
+import { askHaiku, HAIKU_MAX_CHARS } from "./haiku.mjs";
+import { contextRefusal, cutState, estimateTokens, isTooBig, learn, MAX_DENSITY, OPTIMISTIC_FACTOR, preflightError, refusedDensity, stateForBudget, timeBudgetTokens, tooBigError } from "./size.mjs";
 import { fail, hide, hideHost, isRecord, json, message, questionId, questionsBody } from "./util.mjs";
 export const DEFAULT_JEV_URL = "https://api.typesafe.ai/v1/systemone";
 export const DEFAULT_MODEL = "jev-latest";
@@ -42,10 +42,9 @@ export function detail(text, redact, numbers) {
 	};
 	return typeof why === "string" ? redact(why) : JSON.stringify(why, (_k, v) => clean(v));
 }
-export async function ask($, tool, state, questions, env, timeoutMs, signal, onSample) {
+export async function ask($, tool, state, questions, env, timeoutMs, signal, questionsChars, onSample) {
 	const ids = questions.map((_, i) => questionId(tool, i));
 	const questionsObject = questionsBody(tool, questions);
-	const questionsChars = JSON.stringify(questionsObject).length;
 	const chars = state.length + questionsChars;
 	const target = endpoint(env.jevUrl, env.base);
 	if (!target.ok) return fail(tool, target.error);
@@ -122,8 +121,12 @@ export async function ask($, tool, state, questions, env, timeoutMs, signal, onS
 	}
 }
 export async function answerJev($, tool, input, mode, env, timeoutMs, signal, know) {
-	const send = (state) => ask($, tool, state, input.questions, env, timeoutMs, signal, (chars, tokens) => learn($, know, chars, tokens));
 	const questionsChars = JSON.stringify(questionsBody(tool, input.questions)).length;
+	const send = async (state) => {
+		const answer = await ask($, tool, state, input.questions, env, timeoutMs, signal, questionsChars, (chars, tokens) => learn($, know, chars, tokens));
+		if (isTooBig(answer)) know.nctx = answer.tooBig.limit + 1;
+		return answer;
+	};
 	const limit = know.nctx - 1;
 	const budget = Math.min(limit, timeBudgetTokens(timeoutMs));
 	const estimate = estimateTokens(input.state.length + questionsChars, Math.min(MAX_DENSITY, OPTIMISTIC_FACTOR * know.density));
@@ -131,14 +134,11 @@ export async function answerJev($, tool, input, mode, env, timeoutMs, signal, kn
 	if (estimate <= budget) {
 		const first = await send(input.state);
 		if (!isTooBig(first)) return first;
-		know.nctx = first.tooBig.limit + 1;
 		refused = first.tooBig;
 		if (signal.aborted) return fail(tool, "the call was abandoned");
 	}
 	if (mode === "error") return refused ? tooBigError(tool, refused) : preflightError(tool, estimate, budget, limit, timeoutMs, stateForBudget(budget, know.density, questionsChars));
 	if (mode === "haiku") return await askHaiku($, tool, cutState(input.state, HAIKU_MAX_CHARS), input.questions, timeoutMs, signal);
-	const second = await send(cutState(input.state, refused ? stateThatFits(refused, budget) : stateForBudget(budget, know.density, questionsChars)));
-	if (!isTooBig(second)) return second;
-	know.nctx = second.tooBig.limit + 1;
-	return tooBigError(tool, second.tooBig);
+	const second = await send(cutState(input.state, stateForBudget(refused ? Math.min(budget, refused.limit) : budget, refused ? refusedDensity(refused) : know.density, questionsChars)));
+	return isTooBig(second) ? tooBigError(tool, second.tooBig) : second;
 }
