@@ -13,6 +13,7 @@ paths:
   - Report: one block per tool run, `universal-lint: <tool> found issues in <targets>:` naming every file of the run, also those the tool found clean; batched output is the tool's own, not split per file.
   - A multi-file chunk with a skip verdict reruns its files one at a time (at most `BATCH_MAX_FILES` single spawns per chunk, each under the unchanged per-spawn timeout; no bisect); a spawn error, signal or timeout on a multi-file chunk triggers the same per-file rerun (a single file that still fails or times out is dropped, as the per-file driver dropped it).
   - The hook's stdin entry point (`main()`) stays the hook's sole entry; `lintFilesHandler` is the driver's one additive hook export (`lintFileHandler` stays exported for `main` and tests). `isMainModule()` keeps the import from starting the stdin read.
+- Root: `$PWD` when it names the same directory as `process.cwd()` (always the real path), else `process.cwd()`. A symlinked session cwd keeps the link in Glob/pwd paths (as the hook's payload cwd does); a real-path root rejects the local bin dir as outside it and the file goes unlinted.
 - Read-only — the driver never runs an autofix path.
 - Fail-open per file, chunk and tsconfig group; always exits 0 (2 only for a missing `<listfile>` argument).
 - `disable-model-invocation: true` (user-invoke-only); no `userConfig`. The skill dir is self-contained: no references to other plugins (tested).

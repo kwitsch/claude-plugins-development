@@ -1,7 +1,7 @@
 // The /universal-lint:universal-lint skill (SKILL.md + lint-files.mjs); ported from test/universal-lint/skill.bats.
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, readdirSync, readFileSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "vitest";
 import { DRIVER, makeEnv } from "./support/lint-hook.mts";
@@ -200,4 +200,20 @@ test("lint-files.mjs splits a tool's files into one run per argv prefix (markdow
   assert.equal(calls.filter((l) => l.includes(withConfig) && !l.includes(without) && !l.includes("--config")).length, 1, calls.join("\n"));
   assert.equal(calls.filter((l) => l.includes(without) && !l.includes(withConfig) && l.includes("--config")).length, 1, calls.join("\n"));
   assert.match(r.stdout, /no findings/);
+});
+
+test("lint-files.mjs finds a project-local linter through a symlinked cwd ($PWD keeps the link)", () => {
+  const e = makeEnv();
+  const link = path.join(path.dirname(e.cwd), "link");
+  symlinkSync(e.cwd, link);
+  e.file(".oxlintrc.json", "{}\n");
+  e.file("a.ts", "export const x = 1;\n");
+  const bin = e.file("node_modules/.bin/oxlint", "#!/usr/bin/env bash\nprintf 'oxlint %s\\n' \"$*\" >> \"$RECORD\"\necho 'a.ts:1:1 warning: x'\nexit 1\n");
+  chmodSync(bin, 0o755);
+  const list = path.join(path.dirname(e.cwd), "list");
+  writeFileSync(list, path.join(link, "a.ts") + "\n");
+  const r = spawnSync(process.execPath, [DRIVER, list], { cwd: link, env: { ...e.childEnv(), PWD: link }, encoding: "utf8" });
+  assert.equal(r.status, 0);
+  assert.match(r.stdout, /oxlint found issues/, r.stdout);
+  assert.equal(e.lines().filter((l) => l.startsWith("oxlint ")).length, 1);
 });
