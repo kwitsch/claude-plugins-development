@@ -230,6 +230,8 @@ test("only skills related to the prompt are offered", () => {
   const skills = dedupeSkills(SKILLS);
   expect(relevant("can you show me the full list", skills)).toEqual([]);
   expect(relevant("run the tests", skills)).toEqual([]);
+  // two stopwords ("run", "the") alone would reach the score of 2
+  expect(relevant("run the tests", [{ name: "deploy", description: "Run the deploy pipeline" }])).toEqual([]);
   expect(relevant("write youtube titles for my video", skills).map((s) => s.name)).toEqual(["youtube-metadata"]);
   expect(relevant("merge these two pdfs", skills).map((s) => s.name)).toEqual(["pdf"]);
   expect(relevant("open the page in chrome", skills).map((s) => s.name)).toEqual(["chrome-browser"]);
