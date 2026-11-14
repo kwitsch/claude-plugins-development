@@ -1,10 +1,24 @@
 #!/usr/bin/env node
 // MCP wrapper: indexes the current project when needed, then serves `graphmind mcp` over inherited stdio.
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { findGraphmind, registered, setupMcpPresent } from "./common.mjs";
+
+/**
+ * The real path of `p`, or `p` resolved when it does not exist.
+ *
+ * @param p - Path.
+ * @returns Absolute path with symlinks followed where possible.
+ */
+function real(p: string): string {
+  try {
+    return realpathSync(p);
+  } catch {
+    return resolve(p);
+  }
+}
 
 /**
  * Whether `dir` is a git work tree root or inside one (a `.git` entry in it or an ancestor) and not the home directory.
@@ -13,8 +27,9 @@ import { findGraphmind, registered, setupMcpPresent } from "./common.mjs";
  * @returns True when init may index it.
  */
 export function indexable(dir: string): boolean {
-  const home = resolve(homedir());
-  for (let d = resolve(dir);; d = resolve(d, "..")) {
+  // Real paths on both sides: a symlinked HOME (FreeBSD /home -> /usr/home) would never equal the real cwd.
+  const home = real(homedir());
+  for (let d = real(dir);; d = resolve(d, "..")) {
     // A dotfiles repo at $HOME must not make every folder below it indexable.
     if (d === home) return false;
     if (existsSync(join(d, ".git"))) return true;

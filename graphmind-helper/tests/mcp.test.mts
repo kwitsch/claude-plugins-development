@@ -1,7 +1,7 @@
 // The built MCP wrapper, run as a process with a fake `graphmind` on PATH and a temp HOME.
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -85,4 +85,17 @@ test("without the binary the wrapper exits 1; home and non-git folders are not i
   assert.equal(runWrapper(true).r.status, 1);
   assert.equal(indexable(root), false);
   assert.equal(indexable(proj), true);
+});
+
+test("a dotfiles repo in a symlinked HOME does not make a plain folder below it indexable", () => {
+  mkdirSync(join(home, ".git"));
+  mkdirSync(join(home, "notes", "sub"), { recursive: true });
+  symlinkSync(home, join(root, "linkhome"));
+  const saved = process.env.HOME;
+  process.env.HOME = join(root, "linkhome");
+  try {
+    assert.equal(indexable(join(home, "notes", "sub")), false);
+  } finally {
+    process.env.HOME = saved;
+  }
 });
