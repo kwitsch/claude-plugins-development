@@ -1,6 +1,6 @@
 // Pure logic of the built plugin/hooks/{candidates,report,context,policy}.mjs: upstream jev-pilot tests/candidates.test.ts.
 import { expect, test } from "vitest";
-import { commandKey, coversStep, dedupeSkills, isSafeScript, isSafeToOffer, mentionedPaths, quotedTerms, relevant, SAFE_MAKE, words } from "../plugin/hooks/candidates.mjs";
+import { commandKey, coversStep, dedupeSkills, isSafeScript, isSafeToOffer, mentionedPaths, quotedTerms, relevant, SAFE_MAKE, sameCall, words } from "../plugin/hooks/candidates.mjs";
 import { clip, splitTurn, summarize } from "../plugin/hooks/context.mjs";
 import { route } from "../plugin/hooks/policy.mjs";
 import { buildReport, escapePipes, verdict, when } from "../plugin/hooks/report.mjs";
@@ -235,6 +235,19 @@ test("only skills related to the prompt are offered", () => {
   expect(relevant("write youtube titles for my video", skills).map((s) => s.name)).toEqual(["youtube-metadata"]);
   expect(relevant("merge these two pdfs", skills).map((s) => s.name)).toEqual(["pdf"]);
   expect(relevant("open the page in chrome", skills).map((s) => s.name)).toEqual(["chrome-browser"]);
+});
+
+test("sameCall compares each tool by the argument that matters", () => {
+  const call = (tool: string, input: Record<string, unknown>) => ({ tool, input });
+  expect(sameCall(call("Read", { file_path: "/a" }), call("Read", { file_path: "/a" }))).toBe(true);
+  expect(sameCall(call("Read", { file_path: "/a" }), call("Read", { file_path: "/b" }))).toBe(false);
+  expect(sameCall(call("Skill", { skill: "pdf" }), call("Skill", { skill: "pdf" }))).toBe(true);
+  expect(sameCall(call("Skill", { skill: "pdf" }), call("Skill", { skill: "docx" }))).toBe(false);
+  expect(sameCall(call("ToolSearch", { query: "slack" }), call("ToolSearch", { query: "slack" }))).toBe(true);
+  expect(sameCall(call("ToolSearch", { query: "slack" }), call("ToolSearch", { query: "gmail" }))).toBe(false);
+  expect(sameCall(call("Bash", { command: "npm test " }), call("Bash", { command: "npm test" }))).toBe(true);
+  expect(sameCall(call("Bash", { command: "npm test" }), call("Bash", { command: "npm run build" }))).toBe(false);
+  expect(sameCall(call("Read", { file_path: "/a" }), call("Skill", { skill: "/a" }))).toBe(false);
 });
 
 test("commands compare by what they run, not how the output is filtered", () => {
