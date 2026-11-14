@@ -57,7 +57,7 @@ type Runner = Parameters<Parameters<typeof test>[2]>[0];
 // Answers every call the mod makes on `$`. The batch tool is listed and answered from `jev`; a mod's `$.tool.call`
 // resolves to the stub's `value`: the tool result `{ result }`, or `{ deny }` as the real engine resolves a deny (a bare
 // `{ deny }` stub answer would make the kit reject instead). Other tools go on to the test's own `tool.call` stub.
-function setup(on: On, opts: { messages: Msg[]; jev: Jev; cwd?: () => string; files?: string[]; links?: string[]; packageJson?: object | string; env?: Record<string, string>; store?: Record<string, unknown>; existsDenied?: boolean; tools?: { name: string; description: string; mcp: boolean }[] | null }) {
+function setup(on: On, opts: { messages: Msg[]; jev: Jev; cwd?: () => string; files?: string[]; links?: string[]; packageJson?: object | string; env?: Record<string, string>; store?: Record<string, unknown>; existsDenied?: boolean; sizes?: Record<string, number>; tools?: { name: string; description: string; mcp: boolean }[] | null }) {
   const sent: Asked[] = [];
   let batchCalls = 0;
   let reads = 0;
@@ -76,7 +76,7 @@ function setup(on: On, opts: { messages: Msg[]; jev: Jev; cwd?: () => string; fi
   on("fs.stat", (_$, e) => {
     statted.push(String(e.path));
     const isLink = (opts.links ?? []).includes(String(e.path));
-    return isLink || (opts.files ?? []).includes(String(e.path)) ? { value: { kind: "file", size: 100, mtimeMs: 0, isLink } } : { deny: "ENOENT" };
+    return isLink || (opts.files ?? []).includes(String(e.path)) ? { value: { kind: "file", size: opts.sizes?.[String(e.path)] ?? 100, mtimeMs: 0, isLink } } : { deny: "ENOENT" };
   });
   on("fs.read", (_$, e) => (opts.packageJson && e.path === `${CWD}/package.json` ? { value: typeof opts.packageJson === "string" ? opts.packageJson : JSON.stringify(opts.packageJson) } : { deny: "ENOENT" }));
   on("ui.status", () => ({ value: undefined }));
@@ -619,6 +619,20 @@ test("A symlinked file is never offered as a Read candidate", { options: { takeO
   claudeBeneath(on, []);
   expect(toolId((await drain($.turn.step(step))).chunks)).toBe("");
 });
+
+// The 2 MB cap: a file of exactly 2,000,000 bytes is still offered, a larger one is not, even with a confident pick.
+for (const [size, offered] of [[2_000_000, true], [2_000_001, false], [5_000_000, false]] as const) {
+  test(`A ${size}-byte file is ${offered ? "" : "never "}offered as a Read candidate`, { options: { takeOnlyForBypass: false } }, async ($, on) => {
+    setup(on, {
+      messages: [user("what is in big.log?")],
+      jev: byId({ next_action: { type: "choice", choice: "read big.log", probabilities: { "read big.log": 0.97, claude: 0.03 }, confidence: 0.95 } }),
+      files: [`${CWD}/big.log`],
+      sizes: { [`${CWD}/big.log`]: size },
+    });
+    claudeBeneath(on, []);
+    expect(toolId((await drain($.turn.step(step))).chunks) !== "").toBe(offered);
+  });
+}
 
 // An allow that a settings rule already gave stays as it is: rewording it makes the security plugin warn the user.
 test("A call Jev made itself keeps a settings allow verdict untouched", { options: { takeOnlyForBypass: false } }, async ($, on) => {
