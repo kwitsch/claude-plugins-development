@@ -18,8 +18,10 @@ type Runner = Parameters<Parameters<typeof test>[2]>[0];
 type World = {
   /** Tools `$.tool.list()` reports. */
   tools?: { name: string; description: string; mcp: boolean }[];
-  /** Paths `fs.exists` reports. */
+  /** Paths `fs.exists` reports (`fs.stat`: as files). */
   files?: string[];
+  /** Paths `fs.stat` reports as directories. */
+  dirs?: string[];
   /** Contents of settings.json when it exists. */
   settings?: string;
   /** `gm_status` fails (project not registered). */
@@ -50,7 +52,8 @@ function setup(on: Parameters<typeof mock.clock>[0], w: World = {}) {
   const files = w.files ?? [BIN];
   on("env.get", (_$, e) => ({ value: e.name === "HOME" ? "/home/u" : e.name === "PATH" ? "/usr/bin" : undefined }));
   on("session.cwd", () => ({ value: CWD }));
-  on("fs.exists", (_$, e) => ({ value: files.includes(String(e.path)) || (w.settings !== undefined && e.path === SETTINGS) }));
+  on("fs.exists", (_$, e) => ({ value: files.includes(String(e.path)) || w.dirs?.includes(String(e.path)) || (w.settings !== undefined && e.path === SETTINGS) }));
+  on("fs.stat", (_$, e) => (files.includes(String(e.path)) ? { value: { kind: "file", size: 1, mtimeMs: 0 } } : w.dirs?.includes(String(e.path)) ? { value: { kind: "dir", size: 0, mtimeMs: 0 } } : { deny: "ENOENT" }));
   on("fs.read", (_$, e) => (e.path === SETTINGS && w.settings !== undefined ? { value: w.settings } : { deny: "ENOENT" }));
   on("tool.list", () => ({ value: w.tools ?? OWN }));
   on("process.run", (_$, e) => {
@@ -271,6 +274,13 @@ test("session start toasts when no graphmind binary exists", async ($, on) => {
   await $.session.start({ source: "startup" });
   await clock.settle();
   expect(toasts).toHaveLength(1);
+  expect(toasts[0]).toMatch(/graphmind binary was not found/);
+});
+
+test("a directory named graphmind is not the binary", async ($, on) => {
+  const { toasts, clock } = setup(on, { files: [], dirs: [BIN] });
+  await $.session.start({ source: "startup" });
+  await clock.settle();
   expect(toasts[0]).toMatch(/graphmind binary was not found/);
 });
 

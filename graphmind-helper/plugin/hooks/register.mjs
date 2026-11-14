@@ -37,7 +37,7 @@ async function graphmindBin($, now) {
 	if (state.binMissAt !== undefined && now - state.binMissAt < NEGATIVE_TTL_MS) return undefined;
 	const [home, pathVar] = await Promise.all([$.env.get("HOME"), $.env.get("PATH")]);
 	const candidates = binaryDirs(pathVar, home).map((d) => `${d}/graphmind`);
-	const found = await Promise.all(candidates.map((p) => $.fs.exists(p)));
+	const found = await Promise.all(candidates.map((p) => $.fs.stat(p).then((s) => s.kind !== "dir", () => false)));
 	state.bin = candidates.find((_, i) => found[i]);
 	state.binMissAt = state.bin ? undefined : now;
 	return state.bin;

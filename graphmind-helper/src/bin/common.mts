@@ -1,18 +1,34 @@
 // Helpers of the MCP wrapper `mcp.mts` (zero-dependency Node). The hooks are a function-hooks module (`src/hooks/register.mts`).
 import { spawnSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { accessSync, constants, readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { delimiter, join, resolve, sep } from "node:path";
 import { binaryDirs } from "../hooks/terms.mjs";
 
 /**
- * The graphmind binary: the first one on PATH, else the places the setup scripts add to PATH (`binaryDirs`, shared with the module).
+ * The graphmind binary: the first executable file on PATH, else in the places the setup scripts add to PATH (`binaryDirs`, shared
+ * with the module). Like `command -v`, a directory or a non-executable `graphmind` is skipped.
  *
  * @param env - Process environment.
  * @returns Absolute path, `undefined` when there is none.
  */
 export function findGraphmind(env: NodeJS.ProcessEnv = process.env): string | undefined {
-  return binaryDirs(env.PATH, homedir(), delimiter).map((d) => join(d, "graphmind")).find((p) => existsSync(p));
+  return binaryDirs(env.PATH, homedir(), delimiter).map((d) => join(d, "graphmind")).find(isExecutableFile);
+}
+
+/**
+ * Whether a path is an executable regular file (symlinks followed).
+ *
+ * @param p - The path.
+ * @returns `true` for an executable file.
+ */
+function isExecutableFile(p: string): boolean {
+  try {
+    accessSync(p, constants.X_OK);
+    return statSync(p).isFile();
+  } catch {
+    return false;
+  }
 }
 
 /**

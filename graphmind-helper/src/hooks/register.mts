@@ -42,7 +42,7 @@ type Engine = {
   /** The session's directory. */
   session: { cwd(): Promise<string> };
   /** Filesystem reads. */
-  fs: { exists(path: string): Promise<boolean>; read(path: string): Promise<string> };
+  fs: { exists(path: string): Promise<boolean>; read(path: string): Promise<string>; stat(path: string): Promise<{ kind: "file" | "dir" | "other" }> };
   /** Tools: the listed ones and calling one (the graphmind MCP tools). */
   tool: {
     list(): Promise<ToolInfo[]>;
@@ -167,7 +167,8 @@ async function callText($: Engine, tool: string, cwd: string, input: Record<stri
 }
 
 /**
- * The graphmind binary (the directories of `binaryDirs`, as the MCP wrapper looks), cached once found and a miss for {@link NEGATIVE_TTL_MS}.
+ * The graphmind binary (the directories of `binaryDirs`, as the MCP wrapper looks; a directory named `graphmind` is skipped), cached
+ * once found and a miss for {@link NEGATIVE_TTL_MS}.
  *
  * @param $ - Engine interface.
  * @param now - The engine clock.
@@ -178,7 +179,8 @@ async function graphmindBin($: Engine, now: number): Promise<string | undefined>
   if (state.binMissAt !== undefined && now - state.binMissAt < NEGATIVE_TTL_MS) return undefined;
   const [home, pathVar] = await Promise.all([$.env.get("HOME"), $.env.get("PATH")]);
   const candidates = binaryDirs(pathVar, home).map((d) => `${d}/graphmind`);
-  const found = await Promise.all(candidates.map((p) => $.fs.exists(p)));
+  // shortcut: the engine's stat has no mode bits, so a non-executable file still counts here; the wrapper checks X_OK.
+  const found = await Promise.all(candidates.map((p) => $.fs.stat(p).then((s) => s.kind !== "dir", () => false)));
   state.bin = candidates.find((_, i) => found[i]);
   state.binMissAt = state.bin ? undefined : now;
   return state.bin;

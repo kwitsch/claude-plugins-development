@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, test } from "vitest";
+import { findGraphmind } from "../plugin/bin/common.mjs";
 import { indexable } from "../plugin/bin/mcp.mjs";
 
 const MCP = fileURLToPath(new URL("../plugin/bin/mcp.mjs", import.meta.url));
@@ -79,6 +80,15 @@ test("with CLAUDE_CONFIG_DIR set only its .claude.json counts, not the one in HO
   writeFileSync(join(cfg, ".claude.json"), server);
   rmSync(join(root, "calls.log"));
   assert.doesNotMatch(runWrapper(false, { CLAUDE_CONFIG_DIR: cfg }).calls, /^mcp$/m);
+});
+
+test("a directory or non-executable graphmind earlier on PATH does not shadow the binary", () => {
+  const dir = join(root, "a");
+  const plain = join(root, "p");
+  mkdirSync(join(dir, "graphmind"), { recursive: true });
+  mkdirSync(plain);
+  writeFileSync(join(plain, "graphmind"), FAKE);
+  assert.equal(findGraphmind({ PATH: `${dir}:${plain}:${fakeBin}` }), join(fakeBin, "graphmind"));
 });
 
 test("without the binary the wrapper exits 1; home and non-git folders are not indexable", () => {
