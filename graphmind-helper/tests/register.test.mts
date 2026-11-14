@@ -26,6 +26,8 @@ type World = {
   unregistered?: boolean;
   /** Output of `graphmind memory search`. */
   search?: string;
+  /** Text of `gm_memory_list`. */
+  recent?: string;
 };
 
 /**
@@ -68,7 +70,7 @@ function setup(on: Parameters<typeof mock.clock>[0], w: World = {}) {
     if (!tool.startsWith("mcp__")) return { result: "tool output" };
     calls.push({ ...e, tool });
     if (tool.endsWith("__gm_status") && w.unregistered) return { value: { deny: "Project is not registered" } };
-    const text = tool.endsWith("__gm_status") ? "Project: p\nGraph: 1 symbols" : tool.endsWith("__gm_map") ? ">> map\n  top file" : tool.endsWith("__gm_memory_list") ? ">> 1\n  [decision] recent one (id: x)" : "  foo [Function] a.ts:1";
+    const text = tool.endsWith("__gm_status") ? "Project: p\nGraph: 1 symbols" : tool.endsWith("__gm_map") ? ">> map\n  top file" : tool.endsWith("__gm_memory_list") ? (w.recent ?? ">> 1\n  [decision] recent one (id: x)") : "  foo [Function] a.ts:1";
     // The shape of a real MCP tool result (live, Claude Code 2.1.325): text parts under `result` and the joined text.
     return tool.includes("graphmind") ? { value: { result: [{ type: "text", text }], text } } : next(e);
   });
@@ -137,6 +139,19 @@ test("a memory search hit that is a priority entry is not shown again", async ($
   const second = (prompts[1].context ?? []).join("\n");
   expect(second).not.toMatch(/always use X/);
   expect(second).toMatch(/about foo_bar/);
+});
+
+test("a recent memory that is a priority entry is left out of the briefing", async ($, on) => {
+  // Real MCP shape (graphmind 0.3.7): gm_memory_list lists a priority entry without its star; the summary may hold 8 hex.
+  const recent = ">> 3\n  [decision] always use X (id: aaaaaaaa-1111-2222-3333-444444444444)\n  [pattern] see aaaaaaaa notes (id: cccccccc-1111-2222-3333-444444444444)\n  [bug] recent one (id: dddddddd-1111-2222-3333-444444444444)";
+  const { prompts, calls } = setup(on, { recent });
+  await $.session.start({ source: "startup" });
+  await prompt($, "please explain the recent decisions");
+  const first = (prompts[0].context ?? []).join("\n");
+  expect(first.match(/always use X/g)).toHaveLength(1);
+  expect(first).toMatch(/see aaaaaaaa notes/);
+  expect(first).toMatch(/recent one/);
+  expect(calls.find((c) => c.tool.endsWith("__gm_memory_list"))).toMatchObject({ limit: 10 });
 });
 
 test("every tenth prompt carries the save reminder", async ($, on) => {

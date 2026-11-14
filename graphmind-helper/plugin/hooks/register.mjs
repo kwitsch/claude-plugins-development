@@ -148,10 +148,11 @@ async function recallFor($, prompt) {
 			code_only: true
 		}) : undefined,
 		briefing ? callText($, tools.map, cwd, { limit: 20 }) : undefined,
-		briefing ? callText($, tools.memoryList, cwd, { limit: 5 }) : undefined
+		briefing ? callText($, tools.memoryList, cwd, { limit: 10 }) : undefined
 	]);
 	const priority = listing(priorityRaw);
-	const skip = new Set([...state.shown, ...priority.map((l) => entryId(l) ?? "")]);
+	const pids = new Set(priority.flatMap((l) => entryId(l) ?? []));
+	const skip = new Set([...state.shown, ...pids]);
 	const found = search ? [{
 		title: "[graphmind memory] Relevant:",
 		lines: listing(memoryRaw).filter((l) => !l.startsWith("!") && !skip.has(entryId(l) ?? "")).slice(0, 5)
@@ -178,7 +179,7 @@ async function recallFor($, prompt) {
 			},
 			{
 				title: "Recent memories:",
-				lines: listing(recent ?? "").slice(0, 5)
+				lines: listing(recent ?? "").filter((l) => !pids.has(/\(id: ([0-9a-f]{8})/.exec(l)?.[1] ?? "")).slice(0, 5)
 			},
 			...found,
 			{

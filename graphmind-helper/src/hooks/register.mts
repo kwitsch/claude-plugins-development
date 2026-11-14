@@ -308,11 +308,12 @@ async function recallFor($: Engine, prompt: string): Promise<string[]> {
     search ? cli($, bin, ["memory", "search", terms, "--limit", "5", "--max-chars", "300", "--no-recall"], cwd) : "",
     search && isCodePrompt(prompt) ? callText($, tools.search, cwd, { query: terms, limit: 5, code_only: true }) : undefined,
     briefing ? callText($, tools.map, cwd, { limit: 20 }) : undefined,
-    briefing ? callText($, tools.memoryList, cwd, { limit: 5 }) : undefined,
+    briefing ? callText($, tools.memoryList, cwd, { limit: 10 }) : undefined,
   ]);
   const priority = listing(priorityRaw);
   // A search hit that is a priority entry is already shown or offered in the priority block (the setup's drop_shown).
-  const skip = new Set([...state.shown, ...priority.map((l) => entryId(l) ?? "")]);
+  const pids = new Set(priority.flatMap((l) => entryId(l) ?? []));
+  const skip = new Set([...state.shown, ...pids]);
   const found: Block[] = search
     ? [
       { title: "[graphmind memory] Relevant:", lines: listing(memoryRaw).filter((l) => !l.startsWith("!") && !skip.has(entryId(l) ?? "")).slice(0, 5) },
@@ -328,7 +329,8 @@ async function recallFor($: Engine, prompt: string): Promise<string[]> {
       { title: "Project status:", lines: status.split("\n").slice(0, 10) },
       { title: "Structure:", lines: (map ?? "").split("\n").slice(0, 20) },
       { title: "★ Priority context (always active):", lines: priority },
-      { title: "Recent memories:", lines: listing(recent ?? "").slice(0, 5) },
+      // gm_memory_list does not star priority entries (the setup drops them by the star); match its "(id: " prefix, the summary can hold any 8 hex.
+      { title: "Recent memories:", lines: listing(recent ?? "").filter((l) => !pids.has(/\(id: ([0-9a-f]{8})/.exec(l)?.[1] ?? "")).slice(0, 5) },
       ...found,
       { title: "", lines: [AUTO_MEMORY] },
     ];
