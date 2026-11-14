@@ -139,7 +139,8 @@ test("With only a skill named none related, no skill question", async ($, on) =>
 });
 
 test("A general-purpose subagent is switched only when Jev is confident; an explicit type is kept", async ($, on) => {
-  const sent = base(on, () => ({ type: "choice", choice: "Explore", probabilities: { Explore: 0.92, "general-purpose": 0.08 }, confidence: 0.85 }));
+  let p = 0.92;
+  const sent = base(on, () => ({ type: "choice", choice: "Explore", probabilities: { Explore: p, "general-purpose": 1 - p }, confidence: 0.85 }));
   on("agent.offer", () => ({ isOffered: true }));
   const spawned: unknown[] = [];
   on("tool.call", (_$, e) => {
@@ -151,9 +152,14 @@ test("A general-purpose subagent is switched only when Jev is confident; an expl
 
   await $.tool.call({ tool: "Agent", description: "find usages", prompt: "Find every caller of addTodo", tool_use_id: "a1" });
   await $.tool.call({ tool: "Agent", description: "plan", prompt: "Find every caller of addTodo", subagent_type: "Plan", tool_use_id: "a2" });
-  expect(spawned).toEqual(["Explore", "Plan"]);
+  // "claude" means no specific type, so it is switched too.
+  await $.tool.call({ tool: "Agent", description: "find usages", prompt: "Find every caller of addTodo", subagent_type: "claude", tool_use_id: "a3" });
+  // Below SWITCH_AT (0.85) the general-purpose call is kept.
+  p = 0.6;
+  await $.tool.call({ tool: "Agent", description: "find usages", prompt: "Find every caller of addTodo", tool_use_id: "a4" });
+  expect(spawned).toEqual(["Explore", "Plan", "Explore", undefined]);
   // The offered agent types are the options of one choice call per Agent call.
-  expect(sent.map((q) => q.type)).toEqual(["choice", "choice"]);
+  expect(sent.map((q) => q.type)).toEqual(["choice", "choice", "choice", "choice"]);
   expect(sent[0].criteria).toEqual({ "general-purpose": "General tasks", Explore: "Read-only codebase search" });
 });
 
