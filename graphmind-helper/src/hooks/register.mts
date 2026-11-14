@@ -16,9 +16,23 @@ import { binaryDirs, entryId, fit, isCodePrompt, isRecallable, listing, NUDGE, r
 import type { Block, GmTools, SearchCall } from "./terms.mjs";
 
 /** One entry of `$.tool.list()`. */
-type ToolInfo = { name: string };
+type ToolInfo = {
+  /** The tool's full name. */
+  name: string;
+};
 /** A `tool.call` result. */
-type ToolResult = { deny?: unknown; isError?: boolean; result?: unknown; text?: unknown; context?: unknown } & Record<string, unknown>;
+type ToolResult = {
+  /** Why the call was denied. */
+  deny?: unknown;
+  /** Whether the tool reported an error. */
+  isError?: boolean;
+  /** The result: a string or MCP text parts. */
+  result?: unknown;
+  /** The joined text of an MCP result. */
+  text?: unknown;
+  /** Context for the model added by a hook. */
+  context?: unknown;
+} & Record<string, unknown>;
 /** The part of the engine interface `$` this module uses. */
 type Engine = {
   /** Time. */
@@ -45,7 +59,18 @@ type Next<E, R> = (e: E) => Promise<R>;
 /** A function hook taking event `E` and resolving `R`. */
 type Hook<E, R> = ($: Engine, e: E, next: Next<E, R>) => Promise<R>;
 /** A `prompt.submit` event. */
-type PromptEvent = { command?: unknown; isMeta?: boolean; text: string; context?: readonly string[]; origin?: { kind?: string } } & Record<string, unknown>;
+type PromptEvent = {
+  /** Set for a slash command. */
+  command?: unknown;
+  /** Set for a meta prompt. */
+  isMeta?: boolean;
+  /** The prompt text. */
+  text: string;
+  /** Context entries already attached. */
+  context?: readonly string[];
+  /** Who submitted the prompt. */
+  origin?: { kind?: string };
+} & Record<string, unknown>;
 /** A `tool.call` event; the tool's input fields sit on the event itself. */
 type ToolCall = SearchCall;
 /** The `on` the engine passes to `register`, one overload per hooked event. */
@@ -120,8 +145,9 @@ function textOf(r: ToolResult): string | undefined {
   if (typeof r.text === "string") return r.text;
   if (typeof r.result === "string") return r.result;
   if (!Array.isArray(r.result)) return undefined;
-  const parts = (r.result as unknown[]).map((p) => (p && typeof p === "object" && typeof (p as { text?: unknown }).text === "string" ? (p as { text: string }).text : ""));
-  return parts.join("\n");
+  const parts = (r.result as unknown[]).map((p) => (p && typeof p === "object" && typeof (p as { text?: unknown }).text === "string" ? (p as { text: string }).text : "")).filter((t) => t !== "");
+  // A result without any text part is no answer (an empty status must not make a project look registered).
+  return parts.length ? parts.join("\n") : undefined;
 }
 
 /**
@@ -183,8 +209,9 @@ async function setupWired($: Engine): Promise<boolean> {
   if (state.wired !== undefined) return state.wired;
   let wired = false;
   try {
-    const home = await $.env.get("HOME");
-    const file = home ? `${home}/.claude/settings.json` : "";
+    const [home, configDir] = await Promise.all([$.env.get("HOME"), $.env.get("CLAUDE_CONFIG_DIR")]);
+    const dir = configDir || (home ? `${home}/.claude` : "");
+    const file = dir ? `${dir}/settings.json` : "";
     if (file && await $.fs.exists(file)) {
       const text = await $.fs.read(file);
       wired = SETUP_SCRIPTS.some((s) => text.includes(s));
@@ -377,6 +404,8 @@ async function onToolCall($: Engine, e: ToolCall, next: Next<ToolCall, ToolResul
   if (state.nudged || !shouldNudge(e)) return r;
   try {
     if (!(await usable($))) return r;
+    // Parallel searches all pass the first check while `usable` is awaited: only the first one nudges.
+    if (state.nudged) return r;
     state.nudged = true;
     return { ...r, context: [...(Array.isArray(r.context) ? r.context as unknown[] : []), NUDGE] };
   } catch {

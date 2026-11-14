@@ -22,8 +22,8 @@ function textOf(r) {
 	if (typeof r.text === "string") return r.text;
 	if (typeof r.result === "string") return r.result;
 	if (!Array.isArray(r.result)) return undefined;
-	const parts = r.result.map((p) => p && typeof p === "object" && typeof p.text === "string" ? p.text : "");
-	return parts.join("\n");
+	const parts = r.result.map((p) => p && typeof p === "object" && typeof p.text === "string" ? p.text : "").filter((t) => t !== "");
+	return parts.length ? parts.join("\n") : undefined;
 }
 async function callText($, tool, cwd, input = {}) {
 	return textOf(await $.tool.call({
@@ -57,8 +57,9 @@ async function setupWired($) {
 	if (state.wired !== undefined) return state.wired;
 	let wired = false;
 	try {
-		const home = await $.env.get("HOME");
-		const file = home ? `${home}/.claude/settings.json` : "";
+		const [home, configDir] = await Promise.all([$.env.get("HOME"), $.env.get("CLAUDE_CONFIG_DIR")]);
+		const dir = configDir || (home ? `${home}/.claude` : "");
+		const file = dir ? `${dir}/settings.json` : "";
 		if (file && await $.fs.exists(file)) {
 			const text = await $.fs.read(file);
 			wired = SETUP_SCRIPTS.some((s) => text.includes(s));
@@ -227,6 +228,7 @@ async function onToolCall($, e, next) {
 	if (state.nudged || !shouldNudge(e)) return r;
 	try {
 		if (!await usable($)) return r;
+		if (state.nudged) return r;
 		state.nudged = true;
 		return {
 			...r,

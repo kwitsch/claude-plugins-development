@@ -119,7 +119,12 @@ export function listing(out: string): string[] {
 }
 
 /** One block of a message: lines under an optional title (an empty title puts the lines in as plain text). */
-export type Block = { title: string; lines: string[] };
+export type Block = {
+  /** The heading line, `""` for none. */
+  title: string;
+  /** The lines under it. */
+  lines: string[];
+};
 
 /** A message built within the budget. */
 export type Fitted = {
@@ -157,8 +162,16 @@ export function fit(head: string, blocks: Block[], max: number = MAX_CHARS): Fit
 }
 
 /** The graphmind MCP tools the module uses. */
-export type GmTools = { status: string; map: string; memoryList: string; search: string };
-
+export type GmTools = {
+  /** `gm_status`. */
+  status: string;
+  /** `gm_map`. */
+  map: string;
+  /** `gm_memory_list`. */
+  memoryList: string;
+  /** `gm_search`. */
+  search: string;
+};
 
 /**
  * Finds the graphmind MCP tools in the engine's tool list. The plugin's own server and the one `graphmind setup`

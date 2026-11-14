@@ -25,6 +25,7 @@
 - The module loads (`graphmind-helper@inline`, events session.start/session.end/prompt.submit/tool.call) and the plugin's MCP server connects as `plugin:graphmind-helper:graphmind`; `$.tool.call` reaches its tools as `mcp__plugin_graphmind-helper_graphmind__gm_*`.
 - A real MCP tool result is `{ result: [{ type: "text", text }], text }`, not a string (a first build read only strings and silently added nothing): `textOf` reads `text`, then a string `result`, then the text parts.
 - The first-prompt briefing (a `context` entry returned from `prompt.submit`) reaches the model verbatim. The nudge (`context` on a `tool.call` result) reaches it too, shown to the model as "tool.call hook additional context".
+- Those runs used the 0.2.0 build before the parallel-recall refactor and the `CLAUDE_CONFIG_DIR` dedupe fix; afterwards only the kit tests ran. A live harness must now give the session a config dir without the setup hooks (the module reads `$CLAUDE_CONFIG_DIR/settings.json`, else `~/.claude/settings.json`), or the module correctly stays silent. Copying the credentials into a scratch config dir was refused by the auto-mode classifier, so a re-run needs the user.
 - Not exercised live: a `graphmind setup` server (name `mcp__graphmind__*`, only in the kit test), the setup-hooks dedupe, an unregistered project and init, the 10th-prompt checkpoint.
 
 ## Tests

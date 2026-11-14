@@ -175,6 +175,13 @@ test("a code search gets the nudge once; other tools and graphmind itself get no
   expect((await toolCall($, { tool: "Grep" })).context).toBeUndefined();
 });
 
+test("parallel code searches get one nudge between them", async ($, on) => {
+  setup(on);
+  await $.session.start({ source: "startup" });
+  const results = await Promise.all([toolCall($, { tool: "Grep" }), toolCall($, { tool: "Grep" }), toolCall($, { tool: "Glob" })]);
+  expect(results.filter((r) => r.context?.length)).toHaveLength(1);
+});
+
 test("no nudge while the project is not registered", async ($, on) => {
   setup(on, { unregistered: true });
   await $.session.start({ source: "startup" });
