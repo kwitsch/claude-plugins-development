@@ -17,7 +17,7 @@
 - The briefing waits for the first `prompt.submit`: the MCP server starts concurrently with `session.start`.
 - Init stays in the MCP wrapper (before the server starts); guarded: inside a git work tree, not `$HOME`, only when `graphmind which` fails.
 - Without the binary the module adds nothing, the wrapper exits 1 (the server shows as failed in `/mcp`), the toast explains.
-- Dedupe: the module adds nothing when `~/.claude/settings.json` names the setup's scripts (read once per conversation).
+- Dedupe: the module adds nothing when the user settings (`~/.claude/settings.json`, or `$CLAUDE_CONFIG_DIR/settings.json` when that is set) name the setup's scripts (read once per conversation).
 - `$.tool.call` and `$.process.run` run in-frame of a hook (permission checks otherwise prompt); all of them are awaited inside `prompt.submit`/`tool.call`. Every failure fails open (the prompt or result passes unchanged).
 
 ## Live-verified (`claude -p`, Claude Code 2.1.325, 2026-11-14; setup hooks kept out by a temp `HOME` plus `CLAUDE_CONFIG_DIR` and `--setting-sources project`)

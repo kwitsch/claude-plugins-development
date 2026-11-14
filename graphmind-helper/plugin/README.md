@@ -14,7 +14,7 @@ Does for Claude Code, from the plugin, what [`graphmind setup`](https://github.c
 
 ## Already ran `graphmind setup`?
 
-- The module adds nothing when `~/.claude/settings.json` names the setup's `graphmind-*.sh` scripts, so nothing is injected twice.
+- The module adds nothing when Claude Code's user settings (`~/.claude/settings.json`, or `$CLAUDE_CONFIG_DIR/settings.json` when that is set) name the setup's `graphmind-*.sh` scripts, so nothing is injected twice.
 - The plugin's MCP server is skipped when Claude Code's global config (`~/.claude.json`, or `$CLAUDE_CONFIG_DIR/.claude.json` when that is set) already holds a `graphmind` server (init still runs); the module then uses that server's tools. To use the plugin's server instead, remove that entry (`claude mcp remove graphmind`).
 - The plugin never edits `~/.claude/settings.json` or `~/.claude.json`.
 

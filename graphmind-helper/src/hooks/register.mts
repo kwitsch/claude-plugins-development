@@ -203,7 +203,7 @@ async function cli($: Engine, bin: string, args: string[], cwd: string): Promise
  * Whether `graphmind setup` already wired its hooks into the user's settings, so this module would inject twice. Asked once per conversation.
  *
  * @param $ - Engine interface.
- * @returns True when one of the setup scripts is named in `~/.claude/settings.json`.
+ * @returns True when one of the setup scripts is named in the user settings (`$CLAUDE_CONFIG_DIR/settings.json`, else `~/.claude/settings.json`).
  */
 async function setupWired($: Engine): Promise<boolean> {
   if (state.wired !== undefined) return state.wired;
