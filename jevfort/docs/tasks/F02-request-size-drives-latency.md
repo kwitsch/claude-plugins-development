@@ -1,14 +1,16 @@
 ---
 id: F02
 title: Jev latency follows the request size; full clips cost ~3 s before the first token and 1.7 s per done check
-status: open
+status: closed
 priority: medium
 area: jevfort/src/hooks/register.mts (turn.step state, contextCompact, previousReply), jevfort/src/hooks/context.mts (summarize, clip)
 ---
 
 ## Status
 
-Open. Found in the performance analysis of 2026-11-14 ([../EVALUATION-2026-11-14.md](../EVALUATION-2026-11-14.md)), plugin 0.10.1.
+Closed 2026-11-14 as a measurement record, no code change (user decision, shipped state 0.12.0). Reason: shortening the states would change the effort calibration (`EFFORT_CUTS`, `MECHANICAL_FROM` were measured on today's states) and the calibration prompts are not in the repository, so the accuracy cost cannot be measured; the ~0.16 ms per byte figure stays as the record.
+
+Earlier state: open. Found in the performance analysis of 2026-11-14 ([../EVALUATION-2026-11-14.md](../EVALUATION-2026-11-14.md)), plugin 0.10.1.
 
 Note (0.12.0): the done check, the prompt classifier and the step-k measurement (`measureSteps`) are gone; the task-end question is its own request. The figures below for them are history. Re-measured on 0.11.0 ([../EVALUATION-2026-11-14-2.md](../EVALUATION-2026-11-14-2.md)), still open: with every clip full the classifier takes 1100 ms (F01 cut its skill options) and step 0 1548 ms, 2.65 s before the first token; the turn end with done check and task end in one batch (F03) 1771 ms, the step-k measurement 1695 ms. A 4-step turn's done check 644 ms, step 0 617 ms, measurement 729 ms. The ~0.16 ms per byte model still holds.
 

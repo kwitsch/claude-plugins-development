@@ -17,11 +17,11 @@ Legend: `[x]` finished (done, or closed without code: status `closed` in the tas
 
 ## Remaining
 
-- [ ] [F02](tasks/F02-request-size-drives-latency.md) `open` medium: Jev latency follows the request size (~0.16 ms per byte); full clips cost ~3 s before the first token and 1.7 s per done check (0.11.0: 2.65 s and 1.77 s). 0.12.0: only step 0 (and take-steps steps) and the task-end question remain; waiting for a user decision on accuracy vs latency (the calibration prompts are not in the repository)
 - [ ] [F14](tasks/F14-agent-type-choice-latency.md) `open` medium: the agent-type choice waits ~1.15 s (real median, 103 calls) before every Agent dispatch and switched none; 9% of the calls cannot switch at all
 
 ## Closed without code (measurement records, decided 2026-11-14)
 
+- [x] [F02](tasks/F02-request-size-drives-latency.md) Jev latency follows the request size (~0.16 ms per byte): closed as a measurement record, shorter states would change the effort calibration and its prompts are not in the repo
 - [x] [F09](tasks/F09-foreign-tool-and-stream-overhead.md) Foreign `tool.call`/`tool.check` overhead (+0.15 us per call, 0 ops) and the stream pass-through (+0.57 us per chunk)
 - [x] [F10](tasks/F10-parallel-turn-start.md) Classify and step 0 in parallel or as one batch: no gain, the endpoint answers one request after another
 - [x] [F11](tasks/F11-test-suite-runtime.md) Test-suite runtime (196 tests, 1.6 s)
