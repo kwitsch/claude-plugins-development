@@ -14,6 +14,10 @@ test("paths with extensions are found in text", () => {
   expect(mentionedPaths(["look at src/app.ts and ./README.md, not v1.2 or https://x.io/a.js"])).toEqual(["src/app.ts", "./README.md"]);
 });
 
+test("a path at the end of a sentence is found", () => {
+  for (const s of ["explain src/app.ts.", "what is in src/app.ts?", "src/app.ts!", "see (src/app.ts)."]) expect(mentionedPaths([s])).toEqual(["src/app.ts"]);
+});
+
 test("an empty log gives a hint, not a crash", () => {
   expect(buildReport([], 0.85)).toContain("the log is empty");
   expect(buildReport([], 0.85)).not.toContain("shadow");

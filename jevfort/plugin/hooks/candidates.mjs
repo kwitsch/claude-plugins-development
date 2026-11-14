@@ -5,7 +5,7 @@ export const SAFE_SCRIPT = /^(test|tests|lint|build|typecheck|type-check|check|t
 export const BUILTIN_COMMANDS = new Set(("add-dir agents bug clear compact config context cost diff doctor exit export help hooks ide init " + "install-github-app login logout mcp memory model permissions plugin pr-comments release-notes resume " + "review rewind status statusline terminal-setup theme upgrade usage vim").split(" "));
 export const SKILL_BLOCKLIST_KEY = "skillBlocklist";
 export const SAFE_MAKE = /^(test|tests|check|lint|build|typecheck)$/;
-const PATH = /(?:^|[\s`'"([])((?:~|\.{1,2})?\/?[\w@.-]+(?:\/[\w@.-]+)*\.[A-Za-z][A-Za-z0-9]{0,7})(?=$|[\s`'"),:;\]])/g;
+const PATH = /(?:^|[\s`'"([])((?:~|\.{1,2})?\/?[\w@.-]+(?:\/[\w@.-]+)*\.[A-Za-z][A-Za-z0-9]{0,7})(?=[.?!]*(?:$|[\s`'"),:;\]]))/g;
 const QUOTED = /`([^`\n]{3,60})`|"([^"\n]{3,60})"/g;
 export function mentionedPaths(texts, seen = new Set()) {
 	for (const text of texts) {

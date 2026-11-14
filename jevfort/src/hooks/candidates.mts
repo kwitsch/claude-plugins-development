@@ -41,8 +41,8 @@ export const SKILL_BLOCKLIST_KEY = "skillBlocklist";
 
 /** Makefile targets safe to run unasked. */
 export const SAFE_MAKE = /^(test|tests|check|lint|build|typecheck)$/;
-/** Paths like src/app.ts, ./README.md, /abs/x.json: something with a file extension. */
-const PATH = /(?:^|[\s`'"([])((?:~|\.{1,2})?\/?[\w@.-]+(?:\/[\w@.-]+)*\.[A-Za-z][A-Za-z0-9]{0,7})(?=$|[\s`'"),:;\]])/g;
+/** Paths like src/app.ts, ./README.md, /abs/x.json: something with a file extension, also at a sentence end (`src/app.ts.`, `src/app.ts?`). */
+const PATH = /(?:^|[\s`'"([])((?:~|\.{1,2})?\/?[\w@.-]+(?:\/[\w@.-]+)*\.[A-Za-z][A-Za-z0-9]{0,7})(?=[.?!]*(?:$|[\s`'"),:;\]]))/g;
 /** Terms the user quoted: `useAuth`, "TODO: fix". */
 const QUOTED = /`([^`\n]{3,60})`|"([^"\n]{3,60})"/g;
 
