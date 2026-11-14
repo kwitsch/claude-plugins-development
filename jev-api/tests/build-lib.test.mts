@@ -114,7 +114,7 @@ test("one local name bound by two hoisted imports or by an import and a declarat
     "register.mts": REGISTER,
   });
   assert.equal(decl.status, 1);
-  assert.match(decl.stderr, /join is/);
+  assert.match(decl.stderr, /'join' has already been declared/);
 });
 
 test("one name bound twice by a later declarator or a destructuring pattern fails the build", () => {
@@ -132,4 +132,18 @@ test("one name bound twice by a later declarator or a destructuring pattern fail
   });
   assert.equal(patterns.status, 1);
   assert.match(patterns.stderr, /shared/);
+});
+
+test("declaration-like lines inside a helper's template literal bind no name", () => {
+  const one = build({
+    "a.mts": "export const HELP = `Example:\nconst limit = 5;\nend`;\nexport const limit = 3;\n",
+    "register.mts": `import { HELP, limit } from "./a.mjs";\nexport function register(on: unknown): string { return HELP + limit; }\n`,
+  });
+  assert.equal(one.status, 0, one.stderr);
+  const two = build({
+    "a.mts": "export const PROMPT = `Answer as JSON.\nfunction answer is what you return`;\n",
+    "b.mts": `export function answer(): number { return 1; }\n`,
+    "register.mts": `import { PROMPT } from "./a.mjs";\nimport { answer } from "./b.mjs";\nexport function register(on: unknown): string { return PROMPT + answer(); }\n`,
+  });
+  assert.equal(two.status, 0, two.stderr);
 });

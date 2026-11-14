@@ -147,7 +147,7 @@ function bundleLib(compiled: Map<string, string>): { members: string[]; entries:
     else for (const s of m[1].split(",").map((x) => x.trim().replace(/\s+/g, " ")).filter(Boolean)) named.set(m[2], (named.get(m[2]) ?? new Set()).add(s));
   }
   for (const [source, specs] of named) imports.push(`import { ${[...specs].join(", ")} } from ${source};`);
-  // every top-level name, imported or declared, is unique across the helpers
+  // every hoisted import binds a name once (declared names are left to the Node parse below, which sees the real syntax)
   const seen = new Map<string, string>();
   const bind = (name: string, where: string): void => {
     const other = seen.get(name);
@@ -158,11 +158,6 @@ function bundleLib(compiled: Map<string, string>): { members: string[]; entries:
     // the local name is the last word of each specifier: `a`, `a as b`, `* as b`, a default `b`
     const clause = /^import\s*([^"']*?)\s*from\s*["']/.exec(line)?.[1] ?? "";
     for (const s of clause.replace(/[{}]/g, ",").split(",").map((x) => x.trim()).filter(Boolean)) bind(s.split(/\s+/).at(-1) ?? s, `\`${line}\``);
-  }
-  for (const f of ordered) {
-    for (const m of (bodies.get(f) ?? "").matchAll(/^(?:export\s+)?(?:async\s+)?(?:function\*?|const|let|class)\s+([A-Za-z_$][\w$]*)/gm)) {
-      bind(m[1], path.relative(ROOT, f));
-    }
   }
   // the entries import from lib.mjs; lib.mjs exports exactly the names they take
   const needed = new Set<string>();
@@ -187,8 +182,8 @@ function bundleLib(compiled: Map<string, string>): { members: string[]; entries:
   }
   const text = ordered.map((f) => bodies.get(f) ?? "").join("\n");
   const code = `${imports.join("\n")}\n${text}\nexport { ${[...needed].sort().join(", ")} };\n`;
-  // the name check above sees only a declaration's first name; Node's parse catches every other duplicate binding
-  // (`const a = 1, b = 2`, destructuring) before it ships as a SyntaxError
+  // Node's parse catches every duplicate top-level binding (a name declared in two helpers, or declared and imported)
+  // before it ships; a line scan of the bodies would also match declaration-like lines inside template literals
   const check = spawnSync(process.execPath, ["--check", "--input-type=module"], { input: code, encoding: "utf8" });
   if (check.status !== 0) fail(`lib.mjs does not parse (a top-level name bound twice across helpers?):\n${check.stderr}`);
   return { members, entries, code };
