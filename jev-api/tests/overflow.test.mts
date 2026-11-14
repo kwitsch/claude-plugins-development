@@ -215,9 +215,18 @@ const BIG = { state: "a".repeat(100_000), timeout: 30, overflow: "error" };
 test("the server's context rejection becomes a clear refusal with the numbers and a size to aim for", async ($, on) => {
   const { fetched } = setup(on, { replies: [tooBig(40025)] });
   const r = await call($, "noul", BIG);
-  const aim = allowedState(fetched[0], 40025, 32767);
+  // The 30 s timeout allows fewer tokens than the limit, so the aim is sized to the timeout.
+  const aim = allowedState(fetched[0], 40025, Math.min(budgetTokens(30), 32767));
   expect(r.deny).toBe(`noul: state too large for System One: the request has 40025 tokens, the limit is 32767; shorten the state to about ${aim} characters`);
   expect(fetched).toHaveLength(1);
+});
+
+test("the size to aim for after a refusal fits the timeout at the refusal's exact density", async ($, on) => {
+  const { fetched } = setup(on, { replies: [tooBig(36_000)] });
+  const r = await call($, "noul", { state: "x".repeat(90_000), timeout: 20, overflow: "error" });
+  const aim = Number(/about (\d+) characters/.exec(r.deny ?? "")?.[1]);
+  const density = promptChars(fetched[0]) / (36_000 - 26);
+  expect(Math.ceil((aim + NOUL_QUESTION_CHARS) / density) + 26).toBeLessThanOrEqual(budgetTokens(20));
 });
 
 test("the limit is the server's n_ctx minus one", async ($, on) => {

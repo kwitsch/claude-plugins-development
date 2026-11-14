@@ -262,10 +262,11 @@ export function aimHundreds(chars: number): number {
  *
  * @param tool - The tool called.
  * @param refused - The server's refusal with the prompt's size.
+ * @param budget - The tokens the call's timeout allows (with the limit known before the refusal); the aim fits it and the refused limit.
  * @returns The error answer: the exact numbers and the state size to aim for (in hundreds of characters).
  */
-export function tooBigError(tool: ToolName, refused: TooBig["tooBig"]): ToolResult {
-  const aim = aimHundreds(stateForBudget(refused.limit, refusedDensity(refused), refused.questionsChars));
+export function tooBigError(tool: ToolName, refused: TooBig["tooBig"], budget: number): ToolResult {
+  const aim = aimHundreds(stateForBudget(Math.min(budget, refused.limit), refusedDensity(refused), refused.questionsChars));
   return fail(tool, `state too large for System One: the request has ${refused.tokens} tokens, the limit is ${refused.limit}; shorten the state to about ${aim} characters`);
 }
 
