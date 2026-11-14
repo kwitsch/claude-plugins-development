@@ -1674,3 +1674,29 @@ test("A 6-step turn writes the log and the counters once, and /jev export still 
   expect(kinds).toContain("done");
   expect(await runJev($, "")).toMatch(/compare(:pass)?=6/);
 });
+
+test("session.end writes the decisions recorded outside a turn", { options: { minEffort: "high", maxEffort: "low" } }, async ($, on) => {
+  const logs: { kind: string; text: string }[][] = [];
+  on("store.set", (_$, e, next) => (e.key === "log" && logs.push(e.value as { kind: string; text: string }[]), next(e)));
+  setup(on, { messages: [], jev: () => undefined });
+  on("command.register", async () => ({ value: undefined }));
+  on("tool.register", async () => ({ value: { tool: "mcp__jevfort__estimate_effort" } }));
+  on("session.start", async () => ({}));
+  on("session.end", async () => ({}));
+  await $.session.start({ cwd: CWD, surface: "terminal", isInteractive: true });
+  expect(logs).toEqual([]);
+  await $.session.end({ reason: "clear", sessionId: SID, resume: { id: SID } });
+  expect(logs).toHaveLength(1);
+  expect(logs[0]).toContainEqual(expect.objectContaining({ kind: "error", text: expect.stringContaining("invalid effort bounds") }));
+});
+
+test("An inactive turn.complete writes the decisions pending from the turn", async ($, on) => {
+  const sets: string[] = [];
+  on("store.set", (_$, e, next) => (sets.push(String(e.key)), next(e)));
+  setup(on, { messages: [user("rename foo to bar")], tools: SINGLE_TOOLS, jev: () => undefined });
+  followUps(on);
+  expect(await estimateCall($)).toEqual({ result: JSON.stringify({ effort: "high", source: "fallback" }) });
+  expect(sets).toEqual([]);
+  await $.turn.complete(answered("t1", "Done."));
+  expect(sets.filter((k) => k === "log")).toHaveLength(1);
+});
