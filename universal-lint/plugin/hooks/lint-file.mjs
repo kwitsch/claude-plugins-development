@@ -628,11 +628,18 @@ function walkToRoot(dir, checkDir) {
 export function hasProjectMarkdownlintConfig(fileDir) {
 	return walkToRoot(fileDir, (dir) => anyConfigExists(dir, MARKDOWNLINT_CONFIG_FILENAMES));
 }
-function hasMarkdownlintRc(fileDir, cwd) {
-	const found = (d) => configExists(d, ".markdownlintrc");
-	if (process.env.markdownlint_config || walkToRoot(fileDir, found) || walkToRoot(cwd, found)) return true;
+const MARKDOWNLINT_CLASSIC_CONFIG_FILENAMES = [
+	".markdownlint.jsonc",
+	".markdownlint.json",
+	".markdownlint.yaml",
+	".markdownlint.yml"
+];
+function hasMarkdownlintRc(spawnCwd) {
+	if (anyConfigExists(spawnCwd, MARKDOWNLINT_CLASSIC_CONFIG_FILENAMES) || walkToRoot(spawnCwd, (d) => configExists(d, ".markdownlintrc"))) return true;
 	const home = homedir();
+	const env = process.env.markdownlint_config;
 	return [
+		...env ? [path.resolve(spawnCwd, env)] : [],
 		path.join(home, ".config", "markdownlint", "config"),
 		path.join(home, ".config", "markdownlint"),
 		path.join(home, ".markdownlint", "config"),
@@ -697,7 +704,7 @@ function markdownlintNoLineLengthConfigPath() {
 	renameSync(tmp, file);
 	return file;
 }
-export function buildArgv(tool, resolvedFile, cwd, manifest) {
+export function buildArgv(tool, resolvedFile, cwd, manifest, spawnCwd = cwd) {
 	const dir = path.dirname(resolvedFile);
 	const argv = tool.args.slice();
 	if (tool.needsCheckstyleConfig) {
@@ -706,7 +713,7 @@ export function buildArgv(tool, resolvedFile, cwd, manifest) {
 	if (tool.guardYamlLineLength && !hasProjectYamllintConfig(cwd) && !hasUserGlobalYamllintConfig()) {
 		argv.push("-d", YAMLLINT_NO_LINE_LENGTH_CONFIG_DATA);
 	}
-	if (tool.guardMarkdownLineLength && !hasProjectMarkdownlintConfig(dir) && !(tool.name === "markdownlint" && hasMarkdownlintRc(dir, cwd))) {
+	if (tool.guardMarkdownLineLength && !(tool.name === "markdownlint" ? hasMarkdownlintRc(spawnCwd) : hasProjectMarkdownlintConfig(dir))) {
 		argv.push("--config", markdownlintNoLineLengthConfigPath());
 	}
 	if (tool.manifestPath) {
@@ -830,9 +837,9 @@ function planChainLint(lang, resolved, cwd) {
 		manifest = resolveCargoManifest(path.dirname(resolved), cwd);
 		if (!manifest) return null;
 	}
-	const argv = buildArgv(tool, resolved, cwd, manifest);
-	const timeout = tool.manifestPath ? CARGO_SPAWN_TIMEOUT_MS : SPAWN_TIMEOUT_MS;
 	const spawnCwd = sel.local ? path.join(sel.local, "../../..") : cwd;
+	const argv = buildArgv(tool, resolved, cwd, manifest, spawnCwd);
+	const timeout = tool.manifestPath ? CARGO_SPAWN_TIMEOUT_MS : SPAWN_TIMEOUT_MS;
 	return {
 		tool,
 		local: sel.local,

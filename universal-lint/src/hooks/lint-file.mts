@@ -1199,21 +1199,26 @@ export function hasProjectMarkdownlintConfig(fileDir: string): boolean {
   return walkToRoot(fileDir, (dir) => anyConfigExists(dir, MARKDOWNLINT_CONFIG_FILENAMES));
 }
 
+/** Project config names classic markdownlint (markdownlint-cli 0.49) reads, each only relative to its cwd (`fs.accessSync`, no walk). */
+const MARKDOWNLINT_CLASSIC_CONFIG_FILENAMES = [".markdownlint.jsonc", ".markdownlint.json", ".markdownlint.yaml", ".markdownlint.yml"];
+
 /**
- * True if markdownlint (classic) reads an rc config: markdownlint-cli 0.49 starts from `rc("markdownlint")` (run-con)
- * and deep-extends `--config` over it, so the MD013 guard would override it. run-con's places: `.markdownlintrc` from
- * the spawn cwd upward (walked here from the file dir and `cwd`), `$markdownlint_config`, `~/.config/markdownlint{,/config}`,
- * `~/.markdownlint/config`, `~/.markdownlintrc`, `/etc/markdownlint{rc,/config}`. markdownlint-cli2 reads none of them.
+ * True if markdownlint (classic) reads a config of its own, so the MD013 guard must stay off: markdownlint-cli 0.49
+ * starts from `rc("markdownlint")` (run-con), spreads the first of MARKDOWNLINT_CLASSIC_CONFIG_FILENAMES found in its
+ * cwd over it and deep-extends `--config` over both, so the guard would turn off a configured MD013. run-con's places:
+ * `.markdownlintrc` from the spawn cwd upward (`cc.find` starts at `process.cwd()`), the file `$markdownlint_config`
+ * (relative to the spawn cwd; a missing one is ignored), `~/.config/markdownlint{,/config}`, `~/.markdownlint/config`,
+ * `~/.markdownlintrc`, `/etc/markdownlint{rc,/config}`. A config next to the file but below the spawn cwd is never
+ * read. markdownlint-cli2 reads none of them (`hasProjectMarkdownlintConfig` serves it).
  *
- * @param fileDir - Directory of the edited file.
- * @param cwd - Project root.
- * @returns True when an rc config exists.
+ * @param spawnCwd - The cwd markdownlint is spawned in.
+ * @returns True when such a config exists.
  */
-function hasMarkdownlintRc(fileDir: string, cwd: string): boolean {
-  const found = (d: string): boolean => configExists(d, ".markdownlintrc");
-  if (process.env.markdownlint_config || walkToRoot(fileDir, found) || walkToRoot(cwd, found)) return true;
+function hasMarkdownlintRc(spawnCwd: string): boolean {
+  if (anyConfigExists(spawnCwd, MARKDOWNLINT_CLASSIC_CONFIG_FILENAMES) || walkToRoot(spawnCwd, (d) => configExists(d, ".markdownlintrc"))) return true;
   const home = homedir();
-  return [path.join(home, ".config", "markdownlint", "config"), path.join(home, ".config", "markdownlint"), path.join(home, ".markdownlint", "config"), path.join(home, ".markdownlintrc"), "/etc/markdownlint/config", "/etc/markdownlintrc"].some((p) => {
+  const env = process.env.markdownlint_config;
+  return [...(env ? [path.resolve(spawnCwd, env)] : []), path.join(home, ".config", "markdownlint", "config"), path.join(home, ".config", "markdownlint"), path.join(home, ".markdownlint", "config"), path.join(home, ".markdownlintrc"), "/etc/markdownlint/config", "/etc/markdownlintrc"].some((p) => {
     try {
       return statSync(p).isFile(); // run-con reads files only; ~/.config/markdownlint is often the dir holding `config`
     } catch {
@@ -1335,9 +1340,10 @@ function markdownlintNoLineLengthConfigPath(): string {
  * @param resolvedFile - Absolute path of the edited file.
  * @param cwd - Project root.
  * @param manifest - Precomputed resolveCargoManifest result, to skip a second walk.
+ * @param spawnCwd - The cwd the tool is spawned in (classic markdownlint reads its configs from there); defaults to `cwd`.
  * @returns The tool's argv, target last (none for manifestPath tools).
  */
-export function buildArgv(tool: LintTool, resolvedFile: string, cwd: string, manifest?: string | null): string[] {
+export function buildArgv(tool: LintTool, resolvedFile: string, cwd: string, manifest?: string | null, spawnCwd: string = cwd): string[] {
   const dir = path.dirname(resolvedFile);
   const argv = tool.args.slice();
   if (tool.needsCheckstyleConfig) {
@@ -1346,7 +1352,7 @@ export function buildArgv(tool: LintTool, resolvedFile: string, cwd: string, man
   if (tool.guardYamlLineLength && !hasProjectYamllintConfig(cwd) && !hasUserGlobalYamllintConfig()) {
     argv.push("-d", YAMLLINT_NO_LINE_LENGTH_CONFIG_DATA);
   }
-  if (tool.guardMarkdownLineLength && !hasProjectMarkdownlintConfig(dir) && !(tool.name === "markdownlint" && hasMarkdownlintRc(dir, cwd))) {
+  if (tool.guardMarkdownLineLength && !(tool.name === "markdownlint" ? hasMarkdownlintRc(spawnCwd) : hasProjectMarkdownlintConfig(dir))) {
     argv.push("--config", markdownlintNoLineLengthConfigPath());
   }
   // cargo clippy/check take no positional target. Resolve the nearest
@@ -1596,11 +1602,11 @@ function planChainLint(lang: LangEntry, resolved: string, cwd: string): ChainPla
     if (!manifest) return null;
   }
 
-  const argv = buildArgv(tool, resolved, cwd, manifest);
-  // Compile-heavy cargo tools get their own budget (mirrors TSC_SPAWN_TIMEOUT_MS).
-  const timeout = tool.manifestPath ? CARGO_SPAWN_TIMEOUT_MS : SPAWN_TIMEOUT_MS;
   // A local bin runs from its package root (the dir holding node_modules): eslint <= 9 resolves its flat config from the spawn cwd.
   const spawnCwd = sel.local ? path.join(sel.local, "../../..") : cwd;
+  const argv = buildArgv(tool, resolved, cwd, manifest, spawnCwd);
+  // Compile-heavy cargo tools get their own budget (mirrors TSC_SPAWN_TIMEOUT_MS).
+  const timeout = tool.manifestPath ? CARGO_SPAWN_TIMEOUT_MS : SPAWN_TIMEOUT_MS;
   return { tool, local: sel.local, argv, spawnCwd, timeout, manifest };
 }
 

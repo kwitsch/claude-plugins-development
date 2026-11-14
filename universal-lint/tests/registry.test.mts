@@ -605,6 +605,34 @@ test("buildArgv: classic markdownlint runs bare with a .markdownlintrc (rc confi
   }
 });
 
+test("buildArgv: classic markdownlint keeps the guard for configs it never reads (below the spawn cwd, missing $markdownlint_config)", () => {
+  const root = mkdtempSync(path.join(tmpdir(), "ul-md-"));
+  const sub = path.join(root, "sub");
+  mkdirSync(sub, { recursive: true });
+  writeFileSync(path.join(sub, ".markdownlintrc"), "{\"MD009\": false}");
+  writeFileSync(path.join(sub, ".markdownlint.json"), "{\"MD009\": false}");
+  const file = path.join(sub, "a.md");
+  const dataDir = mkdtempSync(path.join(tmpdir(), "ul-data-"));
+  const guarded = [path.join(dataDir, "markdownlint-no-line-length.json"), file];
+  const prev = { data: process.env.CLAUDE_PLUGIN_DATA, home: process.env.HOME, env: process.env.markdownlint_config };
+  process.env.CLAUDE_PLUGIN_DATA = dataDir;
+  process.env.HOME = mkdtempSync(path.join(tmpdir(), "ul-home-"));
+  process.env.markdownlint_config = path.join(root, "missing.json");
+  try {
+    const classic = REGISTRY.markdown.chain[1];
+    assert.deepEqual(buildArgv(classic, file, root), ["--config", ...guarded]);
+    // spawned in sub (a local package root there): markdownlint reads sub's configs
+    assert.deepEqual(buildArgv(classic, file, root, null, sub), [file]);
+    writeFileSync(path.join(root, ".markdownlint.yaml"), "MD009: false\n");
+    assert.deepEqual(buildArgv(classic, file, root), [file]);
+  } finally {
+    for (const [k, v] of [["CLAUDE_PLUGIN_DATA", prev.data], ["HOME", prev.home], ["markdownlint_config", prev.env]] as const) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
+  }
+});
+
 test("REGISTRY: php chain is phpstan -> psalm, neither carries npmSpec", () => {
   assert.equal(REGISTRY.php.chain.length, 2);
   assert.equal(REGISTRY.php.chain[0].name, "phpstan");
