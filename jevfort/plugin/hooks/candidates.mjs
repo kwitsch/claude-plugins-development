@@ -13,8 +13,11 @@ const PATH = /(?:^|[\s`'"([])((?:~|\.{1,2})?\/?[\w@.-]+(?:\/[\w@.-]+)*\.[A-Za-z]
 const QUOTED = /`([^`\n]{3,60})`|"([^"\n]{3,60})"/g;
 export function mentionedPaths(texts, seen = new Set()) {
 	for (const text of texts) {
+		const spans = [...text.matchAll(QUOTED)].map((q) => [q.index, q.index + q[0].length]);
 		for (const m of text.matchAll(PATH)) {
 			const p = m[1];
+			const start = m.index + m[0].length - p.length;
+			if (spans.some(([a, b]) => start > a && start < b && /\s/.test(text.slice(a + 1, start)))) continue;
 			if (/^\d/.test(p) || /^https?:/.test(p) || p.includes("..")) continue;
 			seen.add(p);
 		}
