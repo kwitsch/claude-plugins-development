@@ -16,7 +16,7 @@
 import { GENERAL, SWITCH_AT } from "./agents.mjs";
 import { CACHE_TTL, cacheColor, cacheLabel, minutesLeft, nextTtl } from "./cache.mjs";
 import type { CacheTtl } from "./cache.mjs";
-import { absolute, AUTH_TOOL, bash, BUILTIN_COMMANDS, clipScript, coversStep, dedupeSkills, isSafeToOffer, MAX_READS, mentionedPaths, quotedTerms, relevant, SAFE_MAKE, SAFE_SCRIPT, sameCall, SKILL_BLOCKLIST_KEY } from "./candidates.mjs";
+import { absolute, AUTH_TOOL, bash, BUILTIN_COMMANDS, clipScript, coversStep, dedupeSkills, isSafeToOffer, MAX_READS, MAX_STATS, mentionedPaths, quotedTerms, relevant, SAFE_MAKE, SAFE_SCRIPT, sameCall, SKILL_BLOCKLIST_KEY } from "./candidates.mjs";
 import type { Candidate } from "./candidates.mjs";
 import { COMPACT_MAX_TOKENS, COMPACT_MODEL, COMPACT_SYSTEM, compactInstructions, compactItems, haikuTranscript, RELEVANCE } from "./compact.mjs";
 import { clip, splitTurn, summarize, toolCalls } from "./context.mjs";
@@ -143,6 +143,8 @@ type RenderEvent = { props: { isErrored?: boolean; text: string } } & Record<str
 type BandEvent = { props: { hasSurvey: boolean } } & Record<string, unknown>;
 /** A `turn.complete` event. */
 type TurnEnd = { turnId: string; reason?: string; agentId?: string; answer?: string } & Record<string, unknown>;
+/** A turn's `$.fs.stat` results by absolute path (`undefined`: missing or refused). */
+type StatCache = Map<string, { kind: string; size: number } | undefined>;
 /** A `command.run` event. */
 type CommandEvent = { args: string } & Record<string, unknown>;
 /** The `on` the engine passes to `register`, one overload per hooked event. */
@@ -612,9 +614,11 @@ async function packageRunner($: Engine, cwd: string): Promise<string> {
  * @param steps - The turn's steps so far.
  * @param calls - The turn's tool calls so far.
  * @param stepIndex - The step within the turn.
+ * @param statted - The turn's stat results by absolute path, filled here; at most `MAX_STATS` new paths per call (a
+ * fresh map by default, so nothing outlives the turn).
  * @returns At most `MAX_CHOICE_OPTIONS - 1` candidates (one of jev-api's choice options is `claude`).
  */
-async function buildCandidates($: Engine, request: string, steps: readonly SessionMessage[], calls: readonly ToolUse[], stepIndex: number): Promise<Candidate[]> {
+async function buildCandidates($: Engine, request: string, steps: readonly SessionMessage[], calls: readonly ToolUse[], stepIndex: number, statted: StatCache = new Map()): Promise<Candidate[]> {
   const cwd = await $.session.cwd();
   const out: Candidate[] = [];
   const has = (file: string) => $.fs.exists(`${cwd}/${file}`).catch(() => false);
@@ -623,12 +627,18 @@ async function buildCandidates($: Engine, request: string, steps: readonly Sessi
   const texts = [request, ...steps.map((m) => m.text), ...calls.map((c) => c.text ?? "")];
   const alreadyRead = new Set(calls.filter((c) => c.tool === "Read").map((c) => String(c.input.file_path)));
   let reads = 0;
+  let probes = 0;
   for (const p of mentionedPaths(texts)) {
     if (reads >= MAX_READS) break;
     if (p.startsWith("~")) continue;
     const file = absolute(cwd, p);
     if (alreadyRead.has(file) || !isSafeToOffer(file, cwd)) continue;
-    const stat = await $.fs.stat(file).catch(() => undefined);
+    if (!statted.has(file)) {
+      if (probes >= MAX_STATS) break;
+      probes += 1;
+      statted.set(file, await $.fs.stat(file).catch(() => undefined));
+    }
+    const stat = statted.get(file);
     if (stat?.kind !== "file" || stat.size > 2_000_000) continue;
     out.push({ key: `read ${p}`, description: `Read the file ${p}`, tool: "Read", input: { file_path: file } });
     reads += 1;
@@ -1146,8 +1156,9 @@ export const register = (on: On, options: Options): void => {
     };
   });
 
-  // Per-turn state: the difficulty route, the effort sent on every step of the turn, Jev's takes and the bypass.
-  const turns = new Map<string, { route?: Route; effort?: Effort; taken: number; bypassId?: string; bypassAction?: string }>();
+  // Per-turn state: the difficulty route, the effort sent on every step of the turn, Jev's takes, the bypass and the
+  // stat results of mentioned paths (dropped with the turn, so a file created later is offered in the next turn).
+  const turns = new Map<string, { route?: Route; effort?: Effort; taken: number; bypassId?: string; bypassAction?: string; statted: StatCache }>();
   // What each loop's first turn (key `agentId`, `""` for the main loop) saw and estimated: the session model's family,
   // the session effort (`from`) and the estimate (unset when none was made or Jev failed). Drives the Haiku/Fable hold.
   const firstTurns = new Map<string, { family?: EstimateModel; from: unknown; effort?: Effort }>();
@@ -1356,7 +1367,7 @@ export const register = (on: On, options: Options): void => {
     if ((await jevMissing($)).length) return yield* next(e);
     if (e.agentId && !subagents) return yield* next(e);
 
-    const turn = turns.get(e.turnId) ?? { taken: 0 };
+    const turn = turns.get(e.turnId) ?? { taken: 0, statted: new Map() as StatCache };
     turns.set(e.turnId, turn);
 
     const ctx = await readTurn($, e.agentId);
@@ -1392,7 +1403,7 @@ export const register = (on: On, options: Options): void => {
     let candidates: Candidate[] = [];
     // Not on a slash-command turn: its skill text is not in the transcript, so Jev (and the Haiku summary) would answer the bare command and the skill never runs.
     if (takeSteps && !ctx.command && turn.taken < MAX_TAKES_PER_TURN && (!takeOnlyForBypass || (bypass && e.index === 0 && !e.agentId))) {
-      candidates = (await buildCandidates($, ctx.request, ctx.steps, calls, e.index)).filter((c) => !(last && sameCall(last, { tool: c.tool, input: c.input })));
+      candidates = (await buildCandidates($, ctx.request, ctx.steps, calls, e.index, turn.statted)).filter((c) => !(last && sameCall(last, { tool: c.tool, input: c.input })));
       if (candidates.length) questions.next_action = nextActionQuestion(candidates);
     }
     // Step 0: the difficulty (only for model routing) and the effort estimate, or a Haiku/Fable turn's held first-turn
@@ -1450,7 +1461,7 @@ export const register = (on: On, options: Options): void => {
       let measured: Candidate[] = [];
       // Not on a slash-command turn either: Jev would be compared on the bare command, whose skill text it cannot see.
       if (measureSteps && takeSteps && !ctx.command && e.index > 0 && !e.agentId) {
-        measured = (await buildCandidates($, ctx.request, ctx.steps, calls, e.index)).filter((c) => !(last && sameCall(last, { tool: c.tool, input: c.input })));
+        measured = (await buildCandidates($, ctx.request, ctx.steps, calls, e.index, turn.statted)).filter((c) => !(last && sameCall(last, { tool: c.tool, input: c.input })));
         if (measured.length) {
           measure = askJev($, { request: clip(ctx.request, 4000), recent: summarize(ctx.steps), cwd: await $.session.cwd() }, { next_action: nextActionQuestion(measured) });
         }

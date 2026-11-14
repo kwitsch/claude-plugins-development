@@ -69,6 +69,7 @@ function setup(on: On, opts: { messages: Msg[]; jev: Jev; files?: string[]; pack
   const sent: Asked[] = [];
   let batchCalls = 0;
   let reads = 0;
+  const statted: string[] = [];
   mock.env(on, opts.env ?? {});
   mock.store(on, opts.store ?? {});
   const clock = mock.clock(on);
@@ -79,7 +80,10 @@ function setup(on: On, opts: { messages: Msg[]; jev: Jev; files?: string[]; pack
   on("session.cwd", () => ({ value: CWD }));
   on("session.id", () => ({ value: SID }));
   on("fs.exists", (_$, e) => ({ value: Boolean(opts.packageJson) && e.path === `${CWD}/package.json` }));
-  on("fs.stat", (_$, e) => ((opts.files ?? []).includes(String(e.path)) ? { value: { kind: "file", size: 100, mtimeMs: 0, isLink: false } } : { deny: "ENOENT" }));
+  on("fs.stat", (_$, e) => {
+    statted.push(String(e.path));
+    return (opts.files ?? []).includes(String(e.path)) ? { value: { kind: "file", size: 100, mtimeMs: 0, isLink: false } } : { deny: "ENOENT" };
+  });
   on("fs.read", (_$, e) => (opts.packageJson && e.path === `${CWD}/package.json` ? { value: JSON.stringify(opts.packageJson) } : { deny: "ENOENT" }));
   on("ui.status", () => ({ value: undefined }));
   on("agent.list", () => ({ value: opts.agents ?? [] }));
@@ -101,7 +105,7 @@ function setup(on: On, opts: { messages: Msg[]; jev: Jev; files?: string[]; pack
     const raw = answers.find((a) => typeof a === "string");
     return { value: { result: raw ?? JSON.stringify(answers.map((a, i) => a ?? NEUTRAL[asked[i].type])) } };
   });
-  return { sent, clock, calls: () => batchCalls, reads: () => reads };
+  return { sent, clock, statted, calls: () => batchCalls, reads: () => reads };
 }
 
 // Stubs beneath the done check: the turn's end, and the follow-up messages the mod submits (their texts).
@@ -1033,6 +1037,18 @@ test("/jev status still answers when the counters cannot be read", async ($, on)
   on("store.get", () => ({ deny: "EACCES" }));
   setup(on, { messages: [], jev: () => undefined });
   expect(await runJev($, "")).toContain("Decisions (all sessions): unreadable=1");
+});
+
+test("A turn's mentioned paths are statted at most 16 per step and each once per turn", async ($, on) => {
+  const missing = Array.from({ length: 100 }, (_, i) => `src/gone${i}.ts`);
+  const { statted } = setup(on, { messages: [user(`fix the build, tsc says: ${missing.join(" ")}`)], jev: () => undefined });
+  claudeBeneath(on, []);
+  await drain($.turn.step(step));
+  const first = statted.length;
+  expect(first).toBeLessThanOrEqual(16);
+  await drain($.turn.step({ ...step, index: 1 }));
+  expect(statted.length - first).toBeLessThanOrEqual(16);
+  expect(new Set(statted).size).toBe(statted.length);
 });
 
 test("A finished step does not wait for a slow step measurement", async ($, on) => {

@@ -1,6 +1,6 @@
 import { GENERAL, SWITCH_AT } from "./agents.mjs";
 import { CACHE_TTL, cacheColor, cacheLabel, minutesLeft, nextTtl } from "./cache.mjs";
-import { absolute, AUTH_TOOL, bash, BUILTIN_COMMANDS, clipScript, coversStep, dedupeSkills, isSafeToOffer, MAX_READS, mentionedPaths, quotedTerms, relevant, SAFE_MAKE, SAFE_SCRIPT, sameCall, SKILL_BLOCKLIST_KEY } from "./candidates.mjs";
+import { absolute, AUTH_TOOL, bash, BUILTIN_COMMANDS, clipScript, coversStep, dedupeSkills, isSafeToOffer, MAX_READS, MAX_STATS, mentionedPaths, quotedTerms, relevant, SAFE_MAKE, SAFE_SCRIPT, sameCall, SKILL_BLOCKLIST_KEY } from "./candidates.mjs";
 import { COMPACT_MAX_TOKENS, COMPACT_MODEL, COMPACT_SYSTEM, compactInstructions, compactItems, haikuTranscript, RELEVANCE } from "./compact.mjs";
 import { clip, splitTurn, summarize, toolCalls } from "./context.mjs";
 import { choice, COMPACT_API_TIMEOUT_S, COMPACT_TIMEOUT_MS, HAIKU_API_TIMEOUT_S, HAIKU_TIMEOUT_MS, isAnswer, JEV_API_TIMEOUT_S, JEV_BATCH, JEV_TOOL_PREFIX, JEV_TOOLS, MAX_CHOICE_OPTIONS, MAX_ERROR, MAX_PAUSE_MS, MEASURE_GRACE_MS, missingJevTools, noul, PAUSE_MS, score, TIMEOUT_MS } from "./jev.mjs";
@@ -316,7 +316,7 @@ async function packageRunner($, cwd) {
 	}
 	return "npm";
 }
-async function buildCandidates($, request, steps, calls, stepIndex) {
+async function buildCandidates($, request, steps, calls, stepIndex, statted = new Map()) {
 	const cwd = await $.session.cwd();
 	const out = [];
 	const has = (file) => $.fs.exists(`${cwd}/${file}`).catch(() => false);
@@ -327,12 +327,18 @@ async function buildCandidates($, request, steps, calls, stepIndex) {
 	];
 	const alreadyRead = new Set(calls.filter((c) => c.tool === "Read").map((c) => String(c.input.file_path)));
 	let reads = 0;
+	let probes = 0;
 	for (const p of mentionedPaths(texts)) {
 		if (reads >= MAX_READS) break;
 		if (p.startsWith("~")) continue;
 		const file = absolute(cwd, p);
 		if (alreadyRead.has(file) || !isSafeToOffer(file, cwd)) continue;
-		const stat = await $.fs.stat(file).catch(() => undefined);
+		if (!statted.has(file)) {
+			if (probes >= MAX_STATS) break;
+			probes += 1;
+			statted.set(file, await $.fs.stat(file).catch(() => undefined));
+		}
+		const stat = statted.get(file);
 		if (stat?.kind !== "file" || stat.size > 2e6) continue;
 		out.push({
 			key: `read ${p}`,
@@ -998,7 +1004,10 @@ export const register = (on, options) => {
 		const next = (request) => cacheWatch($, e, request, rawNext(request));
 		if ((await jevMissing($)).length) return yield* next(e);
 		if (e.agentId && !subagents) return yield* next(e);
-		const turn = turns.get(e.turnId) ?? { taken: 0 };
+		const turn = turns.get(e.turnId) ?? {
+			taken: 0,
+			statted: new Map()
+		};
 		turns.set(e.turnId, turn);
 		const ctx = await readTurn($, e.agentId);
 		if (!ctx) return yield* next(e);
@@ -1050,7 +1059,7 @@ export const register = (on, options) => {
 		const questions = {};
 		let candidates = [];
 		if (takeSteps && !ctx.command && turn.taken < MAX_TAKES_PER_TURN && (!takeOnlyForBypass || bypass && e.index === 0 && !e.agentId)) {
-			candidates = (await buildCandidates($, ctx.request, ctx.steps, calls, e.index)).filter((c) => !(last && sameCall(last, {
+			candidates = (await buildCandidates($, ctx.request, ctx.steps, calls, e.index, turn.statted)).filter((c) => !(last && sameCall(last, {
 				tool: c.tool,
 				input: c.input
 			})));
@@ -1110,7 +1119,7 @@ export const register = (on, options) => {
 			let measure;
 			let measured = [];
 			if (measureSteps && takeSteps && !ctx.command && e.index > 0 && !e.agentId) {
-				measured = (await buildCandidates($, ctx.request, ctx.steps, calls, e.index)).filter((c) => !(last && sameCall(last, {
+				measured = (await buildCandidates($, ctx.request, ctx.steps, calls, e.index, turn.statted)).filter((c) => !(last && sameCall(last, {
 					tool: c.tool,
 					input: c.input
 				})));

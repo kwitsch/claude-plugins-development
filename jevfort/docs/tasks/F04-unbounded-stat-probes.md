@@ -1,14 +1,16 @@
 ---
 id: F04
 title: buildCandidates stats every mentioned path of the whole turn one after another, again at every step
-status: open
+status: done
 priority: medium
-area: jevfort/src/hooks/register.mts (buildCandidates, onTurnStep), jevfort/src/hooks/candidates.mts (mentionedPaths, MAX_READS)
+area: jevfort/src/hooks/register.mts (buildCandidates, onTurnStep), jevfort/src/hooks/candidates.mts (mentionedPaths, MAX_READS, MAX_STATS)
 ---
 
 ## Status
 
-Open. Found in the performance analysis of 2026-11-14 ([../EVALUATION-2026-11-14.md](../EVALUATION-2026-11-14.md)), plugin 0.10.1.
+Done in 0.11.0 (numbers: [../EVALUATION-2026-11-14-F04.md](../EVALUATION-2026-11-14-F04.md)). `buildCandidates` takes the turn's stat cache (`turn.statted`, a `Map` in the per-turn state of `turns`, dropped with `turns.delete` at `turn.complete`; `/jev candidates` gets a fresh one) and stats at most `MAX_STATS` (16, `candidates.mts`) paths per call that the turn has not statted yet; cached results are free and do not count. Approach points 1 and 2; the offered order stays the `mentionedPaths` order (no newest-first, tests pin candidate lists), so a qualifying file behind more than 16 unprobed missing paths is offered at a later step once those are cached. Point 3 (parallel stats) not done: with the bound it saves at most 15 sequential stats per call.
+
+Earlier state: Open. Found in the performance analysis of 2026-11-14 ([../EVALUATION-2026-11-14.md](../EVALUATION-2026-11-14.md)), plugin 0.10.1.
 
 ## Problem
 
@@ -38,6 +40,8 @@ Keep the order of the offered reads stable (tests pin candidate lists).
 
 - Kit test: a turn whose tool results mention 100 missing paths makes at most the bound of `fs.stat` calls at a step, and none for the same paths at the next step of the turn; existing candidate tests stay green.
 - Re-measure the evaluation's `bench2.mjs` missing-path rows in a new dated evaluation.
+
+Result (0.11.0): kit test `tests/register.test.mts` "A turn's mentioned paths are statted at most 16 per step and each once per turn" (100 missing paths in the request, plugin-default options): at most 16 `fs.stat` at step 0 and at step 1, no path statted twice; it failed before the fix (100 stats at step 0). All 200 tests, `pnpm lint` and the build green. [../EVALUATION-2026-11-14-F04.md](../EVALUATION-2026-11-14-F04.md) (fake `$`, before = `cbe02de`, 5 runs, two builds per step with `takeOnlyForBypass` off): step 40 of a 40 steps x 50 missing paths turn 4000 -> 32 stats (51.5 -> 12.4 ms median), steps 1-39 of that turn 156000 -> 1248; 20 x 25: 1000 -> 32 at step 20, 19000 -> 468 over the rest (each of the 500 paths statted once).
 
 ## Constraints
 

@@ -20,6 +20,8 @@ export type Candidate = {
 
 /** How many file reads a turn may be offered. */
 export const MAX_READS = 8;
+/** How many mentioned paths one candidate build may stat that the turn has not statted yet (missing paths do not count towards {@link MAX_READS}). */
+export const MAX_STATS = 16;
 /** How many quoted-term searches a turn may be offered. */
 const MAX_SEARCHES = 3;
 /** package.json script names safe to run unasked. */
