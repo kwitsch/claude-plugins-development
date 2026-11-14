@@ -100,12 +100,9 @@ async function askJev($, state, questions, slow = false) {
 		}));
 	})();
 	call.catch(() => undefined);
-	let timer;
-	const timeout = new Promise((resolve) => {
-		timer = $.clock.after(budgetMs, () => resolve(undefined));
-	});
+	const timer = deadline($, budgetMs);
 	try {
-		const answers = await Promise.race([call, timeout]);
+		const answers = await Promise.race([call, timer.elapsed]);
 		if (!answers) {
 			pauseAfterTimeout(startedAt, budgetMs, `timeout after ${budgetMs}ms`);
 			return done({
@@ -128,8 +125,18 @@ async function askJev($, state, questions, slow = false) {
 			error
 		});
 	} finally {
-		timer?.cancel();
+		timer.cancel();
 	}
+}
+function deadline($, ms) {
+	let timer;
+	const elapsed = new Promise((resolve) => {
+		timer = $.clock.after(ms, () => resolve(undefined));
+	});
+	return {
+		elapsed,
+		cancel: () => timer?.cancel()
+	};
 }
 let jevTools;
 let toolListing;
@@ -294,7 +301,7 @@ async function flushLog($) {
 		const log = await readLog($);
 		await $.store.set(LOG_KEY, [...log, ...entries].slice(-MAX_ENTRIES));
 		const tally = await stats($);
-		for (const d of entries) tally[statsKey(d)] = (tally[statsKey(d)] ?? 0) + 1;
+		for (const key of entries.map(statsKey)) tally[key] = (tally[key] ?? 0) + 1;
 		await $.store.set("stats", tally);
 	});
 	storeQueue = run.catch(() => undefined);
@@ -1178,9 +1185,12 @@ export const register = (on, options) => {
 				}
 			}
 			const claudeResult = yield* next(routed(e));
-			let grace;
-			const measureResult = await Promise.race([measure, new Promise((resolve) => grace = $.clock.after(MEASURE_GRACE_MS, () => resolve(undefined)))]);
-			grace?.cancel();
+			let measureResult;
+			if (measure) {
+				const grace = deadline($, MEASURE_GRACE_MS);
+				measureResult = await Promise.race([measure, grace.elapsed]).catch(() => undefined);
+				grace.cancel();
+			}
 			const measureAnswer = measureResult?.ok ? choice(measureResult.answers, "next_action") : undefined;
 			if (measureAnswer) await recordCompare($, e.turnId, e.index, ctx.request, measureAnswer, measured, claudeResult.toolUses, true);
 			return claudeResult;

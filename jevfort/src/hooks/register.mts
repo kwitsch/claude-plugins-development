@@ -275,13 +275,10 @@ async function askJev($: Engine, state: unknown, questions: Record<string, Quest
   })();
   // A call abandoned at the timeout must not raise an unhandled rejection.
   call.catch(() => undefined);
-  let timer: { cancel(): void } | undefined;
-  const timeout = new Promise<undefined>((resolve) => {
-    timer = $.clock.after(budgetMs, () => resolve(undefined));
-  });
+  const timer = deadline($, budgetMs);
 
   try {
-    const answers = await Promise.race([call, timeout]);
+    const answers = await Promise.race([call, timer.elapsed]);
     if (!answers) {
       // Only a timeout pauses (a refused or failing endpoint answers fast and costs nothing).
       pauseAfterTimeout(startedAt, budgetMs, `timeout after ${budgetMs}ms`);
@@ -297,8 +294,23 @@ async function askJev($: Engine, state: unknown, questions: Record<string, Quest
     if (timedOut) pauseAfterTimeout(startedAt, budgetMs, timedOut[0]);
     return done({ ok: false, error });
   } finally {
-    timer?.cancel();
+    timer.cancel();
   }
+}
+
+/**
+ * A cancellable budget for `Promise.race` (`$.clock.sleep` has no cancel and would stay pending after the race settled).
+ *
+ * @param $ - Engine interface.
+ * @param ms - The budget.
+ * @returns `elapsed` resolves with `undefined` after `ms` (rejects only when `$.clock.after` throws; a timer the engine refuses later never fires, so `elapsed` stays pending), `cancel` stops the timer.
+ */
+function deadline($: Engine, ms: number): { elapsed: Promise<undefined>; cancel(): void } {
+  let timer: { cancel(): void } | undefined;
+  const elapsed = new Promise<undefined>((resolve) => {
+    timer = $.clock.after(ms, () => resolve(undefined));
+  });
+  return { elapsed, cancel: () => timer?.cancel() };
 }
 
 /** This turn's jev-api listing, shared by concurrent hooks; dropped at every main-loop `turn.complete` and at `session.start`. */
@@ -578,7 +590,7 @@ async function flushLog($: Engine): Promise<void> {
     await $.store.set(LOG_KEY, [...log, ...entries].slice(-MAX_ENTRIES));
 
     const tally = await stats($);
-    for (const d of entries) tally[statsKey(d)] = (tally[statsKey(d)] ?? 0) + 1;
+    for (const key of entries.map(statsKey)) tally[key] = (tally[key] ?? 0) + 1;
     await $.store.set("stats", tally);
   });
   storeQueue = run.catch(() => undefined);
@@ -1561,10 +1573,13 @@ export const register = (on: On, options: Options): void => {
       }
       const claudeResult = yield* next(routed(e));
       // Claude's step is done: wait only a moment for the measurement (it only logs; a late one is not recorded), never the rest of its budget.
-      // A refused clock must not fail the step whose result is already in: the measurement is dropped.
-      let grace: { cancel(): void } | undefined;
-      const measureResult = await Promise.race([measure, new Promise<undefined>((resolve) => (grace = $.clock.after(MEASURE_GRACE_MS, () => resolve(undefined))))]);
-      grace?.cancel();
+      // A throwing clock must not fail the step whose result is already in: the measurement is dropped. No measurement, no timer.
+      let measureResult: JevResult | undefined;
+      if (measure) {
+        const grace = deadline($, MEASURE_GRACE_MS);
+        measureResult = await Promise.race([measure, grace.elapsed]).catch(() => undefined);
+        grace.cancel();
+      }
       const measureAnswer = measureResult?.ok ? choice(measureResult.answers, "next_action") : undefined;
       if (measureAnswer) await recordCompare($, e.turnId, e.index, ctx.request, measureAnswer, measured, claudeResult.toolUses, true);
       return claudeResult;
