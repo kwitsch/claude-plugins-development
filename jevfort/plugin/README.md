@@ -23,7 +23,7 @@ Without jev-api's batch tool in a session (for example denied by a permission ru
 
 ## Debug log
 
-With `claude --debug` (or `--debug-file`) jevfort writes one line per effort decision, for example `[jevfort] $.ui.log: effort claude-opus-5-5: session medium → low · mechanical (score 0.15)`: the model, the session effort, the effort jevfort chose, and where it came from (`jev` with its score, `mechanical`, `fallback`, `held` on Haiku/Fable, or why Jev gave none). It is the only line jevfort logs; nothing goes to the status line.
+With `claude --debug` (or `--debug-file`) jevfort writes one line per effort decision, for example `[jevfort] $.ui.log (to debug): effort claude-opus-5-5: session medium → low · mechanical (score 0.15)`: the model, the session effort, the effort jevfort chose, and where it came from (`jev` with its score, `mechanical`, `fallback`, `held` on Haiku/Fable, or why Jev gave none). It is the only line jevfort logs; nothing goes to the status line.
 
 ## Effort band
 
