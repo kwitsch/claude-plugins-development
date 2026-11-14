@@ -7,9 +7,9 @@ import { test } from "vitest";
 const json = (rel: string) => JSON.parse(readFileSync(new URL(`../plugin/${rel}`, import.meta.url), "utf8"));
 const manifest = json(".claude-plugin/plugin.json");
 
-test("the manifest has name jevfort, version 0.11.0, author Kwitsch, a description and keywords", () => {
+test("the manifest has name jevfort, version 0.12.0, author Kwitsch, a description and keywords", () => {
   assert.equal(manifest.name, "jevfort");
-  assert.equal(manifest.version, "0.11.0");
+  assert.equal(manifest.version, "0.12.0");
   assert.equal(manifest.author.name, "Kwitsch");
   assert.ok(manifest.description.length > 0);
   assert.ok(Array.isArray(manifest.keywords) && manifest.keywords.length > 0);
@@ -23,19 +23,15 @@ test("the manifest declares the jev-api plugin as its only dependency, and packa
   assert.match(manifest.description, /jev-api/);
 });
 
-test("userConfig declares exactly 18 options: no mode selector, no gate", () => {
+test("userConfig declares exactly 14 options: no mode selector, no gate", () => {
   assert.deepEqual(Object.keys(manifest.userConfig).sort(), [
     "agentTypes",
     "autoCompactPercent",
     "bypass",
-    "classify",
     "compaction",
-    "doneCheck",
-    "doneThreshold",
     "forceCompactPercent",
     "haikuCompact",
     "maxEffort",
-    "measureSteps",
     "minEffort",
     "routing",
     "subagents",
@@ -48,6 +44,11 @@ test("userConfig declares exactly 18 options: no mode selector, no gate", () => 
     assert.ok(v.type.length > 0 && v.title.length > 0 && v.description.length > 0, k);
   }
   assert.ok(!/shadow/i.test(readFileSync(new URL("../package.json", import.meta.url), "utf8")));
+});
+
+test("routing is a boolean on by default, with no model mode", () => {
+  assert.deepEqual({ ...manifest.userConfig.routing, title: "", description: "" }, { type: "boolean", title: "", description: "", default: true });
+  assert.ok(!("options" in manifest.userConfig.routing));
 });
 
 test("minEffort and maxEffort are effort-level strings defaulting to low and xhigh", () => {

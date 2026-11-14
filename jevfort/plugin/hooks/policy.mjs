@@ -20,25 +20,6 @@ export const singleActionQuestion = {
 		false: "No: it also needs code changes, several steps, investigation, explanation beyond the output, or judgment"
 	}
 };
-export const DIFFICULTY_LEVELS = [
-	"Trivial: a lookup, running a known command, or a short factual answer",
-	"Routine: a small, well-specified change or explanation in one place",
-	"Substantial: changes across several files, debugging with an unclear cause, or design choices",
-	"Hard: architecture, subtle concurrency or security issues, or a large ambiguous task"
-];
-export const difficultyQuestion = {
-	type: "score",
-	instructions: "How much reasoning does an AI coding assistant need to fully handle the user request in `request`? When `previous_reply` is present, `request` answers the assistant's previous reply: judge a short follow-up like 'yes' or 'do it' by the work it approves or asks about there.",
-	criteria: DIFFICULTY_LEVELS
-};
-export const doneQuestion = {
-	type: "noul",
-	instructions: "An AI coding assistant just stopped. Did it fully finish the user's request in `request`, judging from `final_message` and `recent`?",
-	criteria: {
-		true: "Finished, or stopped for a good reason: it needs an answer only the user can give, or it reports a real blocker",
-		false: "Stopped partway: steps it said it would do are not done, it asks permission to continue work it could just do, or the request is only partly handled"
-	}
-};
 export const taskEndQuestion = {
 	type: "noul",
 	instructions: "An AI coding assistant just ended a turn. Did it close a whole task for the user (the request in `request` is done and nothing it announced remains), judging from `final_message` and `recent`?",
@@ -80,7 +61,6 @@ export const ESTIMATE_MODELS = [
 	"fable"
 ];
 export const EVERY_TURN_MODELS = ["sonnet", "opus"];
-export const MIN_CONFIDENCE = .5;
 export const MECHANICAL_FROM = .95;
 export const EFFORT_CUTS = [
 	1.05,
@@ -213,26 +193,6 @@ export const ESTIMATE_SPEC = {
 		]
 	}
 };
-export const LOW_BELOW = 1;
-export const HIGH_FROM = 1.8;
-export function route(answer, mode) {
-	if (!answer || answer.confidence < MIN_CONFIDENCE) return undefined;
-	const level = answer.score;
-	if (mode === "effort" || level >= HIGH_FROM) return { level };
-	return {
-		level,
-		model: level < LOW_BELOW ? "claude-haiku-5-5" : "claude-sonnet-5-5"
-	};
-}
-const MODEL_TIER = (model) => /haiku/.test(model) ? 0 : /sonnet/.test(model) ? 1 : /opus|fable/.test(model) ? 2 : -1;
-export function lowerModel(current, target) {
-	if (!target) return undefined;
-	const c = MODEL_TIER(current);
-	return c > MODEL_TIER(target) ? target : undefined;
-}
-export function shouldContinue(done, threshold = .15) {
-	return done !== undefined && done < threshold;
-}
 export function inScratchpad(file, sessionId, roots) {
 	if (!file.startsWith("/") || file.startsWith("//") || file.includes("\\") || !sessionId) return false;
 	const segs = file.split("/");

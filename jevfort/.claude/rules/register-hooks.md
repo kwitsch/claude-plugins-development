@@ -60,7 +60,7 @@ the shapes below: `inline-headroom/docs/claude-code-verification.md`.
 - Effort band: the `ui.render` hook with matcher `{ component: "AbovePrompt" }` draws `Box`/`Text`/`Button` from
   `$.ui.resolve(e)` (detached factories) out of the closure state `band` (written at main-loop step 0 in `turn.step`:
   `configured` = step-0 `e.effort`, `chosen` = the estimate or held effort) and `autoOff` (flipped by the Button
-  `key: "auto"`, reset at `session.start` and `session.end`). The effort row is hidden with `routing: "off"` and while
+  `key: "auto"`, reset at `session.start` and `session.end`). The effort row is hidden with `routing: false` and while
   `jevState !== ""`; then the hook draws only the cache countdown (above `await next(e)`, in a column Box, so another
   plugin's band beneath survives) or, without a countdown, passes; it always passes while `e.props.hasSurvey`.
   `onPress` only flips the flag and calls `$.ui.invalidate` (no storage call; it runs after the frame, so a throw sets `bandStale` and the next applied listing redraws). While `autoOff`,
@@ -78,9 +78,7 @@ the shapes below: `inline-headroom/docs/claude-code-verification.md`.
 - `turn.step` `usage` may be `null`; `command.run` returning `{}` prints no row and records no model context.
 - `cc-plugin-sec-default` skips every user-tier `prompt.compose`/`prompt.section`/`prompt.context` hook, so the mod
   registers none of them; the prompt classifier uses `prompt.submit` and adds `context` entries. It also passes
-  `classic.Stop` on past every user-tier hook (notice `its classic.Stop hook was skipped`), so the done check runs in
-  `turn.complete` and continues with an unawaited `$.prompt.submit({ text: DONE_PROMPT })`, exempting the next
-  main-loop turn via `donePending`.
+  `classic.Stop` on past every user-tier hook (notice `its classic.Stop hook was skipped`); jevfort has no Stop-time work.
 
 ## Storage calls must run in-frame
 

@@ -101,18 +101,14 @@ export function buildReport(log, threshold) {
 		}
 	}
 	const routes = of("route");
-	const scores = routes.map((e) => num(e.data?.score)).filter((s) => s !== undefined);
 	const effortScores = routes.map((e) => num(e.data?.effortScore)).filter((s) => s !== undefined);
 	const avgOf = (xs) => (xs.reduce((a, b) => a + b, 0) / xs.length).toFixed(2);
 	const lowered = routes.filter((e) => e.data?.lowered === true);
 	const raised = routes.filter((e) => e.data?.raised === true);
-	const dones = of("done");
-	const continued = dones.filter((e) => e.data?.continued === true);
-	out.push("", "### Routing and done check");
+	out.push("", "### Decisions");
 	out.push("| Decision | Checked | Result |");
 	out.push("|---|---|---|");
-	out.push(`| Effort routing | ${routes.length} turns | ${scores.length || !effortScores.length ? `avg difficulty ${scores.length ? avgOf(scores) : "—"} (0 trivial … 3 hard)` : `avg effort score ${avgOf(effortScores)} (0 mechanical … 4 hardest)`} · ${lowered.length} lowered, ${raised.length} raised, ${new Set([...lowered, ...raised].filter((e) => e.applied)).size} applied |`);
-	out.push(`| Done check | ${dones.length} stops | ${continued.length} unfinished, ${continued.filter((e) => e.applied).length} sent back |`);
+	out.push(`| Effort routing | ${routes.length} turns | ${effortScores.length ? `avg effort score ${avgOf(effortScores)} (0 mechanical … 4 hardest)` : "avg effort score —"} · ${lowered.length} lowered, ${raised.length} raised, ${new Set([...lowered, ...raised].filter((e) => e.applied)).size} applied |`);
 	const classified = of("classify");
 	if (classified.length) {
 		const kinds = new Map();

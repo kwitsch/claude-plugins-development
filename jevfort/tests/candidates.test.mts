@@ -2,7 +2,6 @@
 import { expect, test } from "vitest";
 import { commandKey, coversStep, dedupeSkills, isSafeScript, isSafeToOffer, mentionedPaths, quotedTerms, relevant, SAFE_MAKE, sameCall, words } from "../plugin/hooks/candidates.mjs";
 import { clip, splitTurn, summarize } from "../plugin/hooks/context.mjs";
-import { route } from "../plugin/hooks/policy.mjs";
 import { buildReport, escapePipes, verdict, when } from "../plugin/hooks/report.mjs";
 
 test("quoted terms become searches, file names do not", () => {
@@ -221,8 +220,8 @@ test("the report counts a step-0 request once and shows the effort score under t
   expect(report).toContain("avg effort score 2.50");
 });
 
-test("the report counts a turn that lowered the model and raised the effort as one applied route", () => {
-  const report = buildReport([{ at: 1, kind: "route", applied: true, text: "route", turnId: "t1", data: { score: 0.5, confidence: 0.9, effort: "high", lowered: true, raised: true } }], 0.85);
+test("the report counts a turn that is both lowered and raised as one applied route", () => {
+  const report = buildReport([{ at: 1, kind: "route", applied: true, text: "route", turnId: "t1", data: { effort: "high", lowered: true, raised: true } }], 0.85);
   expect(report).toContain("1 lowered, 1 raised, 1 applied |");
 });
 
@@ -240,9 +239,6 @@ test("the report counts summary rows, the newest 15 steps, the take threshold an
     c(1, { bestP: 0.9, agree: false, claude: ["Read", "Grep", "Read"] }),
     c(2, { bestP: 0.6, agree: true, claudeUsedCandidate: true }),
     ...Array.from({ length: 13 }, (_, i) => c(3 + i, { bestP: 0.5 })),
-    e("done", true, { continued: true }),
-    e("done", false, { continued: true }),
-    e("done", true, { continued: false }),
     e("classify", true, { kind: "code", hints: 1 }),
     e("classify", true, { kind: "code", hints: 0 }),
     e("classify", false, { kind: "question", hints: 2 }),
@@ -266,7 +262,7 @@ test("the report counts summary rows, the newest 15 steps, the take threshold an
   for (const row of ["| 0.60 | 3 | 67% | `███████░░░` |", "| 0.70 | 2 | 50% | `█████░░░░░` |", "| **0.85 ← current** | 2 | 50% |", "| 0.90 | 2 | 50% |", "| 0.95 | 1 | 100% | `██████████` |"]) {
     expect(report).toContain(row);
   }
-  expect(report).toContain("| Done check | 3 stops | 2 unfinished, 1 sent back |");
+  expect(report).not.toContain("Done check");
   expect(report).toContain("| Prompt classifier | 3 prompts | 2 code · 1 question · 2 hinted, 1 applied |");
   expect(report).toContain("| Subagent type | 3 spawns | 1 agreed with Claude · 2 switched, 1 applied |");
   expect(report).toContain("| Compaction | 2 runs | 15 results scored · 4 kept in detail · 6 marked droppable |");
@@ -315,16 +311,6 @@ test("a step matches only when Jev's one action would replace all of it", () => 
   expect(coversStep([{ tool: "Bash", input: { command: "npm test 2>&1 | tail -20" } }], jev)).toBe(true);
   expect(coversStep([{ tool: "Bash", input: { command: "ls && cat package.json && npm test" } }], jev)).toBe(false);
   expect(coversStep([{ tool: "Bash", input: { command: "npm test" } }, { tool: "Read", input: { file_path: "/a" } }], jev)).toBe(false);
-});
-
-const rated = (score: number, confidence = 0.9) => ({ type: "score" as const, score, probabilities: {}, confidence });
-
-test("route: in model mode trivial goes to Haiku and routine to Sonnet; effort mode only rates", () => {
-  expect(route(rated(0.95), "model")).toEqual({ level: 0.95, model: "claude-haiku-5-5" });
-  expect(route(rated(1.5), "model")).toEqual({ level: 1.5, model: "claude-sonnet-5-5" });
-  expect(route(rated(2.9), "model")).toEqual({ level: 2.9 });
-  expect(route(rated(0.95), "effort")).toEqual({ level: 0.95 });
-  expect(route(rated(2.9, 0.3), "model")).toBeUndefined();
 });
 
 test("words keeps umlauts whole instead of splitting at them", () => {

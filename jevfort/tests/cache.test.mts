@@ -6,7 +6,7 @@ import { CACHE_TTL, cacheColor, cacheLabel, cacheTtlOf, minutesLeft, nextTtl } f
 import { COMPACT_MAX_TOKENS, compactTranscript, haikuTranscript } from "../plugin/hooks/compact.mjs";
 
 /** Options passed to the kit: effort routing, compaction and Haiku compaction on, auto-compact at 60%. */
-const DEFAULTS = { routing: "effort", compaction: true, haikuCompact: true, autoCompactPercent: 60 };
+const DEFAULTS = { routing: true, compaction: true, haikuCompact: true, autoCompactPercent: 60 };
 /** Test kit bound to the built `plugin/hooks/register.mjs`. */
 const { test, mock } = createKit({ module: new URL("../plugin/hooks/register.mjs", import.meta.url), plugin: "jevfort", options: DEFAULTS });
 
@@ -441,7 +441,7 @@ test("a precompute that Claude Code's own compaction answers leaves the countdow
   await ui.unmount();
 });
 
-test("the countdown sits above another plugin's band while the effort row is hidden", { options: { routing: "off" } }, async ($, on) => {
+test("the countdown sits above another plugin's band while the effort row is hidden", { options: { routing: false } }, async ($, on) => {
   const { clock } = chatSetup(on, 10);
   on("ui.render", () => BENEATH);
   await $.session.start(START);
