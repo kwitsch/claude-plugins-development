@@ -55,7 +55,10 @@ type Engine = {
   ui: { toast(text: string, options?: { timeoutMs?: number }): void };
 };
 /** Continues the hook chain with an event. */
-type Next<E, R> = (e: E) => Promise<R>;
+type Next<E, R> = ((e: E) => Promise<R>) & {
+  /** Aborts when the dispatch is abandoned (interrupt, a hook above settled first, budget). */
+  signal?: AbortSignal;
+};
 /** A function hook taking event `E` and resolving `R`. */
 type Hook<E, R> = ($: Engine, e: E, next: Next<E, R>) => Promise<R>;
 /** A `prompt.submit` event. */
@@ -282,26 +285,18 @@ async function usable($: Engine): Promise<Usable | undefined> {
  *
  * @param $ - Engine interface.
  * @param prompt - The prompt text.
+ * @param signal - The dispatch's `next.signal`; once it aborted, nothing is returned and no state is committed.
  * @returns The context entries to add, none when graphmind is not usable here.
  */
-async function recallFor($: Engine, prompt: string): Promise<string[]> {
+async function recallFor($: Engine, prompt: string, signal?: AbortSignal): Promise<string[]> {
   if (!isRecallable(prompt)) return [];
   const use = await usable($);
   if (!use) return [];
   const { bin, tools, cwd, now, status } = use;
 
-  state.turns++;
-  const checkpoint = state.turns % CHECKPOINT_EVERY === 0
-    ? `[graphmind checkpoint — prompt ${state.turns}] Review the last ${CHECKPOINT_EVERY} prompts. Call gm_session_analyze with an array of facts (decisions, conventions, bugs, constraints) that emerged — it batch-saves and deduplicates in one call. Use priority=true for facts needed every session.\n\n`
-    : "";
-
   const terms = searchTerms(prompt);
   const last = terms ? state.searched.get(terms) : undefined;
   const search = terms !== "" && (last === undefined || now - last >= SEARCH_TTL_MS);
-  if (search) {
-    if (state.searched.size > 50) state.searched.clear();
-    state.searched.set(terms, now);
-  }
   const briefing = !state.briefed;
   // The calls do not depend on each other: all go out at once. --no-recall: an automatic search on every prompt is not a sign the entry matters (graphmind issue #112).
   const [priorityRaw, memoryRaw, code, map, recent] = await Promise.all([
@@ -311,6 +306,16 @@ async function recallFor($: Engine, prompt: string): Promise<string[]> {
     briefing ? callText($, tools.map, cwd, { limit: 20 }) : undefined,
     briefing ? callText($, tools.memoryList, cwd, { limit: 10 }) : undefined,
   ]);
+  // An abandoned dispatch (interrupt, a hook above settled first, budget) delivers nothing: commit no state, so the next prompt gets what this one lost.
+  if (signal?.aborted) return [];
+  state.turns++;
+  const checkpoint = state.turns % CHECKPOINT_EVERY === 0
+    ? `[graphmind checkpoint — prompt ${state.turns}] Review the last ${CHECKPOINT_EVERY} prompts. Call gm_session_analyze with an array of facts (decisions, conventions, bugs, constraints) that emerged — it batch-saves and deduplicates in one call. Use priority=true for facts needed every session.\n\n`
+    : "";
+  if (search) {
+    if (state.searched.size > 50) state.searched.clear();
+    state.searched.set(terms, now);
+  }
   const priority = listing(priorityRaw);
   // A search hit that is a priority entry is already shown or offered in the priority block (the setup's drop_shown).
   const pids = new Set(priority.flatMap((l) => entryId(l) ?? []));
@@ -392,7 +397,7 @@ async function onSessionEnd(_$: Engine, e: unknown, next: Next<unknown, unknown>
  */
 async function onPromptSubmit($: Engine, e: PromptEvent, next: Next<PromptEvent, unknown>): Promise<unknown> {
   if (e.origin?.kind === "plugin" || e.isMeta || e.command) return next(e);
-  const added = await recallFor($, e.text).catch(() => []);
+  const added = await recallFor($, e.text, next.signal).catch(() => []);
   return next(added.length ? { ...e, context: [...(e.context ?? []), ...added] } : e);
 }
 

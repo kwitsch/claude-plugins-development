@@ -131,6 +131,36 @@ test("the first prompt gets the briefing and the recall, a later one only recall
   expect(second).not.toMatch(/always use X/);
 });
 
+/** Whether the inline plugin `above` settles the next prompt before the module does (the engine then abandons the dispatch). */
+let abandonNext = false;
+
+test("an abandoned first prompt does not cost the conversation its briefing", {
+  plugins: [{
+    name: "above",
+    tier: "prepend",
+    register(on) {
+      on("prompt.submit", (_$, e, next) => {
+        if (!abandonNext) return next(e);
+        abandonNext = false;
+        return Promise.race([next(e), Promise.resolve({})]);
+      });
+    },
+  }],
+}, async ($, on) => {
+  const { prompts, clock } = setup(on);
+  await $.session.start({ source: "startup" });
+  abandonNext = true;
+  await prompt($, "where is foo_bar defined in the code");
+  await clock.settle();
+  // The lingering module finished and passed the prompt on, but delivered nothing for the abandoned dispatch.
+  expect((prompts[0]?.context ?? []).join("\n")).toBe("");
+  await prompt($, "where is foo_bar defined in the code");
+  const second = (prompts.at(-1)?.context ?? []).join("\n");
+  expect(second).toMatch(/Project indexed and ready/);
+  expect(second).toMatch(/always use X/);
+  expect(second).toMatch(/about foo_bar/);
+});
+
 test("a full briefing does not starve the first prompt's recall", async ($, on) => {
   // A real project's priority block is about 6000 chars: the briefing and the recall each get their own budget.
   const priority = `>> 20\n${Array.from({ length: 20 }, (_, i) => `★ ${String(i).padStart(8, "a")} [decision] ${"x".repeat(280)}`).join("\n")}\n`;

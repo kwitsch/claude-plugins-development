@@ -107,20 +107,14 @@ async function usable($) {
 		status
 	};
 }
-async function recallFor($, prompt) {
+async function recallFor($, prompt, signal) {
 	if (!isRecallable(prompt)) return [];
 	const use = await usable($);
 	if (!use) return [];
 	const { bin, tools, cwd, now, status } = use;
-	state.turns++;
-	const checkpoint = state.turns % CHECKPOINT_EVERY === 0 ? `[graphmind checkpoint — prompt ${state.turns}] Review the last ${CHECKPOINT_EVERY} prompts. Call gm_session_analyze with an array of facts (decisions, conventions, bugs, constraints) that emerged — it batch-saves and deduplicates in one call. Use priority=true for facts needed every session.\n\n` : "";
 	const terms = searchTerms(prompt);
 	const last = terms ? state.searched.get(terms) : undefined;
 	const search = terms !== "" && (last === undefined || now - last >= SEARCH_TTL_MS);
-	if (search) {
-		if (state.searched.size > 50) state.searched.clear();
-		state.searched.set(terms, now);
-	}
 	const briefing = !state.briefed;
 	const [priorityRaw, memoryRaw, code, map, recent] = await Promise.all([
 		cli($, bin, [
@@ -150,6 +144,13 @@ async function recallFor($, prompt) {
 		briefing ? callText($, tools.map, cwd, { limit: 20 }) : undefined,
 		briefing ? callText($, tools.memoryList, cwd, { limit: 10 }) : undefined
 	]);
+	if (signal?.aborted) return [];
+	state.turns++;
+	const checkpoint = state.turns % CHECKPOINT_EVERY === 0 ? `[graphmind checkpoint — prompt ${state.turns}] Review the last ${CHECKPOINT_EVERY} prompts. Call gm_session_analyze with an array of facts (decisions, conventions, bugs, constraints) that emerged — it batch-saves and deduplicates in one call. Use priority=true for facts needed every session.\n\n` : "";
+	if (search) {
+		if (state.searched.size > 50) state.searched.clear();
+		state.searched.set(terms, now);
+	}
 	const priority = listing(priorityRaw);
 	const pids = new Set(priority.flatMap((l) => entryId(l) ?? []));
 	const skip = new Set([...state.shown, ...pids]);
@@ -219,7 +220,7 @@ async function onSessionEnd(_$, e, next) {
 }
 async function onPromptSubmit($, e, next) {
 	if (e.origin?.kind === "plugin" || e.isMeta || e.command) return next(e);
-	const added = await recallFor($, e.text).catch(() => []);
+	const added = await recallFor($, e.text, next.signal).catch(() => []);
 	return next(added.length ? {
 		...e,
 		context: [...e.context ?? [], ...added]

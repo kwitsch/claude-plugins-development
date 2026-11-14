@@ -70,6 +70,26 @@ test("a mods API call fires through the hooks of the plugins above the caller, t
   expect(await text($.command.run({ command: "close" }))).toBe("probe saw {\"value\":\"closed\"} from p");
 });
 
+/** The next.signal each hook of the abandonment test saw. */
+const seen: { above?: AbortSignal; below?: AbortSignal } = {};
+test("a hook that settles before its next abandons the rest of the chain: next.signal aborts beneath it only", {
+  plugins: [{
+    name: "above",
+    tier: "prepend",
+    register(on) {
+      on("prompt.submit", (_$, e, next) => (seen.above = next.signal, void Promise.resolve(next(e)).catch(() => {}), {}));
+    },
+  }],
+}, async ($, on) => {
+  let release = () => {};
+  on("prompt.submit", (_$, _e, next) => (seen.below = next.signal, new Promise((r) => (release = () => r({})))));
+  expect(await $.prompt.submit({ text: "x" })).toEqual({});
+  expect(seen.above?.aborted).toBe(false);
+  expect(seen.below?.aborted).toBe(true);
+  release();
+});
+
+
 test("the test's $ cannot fire a mods API call", ($) => {
   expect(() => $.ui.close({ id: "p" })).toThrow(/mods API call/);
 });
