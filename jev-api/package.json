@@ -14,6 +14,9 @@
     "name": "Kwitsch"
   },
   "type": "module",
+  "pluginBuild": {
+    "bundleHooksLib": true
+  },
   "scripts": {
     "build": "node ../development/scripts/build-plugin.mts",
     "test": "vitest run --config \"$(git rev-parse --show-toplevel)/vitest.config.mts\""

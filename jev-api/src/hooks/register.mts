@@ -13,12 +13,12 @@
  * @packageDocumentation
  */
 
-import { askHaiku } from "./haiku.mjs";
+import { askHaiku, HAIKU_MAX_CHARS } from "./haiku.mjs";
 import { parseInput } from "./input.mjs";
 import { answerJev } from "./jev.mjs";
 import { ensureTools, REGISTER_WAIT_MS } from "./registry.mjs";
 import type { RegState } from "./registry.mjs";
-import { DEFAULT_CONTEXT_TOKENS, DEFAULT_DENSITY, loadKnowledge } from "./size.mjs";
+import { cutState, DEFAULT_CONTEXT_TOKENS, DEFAULT_DENSITY, loadKnowledge } from "./size.mjs";
 import type { Knowledge } from "./size.mjs";
 import { TOOL_PREFIX } from "./tools.mjs";
 import { DEFAULT_OVERFLOW, TOOLS } from "./types.mjs";
@@ -77,7 +77,7 @@ export function register(on: On, options?: Options): void {
       // No Jev access configured: Haiku stands in. A configured Jev that fails stays an error.
       // A whole number of milliseconds, at least 1: $.model.complete refuses anything else (2.01 s * 1000 is 2009.9999999999998).
       const timeoutMs = Math.max(1, Math.round((seconds(e["timeout"]) ?? fallbackS) * 1000));
-      if (!key && !base && !jevUrl) return await askHaiku($, type, input.state, input.questions, timeoutMs, next.signal);
+      if (!key && !base && !jevUrl) return await askHaiku($, type, cutState(input.state, HAIKU_MAX_CHARS), input.questions, timeoutMs, next.signal);
       await loadKnowledge($, know);
       if (next.signal.aborted) return fail(type, "the call was abandoned");
       return await answerJev($, type, input, input.overflow ?? defaultOverflow, { key, base, jevUrl, model }, timeoutMs, next.signal, know);

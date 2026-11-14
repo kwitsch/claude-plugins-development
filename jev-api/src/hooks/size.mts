@@ -59,7 +59,7 @@ export const LATENCY_QUADRATIC_MS = 1.8e-5;
 /** The safety factor of the latency model: the measured spread was up to 1.31. */
 export const LATENCY_MARGIN = 1.3;
 
-/** The smallest token budget a timeout gives: a smaller timeout is the caller's choice (a test, a probe), not a size problem, so the call times out like before instead of being refused. */
+/** The smallest token budget a timeout gives: the budget never shrinks below this, so a probe-sized timeout does not refuse prompts of this size or smaller. */
 export const MIN_BUDGET_TOKENS = 1000;
 
 /** The share of the kept characters of a cut state that comes from its start (the rest is its end). */

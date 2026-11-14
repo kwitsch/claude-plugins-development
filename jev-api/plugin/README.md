@@ -40,7 +40,7 @@ Overflow modes, for a prompt that does not fit:
 | `truncate` | The middle of the state is cut (60 % head, 40 % tail, a `[... N characters omitted ...]` marker between) to fit, and the request is sent; after a server refusal it is retried once with the exact cut. The answer does not say that the state was cut.       |
 | `haiku`    | Claude Haiku answers (the fallback described above, calibrated differently from Jev); a state over 150000 characters is cut the same way first.                                                                                                               |
 
-A Jev that is not configured never goes through this: Haiku answers as before.
+Without a configured Jev there is no preflight and no store access: Haiku answers as before, with a state over 150000 characters cut the same way first.
 
 ## Tools
 

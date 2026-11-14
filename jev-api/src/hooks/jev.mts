@@ -195,7 +195,13 @@ export async function answerJev($: Engine, tool: ToolName, input: { state: strin
   }
   if (mode === "error") return refused ? tooBigError(tool, refused) : preflightError(tool, estimate, budget, limit, timeoutMs, stateForBudget(budget, know.density, questionsChars));
   if (mode === "haiku") return await askHaiku($, tool, cutState(input.state, HAIKU_MAX_CHARS), input.questions, timeoutMs, signal);
-  // truncate: what the budget (the limit and the timeout) allows, at the learned density, or after a refusal at the exact density its count gave
-  const second = await send(cutState(input.state, stateForBudget(refused ? Math.min(budget, refused.limit) : budget, refused ? refusedDensity(refused) : know.density, questionsChars)));
-  return isTooBig(second) ? tooBigError(tool, second.tooBig) : second;
+  // truncate: what the budget (the limit and the timeout) allows, at the learned density, or after a refusal at the exact density its count gave;
+  // a cut sent without a refusal before it (the preflight said no) that is refused too gets one more cut at its exact density, so never more than two requests
+  const cut = (r: TooBig["tooBig"] | undefined) => send(cutState(input.state, stateForBudget(r ? Math.min(budget, r.limit) : budget, r ? refusedDensity(r) : know.density, questionsChars)));
+  let answer = await cut(refused);
+  if (!refused && isTooBig(answer)) {
+    if (signal.aborted) return fail(tool, "the call was abandoned");
+    answer = await cut(answer.tooBig);
+  }
+  return isTooBig(answer) ? tooBigError(tool, answer.tooBig) : answer;
 }

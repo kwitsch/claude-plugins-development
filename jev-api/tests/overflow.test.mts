@@ -474,3 +474,21 @@ for (const [name, text] of [["another error type", JSON.stringify({ error: { cod
     expect(r.deny).toMatch(/^noul: HTTP 400/);
   });
 }
+
+test("a cut sent after the preflight said no, then refused, is cut once more at the exact density and answers", async ($, on) => {
+  // 150000 dense characters: the preflight rejects (no first request), the first cut at the learned density is refused, the second cut fits.
+  const { fetched } = setup(on, { replies: [tooBig(46_000), okReply()] });
+  const r = await call($, "noul", { state: "x".repeat(150_000), timeout: 20, overflow: "truncate" });
+  expect(r.deny).toBeUndefined();
+  expect(fetched).toHaveLength(2);
+  expect(fetched[1].body.state.length).toBeLessThan(fetched[0].body.state.length);
+});
+
+test("a state over 150000 characters is cut for the Haiku stand-in when no Jev access is configured", async ($, on) => {
+  setup(on, { env: {} });
+  const asked: Record<string, unknown>[] = [];
+  on("model.complete", (_$, e) => (asked.push(e), { value: { isAnswered: true, text: JSON.stringify({ answers: { answer: { type: "noul", noul: 0.9 } } }), usage: {} } }));
+  await call($, "noul", { state: "b".repeat(1_000_000), timeout: 20 });
+  expect(String(asked[0]["prompt"])).toContain("characters omitted");
+  expect(String(asked[0]["prompt"]).length).toBeLessThan(150_000 + 1000);
+});
