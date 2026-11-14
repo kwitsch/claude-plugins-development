@@ -28,7 +28,7 @@ The overflow mode of a call is its `overflow` input (`error`, `truncate` or `hai
 
 System One takes at most 32767 prompt tokens (the state plus the questions), and its latency grows with the prompt: about 3 s at 4k tokens, 15 s at 16k, 35 s at 28k. Characters per token vary from 1 (emoji, `€`) over 3.3 to 4.8 (code, prose) to 8 (repetitive text), so the plugin works with an estimate and the server's own counts:
 
-- Before sending, a call is refused (or handled by its overflow mode) when even an optimistic estimate (twice the learned characters per token, at least 6 and at most 8) exceeds what the server and the timeout allow: about 4k tokens at 4 s, 15.6k at 20 s, 21k at 30 s. A timeout so small that fewer than 1000 tokens fit is left alone (the call just times out).
+- Before sending, a call is refused (or handled by its overflow mode) when even an optimistic estimate (twice the learned characters per token, at least 6 and at most 8) exceeds what the server and the timeout allow: about 4k tokens at 4 s, 15.6k at 20 s, 21k at 30 s. The time budget never drops below 1000 tokens: a prompt that small is always sent, even with a very short timeout (the call then just times out); a larger one is still refused or handled by its overflow mode.
 - When the server refuses a prompt (HTTP 400, `exceed_context_size_error`), its exact token count is used: the plugin learns the real characters per token and, per overflow mode, reacts.
 - The characters per token are learned from every answer (`usage.input_tokens`) and refusal, smoothed, and kept between sessions in the plugin's own store (`$.store`, shared by every session on the machine); a failing store only loses the statistic.
 

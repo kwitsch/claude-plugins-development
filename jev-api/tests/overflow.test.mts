@@ -264,6 +264,13 @@ for (const seconds of [4, 20, 30]) {
   });
 }
 
+test("a timeout below the smallest budget refuses a large state without claiming the floor fits", async ($, on) => {
+  const { fetched } = setup(on);
+  const r = await call($, "noul", { state: "word ".repeat(4000), timeout: 0.1, overflow: "error" });
+  expect(fetched).toHaveLength(0);
+  expect(r.deny).toMatch(/^noul: state too large for the timeout of 0\.1 s: at least \d+ tokens; shorten the state to about \d+ characters or raise the timeout/);
+});
+
 test("a timeout below the smallest budget never refuses a small state (the call just times out like before)", async ($, on) => {
   const { fetched } = setup(on);
   const r = await call($, "noul", { state: "Hello there!", timeout: 0.05, overflow: "error" });

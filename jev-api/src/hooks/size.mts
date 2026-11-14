@@ -282,5 +282,7 @@ export function tooBigError(tool: ToolName, refused: TooBig["tooBig"]): ToolResu
  */
 export function preflightError(tool: ToolName, estimate: number, budget: number, limit: number, timeoutMs: number, aim: number): ToolResult {
   if (budget >= limit) return fail(tool, `state too large for System One: at least ${estimate} tokens, the limit is ${limit}; shorten the state to about ${aimHundreds(aim)} characters`);
-  return fail(tool, `state too large for the timeout of ${timeoutMs / 1000} s: at least ${estimate} tokens, about ${budget} fit; shorten the state to about ${aimHundreds(aim)} characters or raise the timeout (at most ${MAX_TIMEOUT_S} s)`);
+  // At the floor the timeout allows fewer tokens than the budget, so naming the budget as what fits would be false.
+  const fit = budget > MIN_BUDGET_TOKENS ? `, about ${budget} fit` : "";
+  return fail(tool, `state too large for the timeout of ${timeoutMs / 1000} s: at least ${estimate} tokens${fit}; shorten the state to about ${aimHundreds(aim)} characters or raise the timeout (at most ${MAX_TIMEOUT_S} s)`);
 }
