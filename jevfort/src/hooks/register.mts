@@ -1117,6 +1117,12 @@ export const register = (on: On, options: Options): void => {
     const turn = turns.get(e.turnId) ?? { taken: 0, cache: newCache() };
     turns.set(e.turnId, turn);
 
+    // A new main-loop turn: the session effort bold, the last turn's choice cleared (also for a turn without a request).
+    if (routing && e.index === 0 && !e.agentId) {
+      band = isEffort(e.effort) ? { configured: e.effort } : {};
+      $.ui.invalidate("ui.render");
+    }
+
     // One transcript read per step: the turn and, at main-loop step 0, the previous reply.
     const messages = await $.session.messages(e.agentId ? { agentId: e.agentId } : {});
     const ctx = turnOf(messages);
@@ -1153,11 +1159,6 @@ export const register = (on: On, options: Options): void => {
     let firstTurn: { family?: EstimateModel; from: unknown; effort?: Effort } | undefined;
     if (routing && e.index === 0) {
       const sessionEffort = isEffort(e.effort) ? e.effort : undefined;
-      if (!e.agentId) {
-        // A new main-loop turn: the session effort bold, the last turn's choice cleared.
-        band = sessionEffort ? { configured: sessionEffort } : {};
-        $.ui.invalidate("ui.render");
-      }
       // Auto off (the band's button): no first-turn record, no estimate, no hold; the turn runs at the session effort.
       if (!autoOff) {
         const loop = e.agentId ?? "";
