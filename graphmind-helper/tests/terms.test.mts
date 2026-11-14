@@ -22,6 +22,8 @@ test("isCodePrompt matches exploration and implementation prompts", () => {
   assert.equal(isCodePrompt("thanks, that is fine with me"), false);
   assert.equal(isCodePrompt("please add a guard to the parser"), true);
   assert.equal(isCodePrompt("fix\nin"), false);
+  // /m: grep in the setup script matches line by line, so a later line counts too.
+  assert.equal(isCodePrompt("thanks\nplease add a guard to the parser"), true);
   assert.equal(isCodePrompt("ok fix it, then fix the bug in x"), true);
 });
 
