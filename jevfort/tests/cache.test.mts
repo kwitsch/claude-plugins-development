@@ -253,6 +253,19 @@ for (const [percent, option, runs] of [[70, 60, 1], [50, 60, 0], [90, 0, 0], [Nu
   });
 }
 
+test("a response after an auto-compact opens a new cold period that compacts again", async ($, on) => {
+  const { clock, state } = chatSetup(on, 70);
+  await $.session.start(START);
+  await respond($);
+  await clock.advance(CACHE_TTL["1h"] + 60_000);
+  expect(state.compacts).toBe(1);
+  await respond($);
+  await clock.advance(30 * 60_000);
+  expect(state.compacts).toBe(1);
+  await clock.advance(CACHE_TTL["1h"]);
+  expect(state.compacts).toBe(2);
+});
+
 test("a repeated session.start (reload) replaces the cache tick instead of adding a second one", async ($, on) => {
   let reads = 0;
   // Registered before chatSetup, so it runs above its answer: counts every fill read.
