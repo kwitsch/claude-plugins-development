@@ -104,6 +104,15 @@ test("a slash command that started a turn is the request, a local command is not
   expect(splitTurn([typed("Thanks!"), { role: "assistant", text: "ok", toolUses: [] }, local, typed("<task-notification>done</task-notification>")])?.request).toBe("Thanks!");
 });
 
+test("a command row with a long run of blanks in its name is read in linear time, blanks around the name are trimmed", () => {
+  const typed = (text: string) => ({ role: "user" as const, text, toolUses: [] });
+  // A lazy name group beside `\s*` took 2 s at 2000 blanks and grows cubically: a pasted prompt could hang the hook.
+  const t = performance.now();
+  expect(splitTurn([typed("Thanks!"), typed(`<command-message>x</command-message><command-name>${" ".repeat(20_000)}y`)])?.request).toBe("Thanks!");
+  expect(performance.now() - t).toBeLessThan(500);
+  expect(splitTurn([typed("<command-message>f</command-message>\n<command-name> /f\n</command-name>\n<command-args> a </command-args>")])?.request).toBe("/f a");
+});
+
 test("rows that are no request: compaction summary, interrupt, a bang command, an image-only prompt", () => {
   const typed = (text: string) => ({ role: "user" as const, text, toolUses: [] });
   const reply = { role: "assistant" as const, text: "ok", toolUses: [] };

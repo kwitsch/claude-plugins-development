@@ -32,6 +32,14 @@ const jevPause = {
 	at: 0,
 	error: ""
 };
+const API_TIMEOUT = /\btimeout after \d+ms\b/;
+function pauseAfterTimeout(startedAt, budgetMs, error) {
+	if (startedAt < jevPause.until) return;
+	jevPause.ms = jevPause.ms ? Math.min(jevPause.ms * 2, MAX_PAUSE_MS) : PAUSE_MS;
+	jevPause.until = startedAt + budgetMs + jevPause.ms;
+	jevPause.at = startedAt;
+	jevPause.error = error;
+}
 async function askJev($, state, questions, slow = false) {
 	const startedAt = await $.clock.now().catch(() => Date.now());
 	if (startedAt < jevPause.at) Object.assign(jevPause, {
@@ -95,12 +103,7 @@ async function askJev($, state, questions, slow = false) {
 	try {
 		const answers = await Promise.race([call, timeout]);
 		if (!answers) {
-			if (startedAt >= jevPause.until) {
-				jevPause.ms = jevPause.ms ? Math.min(jevPause.ms * 2, MAX_PAUSE_MS) : PAUSE_MS;
-				jevPause.until = startedAt + budgetMs + jevPause.ms;
-				jevPause.at = startedAt;
-				jevPause.error = `timeout after ${budgetMs}ms`;
-			}
+			pauseAfterTimeout(startedAt, budgetMs, `timeout after ${budgetMs}ms`);
 			return done({
 				ok: false,
 				error: `timeout after ${budgetMs}ms`
@@ -113,9 +116,12 @@ async function askJev($, state, questions, slow = false) {
 			answers
 		});
 	} catch (err) {
+		const error = err instanceof Error ? err.message : String(err);
+		const timedOut = API_TIMEOUT.exec(error);
+		if (timedOut) pauseAfterTimeout(startedAt, budgetMs, timedOut[0]);
 		return done({
 			ok: false,
-			error: err instanceof Error ? err.message : String(err)
+			error
 		});
 	}
 }
@@ -792,7 +798,7 @@ export const register = (on, options) => {
 		}
 		if (arg === "export") {
 			const log = await readLog($);
-			const path = `${await $.session.cwd()}/.jev/decisions-${await $.clock.now()}.jsonl`;
+			const path = `${await $.session.cwd()}/.jev/decisions-${await $.clock.now().catch(() => Date.now())}.jsonl`;
 			try {
 				if (await $.fs.exists(path)) return { text: `Jev pilot: ${path} exists, nothing written` };
 				await $.fs.write(path, log.map((entry) => JSON.stringify(entry)).join("\n") + "\n");
@@ -1019,7 +1025,7 @@ export const register = (on, options) => {
 		if (!Object.keys(questions).length) {
 			let measure;
 			let measured = [];
-			if (measureSteps && takeSteps && e.index > 0 && !e.agentId) {
+			if (measureSteps && takeSteps && !ctx.command && e.index > 0 && !e.agentId) {
 				measured = (await buildCandidates($, ctx.request, ctx.steps, calls, e.index)).filter((c) => !(last && sameCall(last, {
 					tool: c.tool,
 					input: c.input
@@ -1033,7 +1039,7 @@ export const register = (on, options) => {
 				}
 			}
 			const claudeResult = yield* next(routed(e));
-			const measureResult = await Promise.race([measure, $.clock.sleep(MEASURE_GRACE_MS).then(() => undefined)]);
+			const measureResult = await Promise.race([measure, $.clock.sleep(MEASURE_GRACE_MS).then(() => undefined, () => undefined)]);
 			const measureAnswer = measureResult?.ok ? choice(measureResult.answers, "next_action") : undefined;
 			if (measureAnswer) await recordCompare($, e.turnId, e.index, ctx.request, measureAnswer, measured, claudeResult.toolUses, true);
 			return claudeResult;

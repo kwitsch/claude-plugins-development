@@ -9,14 +9,15 @@ function isTranscriptOnly(text) {
 	const rest = text.slice(end + close.length).trim();
 	return rest === "" || TRANSCRIPT_ONLY.test(rest);
 }
-const COMMAND_ROW = /^\s*<command-message>[\s\S]*?<\/command-message>\s*<command-name>\s*([^<]*?)\s*<\/command-name>\s*(?:<command-args>([\s\S]*)<\/command-args>\s*)?$/;
+const COMMAND_ROW = /^\s*<command-message>[\s\S]*?<\/command-message>\s*<command-name>([^<]*)<\/command-name>\s*(?:<command-args>([\s\S]*)<\/command-args>\s*)?$/;
 const COMPACT_SUMMARY = "This session is being continued from a previous conversation that ran out of context.";
 const INTERRUPT = /^\[Request interrupted by user( for tool use)?\]$/;
 function typedCommand(text) {
 	const m = COMMAND_ROW.exec(text);
-	if (!m?.[1]) return undefined;
-	const args = m[2]?.trim();
-	return args ? `${m[1]} ${args}` : m[1];
+	const name = m?.[1]?.trim();
+	if (!name) return undefined;
+	const args = m?.[2]?.trim();
+	return args ? `${name} ${args}` : name;
 }
 export function splitTurn(messages) {
 	let summary;

@@ -197,6 +197,25 @@ const asText = (v: unknown): string => String(v);
  */
 const jevPause = { until: 0, ms: 0, at: 0, error: "" };
 
+/** jev-api's own timeout text (`timeout after 4000ms`, with Haiku answering `fallback: timeout after 14000ms`): it reaches `askJev` as an error when jev-api's clock ends before jevfort's, as Haiku's 14 s does before the 15 s budget. */
+const API_TIMEOUT = /\btimeout after \d+ms\b/;
+
+/**
+ * Starts the pause after a timeout of Jev, or doubles it. Only a call that started after the previous pause lengthens
+ * it: parallel calls of one outage time out together and count once.
+ *
+ * @param startedAt - When the timed-out call started.
+ * @param budgetMs - The call's budget.
+ * @param error - The timeout text `/jev` shows while the pause lasts.
+ */
+function pauseAfterTimeout(startedAt: number, budgetMs: number, error: string): void {
+  if (startedAt < jevPause.until) return;
+  jevPause.ms = jevPause.ms ? Math.min(jevPause.ms * 2, MAX_PAUSE_MS) : PAUSE_MS;
+  jevPause.until = startedAt + budgetMs + jevPause.ms;
+  jevPause.at = startedAt;
+  jevPause.error = error;
+}
+
 /**
  * Asks Jev through the jev-api plugin's `batch` tool; never throws. All questions go out in one `$.tool.call` (one
  * System One request) inside the calling hook's frame, raced against its budget (`TIMEOUT_MS`, `COMPACT_TIMEOUT_MS` for the compaction ranking, `HAIKU_TIMEOUT_MS` while Haiku answers). All or nothing: a failed call, a
@@ -250,21 +269,19 @@ async function askJev($: Engine, state: unknown, questions: Record<string, Quest
   try {
     const answers = await Promise.race([call, timeout]);
     if (!answers) {
-      // Only a timeout pauses (a refused or failing endpoint answers fast and costs nothing), and only a call that started
-      // after the previous pause lengthens it: parallel calls of one outage time out together and count once.
-      if (startedAt >= jevPause.until) {
-        jevPause.ms = jevPause.ms ? Math.min(jevPause.ms * 2, MAX_PAUSE_MS) : PAUSE_MS;
-        jevPause.until = startedAt + budgetMs + jevPause.ms;
-        jevPause.at = startedAt;
-        jevPause.error = `timeout after ${budgetMs}ms`;
-      }
+      // Only a timeout pauses (a refused or failing endpoint answers fast and costs nothing).
+      pauseAfterTimeout(startedAt, budgetMs, `timeout after ${budgetMs}ms`);
       return done({ ok: false, error: `timeout after ${budgetMs}ms` });
     }
     jevPause.ms = 0;
     jevPause.until = 0;
     return done({ ok: true, answers });
   } catch (err) {
-    return done({ ok: false, error: err instanceof Error ? err.message : String(err) });
+    const error = err instanceof Error ? err.message : String(err);
+    // jev-api's own timeout, answered before jevfort's clock ran out, is a timeout too.
+    const timedOut = API_TIMEOUT.exec(error);
+    if (timedOut) pauseAfterTimeout(startedAt, budgetMs, timedOut[0]);
+    return done({ ok: false, error });
   }
 }
 
@@ -546,6 +563,7 @@ async function readTurn($: Engine, agentId?: string): Promise<TurnContext | unde
   // Jev's own done follow-up is not the user's request.
   // shortcut: SessionMessage has no origin marker, so the synthetic message is matched by its exact text; a user sending exactly that text loses that one message from the scored request.
   // The follow-up as stored: the engine wraps a plugin's submitted prompt ("The <plugin> plugin sent a message:\n<text>\n\nThis is how ...").
+  /** Whether a trimmed user row is jevfort's own done follow-up, bare or as the engine wraps it. */
   const own = (t: string) => t === DONE_PROMPT || t.startsWith(`The ${PLUGIN_NAME} plugin sent a message:\n${DONE_PROMPT}\n`);
   return splitTurn(messages.filter((m) => !(m.role === "user" && own(m.text.trim()))));
 }
@@ -937,7 +955,7 @@ export const register = (on: On, options: Options): void => {
   // user turn neither consumes nor inherits it, a user pasting the follow-up text triggers nothing, and a meta prompt in
   // between (a background-task notification) does not re-open the follow-up turn to a second check. A hot reload forgets it: at worst one more follow-up.
   let donePending = false;
-  // Bumped at every session.end: a done follow-up submitted before a /clear must not land in the new conversation.
+  // Bumped at every session.start and session.end: a done follow-up submitted before a /clear must not land in the new conversation.
   let sessionEpoch = 0;
   let followUpEpoch = 0;
   // Why the last follow-up failed to submit: its rejection arrives after the hook frame ended, so it is logged by the next turn.complete.
@@ -1154,7 +1172,7 @@ export const register = (on: On, options: Options): void => {
     if (arg === "export") {
       const log = await readLog($);
       // A new file per export: $.fs.write follows symlinks (live, 2.1.325), so a committed `.jev/decisions.jsonl` symlink would make an overwrite land outside the cwd.
-      const path = `${await $.session.cwd()}/.jev/decisions-${await $.clock.now()}.jsonl`;
+      const path = `${await $.session.cwd()}/.jev/decisions-${await $.clock.now().catch(() => Date.now())}.jsonl`;
       try {
         if (await $.fs.exists(path)) return { text: `Jev pilot: ${path} exists, nothing written` };
         await $.fs.write(path, log.map((entry) => JSON.stringify(entry)).join("\n") + "\n");
@@ -1353,7 +1371,8 @@ export const register = (on: On, options: Options): void => {
       // take, so the take threshold can be measured adding at most MEASURE_GRACE_MS of delay after the step.
       let measure: Promise<JevResult> | undefined;
       let measured: Candidate[] = [];
-      if (measureSteps && takeSteps && e.index > 0 && !e.agentId) {
+      // Not on a slash-command turn either: Jev would be compared on the bare command, whose skill text it cannot see.
+      if (measureSteps && takeSteps && !ctx.command && e.index > 0 && !e.agentId) {
         measured = (await buildCandidates($, ctx.request, ctx.steps, calls, e.index)).filter((c) => !(last && sameCall(last, { tool: c.tool, input: c.input })));
         if (measured.length) {
           measure = askJev($, { request: clip(ctx.request, 4000), recent: summarize(ctx.steps), cwd: await $.session.cwd() }, { next_action: nextActionQuestion(measured) });
@@ -1361,7 +1380,8 @@ export const register = (on: On, options: Options): void => {
       }
       const claudeResult = yield* next(routed(e));
       // Claude's step is done: wait only a moment for the measurement (it only logs; a late one is not recorded), never the rest of its budget.
-      const measureResult = await Promise.race([measure, $.clock.sleep(MEASURE_GRACE_MS).then(() => undefined)]);
+      // A refused clock must not fail the step whose result is already in: the measurement is dropped.
+      const measureResult = await Promise.race([measure, $.clock.sleep(MEASURE_GRACE_MS).then(() => undefined, () => undefined)]);
       const measureAnswer = measureResult?.ok ? choice(measureResult.answers, "next_action") : undefined;
       if (measureAnswer) await recordCompare($, e.turnId, e.index, ctx.request, measureAnswer, measured, claudeResult.toolUses, true);
       return claudeResult;

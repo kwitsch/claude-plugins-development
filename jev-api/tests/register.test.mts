@@ -1157,6 +1157,18 @@ it("a numeric key echoed with more digits than a double holds, or as 123456.0, i
   }
 });
 
+// The reviver redacts every number of the body: a key that is no number cannot sit in one, so an error body of many numbers must not pay for it (1M numbers took 4 s).
+it("an error body of many numbers is not redacted number by number when the key is no number", async () => {
+  const { run } = await direct({
+    env: { get: async (n: string) => (n === "JEV_URL" ? "https://host/x" : n === "TYPESAFE_API_KEY" ? "sk-SECRET-1234567890" : undefined) },
+    http: { fetch: () => Promise.resolve({ status: 500, ok: false, headers: {}, text: JSON.stringify({ detail: "down", items: Array.from({ length: 600_000 }, (_, i) => i + 100_000) }) }) },
+    tool: { register: async (s: { name: string }) => ({ tool: TOOL(s.name) }) },
+  });
+  const t = performance.now();
+  expect((await run("noul")).deny).toBe("noul: HTTP 500: down");
+  expect(performance.now() - t).toBeLessThan(1500);
+});
+
 // A rejection value that cannot be made into text must not leave the call unanswered.
 it("a call is answered when the env read rejects with a value that cannot be stringified", async () => {
   const { run } = await direct({

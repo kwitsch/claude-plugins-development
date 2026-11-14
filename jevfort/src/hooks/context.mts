@@ -91,8 +91,10 @@ function isTranscriptOnly(text: string): boolean {
  * The row of a slash command that started a turn (a skill typed as `/name args`): `<command-message>` first, then the
  * name and optional arguments, nothing else. The arguments group is greedy, so the row's last closing tag ends it
  * whatever the arguments contain. A local command such as `/jev` starts with `<command-name>` and starts no turn.
+ * The name group takes its surrounding blanks and {@link typedCommand} trims them: a lazy group beside `\s*` backtracks
+ * cubically on a long run of blanks (2000 of them took 2 s).
  */
-const COMMAND_ROW = /^\s*<command-message>[\s\S]*?<\/command-message>\s*<command-name>\s*([^<]*?)\s*<\/command-name>\s*(?:<command-args>([\s\S]*)<\/command-args>\s*)?$/;
+const COMMAND_ROW = /^\s*<command-message>[\s\S]*?<\/command-message>\s*<command-name>([^<]*)<\/command-name>\s*(?:<command-args>([\s\S]*)<\/command-args>\s*)?$/;
 
 /** How the row a compaction leaves begins. */
 const COMPACT_SUMMARY = "This session is being continued from a previous conversation that ran out of context.";
@@ -108,9 +110,10 @@ const INTERRUPT = /^\[Request interrupted by user( for tool use)?\]$/;
  */
 function typedCommand(text: string): string | undefined {
   const m = COMMAND_ROW.exec(text);
-  if (!m?.[1]) return undefined;
-  const args = m[2]?.trim();
-  return args ? `${m[1]} ${args}` : m[1];
+  const name = m?.[1]?.trim();
+  if (!name) return undefined;
+  const args = m?.[2]?.trim();
+  return args ? `${name} ${args}` : name;
 }
 
 /**

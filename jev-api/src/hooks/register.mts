@@ -555,17 +555,23 @@ function endpoint(jev: string | undefined, base: string | undefined): { ok: true
  *
  * @param text - The raw response body.
  * @param redact - Replaces what must not reach the model; applied to every string and object key of the reason before a non-string one is made into JSON text.
+ * @param numbers - Whether a number can carry a secret (the key is made of number characters): only then is every number of the body redacted, which costs seconds on an error body of megabytes of numbers.
  * @returns The reason redacted (a string as is, anything else JSON-stringified), or undefined when there is none.
  */
-function detail(text: string, redact: (s: string) => string): string | undefined {
+function detail(text: string, redact: (s: string) => string, numbers: boolean): string | undefined {
   // A number is matched on its source text: parsing rounds 20 digits to 17 and drops `.0` and `e0`, so a numeric key would no longer match.
-  const body = json(text, (_k, v, c) => (typeof v === "number" && c?.source !== undefined && redact(c.source) !== c.source ? c.source : v));
+  const body = json(text, numbers ? (_k, v, c) => (typeof v === "number" && c?.source !== undefined && redact(c.source) !== c.source ? c.source : v) : undefined);
   if (!isRecord(body)) return undefined;
   const error = body["error"];
   const why = body["detail"] ?? (isRecord(error) ? error["message"] : undefined);
   if (why === undefined) return undefined;
   // Redacted per string, number (a numeric key echoed as a JSON number) and object key before the JSON text is made: JSON escapes quotes and backslashes, a secret containing one would no longer match.
-  const clean = (v: unknown): unknown => (typeof v === "string" ? redact(v) : typeof v === "number" && redact(String(v)) !== String(v) ? redact(String(v)) : isRecord(v) ? Object.fromEntries(Object.entries(v).map(([k, x]) => [redact(k), x])) : v);
+  /** The JSON.stringify replacer: redacts strings, numbers and object keys; other values pass. */
+  const clean = (v: unknown): unknown => {
+    if (typeof v === "string") return redact(v);
+    if (typeof v === "number") return numbers && redact(String(v)) !== String(v) ? redact(String(v)) : v;
+    return isRecord(v) ? Object.fromEntries(Object.entries(v).map(([k, x]) => [redact(k), x])) : v;
+  };
   return typeof why === "string" ? redact(why) : JSON.stringify(why, (_k, v: unknown) => clean(v));
 }
 
@@ -761,7 +767,8 @@ async function ask($: Engine, tool: ToolName, state: string, questions: Question
     if (res === "timeout") return fail(tool, `timeout after ${timeoutMs}ms`);
     if (res === "aborted") return fail(tool, "the call was abandoned");
     if (!res.ok) {
-      const why = detail(res.text, redact);
+      // Only a key made of number characters can sit inside a JSON number's text.
+      const why = detail(res.text, redact, key !== undefined && key.length >= MIN_REDACT_KEY && /^[-+.\deE]+$/.test(key));
       let text = why === undefined ? "" : why.trim(); // detail() already redacted it: a second pass would nest the host placeholder
       if (text.length > MAX_DETAIL) {
         text = text.slice(0, MAX_DETAIL);

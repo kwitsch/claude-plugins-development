@@ -295,13 +295,17 @@ function endpoint(jev, base) {
 		url: DEFAULT_JEV_URL
 	};
 }
-function detail(text, redact) {
-	const body = json(text, (_k, v, c) => typeof v === "number" && c?.source !== undefined && redact(c.source) !== c.source ? c.source : v);
+function detail(text, redact, numbers) {
+	const body = json(text, numbers ? (_k, v, c) => typeof v === "number" && c?.source !== undefined && redact(c.source) !== c.source ? c.source : v : undefined);
 	if (!isRecord(body)) return undefined;
 	const error = body["error"];
 	const why = body["detail"] ?? (isRecord(error) ? error["message"] : undefined);
 	if (why === undefined) return undefined;
-	const clean = (v) => typeof v === "string" ? redact(v) : typeof v === "number" && redact(String(v)) !== String(v) ? redact(String(v)) : isRecord(v) ? Object.fromEntries(Object.entries(v).map(([k, x]) => [redact(k), x])) : v;
+	const clean = (v) => {
+		if (typeof v === "string") return redact(v);
+		if (typeof v === "number") return numbers && redact(String(v)) !== String(v) ? redact(String(v)) : v;
+		return isRecord(v) ? Object.fromEntries(Object.entries(v).map(([k, x]) => [redact(k), x])) : v;
+	};
 	return typeof why === "string" ? redact(why) : JSON.stringify(why, (_k, v) => clean(v));
 }
 function isUnit(v) {
@@ -441,7 +445,7 @@ async function ask($, tool, state, questions, env, timeoutMs, signal) {
 		if (res === "timeout") return fail(tool, `timeout after ${timeoutMs}ms`);
 		if (res === "aborted") return fail(tool, "the call was abandoned");
 		if (!res.ok) {
-			const why = detail(res.text, redact);
+			const why = detail(res.text, redact, key !== undefined && key.length >= MIN_REDACT_KEY && /^[-+.\deE]+$/.test(key));
 			let text = why === undefined ? "" : why.trim();
 			if (text.length > MAX_DETAIL) {
 				text = text.slice(0, MAX_DETAIL);

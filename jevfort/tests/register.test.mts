@@ -410,6 +410,29 @@ test("Parallel calls that time out in one outage lengthen the pause once", async
   expect(calls()).toBe(3);
 });
 
+for (const [name, deny, env] of [["a jev-api timeout answered before jevfort's own", "batch: timeout after 4000ms", { JEV_URL: "https://jev.example/x" }], ["a Haiku timeout (14 s, before the 15 s budget)", "batch: fallback: timeout after 14000ms", {}]] as const) {
+  test(`${name} pauses Jev like the local timeout`, async ($, on) => {
+    const seen: unknown[] = [];
+    const { calls } = setup(on, { messages: [user("what does this project do?")], jev: () => ({ __deny: deny }), env });
+    claudeBeneath(on, seen);
+    await drain($.turn.step(step));
+    expect(calls()).toBe(1);
+    // Within the pause nothing is sent.
+    await drain($.turn.step(step));
+    expect(calls()).toBe(1);
+    expect(await runJev($, "")).toContain("paused for");
+  });
+}
+
+test("a fast failure that is no timeout pauses nothing", async ($, on) => {
+  const seen: unknown[] = [];
+  const { calls } = setup(on, { messages: [user("what does this project do?")], jev: () => ({ __deny: "batch: HTTP 503" }), env: { JEV_URL: "https://jev.example/x" } });
+  claudeBeneath(on, seen);
+  await drain($.turn.step(step));
+  await drain($.turn.step(step));
+  expect(calls()).toBe(2);
+});
+
 test("a /clear (session.end) drops the done follow-up that was submitted before it", async ($, on) => {
   setup(on, { messages: [], jev: () => undefined });
   on("session.end", () => ({}));
@@ -593,6 +616,19 @@ test("A turn started by a slash command is left to Claude (no take, no bypass)",
   const { chunks } = await drain($.turn.step(step));
   expect(toolId(chunks)).toBe("");
   expect(seen).toHaveLength(1);
+});
+
+test("A later step of a slash-command turn is not measured against Jev either", async ($, on) => {
+  const command = "<command-message>read-file</command-message>\n<command-name>/read-file</command-name>\n<command-args>src/app.ts</command-args>";
+  const { calls } = setup(on, {
+    messages: [user("Thanks!"), { role: "assistant", text: "ok", toolUses: [] }, user(command)],
+    jev: byId({ next_action: { type: "choice", choice: "read src/app.ts", probabilities: { "read src/app.ts": 0.97, claude: 0.03 }, confidence: 0.95 } }),
+    files: [`${CWD}/src/app.ts`],
+  });
+  claudeBeneath(on, []);
+  await drain($.turn.step({ ...step, index: 4 }));
+  expect(calls()).toBe(0);
+  expect(await runJev($, "report")).not.toContain("Agreement with Claude");
 });
 
 // Phase 2: every decision is logged, and Claude's own call is compared with Jev's.

@@ -114,7 +114,7 @@ The built-in `cc-plugin-sec-default` passes `session.compact` on past every user
 
 ## Pause after a timeout
 
-`askJev` keeps a module-level pause (`jevPause`): a timeout (only a timeout, a fast failure costs nothing) stops all Jev requests for `PAUSE_MS` 30 s, doubling per further timeout up to `MAX_PAUSE_MS` 10 min; the first call after the pause is the probe, any success resets it. Measured live against a hanging endpoint: +8 s before the first token of every turn (classify 4 s, step 0 4 s), +4 s per Agent call and per subagent, +4 s for the done check. The pause ends when the clock reads earlier than the last timeout (a new session, a test).
+`askJev` keeps a module-level pause (`jevPause`): a timeout (only a timeout, a fast failure costs nothing; jevfort's own clock, or jev-api's `timeout after <n>ms` error when that ends first, as Haiku's 14 s does before the 15 s budget) stops all Jev requests for `PAUSE_MS` 30 s, doubling per further timeout up to `MAX_PAUSE_MS` 10 min; the first call after the pause is the probe, any success resets it. Measured live against a hanging endpoint: +8 s before the first token of every turn (classify 4 s, step 0 4 s), +4 s per Agent call and per subagent, +4 s for the done check. The pause ends when the clock reads earlier than the last timeout (a new session, a test).
 
 ## Known limit: several sessions share one log
 
