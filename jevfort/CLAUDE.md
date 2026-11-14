@@ -112,6 +112,10 @@ subagents load it via ToolSearch), no skills, agents, command hooks or MCP serve
 
 The built-in `cc-plugin-sec-default` passes `session.compact` on past every user-tier hook (debug log: `jevfort: session.compact bypassed by cc-plugin-sec-default (tier user); beneath runs`, and `its session.compact hook was skipped`), as it does for `prompt.compose`, `prompt.section`, `prompt.context` and `classic.Stop` (for `tool.check` only a re-dispatch notice appears, the verdict stays allow: inline-headroom/docs/claude-code-verification.md). So the Jev ranking, the Haiku compaction and the `cacheExpires = 0` reset after a compaction do not run until that changes; core compacts on its own. Seen live with a manual `/compact` in `claude -p`; an interactive session and an auto-compaction were not tried. Nothing in this plugin can get past a prepend-tier hook; the code and its tests stay as they are (the kit runs the hook).
 
+## Pause after a timeout
+
+`askJev` keeps a module-level pause (`jevPause`): a timeout (only a timeout, a fast failure costs nothing) stops all Jev requests for `PAUSE_MS` 30 s, doubling per further timeout up to `MAX_PAUSE_MS` 10 min; the first call after the pause is the probe, any success resets it. Measured live against a hanging endpoint: +8 s before the first token of every turn (classify 4 s, step 0 4 s), +4 s per Agent call and per subagent, +4 s for the done check. The pause ends when the clock reads earlier than the last timeout (a new session, a test).
+
 ## Known limit: several sessions share one log
 
 `record()` reads and writes the whole `log` and `stats` values and is serialized only inside one process: two Claude processes on the same plugin store can overwrite each other's entries, so `/jev` counts and `/jev report` undercount while several sessions run at once. Behaviour is unaffected. A per-session key merged at read time would fix it; not done.

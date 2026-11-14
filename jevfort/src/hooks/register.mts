@@ -21,7 +21,7 @@ import type { Candidate } from "./candidates.mjs";
 import { COMPACT_MAX_TOKENS, COMPACT_MODEL, COMPACT_SYSTEM, compactInstructions, compactItems, haikuTranscript, RELEVANCE } from "./compact.mjs";
 import { clip, splitTurn, summarize, toolCalls } from "./context.mjs";
 import type { SessionMessage, ToolUse, TurnContext } from "./context.mjs";
-import { choice, COMPACT_API_TIMEOUT_S, COMPACT_TIMEOUT_MS, HAIKU_API_TIMEOUT_S, HAIKU_TIMEOUT_MS, isAnswer, JEV_API_TIMEOUT_S, JEV_BATCH, JEV_TOOL_PREFIX, JEV_TOOLS, MAX_CHOICE_OPTIONS, MAX_ERROR, MEASURE_GRACE_MS, missingJevTools, noul, score, TIMEOUT_MS } from "./jev.mjs";
+import { choice, COMPACT_API_TIMEOUT_S, COMPACT_TIMEOUT_MS, HAIKU_API_TIMEOUT_S, HAIKU_TIMEOUT_MS, isAnswer, JEV_API_TIMEOUT_S, JEV_BATCH, JEV_TOOL_PREFIX, JEV_TOOLS, MAX_CHOICE_OPTIONS, MAX_ERROR, MAX_PAUSE_MS, MEASURE_GRACE_MS, missingJevTools, noul, PAUSE_MS, score, TIMEOUT_MS } from "./jev.mjs";
 import type { Answer, ChoiceAnswer, JevResult, Question } from "./jev.mjs";
 import { LOG_KEY, MAX_ENTRIES, recentDecisions, remember, statsKey } from "./log.mjs";
 import type { Entry } from "./log.mjs";
@@ -191,6 +191,13 @@ const FINISHED = new Set(["completed", "failed", "killed", "idle"]);
 const asText = (v: unknown): string => String(v);
 
 /**
+ * Jev did not answer in time: no new request is sent until `until` (a dead endpoint would otherwise cost the full budget
+ * at every prompt and step). `ms` is the pause that follows the next timeout, `at` the time of the last one (a clock that
+ * went back, as in a new session, ends the pause).
+ */
+const jevPause = { until: 0, ms: 0, at: 0, error: "" };
+
+/**
  * Asks Jev through the jev-api plugin's `batch` tool; never throws. All questions go out in one `$.tool.call` (one
  * System One request) inside the calling hook's frame, raced against its budget (`TIMEOUT_MS`, `COMPACT_TIMEOUT_MS` for the compaction ranking, `HAIKU_TIMEOUT_MS` while Haiku answers). All or nothing: a failed call, a
  * timeout or a wrong answer is `{ ok: false }`, so callers fall back to Claude Code's own behaviour. A call still
@@ -205,9 +212,11 @@ const asText = (v: unknown): string => String(v);
 async function askJev($: Engine, state: unknown, questions: Record<string, Question>, slow = false): Promise<JevResult> {
   // A refused clock read must not throw out of askJev (its caller may be past `next`): the wall clock stands in.
   const startedAt = await $.clock.now().catch(() => Date.now());
+  if (startedAt < jevPause.at) Object.assign(jevPause, { until: 0, ms: 0, at: 0, error: "" });
   const done = async (r: { ok: true; answers: Record<string, Answer> } | { ok: false; error: string }): Promise<JevResult> => ({ ...(r.ok ? r : { ok: false as const, error: clip(r.error, MAX_ERROR) }), ms: (await $.clock.now().catch(() => Date.now())) - startedAt });
 
   // Without Jev access jev-api answers through Haiku, which needs a longer budget (jev-api reads the same three variables).
+  if (startedAt < jevPause.until) return done({ ok: false, error: `paused for ${Math.ceil((jevPause.until - startedAt) / 1000)} s after a timeout (${jevPause.error})` });
   const [key, base, jevUrl] = await Promise.all([$.env.get("TYPESAFE_API_KEY"), $.env.get("TYPESAFE_BASE_URL"), $.env.get("JEV_URL")]).catch(() => [undefined, undefined, undefined]);
   const haiku = ![key, base, jevUrl].some((v) => v?.trim());
   const budgetMs = haiku ? HAIKU_TIMEOUT_MS : slow ? COMPACT_TIMEOUT_MS : TIMEOUT_MS;
@@ -239,7 +248,16 @@ async function askJev($: Engine, state: unknown, questions: Record<string, Quest
 
   try {
     const answers = await Promise.race([call, timeout]);
-    if (!answers) return done({ ok: false, error: `timeout after ${budgetMs}ms` });
+    if (!answers) {
+      // Only a timeout pauses (a refused or failing endpoint answers fast and costs nothing).
+      jevPause.ms = jevPause.ms ? Math.min(jevPause.ms * 2, MAX_PAUSE_MS) : PAUSE_MS;
+      jevPause.until = startedAt + budgetMs + jevPause.ms;
+      jevPause.at = startedAt;
+      jevPause.error = `timeout after ${budgetMs}ms`;
+      return done({ ok: false, error: jevPause.error });
+    }
+    jevPause.ms = 0;
+    jevPause.until = 0;
     return done({ ok: true, answers });
   } catch (err) {
     return done({ ok: false, error: err instanceof Error ? err.message : String(err) });
@@ -915,6 +933,9 @@ export const register = (on: On, options: Options): void => {
   // user turn neither consumes nor inherits it, a user pasting the follow-up text triggers nothing, and a meta prompt in
   // between (a background-task notification) does not re-open the follow-up turn to a second check. A hot reload forgets it: at worst one more follow-up.
   let donePending = false;
+  // Bumped at every session.end: a done follow-up submitted before a /clear must not land in the new conversation.
+  let sessionEpoch = 0;
+  let followUpEpoch = 0;
   // Why the last follow-up failed to submit: its rejection arrives after the hook frame ended, so it is logged by the next turn.complete.
   let lostFollowUp: string | undefined;
   // Phase 3: classify each prompt as it is sent and, when Jev is confident, add a short hint only Claude reads.
@@ -922,6 +943,7 @@ export const register = (on: On, options: Options): void => {
   on("prompt.submit", async function onPromptSubmit($: Engine, e: PromptEvent, next: Next<PromptEvent, unknown>): Promise<unknown> {
     if ((await jevMissing($)).length) return next(e);
     if (e.origin?.kind === "plugin" && e.origin.name === PLUGIN_NAME) {
+      if (followUpEpoch !== sessionEpoch) return { drop: "jevfort: done follow-up dropped, the conversation was cleared" };
       donePending = true;
       return next(e);
     }
@@ -1059,6 +1081,7 @@ export const register = (on: On, options: Options): void => {
   on("session.start", async function onSessionStart($: Engine, e: unknown, next: Next<unknown, unknown>): Promise<unknown> {
     // A new session (a start, a reload) gets its own first-turn estimate, an empty band, Auto on and a fresh cache
     // countdown; session.end does the same for /clear and /resume, where no session.start follows.
+    sessionEpoch += 1;
     forgetConversation();
     resetCache($);
     // Until the baseline below, a listing raised beneath `next(e)` (before jev-api registered) applies nothing.
@@ -1175,6 +1198,7 @@ export const register = (on: On, options: Options): void => {
           if (await checkDone($, e, doneThreshold)) {
             // Not awaited: it resolves only once the new turn starts, which waits for this turn to end. No `$` call in the
             // rejection handler: it runs after this frame, so the next turn.complete logs the error in-frame.
+            followUpEpoch = sessionEpoch;
             $.prompt.submit({ text: DONE_PROMPT }).catch((err: unknown) => {
               donePending = false;
               lostFollowUp = String(err);

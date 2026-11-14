@@ -20,12 +20,19 @@ test("an empty log gives a hint, not a crash", () => {
 });
 
 test("shell output and slash-command rows are not taken as the request", () => {
+  // Live (2.1.325): a `!` command starts a turn of its own, so the prompt before it is not what that turn answers.
   const turn = splitTurn([
     { role: "user", text: "delete the folder /tmp/x", toolUses: [] },
     { role: "user", text: "<bash-input>mkdir -p /tmp/x</bash-input>", toolUses: [] },
     { role: "user", text: "<bash-stdout>(Bash completed with no output)</bash-stdout>", toolUses: [] },
   ]);
-  expect(turn?.request).toBe("delete the folder /tmp/x");
+  expect(turn).toBeUndefined();
+  // Output of a local command (no bash-input) is skipped and the prompt before it stands.
+  const local = splitTurn([
+    { role: "user", text: "delete the folder /tmp/x", toolUses: [] },
+    { role: "user", text: "<local-command-stdout>Total cost: $0.01</local-command-stdout>", toolUses: [] },
+  ]);
+  expect(local?.request).toBe("delete the folder /tmp/x");
 });
 
 test("times show HH:MM, with the date when not on the latest entry's day", () => {
@@ -95,6 +102,17 @@ test("a slash command that started a turn is the request, a local command is not
   const local = typed("<command-name>/jev</command-name>\n<command-args></command-args>");
   expect(splitTurn([typed("Thanks!"), { role: "assistant", text: "ok", toolUses: [] }, local])?.request).toBe("Thanks!");
   expect(splitTurn([typed("Thanks!"), { role: "assistant", text: "ok", toolUses: [] }, local, typed("<task-notification>done</task-notification>")])?.request).toBe("Thanks!");
+});
+
+test("rows that are no request: compaction summary, interrupt, a bang command, an image-only prompt", () => {
+  const typed = (text: string) => ({ role: "user" as const, text, toolUses: [] });
+  const reply = { role: "assistant" as const, text: "ok", toolUses: [] };
+  const summary = typed("This session is being continued from a previous conversation that ran out of context. The summary below covers...");
+  expect(splitTurn([typed("fix the bug"), reply, summary])?.request).toBe("fix the bug");
+  expect(splitTurn([summary, reply])?.request).toContain("This session is being continued");
+  expect(splitTurn([typed("fix the bug"), reply, typed("[Request interrupted by user]")])).toBeUndefined();
+  expect(splitTurn([typed("fix the bug"), reply, typed("<bash-input>echo hi</bash-input>"), typed("<bash-stdout>hi</bash-stdout><bash-stderr></bash-stderr>")])).toBeUndefined();
+  expect(splitTurn([typed("what colour?"), reply, typed("")])).toBeUndefined();
 });
 
 test("only skills related to the prompt are offered", () => {

@@ -373,6 +373,28 @@ test("Jev calls that do not answer within 4000 ms time out and Claude takes the 
   expect(await runJev($, "")).toContain("unavailable: timeout after 4000ms");
 });
 
+test("After a timeout Jev is not asked again for 30 s, then once more; a timeout doubles the pause", async ($, on) => {
+  const seen: unknown[] = [];
+  const { clock, calls } = setup(on, { messages: [user("what does this project do?")], jev: () => new Promise<never>(() => {}), env: { JEV_URL: "https://jev.example/x" } });
+  claudeBeneath(on, seen);
+  let run = drain($.turn.step(step));
+  while (calls() < 1) await clock.advance(0);
+  await clock.advance(4000);
+  await run;
+  expect(calls()).toBe(1);
+  // Within the pause nothing is sent.
+  await drain($.turn.step(step));
+  expect(calls()).toBe(1);
+  expect(await runJev($, "")).toContain("paused for");
+  // After it, one probe goes out.
+  await clock.advance(30_000);
+  run = drain($.turn.step(step));
+  while (calls() < 2) await clock.advance(0);
+  await clock.advance(4000);
+  await run;
+  expect(calls()).toBe(2);
+});
+
 test("without any Jev variable (Haiku answers in jev-api) the budget is 15000 ms", async ($, on) => {
   const seen: unknown[] = [];
   const { sent, clock } = setup(on, { messages: [user("what does this project do?")], jev: () => new Promise<never>(() => {}) });

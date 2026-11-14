@@ -6,6 +6,12 @@
  * @packageDocumentation
  */
 
+/** The first pause after a timeout of Jev, in ms; it doubles with every further timeout up to {@link MAX_PAUSE_MS}. */
+export const PAUSE_MS = 30_000;
+
+/** The longest pause after repeated timeouts of Jev, in ms. */
+export const MAX_PAUSE_MS = 600_000;
+
 /** How long a finished step waits for the parallel step measurement, in ms: it only feeds the log. */
 export const MEASURE_GRACE_MS = 250;
 

@@ -10,6 +10,8 @@ function isTranscriptOnly(text) {
 	return rest === "" || TRANSCRIPT_ONLY.test(rest);
 }
 const COMMAND_ROW = /^\s*<command-message>[\s\S]*?<\/command-message>\s*<command-name>\s*([^<]*?)\s*<\/command-name>\s*(?:<command-args>([\s\S]*)<\/command-args>\s*)?$/;
+const COMPACT_SUMMARY = "This session is being continued from a previous conversation that ran out of context.";
+const INTERRUPT = /^\[Request interrupted by user( for tool use)?\]$/;
 function typedCommand(text) {
 	const m = COMMAND_ROW.exec(text);
 	if (!m?.[1]) return undefined;
@@ -17,9 +19,16 @@ function typedCommand(text) {
 	return args ? `${m[1]} ${args}` : m[1];
 }
 export function splitTurn(messages) {
+	let summary;
 	for (let i = messages.length - 1; i >= 0; i--) {
 		const m = messages[i];
-		if (m.role !== "user" || m.text.trim() === "" || m.toolResults?.length) continue;
+		if (m.role !== "user" || m.toolResults?.length) continue;
+		const text = m.text.trim();
+		if (text === "" || INTERRUPT.test(text) || /^<bash-input>/.test(text) && isTranscriptOnly(text)) return undefined;
+		if (text.startsWith(COMPACT_SUMMARY)) {
+			summary ??= i;
+			continue;
+		}
 		const typed = typedCommand(m.text);
 		if (typed) return {
 			request: typed,
@@ -31,7 +40,10 @@ export function splitTurn(messages) {
 			steps: messages.slice(i + 1)
 		};
 	}
-	return undefined;
+	return summary === undefined ? undefined : {
+		request: messages[summary].text,
+		steps: messages.slice(summary + 1)
+	};
 }
 export function toolCalls(steps) {
 	return steps.flatMap((m) => m.role === "assistant" ? m.toolUses : []);

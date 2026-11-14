@@ -3,7 +3,7 @@ import { CACHE_TTL, cacheColor, cacheLabel, minutesLeft, nextTtl } from "./cache
 import { absolute, AUTH_TOOL, bash, BUILTIN_COMMANDS, clipScript, coversStep, dedupeSkills, isSafeToOffer, MAX_READS, mentionedPaths, quotedTerms, relevant, SAFE_MAKE, SAFE_SCRIPT, sameCall, SKILL_BLOCKLIST_KEY } from "./candidates.mjs";
 import { COMPACT_MAX_TOKENS, COMPACT_MODEL, COMPACT_SYSTEM, compactInstructions, compactItems, haikuTranscript, RELEVANCE } from "./compact.mjs";
 import { clip, splitTurn, summarize, toolCalls } from "./context.mjs";
-import { choice, COMPACT_API_TIMEOUT_S, COMPACT_TIMEOUT_MS, HAIKU_API_TIMEOUT_S, HAIKU_TIMEOUT_MS, isAnswer, JEV_API_TIMEOUT_S, JEV_BATCH, JEV_TOOL_PREFIX, JEV_TOOLS, MAX_CHOICE_OPTIONS, MAX_ERROR, MEASURE_GRACE_MS, missingJevTools, noul, score, TIMEOUT_MS } from "./jev.mjs";
+import { choice, COMPACT_API_TIMEOUT_S, COMPACT_TIMEOUT_MS, HAIKU_API_TIMEOUT_S, HAIKU_TIMEOUT_MS, isAnswer, JEV_API_TIMEOUT_S, JEV_BATCH, JEV_TOOL_PREFIX, JEV_TOOLS, MAX_CHOICE_OPTIONS, MAX_ERROR, MAX_PAUSE_MS, MEASURE_GRACE_MS, missingJevTools, noul, PAUSE_MS, score, TIMEOUT_MS } from "./jev.mjs";
 import { LOG_KEY, MAX_ENTRIES, recentDecisions, remember, statsKey } from "./log.mjs";
 import { bestAction, bounds, difficultyQuestion, doneQuestion, EFFORT_ORDER, effortQuestion, ESTIMATE_SPEC, ESTIMATE_TOOL, estimateEffort, EVERY_TURN_MODELS, inBandRange, inScratchpad, isEffort, lowerModel, mechanicalQuestion, modelFamily, nextActionQuestion, parseEstimateInput, pickCandidate, route, shouldContinue, singleActionQuestion } from "./policy.mjs";
 import { hints, NONE, promptQuestions } from "./prompt.mjs";
@@ -26,14 +26,30 @@ const FINISHED = new Set([
 	"idle"
 ]);
 const asText = (v) => String(v);
+const jevPause = {
+	until: 0,
+	ms: 0,
+	at: 0,
+	error: ""
+};
 async function askJev($, state, questions, slow = false) {
 	const startedAt = await $.clock.now().catch(() => Date.now());
+	if (startedAt < jevPause.at) Object.assign(jevPause, {
+		until: 0,
+		ms: 0,
+		at: 0,
+		error: ""
+	});
 	const done = async (r) => ({
 		...r.ok ? r : {
 			ok: false,
 			error: clip(r.error, MAX_ERROR)
 		},
 		ms: await $.clock.now().catch(() => Date.now()) - startedAt
+	});
+	if (startedAt < jevPause.until) return done({
+		ok: false,
+		error: `paused for ${Math.ceil((jevPause.until - startedAt) / 1e3)} s after a timeout (${jevPause.error})`
 	});
 	const [key, base, jevUrl] = await Promise.all([
 		$.env.get("TYPESAFE_API_KEY"),
@@ -78,10 +94,18 @@ async function askJev($, state, questions, slow = false) {
 	const timeout = $.clock.sleep(budgetMs).then(() => undefined);
 	try {
 		const answers = await Promise.race([call, timeout]);
-		if (!answers) return done({
-			ok: false,
-			error: `timeout after ${budgetMs}ms`
-		});
+		if (!answers) {
+			jevPause.ms = jevPause.ms ? Math.min(jevPause.ms * 2, MAX_PAUSE_MS) : PAUSE_MS;
+			jevPause.until = startedAt + budgetMs + jevPause.ms;
+			jevPause.at = startedAt;
+			jevPause.error = `timeout after ${budgetMs}ms`;
+			return done({
+				ok: false,
+				error: jevPause.error
+			});
+		}
+		jevPause.ms = 0;
+		jevPause.until = 0;
 		return done({
 			ok: true,
 			answers
@@ -567,10 +591,13 @@ export const register = (on, options) => {
 		});
 	});
 	let donePending = false;
+	let sessionEpoch = 0;
+	let followUpEpoch = 0;
 	let lostFollowUp;
 	on("prompt.submit", async function onPromptSubmit($, e, next) {
 		if ((await jevMissing($)).length) return next(e);
 		if (e.origin?.kind === "plugin" && e.origin.name === PLUGIN_NAME) {
+			if (followUpEpoch !== sessionEpoch) return { drop: "jevfort: done follow-up dropped, the conversation was cleared" };
 			donePending = true;
 			return next(e);
 		}
@@ -706,6 +733,7 @@ export const register = (on, options) => {
 		autoOff = false;
 	};
 	on("session.start", async function onSessionStart($, e, next) {
+		sessionEpoch += 1;
 		forgetConversation();
 		resetCache($);
 		jevState = undefined;
@@ -810,6 +838,7 @@ export const register = (on, options) => {
 			if (doneCheck && !exempt && e.reason === "answer") {
 				try {
 					if (await checkDone($, e, doneThreshold)) {
+						followUpEpoch = sessionEpoch;
 						$.prompt.submit({ text: DONE_PROMPT }).catch((err) => {
 							donePending = false;
 							lostFollowUp = String(err);

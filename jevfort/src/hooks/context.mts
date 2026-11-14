@@ -94,6 +94,12 @@ function isTranscriptOnly(text: string): boolean {
  */
 const COMMAND_ROW = /^\s*<command-message>[\s\S]*?<\/command-message>\s*<command-name>\s*([^<]*?)\s*<\/command-name>\s*(?:<command-args>([\s\S]*)<\/command-args>\s*)?$/;
 
+/** How the row a compaction leaves begins. */
+const COMPACT_SUMMARY = "This session is being continued from a previous conversation that ran out of context.";
+
+/** The row Claude Code stores when the user presses Esc. */
+const INTERRUPT = /^\[Request interrupted by user( for tool use)?\]$/;
+
 /**
  * The slash command a row stands for, as typed.
  *
@@ -116,14 +122,24 @@ function typedCommand(text: string): string | undefined {
  * @returns The request and the steps after it, or `undefined` without a request.
  */
 export function splitTurn(messages: readonly SessionMessage[]): TurnContext | undefined {
+  let summary: number | undefined;
   for (let i = messages.length - 1; i >= 0; i--) {
     const m = messages[i];
-    if (m.role !== "user" || m.text.trim() === "" || m.toolResults?.length) continue;
+    if (m.role !== "user" || m.toolResults?.length) continue;
+    const text = m.text.trim();
+    // No request for this turn: an empty row (an image-only prompt), the user's interrupt marker, a `!` shell command.
+    // The walk stops: an older prompt is not what this turn answers.
+    if (text === "" || INTERRUPT.test(text) || (/^<bash-input>/.test(text) && isTranscriptOnly(text))) return undefined;
+    // The summary a compaction leaves is no request; it stands in only when nothing typed is left before it.
+    if (text.startsWith(COMPACT_SUMMARY)) {
+      summary ??= i;
+      continue;
+    }
     const typed = typedCommand(m.text);
     if (typed) return { request: typed, command: true, steps: messages.slice(i + 1) };
     if (!isTranscriptOnly(m.text)) return { request: m.text, steps: messages.slice(i + 1) };
   }
-  return undefined;
+  return summary === undefined ? undefined : { request: messages[summary].text, steps: messages.slice(summary + 1) };
 }
 
 /**
