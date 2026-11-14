@@ -42,7 +42,8 @@ const SIBLING_IMPORT = /^import\s*\{([^}]*)\}\s*from\s*"\.\/([\w-]+)\.mjs";?[ \t
  * `plugin/hooks/hooks.json` does not list; the listed entry modules stay separate files (Claude Code reads them) and
  * import what they need from `./lib.mjs` instead of the helpers. Works on type-stripped code and relies on what the
  * sources guarantee, all of it checked here: helpers import each other by `./name.mjs` with named imports only (no `as`), their
- * top-level names are unique across helpers (they were one file once), and they keep no state at module level that
+ * top-level names (imported or declared) are unique across helpers (they were one file once; named imports of one
+ * other source, such as `node:path`, merge into one import), and they keep no state at module level that
  * a test kit reload could miss.
  *
  * @param compiled - Type-stripped code by output path.
@@ -91,13 +92,30 @@ function bundleLib(compiled: Map<string, string>): { members: string[]; entries:
     ordered.push(f);
   };
   for (const f of members) visit(f);
-  // every top-level name is unique across the helpers
+  // named imports of one source merge into one import (the same name from two helpers is bound once); others stay whole lines
+  const named = new Map<string, Set<string>>();
+  const imports: string[] = [];
+  for (const line of hoisted) {
+    const m = /^import\s*\{([^}]*)\}\s*from\s*(["'][^"']*["']);?$/.exec(line);
+    if (!m) imports.push(line);
+    else for (const s of m[1].split(",").map((x) => x.trim().replace(/\s+/g, " ")).filter(Boolean)) named.set(m[2], (named.get(m[2]) ?? new Set()).add(s));
+  }
+  for (const [source, specs] of named) imports.push(`import { ${[...specs].join(", ")} } from ${source};`);
+  // every top-level name, imported or declared, is unique across the helpers
   const seen = new Map<string, string>();
+  const bind = (name: string, where: string): void => {
+    const other = seen.get(name);
+    if (other !== undefined) fail(`${name} is bound by ${other} and ${where}`);
+    seen.set(name, where);
+  };
+  for (const line of imports) {
+    // the local name is the last word of each specifier: `a`, `a as b`, `* as b`, a default `b`
+    const clause = /^import\s*([^"']*?)\s*from\s*["']/.exec(line)?.[1] ?? "";
+    for (const s of clause.replace(/[{}]/g, ",").split(",").map((x) => x.trim()).filter(Boolean)) bind(s.split(/\s+/).at(-1) ?? s, `\`${line}\``);
+  }
   for (const f of ordered) {
     for (const m of (bodies.get(f) ?? "").matchAll(/^(?:export\s+)?(?:async\s+)?(?:function\*?|const|let|class)\s+([A-Za-z_$][\w$]*)/gm)) {
-      const other = seen.get(m[1]);
-      if (other !== undefined) fail(`${m[1]} is declared in ${path.relative(ROOT, other)} and ${path.relative(ROOT, f)}`);
-      seen.set(m[1], f);
+      bind(m[1], path.relative(ROOT, f));
     }
   }
   // the entries import from lib.mjs; lib.mjs exports exactly the names they take
@@ -124,7 +142,7 @@ function bundleLib(compiled: Map<string, string>): { members: string[]; entries:
   }
   const text = ordered.map((f) => (bodies.get(f) ?? "").replace(/^export\s+(?=(?:async\s+)?(?:function|const|let|class)\b)/gm, "")).join("\n");
   if (/^export\s/m.test(text)) fail("a helper exports something other than a declaration");
-  const code = `${[...hoisted].join("\n")}\n${text}\nexport { ${[...needed].sort().join(", ")} };\n`;
+  const code = `${imports.join("\n")}\n${text}\nexport { ${[...needed].sort().join(", ")} };\n`;
   return { members, entries, code };
 }
 
