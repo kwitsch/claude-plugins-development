@@ -2361,7 +2361,7 @@ export async function lintFileHandler(args: PostToolUseHookInput, scoped: { fp: 
     const d0 = digestOrNull(resolved);
     // `await` inside the try is load-bearing: a rejected promise must land in the catch (fail open).
     const kept = await lintResolved(resolved, args.cwd, ranges, "PostToolUse");
-    const d1 = digestOrNull(resolved);
+    const d1 = kept.length > 0 ? digestOrNull(resolved) : null; // only a held finding needs the second digest
     return formatFindings(await settleFindings(kept, resolved, rec, d0, d1), "PostToolUse", "universal-lint");
   } catch {
     return {};
@@ -2700,7 +2700,7 @@ export async function fileChangedHandler(args: PostToolUseHookInput): Promise<Ho
     try {
       d0 = digestOrNull(s.fp);
       kept = await lintResolved(s.fp, cwd, null, "FileChanged");
-      d1 = digestOrNull(s.fp);
+      if (kept.length > 0) d1 = digestOrNull(s.fp); // only a held finding needs the second digest
     } finally {
       try {
         if (slot) rmSync(slot, { force: true });
