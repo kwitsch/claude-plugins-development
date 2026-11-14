@@ -2035,11 +2035,12 @@ const LOC_ROW_RE = /^\s*(?<line>\d+):\d+\s/;
 const LOC_SHELLCHECK_RE = /^In .+ line (?<line>\d+):/;
 
 /**
- * Parse/syntax error wording (plus tsc's TS1xxx and shellcheck's SC1xxx parser codes). An edit-caused parse error is
+ * Parse/syntax error wording (plus rustc's unnumbered `error: expected ...` header, tsc's TS1xxx and shellcheck's SC1xxx
+ * parser codes; a bare `expected '...'` would also match eslint eqeqeq and rustc E0308 type errors). An edit-caused parse error is
  * often reported away from the edit (unclosed brace -> EOF), so such a diagnostic is kept even outside the range.
  * shortcut: wording heuristic, a tool phrasing parse errors differently is still gated; extend the list when one shows up.
  */
-const PARSE_ERROR_RE = /pars(?:e|ing) error|syntax ?error|unexpected (?:token|end|eof|character|indent)|unterminated|unclosed|end of (?:file|input)|\bexpected [`'"]|\b(?:TS1|SC1)\d{3}\b/i;
+const PARSE_ERROR_RE = /pars(?:e|ing) error|syntax ?error|unexpected (?:token|end|eof|character|indent)|unterminated|unclosed|end of (?:file|input)|\berror: expected\b|\b(?:TS1|SC1)\d{3}\b/i;
 
 /**
  * Drop the diagnostics of `finding` located in `resolved` outside `ranges`. Text is split into blank-line paragraphs;

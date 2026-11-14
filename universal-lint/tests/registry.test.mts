@@ -1073,6 +1073,15 @@ test("gateFinding: an own-file parse error outside the range is kept (location l
   assert.equal(gateFinding(gf("a.ts(9,1): error TS2322: type-marker\n"), [[0, 0]], resolved), null);
 });
 
+test("gateFinding: eslint eqeqeq and rustc E0308 `expected` wording outside the range are not parse errors (dropped)", () => {
+  const js = path.join(GATE_DIR, "a.js");
+  assert.equal(gateFinding(gf(`${js}\n  3:7  error  Expected '===' and instead saw '=='  eqeqeq\n\n✖ 1 problem\n`), [[1, 1]], js), null);
+  const rs = path.join(GATE_DIR, "src", "c.rs");
+  const e0308 = "error[E0308]: mismatched types\n --> src/c.rs:4:20\n  |\n4 |     let x: u8 = {};\n  |            --   ^^ expected `u8`, found `()`\n";
+  assert.equal(gateFinding(gf(e0308), [[2, 2]], rs), null);
+  assert.ok(gateFinding(gf("error: expected `;`, found `println`\n --> src/c.rs:4:20\n"), [[2, 2]], rs));
+});
+
 test("gateFinding: text without any location is returned unchanged", () => {
   const f = gf("something went wrong\n");
   assert.equal(gateFinding(f, [[0, 0]], path.join(GATE_DIR, "a.ts")), f);
