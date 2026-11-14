@@ -66,3 +66,9 @@ test("the built hooks modules exist", () => {
     assert.ok(existsSync(new URL(`../plugin/hooks/${f}.mjs`, import.meta.url)), f);
   }
 });
+
+test("the README mentions skill or plan hints only where it says the 0.12.0 removal", () => {
+  const readme = readFileSync(new URL("../plugin/README.md", import.meta.url), "utf8");
+  const hintLines = readme.split("\n").filter((line) => /\bhints?\b/i.test(line));
+  assert.deepEqual(hintLines.map((line) => line.slice(0, 20)), ["Coming from 0.11: th"]);
+});
