@@ -4,8 +4,9 @@
 // Jev is the jev-api plugin's batch tool: a fake `tool.call` answers `mcp__jev-api__batch` question by question.
 import { createKit } from "claude-engine-vitest";
 import type { On } from "claude-engine-vitest";
-import { expect } from "vitest";
+import { expect, test as pureTest } from "vitest";
 import { JEV_BATCH, JEV_TOOL_PREFIX } from "../plugin/hooks/jev.mjs";
+import { statsKey } from "../plugin/hooks/log.mjs";
 import { difficultyQuestion, doneQuestion, effortQuestion, mechanicalQuestion, nextActionQuestion, singleActionQuestion, taskEndQuestion } from "../plugin/hooks/policy.mjs";
 
 // The manifest defaults (jevfort/package.json claudePlugin.userConfig): the kit does not fill userConfig defaults.
@@ -1152,10 +1153,12 @@ test("Built-in commands are never offered as skills, and a skill that fails is b
   expect(offered[1] ?? []).not.toContain("skill changelog");
 });
 
-for (const [name, answer, blocked] of [
-  ["succeeds", { result: "ok" }, false],
-  ["is denied", { deny: "Skill: changelog is not a skill" }, true],
-] as const) {
+for (
+  const [name, answer, blocked] of [
+    ["succeeds", { result: "ok" }, false],
+    ["is denied", { deny: "Skill: changelog is not a skill" }, true],
+  ] as const
+) {
   test(`A skill Jev ran itself that ${name} is ${blocked ? "" : "not "}blocklisted`, { options: { takeOnlyForBypass: false } }, async ($, on) => {
     const offered: string[][] = [];
     setup(on, {
@@ -2363,4 +2366,9 @@ test("An inactive turn.complete writes the decisions pending from the turn", asy
   expect(sets).toEqual([]);
   await $.turn.complete(answered("t1", "Done."));
   expect(sets.filter((k) => k === "log")).toHaveLength(1);
+});
+
+pureTest("statsKey counts a passed decision apart from an acted one", () => {
+  expect(statsKey({ kind: "take", applied: true })).toBe("take");
+  expect(statsKey({ kind: "take", applied: false })).toBe("take:pass");
 });
