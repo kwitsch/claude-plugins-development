@@ -468,6 +468,22 @@ test("a /clear (session.end) drops the done follow-up that was submitted before 
   expect(JSON.stringify(r)).toContain("conversation was cleared");
 });
 
+test("a /clear during the done check drops the follow-up the check queues", { options: { classify: false } }, async ($, on) => {
+  let release = () => {};
+  const gate = new Promise<void>((resolve) => (release = resolve));
+  const { sent, clock } = setup(on, { messages: [user("rename foo to bar in all files")], jev: (q) => gate.then(() => (q.id === "done" ? { type: "noul", noul: 0.04 } : undefined)) as Promise<never> });
+  const submitted = followUps(on);
+  on("session.end", () => ({}));
+  const turn = $.turn.complete(answered("t1", "Half done."));
+  while (!ids(sent).includes("done")) await clock.advance(0);
+  await $.session.end({ reason: "clear", sessionId: "s1", resume: { id: "s1" } });
+  release();
+  await turn;
+  await expect.poll(() => submitted.length).toBe(1);
+  const r = await ownSubmit($, submitted[0]);
+  expect(JSON.stringify(r)).toContain("conversation was cleared");
+});
+
 test("without any Jev variable (Haiku answers in jev-api) the budget is 15000 ms", async ($, on) => {
   const seen: unknown[] = [];
   const { sent, clock } = setup(on, { messages: [user("what does this project do?")], jev: () => new Promise<never>(() => {}) });
