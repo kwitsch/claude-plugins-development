@@ -40,6 +40,8 @@ type World = {
   priority?: string;
   /** Text of `gm_map`. */
   map?: string;
+  /** `session.compact` answers a skip instead of messages. */
+  compactSkip?: boolean;
 };
 
 /**
@@ -75,7 +77,7 @@ function setup(on: Parameters<typeof mock.clock>[0], w: World = {}) {
   });
   on("session.start", async () => ({}));
   on("session.end", async () => ({}));
-  on("session.compact", async () => ({ messages: [] }));
+  on("session.compact", async () => (w.compactSkip ? { skip: "not now" } : { messages: [] }));
   on("prompt.submit", (_$, e) => {
     prompts.push({ context: e.context as readonly string[] | undefined });
     return { value: {} };
@@ -160,6 +162,17 @@ test("a precompute or a subagent's compaction does not brief again", async ($, o
   await prompt($, "where is foo_bar defined in the code");
   await $.session.compact({ trigger: "precompute" });
   await $.session.compact({ trigger: "auto", agentId: "a1" });
+  await prompt($, "something else entirely about parseConfig here");
+  const after = (prompts[1].context ?? []).join("\n");
+  expect(after).not.toMatch(/Project indexed and ready/);
+  expect(after).not.toMatch(/always use X/);
+});
+
+test("a skipped compaction does not brief again", async ($, on) => {
+  const { prompts } = setup(on, { compactSkip: true });
+  await $.session.start({ source: "startup" });
+  await prompt($, "where is foo_bar defined in the code");
+  await $.session.compact({ trigger: "auto" });
   await prompt($, "something else entirely about parseConfig here");
   const after = (prompts[1].context ?? []).join("\n");
   expect(after).not.toMatch(/Project indexed and ready/);
