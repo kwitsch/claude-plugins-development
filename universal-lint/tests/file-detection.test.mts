@@ -507,6 +507,23 @@ test("FileChanged: a change after the last completed check runs tsc again, a new
   assert.equal(calls(e, "tsc "), 2);
 });
 
+test("FileChanged: the payload's session_id keys the coverage stamp, another session runs tsc again (F13)", () => {
+  const e = makeEnv();
+  e.file("tsconfig.json", TSCONFIG);
+  slowStub(e, "tsc", 0, "a.ts(1,1): error TS2322: marker", 2);
+  const a = e.file("a.ts", "export const a = 1;\n");
+  gitInit(e);
+  writeFileSync(a, "export const a = 2;\n");
+  for (const [i, session_id] of ["A", "B"].entries()) {
+    const r = changed(e, a, { session_id });
+    assert.equal(r.status, 2);
+    assert.match(r.stderr, /TS2322: marker/);
+    assert.equal(calls(e, "tsc "), i + 1);
+  }
+  assert.equal(changed(e, a, { session_id: "A" }).status, 0);
+  assert.equal(calls(e, "tsc "), 2);
+});
+
 test("FileChanged: an unusable fc-locks dir runs tsc unlocked (fail open, F13)", () => {
   const e = makeEnv();
   e.file("tsconfig.json", TSCONFIG);
