@@ -177,7 +177,7 @@ interface LangEntry {
 }
 
 /** One tool's issues, ready to be rendered into the hook's additionalContext. */
-interface Finding {
+export interface Finding {
   /** Name of the tool that reported. */
   tool: string;
   /** What was checked, relative to the project root. */
@@ -1887,6 +1887,84 @@ export function editRanges(args: PostToolUseHookInput): Array<[number, number]> 
   return ranges;
 }
 
+/** Default length of the settle window (ms): findings are held this long before they are reported (F34). */
+export const SETTLE_MS = 5000;
+
+/**
+ * Length of the hold for this process: `UNIVERSAL_LINT_SETTLE_MS` (a finite number >= 0; a test and perf-harness seam,
+ * not a user setting) else `SETTLE_MS`, cut so the hold ends at least 1 s before the 90 s hook backstop.
+ *
+ * @param uptimeMs - Process uptime in ms (injectable for tests).
+ * @returns Milliseconds to wait, never negative.
+ */
+export function settleWaitMs(uptimeMs: number = process.uptime() * 1000): number {
+  const raw = process.env.UNIVERSAL_LINT_SETTLE_MS;
+  const n = raw === undefined || raw.trim() === "" ? Number.NaN : Number(raw);
+  const base = Number.isFinite(n) && n >= 0 ? n : SETTLE_MS;
+  return Math.max(0, Math.min(base, HOOK_TIMEOUT_MS - 1000 - uptimeMs));
+}
+
+/** One `structuredPatch` hunk with the old-line map the settle window's supersession needs. */
+export interface EditHunk {
+  /** 1-based first old line as in the patch (the line before the hunk when it has no old lines). */
+  oldStart: number;
+  /** Old-side lines walked (context and removed). */
+  oldLines: number;
+  /** 1-based first new line as in the patch. */
+  newStart: number;
+  /** New-side lines walked (context and added). */
+  newLines: number;
+  /** One entry per old-side line: its new 0-based line, or -1 when the edit removed it. */
+  map: number[];
+}
+
+/**
+ * The hunks of an Edit with the old-to-new line map of each (the data `editRanges` reads, kept per old line).
+ *
+ * @param args - The PostToolUse hook payload.
+ * @returns The hunks, or null when the whole file counts as edited (Write, other tool, missing or malformed patch).
+ */
+export function editHunks(args: PostToolUseHookInput): EditHunk[] | null {
+  const patch = args?.tool_response?.structuredPatch;
+  if (args?.tool_name !== "Edit" || !Array.isArray(patch)) return null;
+  const hunks: EditHunk[] = [];
+  for (const h of patch as Array<{ oldStart?: unknown; newStart?: unknown; lines?: unknown }>) {
+    if (typeof h?.oldStart !== "number" || typeof h.newStart !== "number" || !Array.isArray(h.lines)) return null;
+    const map: number[] = [];
+    let next = h.newStart - 1;
+    for (const l of h.lines as unknown[]) {
+      const c = typeof l === "string" ? l[0] : " ";
+      if (c === "\\") continue; // `\ No newline at end of file` is not a line
+      if (c === "-") map.push(-1);
+      else if (c === "+") next++;
+      else map.push(next++);
+    }
+    hunks.push({ oldStart: h.oldStart, oldLines: map.length, newStart: h.newStart, newLines: next - (h.newStart - 1), map });
+  }
+  return hunks;
+}
+
+/**
+ * Where an old line sits after an edit.
+ *
+ * @param line - 0-based line before the edit.
+ * @param hunks - The edit's hunks in file order.
+ * @returns The 0-based line after the edit, or null when the edit removed or replaced it.
+ */
+export function carryLine(line: number, hunks: readonly EditHunk[]): number | null {
+  let shift = 0;
+  for (const h of hunks) {
+    const start = h.oldLines === 0 ? h.oldStart : h.oldStart - 1; // a hunk without old lines names the line before it
+    if (line < start) break;
+    if (line < start + h.oldLines) {
+      const n = h.map[line - start];
+      return n < 0 ? null : n;
+    }
+    shift += h.newLines - h.oldLines;
+  }
+  return line + shift;
+}
+
 /**
  * Location regex A: `<path>.<ext>:<line>` or `<path>.<ext>(<line>` (ruff, ktlint, golangci-lint, go vet, checkstyle,
  * markdownlint, psalm, oxlint `,-[src/a.ts:3:7]`, cargo `--> src/a.rs:12:5`, tsc `a.ts(12,5)` / `a.ts:12:5`).
@@ -1914,12 +1992,15 @@ const PARSE_ERROR_RE = /pars(?:e|ing) error|syntax ?error|unexpected (?:token|en
  * not reportable. existsSync results are memoized per call.
  *
  * @param finding - One tool's finding.
- * @param ranges - Inclusive 0-based edited line ranges, or null when every line counts as edited.
+ * @param ranges - Inclusive 0-based edited line ranges, null when every line counts as edited, or a predicate on the
+ *   0-based line that says whether a diagnostic located there is kept (the settle window's "line survives" test).
  * @param resolved - Absolute path of the edited file.
+ * @param keepParseErrors - Keep an own-file parse error that misses `ranges` (default). The settle window turns it off:
+ *   a parse error on a line a later edit rewrote must not survive.
  * @returns The finding with only the kept text, `finding` itself when no line is located (unknown format, fail open),
  *   or null when nothing reportable remains.
  */
-export function gateFinding(finding: Finding, ranges: Array<[number, number]> | null, resolved: string): Finding | null {
+export function gateFinding(finding: Finding, ranges: Array<[number, number]> | null | ((line0: number) => boolean), resolved: string, keepParseErrors = true): Finding | null {
   const seen = new Map<string, boolean>();
   /** Memoized `existsSync` for this call (the filesystem is stable within one call). */
   const exists = (abs: string): boolean => {
@@ -1930,7 +2011,7 @@ export function gateFinding(finding: Finding, ranges: Array<[number, number]> | 
     }
     return found;
   };
-  const hit = (line: number): "hit" | "miss" => (ranges === null || ranges.some(([s, e]) => s <= line - 1 && line - 1 <= e) ? "hit" : "miss");
+  const hit = (line: number): "hit" | "miss" => (ranges === null || (typeof ranges === "function" ? ranges(line - 1) : ranges.some(([s, e]) => s <= line - 1 && line - 1 <= e)) ? "hit" : "miss");
   const classify = (raw: string): "hit" | "miss" | "foreign" | null => {
     const plain = raw.replace(ANSI_SGR_RE, "");
     const row = LOC_ROW_RE.exec(plain); // a stylish row first: its message text can look like `foo.bar(3)`
@@ -1965,7 +2046,7 @@ export function gateFinding(finding: Finding, ranges: Array<[number, number]> | 
     const preambleParse = PARSE_ERROR_RE.test(out.join("\n"));
     starts.forEach((start, n) => {
       const seg = lines.slice(start, starts[n + 1] ?? lines.length);
-      if (kinds[start] === "miss" && !preambleParse && !PARSE_ERROR_RE.test(seg.join("\n"))) return;
+      if (kinds[start] === "miss" && !(keepParseErrors && (preambleParse || PARSE_ERROR_RE.test(seg.join("\n"))))) return;
       out.push(...seg);
       any = true;
     });

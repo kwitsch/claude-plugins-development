@@ -996,11 +996,56 @@ export function editRanges(args) {
 	}
 	return ranges;
 }
+export const SETTLE_MS = 5e3;
+export function settleWaitMs(uptimeMs = process.uptime() * 1e3) {
+	const raw = process.env.UNIVERSAL_LINT_SETTLE_MS;
+	const n = raw === undefined || raw.trim() === "" ? Number.NaN : Number(raw);
+	const base = Number.isFinite(n) && n >= 0 ? n : SETTLE_MS;
+	return Math.max(0, Math.min(base, HOOK_TIMEOUT_MS - 1e3 - uptimeMs));
+}
+export function editHunks(args) {
+	const patch = args?.tool_response?.structuredPatch;
+	if (args?.tool_name !== "Edit" || !Array.isArray(patch)) return null;
+	const hunks = [];
+	for (const h of patch) {
+		if (typeof h?.oldStart !== "number" || typeof h.newStart !== "number" || !Array.isArray(h.lines)) return null;
+		const map = [];
+		let next = h.newStart - 1;
+		for (const l of h.lines) {
+			const c = typeof l === "string" ? l[0] : " ";
+			if (c === "\\") continue;
+			if (c === "-") map.push(-1);
+			else if (c === "+") next++;
+			else map.push(next++);
+		}
+		hunks.push({
+			oldStart: h.oldStart,
+			oldLines: map.length,
+			newStart: h.newStart,
+			newLines: next - (h.newStart - 1),
+			map
+		});
+	}
+	return hunks;
+}
+export function carryLine(line, hunks) {
+	let shift = 0;
+	for (const h of hunks) {
+		const start = h.oldLines === 0 ? h.oldStart : h.oldStart - 1;
+		if (line < start) break;
+		if (line < start + h.oldLines) {
+			const n = h.map[line - start];
+			return n < 0 ? null : n;
+		}
+		shift += h.newLines - h.oldLines;
+	}
+	return line + shift;
+}
 const LOC_PATH_RE = /(?<![^\s:()[\]'"])(?<path>[^\s:()[\]'"]+\.[A-Za-z0-9]+)[:(](?<line>\d+)(?:[:,]\d+)?/;
 const LOC_ROW_RE = /^\s*(?<line>\d+):\d+\s/;
 const LOC_SHELLCHECK_RE = /^In .+ line (?<line>\d+):/;
 const PARSE_ERROR_RE = /pars(?:e|ing) error|syntax ?error|unexpected (?:token|end|eof|character|indent)|unterminated|unclosed|end of (?:file|input)|\bexpected [`'"]|\b(?:TS1|SC1)\d{3}\b/i;
-export function gateFinding(finding, ranges, resolved) {
+export function gateFinding(finding, ranges, resolved, keepParseErrors = true) {
 	const seen = new Map();
 	const exists = (abs) => {
 		let found = seen.get(abs);
@@ -1010,7 +1055,7 @@ export function gateFinding(finding, ranges, resolved) {
 		}
 		return found;
 	};
-	const hit = (line) => ranges === null || ranges.some(([s, e]) => s <= line - 1 && line - 1 <= e) ? "hit" : "miss";
+	const hit = (line) => ranges === null || (typeof ranges === "function" ? ranges(line - 1) : ranges.some(([s, e]) => s <= line - 1 && line - 1 <= e)) ? "hit" : "miss";
 	const classify = (raw) => {
 		const plain = raw.replace(ANSI_SGR_RE, "");
 		const row = LOC_ROW_RE.exec(plain);
@@ -1042,7 +1087,7 @@ export function gateFinding(finding, ranges, resolved) {
 		const preambleParse = PARSE_ERROR_RE.test(out.join("\n"));
 		starts.forEach((start, n) => {
 			const seg = lines.slice(start, starts[n + 1] ?? lines.length);
-			if (kinds[start] === "miss" && !preambleParse && !PARSE_ERROR_RE.test(seg.join("\n"))) return;
+			if (kinds[start] === "miss" && !(keepParseErrors && (preambleParse || PARSE_ERROR_RE.test(seg.join("\n"))))) return;
 			out.push(...seg);
 			any = true;
 		});
