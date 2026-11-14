@@ -622,6 +622,25 @@ function walkToRoot(dir, checkDir) {
 export function hasProjectMarkdownlintConfig(fileDir) {
 	return walkToRoot(fileDir, (dir) => anyConfigExists(dir, MARKDOWNLINT_CONFIG_FILENAMES));
 }
+function hasMarkdownlintRc(fileDir, cwd) {
+	const found = (d) => configExists(d, ".markdownlintrc");
+	if (process.env.markdownlint_config || walkToRoot(fileDir, found) || walkToRoot(cwd, found)) return true;
+	const home = homedir();
+	return [
+		path.join(home, ".config", "markdownlint", "config"),
+		path.join(home, ".config", "markdownlint"),
+		path.join(home, ".markdownlint", "config"),
+		path.join(home, ".markdownlintrc"),
+		"/etc/markdownlint/config",
+		"/etc/markdownlintrc"
+	].some((p) => {
+		try {
+			return statSync(p).isFile();
+		} catch {
+			return false;
+		}
+	});
+}
 const STYLELINT_CONFIG_FILENAMES = [
 	".stylelintrc",
 	".stylelintrc.json",
@@ -681,7 +700,7 @@ export function buildArgv(tool, resolvedFile, cwd, manifest) {
 	if (tool.guardYamlLineLength && !hasProjectYamllintConfig(cwd) && !hasUserGlobalYamllintConfig()) {
 		argv.push("-d", YAMLLINT_NO_LINE_LENGTH_CONFIG_DATA);
 	}
-	if (tool.guardMarkdownLineLength && !hasProjectMarkdownlintConfig(dir)) {
+	if (tool.guardMarkdownLineLength && !hasProjectMarkdownlintConfig(dir) && !(tool.name === "markdownlint" && hasMarkdownlintRc(dir, cwd))) {
 		argv.push("--config", markdownlintNoLineLengthConfigPath());
 	}
 	if (tool.manifestPath) {

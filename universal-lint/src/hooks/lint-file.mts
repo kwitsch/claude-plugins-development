@@ -1191,6 +1191,29 @@ export function hasProjectMarkdownlintConfig(fileDir: string): boolean {
 }
 
 /**
+ * True if markdownlint (classic) reads an rc config: markdownlint-cli 0.49 starts from `rc("markdownlint")` (run-con)
+ * and deep-extends `--config` over it, so the MD013 guard would override it. run-con's places: `.markdownlintrc` from
+ * the spawn cwd upward (walked here from the file dir and `cwd`), `$markdownlint_config`, `~/.config/markdownlint{,/config}`,
+ * `~/.markdownlint/config`, `~/.markdownlintrc`, `/etc/markdownlint{rc,/config}`. markdownlint-cli2 reads none of them.
+ *
+ * @param fileDir - Directory of the edited file.
+ * @param cwd - Project root.
+ * @returns True when an rc config exists.
+ */
+function hasMarkdownlintRc(fileDir: string, cwd: string): boolean {
+  const found = (d: string): boolean => configExists(d, ".markdownlintrc");
+  if (process.env.markdownlint_config || walkToRoot(fileDir, found) || walkToRoot(cwd, found)) return true;
+  const home = homedir();
+  return [path.join(home, ".config", "markdownlint", "config"), path.join(home, ".config", "markdownlint"), path.join(home, ".markdownlint", "config"), path.join(home, ".markdownlintrc"), "/etc/markdownlint/config", "/etc/markdownlintrc"].some((p) => {
+    try {
+      return statSync(p).isFile(); // run-con reads files only; ~/.config/markdownlint is often the dir holding `config`
+    } catch {
+      return false;
+    }
+  });
+}
+
+/**
  * stylelint's per-directory config file names: cosmiconfig 10's default search places for module "stylelint", which
  * stylelint 18.0.0 uses unchanged (verified in its source). `package.json` is the remaining search place and counts
  * only with a `stylelint` key (`hasStylelintConfig`). Update together with stylelint's search places.
@@ -1314,7 +1337,7 @@ export function buildArgv(tool: LintTool, resolvedFile: string, cwd: string, man
   if (tool.guardYamlLineLength && !hasProjectYamllintConfig(cwd) && !hasUserGlobalYamllintConfig()) {
     argv.push("-d", YAMLLINT_NO_LINE_LENGTH_CONFIG_DATA);
   }
-  if (tool.guardMarkdownLineLength && !hasProjectMarkdownlintConfig(dir)) {
+  if (tool.guardMarkdownLineLength && !hasProjectMarkdownlintConfig(dir) && !(tool.name === "markdownlint" && hasMarkdownlintRc(dir, cwd))) {
     argv.push("--config", markdownlintNoLineLengthConfigPath());
   }
   // cargo clippy/check take no positional target. Resolve the nearest

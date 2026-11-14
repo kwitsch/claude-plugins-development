@@ -587,6 +587,24 @@ test("buildArgv: markdownlint-cli2 runs with only --no-globs when a project conf
   assert.deepEqual(buildArgv(markdownlintCli2, path.join(dir, "a.md"), dir), ["--no-globs", path.join(dir, "a.md")]);
 });
 
+test("buildArgv: classic markdownlint runs bare with a .markdownlintrc (rc config) above the file; cli2 keeps its guard", () => {
+  const root = mkdtempSync(path.join(tmpdir(), "ul-md-"));
+  writeFileSync(path.join(root, ".markdownlintrc"), "{\"MD013\": {\"line_length\": 20}}");
+  const sub = path.join(root, "docs");
+  mkdirSync(sub, { recursive: true });
+  const file = path.join(sub, "a.md");
+  const dataDir = mkdtempSync(path.join(tmpdir(), "ul-data-"));
+  const prev = process.env.CLAUDE_PLUGIN_DATA;
+  process.env.CLAUDE_PLUGIN_DATA = dataDir;
+  try {
+    assert.deepEqual(buildArgv(REGISTRY.markdown.chain[1], file, root), [file]);
+    assert.deepEqual(buildArgv(REGISTRY.markdown.chain[0], file, root), ["--no-globs", "--config", path.join(dataDir, "markdownlint-no-line-length.json"), file]);
+  } finally {
+    if (prev === undefined) delete process.env.CLAUDE_PLUGIN_DATA;
+    else process.env.CLAUDE_PLUGIN_DATA = prev;
+  }
+});
+
 test("REGISTRY: php chain is phpstan -> psalm, neither carries npmSpec", () => {
   assert.equal(REGISTRY.php.chain.length, 2);
   assert.equal(REGISTRY.php.chain[0].name, "phpstan");
