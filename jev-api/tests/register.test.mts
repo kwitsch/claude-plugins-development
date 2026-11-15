@@ -916,6 +916,14 @@ it("an already abandoned call sends no request", async () => {
   expect(fetched).toHaveLength(0);
 });
 
+// A call whose signal is aborted before it waits answers at once, though the registration never settles (the stub clock never fires).
+it("an already abandoned call does not wait for a registration that never settles", async () => {
+  const { run } = await direct({ tool: { register: () => new Promise(() => {}) } });
+  const ctl = new AbortController();
+  ctl.abort();
+  expect(await run("noul", ctl.signal)).toEqual({ deny: "noul: the call was abandoned" });
+});
+
 // F06: the abort listeners of settled calls are removed from a signal shared by many calls.
 it("settled calls leave no abort listeners on a shared signal", async () => {
   const { run } = await direct({ tool: { register: async (s: { name: string }) => ({ tool: TOOL(s.name) }) } });
