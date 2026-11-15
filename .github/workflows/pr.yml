@@ -28,9 +28,9 @@ jobs:
         run: |
           rc=0
           for p in $PLUGINS; do
-            # Claude memory only (CLAUDE.md, .claude/ rules): nothing ships, so no version bump and no release
-            if bash .github/scripts/memory-only.sh "$p" "origin/$BASE...HEAD"; then
-              echo "::notice::$p: only Claude memory files changed (CLAUDE.md, .claude/), no version bump required"; continue
+            # only package.json, src/ and plugin/ ship or build what ships; tests, docs, scripts, memory need no bump
+            if ! bash .github/scripts/ships.sh "$p" "origin/$BASE...HEAD"; then
+              echo "::notice::$p: package.json, src/ and plugin/ unchanged, no version bump required"; continue
             fi
             # Dependabot only touches dev tooling; the freshness check below still fails if the shipped build changes
             if [ "$AUTHOR" = "dependabot[bot]" ] && git diff --quiet "origin/$BASE...HEAD" -- "$p/plugin/"; then
