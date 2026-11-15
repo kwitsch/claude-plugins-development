@@ -1,6 +1,6 @@
 ---
 name: refactor-plugin
-description: Refactor one plugin of this repository end to end in a fresh worktree on its own branch cut from a freshly fetched origin/main - perf-worklist, then bughunt-loop, then a merge-ready PR. Use when the user asks to refactor, overhaul or run the full performance and bug hunt pass on a plugin.
+description: Refactor one plugin of this repository end to end in a fresh worktree on its own branch cut from a freshly fetched origin/main - perf-worklist, then bughunt, then a merge-ready PR. Use when the user asks to refactor, overhaul or run the full performance and bug hunt pass on a plugin.
 argument-hint: "<plugin-name>"
 ---
 
@@ -8,7 +8,7 @@ argument-hint: "<plugin-name>"
 
 The argument is the plugin directory name, seen from the repository root. Stop with one line if it is empty, contains anything but letters, digits, `.`, `_` or `-`, or if `<plugin>/package.json` does not exist or has no `claudePlugin` key.
 
-The user's request for this skill is the opt-in for the Workflow tool that `perf-worklist` and `bughunt-loop` use (load `workflow-authoring` first if it is not loaded). Never merge the PR.
+The user's request for this skill is the opt-in for the Workflow tool that `perf-worklist` and `bughunt` use (load `workflow-authoring` first if it is not loaded). Never merge the PR.
 
 ## 1. Worktree on a fresh origin/main
 
@@ -17,9 +17,9 @@ The user's request for this skill is the opt-in for the Workflow tool that `perf
 3. `git switch -c refactoring/<plugin>-$(date +%y%m%d) origin/main`: the branch starts at the fetched `origin/main` whatever the `worktree.baseRef` setting gave the worktree, and nothing is discarded. Stop with one line if that branch already exists.
 4. Note the worktree's absolute path, the branch and today's date (`yyyy-mm-dd`): the sub-skills need path and date for their workflow `args`. Run `pnpm install` when `node_modules` is missing.
 
-## 2. perf-worklist, then 3. bughunt-loop
+## 2. perf-worklist, then 3. bughunt
 
-Run `Skill(perf-worklist, <plugin>)`, wait for its Workflow to finish (the completion notification), then run `Skill(bughunt-loop, <plugin>)` in the same worktree (both edit the same files, never in parallel). In both, "Start: worktree and branch" is already done: skip it (pass the noted worktree path and date on) and create no `perf/` or `fix/` branch; the work stays on the refactoring branch. A blocked job or stop is noted, not fatal.
+Run `Skill(perf-worklist, <plugin>)`, wait for its Workflow to finish (the completion notification), then run `Skill(bughunt, <plugin>)` in the same worktree (both edit the same files, never in parallel). In both, "Start: worktree and branch" is already done: skip it (pass the noted worktree path and date on) and create no `perf/` or `fix/` branch; the work stays on the refactoring branch. A blocked job or stop is noted, not fatal.
 
 ## 4. Merge-ready PR
 
@@ -34,4 +34,4 @@ Both sub-skills may have opened the PR as a draft with their own title: this ste
 
 ## Report
 
-PR URL, whether it is ready or still a draft, the outcome per stage, and the limits of the hunt (from `bughunt-loop`).
+PR URL, whether it is ready or still a draft, the outcome per stage, and the limits of the hunt (from `bughunt`).
