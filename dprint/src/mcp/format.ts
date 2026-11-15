@@ -643,6 +643,9 @@ async function formatOnDisk(sc: Scope, s: { fp: string; real: string }, signal?:
     try {
       // cancelled while waiting for the slot: give it back without reading or spawning anything
       if (signal?.aborted) return false;
+      // the file may have grown while this event waited for the slot: check the cap again before the read
+      // the file may have grown while this event waited for the slot: check the cap again before the read
+      if (overCap(statSync(s.fp).size, s.fp)) return false;
       // read after the slot is held: waiting events must not each keep up to 1 MiB of text alive
       // fatal decoder: a non-UTF-8 file throws (fails open) instead of being rewritten with U+FFFD
       const text = utf8.decode(readFileSync(s.fp));
