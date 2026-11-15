@@ -132,7 +132,8 @@ export function loadKnowledge($: Engine, k: Knowledge): Promise<void> {
         k.samples = typeof n === "number" && Number.isInteger(n) && n > 0 ? n : 0;
       }
     } catch {
-      // best effort: the default density and an unreachable store must not fail a call
+      // best effort: an unreachable store must not fail a call; its value is unknown, so learn() must not overwrite it
+      k.persisted = Number.NaN;
     } finally {
       timer?.cancel();
     }

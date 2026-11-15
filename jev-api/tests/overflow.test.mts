@@ -198,6 +198,13 @@ test("a store read that outlasts the wait is never overwritten by a density lear
   expect(store.sets).toHaveLength(0);
 });
 
+test("a store read that fails is never overwritten by a density learned from one sample", async ($, on) => {
+  const { store } = setup(on, { replies: [okReply(3000)], store: { density: { v: 2, n: 500 } } });
+  store.failGet = true;
+  await call($, "noul", { state: "a".repeat(20000), timeout: 30 });
+  expect(store.sets).toHaveLength(0);
+});
+
 test("the store is read once per module instance, not on every call", async ($, on) => {
   const { store } = setup(on, { replies: [okReply(5000)] });
   await call($, "noul", SMALL);
