@@ -142,6 +142,13 @@ describe("sendRequest", () => {
     const p = await sendRequest({ base: "http://127.0.0.1:1/S3cretT0kenValue" }, STATE, QUESTIONS, fake({ status: 422, text: body }).doFetch);
     expect(JSON.stringify(p)).not.toContain("S3cretT0kenValue");
   });
+  it("redacts a bare query token and a query parameter name", async () => {
+    const body = JSON.stringify({ detail: "bad TOKENSECRET123" });
+    for (const q of ["?TOKENSECRET123", "?TOKENSECRET123=1"]) {
+      const out = await sendRequest({ jevUrl: "http://127.0.0.1:1/v1/systemone" + q }, STATE, QUESTIONS, fake({ status: 401, text: body }).doFetch);
+      expect(JSON.stringify(out)).not.toContain("TOKENSECRET123");
+    }
+  });
   it("redacts a key that contains the endpoint path before the path", async () => {
     const k = "Zq81kLp0Xw2/apiR7vT9mN4sY6bH3cJ";
     const out = await sendRequest({ jevUrl: "https://jev.example/api", key: k }, STATE, QUESTIONS, async (_u, init) => ({ status: 401, text: JSON.stringify({ detail: "bad token: " + init.headers["Authorization"] }) }));

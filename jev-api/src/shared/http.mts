@@ -278,13 +278,13 @@ export async function sendRequest(env: HttpEnv, state: string, questionsObject: 
   if (key && /^https:/i.test(target.url)) headers["Authorization"] = `Bearer ${key}`;
   // Text that reaches the model (a fetch error, an error body a server may echo the request into) must not carry the endpoint
   // or the key: a runtime quotes a header value it rejects (a newline or a non-Latin1 character in the key), whole.
-  const pieces = new Set<string>(); // each query value and path segment of the custom part, raw and decoded
+  const pieces = new Set<string>(); // each query name, value and path segment of the custom part, raw and decoded
   if (env.jevUrl || env.base) {
     try {
       const u = new URL(target.url);
       const segs = u.pathname.split("/");
       if (!env.jevUrl) segs.length = Math.max(0, segs.length - 2); // the fixed `v1/systemone` tail is public
-      const raw = [...segs, ...u.search.slice(1).split("&").flatMap((kv) => kv.split("=").slice(1)), ...u.searchParams.values()];
+      const raw = [...segs, ...u.search.slice(1).split("&").flatMap((kv) => kv.split("=")), ...u.searchParams.keys(), ...u.searchParams.values()];
       for (const r of raw) {
         let d = r;
         try {
