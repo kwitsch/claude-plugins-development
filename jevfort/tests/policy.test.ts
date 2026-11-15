@@ -154,3 +154,27 @@ test("a turn's next-action question has string instructions and one string crite
   expect(Object.keys(q?.criteria as object)).toEqual(["claude", "read src/app.ts"]);
   expect(criteriaOf(q)["read src/app.ts"]).toBe("Read the file src/app.ts");
 });
+
+test("pickCandidate takes at exactly the threshold, not below it, and not without a probability", async () => {
+  const { pickCandidate } = await import("../plugin/hooks/lib.mjs");
+  const cands = [{ key: "read a", label: "a" }] as never;
+  const ans = (probabilities: Record<string, number>) => ({ type: "choice", choice: "read a", probabilities, confidence: 0.9 }) as never;
+  expect(pickCandidate(ans({ "read a": 0.85 }), cands, 0.85)).toBeDefined();
+  expect(pickCandidate(ans({ "read a": 0.84 }), cands, 0.85)).toBeUndefined();
+  expect(pickCandidate(ans({}), cands, 0.85)).toBeUndefined();
+  expect(pickCandidate(ans({}), cands, 0)).toBeDefined();
+});
+
+test("compactInstructions keeps at 2.2 and drops below 0.8, with an unanswered item neither", async () => {
+  const { compactInstructions } = await import("../plugin/hooks/lib.mjs");
+  const items = ["a", "b", "c", "d", "e", "f"].map((label) => ({ id: label, label, result: "" })) as never;
+  const text = compactInstructions(items, [2.2, 2.19, 0.8, 0.79, undefined, 0]) as string;
+  expect(text).toContain("from: a.");
+  expect(text).toContain("dropped: d; f.");
+  expect(compactInstructions(items, [2.19, 0.8, undefined, 1, 1.5, 2])).toBeUndefined();
+});
+
+test("SWITCH_AT is 0.85", async () => {
+  const { SWITCH_AT } = await import("../plugin/hooks/lib.mjs");
+  expect(SWITCH_AT).toBe(0.85);
+});
