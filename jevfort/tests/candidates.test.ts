@@ -460,3 +460,10 @@ kitTest("a never-settling fs.stat does not hold the step: it goes to Claude afte
   await run;
   expect(seen).toHaveLength(1);
 });
+
+kitTest("mentionedPaths scans a 400 KB text full of quotes and paths in bounded time", async () => {
+  const { mentionedPaths } = await import("../plugin/hooks/lib.mjs");
+  const t0 = Date.now();
+  expect(mentionedPaths(['"abc" a/b.ts '.repeat(30000)])).toEqual(["a/b.ts"]);
+  expect(Date.now() - t0).toBeLessThan(500);
+});
