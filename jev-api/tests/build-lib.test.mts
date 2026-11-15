@@ -333,3 +333,19 @@ test("a default plus named import merges with another helper's named import of t
   });
   assert.equal(r.status, 0, r.stderr);
 });
+
+test("a failed build keeps the previous plugin/ output", () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "failed-build-"));
+  try {
+    mkdirSync(path.join(dir, "src"), { recursive: true });
+    mkdirSync(path.join(dir, "plugin"), { recursive: true });
+    writeFileSync(path.join(dir, "package.json"), JSON.stringify({ name: "fixture", version: "0.0.1", description: "d", author: { name: "x" }, keywords: [], type: "module", claudePlugin: {} }));
+    writeFileSync(path.join(dir, "plugin/old.mjs"), "export const old = 1;\n");
+    writeFileSync(path.join(dir, "src/old.mts"), "export const old = = 1;\n");
+    const r = spawnSync(process.execPath, [BUILD, dir], { encoding: "utf8" });
+    assert.equal(r.status, 1);
+    assert.equal(readFileSync(path.join(dir, "plugin/old.mjs"), "utf8"), "export const old = 1;\n");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
