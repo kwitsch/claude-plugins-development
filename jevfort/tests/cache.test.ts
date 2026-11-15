@@ -31,6 +31,14 @@ const warmRead = { input_tokens: 10, output_tokens: 5, cache_read_input_tokens: 
 /** Usage as Claude Code 2.1.322 reports it: four counts and the model, no `cache_creation` detail. */
 const cold = { input_tokens: 5, output_tokens: 5, cache_read_input_tokens: 0, cache_creation_input_tokens: 90_000, model: "claude-opus-5-5" };
 
+test("the band words: 1 minute left reads <1m, 2 read 1m, 59 read 58m, none is cold", async () => {
+  const { cacheLabel } = await import("../plugin/hooks/lib.mjs");
+  expect(cacheLabel(1)).toBe("cache <1m");
+  expect(cacheLabel(2)).toBe("cache 1m");
+  expect(cacheLabel(59)).toBe("cache 58m");
+  expect(cacheLabel(0)).toBe("cache cold");
+});
+
 test("a 1-hour cache write starts a 59-minute countdown", async ($, on) => {
   on("ui.render", () => BENEATH);
   const { clock } = chatSetup(on, 10);
