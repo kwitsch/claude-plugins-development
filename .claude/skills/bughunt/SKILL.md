@@ -18,6 +18,10 @@ The user's request for this skill is the opt-in for the Workflow tool (load `wor
 - Verify also rates the fix: `sonnet` for a local, well-understood change; `opus` for a cross-cutting, subtle or risky one (concurrency, caches, protocol), with effort `low|medium|high`.
 - **Counters per lens.** Each hunt lens runs its own rounds. A lens round counts as _no finding_ when none of its findings was confirmed by a verifier (empty report, all refuted, or a failed hunter or verifier); a confirmed finding resets that lens's no-finding counter. A lens retires after `noFinding` no-finding rounds in a row or after `maxRounds` rounds of its own. The hunt ends when every lens is retired, or on a blocked fix.
 
+## jev-api first
+
+The skill and every workflow agent use the jev-api tools (`mcp__jev-api__batch`, `choice`, `noul`, `score`; load them via ToolSearch if deferred) before own reasoning for decisions that fit options, a rating or yes/no: hunters classify `severity`, `verifyModel` and `verifyEffort` and check whether a finding duplicates one already found (`noul`); verifiers rate the fix (`fixModel`, `fixEffort`) and whether a claim is a documented limit or style; fixers and the closer decide yes/no questions such as "is this test failure related to my change". Several questions about one text go in one `batch`. Own reasoning replaces the answer on low confidence or a failed call. jev-api never replaces a repro, a test run or reading the code: facts are measured, only classifications and yes/no go to jev-api.
+
 ## Start: worktree and branch
 
 First action, before reading anything: check whether the session already is in a linked git worktree (`git rev-parse --git-dir` ends in `/worktrees/<name>`, or `--git-common-dir` differs from `--git-dir`). If not, call `EnterWorktree` (load it via ToolSearch if deferred) with `name: "bughunt-<plugin>"`, then `git switch -c fix/<plugin>-bughunt-<YYYY-MM-DD>` (one branch and one draft PR for the whole run). In an existing linked worktree only create that branch when the current one has no commits of its own. Never nest. Note the worktree's absolute path and today's date: both go into the workflow `args`. A pure review request stays read-only (pass `fix: false`: Hunt and Verify only, verified findings are reported), but the scratch files and the checkout still belong in the worktree.
@@ -127,7 +131,9 @@ const LENSES = [
 
 // No human reads the agents' text: no narration between tool calls, only the structured result.
 const QUIET = '\n\nNo narration: no text between tool calls, no plans, no progress notes, no recap. Call tools silently and end with the structured result only.'
-const run = (prompt, opts) => agent(prompt + QUIET, opts)
+// Classifications and yes/no go to the jev-api tools first; facts (repro, tests, code) are measured, never asked.
+const JEV = '\n\nFor decisions that fit options, a rating or yes/no (severity, effort, duplicate of an already found finding, documented limit or style, test failure unrelated to your change) call the jev-api tools first (mcp__jev-api__batch for several questions about one text; load them via ToolSearch if deferred) and use your own reasoning only on low confidence or a failed call. Never use them instead of a repro, a test run or reading the code.'
+const run = (prompt, opts) => agent(prompt + JEV + QUIET, opts)
 
 const huntPrompt = (a, lens, seen) => `Bug hunt on plugin "${plugin}", area "${a.name}" (files: ${a.files}), in the git worktree ${worktree}. READ-ONLY on the repository; scratch files go under the session scratchpad. Stay in the worktree.
 Lens of this round: ${lens}. Read .claude/skills/bughunt/SKILL.md and ${plugin}/CLAUDE.md first.
