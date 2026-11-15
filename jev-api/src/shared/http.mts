@@ -183,7 +183,7 @@ function hostOf(url: string): string {
 /**
  * Replaces the bare host of a URL in an error text. A DNS failure quotes only the host (`getaddrinfo ENOTFOUND <host>`,
  * live on 2.1.325), which may be private too. Only whole host names are replaced, ignoring case: the host `jev` must
- * not turn `jev-latest` or `api.jev`, nor the host `10.0.0.5` turn `110.0.0.5`, into something else.
+ * not turn `jev-latest` or `api.jev`, nor the host `10.0.0.5` turn `110.0.0.5`, into something else. A host right after a percent escape (`http%3A%2F%2Fhost`) counts as whole.
  *
  * @param text - The text.
  * @param url - The endpoint URL; one that does not parse changes nothing.
@@ -200,7 +200,7 @@ export function hideHost(text: string, url: string): string {
   // An IPv6 host comes with brackets, an error text quotes the bare address.
   let t = text;
   for (const h of new Set([host, host.replace(/^\[(.*)\]$/, "$1")])) {
-    t = t.replace(new RegExp(`(?<![\\w.-])${h.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\w-])`, "gi"), "<host>");
+    t = t.replace(new RegExp(`(?:(?<![\\w.-])|(?<=%[0-9a-f]{2}))${h.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\w-])`, "gi"), "<host>");
   }
   return t;
 }

@@ -47,7 +47,15 @@ describe("hide and hideHost", () => {
   });
   it("keeps the text when the URL does not parse", () => {
     expect(hideHost("text", "not a url")).toBe("text");
+  });
+  it("hides the full percent-encoded URL, any hex case", () => {
     expect(hide("echo http%3a%2F%2F127.0.0.1%3A8080%2Fv1%2Fsystemone!", "http://127.0.0.1:8080/v1/systemone", "<P>")).toBe("echo <P>!");
+  });
+  it("hides the host of a partial percent-encoded echo", () => {
+    const u = "http://127.0.0.1:8080/v1/systemone";
+    for (const s of ["cb=http%3A%2F%2F127.0.0.1%3A8080%2Fother", "cb=http%3a%2f%2f127.0.0.1%3a8080", "cb=http%3A%2F%2F127.0.0.1"]) {
+      expect(hideHost(hide(s, u, "<U>"), u)).not.toContain("127.0.0.1");
+    }
   });
 });
 
