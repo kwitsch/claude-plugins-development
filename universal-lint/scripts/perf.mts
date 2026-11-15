@@ -251,7 +251,7 @@ async function main(): Promise<void> {
     cases.forEach((c, i) => writeFileSync(join(data, `p${i}.json`), JSON.stringify(c.payload ?? {})));
     // the hook's writtenDigestPath(hashPath(real path)): sha256 hex of the real path under <CLAUDE_PLUGIN_DATA>/written/
     const digest = join(data, "written", createHash("sha256").update(realpathSync(join(dir, "a.sh"))).digest("hex"));
-    // UNIVERSAL_LINT_SETTLE_MS=0: the harness measures lint cost, not the 5 s settle hold of findings (F34)
+    // UNIVERSAL_LINT_SETTLE_MS=0: the harness measures lint cost, not the quiet-time hold of findings (F34, F40)
     const base: NodeJS.ProcessEnv = { ...process.env, CLAUDE_PLUGIN_DATA: data, UNIVERSAL_LINT_SETTLE_MS: "0" };
     delete base.NODE_OPTIONS;
     const envs = paths.map((PATH) => ({ ...base, PATH }));

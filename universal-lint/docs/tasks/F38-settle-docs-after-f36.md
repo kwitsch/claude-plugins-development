@@ -1,14 +1,16 @@
 ---
 id: F38
 title: Settle-window docs still describe the 0.16.0 parse-error rule
-status: open
+status: closed
 priority: low
 area: universal-lint/plugin/README.md, universal-lint/.claude/rules/settle-window.md (docs)
 ---
 
 ## Status
 
-Open. Found by [EVALUATION-2026-11-14b](../EVALUATION-2026-11-14b.md) (docs drift check on 0.16.1). Docs only, no code change.
+Closed in 0.17.0 without its own change: F40 removed the parse-error rule this task wanted documented (`gateFinding` has no `"drop"` mode any more) and rewrote the README paragraph and `settle-window.md` (first heading now `#`).
+
+Earlier state: Open. Found by [EVALUATION-2026-11-14b](../EVALUATION-2026-11-14b.md) (docs drift check on 0.16.1). Docs only, no code change.
 
 ## Problem
 

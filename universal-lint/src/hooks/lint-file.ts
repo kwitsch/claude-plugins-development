@@ -6,10 +6,11 @@
  * Command hook, invoked directly per event (no MCP server). stdin = hook JSON (PostToolUseHookInput); `main()`
  * dispatches on `hook_event_name`: SessionStart/CwdChanged print the git watch list as `watchPaths` (stdout JSON,
  * exit 0); FileChanged lints a watched file changed outside Write/Edit (unlink, scope, digest and git gates, then a
- * cross-process slot);
+ * cross-process slot); Stop/SubagentStop lint the files whose edits no report has covered yet (`sweepHandler`);
  * anything else is PostToolUse Write|Edit (digest recorded, then lint). `asyncRewake: true` in hooks.json for
  * PostToolUse and FileChanged: runs in the background (safe because linting never mutates the file); findings go to
- * stderr with exit 2, which wakes Claude with them; no finding = no output, exit 0.
+ * stderr with exit 2, which wakes Claude with them (at Stop/SubagentStop, which are synchronous, it keeps the stopping
+ * agent going); no finding = no output, exit 0.
  *
  * lint flow (every failure path returns `{}` silently, fail open): guard `tool_response.success !== false`, then
  * `scopedTarget` (real path strictly inside the real cwd, not excluded: node_modules/vendor/.git, .claude/worktrees,
@@ -29,7 +30,7 @@
 import { execFileSync, spawn } from "node:child_process";
 import type { ChildProcess, SpawnSyncOptionsWithStringEncoding, SpawnSyncReturns } from "node:child_process";
 import type { Hash } from "node:crypto";
-import { accessSync, constants as fsConstants, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { accessSync, constants as fsConstants, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { availableParallelism, homedir, tmpdir } from "node:os";
 import path from "node:path";
@@ -188,16 +189,20 @@ export interface Finding {
   base: string;
 }
 
-/** The subset of Claude Code's hook payloads this module reads (PostToolUse, FileChanged, SessionStart, CwdChanged). */
+/** The subset of Claude Code's hook payloads this module reads (PostToolUse, FileChanged, SessionStart, CwdChanged, Stop, SubagentStop). */
 interface PostToolUseHookInput {
   /** Project root the session runs in. */
   cwd: string;
-  /** Hook event (`PostToolUse`, `FileChanged`, `SessionStart`, `CwdChanged`); missing in older payloads (treated as PostToolUse). */
+  /** Hook event (`PostToolUse`, `FileChanged`, `SessionStart`, `CwdChanged`, `Stop`, `SubagentStop`); missing in older payloads (treated as PostToolUse). */
   hook_event_name?: unknown;
   /** The session scratchpad directory; files inside it are out of scope. */
   scratchpad_dir?: unknown;
-  /** The Claude Code session; FileChanged keys the project-check coverage stamp by it (`coalesceProjectCheck`). */
+  /** The Claude Code session; FileChanged keys the project-check coverage stamp by it (`coalesceProjectCheck`), and with `agent_id` it names the journal owner (`ownerOf`). */
   session_id?: unknown;
+  /** Present only inside a subagent (Agent tool, workflow agent): the agent that made the edit or is stopping. */
+  agent_id?: unknown;
+  /** Stop/SubagentStop: true when the agent already continued because a stop hook blocked this stop. */
+  stop_hook_active?: unknown;
   /** FileChanged: the changed file. */
   file_path?: unknown;
   /** FileChanged: `"change"`, `"add"` or `"unlink"`. */
@@ -2015,24 +2020,31 @@ export function editRanges(args: PostToolUseHookInput): Array<[number, number]> 
   return ranges;
 }
 
-/** Default length of the settle window (ms): findings are held this long before they are reported (F34). */
-export const SETTLE_MS = 5000;
+/** Default quiet time (ms): held findings are reported once their agent made no Write/Edit for this long (F40; 5 s fixed in F34). */
+export const SETTLE_MS = 20000;
+/** How often a held lint looks at the journal and the activity stamp (ms). */
+const SETTLE_POLL_MS = 250;
+/** Journal records and activity stamps older than this are pruned (ms): longer than any turn or agent run is expected to last. */
+const PENDING_TTL_MS = 24 * 60 * 60 * 1000;
 
 /**
- * Length of the hold for this process: `UNIVERSAL_LINT_SETTLE_MS` (a finite number >= 0; a test and perf-harness seam,
- * not a user setting) else `SETTLE_MS`, cut so the hold ends at least 1 s before the 90 s hook backstop.
+ * What is left of the hold for this process: the quiet time (`UNIVERSAL_LINT_SETTLE_MS`, a finite number >= 0; a test
+ * and perf-harness seam, not a user setting; else `SETTLE_MS`) minus the time the agent has already been quiet, cut so
+ * the hold ends at least 1 s before the 90 s hook backstop. In a headless run (`claude -p`: `CLAUDE_CODE_ENTRYPOINT`
+ * starts with `sdk`) nothing is held: Claude Code does not background the hook there, so no later edit can arrive.
  *
  * @param uptimeMs - Process uptime in ms (injectable for tests).
+ * @param idleMs - Time since the agent's last journaled Write/Edit in ms.
  * @returns Milliseconds to wait, never negative.
  */
-export function settleWaitMs(uptimeMs: number = process.uptime() * 1000): number {
+export function settleWaitMs(uptimeMs: number = process.uptime() * 1000, idleMs = 0): number {
   const raw = process.env.UNIVERSAL_LINT_SETTLE_MS;
   const n = raw === undefined || raw.trim() === "" ? Number.NaN : Number(raw);
-  const base = Number.isFinite(n) && n >= 0 ? n : SETTLE_MS;
-  return Math.max(0, Math.min(base, HOOK_TIMEOUT_MS - 1000 - uptimeMs));
+  const base = Number.isFinite(n) && n >= 0 ? n : process.env.CLAUDE_CODE_ENTRYPOINT?.startsWith("sdk") ? 0 : SETTLE_MS;
+  return Math.max(0, Math.min(base - idleMs, HOOK_TIMEOUT_MS - 1000 - uptimeMs));
 }
 
-/** One `structuredPatch` hunk with the old-line map the settle window's supersession needs. */
+/** One `structuredPatch` hunk with the old-line map that carries earlier edits' ranges through this edit. */
 export interface EditHunk {
   /** 1-based first old line as in the patch (the line before the hunk when it has no old lines). */
   oldStart: number;
@@ -2125,16 +2137,12 @@ const PARSE_ERROR_RE = /pars(?:e|ing) error|syntax ?error|unexpected (?:token|en
  * not reportable. existsSync results are memoized per call.
  *
  * @param finding - One tool's finding.
- * @param ranges - Inclusive 0-based edited line ranges, null when every line counts as edited, or a predicate on the
- *   0-based line that says whether a diagnostic located there is kept (the settle window's "line survives" test).
+ * @param ranges - Inclusive 0-based edited line ranges, or null when every line counts as edited.
  * @param resolved - Absolute path of the edited file.
- * @param keepParseErrors - `true` (default): keep an own-file parse error that misses `ranges`. `false`: treat it like any
- *   diagnostic. `"drop"`: drop an own-file parse error on any line (the settle window with a later edit: that edit's
- *   own lint reports a parse error that persists, and its cause may be on another line than the error).
  * @returns The finding with only the kept text, `finding` itself when no line is located (unknown format, fail open),
  *   or null when nothing reportable remains.
  */
-export function gateFinding(finding: Finding, ranges: Array<[number, number]> | null | ((line0: number) => boolean), resolved: string, keepParseErrors: boolean | "drop" = true): Finding | null {
+export function gateFinding(finding: Finding, ranges: Array<[number, number]> | null, resolved: string): Finding | null {
   const seen = new Map<string, boolean>();
   /** Memoized `existsSync` for this call (the filesystem is stable within one call). */
   const exists = (abs: string): boolean => {
@@ -2145,7 +2153,7 @@ export function gateFinding(finding: Finding, ranges: Array<[number, number]> | 
     }
     return found;
   };
-  const hit = (line: number): "hit" | "miss" => (ranges === null || (typeof ranges === "function" ? ranges(line - 1) : ranges.some(([s, e]) => s <= line - 1 && line - 1 <= e)) ? "hit" : "miss");
+  const hit = (line: number): "hit" | "miss" => (ranges === null || ranges.some(([s, e]) => s <= line - 1 && line - 1 <= e) ? "hit" : "miss");
   const classify = (raw: string): "hit" | "miss" | "foreign" | null => {
     const plain = raw.replace(ANSI_SGR_RE, "");
     if (finding.tool === "shellcheck" && !SHELLCHECK_GCC_RE.test(plain)) {
@@ -2186,9 +2194,7 @@ export function gateFinding(finding: Finding, ranges: Array<[number, number]> | 
     const preambleParse = PARSE_ERROR_RE.test(out.join("\n"));
     starts.forEach((start, n) => {
       const seg = lines.slice(start, starts[n + 1] ?? lines.length);
-      const parse = preambleParse || PARSE_ERROR_RE.test(seg.join("\n"));
-      if (keepParseErrors === "drop" && parse && kinds[start] !== "foreign") return;
-      if (kinds[start] === "miss" && !(keepParseErrors === true && parse)) return;
+      if (kinds[start] === "miss" && !(preambleParse || PARSE_ERROR_RE.test(seg.join("\n")))) return;
       out.push(...seg);
       any = true;
     });
@@ -2342,6 +2348,22 @@ export interface EditRecord {
   name: string;
 }
 
+/** One journal record as stored: an edit of a file that no report has covered yet. */
+export interface PendingRecord {
+  /** The edit's hunks, null when the whole file counts as edited (Write, FileChanged, malformed patch). */
+  hunks: EditHunk[] | null;
+  /** The lines the edit changed (`editRanges`), null when the whole file counts as edited. */
+  ranges: Array<[number, number]> | null;
+  /** Digest of the content after the edit, null when unknown. */
+  digest: string | null;
+  /** Digest of the content the hunks apply to, null when unknown or without hunks. */
+  before: string | null;
+  /** Lexical path of the edited file. */
+  fp: string;
+  /** Payload cwd of the edit (spawn cwd and config search root of its lint). */
+  cwd: string;
+}
+
 /**
  * Settle-window journal directory: `CLAUDE_PLUGIN_DATA` (OS temp dir when unset)/settle. Never inside the project tree.
  *
@@ -2352,31 +2374,76 @@ function settleDir(): string {
 }
 
 /**
- * Journal one edit of a file for the settle window: `<hashPath(real)>-<ms>-<pid>.json` holding the edit's hunks (null =
- * whole file), the digest of the file after it and `before`, the digest of the file the hunks apply to (an Edit's
- * `originalFile`; null without hunks), written atomically (temp file + `renameSync`). Older entries
- * (name timestamp more than `HOOK_TIMEOUT_MS` ago or ahead, temp leftovers too) are pruned first, so a live reader
- * still finds everything a hook run can need. Fails open to null (the lint then reports at once).
+ * The journal owner of a payload: the session and, inside a subagent, the agent. Findings are reported to the owner
+ * of the edit only (F40): the main conversation's by its own lints and the Stop sweep, a subagent's by SubagentStop.
+ *
+ * @param args - Any hook payload.
+ * @returns 16 hex characters, the last segment of the owner's record names.
+ */
+export function ownerOf(args: PostToolUseHookInput | undefined): string {
+  const part = (v: unknown): string => (typeof v === "string" ? v : "");
+  return hashPath(`${part(args?.session_id)}\0${part(args?.agent_id)}`).slice(0, 16);
+}
+
+/**
+ * When the owner last journaled a Write/Edit (any file), from its activity stamp `settle/act/<owner>`.
+ *
+ * @param owner - The `ownerOf` value.
+ * @returns Epoch ms, or 0 when there is no readable stamp (counts as quiet: the hold ends, fail open).
+ */
+function lastActivity(owner: string): number {
+  try {
+    const n = Number(readFileSync(path.join(settleDir(), "act", owner), "utf8"));
+    return Number.isFinite(n) ? n : 0;
+  } catch {
+    return 0;
+  }
+}
+
+/**
+ * Journal one edit of a file: `<hashPath(real)>-<ms>-<pid>-<owner>.json` holding the edit's hunks (null = whole file),
+ * its changed lines, the digest of the file after it, `before` (the digest of the file the hunks apply to: an Edit's
+ * `originalFile`; null without hunks) and the file path and cwd its lint needs, written atomically (temp file +
+ * `renameSync`). The record stays until a report covers it (`settleFindings`, `sweepHandler`) or a lint finds the
+ * file clean. Also renews the owner's activity stamp. Entries dated more than `PENDING_TTL_MS` ago or more than
+ * `HOOK_TIMEOUT_MS` ahead (temp leftovers too) are pruned first. Fails open to null (the lint then reports at once).
  *
  * @param fp - Lexical path of the edited file (read for the digest when `written` is not given).
  * @param real - Real path of the file (the key).
  * @param hunks - The edit's hunks, null when the whole file counts as edited.
  * @param before - Digest of the content the hunks apply to, or null (unknown, or no hunks).
  * @param written - Digest of the content the tool wrote (null: unknown); omitted, the disk is hashed (FileChanged).
+ * @param owner - The `ownerOf` value of the payload.
+ * @param ranges - The edit's changed lines; null or omitted when the whole file counts as edited.
+ * @param cwd - The payload cwd.
  * @returns The record handle, or null on any error.
  */
-export function recordEdit(fp: string, real: string, hunks: EditHunk[] | null, before?: string | null, written?: string | null): EditRecord | null {
+export function recordEdit(
+  fp: string,
+  real: string,
+  hunks: EditHunk[] | null,
+  before?: string | null,
+  written?: string | null,
+  owner: string = ownerOf(undefined),
+  ranges?: Array<[number, number]> | null, // no `= null`: the tests type the built .mjs by inference, and a null default infers `null`
+  cwd = "",
+): EditRecord | null {
   try {
     const dir = settleDir();
-    mkdirSync(dir, { recursive: true });
+    mkdirSync(path.join(dir, "act"), { recursive: true });
     const now = Date.now();
-    // |age|: a name dated that far ahead (clock stepped back) would sort after every fresh record and read as a later edit
-    for (const n of readdirSync(dir)) if (Math.abs(now - Number(n.split("-")[1])) > HOOK_TIMEOUT_MS) rmSync(path.join(dir, n), { force: true });
+    // a name dated ahead (clock stepped back) would sort after every fresh record and read as a later edit
+    for (const n of readdirSync(dir)) {
+      const at = Number(n.split("-")[1]);
+      if (now - at > PENDING_TTL_MS || at - now > HOOK_TIMEOUT_MS) rmSync(path.join(dir, n), { force: true });
+    }
     const key = hashPath(real);
-    const name = `${key}-${String(now).padStart(15, "0")}-${process.pid}.json`;
+    const name = `${key}-${String(now).padStart(15, "0")}-${process.pid}-${owner}.json`;
     const tmp = path.join(dir, `${name}.tmp`);
-    writeFileSync(tmp, JSON.stringify({ hunks, digest: written === undefined ? fileDigest(fp) : written, before: before ?? null }));
+    const record: PendingRecord = { hunks, ranges: ranges ?? null, digest: written === undefined ? fileDigest(fp) : written, before: before ?? null, fp, cwd };
+    writeFileSync(tmp, JSON.stringify(record));
     renameSync(tmp, path.join(dir, name));
+    writeFileSync(path.join(dir, "act", owner), String(now));
     return { key, name };
   } catch {
     return null;
@@ -2384,8 +2451,9 @@ export function recordEdit(fp: string, real: string, hunks: EditHunk[] | null, b
 }
 
 /**
- * Name of the newest journal record of the file, taken next to `d0` and `d1`: a record that appeared while the linter
- * ran means an edit landed then, even when the content is back to `d0` (an edit and its exact undo, A->B->A).
+ * Name of the newest journal record of the file (any owner), taken next to `d0` and `d1`: a record that appeared
+ * while the linter ran means an edit landed then, even when the content is back to `d0` (an edit and its exact undo,
+ * A->B->A).
  *
  * @param rec - The lint's own journal record, or null.
  * @returns The newest record name of `rec.key`, or null (no record, or the journal is unreadable).
@@ -2400,82 +2468,160 @@ function journalTail(rec: EditRecord | null): string | null {
 }
 
 /**
- * The settle window (F34): hold the findings of a finished lint for `settleWaitMs()`, then drop every diagnostic
- * located in `resolved` on a line a later edit of the file removed or replaced (that edit's own lint reports what
- * persists there). Diagnostics in other files and findings without a located line are never dropped.
+ * Names of the journal records of one file and owner, oldest first (the order their hooks wrote them).
+ *
+ * @param key - `hashPath` of the file's real path.
+ * @param owner - The `ownerOf` value.
+ * @returns The record file names; throws when the journal cannot be read.
+ */
+function recordNames(key: string, owner: string): string[] {
+  return readdirSync(settleDir()).filter((n) => n.startsWith(`${key}-`) && n.endsWith(`-${owner}.json`)).sort();
+}
+
+/**
+ * Read journal records.
+ *
+ * @param names - Record file names.
+ * @returns The parsed records in the same order; throws on an unreadable or corrupt record.
+ */
+function readRecords(names: readonly string[]): PendingRecord[] {
+  return names.map((n) => JSON.parse(readFileSync(path.join(settleDir(), n), "utf8")) as PendingRecord);
+}
+
+/**
+ * Remove journal records (a report or a clean lint covered them). Never throws.
+ *
+ * @param names - Record file names.
+ */
+function clearRecords(names: readonly string[]): void {
+  for (const n of names) {
+    try {
+      rmSync(path.join(settleDir(), n), { force: true });
+    } catch {
+      // left for the TTL prune
+    }
+  }
+}
+
+/**
+ * The lines every not yet reported edit of a file changed, in the coordinates of the content with digest `d0`: each
+ * record's own lines, carried through the hunks of the records after it (`carryLine`).
  *
  * @remarks
- * Coordinates: the finding's lines are those of the file as the linter read it, whose digest is `d0`. The reference
- * is the last journal record with `digest === d0`; only the records after it are later edits, except the lint's own
- * record (`rec`): a hook that journals late sorts its own record after a later edit's, but that record never changed
- * the content the lint read (the lint reads the disk after journaling), so it would drop every own-file line as a
- * whole-file edit. A file that changed during the lint (`d0 !== d1`), no matching record, no later record, a later
- * record with hunks whose `before` is not the digest of the later record before it (an unjournaled change in between,
- * or records journaled out of edit order: its hunks are in other coordinates), a missing or
- * unreadable journal or record all mean "cannot tell": the findings are returned as they are (fail open, reported). Nothing is held when there is
- * nothing to report, no own record, or nothing the filter could drop (foreign or unlocated findings only).
+ * Hunks are in the coordinates of the content they were cut from, so the records must form a chain: each `before`
+ * equals the digest of the record before it, and the last digest equals `d0`. A broken chain (a change nobody
+ * journaled, hooks that journaled out of edit order, a formatter that rewrote the file), a record without hunks or
+ * lines (Write, FileChanged) and no record at all mean the whole file (null: report more, never less). One record
+ * alone needs no chain: its own lines are used as they are, as before the journal existed.
+ *
+ * @param recs - The records of one file and owner, oldest first.
+ * @param d0 - Digest of the content the linter reads.
+ * @returns Inclusive 0-based line ranges, or null when the whole file counts as edited.
+ */
+export function pendingRanges(recs: readonly PendingRecord[], d0: string | null): Array<[number, number]> | null {
+  if (recs.length === 1) return Array.isArray(recs[0].ranges) ? recs[0].ranges : null;
+  let lines: Array<[number, number]> | null = [];
+  let prev: string | null | undefined;
+  for (const r of recs) {
+    const chained: boolean = prev === undefined || (prev !== null && r.before === prev);
+    if (lines === null || !chained || !Array.isArray(r.hunks) || !Array.isArray(r.ranges)) lines = null;
+    else {
+      const hunks = r.hunks;
+      const carried: Array<[number, number]> = [];
+      for (const [s, e] of lines) {
+        for (let l = s; l <= e; l++) {
+          const n = carryLine(l, hunks);
+          if (n !== null) carried.push([n, n]);
+        }
+      }
+      lines = [...carried, ...r.ranges];
+    }
+    prev = r.digest;
+  }
+  return typeof prev === "string" && prev === d0 ? lines : null;
+}
+
+/**
+ * The edit-range gate of a lint: `pendingRanges` over the journal records of the file and owner.
+ *
+ * @param rec - The lint's own journal record, or null (no journal: `fallback`).
+ * @param owner - The `ownerOf` value.
+ * @param d0 - Digest of the content the linter reads.
+ * @param fallback - The ranges of the lint's own edit.
+ * @returns The ranges to gate against, or null for the whole file (also when the journal cannot be read).
+ */
+function pendingUnion(rec: EditRecord | null, owner: string, d0: string | null, fallback: Array<[number, number]> | null): Array<[number, number]> | null {
+  if (!rec) return fallback;
+  try {
+    return pendingRanges(readRecords(recordNames(rec.key, owner)), d0);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * A lint that found nothing covers the edits journaled so far: remove the records of the file and owner up to the
+ * lint's own, unless the file changed while the linter ran (then a later lint or the sweep decides). Never throws.
+ *
+ * @param rec - The lint's own journal record, or null.
+ * @param owner - The `ownerOf` value.
+ * @param unchanged - Whether the content and the journal tail are what they were before the lint.
+ */
+function settleClean(rec: EditRecord | null, owner: string, unchanged: boolean): void {
+  if (!rec || !unchanged) return;
+  try {
+    clearRecords(recordNames(rec.key, owner).filter((n) => n <= rec.name));
+  } catch {
+    // unreadable journal: the records stay for the sweep
+  }
+}
+
+/**
+ * The settle window (F34, F40): hold the findings of a finished lint until the owner of the edit has made no
+ * Write/Edit for the quiet time (`settleWaitMs`), then report them only when this lint still covers the newest state
+ * of the file.
+ *
+ * @remarks
+ * Nothing is reported (`[]`, the journal records stay) when the file changed while the linter ran (`d0 !== d1`), a
+ * newer record of the file and owner exists (that edit's lint gates against the lines of every pending edit and
+ * reports what persists), or the file changed outside Write/Edit during the hold (FileChanged lints a watched file):
+ * whatever lint follows, or else the sweep at Stop/SubagentStop (`sweepHandler`), reports the final state. The own
+ * record gone means a sweep or a later clean lint already covered it. Reporting claims the own record by removing it
+ * (a sweep claims the same way, so one of the two reports) and clears the older records of the file and owner.
+ * No own record, an unreadable file (`d0 === null`) or an unreadable journal mean "cannot tell": the findings are
+ * returned at once (fail open, reported).
  *
  * @param findings - The gated findings of the lint.
  * @param resolved - Lexical absolute path of the linted file.
  * @param rec - The lint's own journal record, or null.
  * @param d0 - Digest of the file right before the lint started, or null.
  * @param d1 - Digest of the file right after the lint ended, or null (also when a journal record appeared during the lint).
- * @returns The findings that survive (possibly fewer diagnostics per finding).
+ * @param owner - The `ownerOf` value of the payload.
+ * @returns The findings to report now: all of them or none.
  */
-export async function settleFindings(findings: Finding[], resolved: string, rec: EditRecord | null, d0: string | null, d1: string | null): Promise<Finding[]> {
-  if (findings.length === 0 || !rec || d0 === null || d0 !== d1) return findings;
-  // Nothing the filter could drop (worst case: every own-file located line goes): no later edit changes the result, no hold.
-  try {
-    if (findings.every((f) => gateFinding(f, () => false, resolved, "drop")?.text === f.text)) return findings;
-  } catch {
-    // fail open: hold as usual
-  }
-  const wait = settleWaitMs();
-  if (wait > 0) await sleep(wait);
-  let later: Array<EditHunk[] | null>;
-  try {
-    const dir = settleDir();
-    const recs = readdirSync(dir)
-      .filter((n) => n.startsWith(`${rec.key}-`) && n.endsWith(".json"))
-      .sort()
-      .map((n) => ({ name: n, ...(JSON.parse(readFileSync(path.join(dir, n), "utf8")) as { hunks: EditHunk[] | null; digest: string; before?: string | null }) }));
-    if (recs.some((r) => r.hunks !== null && !Array.isArray(r.hunks))) return findings;
-    let at = -1;
-    recs.forEach((r, i) => {
-      if (r.digest === d0) at = i;
-    });
-    if (at === -1) return findings;
-    // The own record never changed what this lint read (it read the disk after journaling): a late hook's own record is no later edit.
-    const after = recs.slice(at + 1).filter((r) => r.name !== rec.name);
-    if (after.length === 0) return findings;
-    // Hunks are in the coordinates of the content they were cut from: a change nobody journaled breaks the chain.
-    let prev = recs[at].digest;
-    for (const r of after) {
-      if (r.hunks !== null && r.before !== prev) return findings;
-      prev = r.digest;
+export async function settleFindings(findings: Finding[], resolved: string, rec: EditRecord | null, d0: string | null, d1: string | null, owner: string = ownerOf(undefined)): Promise<Finding[]> {
+  if (findings.length === 0 || !rec || d0 === null) return findings;
+  if (d0 !== d1) return [];
+  let names: string[];
+  for (;;) {
+    try {
+      names = recordNames(rec.key, owner);
+    } catch {
+      return findings;
     }
-    later = after.map((r) => r.hunks);
-  } catch {
-    return findings;
+    if (names.at(-1) !== rec.name) return []; // a newer edit owns the report, or the own record is already covered
+    const left = settleWaitMs(undefined, Date.now() - lastActivity(owner));
+    if (left <= 0) break;
+    await sleep(Math.min(left, SETTLE_POLL_MS));
   }
-  const survives = (line0: number): boolean => {
-    let l = line0;
-    for (const h of later) {
-      if (h === null) return false;
-      const n = carryLine(l, h);
-      if (n === null) return false;
-      l = n;
-    }
-    return true;
-  };
+  if (digestOrNull(resolved) !== d0) return [];
   try {
-    return findings.flatMap((f) => {
-      const g = gateFinding(f, survives, resolved, "drop");
-      return g ? [g] : [];
-    });
+    unlinkSync(path.join(settleDir(), rec.name)); // the claim: throws when a sweep took the record first
   } catch {
-    return findings; // a record whose hunks are malformed below the array check: cannot tell, report
+    return [];
   }
+  clearRecords(names);
+  return findings;
 }
 
 /**
@@ -2597,9 +2743,11 @@ function formatFindings(kept: Finding[], hookEventName: string, label: string): 
  * The lint_file tool handler (PostToolUse Write|Edit). Resolves to {} on every guard failure / clean / skip or rejection (fail open); async since F18.
  *
  * @remarks
- * Settle window (F34): the edit is journaled (`recordEdit` with the digest of an Edit's `originalFile` as `before`,
- * also when the lint is clean), the lint runs between two
- * digests of the file (`d0`, `d1`), and its findings are held and filtered by `settleFindings` before they are
+ * Settle window (F34, F40): the edit is journaled under its owner (`recordEdit` with the digest of an Edit's
+ * `originalFile` as `before`). A subagent's edit ends there: its findings would wake the main conversation, so the
+ * SubagentStop sweep (`sweepHandler`) lints the file once and reports to the agent that made the edit. Otherwise the
+ * lint runs between two digests of the file (`d0`, `d1`), gated against the lines of every pending edit of the file
+ * (`pendingUnion`); a clean lint clears the records, findings are held by `settleFindings` before they are
  * formatted. Takes no slot or lock.
  *
  * @param args - The PostToolUse hook payload.
@@ -2615,19 +2763,124 @@ export async function lintFileHandler(args: PostToolUseHookInput, scoped: { fp: 
     const before = typeof original === "string" ? digest(original) : null;
     // the tool's content, not the disk: a change landing before this hook must not be folded into the edit's record
     const wc = writtenContent(args);
-    const rec = recordEdit(resolved, scoped.real, editHunks(args), before, wc === null ? null : digest(wc));
-    // a line break the patch does not count shifts the linter's lines: no gate, no supersession (report whole-file)
+    const owner = ownerOf(args);
+    const rec = recordEdit(resolved, scoped.real, editHunks(args), before, wc === null ? null : digest(wc), owner, ranges, args.cwd);
+    // a subagent's edit: no lint now, SubagentStop reports to that agent (without a journal the lint below still runs, fail open)
+    if (rec && typeof args.agent_id === "string" && args.agent_id) return {};
+    // a line break the patch does not count shifts the linter's lines: no gate (report whole-file)
     const odd = hasForeignLineBreak(resolved);
     const d0 = digestOrNull(resolved);
     const t0 = journalTail(rec);
     // `await` inside the try is load-bearing: a rejected promise must land in the catch (fail open).
-    const kept = await lintResolved(resolved, args.cwd, odd ? null : ranges, "PostToolUse");
-    // only a held finding needs the second digest; a record journaled during the lint (A->B->A) counts as a change
-    const d1 = kept.length > 0 && journalTail(rec) === t0 ? digestOrNull(resolved) : null;
-    return formatFindings(await settleFindings(kept, resolved, odd ? null : rec, d0, d1), "PostToolUse", "universal-lint");
+    const kept = await lintResolved(resolved, args.cwd, odd ? null : pendingUnion(rec, owner, d0, ranges), "PostToolUse");
+    // a record journaled during the lint (A->B->A) counts as a change
+    const d1 = journalTail(rec) === t0 ? digestOrNull(resolved) : null;
+    if (kept.length === 0) settleClean(rec, owner, d0 !== null && d0 === d1);
+    return formatFindings(await settleFindings(kept, resolved, rec, d0, d1, owner), "PostToolUse", "universal-lint");
   } catch {
     return {};
   }
+}
+
+/**
+ * Stop / SubagentStop: lint every file whose edits by this owner (the main conversation, or the stopping subagent)
+ * no report has covered yet, in its final state, and report the findings once (F40).
+ *
+ * @remarks
+ * Pending are the journal records of the owner: every edit of a subagent (its PostToolUse lint is skipped), and for
+ * the main conversation the edits whose lint was superseded, is still held, saw the file change, or died. Each file
+ * is claimed by removing its newest record (a held lint claims the same way, so one of the two reports), scoped
+ * again, gated against the lines of its pending edits (`pendingRanges`) and linted, at most `FILE_CHANGED_SLOTS`
+ * files at a time; a file whose lint could not end before the hook timeout (`slotDeadlineMs`) is left pending.
+ * A report sets the marker `settle/act/<owner>.blocked`; the stop that follows it (`stop_hook_active`) is let
+ * through without a sweep, so the hook never loops. Fails open to {}.
+ *
+ * @param args - The Stop or SubagentStop hook payload.
+ * @returns The hook result: findings as additionalContext, or an empty object.
+ */
+export async function sweepHandler(args: PostToolUseHookInput): Promise<HookResult> {
+  try {
+    const ev = args.hook_event_name === "SubagentStop" ? "SubagentStop" : "Stop";
+    const owner = ownerOf(args);
+    const dir = settleDir();
+    const mark = path.join(dir, "act", `${owner}.blocked`);
+    if (args.stop_hook_active !== true) rmSync(mark, { force: true });
+    else if (existsSync(mark)) return {};
+    pruneActivity();
+    const groups = new Map<string, string[]>();
+    for (const n of readdirSync(dir).sort()) {
+      if (!n.endsWith(`-${owner}.json`)) continue;
+      const key = n.split("-")[0];
+      groups.set(key, [...(groups.get(key) ?? []), n]);
+    }
+    const files = [...groups.values()];
+    const found: Finding[][] = files.map(() => []);
+    let next = 0;
+    /** One lane of the pool: takes the next file until none is left. */
+    const lane = async (): Promise<void> => {
+      while (next < files.length) {
+        const i = next++;
+        try {
+          found[i] = await sweepFile(files[i], args);
+        } catch {
+          // fail open: this file reports nothing
+        }
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(FILE_CHANGED_SLOTS, files.length) }, lane));
+    const out = formatFindings(found.flat(), ev, "universal-lint");
+    if (out.hookSpecificOutput) writeFileSync(mark, "");
+    return out;
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * Remove the activity stamps and stop markers (`settle/act/`) of owners that journaled nothing for `PENDING_TTL_MS`:
+ * one small file per agent would otherwise pile up. Run once per sweep. Never throws.
+ */
+function pruneActivity(): void {
+  try {
+    const act = path.join(settleDir(), "act");
+    for (const n of readdirSync(act)) {
+      const file = path.join(act, n);
+      if (Date.now() - statSync(file).mtimeMs > PENDING_TTL_MS) rmSync(file, { force: true });
+    }
+  } catch {
+    // no stamps yet, or an unreadable one: left for the next sweep
+  }
+}
+
+/**
+ * Lint one file of a sweep (`sweepHandler`).
+ *
+ * @param names - The journal records of the file and owner, oldest first.
+ * @param args - The Stop or SubagentStop hook payload.
+ * @returns The gated findings; empty when the file is left pending, was claimed by a held lint, is out of scope or clean.
+ */
+async function sweepFile(names: readonly string[], args: PostToolUseHookInput): Promise<Finding[]> {
+  let recs: PendingRecord[] | null = null;
+  try {
+    recs = readRecords(names);
+  } catch {
+    // corrupt record: the file cannot be named, its records are dropped below
+  }
+  const last = recs?.at(-1);
+  const known = typeof last?.fp === "string" && typeof last.cwd === "string";
+  if (known && process.uptime() * 1000 >= slotDeadlineMs(path.extname(last.fp).toLowerCase())) return []; // no time left: stays pending
+  unlinkSync(path.join(settleDir(), names[names.length - 1])); // the claim: throws when a held lint took it first
+  clearRecords(names);
+  if (!recs || !known) return [];
+  const s = scopedTarget(last.cwd, last.fp, scratchpadOf(args));
+  if (!s) return [];
+  let ranges: Array<[number, number]> | null = null;
+  try {
+    if (!hasForeignLineBreak(s.fp)) ranges = pendingRanges(recs, digestOrNull(s.fp));
+  } catch {
+    // malformed hunks: the whole file
+  }
+  return lintResolved(s.fp, last.cwd, ranges, "PostToolUse");
 }
 
 /**
@@ -2924,8 +3177,9 @@ export function slotDeadlineMs(ext: string): number {
  * `FILE_CHANGED_SLOTS` cross-process slots (`acquireSlot`) until `FILE_CHANGED_BUDGET_MS` minus the file's lint
  * budget; no slot in time skips with a stderr note; a slot error lints without a slot. Inside `lintResolved` the
  * whole-project check (tsc, go vet/golangci-lint, cargo) runs through `coalesceProjectCheck`: once per burst and project
- * (F13). Settle window (F34): once the digest check says the content changed, a whole-file edit is journaled
- * (`recordEdit`), and the findings are held and filtered by `settleFindings` after the slot is released. Returns {}
+ * (F13). Settle window (F34, F40): once the digest check says the content changed, a whole-file edit is journaled
+ * under the main conversation (`recordEdit`; the payload names no agent), a clean lint clears the file's records, and
+ * findings are held by `settleFindings` after the slot is released. Returns {}
  * for every skip and on any error (fail open).
  * Async since F18 (the git call and `acquireSlot` stay sync: no child of this process exists yet).
  *
@@ -2956,7 +3210,8 @@ export async function fileChangedHandler(args: PostToolUseHookInput): Promise<Ho
     }
     // The content changed outside Write/Edit (never for the digest-matched echo above): a whole-file edit for the
     // settle window, also when the git gate then skips the lint (a restore to committed content leaves no stale finding).
-    const rec = recordEdit(s.fp, s.real, null);
+    const owner = ownerOf(args);
+    const rec = recordEdit(s.fp, s.real, null, undefined, undefined, owner, null, cwd);
     try {
       const status = execFileSync("git", ["--no-optional-locks", "--literal-pathspecs", "status", "--porcelain", "--untracked-files=normal", "--ignored=matching", "--", s.real], {
         cwd: path.dirname(s.real), // git maps a lexical path through an in-repo symlinked dir to a path not in the index
@@ -2981,14 +3236,13 @@ export async function fileChangedHandler(args: PostToolUseHookInput): Promise<Ho
     let kept: Finding[] = [];
     let d0: string | null = null;
     let d1: string | null = null;
-    let odd = false;
     try {
-      odd = hasForeignLineBreak(s.fp); // later edits' hunks would be placed in other line numbers: no supersession
       d0 = digestOrNull(s.fp);
       const t0 = journalTail(rec);
       kept = await lintResolved(s.fp, cwd, null, "FileChanged", typeof args.session_id === "string" ? args.session_id : "");
-      // only a held finding needs the second digest; a record journaled during the lint (A->B->A) counts as a change
-      if (kept.length > 0 && journalTail(rec) === t0) d1 = digestOrNull(s.fp);
+      // a record journaled during the lint (A->B->A) counts as a change
+      if (journalTail(rec) === t0) d1 = digestOrNull(s.fp);
+      if (kept.length === 0) settleClean(rec, owner, d0 !== null && d0 === d1);
     } finally {
       try {
         if (slot) rmSync(slot, { force: true });
@@ -2997,7 +3251,7 @@ export async function fileChangedHandler(args: PostToolUseHookInput): Promise<Ho
       }
     }
     // The hold comes after the slot release: a held finding must not keep one of the K slots busy.
-    return formatFindings(await settleFindings(kept, s.fp, odd ? null : rec, d0, d1), "FileChanged", "universal-lint (changed outside Write/Edit)");
+    return formatFindings(await settleFindings(kept, s.fp, rec, d0, d1, owner), "FileChanged", "universal-lint (changed outside Write/Edit)");
   } catch {
     return {};
   }
@@ -3081,9 +3335,10 @@ function isMainModule(): boolean {
 
 /**
  * Read the hook's stdin JSON and dispatch on `hook_event_name`: SessionStart/CwdChanged print the watch-paths JSON on
- * stdout (exit 0); FileChanged runs fileChangedHandler; anything else (PostToolUse, or a payload without the field)
- * records the Write/Edit digest and runs lintFileHandler. Findings: their text on stderr and exit 2 (asyncRewake wakes
- * Claude with it). Fails open on any error — no output, exit 0.
+ * stdout (exit 0); FileChanged runs fileChangedHandler; Stop/SubagentStop run sweepHandler; anything else
+ * (PostToolUse, or a payload without the field) records the Write/Edit digest and runs lintFileHandler. Findings:
+ * their text on stderr and exit 2 (asyncRewake wakes Claude with it; at Stop/SubagentStop it keeps the stopping agent
+ * going). Fails open on any error — no output, exit 0.
  *
  * @remarks
  * Reads stdin asynchronously to EOF, never `readFileSync(0)`: fd 0 is non-blocking, so a sync read throws EAGAIN on a late writer or a payload above the pipe buffer (hook-design.md "stdin", F05). Never rejects (the whole body is in the try/catch), so the bottom `void main()` is safe. Never calls `process.exit`: the process ends when the event loop drains after stdin EOF and every child's `close`, carrying `process.exitCode` 2 for findings, so the exit-code contract is unchanged.
@@ -3099,6 +3354,7 @@ async function main(): Promise<void> {
     }
     let ctx: string | undefined;
     if (ev === "FileChanged") ctx = (await fileChangedHandler(input)).hookSpecificOutput?.additionalContext;
+    else if (ev === "Stop" || ev === "SubagentStop") ctx = (await sweepHandler(input)).hookSpecificOutput?.additionalContext;
     else {
       const scoped = postToolScope(input);
       recordWrittenFor(scoped, input);
