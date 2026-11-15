@@ -652,6 +652,26 @@ it("session.start retries tools refused before the session was bound", async () 
   expect(tries.filter(Boolean)).toHaveLength(4);
 });
 
+// A pre-bind refusal must not use up the once-per-tool log: a real failure after the bind is logged.
+it("session.start logs a real failure after a pre-bind refusal", async () => {
+  let bound = false;
+  const logs: string[] = [];
+  const { run, hooks, $ } = await direct({
+    tool: {
+      register: async (spec: { name: string }) => {
+        if (!bound) throw new Error("session not bound");
+        if (spec.name === "batch") throw new Error("invalid input schema (real failure)");
+        return { tool: TOOL(spec.name) };
+      },
+    },
+    ui: { log: async (t: string) => void logs.push(t) },
+  });
+  await run("noul");
+  bound = true;
+  await hooks.get("session.start")?.($, { cwd: "/p" }, Object.assign(async (e: unknown) => e, { signal: new AbortController().signal }));
+  expect(logs).toContain("registering batch failed: invalid input schema (real failure)");
+});
+
 // A registration begun before the bind and still in flight at session.start fails after it: session.start retries it.
 it("session.start retries tools whose pre-bind attempt fails during its wait", async () => {
   let bound = false;

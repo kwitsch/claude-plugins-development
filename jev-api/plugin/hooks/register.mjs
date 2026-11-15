@@ -23,9 +23,12 @@ export function register(on, options) {
 	on("session.start", async function onSessionStart($, e, next) {
 		try {
 			st.retryAt.clear();
+			st.failures.clear();
 			st.stuck.clear();
+			const inFlight = [...st.pending.keys()];
 			if (st.missing.size > 0) await ensureTools($, st, 5 * REGISTER_WAIT_MS);
 			st.retryAt.clear();
+			for (const type of inFlight) st.failures.delete(type);
 			if (st.missing.size > 0) await ensureTools($, st, 5 * REGISTER_WAIT_MS);
 		} catch {}
 		try {
