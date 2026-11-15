@@ -696,13 +696,14 @@ export const register = (on, options) => {
 			const first = firstTurns.get(e.agentId ?? "");
 			const family = modelFamily(e.model);
 			const held = family && !EVERY_TURN_MODELS.includes(family) && first?.effort && first.family === family && first.from === e.effort ? first.effort : undefined;
-			if (!held) return;
+			if (!held) return false;
 			if (held !== e.effort) turn.effort = held;
 			debugEffort($, e, "held", held);
 			if (!e.agentId) {
 				band.chosen = held;
 				$.ui.invalidate("ui.render");
 			}
+			return true;
 		};
 		if (!ctx) {
 			if (routing && e.index === 0 && !autoOff) hold();
@@ -752,6 +753,7 @@ export const register = (on, options) => {
 			if (candidates.length) questions.next_action = nextActionQuestion(candidates);
 		}
 		let estimate;
+		let heldApplied = false;
 		let firstTurn;
 		if (routing && e.index === 0) {
 			const sessionEffort = isEffort(e.effort) ? e.effort : undefined;
@@ -776,7 +778,7 @@ export const register = (on, options) => {
 					questions.effort = effortQuestion;
 					questions.mechanical = mechanicalQuestion;
 				}
-				if (!estimate) hold();
+				if (!estimate) heldApplied = hold();
 			}
 		}
 		if (bypass && e.index === 0 && questions.next_action && !e.agentId) questions.single_action = singleActionQuestion;
@@ -789,6 +791,13 @@ export const register = (on, options) => {
 			cwd: turn.cache.cwd ??= await $.session.cwd()
 		};
 		const r = await askJev($, state, questions);
+		if (autoOff && heldApplied) {
+			turn.effort = undefined;
+			if (!e.agentId) {
+				band.chosen = undefined;
+				$.ui.invalidate("ui.render");
+			}
+		}
 		if (!r.ok) {
 			if (estimate) debugEffort($, e, `jev unavailable (${r.error})`, undefined);
 			return yield* next(routed(e));

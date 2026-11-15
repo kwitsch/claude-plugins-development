@@ -1721,6 +1721,35 @@ test("Auto pressed off while step 0 waits for Jev keeps the session effort", asy
   await ui.unmount();
 });
 
+test("Auto pressed off while a held Haiku turn waits for Jev drops the held effort", async ($, on) => {
+  const seen: { effort?: string }[] = [];
+  let waiting = false;
+  let release!: () => void;
+  const gate = new Promise<void>((r) => (release = r));
+  const jev = (async (q: Asked) => {
+    if (waiting) await gate;
+    return q.id === "effort" ? scored(1.6) : undefined;
+  }) as never;
+  // A named file gives the held t2 a step-0 question, so it waits for Jev.
+  const { sent, clock } = setup(on, { messages: [user("explain src/app.ts")], files: [`${CWD}/src/app.ts`], jev });
+  claudeBeneath(on, seen);
+  sessionStubs(on);
+  await $.session.start(START);
+  const ui = await $.ui.mount(BAND);
+  await drain($.turn.step(turnStep("t1", "claude-haiku-5-5", "high")));
+  waiting = true;
+  const before = sent.length;
+  const run = drain($.turn.step(turnStep("t2", "claude-haiku-5-5", "high")));
+  for (let i = 0; i < 50 && sent.length === before; i++) await clock.settle();
+  await ui.press({ key: "auto" });
+  release();
+  await run;
+  await clock.settle();
+  expect(seen.map((s) => s.effort)).toEqual(["medium", "high"]);
+  expect(await levelProps(ui, "medium")).toEqual({ dimColor: true });
+  await ui.unmount();
+});
+
 test("The band passes before the session baseline and while jevfort is inactive", async ($, on) => {
   const { clock } = setup(on, { messages: [], tools: SINGLE_TOOLS, jev: () => undefined });
   sessionStubs(on);

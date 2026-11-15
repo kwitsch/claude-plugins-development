@@ -1142,17 +1142,18 @@ export const register = (on: On, options: Options): void => {
     // The turn's effort, set at step 0, holds for every step of the turn.
     const routed = (step: Step): Step => (turn.effort ? { ...step, effort: turn.effort } : step);
     // Haiku/Fable after the first turn: hold the first turn's estimate while model and session effort are unchanged.
-    const hold = (): void => {
+    const hold = (): boolean => {
       const first = firstTurns.get(e.agentId ?? "");
       const family = modelFamily(e.model);
       const held = family && !EVERY_TURN_MODELS.includes(family) && first?.effort && first.family === family && first.from === e.effort ? first.effort : undefined;
-      if (!held) return;
+      if (!held) return false;
       if (held !== e.effort) turn.effort = held;
       debugEffort($, e, "held", held);
       if (!e.agentId) {
         band.chosen = held;
         $.ui.invalidate("ui.render");
       }
+      return true;
     };
     // A turn without a request (image-only prompt, interrupt marker) asks Jev nothing but still keeps the hold, so the prompt cache stays.
     if (!ctx) {
@@ -1188,6 +1189,7 @@ export const register = (on: On, options: Options): void => {
     }
     // Step 0: the effort estimate, or a Haiku/Fable turn's held first-turn estimate.
     let estimate: EstimateBounds | undefined;
+    let heldApplied = false;
     let firstTurn: { family?: EstimateModel; from: unknown; effort?: Effort } | undefined;
     if (routing && e.index === 0) {
       const sessionEffort = isEffort(e.effort) ? e.effort : undefined;
@@ -1208,7 +1210,7 @@ export const register = (on: On, options: Options): void => {
           questions.effort = effortQuestion;
           questions.mechanical = mechanicalQuestion;
         }
-        if (!estimate) hold();
+        if (!estimate) heldApplied = hold();
       }
     }
     if (bypass && e.index === 0 && questions.next_action && !e.agentId) questions.single_action = singleActionQuestion;
@@ -1225,6 +1227,14 @@ export const register = (on: On, options: Options): void => {
       cwd: turn.cache.cwd ??= await $.session.cwd(),
     };
     const r = await askJev($, state, questions);
+    // Auto pressed off while Jev answered: a hold applied before the wait is undone, the turn runs at the session effort.
+    if (autoOff && heldApplied) {
+      turn.effort = undefined;
+      if (!e.agentId) {
+        band.chosen = undefined;
+        $.ui.invalidate("ui.render");
+      }
+    }
     if (!r.ok) {
       if (estimate) debugEffort($, e, `jev unavailable (${r.error})`, undefined);
       return yield* next(routed(e));
