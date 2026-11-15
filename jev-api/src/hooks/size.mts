@@ -134,7 +134,8 @@ export function loadKnowledge($: Engine, k: Knowledge): Promise<void> {
   k.loaded ??= (async () => {
     let timer: { cancel(): void } | undefined;
     try {
-      const read = Promise.resolve($.store.get(DENSITY_KEY));
+      // a sync throw must become a rejection: k.loaded is assigned only after this IIFE returns, so a sync failure would be memoized
+      const read = new Promise((resolve) => resolve($.store.get(DENSITY_KEY)));
       const late = new Promise<undefined>((resolve) => {
         timer = $.clock.after(STORE_WAIT_MS, () => resolve(undefined));
       });

@@ -596,6 +596,7 @@ async function direct(overrides: Record<string, unknown>) {
     env: { get: async (name: string) => (name === "TYPESAFE_API_KEY" ? "k" : undefined) },
     http: { fetch: (...a: unknown[]) => (fetched.push(a), Promise.resolve({ status: 200, ok: true, headers: {}, text: JSON.stringify({ answers: { answer: ANSWERS["noul"] } }) })) },
     clock: { after: () => ({ cancel() {} }) },
+    store: { get: async () => undefined, set: async () => undefined },
     ...overrides,
   };
   // an HTTP error is taken over by Haiku, which these hand-made engines lack: its failure text is cut off
@@ -797,7 +798,8 @@ it("a hanging registration of one tool is waited for once, not by every call", a
     },
   });
   for (let i = 0; i < 4; i++) expect(await run("noul")).toEqual({ result: JSON.stringify(ANSWERS["noul"]) });
-  expect(waits.filter((ms) => ms === 1000)).toHaveLength(1);
+  // one registration wait, plus the store read's own 1 s bound (read once per instance)
+  expect(waits.filter((ms) => ms === 1000)).toHaveLength(2);
 });
 
 // F17: a tool the engine keeps refusing is retried once at once, then with a growing delay, and logged once.
@@ -1271,7 +1273,8 @@ it("a tool that hung once is waited for again at its next retry", async () => {
   rejectFirst?.();
   await new Promise((r) => setTimeout(r, 5));
   await run("noul"); // the retry is waited for again
-  expect(waits.filter((ms) => ms === 1000)).toHaveLength(2);
+  // two registration waits, plus the store read's one 1 s bound
+  expect(waits.filter((ms) => ms === 1000)).toHaveLength(3);
 });
 
 // A tool that fails while another is still awaited is not marked stuck by the timed-out wait, so its retry is waited for.
@@ -1300,7 +1303,8 @@ it("a tool that failed during the wait is not marked stuck", async () => {
   await run("noul"); // score fails mid-wait, noul hangs
   await new Promise((r) => setTimeout(r, 5));
   await run("noul"); // score's retry must be waited for again
-  expect(waits.filter((ms) => ms === 1000)).toHaveLength(2);
+  // two registration waits, plus the store read's one 1 s bound
+  expect(waits.filter((ms) => ms === 1000)).toHaveLength(3);
 });
 
 // A hook above refusing $.clock must not stop the session.start chain.
