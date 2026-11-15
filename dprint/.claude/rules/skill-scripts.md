@@ -33,8 +33,6 @@ read the value from the `.mts` source (the built script is minified).
 
 ## Refreshing `dprint-plugins.json`
 
-Hand-written reference data, **not** build output: edit it in place.
-
 1. Regenerate `plugins` from the `latest` array of `https://plugins.dprint.dev/info.json`, keeping registry order
    (it is the candidate preference order):
    - `id`: the URL path between `https://plugins.dprint.dev/` and `-<version>` (the name `dprint config add` accepts)

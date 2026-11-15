@@ -4,15 +4,15 @@ Working documents for agent sessions. Not shipped (`plugin/` is the installable 
 
 ## Layout
 
-- `TASKS.md`: index and checklist of the performance findings (F01-F14). Start here.
-- `EVALUATION-<date>.md`: a dated measurement run of the built `plugin/hooks/*.mjs` (method, machine, numbers, findings). Latest: `EVALUATION-2026-11-14-2.md` (plugin 0.11.0, jev-api 0.3.2, after the worklist); the first analysis: `EVALUATION-2026-11-14.md` (0.10.1).
+- `TASKS.md`: index and checklist of the performance findings (F01-F16). Start here.
+- `EVALUATION-<date>.md`: a dated measurement run of the built `plugin/hooks/*.mjs` (method, machine, numbers, findings). Latest: `EVALUATION-2026-11-14-3.md` (plugin 0.12.0, jev-api 0.3.2, after the option removal); before it `EVALUATION-2026-11-14-2.md` (0.11.0, after the worklist); the first analysis: `EVALUATION-2026-11-14.md` (0.10.1). `EVALUATION-2026-11-15-live-notes.md` holds the measurements and history moved out of `CLAUDE.md` (no new run).
 - `tasks/<id>-<slug>.md`: one document per finding. Frontmatter `id`, `title`, `status` (`done|partial|docs-only|open|closed`), `priority`, `area`; sections Status, Problem, Evidence, Code locations, Approach, Verification, Constraints, Related.
 
 ## How to work a task
 
 1. Pick an unchecked task in `TASKS.md` (highest priority first), read it and its `Related` tasks. Check it against the current code first: symbols move.
-2. Read `../CLAUDE.md` and `../.claude/rules/register-hooks.md` (every `$` use lives in `src/hooks/register.mts`; storage calls must run in-frame). Locate code by the symbol names under `Code locations` (no line numbers on purpose).
-3. Change `src/hooks/*.mts`, add the test named under `Verification` (kit tests in `tests/register.test.mts`, `tests/phase3.test.mts`, pure ones in `tests/policy.test.mts`/`tests/candidates.test.mts`), then `pnpm lint && pnpm --filter jevfort build && pnpm --filter jevfort test`. Never edit `plugin/**/*.mjs` by hand.
+2. Read `../CLAUDE.md` and `../.claude/rules/register-hooks.md` (every `$` use lives in `src/hooks/register.ts`; storage calls must run in-frame). Locate code by the symbol names under `Code locations` (no line numbers on purpose).
+3. Change `src/hooks/*.ts`, add the test named under `Verification` (kit tests in `tests/register.test.ts`, `tests/phase3.test.ts`, pure ones in `tests/policy.test.ts`/`tests/candidates.test.ts`), then `pnpm lint && pnpm --filter jevfort build && pnpm --filter jevfort test`. Never edit `plugin/**/*.mjs` by hand.
 4. Any change under `jevfort/` merged to `main` needs a version bump in `package.json`. jev-api's `batch` name, input and answer shape stay as they are.
 5. Set `status` in the task, say what shipped (version, test), tick it in `TASKS.md` and note new numbers in a new dated evaluation instead of editing old ones.
 

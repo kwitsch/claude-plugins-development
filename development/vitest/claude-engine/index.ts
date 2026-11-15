@@ -240,7 +240,7 @@ const POSITIONAL: Record<string, string[] | undefined> = {
   "audio.speak": ["text", "..."],
   "ui.toast": ["text", "..."],
   "ui.status": ["text"],
-  "ui.log": ["text"],
+  "ui.log": ["text", "..."],
   "ui.notice": ["tool_use_id", "text"],
   "ui.invalidate": ["event"],
   "fs.read": ["path"],
@@ -635,7 +635,8 @@ class Engine {
             if (event === "ui.resolve") return () => elements;
             if (event === "clock.every") return (ms: number, fn: () => unknown) => timer(event, ms, fn, true);
             if (event === "clock.after") return (ms: number, fn: () => unknown) => timer(event, ms, fn, false);
-            if (event === "ui.invalidate") {
+            // Like the real engine, these return undefined: a `.catch` on them throws.
+            if (event === "ui.invalidate" || event === "ui.log") {
               return (...args: unknown[]) => void call(event, input(event, args)).catch((err) => this.report(hook, err));
             }
             return (...args: unknown[]) => {

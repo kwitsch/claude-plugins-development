@@ -1,6 +1,6 @@
 # split script
 
-One-off node script (write it to the session scratchpad, never into the repository, and run it as a plain `node <scratchpad>/split.mjs` from the worktree root). It reads `<plugin>/src/hooks/register.mts`, cuts it into chunks (a TSDoc comment plus its top-level `function`, `const` or `type` declaration), and writes one `.mts` per target file with generated imports. Fill `PLUGIN`, `MAP` (target file to the symbols it takes, every top-level symbol exactly once; `register` stays in `register.mts`) and `DOC` (one sentence per helper file, becomes its file comment).
+One-off node script (write it to the session scratchpad, never into the repository, and run it as a plain `node <scratchpad>/split.mjs` from the worktree root). It reads `<plugin>/src/hooks/register.ts`, cuts it into chunks (a TSDoc comment plus its top-level `function`, `const` or `type` declaration), and writes one `.ts` per target file with generated imports. Fill `PLUGIN`, `MAP` (target file to the symbols it takes, every top-level symbol exactly once; `register` stays in `register.ts`) and `DOC` (one sentence per helper file, becomes its file comment).
 
 Limits: one declaration per top-level name; no `export default`; imports of the original file are not carried over (a file with `node:` imports needs them added by hand to the helper that uses them); a symbol name that also appears inside a string literal may produce an unused import, which `pnpm lint` flags.
 
@@ -9,14 +9,14 @@ import { readFileSync, writeFileSync } from "node:fs";
 
 const PLUGIN = "<plugin>";
 const MAP = {
-  "types.mts": ["..."],
-  "util.mts": ["..."],
-  "register.mts": ["register"],
+  "types.ts": ["..."],
+  "util.ts": ["..."],
+  "register.ts": ["register"],
 };
-const DOC = { "types.mts": "...", "util.mts": "..." };
+const DOC = { "types.ts": "...", "util.ts": "..." };
 
 const dir = `${PLUGIN}/src/hooks/`;
-const lines = readFileSync(dir + "register.mts", "utf8").split("\n");
+const lines = readFileSync(dir + "register.ts", "utf8").split("\n");
 const declRe = /^(export )?(async )?(function|const|type) ([A-Za-z0-9_]+)/;
 
 const decls = [];
@@ -39,7 +39,7 @@ for (const [f, names] of Object.entries(MAP)) {
   const own = new Set(names);
   const chunks = names.map((n) => byName.get(n)).sort((a, b) => a.start - b.start).map((d) => {
     let t = lines.slice(d.start, d.end + 1).join("\n");
-    if (f !== "register.mts") t = t.replace(/^(async function |function |const |type )/m, "export $1");
+    if (f !== "register.ts") t = t.replace(/^(async function |function |const |type )/m, "export $1");
     return t;
   });
   const body = chunks.join("\n\n");
@@ -53,11 +53,11 @@ for (const [f, names] of Object.entries(MAP)) {
   }
   const importLines = [];
   for (const [from, { type, value }] of [...imports].sort(([a], [b]) => a.localeCompare(b))) {
-    const mod = `./${from.replace(".mts", ".mjs")}`;
+    const mod = `./${from.replace(".ts", ".js")}`; // a .ts source imports `./x.js`; the build writes `./x.mjs`
     if (value.length) importLines.push(`import { ${value.sort().join(", ")} } from "${mod}";`);
     if (type.length) importLines.push(`import type { ${type.sort().join(", ")} } from "${mod}";`);
   }
-  const top = f === "register.mts" ? header : `/**\n * ${DOC[f]}\n *\n * @packageDocumentation\n */`;
+  const top = f === "register.ts" ? header : `/**\n * ${DOC[f]}\n *\n * @packageDocumentation\n */`;
   writeFileSync(dir + f, `${top}\n\n${importLines.join("\n")}${importLines.length ? "\n\n" : ""}${body}\n`);
   console.log(f, names.length, "symbols,", importLines.length, "import lines");
 }

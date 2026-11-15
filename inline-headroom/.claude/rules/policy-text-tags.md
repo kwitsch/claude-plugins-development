@@ -137,8 +137,7 @@ A mask-free port of upstream headroom's tag protector
 `parse_tag_at` in block mode, `compress_tagged_content=false`, read 2026-10-11
 at 976aa71) into `src/hooks/policy.mts` as `tagSpans`, sharing the lexer `tagAt`
 with the HTML extractor. It has its own toggle, `tag_protector_enabled`, no
-`compressOn` term and no `/headroom` table: it saves nothing itself, it only
-narrows what the compression levers rewrite.
+`compressOn` term and no `/headroom` table: it saves nothing itself.
 
 Ported verbatim:
 

@@ -32,13 +32,25 @@ server unless marked _static_ (read from the binary) or _spec_ (modelcontextprot
 
 ## Types
 
-Use the official types, not hand-written shapes or `unknown`: `@modelcontextprotocol/server` (2.x, Apache-2.0) as a **devDependency** of the plugin, `import type` only (`Tool`, `ServerCapabilities`, `Implementation`, `DiscoverResult`, `ListToolsResult`, `CallToolResult`, `JSONRPCRequest`, `JSONRPCResultResponse`, `JSONRPCErrorResponse`, `TaskStatus`, `CreateTaskResult`, `GetTaskResult`, ...). The build erases type imports, so `plugin/` stays zero-dependency (runtime exports such as `PROTOCOL_VERSION_META_KEY` or the `ProtocolErrorCode` enum are not imported: copy the literal). Its result types omit wire-only fields (`resultType`, `ttlMs`, `cacheScope`): add those in the era wrapper, as dprint's `reply` does. `@modelcontextprotocol/sdk` 1.x has no 2026-07-28 types and `@modelcontextprotocol/types` does not exist (checked 2026-11-13); `@modelcontextprotocol/core` exports zod schemas only. Request input stays loosely typed at the trust boundary (`RpcRequest`), checked field by field.
+- Use the official types, not hand-written shapes or `unknown`: `@modelcontextprotocol/server` (2.x, Apache-2.0) as a
+  **devDependency** of the plugin, `import type` only.
+- Types to use: `Tool`, `ServerCapabilities`, `Implementation`, `DiscoverResult`, `ListToolsResult`, `CallToolResult`,
+  `JSONRPCRequest`, `JSONRPCResultResponse`, `JSONRPCErrorResponse`, `TaskStatus`, `CreateTaskResult`,
+  `GetTaskResult`, ...
+- The build erases type imports, so `plugin/` stays zero-dependency. Runtime exports (`PROTOCOL_VERSION_META_KEY`,
+  the `ProtocolErrorCode` enum) are not imported: copy the literal.
+- Its result types omit wire-only fields (`resultType`, `ttlMs`, `cacheScope`): add those in the era wrapper, as
+  dprint's `reply` does.
+- Not usable (checked 2026-11-13): `@modelcontextprotocol/sdk` 1.x has no 2026-07-28 types;
+  `@modelcontextprotocol/types` does not exist; `@modelcontextprotocol/core` exports zod schemas only.
+- Request input stays loosely typed at the trust boundary (`RpcRequest`), checked field by field.
 
 ## Server design
 
 - One tool table, one handler per method; the era only changes the envelope. A request is modern when
   `params._meta["io.modelcontextprotocol/protocolVersion"]` is present or the method is `server/discover`; anything
   else (`initialize`, bare requests) is served as 2025-11-25 with the unchanged result shapes.
+- The `initialize` answer carries a version the server supports, never the client's echo.
 - `server/discover` result: `{ resultType: "complete", supportedVersions: ["2026-07-28"], capabilities, _meta:
   { "io.modelcontextprotocol/serverInfo": { name, version } }, ttlMs, cacheScope }`. Declare
   `capabilities.extensions["io.modelcontextprotocol/tasks"] = {}` only when a tool can return a task.
@@ -50,7 +62,15 @@ Use the official types, not hand-written shapes or `unknown`: `@modelcontextprot
   `tools/call`, race the handler against its abort, hand the handler the `signal`, and check it before every new spawn
   and before every write. Work past its last check finishes in the background, its result is dropped. A cancel for an
   unknown or finished id is ignored. A message without `id` never gets an answer.
-- A tool a mod calls with `$.mcp.call` must stay visible to the model: `$.mcp.call` fails with `no connected MCP tool` for a tool whose `_meta.ui.visibility` lacks `"model"` (live, 2.1.325), and a mod gets no timeout and no cancellation from `$.mcp.call` (it is not cancelled when the mod's dispatch is abandoned). Keep the model off such a tool with a `tool.check` hook: `next.origin.plugin` is the plugin itself for the mod's own call and `engine` for the model's direct call (deny it), take no URL or secret from the caller, and implement timeout and cancel in the server (jev-api's `http` server: `timeoutMs` per call, an app-level `cancel` tool, `notifications/cancelled`). The engine's static check also applies to every module of a bundled `lib.mjs`, and `claude plugin validate` finds a violation the vitest kit cannot.
+- A tool a mod calls with `$.mcp.call` must stay visible to the model: `$.mcp.call` fails with
+  `no connected MCP tool` for a tool whose `_meta.ui.visibility` lacks `"model"` (live, 2.1.325).
+- A mod gets no timeout and no cancellation from `$.mcp.call` (it is not cancelled when the mod's dispatch is
+  abandoned): implement timeout and cancel in the server (jev-api's `http` server: `timeoutMs` per call, an app-level
+  `cancel` tool, `notifications/cancelled`).
+- Keep the model off such a tool with a `tool.check` hook: `next.origin.plugin` is the plugin itself for the mod's own
+  call and `engine` for the model's direct call (deny it). Take no URL or secret from the caller.
+- The engine's static check also applies to every module of a bundled `lib.mjs`; `claude plugin validate` finds a
+  violation the vitest kit cannot.
 - Tool `_meta` the client reads: `ui.visibility` without `"model"` keeps the tool from the model and ToolSearch (hooks
   still call it; hook-only servers set `{ ui: { visibility: ["app"] } }` on every tool, also `mcp_status` still shows
   it); `anthropic/alwaysLoad` (true: never deferred behind ToolSearch, at server level it also blocks startup until

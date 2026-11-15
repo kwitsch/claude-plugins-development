@@ -11,8 +11,7 @@ paths:
 - `plugin/.mcp.json` (hand-written) registers `src/mcp/server.mts` directly (no wrapper, no args) under the key
   `storage`, with env `INLINE_HEADROOM_STORAGE_ENABLED` = `${user_config.storage_enabled}`. `CLAUDE_PLUGIN_DATA` gets
   no `env` entry: Claude Code exports it to stdio MCP servers.
-- `server.mts` → `plugin/mcp/server.mjs`: one zero-dep executable module (`#!/usr/bin/env node`, mode 0755 set by the
-  build) with two modes, the per-session stdio MCP front-end and the detached `--service <dataDir>` singleton. Its
+- `server.mts` → `plugin/mcp/server.mjs`: one executable module with two modes, the per-session stdio MCP front-end and the detached `--service <dataDir>` singleton. Its
   pure exports (`isStorageEnabled`, `resolveStorage`, `migrate`, `execOp`, `PROTOCOL`, `MIGRATIONS`) are tested by
   `tests/storage.test.mts`; an `isMainModule()` guard keeps that import free of side effects.
 - `tests/storage.test.mts` needs `node:sqlite` and spawns processes. Its cleanup SIGTERMs every `--service` process
@@ -22,7 +21,7 @@ paths:
 
 Invariants for `src/mcp/server.mts`:
 
-- Node built-ins only (`node:` imports), no npm dependency, no bundling, one file.
+- No bundling, one file.
 - No static `node:sqlite` import. Only `--service` mode loads it via
   `await import("node:sqlite")`, so the front-end starts on any Node. Storage
   needs Node >= 22.13; Bun lacks `node:sqlite`, so there is no
@@ -31,8 +30,7 @@ Invariants for `src/mcp/server.mts`:
   under `PRAGMA locking_mode=EXCLUSIVE` + `journal_mode=WAL` from start to exit.
   That lock is the host-wide election: a second service gets `SQLITE_BUSY` and
   exits 0. Only the lock holder unlinks a stale `storage.sock` and listens.
-- Front-end stdout carries JSON-RPC only; the per-call debug log is gated by
-  `MCP_HOOK_DEBUG`. The service never writes stdout; its stderr is
+- The front-end's per-call debug log is gated by `MCP_HOOK_DEBUG`. The service never writes stdout; its stderr is
   `${CLAUDE_PLUGIN_DATA}/service.log`.
 - Linux, macOS and WSL2 only: the service socket is a path-based Unix socket, so
   `callService` refuses on `win32` (native Windows is a spec non-goal; its
@@ -41,8 +39,7 @@ Invariants for `src/mcp/server.mts`:
 - Data lives only under `CLAUDE_PLUGIN_DATA` (`storage.db`, `storage.sock`,
   `service.log`). There is no fallback directory: an unset, blank or
   uninterpolated value refuses storage.
-- `storage_enabled` is fail-closed (only the trimmed literal `"true"` enables)
-  (the state-creating exception of the toggle convention in the plugin `CLAUDE.md`).
+- `storage_enabled` (fail-closed, plugin `CLAUDE.md`) compares the trimmed value.
   Disabled means `tools/list` is `[]` and no file or process is created.
 - The front-end retries `ENOENT`/`ECONNREFUSED`/`ECONNRESET` and a reply-less
   close (a service shutting down). Every op is idempotent, so a retry is safe

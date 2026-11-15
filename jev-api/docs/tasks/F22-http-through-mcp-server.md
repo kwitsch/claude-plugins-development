@@ -8,7 +8,7 @@ area: jev-api/src/mcp/server.mts, jev-api/src/shared/http.mts, jev-api/src/hooks
 
 ## Status
 
-Done in jev-api 0.5.0. Tests: `jev-api/tests/http-core.test.mts`, `server.test.mts`, `transport.test.mts` (a hand mutation of the guard time, of the reconnect time and a dead guard each found by a test or removed), live checks below.
+Done in jev-api 0.5.0. Tests: `jev-api/tests/http-core.test.mts`, `server.test.mts`, `transport.test.mts` (a hand mutation of the guard time, of the reconnect time and a dead guard each found by a test or removed), live checks below. The resulting design and constraints: `.claude/rules/http-mcp-server.md`.
 
 ## Problem
 

@@ -10,12 +10,6 @@ Plugin parts, each with its own path-scoped rule in `.claude/rules/` (loaded whe
 - Function-hooks module `notice` (toast when a dprint config exists but dprint cannot run) in `src/hooks/`:
   `notice-hook.md`.
 
-## Pitfalls
-
-- `plugin/skills/dprint/dprint-plugins.json` is hand-written reference data, **not** build output: edit it in place.
-- Every `plugin/**/*.mjs` is minified build output: debug against `src/`.
-
 ## Tests
 
-`pnpm --filter dprint test` runs vitest over `tests/*.test.mts` against the built `plugin/`; the shared config sets
-`testTimeout: 30_000` for the files that spawn processes.
+The shared vitest config sets `testTimeout: 30_000` for the files that spawn processes.

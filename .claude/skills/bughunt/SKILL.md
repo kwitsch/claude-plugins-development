@@ -60,7 +60,7 @@ No agent narrates between tool calls (no human reads it); the structured results
 
 At the end of the hunt, before the final report, check what the hunt taught that holds beyond this plugin:
 
-1. List the confirmed defect classes and the Claude Code / tool behaviours you verified (compare with `.claude/rules/hook-file-safety.md`, `.claude/rules/claude-code-hook-facts.md`, `.claude/rules/plugin-docs-tasks.md` and the other rules and skills).
+1. List the confirmed defect classes and the Claude Code / tool behaviours you verified (compare with `.claude/rules/hook-file-safety.md`, `.claude/rules/claude-code-hook-facts.md`, `.claude/rules/claude-code-tool-hook-facts.md`, `.claude/rules/claude-code-skill-facts.md`, `.claude/rules/plugin-docs-tasks.md` and the other rules and skills).
 2. For each, decide: new general fact or defect class, correction of an existing rule or skill, or plugin-specific (stays in the plugin's `docs/` and rules). Only what other plugins of this repository can use, written generally (no plugin names in the rule text except as the source), goes into `.claude/rules/*.md` (with `paths:`) or `.claude/skills/`.
 3. Apply the additions and corrections in the same PR, say in one line which rules or skills changed (or that nothing new qualified).
 

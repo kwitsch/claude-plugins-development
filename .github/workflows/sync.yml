@@ -85,6 +85,7 @@ jobs:
           repository: kwitsch/claude-plugins
           token: ${{ secrets.RELEASE_TOKEN }}
           path: target
+          fetch-depth: 0 # full history, so the rebase in the retry loop below has the merge base
 
       # Pushes straight to main. RELEASE_TOKEN is a fine-grained PAT (Contents:
       # read/write on kwitsch/claude-plugins) acting as the repo admin; the main
@@ -110,4 +111,13 @@ jobs:
           git config user.name "Kwitsch"
           git config user.email "kwitsch@gmail.com"
           git commit -m "Sync $P $V" -m "Synced from kwitsch/claude-plugins-development@$GITHUB_SHA (tag $TAG)."
-          git push origin HEAD:main
+          # Release syncs several plugins in parallel and each pushes to main: a push rejected because another sync
+          # landed first is rebased (each commit touches only plugins/<name>, so it applies cleanly) and retried
+          for i in 1 2 3 4 5; do
+            git push origin HEAD:main && exit 0
+            echo "::notice::push rejected (attempt $i), rebasing onto origin/main"
+            sleep $((i * 3))
+            git pull --rebase origin main
+          done
+          echo "::error::could not push Sync $P $V to kwitsch/claude-plugins main"
+          exit 1

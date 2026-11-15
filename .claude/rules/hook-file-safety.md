@@ -35,7 +35,7 @@ Learned in the dprint plugin (0.12 to 0.13, a long bug hunt). Every point below 
 - Cache only exact hits when staleness cannot be detected cheaply (a config found in an ancestor hides a nearer one created later).
 - A failed or empty read is retried after a delay (failure: short, empty: longer), never cached forever; concurrent callers share one promise.
 - `dispose()` (may respawn: idle exit, timeout) and `close()` (retired for good: eviction, shutdown) are different; check `closed` again after every `await` that precedes a spawn.
-- A start/finish hook pair is keyed by `tool_use_id`; entries of calls that never finish are pruned by age (longer than any call runs).
+- Start/finish hook pairs (keyed by `tool_use_id`, see `.claude/rules/claude-code-tool-hook-facts.md`): entries of calls that never finish are pruned by age (longer than any call runs).
 
 ## Write/Edit content and concurrent hook processes
 
