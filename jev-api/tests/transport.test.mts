@@ -548,6 +548,20 @@ describe("the configuration of the server", () => {
     expect(JSON.parse((await p).result ?? "null")).toEqual(NOUL_ANSWER);
     expect(silent.fetched).toHaveLength(1);
   });
+  it("a hung config call is not shared with the next run: it sends its own config call and the request", async () => {
+    let n = 0;
+    const t = await rig({ onConfig: () => (++n === 1 ? NEVER() : { isError: false, content: [{ type: "text", text: "{\"configured\":true}" }], structuredContent: { configured: true } }) });
+    const p = t.run();
+    await t.until("config", 1);
+    t.fire(3000);
+    await p;
+    expect(t.fetched).toHaveLength(1);
+    t.clock.now += 120_000;
+    await t.run();
+    expect(t.configs()).toHaveLength(2);
+    expect(t.requests()).toHaveLength(1);
+    expect(t.fetched).toHaveLength(1);
+  });
   it("session.start sends it ahead of the first request, only with System One access", async () => {
     const t = await rig();
     await t.hooks.get("session.start")?.(t.$, { cwd: "/p" }, async () => ({}));
