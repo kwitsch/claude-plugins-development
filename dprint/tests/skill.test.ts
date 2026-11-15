@@ -1,6 +1,6 @@
 // Static checks on the hand-written skill files and the generated manifest.
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { test } from "vitest";
@@ -80,6 +80,17 @@ test("README documents the config gate, the 15 s toast module and all six config
   );
   assert.equal(readme.split("\n")[2], manifest.description);
   assert.match(manifest.description, /shows a toast when it has one but no usable dprint \(missing, failing or older than 0\.50\)/);
+});
+
+test("config-names.ts header names only source files that exist", () => {
+  const src = readFileSync(path.join(ROOT, "src/skills/dprint/config-names.ts"), "utf8");
+  const header = src.slice(0, src.indexOf("*/"));
+  const names = [...header.matchAll(/([\w/.-]+\.(?:test\.)?ts)\b/g)].map((m) => m[1]);
+  assert.ok(names.length > 0);
+  for (const n of names) {
+    const found = ["src/skills/dprint", "src", "."].some((base) => existsSync(path.join(ROOT, base, n)));
+    assert.ok(found, `${n} is named in config-names.ts but exists nowhere`);
+  }
 });
 
 test("SKILL.md frontmatter: argument-hint lists the three actions", () => {
