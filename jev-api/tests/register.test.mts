@@ -670,6 +670,34 @@ it("session.start retries tools whose pre-bind attempt fails during its wait", a
   expect(tries.filter(Boolean)).toHaveLength(4);
 });
 
+// A pre-bind attempt that outlasts the call's wait is marked stuck: session.start waits for it and retries it too.
+it("session.start retries tools whose pre-bind attempt outlasts the call's wait", async () => {
+  let bound = false;
+  const tries: boolean[] = [];
+  const { run, hooks, $ } = await direct({
+    tool: {
+      register: async (spec: { name: string }) => {
+        const b = bound;
+        tries.push(b);
+        await new Promise((r) => setTimeout(r, 50));
+        if (!b) throw new Error("session not bound");
+        return { tool: TOOL(spec.name) };
+      },
+    },
+    ui: { log: async () => undefined },
+    clock: {
+      after: (ms: number, fn: () => void) => {
+        const t = ms === 1000 ? setTimeout(fn, 0) : setTimeout(fn, ms);
+        return { cancel: () => clearTimeout(t) };
+      },
+    },
+  });
+  await run("noul");
+  bound = true;
+  await hooks.get("session.start")?.($, { cwd: "/p" }, Object.assign(async (e: unknown) => e, { signal: new AbortController().signal }));
+  expect(tries.filter(Boolean)).toHaveLength(4);
+});
+
 // F03: a registration that never answers must not hold the call.
 it("a registration that never answers does not hold the call", async () => {
   const { run, fetched } = await direct({

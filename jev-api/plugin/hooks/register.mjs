@@ -23,6 +23,7 @@ export function register(on, options) {
 	on("session.start", async function onSessionStart($, e, next) {
 		try {
 			st.retryAt.clear();
+			st.stuck.clear();
 			if (st.missing.size > 0) await ensureTools($, st, 5 * REGISTER_WAIT_MS);
 			st.retryAt.clear();
 			if (st.missing.size > 0) await ensureTools($, st, 5 * REGISTER_WAIT_MS);

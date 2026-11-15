@@ -56,7 +56,9 @@ export function register(on: On, options?: Options): void {
   on("session.start", async function onSessionStart($, e, next) {
     try {
       // Binding the session is what earlier refusals were about: drop their back-off so this retry really runs.
+      // A stuck mark ("waited for once") is stale after the bind too: session.start waits for pre-bind attempts itself.
       st.retryAt.clear();
+      st.stuck.clear();
       if (st.missing.size > 0) await ensureTools($, st, 5 * REGISTER_WAIT_MS);
       // an attempt begun before the bind may have failed during that wait: retry it now
       st.retryAt.clear();
