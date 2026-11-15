@@ -83,7 +83,7 @@ export const meta = {
   description: 'Bug hunt on one plugin: one rotating lens per round, hunters per area, verifier per finding, fixer chosen by the verifier, round and no-finding caps',
   phases: [
     { title: 'Hunt', detail: 'read-only hunters per area for the round lens, parallel' },
-    { title: 'Verify', detail: 'one opus verifier per finding, parallel' },
+    { title: 'Verify', detail: 'one verifier per finding, parallel' },
     { title: 'Fix', detail: 'one fixer per confirmed finding, sequential' },
     { title: 'Close', detail: 'simplify, code-review, learnings' },
   ],
@@ -169,7 +169,7 @@ let blocked = false
 let dry = 0
 let stop = `maxRounds ${maxRounds}`
 
-for (let round = 1; round <= maxRounds && !blocked; round++) {
+for (let round = 1; round <= maxRounds; round++) {
   // One lens per round, rotating; the areas hunt in parallel.
   const l = lenses[(round - 1) % lenses.length]
   const hunts = await parallel(areas.map((a) => () => run(huntPrompt(a, l.lens, seen), { label: `r${round}:${a.name}`, phase: 'Hunt', model: l.model, effort: l.effort, schema: FINDINGS })))
