@@ -93,7 +93,9 @@ async function runProbe(npx: string): Promise<boolean> {
  */
 function probeNpx(npx: string): Promise<boolean> {
   const hit = probes.get(npx);
-  if (hit && (hit.failedAt === undefined || Date.now() - hit.failedAt < NPX_RETRY_MS)) return hit.ok;
+  // a failure stamped in the future (the wall clock stepped back) counts as expired
+  const age = hit?.failedAt === undefined ? 0 : Date.now() - hit.failedAt;
+  if (hit && (hit.failedAt === undefined || (age >= 0 && age < NPX_RETRY_MS))) return hit.ok;
   const entry: { ok: Promise<boolean>; failedAt?: number } = { ok: runProbe(npx) };
   void entry.ok.then((ok) => {
     if (!ok) entry.failedAt = Date.now();
