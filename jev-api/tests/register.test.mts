@@ -1023,6 +1023,14 @@ test("the Haiku output budget covers a choice with many options", async ($, on) 
   expect(Number(asked[1]["maxTokens"])).toBe(512); // unchanged for a noul question
 });
 
+// haikuTokens: 256 + 256 (one question) + per option (ceil(len/3) + 12) + the longest option once more (an echoed name).
+test("the Haiku output budget counts the longest option name a second time", async ($, on) => {
+  const asked = haiku(on, () => said("{}"));
+  mock.env(on, {});
+  await call($, "choice", { criteria: { abcdef: "d", a: "d" } });
+  expect(Number(asked[0]["maxTokens"])).toBe(256 + 256 + (2 + 12) + (1 + 12) + 2);
+});
+
 test("the Haiku output budget counts non-ASCII option names at one token per character", async ($, on) => {
   const asked = haiku(on, () => said("{}"));
   mock.env(on, {});
