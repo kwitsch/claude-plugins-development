@@ -143,7 +143,9 @@ export function hide(text: string, url: string, placeholder: string): string {
   } catch {
     // The engine quotes a URL it cannot parse as given.
   }
-  return text.replaceAll(href, placeholder).replaceAll(url, placeholder);
+  // Also the percent-encoded echo (`http%3A%2F%2F...`), any hex case.
+  const enc = [...new Set([href, url])].map((u) => encodeURIComponent(u).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|");
+  return text.replaceAll(href, placeholder).replaceAll(url, placeholder).replace(new RegExp(enc, "gi"), placeholder);
 }
 
 /**

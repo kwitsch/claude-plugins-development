@@ -47,6 +47,7 @@ describe("hide and hideHost", () => {
   });
   it("keeps the text when the URL does not parse", () => {
     expect(hideHost("text", "not a url")).toBe("text");
+    expect(hide("echo http%3a%2F%2F127.0.0.1%3A8080%2Fv1%2Fsystemone!", "http://127.0.0.1:8080/v1/systemone", "<P>")).toBe("echo <P>!");
   });
 });
 
