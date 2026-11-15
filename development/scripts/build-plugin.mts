@@ -81,6 +81,8 @@ function bundleLib(compiled: Map<string, string>): { members: string[]; entries:
     return process.exit(1);
   };
   /** The module's static imports and `export` statement starts, from the parse. */
+  if (!listed.length) fail("hooks.json lists no modules");
+  for (const e of entryPaths) if (!compiled.has(e)) fail(`hooks.json lists ${path.relative(ROOT, e)}, which has no source`);
   const parse = (f: string, code: string): { imports: StaticImport[]; exports: number[]; reexports: string[]; dynamics: string[] } => {
     const r = parseSync(f, code, { sourceType: "module" });
     if (r.errors.length) fail(`${path.relative(ROOT, f)} does not parse: ${r.errors[0].message}`);
