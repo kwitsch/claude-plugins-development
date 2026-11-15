@@ -189,6 +189,8 @@ function startServer(): void {
   const byCall = new Map<string, Flight>();
   /** What the mod set with `config`; undefined until it did. */
   let config: HttpEnv | undefined;
+  /** The generation of `config` (the mod numbers its config calls); undefined when the mod sent none. */
+  let configGen: number | undefined;
   /** Cancels that arrived before their request: call id to expiry (insertion order is age). */
   const tombstones = new Map<string, number>();
   const send = (msg: JSONRPCResultResponse | JSONRPCErrorResponse) => process.stdout.write(JSON.stringify(msg) + "\n");
@@ -248,7 +250,8 @@ function startServer(): void {
     if (typeof timeoutMs !== "number" || !Number.isInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > MAX_TIMEOUT_MS) return invalid("request", `timeoutMs must be a whole number from 1 to ${MAX_TIMEOUT_MS}`);
     if (byCall.has(callId)) return invalid("request", "callId is already in use by a running request");
     const cfg = config;
-    if (cfg === undefined) return outcomeResult({ kind: "error", code: "unconfigured", message: "the server has no configuration yet" });
+    // the request was synced with another config than the one held now (concurrent calls with different env): the mod sends its own again
+    if (cfg === undefined || (typeof args["configGen"] === "number" && args["configGen"] !== configGen)) return outcomeResult({ kind: "error", code: "unconfigured", message: "the server has no configuration yet" });
     if (!cfg.key && !cfg.base && !cfg.jevUrl) return outcomeResult({ kind: "error", code: "config", message: "no System One access configured: set TYPESAFE_API_KEY, TYPESAFE_BASE_URL or JEV_URL" });
     if (cancelledEarly(callId)) return outcomeResult({ kind: "error", code: "aborted", message: "the call was abandoned" });
     byCall.set(callId, flight);
@@ -283,6 +286,7 @@ function startServer(): void {
    */
   const runConfig = (args: Record<string, unknown>): CallToolResult => {
     config = { key: field(args["key"]), base: field(args["base"]), jevUrl: field(args["jevUrl"]), model: field(args["model"]) };
+    configGen = typeof args["gen"] === "number" ? args["gen"] : undefined;
     return toolResult({ configured: true });
   };
 

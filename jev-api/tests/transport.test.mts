@@ -97,7 +97,7 @@ describe("the request goes through the server", () => {
     expect(call.server).toBe(SERVER);
     expect(call.args).toMatchObject({ state: BASE.state, timeoutMs: 20000, questions: { answer: { type: "noul", instructions: BASE.instructions } } });
     expect(call.args["callId"]).toMatch(/^[a-z0-9]+-\d+$/);
-    expect(Object.keys(call.args).sort((a, b) => a.localeCompare(b))).toEqual(["callId", "questions", "state", "timeoutMs"]);
+    expect(Object.keys(call.args).sort((a, b) => a.localeCompare(b))).toEqual(["callId", "configGen", "questions", "state", "timeoutMs"]);
   });
 
   it("the request gets only the time the connect and the config call left, and none left is a timeout", async () => {
@@ -494,7 +494,7 @@ describe("the configuration of the server", () => {
     const t = await rig({ env: { TYPESAFE_API_KEY: "k", JEV_URL: "https://jev.example/v1/systemone", TYPESAFE_DEFAULT_MODEL: " m " } });
     await t.run();
     await t.run();
-    expect(t.configs().map((c) => c.args)).toEqual([{ key: "k", jevUrl: "https://jev.example/v1/systemone", model: "m" }]);
+    expect(t.configs().map((c) => c.args)).toEqual([{ key: "k", jevUrl: "https://jev.example/v1/systemone", model: "m", gen: 1 }]);
     expect(t.mcpCalls.map((c) => c.tool)).toEqual(["config", "request", "request"]);
   });
   it("is sent again when a value changed", async () => {
@@ -502,7 +502,7 @@ describe("the configuration of the server", () => {
     await t.run();
     t.env["TYPESAFE_API_KEY"] = "k2";
     await t.run();
-    expect(t.configs().map((c) => c.args)).toEqual([{ key: "k" }, { key: "k2" }]);
+    expect(t.configs().map((c) => c.args)).toEqual([{ key: "k", gen: 1 }, { key: "k2", gen: 2 }]);
   });
   it("is sent again after a failed request, read fresh, before the next one", async () => {
     let n = 0;
@@ -548,7 +548,7 @@ describe("the configuration of the server", () => {
   it("session.start sends it ahead of the first request, only with System One access", async () => {
     const t = await rig();
     await t.hooks.get("session.start")?.(t.$, { cwd: "/p" }, async () => ({}));
-    expect(t.configs().map((c) => c.args)).toEqual([{ key: "k" }]);
+    expect(t.configs().map((c) => c.args)).toEqual([{ key: "k", gen: 1 }]);
     await t.run();
     expect(t.configs()).toHaveLength(1);
     const none = await rig({ env: {} });
@@ -657,6 +657,39 @@ describe("Haiku takes over after an HTTP error status", () => {
     const t = await rig({ complete: () => HAIKU_OK, onCall: () => refusal });
     expect((await t.run("noul", { overflow: "error" })).deny).toMatch(/^noul: state too large/);
     expect(t.completed).toHaveLength(0);
+  });
+});
+
+describe("concurrent calls with different env", () => {
+  it("each request is served with the config of its own call, whatever order the config answers come in", async () => {
+    for (const order of [[0, 1], [1, 0]]) {
+      let held: { key: unknown; gen: unknown } | undefined; // the server's one global config, replaced by every config call
+      const served: [unknown, unknown][] = [];
+      const release: (() => void)[] = [];
+      const t = await rig({
+        onConfig: (c) => new Promise((resolve) => release.push(() => ((held = { key: c.args["key"], gen: c.args["gen"] }), resolve(outcome({ configured: true }))))),
+        onCall: (c) => {
+          if (held === undefined || c.args["configGen"] !== held.gen) return outcome({ kind: "error", code: "unconfigured", message: "x" });
+          served.push([c.args["state"], held.key]);
+          return okOutcome;
+        },
+      });
+      t.env["TYPESAFE_API_KEY"] = "kA";
+      const a = t.run("noul", { state: "A" });
+      await t.until("config", 1);
+      t.env["TYPESAFE_API_KEY"] = "kB";
+      const b = t.run("noul", { state: "B" });
+      await t.until("config", 2);
+      for (const i of order) release[i]();
+      // a refused request makes its call send its config again
+      for (let i = 0; i < 20; i++) {
+        await new Promise((r) => setImmediate(r));
+        release.splice(0).forEach((f) => f());
+      }
+      await Promise.all([a, b]);
+      for (const [state, key] of served) expect(key).toBe(state === "A" ? "kA" : "kB");
+      expect(served).toHaveLength(2);
+    }
   });
 });
 

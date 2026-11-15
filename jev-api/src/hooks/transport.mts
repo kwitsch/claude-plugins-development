@@ -49,6 +49,10 @@ export type Link = {
   connecting: Promise<string | undefined> | undefined;
   /** The configuration the server was given last (as JSON); undefined while it has none (not sent yet, or the server restarted). */
   sent: string | undefined;
+  /** The generation of `sent`: how many configs were sent when it was (the server holds the config of the newest generation sent that it received last). */
+  sentGen: number;
+  /** Generations handed out: one per config call, so a request can name the config it was synced with. */
+  gen: number;
   /** Set by a failed request: the next request sends the configuration again, read fresh from the environment. */
   dirty: boolean;
 };
@@ -59,7 +63,7 @@ export type Link = {
  * @returns The link.
  */
 export function newLink(): Link {
-  return { server: undefined, retryAt: 0, counter: 0, logged: false, connecting: undefined, sent: undefined, dirty: false };
+  return { server: undefined, retryAt: 0, counter: 0, logged: false, connecting: undefined, sent: undefined, sentGen: 0, gen: 0, dirty: false };
 }
 
 /** What stops a wait: its time ran out, or the call was abandoned. */
@@ -233,15 +237,16 @@ async function ensureServer($: Engine, link: Link): Promise<string | undefined> 
  * @param server - The server name.
  * @param env - The env values, trimmed.
  * @param signal - Aborts when the call is abandoned.
- * @returns Undefined when the server has the current configuration, an outcome when the call was abandoned, or `{ down }` with the reason when the server failed.
+ * @returns `{ gen }`, the generation of the config this call's values were sent in (the request names it, so a server that holds another call's config refuses it), an outcome when the call was abandoned, or `{ down }` with the reason when the server failed.
  */
-async function syncConfig($: Engine, link: Link, server: string, env: HttpEnv, signal: AbortSignal): Promise<Outcome | { down: string } | undefined> {
+async function syncConfig($: Engine, link: Link, server: string, env: HttpEnv, signal: AbortSignal): Promise<Outcome | { down: string } | { gen: number }> {
   const args = { ...(env.key ? { key: env.key } : {}), ...(env.base ? { base: env.base } : {}), ...(env.jevUrl ? { jevUrl: env.jevUrl } : {}), ...(env.model ? { model: env.model } : {}) };
   const text = JSON.stringify(args);
-  if (link.sent === text && !link.dirty) return undefined;
+  if (link.sent === text && !link.dirty) return { gen: link.sentGen };
+  const gen = ++link.gen;
   let wait: Stop | undefined;
   try {
-    const call = new Promise<McpResult>((resolve) => resolve($.mcp.call(server, "config", args))).then(
+    const call = new Promise<McpResult>((resolve) => resolve($.mcp.call(server, "config", { ...args, gen }))).then(
       (value) => ({ value }),
       (error: unknown) => ({ error }),
     );
@@ -251,9 +256,13 @@ async function syncConfig($: Engine, link: Link, server: string, env: HttpEnv, s
     if (r === "timeout") return { down: `no answer to the config call within ${CONNECT_WAIT_MS} ms` };
     if ("error" in r) return { down: message(r.error) };
     if (!isRecord(r.value) || r.value.isError === true) return { down: "the server refused its configuration" };
-    link.sent = text;
-    link.dirty = false;
-    return undefined;
+    // only the newest config sent may be recorded as the server's: an older answer can arrive after a newer one was sent
+    if (gen === link.gen) {
+      link.sent = text;
+      link.sentGen = gen;
+      link.dirty = false;
+    }
+    return { gen };
   } finally {
     wait?.done();
   }
@@ -272,7 +281,7 @@ export async function configureServer($: Engine, link: Link, env: HttpEnv, signa
     const server = await ensureServer($, link);
     if (server === undefined) return;
     const r = await syncConfig($, link, server, env, signal);
-    if (r !== undefined && "down" in r) await markDown($, link, r.down);
+    if ("down" in r) await markDown($, link, r.down);
   } catch {
     // best effort: the first request sends the configuration again
   }
@@ -303,13 +312,14 @@ function readOutcome(r: McpResult | null | undefined): Outcome | undefined {
  * @param $ - The engine.
  * @param server - The server name.
  * @param callId - The id the server knows the request by.
+ * @param gen - The generation of the config this call was synced with.
  * @param state - The text the questions are about.
  * @param questionsObject - The `questions` of the request body.
  * @param timeoutMs - How long the HTTP request may take.
  * @param signal - Aborts when the call is abandoned.
  * @returns The outcome, or `{ down }` with the reason when the server failed (the call threw, the answer is no outcome): the caller falls back.
  */
-async function callServer($: Engine, server: string, callId: string, state: string, questionsObject: Record<string, unknown>, timeoutMs: number, signal: AbortSignal): Promise<Outcome | { down: string }> {
+async function callServer($: Engine, server: string, callId: string, gen: number, state: string, questionsObject: Record<string, unknown>, timeoutMs: number, signal: AbortSignal): Promise<Outcome | { down: string }> {
   let wait: Stop | undefined;
   /** Tells the server to abort this request; called at most once, by whichever of the guard and the abandonment wins the race. The answer is not awaited and its failure does not matter. */
   const cancel = (): void => {
@@ -320,7 +330,7 @@ async function callServer($: Engine, server: string, callId: string, state: stri
     }
   };
   try {
-    const call = new Promise<McpResult>((resolve) => resolve($.mcp.call(server, "request", { callId, state, questions: questionsObject, timeoutMs }))).then(
+    const call = new Promise<McpResult>((resolve) => resolve($.mcp.call(server, "request", { callId, configGen: gen, state, questions: questionsObject, timeoutMs }))).then(
       (value) => ({ value }),
       (error: unknown) => ({ error }),
     );
@@ -372,7 +382,7 @@ export async function sendOutcome($: Engine, link: Link, env: HttpEnv, state: st
     /** The configuration, then the request. */
     const attempt = async (): Promise<Outcome | { down: string }> => {
       const configured = await syncConfig($, link, server, env, signal);
-      if (configured !== undefined) return configured;
+      if (!("gen" in configured)) return configured;
       // a call id the server can tell apart from every other one of this session and of earlier ones; the counter moves
       // before the await, or calls that run side by side would read the same number
       const n = ++link.counter;
@@ -383,7 +393,7 @@ export async function sendOutcome($: Engine, link: Link, env: HttpEnv, state: st
       const left = timeoutMs - ((await now($)) - started);
       if (signal.aborted) return ABANDONED;
       if (left < 1) return { kind: "error", code: "timeout", message: `timeout after ${timeoutMs}ms` };
-      return callServer($, server, callId, state, questionsObject, Math.round(left), signal);
+      return callServer($, server, callId, configured.gen, state, questionsObject, Math.round(left), signal);
     };
     let outcome = await attempt();
     if (!("down" in outcome) && outcome.kind === "error" && outcome.code === "unconfigured") {
