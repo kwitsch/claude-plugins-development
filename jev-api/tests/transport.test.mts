@@ -122,6 +122,21 @@ describe("the request goes through the server", () => {
     }
   });
 
+  it("a config call cut by a short call timeout does not mark the server down", async () => {
+    let release: (v: unknown) => void = () => {};
+    let first = true;
+    const t = await rig({ onConfig: () => (first ? (first = false, new Promise((r) => (release = r))) : outcome({ configured: true })) });
+    const pending = t.run("noul", { timeout: 1 });
+    for (let i = 0; i < 50; i++) await new Promise((r) => setImmediate(r));
+    t.clock.now += 1000;
+    t.fire(1000);
+    expect((await pending).deny).toContain("timeout after 1000ms");
+    release(outcome({ configured: true })); // the slow config answer arrives; the next call shares it
+    await t.run("noul");
+    expect(t.fetched).toHaveLength(0);
+    expect(t.requests()).toHaveLength(1);
+  });
+
   it("connects once and keeps the server for later calls", async () => {
     const t = await rig();
     await t.run();

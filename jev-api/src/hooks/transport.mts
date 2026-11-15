@@ -240,9 +240,10 @@ async function ensureServer($: Engine, link: Link): Promise<string | undefined> 
  * @param env - The env values, trimmed.
  * @param signal - Aborts when the call is abandoned.
  * @param waitMs - The most the config call may take (default {@link CONNECT_WAIT_MS}).
+ * @param timeoutMs - The call's whole timeout, named in the outcome when `waitMs` (the time left) cuts the wait short.
  * @returns `{ gen }`, the generation of the config this call's values were sent in (the request names it, so a server that holds another call's config refuses it), an outcome when the call was abandoned, or `{ down }` with the reason when the server failed.
  */
-async function syncConfig($: Engine, link: Link, server: string, env: HttpEnv, signal: AbortSignal, waitMs = CONNECT_WAIT_MS): Promise<Outcome | { down: string } | { gen: number }> {
+async function syncConfig($: Engine, link: Link, server: string, env: HttpEnv, signal: AbortSignal, waitMs = CONNECT_WAIT_MS, timeoutMs = waitMs): Promise<Outcome | { down: string } | { gen: number }> {
   const args = { ...(env.key ? { key: env.key } : {}), ...(env.base ? { base: env.base } : {}), ...(env.jevUrl ? { jevUrl: env.jevUrl } : {}), ...(env.model ? { model: env.model } : {}) };
   const text = JSON.stringify(args);
   if (link.sent === text && !link.dirty) return { gen: link.sentGen };
@@ -269,6 +270,8 @@ async function syncConfig($: Engine, link: Link, server: string, env: HttpEnv, s
     const r = await Promise.race([call, wait.stop]);
     if (r === "aborted") return ABANDONED;
     if (r === "timeout") {
+      // the call's own budget ran out, the server is not at fault: no down, and the pending config call stays shared
+      if (waitMs < CONNECT_WAIT_MS) return { kind: "error", code: "timeout", message: `timeout after ${timeoutMs}ms` };
       if (link.syncing?.gen === gen) link.syncing = undefined; // a hung call is not shared with the next one
       return { down: `no answer to the config call within ${CONNECT_WAIT_MS} ms` };
     }
@@ -396,7 +399,7 @@ export async function sendOutcome($: Engine, link: Link, env: HttpEnv, state: st
     let usedGen: number | undefined;
     /** The configuration, then the request. */
     const attempt = async (): Promise<Outcome | { down: string }> => {
-      const configured = await syncConfig($, link, server, env, signal, timeoutMs - ((await now($)) - started));
+      const configured = await syncConfig($, link, server, env, signal, timeoutMs - ((await now($)) - started), timeoutMs);
       if (!("gen" in configured)) return configured;
       usedGen = configured.gen;
       // a call id the server can tell apart from every other one of this session and of earlier ones; the counter moves
