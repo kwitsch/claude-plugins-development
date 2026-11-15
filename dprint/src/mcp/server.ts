@@ -18,8 +18,8 @@ import type { CallToolResult, DiscoverResult, Implementation, JSONRPCErrorRespon
 import { readFileSync } from "node:fs";
 import process from "node:process";
 import readline from "node:readline";
-import { bashFinished, bashStarted, cwdChanged, disposeLsp, drainNotices, fileChanged, fileWritten, formatPre, type HookResult, worktreeEntered, worktreeExited } from "./format.mjs";
-import type { HookInputs } from "./hook-inputs.mjs";
+import { bashFinished, bashStarted, cwdChanged, disposeLsp, drainNotices, fileChanged, fileWritten, formatPre, type HookResult, worktreeEntered, worktreeExited } from "./format.js";
+import type { HookInputs } from "./hook-inputs.js";
 
 /** Server name reported on `initialize`; keep aligned with the `.mcp.json` key. */
 const SERVER_NAME = "dprint-hooks";

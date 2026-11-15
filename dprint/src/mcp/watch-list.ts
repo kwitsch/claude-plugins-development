@@ -10,8 +10,8 @@
 import { execFile } from "node:child_process";
 import path from "node:path";
 import { promisify } from "node:util";
-import { findConfig } from "../skills/dprint/find-config.mjs";
-import { dprintArgv, findDprint } from "../skills/dprint/find-dprint.mjs";
+import { findConfig } from "../skills/dprint/find-config.js";
+import { dprintArgv, findDprint } from "../skills/dprint/find-dprint.js";
 
 /**
  * Most files watched per cwd.

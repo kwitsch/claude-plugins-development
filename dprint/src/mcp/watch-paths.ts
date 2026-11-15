@@ -12,8 +12,8 @@
  * @packageDocumentation
  */
 import { readFileSync } from "node:fs";
-import { inScope, scopeOf } from "./format.mjs";
-import { dprintFilePaths, watchDirectories } from "./watch-list.mjs";
+import { inScope, scopeOf } from "./format.js";
+import { dprintFilePaths, watchDirectories } from "./watch-list.js";
 
 /**
  * Files of the cwd that dprint formats and that are in scope.

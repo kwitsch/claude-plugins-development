@@ -29,7 +29,7 @@ function scratch(mutate: (hooks: typeof HOOKS) => unknown = () => {}) {
     const f of [
       "package.json",
       "plugin/.mcp.json",
-      "src/mcp/hook-inputs.d.mts",
+      "src/mcp/hook-inputs.d.ts",
     ]
   ) {
     cpSync(path.join(ROOT, f), path.join(dir, f));
@@ -139,7 +139,7 @@ test("a changed input template makes the types stale until regenerated", () => {
   assert.equal(run(dir).status, 0);
   assert.equal(run("--check", dir).status, 0);
   assert.match(
-    readFileSync(path.join(dir, "src/mcp/hook-inputs.d.mts"), "utf8"),
+    readFileSync(path.join(dir, "src/mcp/hook-inputs.d.ts"), "utf8"),
     /old_cwd\?: string;/,
   );
 });

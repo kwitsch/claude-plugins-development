@@ -5,7 +5,7 @@
  * EARLY ACCESS API (Claude Code 2.1.316 declarations). Fires after `session.start`, `classic.CwdChanged` and the
  * `EnterWorktree`/`ExitWorktree` tool calls. The check runs detached after the event and swallows every error,
  * so it never blocks, delays or alters the event. A directory without a dprint config is left alone and nothing is
- * spawned; with one, the module picks the one dprint `find-dprint.mts` would pick (first `<PATH entry>/dprint` that
+ * spawned; with one, the module picks the one dprint `find-dprint.ts` would pick (first `<PATH entry>/dprint` that
  * exists, else `$DPRINT_INSTALL/bin/dprint` (default `~/.dprint/bin/dprint`), else the npx cache), runs `--version` on it via `$.process.run`, and only an
  * unusable pick (cannot start, exits non-zero, prints no version, older than `MIN_VERSION`) toasts, naming the
  * cause. No imports at all (hooks modules run without Node and the engine's declaration file is not
@@ -17,8 +17,8 @@
  */
 
 /**
- * dprint's config file names. A copy of `CONFIG_NAMES` (`skills/dprint/config-names.mts`): a relative import
- * may not resolve in the engine; `tests/notice.test.mts` fails on drift.
+ * dprint's config file names. A copy of `CONFIG_NAMES` (`skills/dprint/config-names.ts`): a relative import
+ * may not resolve in the engine; `tests/notice.test.ts` fails on drift.
  */
 const CONFIG_NAMES = [
   "dprint.json",
@@ -32,13 +32,13 @@ const CONFIG_NAMES = [
 /** How long the cannot-run toast stays, in ms: long enough to read, short enough not to nag; a UX default, safe to change. */
 const TOAST_MS = 15_000;
 
-/** Timeout of each dprint probe, in ms (same value as `NPX_PROBE_TIMEOUT_MS` in `find-dprint.mts`; these probes never download). */
+/** Timeout of each dprint probe, in ms (same value as `NPX_PROBE_TIMEOUT_MS` in `find-dprint.ts`; these probes never download). */
 const PROBE_TIMEOUT_MS = 10_000;
 
-/** How long a failed probe stays cached before the next event re-probes, in ms (same as `NPX_RETRY_MS` in `find-dprint.mts`). */
+/** How long a failed probe stays cached before the next event re-probes, in ms (same as `NPX_RETRY_MS` in `find-dprint.ts`). */
 const PROBE_RETRY_MS = 30_000;
 
-/** Minimum dprint version the format hooks need (`dprint lsp`). A copy of `MIN_VERSION` (`skills/dprint/check-dprint.mts`); `tests/notice.test.mts` fails on drift. */
+/** Minimum dprint version the format hooks need (`dprint lsp`). A copy of `MIN_VERSION` (`skills/dprint/check-dprint.ts`); `tests/notice.test.ts` fails on drift. */
 const MIN_VERSION = "0.50.0";
 
 /** The reason when no dprint exists on PATH, in `$DPRINT_INSTALL/bin` (default `~/.dprint/bin`) or in the npx cache (the wording lives only here). */
@@ -141,7 +141,7 @@ function parentOf(dir: string): string {
 
 /**
  * Judge one dprint: it must start and answer `--version` within {@link PROBE_TIMEOUT_MS}, exit 0, print
- * `dprint X.Y.Z` (the regex and compare rule of `check-dprint.mts`; a prerelease of an equal version sorts below)
+ * `dprint X.Y.Z` (the regex and compare rule of `check-dprint.ts`; a prerelease of an equal version sorts below)
  * and be at least {@link MIN_VERSION}.
  *
  * @param $ - Engine interface.
@@ -171,9 +171,9 @@ async function judge($: Engine, argv: string[], cwd: string, name: string): Prom
 
 /**
  * Why the dprint the MCP server's `findDprint` would pick is not usable, `null` when it is. Picks exactly one, in
- * `find-dprint.mts`'s order: the first `<PATH entry>/dprint` that exists, else `$DPRINT_INSTALL/bin/dprint` (default `$HOME/.dprint/bin/dprint`) if it
+ * `find-dprint.ts`'s order: the first `<PATH entry>/dprint` that exists, else `$DPRINT_INSTALL/bin/dprint` (default `$HOME/.dprint/bin/dprint`) if it
  * exists, else the npx cache; only the pick is run (`--version`), so a broken PATH dprint is never masked by a
- * working later one, as `findDprint` would not mask it either. Unlike `find-dprint.mts` (which runs on a format
+ * working later one, as `findDprint` would not mask it either. Unlike `find-dprint.ts` (which runs on a format
  * request) this runs unprompted on every session start and cd, so npx gets `--no` (no download) and every probe runs
  * in HOME (else `/`), never in the project, whose `node_modules/.bin` npx would prefer. Concurrent callers share one
  * probe; a success is cached for the life of the module, a failure for {@link PROBE_RETRY_MS}.

@@ -14,10 +14,10 @@ import { existsSync, lstatSync, readFileSync, realpathSync, statSync, writeFileS
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
-import { findConfig } from "../skills/dprint/find-config.mjs";
-import type { BashFinishedInput, BashStartedInput, CwdChangedInput, DrainNoticesInput, FileChangedInput, FileWrittenInput, FormatPreInput, WorktreeEnteredInput, WorktreeExitedInput } from "./hook-inputs.mjs";
-import { DprintLsp } from "./lsp.mjs";
-import { dprintFilePaths } from "./watch-list.mjs";
+import { findConfig } from "../skills/dprint/find-config.js";
+import type { BashFinishedInput, BashStartedInput, CwdChangedInput, DrainNoticesInput, FileChangedInput, FileWrittenInput, FormatPreInput, WorktreeEnteredInput, WorktreeExitedInput } from "./hook-inputs.js";
+import { DprintLsp } from "./lsp.js";
+import { dprintFilePaths } from "./watch-list.js";
 
 /** Hook output: empty (`{}`) to let the event through unchanged, else a notice and, for `format_pre`, the rewritten tool input. */
 export type HookResult = {

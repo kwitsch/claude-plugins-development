@@ -418,9 +418,9 @@ plainTest("the module's inlined config names equal the shared CONFIG_NAMES; no i
 
 plainTest("the probe constants, MIN_VERSION and version regex equal the shared sources'", () => {
   const read = (f) => readFileSync(path.join(PLUGIN, "..", "src", f), "utf8");
-  const notice = read("hooks/notice.mts");
-  const find = read("skills/dprint/find-dprint.mts");
-  const check = read("skills/dprint/check-dprint.mts");
+  const notice = read("hooks/notice.ts");
+  const find = read("skills/dprint/find-dprint.ts");
+  const check = read("skills/dprint/check-dprint.ts");
   const num = (src, name) => new RegExp(`const ${name} = ([\\d_]+);`).exec(src)?.[1];
   assert.ok(num(find, "NPX_PROBE_TIMEOUT_MS"));
   assert.equal(num(notice, "PROBE_TIMEOUT_MS"), num(find, "NPX_PROBE_TIMEOUT_MS"));

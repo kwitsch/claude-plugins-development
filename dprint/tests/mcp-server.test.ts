@@ -11,7 +11,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { afterEach, beforeEach, test } from "vitest";
 import { DprintLsp } from "../plugin/mcp/lsp.mjs";
 import { findConfig } from "../plugin/skills/dprint/find-config.mjs";
-import type { HookResult } from "../src/mcp/format.mts";
+import type { HookResult } from "../src/mcp/format.ts";
 
 const PLUGIN = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),

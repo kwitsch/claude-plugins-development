@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Validate plugin/hooks/hooks.json and generate src/mcp/hook-inputs.d.mts (the argument types of every MCP
+// Validate plugin/hooks/hooks.json and generate src/mcp/hook-inputs.d.ts (the argument types of every MCP
 // tool the hooks call) from its `input` templates. hooks.json is the contract: Claude Code builds each tool
 // call's arguments from those templates, so the types are derived from it, never written by hand.
 //
@@ -23,7 +23,7 @@ const ROOT = path.resolve(
 /** The hook contract. */
 const HOOKS = path.join(ROOT, "plugin/hooks/hooks.json");
 /** The generated types. */
-const OUT = path.join(ROOT, "src/mcp/hook-inputs.d.mts");
+const OUT = path.join(ROOT, "src/mcp/hook-inputs.d.ts");
 
 /** Hook input fields every event carries (cc-reference hooks reference, "Input"). `*` = any sub-path. */
 const COMMON = [
@@ -292,7 +292,7 @@ const blocks = [...tools].map(([tool, { event, matcher, rendered }]) => {
 const map = [...tools.keys()]
   .map((t) => `  /** {@link ${pascal(t)}Input} */\n  ${t}: ${pascal(t)}Input;`)
   .join("\n");
-/** The generated hook-inputs.d.mts. */
+/** The generated hook-inputs.d.ts. */
 const text = `/**
  * Argument types of the MCP tools called by \`plugin/hooks/hooks.json\`.
  *

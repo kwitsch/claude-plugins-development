@@ -1,6 +1,6 @@
 /**
- * Shared dprint lookup used by `check-dprint.mts`, `run-dprint.mts` and the MCP server's lsp client
- * (`mcp/lsp.mts`) and watch list (`mcp/watch-list.mts`). The project config lookup is `find-config.mts`.
+ * Shared dprint lookup used by `check-dprint.ts`, `run-dprint.ts` and the MCP server's lsp client
+ * (`mcp/lsp.ts`) and watch list (`mcp/watch-list.ts`). The project config lookup is `find-config.ts`.
  *
  * @packageDocumentation
  */

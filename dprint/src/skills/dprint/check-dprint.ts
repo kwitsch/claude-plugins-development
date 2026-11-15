@@ -13,7 +13,7 @@
  */
 
 import { execFileSync } from "node:child_process";
-import { dprintArgv, findDprint } from "./find-dprint.mjs";
+import { dprintArgv, findDprint } from "./find-dprint.js";
 
 /** Lowest supported dprint version; the only definition (README and tests read it from here). */
 const MIN_VERSION = "0.50.0";
