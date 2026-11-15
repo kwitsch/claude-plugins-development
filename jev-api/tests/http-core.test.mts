@@ -114,6 +114,11 @@ describe("sendRequest", () => {
     await sendRequest({ jevUrl: "https://jev.example/x" }, STATE, QUESTIONS, none.doFetch);
     expect(none.calls[0].init.headers["Authorization"]).toBeUndefined();
   });
+  it("redacts the echoed path and query of the endpoint", async () => {
+    const body = JSON.stringify({ detail: "no route for POST /systemone?api_key=SECRETTOKEN123 on 127.0.0.1" });
+    const out = await sendRequest({ jevUrl: "http://127.0.0.1:1/systemone?api_key=SECRETTOKEN123" }, STATE, QUESTIONS, fake({ status: 404, text: body }).doFetch);
+    expect(JSON.stringify(out)).not.toContain("SECRETTOKEN123");
+  });
   it("treats every 2xx as ok and everything else as http", async () => {
     expect((await sendRequest(env, STATE, QUESTIONS, fake({ status: 299, text: "x" }).doFetch)).kind).toBe("ok");
     expect((await sendRequest(env, STATE, QUESTIONS, fake({ status: 300, text: "x" }).doFetch)).kind).toBe("http");

@@ -147,6 +147,29 @@ export function hide(text: string, url: string, placeholder: string): string {
 }
 
 /**
+ * Replaces the path and query of a URL in an error text, as parsed and as written: a server echoes `req.url` (`/p?token=x`)
+ * without scheme and host. A bare `/` stays (it would match every path in the text).
+ *
+ * @param text - The text.
+ * @param url - The endpoint URL.
+ * @param placeholder - What stands in its place.
+ * @returns The text without the path and query.
+ */
+export function hidePath(text: string, url: string, placeholder: string): string {
+  const given = url.replace(/^[a-z][a-z\d+.-]*:\/\/[^/?#]*/i, "");
+  const forms = [given];
+  try {
+    const u = new URL(url);
+    forms.push(u.pathname + u.search, u.search);
+  } catch {
+    // Not parseable: only the written form.
+  }
+  let t = text;
+  for (const f of new Set(forms)) if (f.length > 1) t = t.replaceAll(f, placeholder);
+  return t;
+}
+
+/**
  * Replaces the bare host of a URL in an error text. A DNS failure quotes only the host (`getaddrinfo ENOTFOUND <host>`,
  * live on 2.1.325), which may be private too. Only whole host names are replaced, ignoring case: the host `jev` must
  * not turn `jev-latest` or `api.jev`, nor the host `10.0.0.5` turn `110.0.0.5`, into something else.
@@ -250,6 +273,7 @@ export async function sendRequest(env: HttpEnv, state: string, questionsObject: 
     // In this order: the URL first (it may contain the key), the key before the host (a key may contain the host text).
     const custom = env.jevUrl || env.base; // the default endpoint is public: nothing to hide
     let t = custom ? hide(text, target.url, env.jevUrl ? "<JEV_URL>" : "<TYPESAFE_BASE_URL>/v1/systemone") : text;
+    if (env.jevUrl) t = hidePath(t, target.url, "<JEV_URL>"); // a base URL has no query and its path is fixed
     if (key && key.length >= MIN_REDACT_KEY) t = t.replaceAll(key, "<TYPESAFE_API_KEY>"); // not a short key: it would match ordinary words
     return custom ? hideHost(t, target.url) : t;
   };
