@@ -268,6 +268,29 @@ describe("fallback to $.http.fetch", () => {
     expect(t.requests()).toHaveLength(2);
   });
 
+  it("a server that dies late leaves the fetch only the time that is left, or no fetch at all", async () => {
+    for (const [used, left] of [[3900, 100], [4000, 0]]) {
+      const t = await rig({
+        onCall: (c) => {
+          if (c.tool === "request") {
+            t.clock.now += used;
+            return Promise.reject(new Error("server exited"));
+          }
+          return undefined;
+        },
+      });
+      const r = await t.run("noul", { timeout: 4 });
+      if (left === 0) {
+        expect(t.fetched).toHaveLength(0);
+        expect(r.deny).toBe("noul: timeout after 4000ms");
+      } else {
+        expect(t.fetched).toHaveLength(1);
+        expect(t.timers.filter((x) => x.ms === left)).toHaveLength(1);
+        expect(t.timers.filter((x) => x.ms === 4000)).toHaveLength(0);
+      }
+    }
+  });
+
   it("a connect that throws is the same outage", async () => {
     const t = await rig({
       connect: async () => {

@@ -356,6 +356,7 @@ async function callServer($: Engine, server: string, callId: string, state: stri
  * @returns The outcome; never rejects.
  */
 export async function sendOutcome($: Engine, link: Link, env: HttpEnv, state: string, questionsObject: Record<string, unknown>, timeoutMs: number, signal: AbortSignal): Promise<Outcome> {
+  const started = await now($);
   // the shared connect runs on in the background when the call is abandoned while it is pending
   let onAbort = (): void => {};
   const abandoned = new Promise<"aborted">((resolve) => {
@@ -395,5 +396,8 @@ export async function sendOutcome($: Engine, link: Link, env: HttpEnv, state: st
   }
   // after every await above: an abandoned dispatch sends nothing, the fetch cannot be cancelled
   if (signal.aborted) return ABANDONED;
-  return sendRequest(env, state, questionsObject, fetchViaEngine($, timeoutMs, signal));
+  // the fallback gets only the time the connect, config and request steps left, not the whole timeout again
+  const left = timeoutMs - ((await now($)) - started);
+  if (left < 1) return { kind: "error", code: "timeout", message: `timeout after ${timeoutMs}ms` };
+  return sendRequest(env, state, questionsObject, fetchViaEngine($, Math.round(left), signal));
 }
