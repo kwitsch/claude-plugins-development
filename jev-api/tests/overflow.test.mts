@@ -451,6 +451,13 @@ test("truncate mode cuts the middle of an oversized state to what the time budge
   expect(fetched[0].body.state).toBe(cut(state, keep));
 });
 
+test("truncate mode refuses instead of sending an empty state when the questions fill the budget", async ($, on) => {
+  const { fetched } = setup(on);
+  const r = await call($, "noul", { instructions: "Is this about animals? " + "x".repeat(3000), state: "The cat sat on the mat. ".repeat(400), timeout: 1, overflow: "truncate" });
+  expect(r.deny).toMatch(/state too large/);
+  expect(fetched).toHaveLength(0);
+});
+
 test("truncate mode sends a state that fits unchanged", async ($, on) => {
   const { fetched } = setup(on);
   await call($, "noul", { state: "Hello there!", timeout: 20, overflow: "truncate" });
@@ -471,13 +478,13 @@ test("truncate mode never leaves half of a surrogate pair at a cut", async ($, o
   }
 });
 
-test("truncate mode with a state that cannot keep a character still sends the marker alone", async ($, on) => {
+test("truncate mode with a state that cannot keep a character refuses and sends nothing", async ($, on) => {
   // 1 s time budget of about 1069 tokens: the 255 long options leave no room for any state at all.
   const criteria = Object.fromEntries(Array.from({ length: 255 }, (_, i) => [`option-${i}`, "d".repeat(200)]));
   const { fetched } = setup(on, { replies: [okReply()] });
-  await call($, "choice", { state: "x".repeat(20_000), criteria, timeout: 1, overflow: "truncate" });
-  expect(fetched).toHaveLength(1);
-  expect(fetched[0].body.state).toMatch(/^\n\[\.\.\. 20000 characters omitted \.\.\.\]\n$/);
+  const r = await call($, "choice", { state: "x".repeat(20_000), criteria, timeout: 1, overflow: "truncate" });
+  expect(r.deny).toMatch(/state too large/);
+  expect(fetched).toHaveLength(0);
 });
 
 test("after the server's refusal truncate retries once with the exact cut and answers", async ($, on) => {

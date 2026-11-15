@@ -137,7 +137,12 @@ export async function answerJev($: Engine, tool: ToolName, input: { state: strin
   }
   // truncate: what the budget (the limit and the timeout) allows, at the learned density, or after a refusal at the exact density its count gave;
   // a cut sent without a refusal before it (the preflight said no) that is refused too gets one more cut at its exact density, so never more than two requests
-  const cut = (r: TooBig["tooBig"] | undefined) => send(cutState(input.state, stateForBudget(r ? Math.min(budget, r.limit) : budget, r ? refusedDensity(r) : know.density, questionsChars)));
+  // No state left to send (the questions alone fill the budget): the answer would be about an empty text, so refuse instead.
+  const cut = (r: TooBig["tooBig"] | undefined) => {
+    const keep = stateForBudget(r ? Math.min(budget, r.limit) : budget, r ? refusedDensity(r) : know.density, questionsChars);
+    if (keep <= 0 && input.state.length > 0) return r ? tooBigError(tool, r, budget) : preflightError(tool, estimate, budget, limit, timeoutMs, keep);
+    return send(cutState(input.state, keep));
+  };
   let answer = await cut(refused);
   if (!refused && isTooBig(answer)) {
     if (signal.aborted) return fail(tool, "the call was abandoned");
