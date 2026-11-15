@@ -253,6 +253,28 @@ describe("fallback to $.http.fetch", () => {
     expect(outage(t)).toEqual(["jev-api: HTTP server not available, using $.http.fetch: spawn node ENOENT"]);
   });
 
+  it("an outage that outlasts the 60 s retry is logged once", async () => {
+    const t = await rig({ connect: async () => ({ isConnected: false, message: "down" }) });
+    await t.run();
+    t.clock.now += 60_000;
+    await t.run();
+    expect(t.connects.n).toBe(2);
+    expect(outage(t)).toHaveLength(1);
+  });
+
+  it("a second outage after a successful reconnect is logged again", async () => {
+    let up = false;
+    const t = await rig({
+      connect: async () => (up ? { isConnected: true, server: SERVER } : { isConnected: false, message: "down" }),
+      onCall: () => (up ? Promise.reject(new Error("transport closed")) : okOutcome),
+    });
+    await t.run();
+    up = true;
+    t.clock.now += 60_000;
+    await t.run();
+    expect(outage(t)).toHaveLength(2);
+  });
+
   it("does not reconnect for 60 s, and does at 60 s", async () => {
     let up = false;
     const t = await rig({ connect: async () => (up ? { isConnected: true, server: SERVER } : { isConnected: false, message: "down" }) });
