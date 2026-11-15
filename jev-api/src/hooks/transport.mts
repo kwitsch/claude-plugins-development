@@ -396,10 +396,13 @@ export async function sendOutcome($: Engine, link: Link, env: HttpEnv, state: st
   const server = await Promise.race([ensureServer($, link), abandoned]).finally(() => signal.removeEventListener("abort", onAbort));
   if (server === "aborted") return ABANDONED;
   if (server !== undefined) {
+    /** The generation the last attempt's request named. */
+    let usedGen: number | undefined;
     /** The configuration, then the request. */
     const attempt = async (): Promise<Outcome | { down: string }> => {
       const configured = await syncConfig($, link, server, env, signal);
       if (!("gen" in configured)) return configured;
+      usedGen = configured.gen;
       // a call id the server can tell apart from every other one of this session and of earlier ones; the counter moves
       // before the await, or calls that run side by side would read the same number
       const n = ++link.counter;
@@ -414,8 +417,8 @@ export async function sendOutcome($: Engine, link: Link, env: HttpEnv, state: st
     };
     let outcome = await attempt();
     if (!("down" in outcome) && outcome.kind === "error" && outcome.code === "unconfigured") {
-      // the server was restarted and lost its configuration: send it again, once
-      link.sent = undefined;
+      // the server was restarted and lost its configuration: send it again, once, unless another call already did
+      if (link.sentGen === usedGen) link.sent = undefined;
       outcome = await attempt();
     }
     if (!("down" in outcome)) {

@@ -706,6 +706,45 @@ describe("concurrent calls with the same env", () => {
   });
 });
 
+describe("concurrent calls after a server restart", () => {
+  it("a config another call already sent again serves this call's retry, so neither retried request is refused", async () => {
+    let held: unknown;
+    let hold = false;
+    const answers: (() => void)[] = [];
+    const t = await rig({
+      onConfig: (c) => ((held = c.args["gen"]), outcome({ configured: true })),
+      onCall: (c) => {
+        const r = c.args["configGen"] === held ? okOutcome : outcome({ kind: "error", code: "unconfigured", message: "x" });
+        return hold ? new Promise((resolve) => answers.push(() => resolve(r))) : r;
+      },
+    });
+    expect((await t.run()).deny).toBeUndefined();
+    held = undefined; // the server restarted
+    hold = true;
+    // the clock stops once the second config was sent, between a retry's config and its request
+    let open: () => void = () => {};
+    const gate = new Promise<void>((r) => (open = r));
+    const now = t.$.clock.now;
+    t.$.clock.now = async () => (t.configs().length >= 2 ? (await gate, now()) : now());
+    const tick = async () => {
+      for (let i = 0; i < 20; i++) await new Promise((r) => setImmediate(r));
+    };
+    const a = t.run();
+    const b = t.run();
+    await t.until("request", 3);
+    hold = false;
+    answers[0](); // A: unconfigured, sends the config again and waits at the clock
+    await t.until("config", 2);
+    await tick();
+    answers[1](); // B: unconfigured, while A's request is not sent yet
+    await tick();
+    open();
+    const rs = await Promise.all([a, b]);
+    expect(rs.map((r) => r.deny)).toEqual([undefined, undefined]);
+    expect(t.configs()).toHaveLength(2);
+  });
+});
+
 describe("sendOutcome doc", () => {
   it("does not claim the server reads its own environment (it is given the env)", () => {
     const src = readFileSync(new URL("../src/hooks/transport.mts", import.meta.url), "utf8");
