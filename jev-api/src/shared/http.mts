@@ -270,12 +270,12 @@ export async function sendRequest(env: HttpEnv, state: string, questionsObject: 
   // Text that reaches the model (a fetch error, an error body a server may echo the request into) must not carry the endpoint
   // or the key: a runtime quotes a header value it rejects (a newline or a non-Latin1 character in the key), whole.
   const redact = (text: string): string => {
-    // In this order: the URL first (it may contain the key), the key before the host (a key may contain the host text).
+    // In this order: the URL first (it may contain the key), the key before the path and the host (a key may contain their text).
     const custom = env.jevUrl || env.base; // the default endpoint is public: nothing to hide
     let t = custom ? hide(text, target.url, env.jevUrl ? "<JEV_URL>" : "<TYPESAFE_BASE_URL>/v1/systemone") : text;
     // A base path may carry a token too (a proxy path); hide it without the fixed `/v1/systemone` tail, which hide() already wrote.
-    if (custom) t = env.jevUrl ? hidePath(t, target.url, "<JEV_URL>") : hidePath(t, target.url.slice(0, -"/v1/systemone".length), "<TYPESAFE_BASE_URL>");
     if (key && key.length >= MIN_REDACT_KEY) t = t.replaceAll(key, "<TYPESAFE_API_KEY>"); // not a short key: it would match ordinary words
+    if (custom) t = env.jevUrl ? hidePath(t, target.url, "<JEV_URL>") : hidePath(t, target.url.slice(0, -"/v1/systemone".length), "<TYPESAFE_BASE_URL>");
     return custom ? hideHost(t, target.url) : t;
   };
   try {
