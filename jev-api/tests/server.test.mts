@@ -226,17 +226,6 @@ describe("request", () => {
     assert.deepEqual(outcomeOf(await c.request()), { kind: "http", status: 400, reason: "too big", refusal: { tokens: 40025, nctx: 32768 } });
   });
 
-  test("a refused connection is an error outcome without the host, the port or the key", async () => {
-    const c = start({ JEV_URL: "http://127.0.0.1:9/v1", TYPESAFE_API_KEY: KEY });
-    live.push(c);
-    const r = await c.request();
-    assert.equal(r["result"].isError, true);
-    const o = outcomeOf(r);
-    assert.equal(o["kind"], "error");
-    assert.equal(o["code"], "network");
-    assert.doesNotMatch(JSON.stringify(r), new RegExp(`${KEY}|127\\.0\\.0\\.1`));
-  });
-
   test("without any System One variable the server answers a config error", async () => {
     const c = start({});
     live.push(c);
@@ -365,9 +354,12 @@ describe("request", () => {
     await closedStub.close();
     const c = start({ JEV_URL: url, TYPESAFE_API_KEY: KEY });
     live.push(c);
-    const o = outcomeOf(await c.request());
+    const r = await c.request();
+    assert.equal(r["result"].isError, true);
+    const o = outcomeOf(r);
     assert.equal(o["code"], "network");
     assert.equal(o["message"], "fetch failed (ECONNREFUSED)");
+    assert.doesNotMatch(JSON.stringify(r), new RegExp(`${KEY}|127\\.0\\.0\\.1|:${new URL(url).port}`));
   });
 
   test("two requests run at the same time", async () => {
