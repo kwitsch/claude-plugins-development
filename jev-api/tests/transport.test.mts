@@ -602,7 +602,10 @@ describe("Haiku takes over after an HTTP error status", () => {
   });
   it("an abandoned call is not handed to Haiku", async () => {
     const ac = new AbortController();
-    const t = await rig({ complete: () => HAIKU_OK, onCall: () => (ac.abort(), outcome({ kind: "http", status: 500 })) });
+    const t = await rig({ complete: () => HAIKU_OK, onCall: () => outcome({ kind: "http", status: 500 }) });
+    const real = t.$.clock.now;
+    // the abort comes after the HTTP outcome is back: the first clock read then is takeOver's own
+    (t.$.clock as { now: () => Promise<number> }).now = () => (t.requests().length > 0 && ac.abort(), real());
     expect((await t.run("noul", {}, ac.signal)).deny).toBe("noul: the call was abandoned");
     expect(t.completed).toHaveLength(0);
   });
