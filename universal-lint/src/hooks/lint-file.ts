@@ -105,7 +105,7 @@ const KILL_GRACE_MS = 1000;
  */
 const BATCH_MAX_FILES = 100;
 
-/** Above this many lintable files the watch list is empty (nothing watched), as dprint's watch-list.ts. */
+/** Above this many lintable files the watch list is empty (nothing watched), as dprint's watch-list.mts. */
 export const WATCH_LIMIT = 5000;
 
 /** Budget of each git call (ls-files for the watch list, status for the FileChanged gate). */
