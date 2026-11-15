@@ -234,6 +234,25 @@ test("a symlinked directory below plugin/ fails the layout check and its target 
   }
 });
 
+test("a symlinked plugin/ fails the layout check and its target survives the build", () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "symlink-"));
+  try {
+    mkdirSync(path.join(dir, "p/src"), { recursive: true });
+    mkdirSync(path.join(dir, "outside/sub"), { recursive: true });
+    writeFileSync(path.join(dir, "outside/precious.mjs"), "keep me");
+    writeFileSync(path.join(dir, "outside/sub/other.mjs"), "keep me too");
+    writeFileSync(path.join(dir, "p/src/x.mts"), "export const a = 1;\n");
+    writeFileSync(path.join(dir, "p/package.json"), JSON.stringify({ name: "fixture", version: "0.0.1", description: "d", author: { name: "x" }, keywords: [], type: "module", claudePlugin: {} }));
+    symlinkSync("../outside", path.join(dir, "p/plugin"));
+    const r = spawnSync(process.execPath, [BUILD, path.join(dir, "p")], { encoding: "utf8" });
+    assert.equal(r.status, 1);
+    assert.equal(readFileSync(path.join(dir, "outside/precious.mjs"), "utf8"), "keep me");
+    assert.equal(readFileSync(path.join(dir, "outside/sub/other.mjs"), "utf8"), "keep me too");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("a symlinked plugin.json fails the layout check and its target survives the build", () => {
   const dir = mkdtempSync(path.join(tmpdir(), "symlink-"));
   try {

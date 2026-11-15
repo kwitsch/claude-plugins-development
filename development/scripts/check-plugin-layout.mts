@@ -10,6 +10,11 @@ import path from "node:path";
 const ALLOWED = /^(?!(.*\/)?tests\/)(?!.*\.test\.)(?!(.*\/)?CLAUDE\.md$)(\.claude-plugin\/plugin\.json|\.mcp\.json|README\.md|hooks\/hooks\.json|agents\/[^/]+\.md|skills\/.+\/(SKILL|[^/]+\.reference)\.md|skills\/.+\.json|.+\.mjs)$/;
 
 const root = path.join(process.argv[2] ?? ".", "plugin");
+// readdirSync follows a symlinked root: the build would delete .mjs files in its target
+if (existsSync(root) && lstatSync(root).isSymbolicLink()) {
+  console.error(`${root} is a symlink: the build must not touch what it points at`);
+  process.exit(1);
+}
 /**
  * Every path below a directory; symlinks count as files and are never followed (one could point outside plugin/).
  *
