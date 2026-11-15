@@ -241,7 +241,7 @@ async function syncConfig($: Engine, link: Link, server: string, env: HttpEnv, s
   if (link.sent === text && !link.dirty) return undefined;
   let wait: Stop | undefined;
   try {
-    const call = Promise.resolve($.mcp.call(server, "config", args)).then(
+    const call = new Promise<McpResult>((resolve) => resolve($.mcp.call(server, "config", args))).then(
       (value) => ({ value }),
       (error: unknown) => ({ error }),
     );
@@ -320,7 +320,7 @@ async function callServer($: Engine, server: string, callId: string, state: stri
     }
   };
   try {
-    const call = Promise.resolve($.mcp.call(server, "request", { callId, state, questions: questionsObject, timeoutMs })).then(
+    const call = new Promise<McpResult>((resolve) => resolve($.mcp.call(server, "request", { callId, state, questions: questionsObject, timeoutMs }))).then(
       (value) => ({ value }),
       (error: unknown) => ({ error }),
     );

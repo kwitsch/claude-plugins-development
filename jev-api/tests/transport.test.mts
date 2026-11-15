@@ -379,6 +379,17 @@ describe("fallback to $.http.fetch", () => {
     expect(outage(t)[0]).toContain("transport closed");
   });
 
+  it.each(["config", "request"])("a synchronous throw of the %s call falls back, marks the link down and logs once", async (tool) => {
+    const boom = (): never => {
+      throw new Error("server process exited");
+    };
+    const t = await rig(tool === "config" ? { onConfig: boom } : { onCall: boom });
+    expect(JSON.parse((await t.run()).result ?? "null")).toEqual(NOUL_ANSWER);
+    expect(t.fetched).toHaveLength(1);
+    expect(outage(t)).toHaveLength(1);
+    expect(outage(t)[0]).toContain("server process exited");
+  });
+
   it("a result that is neither an outcome nor an error text falls back, an error text is the answer", async () => {
     const garbage = await rig({ onCall: () => ({ isError: false, content: [{ type: "text", text: "hello" }] }) });
     expect(JSON.parse((await garbage.run()).result ?? "null")).toEqual(NOUL_ANSWER);
