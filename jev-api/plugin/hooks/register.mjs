@@ -24,6 +24,8 @@ export function register(on, options) {
 		try {
 			st.retryAt.clear();
 			if (st.missing.size > 0) await ensureTools($, st, 5 * REGISTER_WAIT_MS);
+			st.retryAt.clear();
+			if (st.missing.size > 0) await ensureTools($, st, 5 * REGISTER_WAIT_MS);
 		} catch {}
 		try {
 			const [key, base, jevUrl, model] = (await Promise.all([

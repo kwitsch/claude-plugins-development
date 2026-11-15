@@ -646,6 +646,30 @@ it("session.start retries tools refused before the session was bound", async () 
   expect(tries.filter(Boolean)).toHaveLength(4);
 });
 
+// A registration begun before the bind and still in flight at session.start fails after it: session.start retries it.
+it("session.start retries tools whose pre-bind attempt fails during its wait", async () => {
+  let bound = false;
+  const tries: boolean[] = [];
+  const { run, hooks, $ } = await direct({
+    tool: {
+      register: async (spec: { name: string }) => {
+        const b = bound;
+        tries.push(b);
+        await new Promise((r) => setTimeout(r, 50));
+        if (!b) throw new Error("session not bound");
+        return { tool: TOOL(spec.name) };
+      },
+    },
+    ui: { log: async () => undefined },
+  });
+  const call = run("noul");
+  await new Promise((r) => setTimeout(r, 10));
+  bound = true;
+  await hooks.get("session.start")?.($, { cwd: "/p" }, Object.assign(async (e: unknown) => e, { signal: new AbortController().signal }));
+  await call;
+  expect(tries.filter(Boolean)).toHaveLength(4);
+});
+
 // F03: a registration that never answers must not hold the call.
 it("a registration that never answers does not hold the call", async () => {
   const { run, fetched } = await direct({
