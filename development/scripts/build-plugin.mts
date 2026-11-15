@@ -195,7 +195,7 @@ function bundleLib(compiled: Map<string, string>): { members: string[]; entries:
     const spans: { start: number; end: number; text: string }[] = [];
     const parsed = parse(f, code);
     // any other spelling of a helper (`././a.mjs`, `../hooks/a.mjs`, `export ... from`) would survive as an import of a deleted file
-    const plain = new Set(parsed.imports.map((i) => i.moduleRequest.value).filter((v) => byName.has(siblingName(v) ?? "")));
+    const plain = new Set(parsed.imports.map((i) => i.moduleRequest.value).filter((v) => siblingName(v) !== undefined && helperOf(f, v) !== undefined));
     for (const src of [...parsed.imports.map((i) => i.moduleRequest.value), ...parsed.reexports]) {
       const isPlainImport = plain.has(src) && !parsed.reexports.includes(src);
       if (helperOf(f, src) !== undefined && !isPlainImport) {
@@ -204,7 +204,7 @@ function bundleLib(compiled: Map<string, string>): { members: string[]; entries:
     }
     for (const imp of parsed.imports) {
       const name = siblingName(imp.moduleRequest.value);
-      if (name === undefined || !byName.has(name)) continue;
+      if (name === undefined || helperOf(f, imp.moduleRequest.value) === undefined) continue;
       for (const n of namedSpecs(f, imp, name)) {
         taken.push(n);
         needed.add(n.split(" as ")[0]);
@@ -212,7 +212,7 @@ function bundleLib(compiled: Map<string, string>): { members: string[]; entries:
       spans.push({ start: imp.start, end: imp.end, text: "" });
     }
     // the first helper import becomes the lib.mjs import, the others go (with their line break)
-    if (spans.length) spans[0].text = `import { ${taken.sort().join(", ")} } from "./lib.mjs";`;
+    if (spans.length) spans[0].text = `import { ${taken.sort().join(", ")} } from "${path.relative(path.dirname(f), libPath()).split(path.sep).map((x, i) => (i === 0 && x !== ".." ? `./${x}` : x)).join("/")}";`;
     entries.set(f, splice(code, spans));
   }
   const text = ordered.map((f) => bodies.get(f) ?? "").join("\n");

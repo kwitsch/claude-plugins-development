@@ -10,12 +10,12 @@ import { test } from "vitest";
 const BUILD = path.resolve(import.meta.dirname, "../../development/scripts/build-plugin.mts");
 
 /** Builds a fixture plugin whose hooks.json lists only register.mjs and returns the build's exit code, stderr, built register.mjs and lib.mjs. */
-const build = (files: Record<string, string>): { status: number | null; stderr: string; entry: string; lib: string } => {
+const build = (files: Record<string, string>, modules = ["./register.mjs"]): { status: number | null; stderr: string; entry: string; lib: string; sub: string } => {
   const dir = mkdtempSync(path.join(tmpdir(), "bundle-lib-"));
   try {
     mkdirSync(path.join(dir, "src/hooks"), { recursive: true });
     mkdirSync(path.join(dir, "plugin/hooks"), { recursive: true });
-    writeFileSync(path.join(dir, "plugin/hooks/hooks.json"), `{ "modules": ["./register.mjs"] }\n`);
+    writeFileSync(path.join(dir, "plugin/hooks/hooks.json"), JSON.stringify({ modules }));
     writeFileSync(path.join(dir, "package.json"), JSON.stringify({ name: "fixture", version: "0.0.1", description: "d", author: { name: "x" }, keywords: [], type: "module", pluginBuild: { bundleHooksLib: true }, claudePlugin: {} }));
     for (const [f, t] of Object.entries(files)) {
       // a key such as `../bin/tool.mts` places a module outside src/hooks
@@ -25,7 +25,8 @@ const build = (files: Record<string, string>): { status: number | null; stderr: 
     const r = spawnSync(process.execPath, [BUILD, dir], { encoding: "utf8" });
     const out = path.join(dir, "plugin/hooks/register.mjs");
     const ok = r.status === 0;
-    return { status: r.status, stderr: r.stderr, entry: ok ? readFileSync(out, "utf8") : "", lib: ok ? readFileSync(path.join(dir, "plugin/hooks/lib.mjs"), "utf8") : "" };
+    const subOut = path.join(dir, "plugin/hooks/sub/extra.mjs");
+    return { sub: ok && modules.length > 1 ? readFileSync(subOut, "utf8") : "", status: r.status, stderr: r.stderr, entry: ok ? readFileSync(out, "utf8") : "", lib: ok ? readFileSync(path.join(dir, "plugin/hooks/lib.mjs"), "utf8") : "" };
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -251,4 +252,11 @@ test("a hoisted import that shadows a global used by another helper fails the bu
   });
   assert.equal(r.status, 1);
   assert.match(r.stderr, /shadows the global setTimeout/);
+});
+
+test("an entry in a subfolder keeps its own sibling import", () => {
+  const r = build({ "register.mts": `import { one } from "./util.mjs";\nexport const r = (): number => one;\n`, "util.mts": A, "sub/util.mts": A, "sub/extra.mts": `import { one } from "./util.mjs";\nexport const e = (): number => one;\n` }, ["./register.mjs", "./sub/extra.mjs"]);
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.sub, /from\s*"\.\/util\.mjs"/);
+  assert.match(r.entry, /from\s*"\.\/lib\.mjs"/);
 });
