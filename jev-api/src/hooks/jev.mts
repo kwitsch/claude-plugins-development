@@ -104,7 +104,7 @@ export async function answerJev($: Engine, tool: ToolName, input: { state: strin
     // Haiku failed too: the model reads both reasons, the HTTP one first
     return r.deny?.startsWith(`${tool}: fallback: `) ? fail(tool, `${why}; ${r.deny.slice(tool.length + 2)}`) : r;
   };
-  // A refusal also tells the server's context window: remembered for the rest of the instance.
+  // A refusal also tells the server's context window: remembered while the endpoint and model stay the same.
   const src = JSON.stringify([env.jevUrl, env.base, env.model]);
   if (know.nctxFor !== src) know.nctx = DEFAULT_CONTEXT_TOKENS;
   const send = async (state: string, requestMs: number = timeoutMs) => {
