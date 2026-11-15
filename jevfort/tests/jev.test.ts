@@ -1,7 +1,7 @@
 // The jev-api tool name jevfort needs, and whether a tool listing lacks it (built plugin/hooks/jev.mjs).
 import assert from "node:assert/strict";
 import { test } from "vitest";
-import { JEV_BATCH, JEV_TOOL_PREFIX, JEV_TOOLS, missingJevTools } from "../plugin/hooks/jev.mjs";
+import { JEV_BATCH, JEV_TOOL_PREFIX, JEV_TOOLS, missingJevTools } from "../src/hooks/jev.ts";
 
 test("the needed tool is jev-api's batch", () => {
   assert.equal(JEV_TOOL_PREFIX, "mcp__jev-api__");

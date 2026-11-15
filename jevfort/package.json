@@ -21,6 +21,9 @@
   "devDependencies": {
     "claude-engine-vitest": "workspace:*"
   },
+  "pluginBuild": {
+    "bundleHooksLib": true
+  },
   "claudePlugin": {
     "dependencies": [
       "jev-api"

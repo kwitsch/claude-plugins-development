@@ -13,20 +13,20 @@
  *
  * @packageDocumentation
  */
-import { GENERAL, SWITCH_AT } from "./agents.mjs";
-import { CACHE_TTL, cacheColor, cacheLabel, minutesLeft, nextTtl } from "./cache.mjs";
-import type { CacheTtl } from "./cache.mjs";
-import { absolute, AUTH_TOOL, bash, BUILTIN_COMMANDS, clipScript, dedupeSkills, isSafeScript, isSafeToOffer, MAX_READS, MAX_STATS, mentionedPaths, quotedTerms, relevant, SAFE_MAKE, sameCall, SKILL_BLOCKLIST_KEY } from "./candidates.mjs";
-import type { Candidate } from "./candidates.mjs";
-import { COMPACT_MAX_TOKENS, COMPACT_MODEL, COMPACT_SYSTEM, compactInstructions, compactItems, haikuTranscript, RELEVANCE } from "./compact.mjs";
-import { clip, splitTurn, summarize, toolCalls } from "./context.mjs";
-import type { SessionMessage, ToolUse, TurnContext } from "./context.mjs";
-import { choice, COMPACT_API_TIMEOUT_S, COMPACT_TIMEOUT_MS, HAIKU_API_TIMEOUT_S, HAIKU_TIMEOUT_MS, isAnswer, JEV_API_TIMEOUT_S, JEV_BATCH, JEV_TOOL_PREFIX, JEV_TOOLS, MAX_CHOICE_OPTIONS, MAX_ERROR, MAX_PAUSE_MS, missingJevTools, noul, PAUSE_MS, score, TIMEOUT_MS } from "./jev.mjs";
-import type { Answer, JevResult, Question } from "./jev.mjs";
-import { bounds, EFFORT_ORDER, effortQuestion, ESTIMATE_SPEC, ESTIMATE_TOOL, estimateEffort, EVERY_TURN_MODELS, inBandRange, inScratchpad, isEffort, mechanicalQuestion, modelFamily, nextActionQuestion, parseEstimateInput, pickCandidate, singleActionQuestion, taskEndQuestion } from "./policy.mjs";
-import type { Effort, EstimateBounds, EstimateModel } from "./policy.mjs";
-import { SUMMARY_MODEL, SYSTEM } from "./summarize.mjs";
-import type { ModelUsage, Summary } from "./summarize.mjs";
+import { GENERAL, SWITCH_AT } from "./agents.js";
+import { CACHE_TTL, cacheColor, cacheLabel, minutesLeft, nextTtl } from "./cache.js";
+import type { CacheTtl } from "./cache.js";
+import { absolute, AUTH_TOOL, bash, BUILTIN_COMMANDS, clipScript, dedupeSkills, isSafeScript, isSafeToOffer, MAX_READS, MAX_STATS, mentionedPaths, quotedTerms, relevant, SAFE_MAKE, sameCall, SKILL_BLOCKLIST_KEY } from "./candidates.js";
+import type { Candidate } from "./candidates.js";
+import { COMPACT_MAX_TOKENS, COMPACT_MODEL, COMPACT_SYSTEM, compactInstructions, compactItems, haikuTranscript, RELEVANCE } from "./compact.js";
+import { clip, splitTurn, summarize, toolCalls } from "./context.js";
+import type { SessionMessage, ToolUse, TurnContext } from "./context.js";
+import { choice, COMPACT_API_TIMEOUT_S, COMPACT_TIMEOUT_MS, HAIKU_API_TIMEOUT_S, HAIKU_TIMEOUT_MS, isAnswer, JEV_API_TIMEOUT_S, JEV_BATCH, JEV_TOOL_PREFIX, JEV_TOOLS, MAX_CHOICE_OPTIONS, MAX_ERROR, MAX_PAUSE_MS, missingJevTools, noul, PAUSE_MS, score, TIMEOUT_MS } from "./jev.js";
+import type { Answer, JevResult, Question } from "./jev.js";
+import { bounds, EFFORT_ORDER, effortQuestion, ESTIMATE_SPEC, ESTIMATE_TOOL, estimateEffort, EVERY_TURN_MODELS, inBandRange, inScratchpad, isEffort, mechanicalQuestion, modelFamily, nextActionQuestion, parseEstimateInput, pickCandidate, singleActionQuestion, taskEndQuestion } from "./policy.js";
+import type { Effort, EstimateBounds, EstimateModel } from "./policy.js";
+import { SUMMARY_MODEL, SYSTEM } from "./summarize.js";
+import type { ModelUsage, Summary } from "./summarize.js";
 
 /** One entry of `$.command.list()`. */
 type CommandInfo = { name: string; description: string; source: string };

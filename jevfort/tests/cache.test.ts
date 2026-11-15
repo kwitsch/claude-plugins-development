@@ -2,8 +2,8 @@
 // None of it needs jev-api: the kit tests list no tools.
 import { createKit } from "claude-engine-vitest";
 import { expect, test as pureTest } from "vitest";
-import { CACHE_TTL, cacheColor, cacheLabel, cacheTtlOf, minutesLeft, nextTtl } from "../plugin/hooks/cache.mjs";
-import { COMPACT_MAX_TOKENS, compactTranscript, haikuTranscript } from "../plugin/hooks/compact.mjs";
+import { CACHE_TTL, cacheColor, cacheLabel, cacheTtlOf, minutesLeft, nextTtl } from "../src/hooks/cache.ts";
+import { COMPACT_MAX_TOKENS, compactTranscript, haikuTranscript } from "../src/hooks/compact.ts";
 
 /** Options passed to the kit: effort routing, compaction and Haiku compaction on, auto-compact at 60%. */
 const DEFAULTS = { routing: true, compaction: true, haikuCompact: true, autoCompactPercent: 60 };

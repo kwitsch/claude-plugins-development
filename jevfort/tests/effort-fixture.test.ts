@@ -3,7 +3,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "vitest";
-import { EFFORT_ORDER, estimateEffort } from "../plugin/hooks/policy.mjs";
+import { EFFORT_ORDER, estimateEffort } from "../src/hooks/policy.ts";
 
 type Row = { id: number; lang: "en" | "de"; label: number; score: number; confidence: number; mechanical: number };
 const ROWS = JSON.parse(readFileSync(new URL("./fixtures/effort-scores.json", import.meta.url), "utf8")) as Row[];

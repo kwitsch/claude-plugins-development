@@ -41,8 +41,8 @@ subagents load it via ToolSearch), no skills, agents, command hooks or MCP serve
   update the band.
 - Cache countdown, Haiku compaction and auto-compact (0.7.0, ported from HeyCubit/effortless `hooks/register.tsx`,
   none needs jev-api, so their work runs before the readiness guard of `turn.step`/`turn.complete`, and `session.compact`
-  has none except around the Jev ranking): `cache.mts` (pure: TTL detection, minutes, label,
-  colour) and the Haiku transcript/prompt in `compact.mts`. `register.mts` wraps `next` in
+  has none except around the Jev ranking): `cache.ts` (pure: TTL detection, minutes, label,
+  colour) and the Haiku transcript/prompt in `compact.ts`. `register.ts` wraps `next` in
   `turn.step` with `cacheWatch`: a main-loop response with `usage` (the step always runs on the chat's own model, jevfort no longer switches it)
   sets `cacheExpires = now + TTL` (in a try/catch: a cosmetic feature never fails the step). The lifetime is
   the assumed 1 hour: Claude Code 2.1.322 reports a step's usage as the four token counts plus `model`, without
@@ -76,14 +76,14 @@ subagents load it via ToolSearch), no skills, agents, command hooks or MCP serve
   question order); no code is imported. Renaming the tool or changing its input or answer shape breaks jevfort: the
   runtime check catches a renamed tool, changed shapes surface as
   `askJev` errors and the fallback to Claude Code's own behaviour.
-- Every `$` use and every `on(...)` call lives in `src/hooks/register.mts` (engine rule, see
+- Every `$` use and every `on(...)` call lives in `src/hooks/register.ts` (engine rule, see
   `.claude/rules/register-hooks.md`); upstream's `askJev`, `readTurn`,
   `previousReply`, `buildCandidates`, `packageRunner`, `summarizeResult` and the
   `register*` functions of `agents`/`compact` moved there. Upstream `mode.ts` and `view.ts` have no
-  file. The other `src/hooks/*.mts` are pure.
-- No `claude-code` type import: `$`, events and `on` are typed structurally at the top of `register.mts`.
-- No done check, no model routing, no prompt classifier, no step measurement, no `/jev` command (0.12.0): upstream's `Stop` done check (a follow-up message after an answer that looks unfinished), difficulty-based model switching, the `prompt.submit` classifier (kind/plan/skill hints) and the parallel step-k measurement (`next_action` asked next to Claude's step) are removed together with their options (`doneCheck`, `doneThreshold`, `routing: "model"`, `classify`, `measureSteps`). The `/jev` command (status, report, candidates, export, clear) is removed with the decision log behind it (`log.mts`, `report.mts`, the store keys `log` and `stats`, which an older version may have left in `$.store` and which are never read): and every `$.ui.status` message (the per-decision `jev: ...` lines, `auto-compact failed`) is gone: jevfort writes nothing to the status line. Its only output is one debug-log line per effort estimate (`$.ui.log(text, { to: "debug" })`, which returns nothing, seen with `claude --debug` as `[jevfort] $.ui.log (to debug): effort <model>: session <e> → <chosen> · <source>`; verified live 2.1.325), written by `debugEffort`. `routing` is a boolean (`options.routing !== false`; Claude Code type-checks `userConfig` before loading, so a non-boolean value keeps the module from loading, verified live 2.1.325, and the fallback only covers an absent value): `false` turns off the step-0 effort estimate and the effort row of the band, not the cache countdown, `estimate_effort` or take-steps. The context-fill task-end question (`taskEndQuestion`) is asked by `contextCompact` as its own request.
-- Effort routing: the turn's effort comes from the effort estimate (`estimateEffort` in `policy.mts`, shared with the
+  file. The other `src/hooks/*.ts` are pure.
+- No `claude-code` type import: `$`, events and `on` are typed structurally at the top of `register.ts`.
+- No done check, no model routing, no prompt classifier, no step measurement, no `/jev` command (0.12.0): upstream's `Stop` done check (a follow-up message after an answer that looks unfinished), difficulty-based model switching, the `prompt.submit` classifier (kind/plan/skill hints) and the parallel step-k measurement (`next_action` asked next to Claude's step) are removed together with their options (`doneCheck`, `doneThreshold`, `routing: "model"`, `classify`, `measureSteps`). The `/jev` command (status, report, candidates, export, clear) is removed with the decision log behind it (`log.ts`, `report.ts`, the store keys `log` and `stats`, which an older version may have left in `$.store` and which are never read): and every `$.ui.status` message (the per-decision `jev: ...` lines, `auto-compact failed`) is gone: jevfort writes nothing to the status line. Its only output is one debug-log line per effort estimate (`$.ui.log(text, { to: "debug" })`, which returns nothing, seen with `claude --debug` as `[jevfort] $.ui.log (to debug): effort <model>: session <e> → <chosen> · <source>`; verified live 2.1.325), written by `debugEffort`. `routing` is a boolean (`options.routing !== false`; Claude Code type-checks `userConfig` before loading, so a non-boolean value keeps the module from loading, verified live 2.1.325, and the fallback only covers an absent value): `false` turns off the step-0 effort estimate and the effort row of the band, not the cache countdown, `estimate_effort` or take-steps. The context-fill task-end question (`taskEndQuestion`) is asked by `contextCompact` as its own request.
+- Effort routing: the turn's effort comes from the effort estimate (`estimateEffort` in `policy.ts`, shared with the
   `estimate_effort` tool; its two questions go out with the other step-0 questions in the same batch call), not from upstream's difficulty->effort
   mapping, which is gone (so is the difficulty question).
   The rule (0.9.0, from the 120-point measurement of 2026-11-13, `tests/fixtures/effort-scores.json`): mechanical from
@@ -93,7 +93,7 @@ subagents load it via ToolSearch), no skills, agents, command hooks or MCP serve
   linear, `EFFORT_CUTS` 1.05/1.9/2.5/3.1 land on 0.5/1.5/2.5/3.5, the last cut is provisional), rounded, clamped. There is no model bias (removed in 0.9.0 by user decision: it was
   never validated and shifted the calibrated cuts per model); the tool's `model` input stays for callers and is ignored by
   the rule. The cuts are for `d1-3b`; the Haiku fallback of jev-api is not calibrated either.
-  `tests/effort-fixture.test.mts` pins the acceptance numbers (A1 to A5). `words()` in `candidates.mts` normalizes to NFC and splits at
+  `tests/effort-fixture.test.ts` pins the acceptance numbers (A1 to A5). `words()` in `candidates.ts` normalizes to NFC and splits at
   `[^\p{L}\p{M}\p{N}]` so umlauts (also NFD-typed) and vowel signs survive; German prompts still share few words with English skill descriptions.
   Opus/Sonnet sessions are estimated every turn; Haiku/Fable sessions only on each loop's first turn, whose estimate is
   then held while the session effort is unchanged. A model switch starts a new first turn. Bounds: options
@@ -114,8 +114,8 @@ The built-in `cc-plugin-sec-default` passes `session.compact` on past every user
 ## Layout
 
 `package.json` is the only manifest source (`claudePlugin.userConfig`, 14 options). `pnpm build` compiles
-`src/**/*.mts` to `plugin/**/*.mjs` (`plugin/hooks/` unmangled and uncompressed) and generates
-`plugin/.claude-plugin/plugin.json`. Tests (`tests/*.test.mts`, vitest + `claude-engine-vitest`) run against `plugin/`.
+`src/**/*.ts` to `plugin/**/*.mjs` (`plugin/hooks/register.mjs` unmangled; the other helpers bundle into `plugin/hooks/lib.mjs`, `pluginBuild.bundleHooksLib: true`) and generates
+`plugin/.claude-plugin/plugin.json`. Tests (`tests/*.test.ts`, vitest + `claude-engine-vitest`) run against `plugin/`; helper unit tests import the `src/hooks/*.ts` sources directly (their `plugin/` names are gone after bundling).
 
 ## Commands
 

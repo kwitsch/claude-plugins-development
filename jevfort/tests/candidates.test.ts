@@ -1,7 +1,7 @@
 // Pure logic of the built plugin/hooks/{candidates,report,context,policy}.mjs: upstream jev-pilot tests/candidates.test.ts.
 import { expect, test } from "vitest";
-import { clipScript, dedupeSkills, isSafeScript, isSafeToOffer, mentionedPaths, quotedTerms, relevant, SAFE_MAKE, sameCall, words } from "../plugin/hooks/candidates.mjs";
-import { clip, splitTurn, summarize } from "../plugin/hooks/context.mjs";
+import { clipScript, dedupeSkills, isSafeScript, isSafeToOffer, mentionedPaths, quotedTerms, relevant, SAFE_MAKE, sameCall, words } from "../src/hooks/candidates.ts";
+import { clip, splitTurn, summarize } from "../src/hooks/context.ts";
 
 test("quoted terms become searches, file names do not", () => {
   expect(quotedTerms("where is `useAuth` used? and \"TODO: fix\" in `src/app.ts`")).toEqual(["useAuth", "TODO: fix"]);
@@ -227,7 +227,7 @@ test("summarize walks from the end: same last entries, old rows are never serial
       throw new Error("old row serialized");
     },
   };
-  const row = (n: number, input: unknown = { n }) => ({ role: "assistant" as const, text: `t${n}`, toolUses: [{ tool: "Read", input: input as Record<string, unknown>, text: `r${n}` }] });
+  const row = (n: number, input: unknown = { n }) => ({ role: "assistant" as const, text: `t${n}`, toolUses: [{ tool_use_id: `c${n}`, tool: "Read", input: input as Record<string, unknown>, text: `r${n}` }] });
   const steps = [row(0, poison), row(1, poison), ...Array.from({ length: 5 }, (_, i) => row(i + 2))];
   const out = summarize(steps);
   expect(out).toHaveLength(8);
@@ -242,12 +242,12 @@ test("summarize keeps the README size caps: last 8 entries, inputs 300 and resul
     role: "assistant" as const,
     text: `t${n}`,
     toolUses: [
-      { tool: "Read", input: { big }, text: big },
-      { tool: "Bash", input: { big }, text: big, isError: true },
-      { tool: "Grep", input: { big }, text: big },
+      { tool_use_id: `w${n}a`, tool: "Read", input: { big }, text: big },
+      { tool_use_id: `w${n}b`, tool: "Bash", input: { big }, text: big, isError: true },
+      { tool_use_id: `w${n}c`, tool: "Grep", input: { big }, text: big },
     ],
   });
-  const small = { role: "assistant" as const, text: "s", toolUses: [{ tool: "Read", input: {}, text: "r" }] };
+  const small = { role: "assistant" as const, text: "s", toolUses: [{ tool_use_id: "s", tool: "Read", input: {}, text: "r" }] };
   // 4 + 2 + 4 entries from the end: the loop overshoots 8, only the slice trims it.
   const out = summarize([wide(0), small, wide(1)]);
   expect(out).toHaveLength(8);
@@ -276,6 +276,7 @@ test("isSafeScript refuses scripts that rewrite files or never exit", () => {
 test("clipScript never leaves a lone surrogate when the cut falls inside an emoji", () => {
   const out = clipScript(`${"x".repeat(79)}\u{1F680} tail`);
   expect(out).toBe(`${"x".repeat(79)}…`);
-  expect(out.isWellFormed()).toBe(true);
+  // a lone surrogate: a high one not followed by a low one, or a low one not preceded by a high one (lib ES2022 has no isWellFormed)
+  expect(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/.test(out)).toBe(false);
   expect(clipScript("short")).toBe("short");
 });

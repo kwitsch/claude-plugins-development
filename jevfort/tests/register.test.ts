@@ -5,8 +5,8 @@
 import { createKit } from "claude-engine-vitest";
 import type { On } from "claude-engine-vitest";
 import { expect } from "vitest";
-import { JEV_BATCH, JEV_TOOL_PREFIX } from "../plugin/hooks/jev.mjs";
-import { effortQuestion, mechanicalQuestion, nextActionQuestion, singleActionQuestion, taskEndQuestion } from "../plugin/hooks/policy.mjs";
+import { JEV_BATCH, JEV_TOOL_PREFIX } from "../src/hooks/jev.ts";
+import { effortQuestion, mechanicalQuestion, nextActionQuestion, singleActionQuestion, taskEndQuestion } from "../src/hooks/policy.ts";
 
 // The manifest defaults (jevfort/package.json claudePlugin.userConfig): the kit does not fill userConfig defaults.
 const DEFAULTS = {

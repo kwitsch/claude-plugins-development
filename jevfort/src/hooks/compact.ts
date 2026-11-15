@@ -6,8 +6,8 @@
  *
  * @packageDocumentation
  */
-import { clip } from "./context.mjs";
-import type { SessionMessage } from "./context.mjs";
+import { clip } from "./context.js";
+import type { SessionMessage } from "./context.js";
 
 /** How many tool results are scored (the last ones). */
 export const MAX_ITEMS = 30;

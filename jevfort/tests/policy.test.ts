@@ -1,7 +1,7 @@
 // Pure tests of the built plugin/hooks/policy.mjs.
 import assert from "node:assert/strict";
 import { test } from "vitest";
-import { bounds, effortLevel, estimateEffort, inScratchpad, isEffort, modelFamily, nextActionQuestion, parseEstimateInput } from "../plugin/hooks/policy.mjs";
+import { bounds, effortLevel, estimateEffort, inScratchpad, isEffort, modelFamily, nextActionQuestion, parseEstimateInput } from "../src/hooks/policy.ts";
 
 const ROOTS = ["/tmp"];
 const SP = "/tmp/claude-1000/-proj/sid-1/scratchpad";

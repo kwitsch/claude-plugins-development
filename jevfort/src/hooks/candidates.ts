@@ -5,7 +5,7 @@
  *
  * @packageDocumentation
  */
-import { head } from "./context.mjs";
+import { head } from "./context.js";
 
 /** One action Jev may take. */
 export type Candidate = {

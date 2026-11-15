@@ -61,9 +61,12 @@ test("hooks.json is exactly the mods module list", () => {
   assert.deepEqual(json("hooks/hooks.json"), { modules: ["./register.mjs"] });
 });
 
-test("the built hooks modules exist", () => {
-  for (const f of ["register", "jev", "policy", "candidates", "context", "agents", "compact", "summarize", "cache"]) {
+test("the hooks ship as register.mjs plus one bundled lib.mjs; the helper modules are not shipped", () => {
+  for (const f of ["register", "lib"]) {
     assert.ok(existsSync(new URL(`../plugin/hooks/${f}.mjs`, import.meta.url)), f);
+  }
+  for (const f of ["jev", "policy", "candidates", "context", "agents", "compact", "summarize", "cache"]) {
+    assert.ok(!existsSync(new URL(`../plugin/hooks/${f}.mjs`, import.meta.url)), f);
   }
 });
 

@@ -4,8 +4,8 @@
  *
  * @packageDocumentation
  */
-import type { Candidate } from "./candidates.mjs";
-import type { ChoiceAnswer, Question, ScoreAnswer } from "./jev.mjs";
+import type { Candidate } from "./candidates.js";
+import type { ChoiceAnswer, Question, ScoreAnswer } from "./jev.js";
 
 /** The option that leaves the step to Claude. */
 export const CLAUDE = "claude";

@@ -3,8 +3,9 @@
 import { createKit } from "claude-engine-vitest";
 import type { On } from "claude-engine-vitest";
 import { expect, test as pureTest } from "vitest";
-import { compactInstructions, compactItems } from "../plugin/hooks/compact.mjs";
-import { JEV_BATCH } from "../plugin/hooks/jev.mjs";
+import { compactInstructions, compactItems } from "../src/hooks/compact.ts";
+import type { SessionMessage } from "../src/hooks/context.ts";
+import { JEV_BATCH } from "../src/hooks/jev.ts";
 
 // The manifest defaults (jevfort/package.json claudePlugin.userConfig): the kit does not fill userConfig defaults.
 const DEFAULTS = {
@@ -138,7 +139,7 @@ test("An agent type no longer offered in a later turn is not a switch target", a
 });
 
 pureTest("Compaction instructions keep relevant results and mark stale ones", () => {
-  const messages = [
+  const messages: SessionMessage[] = [
     { role: "user", text: "fix the failing date test", toolUses: [] },
     {
       role: "assistant",
