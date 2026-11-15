@@ -6,7 +6,7 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, realpathSync, rmSync, w
 import path from "node:path";
 import { test } from "vitest";
 import { hashPath } from "../plugin/hooks/lint-file.mjs";
-import { HOOK, type LintEnv, makeEnv, payload } from "./support/lint-hook.mts";
+import { HOOK, type LintEnv, makeEnv, payload } from "./support/lint-hook.ts";
 
 /** A 4-line shell script; the Edit tests below edit line 2. */
 const SH4 = "echo a\necho $1\necho b\necho $2\n";

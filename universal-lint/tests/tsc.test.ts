@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import { chmodSync } from "node:fs";
 import { test } from "vitest";
-import { makeEnv } from "./support/lint-hook.mts";
+import { makeEnv } from "./support/lint-hook.ts";
 
 /**
  * Stub `name` that appends `<name> start <us>` and `<name> end <us>` (bash `EPOCHREALTIME`, microseconds) around a 1 s

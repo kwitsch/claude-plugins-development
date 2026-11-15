@@ -3,8 +3,8 @@ import assert from "node:assert/strict";
 import { chmodSync, existsSync, mkdirSync, rmSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "vitest";
-import { makeEnv } from "./support/lint-hook.mts";
-import type { LintEnv } from "./support/lint-hook.mts";
+import { makeEnv } from "./support/lint-hook.ts";
+import type { LintEnv } from "./support/lint-hook.ts";
 
 /** Stub line recording the npm_config notice-off vars the spawn received as `env:<update_notifier>,<fund>,<audit>`. */
 const ENV_REC = "printf 'env:%s,%s,%s\\n' \"$npm_config_update_notifier\" \"$npm_config_fund\" \"$npm_config_audit\" >> \"$RECORD\"";

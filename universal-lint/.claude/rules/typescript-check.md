@@ -1,7 +1,7 @@
 ---
 paths:
   - "src/hooks/**"
-  - "tests/{tsc,registry,oxlint}.test.mts"
+  - "tests/{tsc,registry,oxlint}.test.ts"
 ---
 
 # TypeScript type-checking (`tsc`)

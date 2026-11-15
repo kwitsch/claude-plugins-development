@@ -3,7 +3,7 @@ id: F10
 title: Cap concurrent FileChanged lints across hook processes (slot files)
 status: done
 priority: high
-area: universal-lint/src/hooks/lint-file.mts (fileChangedHandler, lintResolved, acquireSlot, slotStale, FILE_CHANGED_SLOTS, FILE_CHANGED_BUDGET_MS, main), universal-lint/.claude/rules/hook-design.md
+area: universal-lint/src/hooks/lint-file.ts (fileChangedHandler, lintResolved, acquireSlot, slotStale, FILE_CHANGED_SLOTS, FILE_CHANGED_BUDGET_MS, main), universal-lint/.claude/rules/hook-design.md
 ---
 
 ## Status
@@ -33,7 +33,7 @@ In `fileChangedHandler`, after the cheap skips and before `lintResolved`, acquir
 
 ## Verification
 
-Manual burst N=10 and N=50 modified on the ts200-f10 fixture (driver in the session scratchpad, numbers in Status and hook-design.md "Measured cost"): peak lint processes ≤ K on 0.15.9 (lint = a hook process with a live non-`git` descendant), none killed, linted + skipped = N (measured split 50 + 0); summed RSS reported, not gated (the waiting hook node processes Claude Code spawns per event stay alive, blocked in `Atomics.wait`). Vitest in file-detection.test.mts: 20 concurrent FileChanged events with a stub that records start/end timestamps, max overlap ≤ `FILE_CHANGED_SLOTS`, all 20 linted, slots released; an unusable data dir lints without a slot; a `.ts` file with every slot held gives up at uptime 10 s with the stderr note, exit 0. registry.test.mts: `acquireSlot` give-up and held cases, stale reclaim for a dead pid and an mtime 91 s old or 91 s in the future.
+Manual burst N=10 and N=50 modified on the ts200-f10 fixture (driver in the session scratchpad, numbers in Status and hook-design.md "Measured cost"): peak lint processes ≤ K on 0.15.9 (lint = a hook process with a live non-`git` descendant), none killed, linted + skipped = N (measured split 50 + 0); summed RSS reported, not gated (the waiting hook node processes Claude Code spawns per event stay alive, blocked in `Atomics.wait`). Vitest in file-detection.test.ts: 20 concurrent FileChanged events with a stub that records start/end timestamps, max overlap ≤ `FILE_CHANGED_SLOTS`, all 20 linted, slots released; an unusable data dir lints without a slot; a `.ts` file with every slot held gives up at uptime 10 s with the stderr note, exit 0. registry.test.ts: `acquireSlot` give-up and held cases, stale reclaim for a dead pid and an mtime 91 s old or 91 s in the future.
 
 ## Constraints
 

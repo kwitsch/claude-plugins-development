@@ -3,7 +3,7 @@ id: F30
 title: Document the Go/Rust cost model (scope, cold caches, bursts)
 status: done
 priority: low
-area: universal-lint/.claude/rules/languages.md (Rust, Go), universal-lint/src/hooks/lint-file.mts (CARGO_SPAWN_TIMEOUT_MS, resolveCargoManifest, REGISTRY.go)
+area: universal-lint/.claude/rules/languages.md (Rust, Go), universal-lint/src/hooks/lint-file.ts (CARGO_SPAWN_TIMEOUT_MS, resolveCargoManifest, REGISTRY.go)
 ---
 
 ## Status

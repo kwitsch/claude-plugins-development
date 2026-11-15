@@ -1,7 +1,7 @@
 ---
 paths:
   - "src/hooks/**"
-  - "tests/go.test.mts"
+  - "tests/go.test.ts"
 ---
 
 # Go: golangci-lint/go vet, package scope, and cold GOCACHE

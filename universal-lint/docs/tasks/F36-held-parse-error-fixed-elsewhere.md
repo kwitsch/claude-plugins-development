@@ -3,7 +3,7 @@ id: F36
 title: A held parse error is reported although a later edit fixed its cause on another line
 status: done
 priority: low
-area: bug - universal-lint/src/hooks/lint-file.mts (settleFindings, gateFinding, PARSE_ERROR_RE)
+area: bug - universal-lint/src/hooks/lint-file.ts (settleFindings, gateFinding, PARSE_ERROR_RE)
 ---
 
 ## Status
@@ -35,12 +35,12 @@ Residuals unchanged: a later lint that dies, times out or finds no tool loses th
 
 ## Verification
 
-Result: `gateFinding`'s `keepParseErrors` is `boolean | "drop"`; `settleFindings` passes `"drop"`. Tests: `settle.test.mts` ("keepParseErrors='drop'") and `settle-process.test.mts` (fixed elsewhere: exit 0; cause left: the later lint reports it, the held one is dropped; non-parse finding on another line kept). The process test and the unit test failed before the fix.
+Result: `gateFinding`'s `keepParseErrors` is `boolean | "drop"`; `settleFindings` passes `"drop"`. Tests: `settle.test.ts` ("keepParseErrors='drop'") and `settle-process.test.ts` (fixed elsewhere: exit 0; cause left: the later lint reports it, the held one is dropped; non-parse finding on another line kept). The process test and the unit test failed before the fix.
 
 Plan was:
 
-- `tests/settle-process.test.mts`: the repro above exits 0 (no wake); a later edit that does not fix the parse error still gets it reported (by the later lint); an edit after a non-parse own-line finding on another line still keeps that finding.
-- Unit tests in `tests/settle.test.mts` for the new mode of `gateFinding`.
+- `tests/settle-process.test.ts`: the repro above exits 0 (no wake); a later edit that does not fix the parse error still gets it reported (by the later lint); an edit after a non-parse own-line finding on another line still keeps that finding.
+- Unit tests in `tests/settle.test.ts` for the new mode of `gateFinding`.
 - `pnpm --filter universal-lint build && pnpm --filter universal-lint test && pnpm lint`.
 
 ## Constraints

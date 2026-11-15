@@ -3,7 +3,7 @@ id: F20
 title: One readdirSync per directory in the upward config walks (9P)
 status: done
 priority: low
-area: universal-lint/src/hooks/lint-file.mts (walkUpToCwd, walkToRoot, resolveOxlintConfig, hasProjectMarkdownlintConfig, hasStylelintConfig, resolveCheckstyleConfig, hasProjectYamllintConfig, resolveTsconfig, resolveCargoManifest)
+area: universal-lint/src/hooks/lint-file.ts (walkUpToCwd, walkToRoot, resolveOxlintConfig, hasProjectMarkdownlintConfig, hasStylelintConfig, resolveCheckstyleConfig, hasProjectYamllintConfig, resolveTsconfig, resolveCargoManifest)
 ---
 
 ## Status
@@ -34,7 +34,7 @@ Per-process memo `dirEntries(dir): Set<string>` (one `readdirSync`, empty set on
 
 ## Verification
 
-registry.test.mts resolver tests unchanged (oxlint-wins-same-dir tie, unreadable-tsconfig-keeps-climbing). Walk timing on a 9P repo: oxlint and markdownlint walks ≤ about 80 ms.
+registry.test.ts resolver tests unchanged (oxlint-wins-same-dir tie, unreadable-tsconfig-keeps-climbing). Walk timing on a 9P repo: oxlint and markdownlint walks ≤ about 80 ms.
 
 ## Constraints
 

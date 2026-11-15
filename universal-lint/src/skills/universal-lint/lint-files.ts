@@ -17,7 +17,7 @@
 
 import { readFileSync, realpathSync } from "node:fs";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
-import { lintFilesHandler } from "../../hooks/lint-file.mjs";
+import { lintFilesHandler } from "../../hooks/lint-file.js";
 
 /** The list file named on the command line. */
 const listFile = process.argv[2];

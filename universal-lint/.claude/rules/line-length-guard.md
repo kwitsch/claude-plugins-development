@@ -1,7 +1,7 @@
 ---
 paths:
   - "src/hooks/**"
-  - "tests/{yaml,markdown,registry}.test.mts"
+  - "tests/{yaml,markdown,registry}.test.ts"
 ---
 
 # YAML/Markdown line-length guard (do not "fix" without reading this)
@@ -12,7 +12,7 @@ paths:
   - With nothing found it passes `-d "{extends: default, rules: {line-length: disable}}"` — single-line flow-style YAML, passed as one argv element. `-d` overrides project **and** user-global config search entirely, hence the guard.
   - The user-global config also skips the guard (`hasUserGlobalYamllintConfig`, yamllint's order: `$YAMLLINT_CONFIG_FILE` with `~` expanded if set, else `$XDG_CONFIG_HOME/yamllint/config`, else `~/.config/yamllint/config`, must be a file): `-d` would replace it with the default ruleset and report rules the user turned off.
 - **markdownlint-cli2 / markdownlint:** `hasProjectMarkdownlintConfig(fileDir)` walks from the edited file's directory to the filesystem root looking for the filenames markdownlint-cli2's `--help` lists under "Configuration via:" (verified: cli2 does **not** read a `markdownlint-cli2` key from `package.json`).
-  - With nothing found, `--config` points both tools at a constant config disabling only MD013 (`{"MD013": false}`, the `MARKDOWNLINT_NO_LINE_LENGTH_CONFIG` constant in `src/hooks/lint-file.mts`).
+  - With nothing found, `--config` points both tools at a constant config disabling only MD013 (`{"MD013": false}`, the `MARKDOWNLINT_NO_LINE_LENGTH_CONFIG` constant in `src/hooks/lint-file.ts`).
   - **Changed in the port:** in kwitsch/claude-plugins this was a loose `hooks/markdownlint-no-line-length.json` next to the script. `plugin/` may only ship the layout allowlist (no stray `.json`), so the content is a TypeScript constant and `markdownlintNoLineLengthConfigPath()` writes it to `${CLAUDE_PLUGIN_DATA}/markdownlint-no-line-length.json` (OS temp dir when unset, never the project tree) the first time it is needed: only when absent or different, atomically (temp file + `renameSync`). markdownlint takes only a file path for `--config`, which is why it must exist on disk.
   - Classic `markdownlint` uses its own check instead (`hasMarkdownlintRc`, on the spawn cwd: the payload `cwd` or the local package root). markdownlint-cli starts from `rc("markdownlint")` (run-con), spreads `.markdownlint.{jsonc,json,yaml,yml}` found in its cwd only (no walk) over it and deep-extends `--config` over both, so the guard would turn off a configured MD013. Places: those four names in the spawn cwd, `.markdownlintrc` from the spawn cwd's real path up to `/` (run-con's `cc.find` starts at `process.cwd()`, which is the real path even when the spawn cwd is reached through a symlink), the file `$markdownlint_config` (resolved against that real path; a missing one is ignored, as run-con does), and the files `~/.config/markdownlint{,/config}`, `~/.markdownlint/config`, `~/.markdownlintrc`, `/etc/markdownlint{rc,/config}`. A config next to the file but below the spawn cwd, or a cli2-only name, is never read by classic markdownlint and keeps the guard. markdownlint-cli2 reads none of these and keeps `hasProjectMarkdownlintConfig(fileDir)`.
   - A write failure throws; `lintFileHandler`'s catch turns it into the usual silent no-op (a broken data dir never surfaces MD013 noise).

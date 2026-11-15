@@ -2,15 +2,15 @@
 paths:
   - "src/hooks/**"
   - "plugin/hooks/**"
-  - "tests/{core,npx-fallback,truncation,manifest,registry,tsc}.test.mts"
-  - "tests/file-detection.test.mts"
+  - "tests/{core,npx-fallback,truncation,manifest,registry,tsc}.test.ts"
+  - "tests/file-detection.test.ts"
   - "scripts/perf.mts"
 ---
 
 # Hook design (do not "fix" without reading this)
 
 - **Four `command` hooks, one entry:** every event runs `"${CLAUDE_PLUGIN_ROOT}/hooks/lint-file.mjs"` (the placeholder is quoted so a plugin path with a space survives; `claude plugin validate` warns otherwise); `main()` dispatches on `hook_event_name`. No hooks.json `async` flag (the hook itself has an async `main` since 0.15.4, see the stdin sub-bullet), no `statusMessage` (silent), no matcher on the three non-tool events. No `if` or FileChanged matcher filter (F26, Claude Code 2.1.321): `if` takes one rule per handler (46 handlers to keep in step with `EXT_MAP`) and a FileChanged matcher also registers watch entries, matches case-sensitively and cannot skip the hook's own echoes or `unlink`; the saving is ~40 ms background CPU per spawn.
-  - PostToolUse `Write|Edit` (`PostToolUse[0]`, index pinned by `tests/manifest.test.mts`): `timeout: 90`, `asyncRewake: true`. Records the content digest (see `file-detection.md`), then lints. A payload without `hook_event_name` is treated as PostToolUse.
+  - PostToolUse `Write|Edit` (`PostToolUse[0]`, index pinned by `tests/manifest.test.ts`): `timeout: 90`, `asyncRewake: true`. Records the content digest (see `file-detection.md`), then lints. A payload without `hook_event_name` is treated as PostToolUse.
   - SessionStart and CwdChanged: `timeout: 30`. Print the watch list on stdout as `{"hookSpecificOutput":{"hookEventName":<event>,"watchPaths":[…]}}`, only when it is non-empty; always exit `0`. CwdChanged builds the list for `new_cwd`; empty output leaves Claude Code with an empty watch list.
   - FileChanged: `timeout: 90`, `asyncRewake: true`. Lints a watched file changed outside Write/Edit with the same findings contract; the text is prefixed `universal-lint (changed outside Write/Edit): ` and `hookEventName` is `FileChanged`.
   - `asyncRewake` runs the hook in the background like `async`, but exit `2` wakes Claude with stderr as soon as the lint finishes, instead of the findings waiting for the next turn. Contract: findings = the `universal-lint…: …` text on stderr + exit `2`; nothing to report = no output, exit `0`.

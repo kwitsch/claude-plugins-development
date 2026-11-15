@@ -46,7 +46,7 @@ There is no written baseline of what one hook event costs, and the analysis harn
 - Floor: `node -e 0` 20-26 ms; hook with payload `{}` 40-47 ms; out-of-scope file (.json/.txt/node_modules/outside cwd) 38-44 ms. `NODE_COMPILE_CACHE`: no gain.
 - Missing linter (.sh/.py/.yml/.java/.kt): 143-215 ms real PATH vs 42-73 ms without /mnt dirs; .php 240-266 (two misses).
 - .ts without lint config (ts300): Write 1318, Edit 1194 ms (N=7); with no eslint reachable 344 ms.
-- This repo, `universal-lint/src/hooks/lint-file.mts` Write: 890-1127 ms (oxlint through rtk-fail + npx; tsc skipped by oxlint typeCheck). CLAUDE.md: 1254-1644 ms.
+- This repo, `universal-lint/src/hooks/lint-file.ts` Write: 890-1127 ms (oxlint through rtk-fail + npx; tsc skipped by oxlint typeCheck). CLAUDE.md: 1254-1644 ms.
 - .md warm npx: 1113-1137 ms; cold npx 4012-5577 ms. Go warm 495-546 ms; Rust warm no-change 185-329 ms, leaf edit 770-925 ms.
 - SessionStart: this repo 56-77 ms (161 paths); /mnt/c blocky-dev 2320-2711 ms (242-266 files).
 - FileChanged tracked-unchanged skip: 41-61 ms ext4, 202-340 ms 9P (git status 139-180 ms); unlink exit 43 ms.
@@ -65,7 +65,7 @@ There is no written baseline of what one hook event costs, and the analysis harn
 
 ## Code locations
 
-None changed. Measured entry points: `main`, `lintFileHandler`, `fileChangedHandler`, `watchPathsHandler` in universal-lint/src/hooks/lint-file.mts (built to plugin/hooks/lint-file.mjs).
+None changed. Measured entry points: `main`, `lintFileHandler`, `fileChangedHandler`, `watchPathsHandler` in universal-lint/src/hooks/lint-file.ts (built to plugin/hooks/lint-file.mjs).
 
 ## Approach
 

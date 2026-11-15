@@ -2,7 +2,7 @@
 // classification; ported from test/universal-lint/rust.bats.
 import assert from "node:assert/strict";
 import { test } from "vitest";
-import { makeEnv } from "./support/lint-hook.mts";
+import { makeEnv } from "./support/lint-hook.ts";
 
 /** A project with a Cargo.toml and src/main.rs. */
 function crate(content = "fn main() {}\n") {

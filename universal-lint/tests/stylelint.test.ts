@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { symlinkSync } from "node:fs";
 import path from "node:path";
 import { test } from "vitest";
-import { makeEnv } from "./support/lint-hook.mts";
+import { makeEnv } from "./support/lint-hook.ts";
 
 const OUT = "a.scss:1:1: Expected a trailing semicolon (declaration-block-trailing-semicolon)";
 

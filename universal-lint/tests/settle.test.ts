@@ -10,7 +10,7 @@ import { carryLine, editHunks, gateFinding, hashPath, recordEdit, settleFindings
 
 /** An Edit payload with the given structuredPatch hunks. */
 const edit = (structuredPatch: unknown) => ({ tool_name: "Edit", tool_response: { structuredPatch } });
-/** Edit replacing line 2 of a 4-line file (same shape as tests/core.test.mts). */
+/** Edit replacing line 2 of a 4-line file (same shape as tests/core.test.ts). */
 const REPLACE_L2 = [{ oldStart: 1, oldLines: 4, newStart: 1, newLines: 4, lines: [" echo a", "-echo $x", "+echo $1", " echo b", " echo $2"] }];
 /** Edit deleting one line between lines 1 and 2. */
 const DELETE_L2 = [{ oldStart: 1, oldLines: 5, newStart: 1, newLines: 4, lines: [" echo a", "-rm x", " echo $1", " echo b", " echo $2"] }];

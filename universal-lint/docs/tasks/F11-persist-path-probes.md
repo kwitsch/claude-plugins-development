@@ -3,7 +3,7 @@ id: F11
 title: Persist onPath probe results across hook processes
 status: done
 priority: medium
-area: universal-lint/src/hooks/lint-file.mts (onPath, probeCache, isToolAvailable, selectLintTool, runLintTool, runTypeCheck)
+area: universal-lint/src/hooks/lint-file.ts (onPath, probeCache, isToolAvailable, selectLintTool, runLintTool, runTypeCheck)
 ---
 
 ## Status

@@ -3,7 +3,7 @@ id: F31
 title: Measure rtk's overhead for shellcheck/ruff with the real tools
 status: done
 priority: low
-area: universal-lint/src/hooks/lint-file.mts (runLintTool on-PATH branch, tryRtk)
+area: universal-lint/src/hooks/lint-file.ts (runLintTool on-PATH branch, tryRtk)
 ---
 
 ## Status

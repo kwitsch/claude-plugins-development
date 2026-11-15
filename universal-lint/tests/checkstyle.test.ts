@@ -1,7 +1,7 @@
 // checkstyle output classification and config resolution; ported from test/universal-lint/checkstyle.bats.
 import assert from "node:assert/strict";
 import { test } from "vitest";
-import { makeEnv } from "./support/lint-hook.mts";
+import { makeEnv } from "./support/lint-hook.ts";
 
 test("checkstyle: boilerplate-only exit 0 -> {}", () => {
   const e = makeEnv();

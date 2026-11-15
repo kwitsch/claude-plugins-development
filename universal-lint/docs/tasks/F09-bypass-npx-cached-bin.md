@@ -3,7 +3,7 @@ id: F09
 title: Spawn the cached npx bin directly instead of npx --yes
 status: done
 priority: high
-area: universal-lint/src/hooks/lint-file.mts (runLintTool npx-fallback branch, runNpx, spawnBin, NPX_REFRESH_MS, REGISTRY npmSpec entries, NPX_SPAWN_TIMEOUT_MS)
+area: universal-lint/src/hooks/lint-file.ts (runLintTool npx-fallback branch, runNpx, spawnBin, NPX_REFRESH_MS, REGISTRY npmSpec entries, NPX_SPAWN_TIMEOUT_MS)
 ---
 
 ## Status
@@ -37,7 +37,7 @@ Accepted cost: npx checks a name-only spec against the registry's `latest` on ev
 
 ## Verification
 
-Tests (`tests/npx-fallback.test.mts`, markdownlint-cli2 as the representative tool, cache key `3c2a9ea6c4b6e0a2` hard-coded): with a fake cached bin and a fresh stamp the bin runs directly (bin dir first on PATH, npx's cwd) and the npx stub records nothing, after removing it the npx fallback runs; a cold `npm_config_cache` runs npx first (stamp written, the hook creates no cache root) and the cached bin the second time; a stamp older than 24 h sends one run through npx and the renewed stamp makes the next run direct; a cached bin without the exec bit, an npx `concurrency.lock` and a `node_modules/.bin/markdownlint-cli2` above cwd each send the lint through npx. Bench (0.15.7 vs 0.15.8, same session): `.md Write` real PATH 1066 -> 476 ms (`perf.mts 5`; target was about 300-350 ms); stylelint-config `.css` Write 951 -> 359 ms (manual; target about 350 ms).
+Tests (`tests/npx-fallback.test.ts`, markdownlint-cli2 as the representative tool, cache key `3c2a9ea6c4b6e0a2` hard-coded): with a fake cached bin and a fresh stamp the bin runs directly (bin dir first on PATH, npx's cwd) and the npx stub records nothing, after removing it the npx fallback runs; a cold `npm_config_cache` runs npx first (stamp written, the hook creates no cache root) and the cached bin the second time; a stamp older than 24 h sends one run through npx and the renewed stamp makes the next run direct; a cached bin without the exec bit, an npx `concurrency.lock` and a `node_modules/.bin/markdownlint-cli2` above cwd each send the lint through npx. Bench (0.15.7 vs 0.15.8, same session): `.md Write` real PATH 1066 -> 476 ms (`perf.mts 5`; target was about 300-350 ms); stylelint-config `.css` Write 951 -> 359 ms (manual; target about 350 ms).
 
 ## Constraints
 

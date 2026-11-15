@@ -4,7 +4,7 @@ import { spawnSync } from "node:child_process";
 import { chmodSync, existsSync, readdirSync, readFileSync, realpathSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "vitest";
-import { DRIVER, makeEnv } from "./support/lint-hook.mts";
+import { DRIVER, makeEnv } from "./support/lint-hook.ts";
 
 const SKILL = path.dirname(DRIVER);
 const skillMd = readFileSync(path.join(SKILL, "SKILL.md"), "utf8");

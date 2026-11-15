@@ -1,7 +1,7 @@
 ---
 paths:
   - "src/hooks/**"
-  - "tests/{checkstyle,core}.test.mts"
+  - "tests/{checkstyle,core}.test.ts"
 ---
 
 # JSON: not covered (do not "fix" without reading this)

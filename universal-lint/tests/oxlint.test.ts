@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import path from "node:path";
 import { test } from "vitest";
-import { makeEnv } from "./support/lint-hook.mts";
+import { makeEnv } from "./support/lint-hook.ts";
 
 /** A tsconfig.json that governs `*.ts` in the project root. */
 const TSCONFIG = "{\"compilerOptions\":{\"noEmit\":true},\"include\":[\"*.ts\"]}";

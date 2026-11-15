@@ -2,7 +2,7 @@
 paths:
   - "src/hooks/**"
   - "plugin/hooks/**"
-  - "tests/settle*.test.mts"
+  - "tests/settle*.test.ts"
 ---
 
 ## Settle window (F34, 0.16.0)

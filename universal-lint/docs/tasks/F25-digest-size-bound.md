@@ -49,7 +49,7 @@ Closed docs-only; hook behaviour is unchanged. The only measurable cost is milli
 
 ## Verification
 
-No code changed, so no new tests; the rebuilt `plugin/hooks/lint-file.mjs` is byte-identical; the existing suite (tests/file-detection.test.mts digest test "FileChanged: skipped while the content matches the Write/Edit digest, linted after a further change") stays green.
+No code changed, so no new tests; the rebuilt `plugin/hooks/lint-file.mjs` is byte-identical; the existing suite (tests/file-detection.test.ts digest test "FileChanged: skipped while the content matches the Write/Edit digest, linted after a further change") stays green.
 
 ## Constraints
 
