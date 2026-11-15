@@ -3,7 +3,7 @@ id: F18
 title: Linear frame accumulation in DprintLsp.onData
 status: done
 priority: low
-area: dprint/src/mcp/lsp.mts (DprintLsp.onData, buf, start, broken)
+area: dprint/src/mcp/lsp.ts (DprintLsp.onData, buf, start, broken)
 ---
 
 ## Status
@@ -21,7 +21,7 @@ Node delivers child stdout in <= 64 KB chunks; each chunk copies the whole accum
 
 ## Code locations
 
-- `DprintLsp.onData`, field `buf`, resets in `start()` (`this.buf = Buffer.alloc(0)`) and `broken()` in dprint/src/mcp/lsp.mts.
+- `DprintLsp.onData`, field `buf`, resets in `start()` (`this.buf = Buffer.alloc(0)`) and `broken()` in dprint/src/mcp/lsp.ts.
 
 ## Approach
 
@@ -33,13 +33,13 @@ Node delivers child stdout in <= 64 KB chunks; each chunk copies the whole accum
 
 ## Verification
 
-- Add a unit-style test in dprint/tests/mcp-server.test.mts with a stub `dprint lsp` that writes one frame in 1-byte/64 KB splits and a response of several MB; assert the format result is correct.
+- Add a unit-style test in dprint/tests/mcp-server.test.ts with a stub `dprint lsp` that writes one frame in 1-byte/64 KB splits and a response of several MB; assert the format result is correct.
 - Measure: 10 MB stub response via format_pre Write, before/after (expect ~-500 ms).
 - `pnpm --filter dprint build && pnpm --filter dprint test`.
 
 ## Constraints
 
-- Edit src/, never plugin/*.mjs; zero-dep node: builtins; TSDoc on every new field and symbol (`pnpm lint`); version bump (plugin.json and package.json equal). Bundle with another lsp.mts change; do not release alone.
+- Edit src/, never plugin/*.mjs; zero-dep node: builtins; TSDoc on every new field and symbol (`pnpm lint`); version bump (plugin.json and package.json equal). Bundle with another lsp.ts change; do not release alone.
 
 ## Related
 

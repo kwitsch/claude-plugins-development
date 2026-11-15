@@ -3,7 +3,7 @@ id: F07
 title: Overlap or drop the git check-ignore spawn in formatPre
 status: closed
 priority: low
-area: dprint/src/mcp/format.mts (formatPre, isGitIgnored)
+area: dprint/src/mcp/format.ts (formatPre, isGitIgnored)
 ---
 
 ## Status

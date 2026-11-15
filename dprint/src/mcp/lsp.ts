@@ -9,7 +9,7 @@
  */
 import { type ChildProcessWithoutNullStreams, spawn } from "node:child_process";
 import { pathToFileURL } from "node:url";
-import { dprintArgv, findDprint } from "../skills/dprint/find-dprint.mjs";
+import { dprintArgv, findDprint } from "../skills/dprint/find-dprint.js";
 
 /** LSP range: zero-based line and UTF-16 character offsets, end exclusive. */
 type LspRange = {
@@ -86,6 +86,8 @@ export class DprintLsp {
   private readonly pending = new Map<number, Pending>();
   /** Tail of the format queue; every format waits for the previous one. */
   private queue: Promise<unknown> = Promise.resolve();
+  /** Formats queued or running; eviction must not close a client while this is above 0. */
+  private active = 0;
   /** Request timeout in ms. */
   private readonly timeoutMs: number;
   /** Idle time in ms before the child is stopped. */
@@ -111,6 +113,11 @@ export class DprintLsp {
     this.timeoutMs = opts.timeoutMs ?? REQUEST_TIMEOUT_MS;
   }
 
+  /** `true` while a format is queued or running. */
+  get busy(): boolean {
+    return this.active > 0;
+  }
+
   /**
    * Format a document as dprint would format the file at `uri`.
    *
@@ -121,8 +128,10 @@ export class DprintLsp {
    */
   format(uri: string, text: string): Promise<string | null> {
     clearTimeout(this.idle);
+    this.active++;
     const run = this.queue.then(() => this.formatNow(uri, text));
     const tail = run.catch(() => {}).then(() => { // a failed call must not block the next one
+      this.active--;
       if (this.queue === tail) this.idle = setTimeout(() => this.dispose(), this.idleMs).unref();
     });
     this.queue = tail;

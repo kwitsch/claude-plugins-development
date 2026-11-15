@@ -3,7 +3,7 @@ id: F28
 title: Test the performance-relevant server paths
 status: done
 priority: low
-area: dprint/tests/mcp-server.test.mts, dprint/src/mcp/lsp.mts (DprintLsp constructor option timeoutMs)
+area: dprint/tests/mcp-server.test.ts, dprint/src/mcp/lsp.ts (DprintLsp constructor option timeoutMs)
 ---
 
 ## Status
@@ -23,9 +23,9 @@ Adversarial run of every untested path against the 0.7.0 build found NO defect: 
 
 ## Code locations
 
-- dprint/tests/mcp-server.test.mts: `STUB_LSP` (stub modes ok, range-error, range-null, crash, hang), `startServer`, `stubDprint`, `tool()`/`call()` helpers; tests named above.
-- `DprintLsp` (constructor `{ cwd, timeoutMs? }`, `noteTimeout`, cooldown), `REQUEST_TIMEOUT_MS`, `NOT_FOUND_RETRY_MS`, `onData` in dprint/src/mcp/lsp.mts.
-- `MAX_CLIENTS` and the client map in dprint/src/mcp/format.mts.
+- dprint/tests/mcp-server.test.ts: `STUB_LSP` (stub modes ok, range-error, range-null, crash, hang), `startServer`, `stubDprint`, `tool()`/`call()` helpers; tests named above.
+- `DprintLsp` (constructor `{ cwd, timeoutMs? }`, `noteTimeout`, cooldown), `REQUEST_TIMEOUT_MS`, `NOT_FOUND_RETRY_MS`, `onData` in dprint/src/mcp/lsp.ts.
+- `MAX_CLIENTS` and the client map in dprint/src/mcp/format.ts.
 
 ## Approach
 
@@ -37,7 +37,7 @@ Add the remaining tests reusing `STUB_LSP` with new modes: `chunked` (write the 
 
 ## Constraints
 
-Tests live in dprint/tests/*.test.mts and run against the built plugin/; edit src/ only for test seams; fail-open behavior must not change; a version bump in dprint/plugin.json AND dprint/package.json is needed if anything under dprint/ is merged to main.
+Tests live in dprint/tests/*.test.ts and run against the built plugin/; edit src/ only for test seams; fail-open behavior must not change; a version bump in dprint/plugin.json AND dprint/package.json is needed if anything under dprint/ is merged to main.
 
 ## Related
 

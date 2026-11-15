@@ -3,7 +3,7 @@ id: F04
 title: Bound dprint lsp child memory for large documents
 status: done
 priority: medium
-area: dprint/src/mcp/format.mts (fileChanged, client, MAX_CLIENTS, MAX_CHANGED_BYTES), dprint/src/mcp/lsp.mts (DprintLsp)
+area: dprint/src/mcp/format.ts (fileChanged, client, MAX_CLIENTS, MAX_CHANGED_BYTES), dprint/src/mcp/lsp.ts (DprintLsp)
 ---
 
 ## Status
@@ -25,7 +25,7 @@ Real session (bigjson-append): one in-place append to a watched 6.5 MB JSON -> 6
 - `fileChanged` (`statSync(s.fp).size > MAX_CHANGED_BYTES`, then `acquireChangeSlot`, then `readFileSync`)
 - `MAX_CHANGED_BYTES`, `MAX_CLIENTS`, `client` (LRU map), `disposeLsp`
 - `DprintLsp.dispose`, `DprintLsp.formatNow` (finally block with `didClose`), `DprintLsp.format`
-- test: "file_changed skips files above 1 MiB" in `tests/mcp-server.test.mts`
+- test: "file_changed skips files above 1 MiB" in `tests/mcp-server.test.ts`
 
 ## Approach
 

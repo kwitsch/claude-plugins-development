@@ -3,12 +3,12 @@ id: F14
 title: Back off after an lsp request timeout
 status: done
 priority: none
-area: dprint/src/mcp/lsp.mts (DprintLsp.formatNow, noteTimeout, failedAt, COOLDOWN_MS, timeoutMs option)
+area: dprint/src/mcp/lsp.ts (DprintLsp.formatNow, noteTimeout, failedAt, COOLDOWN_MS, timeoutMs option)
 ---
 
 ## Status
 
-Done. After a request timeout (or an initialize timeout), formats of the SAME document (key: file URI, per `DprintLsp` client) fail at once for 60 s (`COOLDOWN_MS`). Test-only constructor option `timeoutMs` (default 30 s `REQUEST_TIMEOUT_MS`). Not done: capping `dprint file-paths` in watch-paths.mts at ~3 s (see Approach).
+Done. After a request timeout (or an initialize timeout), formats of the SAME document (key: file URI, per `DprintLsp` client) fail at once for 60 s (`COOLDOWN_MS`). Test-only constructor option `timeoutMs` (default 30 s `REQUEST_TIMEOUT_MS`). Not done: capping `dprint file-paths` in watch-paths.ts at ~3 s (see Approach).
 
 ## Problem
 
@@ -22,18 +22,18 @@ Done. After a request timeout (or an initialize timeout), formats of the SAME do
 
 ## Code locations
 
-- dprint/src/mcp/lsp.mts: `REQUEST_TIMEOUT_MS`, `COOLDOWN_MS`, `TimeoutError`, `DprintLsp.failedAt` (Map uri -> `Date.now()` of last timeout, pruned in `noteTimeout`), `formatNow` (throws "dprint lsp: cooling down after a timeout"), `noteTimeout`, constructor `opts.timeoutMs`.
+- dprint/src/mcp/lsp.ts: `REQUEST_TIMEOUT_MS`, `COOLDOWN_MS`, `TimeoutError`, `DprintLsp.failedAt` (Map uri -> `Date.now()` of last timeout, pruned in `noteTimeout`), `formatNow` (throws "dprint lsp: cooling down after a timeout"), `noteTimeout`, constructor `opts.timeoutMs`.
 - `start()` rejects an initialize timeout; `formatNow` routes it through `noteTimeout` too.
-- dprint/src/mcp/watch-paths.mts: `execFileSync` timeout (10 s) for `dprint file-paths`, unchanged.
+- dprint/src/mcp/watch-paths.ts: `execFileSync` timeout (10 s) for `dprint file-paths`, unchanged.
 
 ## Approach
 
 Implemented per document, not per client, so one slow document does not block others. Rejections surface as `{}` plus one stderr line via `formatPre`/`fileChanged` fail-open. Do not lower `REQUEST_TIMEOUT_MS` (10 s variant not validated).
-Open follow-up (low): in watch-paths.mts lower the `execFileSync` timeout for `dprint file-paths` to ~3 s (healthy answer takes 9-10 ms); on timeout it already prints nothing.
+Open follow-up (low): in watch-paths.ts lower the `execFileSync` timeout for `dprint file-paths` to ~3 s (healthy answer takes 9-10 ms); on timeout it already prints nothing.
 
 ## Verification
 
-- tests/mcp-server.test.mts: "lsp timeout -> later formats of that document fail fast for the cooldown, other documents do not" (uses a stub lsp and `timeoutMs`).
+- tests/mcp-server.test.ts: "lsp timeout -> later formats of that document fail fast for the cooldown, other documents do not" (uses a stub lsp and `timeoutMs`).
 - Real repro: fixture with dprint.json plugin `https://10.255.255.1/plugin.wasm`, `DPRINT_CACHE_DIR` empty; time three format_pre calls; expect ~30 s then ~4 ms.
 - `pnpm --filter dprint build && pnpm --filter dprint test`.
 

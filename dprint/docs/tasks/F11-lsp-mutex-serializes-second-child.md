@@ -3,7 +3,7 @@ id: F11
 title: Do not replace the per-client format queue or the second file_changed child
 status: closed
 priority: none
-area: dprint/src/mcp/lsp.mts (DprintLsp.queue, DprintLsp.format), dprint/src/mcp/format.mts (client, fileChanged key "\0file_changed")
+area: dprint/src/mcp/lsp.ts (DprintLsp.queue, DprintLsp.format), dprint/src/mcp/format.ts (client, fileChanged key "\0file_changed")
 ---
 
 ## Status
@@ -26,8 +26,8 @@ Hypothesis: `DprintLsp.format` serializes every request on one promise chain (`q
 
 ## Code locations
 
-- `DprintLsp.format` / `queue` in dprint/src/mcp/lsp.mts: client-wide FIFO chain (keep).
-- `client(cwd, key)` and `MAX_CLIENTS` in dprint/src/mcp/format.mts: `fileChanged` passes `sc.root + "\0file_changed"` as key so whole-file formats never queue in front of `formatPre` (keep).
+- `DprintLsp.format` / `queue` in dprint/src/mcp/lsp.ts: client-wide FIFO chain (keep).
+- `client(cwd, key)` and `MAX_CLIENTS` in dprint/src/mcp/format.ts: `fileChanged` passes `sc.root + "\0file_changed"` as key so whole-file formats never queue in front of `formatPre` (keep).
 
 ## Approach
 
@@ -36,7 +36,7 @@ Optional hardening, not validated: (1) reword the `client` TSDoc to say dprint l
 
 ## Verification
 
-Only if the optional test is added: in dprint/tests/mcp-server.test.mts spawn the server with a stub `dprint lsp` that records its pid per request, run a format_pre and a file_changed in the same cwd, assert two distinct pids. Run `pnpm --filter dprint build && pnpm --filter dprint test`.
+Only if the optional test is added: in dprint/tests/mcp-server.test.ts spawn the server with a stub `dprint lsp` that records its pid per request, run a format_pre and a file_changed in the same cwd, assert two distinct pids. Run `pnpm --filter dprint build && pnpm --filter dprint test`.
 
 ## Constraints
 

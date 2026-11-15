@@ -3,14 +3,14 @@ id: F12
 title: Bound MCP server RSS growth from multi-MB payloads
 status: done
 priority: low
-area: dprint/src/mcp/format.mts (fileChanged, MAX_CHANGED_BYTES, formatPre), dprint/src/mcp/server.mts (tools/call response), dprint/src/mcp/lsp.mts (send, onData)
+area: dprint/src/mcp/format.ts (fileChanged, MAX_CHANGED_BYTES, formatPre), dprint/src/mcp/server.ts (tools/call response), dprint/src/mcp/lsp.ts (send, onData)
 ---
 
 ## Status
 
-Done in 0.13.0: `formatPre` skips Write content and Edit targets (file size plus new_string) above `MAX_CHANGED_BYTES` (1 MiB) before any git or lsp spawn (`overCap`, shared with `formatOnDisk`); the document passes through unformatted. The double serialization in server.mts is required by the dual-era rule and stays. Test: "Write and Edit above 1 MiB pass through unformatted without spawning dprint lsp".
+Done in 0.13.0: `formatPre` skips Write content and Edit targets (file size plus new_string) above `MAX_CHANGED_BYTES` (1 MiB) before any git or lsp spawn (`overCap`, shared with `formatOnDisk`); the document passes through unformatted. The double serialization in server.ts is required by the dual-era rule and stays. Test: "Write and Edit above 1 MiB pass through unformatted without spawning dprint lsp".
 
-Earlier state: Partial. Mitigated: `fileChanged` skips files above `MAX_CHANGED_BYTES` (1 MiB, stderr line) and the FileChanged spawn count per event dropped from two git spawns to one (F13). NOT addressed: multi-MB Write/Edit payloads in `formatPre`, double serialization in server.mts, send/receive buffer churn.
+Earlier state: Partial. Mitigated: `fileChanged` skips files above `MAX_CHANGED_BYTES` (1 MiB, stderr line) and the FileChanged spawn count per event dropped from two git spawns to one (F13). NOT addressed: multi-MB Write/Edit payloads in `formatPre`, double serialization in server.ts, send/receive buffer churn.
 
 ## Problem
 
@@ -26,10 +26,10 @@ The stdio MCP server lives for the whole session and V8/glibc do not return memo
 
 ## Code locations
 
-- `MAX_CHANGED_BYTES` and `fileChanged` (`statSync(...).size` check before `readFileSync`) in dprint/src/mcp/format.mts: the guard that exists.
-- `formatPre` in dprint/src/mcp/format.mts: no size guard (open).
-- tools/call response builder in dprint/src/mcp/server.mts: puts `JSON.stringify(result)` in content text AND `structuredContent` (response 1.8-1.9x content bytes).
-- `DprintLsp.send` / `onData` in dprint/src/mcp/lsp.mts: per-message Buffer copies (see F18).
+- `MAX_CHANGED_BYTES` and `fileChanged` (`statSync(...).size` check before `readFileSync`) in dprint/src/mcp/format.ts: the guard that exists.
+- `formatPre` in dprint/src/mcp/format.ts: no size guard (open).
+- tools/call response builder in dprint/src/mcp/server.ts: puts `JSON.stringify(result)` in content text AND `structuredContent` (response 1.8-1.9x content bytes).
+- `DprintLsp.send` / `onData` in dprint/src/mcp/lsp.ts: per-message Buffer copies (see F18).
 
 ## Approach
 
@@ -42,7 +42,7 @@ Remaining optional work, lowest value first:
 
 ## Verification
 
-- Test in dprint/tests/mcp-server.test.mts: format_pre Write with content just above the cap returns `{}` and spawns no dprint lsp; the existing "file_changed skips files above 1 MiB" test covers the FileChanged side.
+- Test in dprint/tests/mcp-server.test.ts: format_pre Write with content just above the cap returns `{}` and spawns no dprint lsp; the existing "file_changed skips files above 1 MiB" test covers the FileChanged side.
 - Measure: spawn server, 3 x 10 MB Write, sample VmRSS from /proc/<pid>/status, compare format_pre medians before/after.
 - `pnpm --filter dprint build && pnpm --filter dprint test`.
 

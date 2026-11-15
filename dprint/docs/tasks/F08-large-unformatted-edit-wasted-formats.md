@@ -3,7 +3,7 @@ id: F08
 title: Large not-yet-formatted files make every Edit slow (documented only)
 status: done
 priority: low
-area: dprint/src/mcp/format.mts (formatPre, trimToEdit, lineDiff); docs: dprint/plugin/README.md
+area: dprint/src/mcp/format.ts (formatPre, trimToEdit, lineDiff); docs: dprint/plugin/README.md
 ---
 
 ## Status

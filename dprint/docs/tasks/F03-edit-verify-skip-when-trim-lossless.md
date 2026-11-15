@@ -3,7 +3,7 @@ id: F03
 title: Skip the Edit verification formats when the trim reproduces dprint's output
 status: done
 priority: none
-area: dprint/src/mcp/format.mts (formatPre, trimToEdit)
+area: dprint/src/mcp/format.ts (formatPre, trimToEdit)
 ---
 
 ## Status
@@ -16,7 +16,7 @@ The verification exists to catch a trim that dropped or duplicated content. When
 
 ## Evidence
 
-Bench (real dprint 0.64.3, interleaved A/B, median ms): 500-line clean .ts 28.7 -> 12.5; 2000 lines 97.5 -> 36.5; 3000 lines 154 -> 55; real 732-line format.mts 38.2 -> 15.9; 20000 lines ~1011 -> 357. 0 decision flips (R === out and verification false) in 5 test Edits + 25 bench rows; `updatedInput` byte-identical; idempotency probe 0/36 non-idempotent md/json/yaml/ts snippets; 123/123 tests. No gain (old path runs unchanged) when R !== out: other dirty regions in the file, missing final newline, extra trailing blank lines, unformatted file.
+Bench (real dprint 0.64.3, interleaved A/B, median ms): 500-line clean .ts 28.7 -> 12.5; 2000 lines 97.5 -> 36.5; 3000 lines 154 -> 55; real 732-line format.ts 38.2 -> 15.9; 20000 lines ~1011 -> 357. 0 decision flips (R === out and verification false) in 5 test Edits + 25 bench rows; `updatedInput` byte-identical; idempotency probe 0/36 non-idempotent md/json/yaml/ts snippets; 123/123 tests. No gain (old path runs unchanged) when R !== out: other dirty regions in the file, missing final newline, extra trailing blank lines, unformatted file.
 
 ## Code locations
 

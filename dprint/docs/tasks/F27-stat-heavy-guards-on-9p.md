@@ -3,7 +3,7 @@ id: F27
 title: Cache findConfig results to cut stat latency on 9P repos
 status: done
 priority: low
-area: dprint/src/skills/dprint/find-config.mts (findConfig), dprint/src/mcp/format.mts (realish, scopeOf, fileWritten, fileChanged, formatPre)
+area: dprint/src/skills/dprint/find-config.ts (findConfig), dprint/src/mcp/format.ts (realish, scopeOf, fileWritten, fileChanged, formatPre)
 ---
 
 ## Status
@@ -20,18 +20,18 @@ Pinned steady state (a process holds cwd on the path: Claude Code itself and the
 
 ## Code locations
 
-`findConfig` and `FoundConfig` in dprint/src/skills/dprint/find-config.mts (shared by run-dprint, scan-plugins, mcp/format and watch-paths; other scripts are one-shot processes); call sites in `fileWritten`, `fileChanged`, `formatPre` and `watchList` (watch-paths.mts) only null-check the result; `realish`, `scopeOf` in format.mts.
+`findConfig` and `FoundConfig` in dprint/src/skills/dprint/find-config.ts (shared by run-dprint, scan-plugins, mcp/format and watch-paths; other scripts are one-shot processes); call sites in `fileWritten`, `fileChanged`, `formatPre` and `watchList` (watch-paths.ts) only null-check the result; `realish`, `scopeOf` in format.ts.
 
 ## Approach
 
-1. In find-config.mts add a module-level `Map<string, FoundConfig>` keyed by `path.resolve(dir)`: on lookup return the cached hit only if `existsSync(path.join(hit.dir, hit.name))` still holds, else run the existing walk; set on a hit, delete on null; NEVER cache null (a config created mid-session, e.g. by `dprint init`, must be seen at once). Update the "Nothing is cached" remark. A stale dir/name for a nearer config created later is harmless at all call sites (they only null-check).
+1. In find-config.ts add a module-level `Map<string, FoundConfig>` keyed by `path.resolve(dir)`: on lookup return the cached hit only if `existsSync(path.join(hit.dir, hit.name))` still holds, else run the existing walk; set on a hit, delete on null; NEVER cache null (a config created mid-session, e.g. by `dprint init`, must be seen at once). Update the "Nothing is cached" remark. A stale dir/name for a nearer config created later is harmless at all call sites (they only null-check).
 2. If the 3 `realish` per call (3.5-7 ms on 9P) ever matter, cache `realRoot`/`realScratch` per cwd inside `scopeOf` (not `.native`).
 3. Larger lever on 9P, out of scope here: the git spawns.
    Prototype existed (~8 lines, 5/5 mid-session correctness checks: equals uncached; config removed -> null; null not cached; re-created -> seen; nearer config below cached root still answers root).
 
 ## Verification
 
-Add tests in dprint/tests/mcp-server.test.mts: "config removed mid-session -> gate closes (format_pre {})" and "config created mid-session -> gate opens" (today only "cwd without any dprint config" and cwd_changed gating exist). Measure on /mnt/c (not ext4): fixture cwd at depth 0/3/8 below `.git`, cwd pinned by a child process, 20 reps, uncached vs cached `findConfig` + `scopeOf/inScope` timings.
+Add tests in dprint/tests/mcp-server.test.ts: "config removed mid-session -> gate closes (format_pre {})" and "config created mid-session -> gate opens" (today only "cwd without any dprint config" and cwd_changed gating exist). Measure on /mnt/c (not ext4): fixture cwd at depth 0/3/8 below `.git`, cwd pinned by a child process, 20 reps, uncached vs cached `findConfig` + `scopeOf/inScope` timings.
 
 ## Constraints
 

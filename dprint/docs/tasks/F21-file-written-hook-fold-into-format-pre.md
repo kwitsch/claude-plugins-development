@@ -3,7 +3,7 @@ id: F21
 title: Evaluate folding the file_written hook into format_pre
 status: closed
 priority: low
-area: dprint/src/mcp/format.mts (fileWritten, formatPre, written map), dprint/plugin/hooks/hooks.json (PostToolUse Write|Edit -> file_written)
+area: dprint/src/mcp/format.ts (fileWritten, formatPre, written map), dprint/plugin/hooks/hooks.json (PostToolUse Write|Edit -> file_written)
 ---
 
 ## Status
@@ -24,10 +24,10 @@ Every Write/Edit pays two synchronous mcp_tool dispatches on the tool's critical
 
 ## Code locations
 
-- `fileWritten` in dprint/src/mcp/format.mts: scopeOf, inScope, findConfig gate, `written.set(s.real, digest(readFileSync(...)))`.
+- `fileWritten` in dprint/src/mcp/format.ts: scopeOf, inScope, findConfig gate, `written.set(s.real, digest(readFileSync(...)))`.
 - `written` (Map real path -> digest), checked in `fileChanged` before any spawn and again after the awaits.
-- `formatPre` in dprint/src/mcp/format.mts (Write: formatted content; Edit: `trimToEdit` result, CRLF handling).
-- dprint/plugin/hooks/hooks.json: PostToolUse `Write|Edit` group, tool `file_written`; tool table typed by `HookInputs` in dprint/src/mcp/server.mts (generated dprint/src/mcp/hook-inputs.d.mts).
+- `formatPre` in dprint/src/mcp/format.ts (Write: formatted content; Edit: `trimToEdit` result, CRLF handling).
+- dprint/plugin/hooks/hooks.json: PostToolUse `Write|Edit` group, tool `file_written`; tool table typed by `HookInputs` in dprint/src/mcp/server.ts (generated dprint/src/mcp/hook-inputs.d.ts).
 
 ## Approach
 
@@ -35,12 +35,12 @@ Prototype FIRST in a scratch copy; decision it gates: whether to delete the hook
 
 1. In `formatPre`, after computing the content that will be written, `written.set(real, digest(<exact bytes Claude Code will write>))`. Edit: apply the returned old/new to the file text yourself and render with the file's own line endings; compare against the actual on-disk result in a real headless `claude -p` session (CRLF file, non-unique old_string, replace_all, file with BOM).
 2. Safer alternative from the analysis: keep `file_written` and record in `formatPre` as well (belt and braces); gains only the closed race, not the 15 ms.
-3. Only if the record is provably byte-identical in all cases, delete the PostToolUse hook group and the `file_written` tool (hooks.json, server.mts tool table; `scripts/hooks.mts` regenerates hook-inputs.d.mts). Update CLAUDE.md and tests that call `file_written`.
+3. Only if the record is provably byte-identical in all cases, delete the PostToolUse hook group and the `file_written` tool (hooks.json, server.ts tool table; `scripts/hooks.mts` regenerates hook-inputs.d.ts). Update CLAUDE.md and tests that call `file_written`.
    Trap: a record made at PreToolUse time must not outlive a failed Edit in a way that suppresses a real later change; the digest mismatch makes this safe only if the digest is of the exact post-write bytes.
 
 ## Verification
 
-Existing test "file_written records the Edit/Write result: file_changed leaves it alone, also on repeated events" in dprint/tests/mcp-server.test.mts must keep passing (or be rewritten against format_pre). Add: CRLF Edit then file_changed -> file untouched; rejected Edit -> later real change is still formatted. Real-session check: Write/Edit with edits-style prompts, confirm no whole-file reformat after the FileChanged echo and measure Edit wall vs baseline (~147-153 ms).
+Existing test "file_written records the Edit/Write result: file_changed leaves it alone, also on repeated events" in dprint/tests/mcp-server.test.ts must keep passing (or be rewritten against format_pre). Add: CRLF Edit then file_changed -> file untouched; rejected Edit -> later real change is still formatted. Real-session check: Write/Edit with edits-style prompts, confirm no whole-file reformat after the FileChanged echo and measure Edit wall vs baseline (~147-153 ms).
 
 ## Constraints
 

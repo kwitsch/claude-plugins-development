@@ -13,7 +13,7 @@
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { findConfig } from "./find-config.mjs";
+import { findConfig } from "./find-config.js";
 
 /** One plugin entry of `dprint-plugins.json`. */
 interface RefPlugin {

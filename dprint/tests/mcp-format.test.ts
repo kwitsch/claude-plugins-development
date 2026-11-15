@@ -5,7 +5,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, sy
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test, vi } from "vitest";
-import { applyEdit, bashFinished, bashStarted, formatPre, lineDiff, trimToEdit } from "../plugin/mcp/format.mjs";
+import { applyEdit, bashFinished, bashStarted, disposeLsp, fileChanged, formatPre, lineDiff, trimToEdit } from "../plugin/mcp/format.mjs";
 import { applyTextEdits } from "../plugin/mcp/lsp.mjs";
 
 const h = (aStart, aEnd, bStart, bEnd) => ({ aStart, aEnd, bStart, bEnd });
@@ -282,6 +282,27 @@ test("applyTextEdits: a position past the end of a CRLF line clamps before the \
   );
 });
 
+// Needs a real dprint on PATH with its json plugin in the cache or reachable (CI has neither): skipped there, run locally.
+const realDprint = spawnSync("dprint", ["--version"], { encoding: "utf8" }).status === 0;
+
+test.skipIf(!realDprint)("format_pre: more concurrent roots than the client cap all format (a busy client is not evicted)", async () => {
+  const tmp = mkdtempSync(path.join(tmpdir(), "dprint-evict-"));
+  const roots: string[] = [];
+  for (let i = 0; i < 9; i++) {
+    const r = path.join(tmp, `r${i}`);
+    mkdirSync(path.join(r, ".git"), { recursive: true });
+    writeFileSync(path.join(r, "dprint.json"), JSON.stringify({ json: {}, plugins: ["npm:@dprint/json@0.25.2"] }));
+    roots.push(r);
+  }
+  try {
+    const res = await Promise.all(roots.map((r, i) => formatPre({ cwd: r, agent_id: "", session_id: "ev" + i, scratchpad_dir: "", tool_name: "Write", tool_input: { file_path: path.join(r, "x.json"), content: "{\n\"a\": 1\n}\n" } })));
+    res.forEach((x, i) => assert.ok("hookSpecificOutput" in x, `root ${i} was formatted`));
+  } finally {
+    disposeLsp();
+    rmSync(tmp, { recursive: true, force: true });
+  }
+}, 60_000);
+
 test("trimToEdit: a highly repetitive file jumps to the widest span after the step cap instead of blocking", () => {
   // 10 identical 2000-line blocks: no span under ~18000 lines is unique
   const block = Array.from({ length: 2000 }, (_, i) => `l${i}\n`).join("");
@@ -335,6 +356,94 @@ test("watch list: an empty read (dprint missing) is retried after 5 minutes, not
     process.env.PATH = oldPath;
     process.env.HOME = oldHome;
     if (oldInstall !== undefined) process.env.DPRINT_INSTALL = oldInstall;
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test("format_pre Edit: a file that grows over the cap while git check-ignore runs is skipped, not read", async () => {
+  const tmp = mkdtempSync(path.join(tmpdir(), "dprint-edit-cap-"));
+  const bin = path.join(tmp, "bin");
+  const repo = path.join(tmp, "repo");
+  mkdirSync(bin);
+  mkdirSync(repo);
+  spawnSync("/usr/bin/git", ["init", "-q", repo]);
+  writeFileSync(path.join(repo, "dprint.json"), "{}");
+  const realGit = spawnSync("sh", ["-c", "command -v git"], { encoding: "utf8" }).stdout.trim();
+  // the fake git sleeps 2 s on check-ignore, so the Edit is still waiting for git when the file grows
+  writeFileSync(path.join(bin, "git"), `#!/bin/sh\ncase "$*" in *check-ignore*) sleep 2;; esac\nexec "${realGit}" "$@"\n`);
+  chmodSync(path.join(bin, "git"), 0o755);
+  for (const t of ["bash", "sleep"]) symlinkSync(spawnSync("sh", ["-c", `command -v ${t}`], { encoding: "utf8" }).stdout.trim(), path.join(bin, t));
+  const file = path.join(repo, "e.json");
+  writeFileSync(file, "{\"a\":   1}\n");
+  const oldPath = process.env.PATH;
+  const oldHome = process.env.HOME;
+  process.env.PATH = bin;
+  process.env.HOME = tmp;
+  const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+  try {
+    const call = formatPre({
+      cwd: repo,
+      agent_id: "",
+      session_id: "editcap",
+      scratchpad_dir: "",
+      tool_name: "Edit",
+      tool_input: { file_path: file, old_string: "1", new_string: "2" },
+    });
+    await new Promise((r) => setTimeout(r, 300)); // git check-ignore is still running
+    writeFileSync(file, "{\"x\":[" + Array.from({ length: 150_000 }, (_, i) => `${i}  `).join(",") + "]}\n");
+    assert.deepEqual(await call, {});
+    const logged = stderr.mock.calls.map((c) => String(c[0])).join("");
+    assert.match(logged, /format skipped \(over 1048576 bytes\): .*e\.json/, "the cap is checked again before the read");
+    assert.doesNotMatch(logged, /format_pre failed open/, "the 2 MiB file never reaches the formatter");
+  } finally {
+    stderr.mockRestore();
+    disposeLsp();
+    process.env.PATH = oldPath;
+    process.env.HOME = oldHome;
+    rmSync(tmp, { recursive: true, force: true });
+  }
+}, 30_000);
+
+test("file_changed: a file that grows over the cap while it waits for a slot is skipped, not read", async () => {
+  const tmp = mkdtempSync(path.join(tmpdir(), "dprint-cap-"));
+  const bin = path.join(tmp, "bin");
+  const repo = path.join(tmp, "repo");
+  mkdirSync(bin);
+  mkdirSync(repo);
+  spawnSync("/usr/bin/git", ["init", "-q", repo]);
+  writeFileSync(path.join(repo, "dprint.json"), "{}");
+  // the fake git sleeps 2 s, so the ninth event waits for one of the eight slots
+  const realGit = spawnSync("sh", ["-c", "command -v git"], { encoding: "utf8" }).stdout.trim();
+  writeFileSync(path.join(bin, "git"), `#!/bin/sh\ncase "$*" in *status*|*check-ignore*) sleep 2;; esac\nexec "${realGit}" "$@"\n`);
+  chmodSync(path.join(bin, "git"), 0o755);
+  for (const t of ["bash", "sleep"]) symlinkSync(spawnSync("sh", ["-c", `command -v ${t}`], { encoding: "utf8" }).stdout.trim(), path.join(bin, t));
+  for (let i = 1; i <= 9; i++) writeFileSync(path.join(repo, `f${i}.json`), "{\"a\":   1}\n");
+  const oldPath = process.env.PATH;
+  const oldHome = process.env.HOME;
+  process.env.PATH = bin;
+  process.env.HOME = tmp;
+  const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+  const args = (i: number) => ({
+    cwd: repo,
+    agent_id: "",
+    session_id: "cap",
+    scratchpad_dir: "",
+    file_path: path.join(repo, `f${i}.json`),
+    event: "change",
+  });
+  try {
+    const calls: Promise<unknown>[] = [];
+    for (let i = 1; i <= 9; i++) calls.push(fileChanged(args(i)));
+    await new Promise((r) => setTimeout(r, 300)); // the ninth event is now waiting for a slot
+    writeFileSync(path.join(repo, "f9.json"), "{\"x\":[" + Array.from({ length: 150_000 }, (_, i) => `${i}  `).join(",") + "]}\n");
+    await Promise.all(calls);
+    const logged = stderr.mock.calls.map((c) => String(c[0])).join("");
+    assert.match(logged, /format skipped \(over 1048576 bytes\): .*f9\.json/, "the cap is checked again after the slot wait");
+  } finally {
+    stderr.mockRestore();
+    disposeLsp();
+    process.env.PATH = oldPath;
+    process.env.HOME = oldHome;
     rmSync(tmp, { recursive: true, force: true });
   }
 });
