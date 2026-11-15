@@ -12,7 +12,7 @@ The user's request for this skill is the opt-in for the Workflow tool (load `wor
 
 ## Pipeline
 
-**Hunt** (read-only, `sonnet`) → **Verify** (`opus`, one verifier per finding) → **Fix** (model and effort chosen by the verifier from the effort the fix needs).
+**Hunt** (read-only, `sonnet`) → **Verify** (one verifier per finding, `opus`/`medium` unless the hunter classified the finding with `verifyModel`/`verifyEffort`) → **Fix** (model and effort chosen by the verifier from the effort the fix needs).
 
 - A hunter's finding is only a claim. It goes to Fix only after a verifier reproduced it independently and confirmed it; a refuted finding is dropped and stays in the "already found" list so no hunter reports it again.
 - Verify also rates the fix: `sonnet` for a local, well-understood change; `opus` for a cross-cutting, subtle or risky one (concurrency, caches, protocol), with effort `low|medium|high`.
@@ -31,7 +31,7 @@ Split the plugin into areas (protocol/server, core logic, scripts/skills, hooks 
 `Workflow` with the script below, `args = { plugin, worktree, date, areas, maxRounds, noFinding, fix }`.
 
 - **Hunt**: per active lens one read-only hunter per area in parallel (`sonnet`/`medium`), each with the lens, the keys and titles already found, and the rule "report only defects you reproduced, with the repro and its output". Brief hunters to use real tools (real dprint/git/node, the built `plugin/` output, the test stub) instead of reading alone, and "high bar: no style, speculation or documented limitations".
-- **Verify**: one `opus` verifier per new finding, in parallel; it re-runs the repro itself, reads the code, refutes documented limits and style, and rates the fix.
+- **Verify**: one verifier per new finding, in parallel, model and effort from the finding's `verifyModel`/`verifyEffort` set by the hunter (default `opus`/`medium`); it re-runs the repro itself, reads the code, refutes documented limits and style, and rates the fix.
 - **Fix** (sequential, one agent per confirmed finding, model and effort from the verifier): fix the root cause once in the shared code, add a test that fails without the fix (revert the line to check; a regression test that passes on the old code proves nothing), build, `pnpm lint`, plugin tests, commit and push. The first fix bumps `<plugin>/package.json` once per branch.
 - **Lenses** (the newest fix is the most likely place for the next defect: three rounds in a row found a regression of the previous fix): newest diff and the last fixes; interactions between fixes; TOCTOU, races and symlink swaps; caches keyed too coarsely, stale state, leaks; per-turn or per-session caches and buffers added for speed (every event that must drop or flush them, `.claude/rules/hook-caches-and-tests.md`); slow or unusual file systems, odd names and encodings; fail-open paths and missing error handling at trust boundaries; docs contradicting code and tests that cannot fail.
 - **Close** (when anything was fixed): one agent runs `/simplify`, `/code-review high --fix`, build, lint, tests, then the learnings pass below; commit and push, clean tree, head equal to its upstream.
@@ -90,7 +90,7 @@ const FINDINGS = {
       type: 'array',
       items: {
         type: 'object',
-        properties: { key: { type: 'string' }, title: { type: 'string' }, severity: { enum: ['high', 'medium', 'low'] }, repro: { type: 'string' }, fix: { type: 'string' } },
+        properties: { key: { type: 'string' }, title: { type: 'string' }, severity: { enum: ['high', 'medium', 'low'] }, verifyModel: { enum: ['sonnet', 'opus'] }, verifyEffort: { enum: ['low', 'medium', 'high'] }, repro: { type: 'string' }, fix: { type: 'string' } },
         required: ['key', 'title', 'repro'],
       },
     },
@@ -132,7 +132,7 @@ const run = (prompt, opts) => agent(prompt + QUIET, opts)
 const huntPrompt = (a, lens, seen) => `Bug hunt on plugin "${plugin}", area "${a.name}" (files: ${a.files}), in the git worktree ${worktree}. READ-ONLY on the repository; scratch files go under the session scratchpad. Stay in the worktree.
 Lens of this round: ${lens}. Read .claude/skills/bughunt/SKILL.md and ${plugin}/CLAUDE.md first.
 Already found (do not report again): ${seen.length ? seen.map((s) => `${s.key} (${s.title})`).join('; ') : 'none yet'}.
-Use real tools (the built plugin/ output, real git/node, the test stub) instead of reading alone. Report ONLY defects you reproduced: each with a stable key (file:symbol:short-slug), title, severity, the repro and its output, and a minimal fix. High bar: no style, speculation or documented limitations. A verifier will re-run every repro independently. If nothing is reproduced return an empty list and say in "checked" what you checked.`
+Use real tools (the built plugin/ output, real git/node, the test stub) instead of reading alone. Report ONLY defects you reproduced: each with a stable key (file:symbol:short-slug), title, severity, verifyModel and verifyEffort (classify the verify job: sonnet/low for a simple, local repro; opus/high for subtle, concurrent or cross-cutting ones), the repro and its output, and a minimal fix. High bar: no style, speculation or documented limitations. A verifier will re-run every repro independently. If nothing is reproduced return an empty list and say in "checked" what you checked.`
 
 const verifyPrompt = (f) => `Verify this claimed defect of plugin "${plugin}" in the git worktree ${worktree}. READ-ONLY on the repository; scratch files go under the session scratchpad. Stay in the worktree.
 Finding ${f.key}: ${f.title}. Severity ${f.severity ?? 'n/a'}. Repro: ${f.repro}. Suggested fix: ${f.fix ?? 'none'}.
@@ -177,7 +177,7 @@ while (!blocked) {
     }
   }
   // Verify: one opus verifier per new finding, in parallel.
-  const verdicts = await parallel(fresh.map((f) => () => run(verifyPrompt(f), { label: `r${round}:v:${f.key}`, phase: 'Verify', model: 'opus', effort: 'medium', schema: VERIFY })))
+  const verdicts = await parallel(fresh.map((f) => () => run(verifyPrompt(f), { label: `r${round}:v:${f.key}`, phase: 'Verify', model: f.verifyModel ?? 'opus', effort: f.verifyEffort ?? 'medium', schema: VERIFY })))
   const confirmedNow = []
   fresh.forEach((f, i) => {
     const v = verdicts[i]
