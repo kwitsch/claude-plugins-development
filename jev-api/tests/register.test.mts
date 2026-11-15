@@ -726,14 +726,14 @@ it("session.start retries a pre-bind attempt that was the tool's second refusal"
 // A pre-bind attempt that outlasts the call's wait is marked stuck: session.start waits for it and retries it too.
 it("session.start retries tools whose pre-bind attempt outlasts the call's wait", async () => {
   let bound = false;
-  const tries: boolean[] = [];
+  let done = 0;
   const { run, hooks, $ } = await direct({
     tool: {
       register: async (spec: { name: string }) => {
         const b = bound;
-        tries.push(b);
         await new Promise((r) => setTimeout(r, 50));
         if (!b) throw new Error("session not bound");
+        done++;
         return { tool: TOOL(spec.name) };
       },
     },
@@ -748,7 +748,8 @@ it("session.start retries tools whose pre-bind attempt outlasts the call's wait"
   await run("noul");
   bound = true;
   await hooks.get("session.start")?.($, { cwd: "/p" }, Object.assign(async (e: unknown) => e, { signal: new AbortController().signal }));
-  expect(tries.filter(Boolean)).toHaveLength(4);
+  // session.start must wait for the fresh registrations (needs st.stuck.clear()).
+  expect(done).toBe(4);
 });
 
 // F03: a registration that never answers must not hold the call.
