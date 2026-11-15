@@ -52,6 +52,8 @@ test("session.start registers noul, choice, score and batch without any env var"
   expect(specs[0]).toMatchObject({ inputSchema: { type: "object", required: ["instructions", "state"] } });
   expect(specs[1]).toMatchObject({ inputSchema: { required: ["instructions", "state", "criteria"] } });
   expect(specs[2]).toMatchObject({ inputSchema: { required: ["instructions", "state", "criteria"] } });
+  const q = (specs[3] as { inputSchema: { properties: { questions: { description: string } } } }).inputSchema.properties.questions.description;
+  expect(q).toContain("timeout and overflow apply to the whole batch");
 });
 
 /** The test's `$` (the kit does not export its type). */
@@ -205,6 +207,8 @@ test("invalid input is rejected without a request", async ($, on) => {
   await bad("noul", { state: "  " }, "state must be a non-empty string");
   await bad("noul", { criteria: { maybe: "x" } }, "criteria must be an object with optional string fields true and false");
   await bad("noul", { criteria: { true: 1 } }, "criteria must be an object with optional string fields true and false");
+  await bad("noul", { criteria: { false: 5 } }, "criteria must be an object with optional string fields true and false");
+  await bad("noul", { criteria: { true: "a", false: [] } }, "criteria must be an object with optional string fields true and false");
   await bad("noul", { criteria: ["x"] }, "criteria must be an object with optional string fields true and false");
   await bad("noul", { criteria: null }, "criteria must be an object with optional string fields true and false");
   await bad("choice", { criteria: {} }, "criteria must map 1 to 255 non-blank option names to string descriptions");
@@ -271,7 +275,7 @@ test("tool.call answers the tool names the engine returned", async ($, on) => {
 
 // Only an mcp__<plugin>__<type> answer is followed: anything else must not make the hook claim (or crash on) another tool.
 test("session.start ignores a tool.register answer that names no own tool", async ($, on) => {
-  const answers: Record<string, unknown> = { noul: { tool: "x__noul" }, choice: undefined, score: { tool: "mcp__other__score" } };
+  const answers: Record<string, unknown> = { noul: { tool: "x__noul" }, choice: { tool: "mcp__other__Bash" }, score: { tool: "mcp__other__score" } };
   on("tool.register", async (_$, e) => ({ value: answers[String(e.name)] }));
   setup(on, { env: { JEV_URL: "https://jev.test/v1/systemone" } });
   on("tool.call", async () => ({ result: "from-next" }));
@@ -279,6 +283,8 @@ test("session.start ignores a tool.register answer that names no own tool", asyn
   expect(await $.tool.call({ tool: "Bash", command: "ls" })).toEqual({ result: "from-next" });
   // Ends with __noul but lacks the mcp__ prefix: only that prefix check keeps the hook from claiming it.
   expect(await $.tool.call({ tool: "x__noul", ...BASE.noul })).toEqual({ result: "from-next" });
+  // Starts with mcp__ but ends with another tool's name: only the suffix check keeps the hook from claiming it.
+  expect(await $.tool.call({ tool: "mcp__other__Bash", ...BASE.choice })).toEqual({ result: "from-next" });
   expect(await $.tool.call({ tool: "mcp__other__score", ...BASE.score })).toEqual({ result: JSON.stringify(ANSWERS.score) });
 });
 
@@ -478,12 +484,30 @@ test("a settled request cancels its timeout timer", async ($, on) => {
 // Case 13: missing or wrong-type answer.
 test("a wrong-type or missing answer is an error", async ($, on) => {
   setup(on, { env: { TYPESAFE_API_KEY: "k" }, reply: httpReply(200, JSON.stringify({ answers: { answer: ANSWERS.score } })) });
-  expect(await call($, "noul")).toEqual({ deny: "noul: response had no noul answer" });
+  expect(await call($, "noul")).toEqual({ deny: "noul: response had no valid noul answer" });
+});
+
+test("a System One answer with invalid fields is an error, for noul, choice and score", async ($, on) => {
+  let answer: unknown;
+  setup(on, { env: { TYPESAFE_API_KEY: "k" }, reply: () => httpReply(200, JSON.stringify({ answers: { answer } }))() });
+  const bad = async (type: string, a: unknown) => {
+    answer = a;
+    expect(await call($, type)).toEqual({ deny: `${type}: response had no valid ${type} answer` });
+  };
+  await bad("noul", { type: "noul", noul: 1.5 });
+  await bad("noul", { type: "noul" });
+  await bad("choice", { type: "choice", choice: "zzz", probabilities: "junk" });
+  await bad("choice", { type: "choice", choice: "greeting", probabilities: { greeting: 0.8, question: 0.2 } });
+  await bad("choice", { type: "choice", choice: "greeting", confidence: 0.8, probabilities: { greeting: 0.8 } });
+  await bad("score", { ...ANSWERS.score as object, score: "high" });
+  await bad("score", { ...ANSWERS.score as object, probabilities: { 0: 0.5 } });
+  await bad("score", { ...ANSWERS.score as object, score: 99 });
+  await bad("score", { ...ANSWERS.score as object, score: -0.5 });
 });
 
 test("a response without answers is an error", async ($, on) => {
   setup(on, { env: { TYPESAFE_API_KEY: "k" }, reply: httpReply(200, "{}") });
-  expect(await call($, "choice")).toEqual({ deny: "choice: response had no choice answer" });
+  expect(await call($, "choice")).toEqual({ deny: "choice: response had no valid choice answer" });
 });
 
 // batch: several questions in one request, keyed q0, q1, ... by index; the answers come back as an array in question order.
@@ -518,7 +542,7 @@ test("batch sends every question in one request and returns the answers in quest
 
 test("batch: one missing or wrong-type answer fails the whole call", async ($, on) => {
   setup(on, { env: { TYPESAFE_API_KEY: "k" }, reply: batchReply({ q0: ANSWERS.noul, q1: ANSWERS.score, q2: ANSWERS.score }) });
-  expect(await batch($)).toEqual({ deny: "batch: response had no choice answer for questions[1]" });
+  expect(await batch($)).toEqual({ deny: "batch: response had no valid choice answer for questions[1]" });
 });
 
 test("batch: an HTTP error is prefixed with batch", async ($, on) => {
@@ -574,6 +598,7 @@ async function direct(overrides: Record<string, unknown>) {
     env: { get: async (name: string) => (name === "TYPESAFE_API_KEY" ? "k" : undefined) },
     http: { fetch: (...a: unknown[]) => (fetched.push(a), Promise.resolve({ status: 200, ok: true, headers: {}, text: JSON.stringify({ answers: { answer: ANSWERS["noul"] } }) })) },
     clock: { after: () => ({ cancel() {} }) },
+    store: { get: async () => undefined, set: async () => undefined },
     ...overrides,
   };
   // an HTTP error is taken over by Haiku, which these hand-made engines lack: its failure text is cut off
@@ -625,6 +650,127 @@ it("a failed registration is retried by the next call, only for the tools still 
   expect(tries).toHaveLength(5); // nothing is missing any more
 });
 
+// Refusals before the session is bound must not back off the retry in session.start.
+it("session.start retries tools refused before the session was bound", async () => {
+  let bound = false;
+  const tries: boolean[] = [];
+  const { run, hooks, $ } = await direct({
+    tool: {
+      register: async (spec: { name: string }) => {
+        tries.push(bound);
+        if (!bound) throw new Error("session not bound");
+        return { tool: TOOL(spec.name) };
+      },
+    },
+    ui: { log: async () => undefined },
+  });
+  await run("noul");
+  await run("noul");
+  bound = true;
+  await hooks.get("session.start")?.($, { cwd: "/p" }, Object.assign(async (e: unknown) => e, { signal: new AbortController().signal }));
+  expect(tries.filter(Boolean)).toHaveLength(4);
+});
+
+// A pre-bind refusal must not use up the once-per-tool log: a real failure after the bind is logged.
+it("session.start logs a real failure after a pre-bind refusal", async () => {
+  let bound = false;
+  const logs: string[] = [];
+  const { run, hooks, $ } = await direct({
+    tool: {
+      register: async (spec: { name: string }) => {
+        if (!bound) throw new Error("session not bound");
+        if (spec.name === "batch") throw new Error("invalid input schema (real failure)");
+        return { tool: TOOL(spec.name) };
+      },
+    },
+    ui: { log: async (t: string) => void logs.push(t) },
+  });
+  await run("noul");
+  bound = true;
+  await hooks.get("session.start")?.($, { cwd: "/p" }, Object.assign(async (e: unknown) => e, { signal: new AbortController().signal }));
+  expect(logs).toContain("registering batch failed: invalid input schema (real failure)");
+});
+
+// A registration begun before the bind and still in flight at session.start fails after it: session.start retries it.
+it("session.start retries tools whose pre-bind attempt fails during its wait", async () => {
+  let bound = false;
+  const tries: boolean[] = [];
+  const { run, hooks, $ } = await direct({
+    tool: {
+      register: async (spec: { name: string }) => {
+        const b = bound;
+        tries.push(b);
+        await new Promise((r) => setTimeout(r, 50));
+        if (!b) throw new Error("session not bound");
+        return { tool: TOOL(spec.name) };
+      },
+    },
+    ui: { log: async () => undefined },
+  });
+  const call = run("noul");
+  await new Promise((r) => setTimeout(r, 10));
+  bound = true;
+  await hooks.get("session.start")?.($, { cwd: "/p" }, Object.assign(async (e: unknown) => e, { signal: new AbortController().signal }));
+  await call;
+  expect(tries.filter(Boolean)).toHaveLength(4);
+});
+
+// The in-flight pre-bind attempt is the tool's second refusal (5 s back-off): session.start still retries it.
+it("session.start retries a pre-bind attempt that was the tool's second refusal", async () => {
+  let bound = false;
+  let slow = false;
+  const tries: boolean[] = [];
+  const { run, hooks, $ } = await direct({
+    tool: {
+      register: async (spec: { name: string }) => {
+        const b = bound;
+        tries.push(b);
+        if (slow) await new Promise((r) => setTimeout(r, 50));
+        if (!b) throw new Error("session not bound");
+        return { tool: TOOL(spec.name) };
+      },
+    },
+    ui: { log: async () => undefined },
+  });
+  await run("noul"); // first refusal of every tool, fast
+  slow = true;
+  const call = run("noul"); // second attempt, in flight at the bind
+  await new Promise((r) => setTimeout(r, 10));
+  bound = true;
+  await hooks.get("session.start")?.($, { cwd: "/p" }, Object.assign(async (e: unknown) => e, { signal: new AbortController().signal }));
+  await call;
+  expect(tries.filter(Boolean)).toHaveLength(4);
+});
+
+// A pre-bind attempt that outlasts the call's wait is marked stuck: session.start waits for it and retries it too.
+it("session.start retries tools whose pre-bind attempt outlasts the call's wait", async () => {
+  let bound = false;
+  let done = 0;
+  const { run, hooks, $ } = await direct({
+    tool: {
+      register: async (spec: { name: string }) => {
+        const b = bound;
+        await new Promise((r) => setTimeout(r, 50));
+        if (!b) throw new Error("session not bound");
+        done++;
+        return { tool: TOOL(spec.name) };
+      },
+    },
+    ui: { log: async () => undefined },
+    clock: {
+      after: (ms: number, fn: () => void) => {
+        const t = ms === 1000 ? setTimeout(fn, 0) : setTimeout(fn, ms);
+        return { cancel: () => clearTimeout(t) };
+      },
+    },
+  });
+  await run("noul");
+  bound = true;
+  await hooks.get("session.start")?.($, { cwd: "/p" }, Object.assign(async (e: unknown) => e, { signal: new AbortController().signal }));
+  // session.start must wait for the fresh registrations (needs st.stuck.clear()).
+  expect(done).toBe(4);
+});
+
 // F03: a registration that never answers must not hold the call.
 it("a registration that never answers does not hold the call", async () => {
   const { run, fetched } = await direct({
@@ -654,7 +800,8 @@ it("a hanging registration of one tool is waited for once, not by every call", a
     },
   });
   for (let i = 0; i < 4; i++) expect(await run("noul")).toEqual({ result: JSON.stringify(ANSWERS["noul"]) });
-  expect(waits.filter((ms) => ms === 1000)).toHaveLength(1);
+  // one registration wait, plus the store read's own 1 s bound (read once per instance)
+  expect(waits.filter((ms) => ms === 1000)).toHaveLength(2);
 });
 
 // F17: a tool the engine keeps refusing is retried once at once, then with a growing delay, and logged once.
@@ -839,6 +986,14 @@ it("an already abandoned call sends no request", async () => {
   expect(fetched).toHaveLength(0);
 });
 
+// A call whose signal is aborted before it waits answers at once, though the registration never settles (the stub clock never fires).
+it("an already abandoned call does not wait for a registration that never settles", async () => {
+  const { run } = await direct({ tool: { register: () => new Promise(() => {}) } });
+  const ctl = new AbortController();
+  ctl.abort();
+  expect(await run("noul", ctl.signal)).toEqual({ deny: "noul: the call was abandoned" });
+});
+
 // F06: the abort listeners of settled calls are removed from a signal shared by many calls.
 it("settled calls leave no abort listeners on a shared signal", async () => {
   const { run } = await direct({ tool: { register: async (s: { name: string }) => ({ tool: TOOL(s.name) }) } });
@@ -866,6 +1021,22 @@ test("the Haiku output budget covers a choice with many options", async ($, on) 
   await call($, "noul");
   expect(Number(asked[0]["maxTokens"])).toBeGreaterThan(4096);
   expect(Number(asked[1]["maxTokens"])).toBe(512); // unchanged for a noul question
+});
+
+// haikuTokens: 256 + 256 (one question) + per option (ceil(len/3) + 12) + the longest option once more (an echoed name).
+test("the Haiku output budget counts the longest option name a second time", async ($, on) => {
+  const asked = haiku(on, () => said("{}"));
+  mock.env(on, {});
+  await call($, "choice", { criteria: { abcdef: "d", a: "d" } });
+  expect(Number(asked[0]["maxTokens"])).toBe(256 + 256 + (2 + 12) + (1 + 12) + 2);
+});
+
+test("the Haiku output budget counts non-ASCII option names at one token per character", async ($, on) => {
+  const asked = haiku(on, () => said("{}"));
+  mock.env(on, {});
+  const criteria = Object.fromEntries(Array.from({ length: 60 }, (_, i) => [`${"あ".repeat(28)}${String(i).padStart(2, "0")}`, "d"]));
+  await call($, "choice", { criteria });
+  expect(Number(asked[0]["maxTokens"])).toBeGreaterThanOrEqual(2400);
 });
 
 test("the Haiku output budget grows with the levels of a score", async ($, on) => {
@@ -1112,7 +1283,38 @@ it("a tool that hung once is waited for again at its next retry", async () => {
   rejectFirst?.();
   await new Promise((r) => setTimeout(r, 5));
   await run("noul"); // the retry is waited for again
-  expect(waits.filter((ms) => ms === 1000)).toHaveLength(2);
+  // two registration waits, plus the store read's one 1 s bound
+  expect(waits.filter((ms) => ms === 1000)).toHaveLength(3);
+});
+
+// A tool that fails while another is still awaited is not marked stuck by the timed-out wait, so its retry is waited for.
+it("a tool that failed during the wait is not marked stuck", async () => {
+  const waits: number[] = [];
+  let rejectScore: (() => void) | undefined;
+  let scoreTries = 0;
+  const { run } = await direct({
+    tool: {
+      register: (spec: { name: string }) => {
+        if (spec.name === "noul") return new Promise(() => {});
+        if (spec.name !== "score") return Promise.resolve({ tool: TOOL(spec.name) });
+        scoreTries++;
+        return scoreTries === 1 ? new Promise((_, rej) => (rejectScore = () => rej(new Error("late")))) : new Promise(() => {});
+      },
+    },
+    ui: { log: async () => undefined },
+    clock: {
+      after: (ms: number, fn: () => void) => {
+        waits.push(ms);
+        const t = ms === 1000 ? setTimeout(() => (rejectScore?.(), void new Promise((r) => setTimeout(r, 5)).then(fn)), 0) : undefined;
+        return { cancel: () => clearTimeout(t) };
+      },
+    },
+  });
+  await run("noul"); // score fails mid-wait, noul hangs
+  await new Promise((r) => setTimeout(r, 5));
+  await run("noul"); // score's retry must be waited for again
+  // two registration waits, plus the store read's one 1 s bound
+  expect(waits.filter((ms) => ms === 1000)).toHaveLength(3);
 });
 
 // A hook above refusing $.clock must not stop the session.start chain.
@@ -1339,4 +1541,75 @@ describe.skipIf(!process.env.JEV_URL)("live JEV System One (JEV_URL)", () => {
     expect(res.deny).toBeUndefined();
     expect((JSON.parse(String(res.result)) as { type: string }[]).map((a) => a.type)).toEqual(["noul", "choice", "score"]);
   });
+});
+
+// A pre-bind attempt that outlasts session.start's waits and fails later is stale: session.start registers after the bind, and the real failure is logged.
+it("session.start registers after the bind although a pre-bind attempt fails after its waits", async () => {
+  let bound = false;
+  let release: () => void = () => undefined;
+  const stale = new Promise<void>((r) => (release = r));
+  const tries: string[] = [];
+  const logs: string[] = [];
+  const { run, hooks, $ } = await direct({
+    tool: {
+      register: async (spec: { name: string }) => {
+        if (!bound) {
+          await stale;
+          throw new Error("session not bound");
+        }
+        tries.push(spec.name);
+        if (spec.name === "batch") throw new Error("real failure");
+        return { tool: TOOL(spec.name) };
+      },
+    },
+    ui: { log: async (text: string) => void logs.push(text) },
+    clock: {
+      after: (_ms: number, fn: () => void) => {
+        const t = setTimeout(fn, 0);
+        return { cancel: () => clearTimeout(t) };
+      },
+    },
+  });
+  await run("noul");
+  bound = true;
+  await hooks.get("session.start")?.($, { cwd: "/p" }, Object.assign(async (e: unknown) => e, { signal: new AbortController().signal }));
+  expect(tries).toEqual(["noul", "choice", "score", "batch"]);
+  release();
+  await new Promise((r) => setTimeout(r, 20));
+  expect(logs).toEqual(["registering batch failed: real failure"]);
+});
+
+// A stale pre-bind attempt settling after session.start must not drop the fresh attempt's pending entry (else the next call registers the hanging tool twice).
+it("a stale attempt settling does not start a duplicate registration of a hanging tool", async () => {
+  let bound = false;
+  let release: () => void = () => undefined;
+  const stale = new Promise<void>((r) => (release = r));
+  const post: string[] = [];
+  const { run, hooks, $ } = await direct({
+    tool: {
+      register: async (spec: { name: string }) => {
+        if (!bound) {
+          await stale;
+          throw new Error("session not bound");
+        }
+        post.push(spec.name);
+        if (spec.name === "batch") return new Promise(() => {});
+        return { tool: TOOL(spec.name) };
+      },
+    },
+    clock: {
+      after: (_ms: number, fn: () => void) => {
+        const t = setTimeout(fn, 0);
+        return { cancel: () => clearTimeout(t) };
+      },
+    },
+  });
+  await run("noul");
+  bound = true;
+  await hooks.get("session.start")?.($, { cwd: "/p" }, Object.assign(async (e: unknown) => e, { signal: new AbortController().signal }));
+  release();
+  await new Promise((r) => setTimeout(r, 20));
+  await run("noul");
+  await run("noul");
+  expect(post.filter((n) => n === "batch")).toEqual(["batch"]);
 });

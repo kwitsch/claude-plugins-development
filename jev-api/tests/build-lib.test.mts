@@ -2,7 +2,7 @@
 // bundler cannot rewrite must fail the build instead of shipping a broken lib.mjs.
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "vitest";
@@ -10,12 +10,12 @@ import { test } from "vitest";
 const BUILD = path.resolve(import.meta.dirname, "../../development/scripts/build-plugin.mts");
 
 /** Builds a fixture plugin whose hooks.json lists only register.mjs and returns the build's exit code, stderr, built register.mjs and lib.mjs. */
-const build = (files: Record<string, string>): { status: number | null; stderr: string; entry: string; lib: string } => {
+const build = (files: Record<string, string>, modules = ["./register.mjs"]): { status: number | null; stderr: string; entry: string; lib: string; sub: string } => {
   const dir = mkdtempSync(path.join(tmpdir(), "bundle-lib-"));
   try {
     mkdirSync(path.join(dir, "src/hooks"), { recursive: true });
     mkdirSync(path.join(dir, "plugin/hooks"), { recursive: true });
-    writeFileSync(path.join(dir, "plugin/hooks/hooks.json"), `{ "modules": ["./register.mjs"] }\n`);
+    writeFileSync(path.join(dir, "plugin/hooks/hooks.json"), JSON.stringify({ modules }));
     writeFileSync(path.join(dir, "package.json"), JSON.stringify({ name: "fixture", version: "0.0.1", description: "d", author: { name: "x" }, keywords: [], type: "module", pluginBuild: { bundleHooksLib: true }, claudePlugin: {} }));
     for (const [f, t] of Object.entries(files)) {
       // a key such as `../bin/tool.mts` places a module outside src/hooks
@@ -25,7 +25,8 @@ const build = (files: Record<string, string>): { status: number | null; stderr: 
     const r = spawnSync(process.execPath, [BUILD, dir], { encoding: "utf8" });
     const out = path.join(dir, "plugin/hooks/register.mjs");
     const ok = r.status === 0;
-    return { status: r.status, stderr: r.stderr, entry: ok ? readFileSync(out, "utf8") : "", lib: ok ? readFileSync(path.join(dir, "plugin/hooks/lib.mjs"), "utf8") : "" };
+    const subOut = path.join(dir, "plugin/hooks/sub/extra.mjs");
+    return { sub: ok && modules.length > 1 ? readFileSync(subOut, "utf8") : "", status: r.status, stderr: r.stderr, entry: ok ? readFileSync(out, "utf8") : "", lib: ok ? readFileSync(path.join(dir, "plugin/hooks/lib.mjs"), "utf8") : "" };
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -38,6 +39,12 @@ test("a helper importing a helper with an alias fails the build", () => {
   const r = build({ "a.mts": A, "b.mts": `import { one as uno } from "./a.mjs";\nexport const two = (): number => uno + 1;\n`, "register.mts": REGISTER });
   assert.equal(r.status, 1);
   assert.match(r.stderr, /renames an import of \.\/a\.mjs/);
+});
+
+test.each(["../hooks/a.mjs", "././a.mjs", "./a.mjs?v=1"])("a helper importing a helper as %s fails the build", (spec) => {
+  const r = build({ "a.mts": A, "b.mts": `import { one as uno } from "${spec}";\nexport const two = (): number => uno + 1;\n`, "register.mts": REGISTER });
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /a helper, other than by \.\/name\.mjs/);
 });
 
 test("a namespace import of a helper fails the build", () => {
@@ -55,7 +62,7 @@ test("an entry's namespace import of a helper fails the build", () => {
 test("a module outside the bundle that imports a helper fails the build", () => {
   const r = build({ "a.mts": A, "register.mts": `import { one } from "./a.mjs";\nexport function register(on: unknown): number { return one; }\n`, "../bin/tool.mts": `import { one } from "../hooks/a.mjs";\nconsole.log(one);\n` });
   assert.equal(r.status, 1);
-  assert.match(r.stderr, /bin\/tool\.mjs imports plugin\/hooks\/a\.mjs, which is bundled into lib\.mjs/);
+  assert.match(r.stderr, /bin\/tool\.mjs imports, re-exports or dynamically imports plugin\/hooks\/a\.mjs, which is bundled into lib\.mjs/);
 });
 
 test("a helper's import from outside hooks/ stays in lib.mjs with its path, in front of the code", () => {
@@ -157,4 +164,199 @@ test("declaration-like lines inside a helper's template literal bind no name", (
     "register.mts": `import { PROMPT } from "./a.mjs";\nimport { answer } from "./b.mjs";\nexport function register(on: unknown): string { return PROMPT + answer(); }\n`,
   });
   assert.equal(two.status, 0, two.stderr);
+});
+
+test("a helper whose file name has a dot or a non-ASCII letter is bundled into lib.mjs", () => {
+  const r = build({
+    "size.util.mts": `export const one = 1;\n`,
+    "größe.mts": `export const two = 2;\n`,
+    "register.mts": `import { one } from "./size.util.mjs";\nimport { two } from "./größe.mjs";\nexport function register(on: unknown): number { return one + two; }\n`,
+  });
+  assert.equal(r.status, 0, r.stderr);
+  assert.doesNotMatch(r.entry, /size\.util\.mjs|größe\.mjs/);
+  assert.match(r.entry, /from "\.\/lib\.mjs"/);
+});
+
+const ENTRY_TAIL = `\nexport function register(on: unknown): number { return 1; }\n`;
+for (const line of [`export { one } from "./a.mjs";`, `export * from "./a.mjs";`, `export { one as uno } from "./a.mjs";`, `import { one } from "./a.mjs?v=1";\nconsole.log(one);`, `import { one } from "./a.mjs#x";\nconsole.log(one);`, `import { one } from "././a.mjs";\nconsole.log(one);`, `import { one } from "../hooks/a.mjs";\nconsole.log(one);`]) {
+  test(`an entry that reaches a helper as \`${line.split("\n")[0]}\` fails the build`, () => {
+    const r = build({ "a.mts": A, "register.mts": line + ENTRY_TAIL });
+    assert.equal(r.status, 1);
+    assert.match(r.stderr, /register\.mjs imports\/re-exports/);
+  });
+}
+
+test.each(["../hooks/a.mjs#x", "../hooks/a.mjs?v=1"])("a module outside the bundle importing a helper as %s fails the build", (spec) => {
+  const r = build({ "a.mts": A, "register.mts": `import { one } from "./a.mjs";\nexport function register(on: unknown): number { return one; }\n`, "../bin/t.mts": `import { one } from "${spec}";\nconsole.log(one);\n` });
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /bin\/t\.mjs imports, re-exports or dynamically imports plugin\/hooks\/a\.mjs/);
+});
+
+test("an entry dynamically importing a helper with a query fails the build", () => {
+  const r = build({ "a.mts": A, "register.mts": `export const load = () => import("./a.mjs?v=1");\nexport function register(on: unknown): number { return 1; }\n` });
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /dynamically imports/);
+});
+
+test("a module outside the bundle that re-exports a helper fails the build", () => {
+  const r = build({ "a.mts": A, "register.mts": `import { one } from "./a.mjs";\nexport function register(on: unknown): number { return one; }\n`, "../bin/tool.mts": `export { one } from "../hooks/a.mjs";\n` });
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /bin\/tool\.mjs imports, re-exports or dynamically imports plugin\/hooks\/a\.mjs/);
+});
+
+test("a module outside the bundle that dynamically imports a helper fails the build", () => {
+  const r = build({ "a.mts": A, "register.mts": `import { one } from "./a.mjs";\nexport function register(on: unknown): number { return one; }\n`, "../bin/tool.mts": `export const load = () => import("../hooks/a.mjs");\n` });
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /bin\/tool\.mjs imports, re-exports or dynamically imports plugin\/hooks\/a\.mjs/);
+});
+
+test("an entry that dynamically imports a helper fails the build", () => {
+  const r = build({ "a.mts": A, "register.mts": `export async function register(on: unknown): Promise<number> { return (await import("./a.mjs")).one; }\n` });
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /register\.mjs dynamically imports \.\/a\.mjs/);
+});
+
+test("a symlinked directory below plugin/ fails the layout check and its target survives the build", () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "symlink-"));
+  try {
+    mkdirSync(path.join(dir, "p/src"), { recursive: true });
+    mkdirSync(path.join(dir, "p/plugin/skills"), { recursive: true });
+    mkdirSync(path.join(dir, "outside"));
+    writeFileSync(path.join(dir, "outside/precious.mjs"), "keep me");
+    writeFileSync(path.join(dir, "p/src/x.mts"), "export const a = 1;\n");
+    writeFileSync(path.join(dir, "p/package.json"), JSON.stringify({ name: "fixture", version: "0.0.1", description: "d", author: { name: "x" }, keywords: [], type: "module", claudePlugin: {} }));
+    symlinkSync("../../../outside", path.join(dir, "p/plugin/skills/shared.json"));
+    const r = spawnSync(process.execPath, [BUILD, path.join(dir, "p")], { encoding: "utf8" });
+    assert.equal(r.status, 1);
+    assert.equal(readFileSync(path.join(dir, "outside/precious.mjs"), "utf8"), "keep me");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a symlinked plugin/ fails the layout check and its target survives the build", () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "symlink-"));
+  try {
+    mkdirSync(path.join(dir, "p/src"), { recursive: true });
+    mkdirSync(path.join(dir, "outside/sub"), { recursive: true });
+    writeFileSync(path.join(dir, "outside/precious.mjs"), "keep me");
+    writeFileSync(path.join(dir, "outside/sub/other.mjs"), "keep me too");
+    writeFileSync(path.join(dir, "p/src/x.mts"), "export const a = 1;\n");
+    writeFileSync(path.join(dir, "p/package.json"), JSON.stringify({ name: "fixture", version: "0.0.1", description: "d", author: { name: "x" }, keywords: [], type: "module", claudePlugin: {} }));
+    symlinkSync("../outside", path.join(dir, "p/plugin"));
+    const r = spawnSync(process.execPath, [BUILD, path.join(dir, "p")], { encoding: "utf8" });
+    assert.equal(r.status, 1);
+    assert.equal(readFileSync(path.join(dir, "outside/precious.mjs"), "utf8"), "keep me");
+    assert.equal(readFileSync(path.join(dir, "outside/sub/other.mjs"), "utf8"), "keep me too");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a symlinked plugin.json fails the layout check and its target survives the build", () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "symlink-"));
+  try {
+    mkdirSync(path.join(dir, "p/src"), { recursive: true });
+    mkdirSync(path.join(dir, "p/plugin/.claude-plugin"), { recursive: true });
+    mkdirSync(path.join(dir, "outside"));
+    writeFileSync(path.join(dir, "outside/victim.txt"), "PRECIOUS");
+    writeFileSync(path.join(dir, "p/src/x.mts"), "export const a = 1;\n");
+    writeFileSync(path.join(dir, "p/package.json"), JSON.stringify({ name: "fixture", version: "0.0.1", description: "d", author: { name: "x" }, keywords: [], type: "module", claudePlugin: {} }));
+    symlinkSync("../../../outside/victim.txt", path.join(dir, "p/plugin/.claude-plugin/plugin.json"));
+    const r = spawnSync(process.execPath, [BUILD, path.join(dir, "p")], { encoding: "utf8" });
+    assert.equal(r.status, 1);
+    assert.equal(readFileSync(path.join(dir, "outside/victim.txt"), "utf8"), "PRECIOUS");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a helper's top-level name that shadows a global used by another helper fails the build", () => {
+  const r = build({
+    "a.mts": `const URL = "not the global";\nexport const a = (): string => URL;\n`,
+    "b.mts": `export const host = (u: string): string => new URL(u).host;\n`,
+    "register.mts": `import { a } from "./a.mjs";\nimport { host } from "./b.mjs";\nexport const both = (u: string): string => a() + host(u);\n`,
+  });
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /shadows the global URL/);
+});
+
+test("a destructured helper name with a default that shadows a global fails the build", () => {
+  const r = build({
+    "a.mts": `const { URL = 1 } = { URL: 2 } as { URL?: number };\nexport const a = (): number => URL;\n`,
+    "b.mts": `export const host = (u: string): string => new URL(u).host;\n`,
+    "register.mts": `import { a } from "./a.mjs";\nimport { host } from "./b.mjs";\nexport const both = (u: string): string => a() + host(u);\n`,
+  });
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /shadows the global URL/);
+});
+
+test("a hoisted import that shadows a global used by another helper fails the build", () => {
+  const r = build({
+    "a.mts": `import { setTimeout } from "node:timers/promises";\nexport async function pause(): Promise<void> { await setTimeout(1); }\n`,
+    "b.mts": `export function later(cb: () => void): void { setTimeout(cb, 0); }\n`,
+    "register.mts": `import { pause } from "./a.mjs";\nimport { later } from "./b.mjs";\nexport const both = async (): Promise<void> => { await pause(); later(() => {}); };\n`,
+  });
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /shadows the global setTimeout/);
+});
+
+test("an entry in a subfolder keeps its own sibling import", () => {
+  const r = build({ "register.mts": `import { one } from "./util.mjs";\nexport const r = (): number => one;\n`, "util.mts": A, "sub/util.mts": A, "sub/extra.mts": `import { one } from "./util.mjs";\nexport const e = (): number => one;\n` }, ["./register.mjs", "./sub/extra.mjs"]);
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.sub, /from\s*"\.\/util\.mjs"/);
+  assert.match(r.entry, /from\s*"\.\/lib\.mjs"/);
+});
+
+test("a hooks.json entry without source fails the build", () => {
+  const r = build({ "a.mts": A, "register.mts": REGISTER }, ["./registr.mjs"]);
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /registr\.mjs, which has no source/);
+});
+
+test("a hooks.json without modules fails the build", () => {
+  const r = build({ "a.mts": A, "register.mts": REGISTER }, []);
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /lists no modules/);
+});
+
+test("a bare builtin import named like a helper is not a helper import", () => {
+  const r = build({ "util.mts": A, "fmt.mts": `import { inspect } from "util";\nimport { one } from "./util.mjs";\nexport const two = (): string => inspect(one);\n`, "register.mts": `import { two } from "./fmt.mjs";\nexport function register(on: unknown): string { return two(); }\n` });
+  assert.equal(r.status, 0, r.stderr);
+});
+
+test("a default plus named import merges with another helper's named import of the same source", () => {
+  const r = build({
+    "a.mts": `import path, { join } from "node:path";\nexport const one = join("a") + path.sep;\n`,
+    "b.mts": `import { join } from "node:path";\nexport const two = (): string => join("b");\n`,
+    "register.mts": `import { one } from "./a.mjs";\nimport { two } from "./b.mjs";\nexport function register(on: unknown): string { return one + two(); }\n`,
+  });
+  assert.equal(r.status, 0, r.stderr);
+});
+
+test("two helpers binding the same default (mixed or plain) from one source build", () => {
+  for (const b of [`import path, { dirname } from "node:path";\nexport const two = (): string => dirname("b") + path.sep;\n`, `import path from "node:path";\nexport const two = (): string => path.sep;\n`]) {
+    const r = build({
+      "a.mts": `import path, { join } from "node:path";\nexport const one = join("a") + path.sep;\n`,
+      "b.mts": b,
+      "register.mts": `import { one } from "./a.mjs";\nimport { two } from "./b.mjs";\nexport function register(on: unknown): string { return one + two(); }\n`,
+    });
+    assert.equal(r.status, 0, r.stderr);
+  }
+});
+
+test("a failed build keeps the previous plugin/ output", () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "failed-build-"));
+  try {
+    mkdirSync(path.join(dir, "src"), { recursive: true });
+    mkdirSync(path.join(dir, "plugin"), { recursive: true });
+    writeFileSync(path.join(dir, "package.json"), JSON.stringify({ name: "fixture", version: "0.0.1", description: "d", author: { name: "x" }, keywords: [], type: "module", claudePlugin: {} }));
+    writeFileSync(path.join(dir, "plugin/old.mjs"), "export const old = 1;\n");
+    writeFileSync(path.join(dir, "src/old.mts"), "export const old = = 1;\n");
+    const r = spawnSync(process.execPath, [BUILD, dir], { encoding: "utf8" });
+    assert.equal(r.status, 1);
+    assert.equal(readFileSync(path.join(dir, "plugin/old.mjs"), "utf8"), "export const old = 1;\n");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

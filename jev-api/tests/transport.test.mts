@@ -1,4 +1,5 @@
 // Tests of the MCP transport of the jev-api mod: the hooks driven directly with a hand-made `$` (the kit cannot abandon a dispatch).
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 const TOOL = (type: string) => `mcp__jev-api__${type}`;
@@ -22,7 +23,7 @@ type Rig = Awaited<ReturnType<typeof rig>>;
  *
  * @param opts - `connect` answers `$.mcp.connect` (default: connected); `onCall` answers `$.mcp.call` (default: an ok outcome for `request`, `{cancelled:true}` for `cancel`); `noMcp` leaves `$.mcp` out like the older tests' world; `options` is the plugin's userConfig; `env` the env values.
  */
-async function rig(opts: { connect?: () => Promise<unknown>; onCall?: (c: Call) => unknown; noMcp?: boolean; onConfig?: (c: Call) => unknown; complete?: (r: Args) => unknown; options?: Record<string, unknown>; env?: Record<string, string> } = {}) {
+async function rig(opts: { connect?: () => Promise<unknown>; onCall?: (c: Call) => unknown; noMcp?: boolean; onConfig?: (c: Call) => unknown; complete?: (r: Args) => unknown; store?: () => Promise<unknown>; register?: () => Promise<unknown>; options?: Record<string, unknown>; env?: Record<string, string> } = {}) {
   const { register } = await import("../plugin/hooks/register.mjs");
   const hooks = new Map<string, (...a: unknown[]) => Promise<unknown>>();
   register((event: string, hook: (...a: unknown[]) => Promise<unknown>) => void hooks.set(event, hook), opts.options);
@@ -47,6 +48,8 @@ async function rig(opts: { connect?: () => Promise<unknown>; onCall?: (c: Call) 
     },
     model: { complete: (r: Args) => (completed.push(r), Promise.resolve(opts.complete ? opts.complete(r) : { isAnswered: false, reason: "unavailable" })) },
     ui: { log: (t: string) => void logs.push(t) },
+    ...(opts.store ? { store: { get: opts.store, set: async () => undefined } } : {}),
+    ...(opts.register ? { tool: { register: opts.register } } : {}),
     ...(opts.noMcp ? {} : {
       mcp: {
         connect: async () => (connects.n++, opts.connect ? opts.connect() : { isConnected: true, server: SERVER }),
@@ -94,7 +97,44 @@ describe("the request goes through the server", () => {
     expect(call.server).toBe(SERVER);
     expect(call.args).toMatchObject({ state: BASE.state, timeoutMs: 20000, questions: { answer: { type: "noul", instructions: BASE.instructions } } });
     expect(call.args["callId"]).toMatch(/^[a-z0-9]+-\d+$/);
-    expect(Object.keys(call.args).sort((a, b) => a.localeCompare(b))).toEqual(["callId", "questions", "state", "timeoutMs"]);
+    expect(Object.keys(call.args).sort((a, b) => a.localeCompare(b))).toEqual(["callId", "configGen", "questions", "state", "timeoutMs"]);
+  });
+
+  it("the request gets only the time the connect and the config call left, and none left is a timeout", async () => {
+    for (const [used, expected] of [[2900, 1100], [4000, undefined]] as [number, number | undefined][]) {
+      const t = await rig({ connect: async () => (t.clock.now += used / 2, { isConnected: true, server: SERVER }), onConfig: () => (t.clock.now += used / 2, outcome({ configured: true })) });
+      const r = await t.run("noul", { timeout: 4 });
+      if (expected === undefined) {
+        expect(t.requests()).toHaveLength(0);
+        expect(r.deny).toContain("timeout after 4000ms");
+      } else expect(t.requests()[0].args["timeoutMs"]).toBe(expected);
+    }
+  });
+
+  it("a hung connect or config call does not hold the call past a shorter timeout", async () => {
+    for (const hang of ["connect", "config"]) {
+      const t = await rig(hang === "connect" ? { connect: NEVER } : { onConfig: NEVER });
+      const pending = t.run("noul", { timeout: 1 });
+      for (let i = 0; i < 50; i++) await new Promise((r) => setImmediate(r));
+      t.clock.now += 1000;
+      t.fire(1000);
+      expect((await pending).deny).toContain("timeout after 1000ms");
+    }
+  });
+
+  it("a config call cut by a short call timeout does not mark the server down", async () => {
+    let release: (v: unknown) => void = () => {};
+    let first = true;
+    const t = await rig({ onConfig: () => (first ? (first = false, new Promise((r) => (release = r))) : outcome({ configured: true })) });
+    const pending = t.run("noul", { timeout: 1 });
+    for (let i = 0; i < 50; i++) await new Promise((r) => setImmediate(r));
+    t.clock.now += 1000;
+    t.fire(1000);
+    expect((await pending).deny).toContain("timeout after 1000ms");
+    release(outcome({ configured: true })); // the slow config answer arrives; the next call shares it
+    await t.run("noul");
+    expect(t.fetched).toHaveLength(0);
+    expect(t.requests()).toHaveLength(1);
   });
 
   it("connects once and keeps the server for later calls", async () => {
@@ -153,7 +193,7 @@ describe("outcomes become the tool results of 0.4.0", () => {
   });
   it("an ok outcome with a wrong answer is the old response error", async () => {
     const t = await rig({ onCall: () => outcome({ kind: "ok", status: 200, text: "{\"answers\":{}}" }) });
-    expect(await t.run()).toEqual({ deny: "noul: response had no noul answer" });
+    expect(await t.run()).toEqual({ deny: "noul: response had no valid noul answer" });
   });
   it("a context refusal is the translated refusal in error mode", async () => {
     const t = await rig({ onCall: () => outcome({ kind: "http", status: 400, reason: "too big", refusal: { tokens: 40025, nctx: 32768 } }) });
@@ -220,6 +260,17 @@ describe("timeout guard and abandonment", () => {
     expect(t.cancels()).toHaveLength(0);
   });
 
+  it("a dispatch abandoned while the time left is read sends no request", async () => {
+    const t = await rig();
+    await t.run(); // connects
+    const ctl = new AbortController();
+    let reads = 0; // 1 start time, 2 config sync, 3 call id, 4 time left
+    (t.$.clock as { now: () => Promise<number> }).now = async () => (++reads === 4 && ctl.abort(), 1_000_000);
+    expect(await t.run("noul", {}, ctl.signal)).toEqual({ deny: "noul: the call was abandoned" });
+    expect(reads).toBeGreaterThanOrEqual(3);
+    expect(t.requests()).toHaveLength(1);
+  });
+
   it("a settled call sends no cancel, also not when its signal aborts later or its guard fires", async () => {
     const t = await rig();
     const ctl = new AbortController();
@@ -250,6 +301,28 @@ describe("fallback to $.http.fetch", () => {
     expect(outage(t)).toEqual(["jev-api: HTTP server not available, using $.http.fetch: spawn node ENOENT"]);
   });
 
+  it("an outage that outlasts the 60 s retry is logged once", async () => {
+    const t = await rig({ connect: async () => ({ isConnected: false, message: "down" }) });
+    await t.run();
+    t.clock.now += 60_000;
+    await t.run();
+    expect(t.connects.n).toBe(2);
+    expect(outage(t)).toHaveLength(1);
+  });
+
+  it("a second outage after a successful reconnect is logged again", async () => {
+    let up = false;
+    const t = await rig({
+      connect: async () => (up ? { isConnected: true, server: SERVER } : { isConnected: false, message: "down" }),
+      onCall: () => (up ? Promise.reject(new Error("transport closed")) : okOutcome),
+    });
+    await t.run();
+    up = true;
+    t.clock.now += 60_000;
+    await t.run();
+    expect(outage(t)).toHaveLength(2);
+  });
+
   it("does not reconnect for 60 s, and does at 60 s", async () => {
     let up = false;
     const t = await rig({ connect: async () => (up ? { isConnected: true, server: SERVER } : { isConnected: false, message: "down" }) });
@@ -266,6 +339,29 @@ describe("fallback to $.http.fetch", () => {
     await t.run();
     expect(t.connects.n).toBe(2);
     expect(t.requests()).toHaveLength(2);
+  });
+
+  it("a server that dies late leaves the fetch only the time that is left, or no fetch at all", async () => {
+    for (const [used, left] of [[3900, 100], [4000, 0]]) {
+      const t = await rig({
+        onCall: (c) => {
+          if (c.tool === "request") {
+            t.clock.now += used;
+            return Promise.reject(new Error("server exited"));
+          }
+          return undefined;
+        },
+      });
+      const r = await t.run("noul", { timeout: 4 });
+      if (left === 0) {
+        expect(t.fetched).toHaveLength(0);
+        expect(r.deny).toBe("noul: timeout after 4000ms");
+      } else {
+        expect(t.fetched).toHaveLength(1);
+        expect(t.timers.filter((x) => x.ms === left)).toHaveLength(1);
+        expect(t.timers.filter((x) => x.ms === 4000 && !x.cancelled)).toHaveLength(0);
+      }
+    }
   });
 
   it("a connect that throws is the same outage", async () => {
@@ -314,6 +410,34 @@ describe("fallback to $.http.fetch", () => {
     expect(t.fetched).toHaveLength(1);
   });
 
+  it("a call abandoned while the connect is pending is answered at once and sends nothing", async () => {
+    const t = await rig({ connect: NEVER });
+    const ac = new AbortController();
+    const pending = t.run("noul", {}, ac.signal);
+    for (let i = 0; i < 100 && !t.timers.some((x) => x.ms === 3000); i++) await new Promise((r) => setImmediate(r));
+    ac.abort();
+    expect(await pending).toEqual({ deny: "noul: the call was abandoned" });
+    t.fire(3000);
+    await new Promise((r) => setImmediate(r));
+    expect(t.fetched).toHaveLength(0);
+  });
+
+  for (const [name, hang] of [["store read", "store"], ["tool registration", "register"]] as const) {
+    it(`a call abandoned while the ${name} is pending is answered before its timer and sends nothing`, async () => {
+      // the store case needs the registration to finish, or the call is abandoned before it reaches the store
+      let reached = false;
+      const t = await rig({ register: async () => ({}), [hang]: () => (reached = true, NEVER()) });
+      const ac = new AbortController();
+      const pending = t.run("noul", {}, ac.signal);
+      for (let i = 0; i < 100 && !reached; i++) await new Promise((r) => setImmediate(r));
+      expect(reached).toBe(true);
+      ac.abort();
+      expect(await pending).toEqual({ deny: "noul: the call was abandoned" });
+      expect(t.fetched).toHaveLength(0);
+      expect(t.requests()).toHaveLength(0);
+    });
+  }
+
   it("a throwing request call falls back for that call, marks the link down and logs once", async () => {
     const t = await rig({ onCall: () => Promise.reject(new Error("transport closed")) });
     expect(JSON.parse((await t.run()).result ?? "null")).toEqual(NOUL_ANSWER);
@@ -326,10 +450,24 @@ describe("fallback to $.http.fetch", () => {
     expect(outage(t)[0]).toContain("transport closed");
   });
 
+  it.each(["config", "request"])("a synchronous throw of the %s call falls back, marks the link down and logs once", async (tool) => {
+    const boom = (): never => {
+      throw new Error("server process exited");
+    };
+    const t = await rig(tool === "config" ? { onConfig: boom } : { onCall: boom });
+    expect(JSON.parse((await t.run()).result ?? "null")).toEqual(NOUL_ANSWER);
+    expect(t.fetched).toHaveLength(1);
+    expect(outage(t)).toHaveLength(1);
+    expect(outage(t)[0]).toContain("server process exited");
+  });
+
   it("a result that is neither an outcome nor an error text falls back, an error text is the answer", async () => {
     const garbage = await rig({ onCall: () => ({ isError: false, content: [{ type: "text", text: "hello" }] }) });
     expect(JSON.parse((await garbage.run()).result ?? "null")).toEqual(NOUL_ANSWER);
     expect(garbage.fetched).toHaveLength(1);
+    const odd = await rig({ onCall: () => ({ isError: false, content: [null, 3, { type: "text" }] as never }) });
+    expect(JSON.parse((await odd.run()).result ?? "null")).toEqual(NOUL_ANSWER);
+    expect(odd.fetched).toHaveLength(1);
     const text = await rig({ onCall: () => ({ isError: true, content: [{ type: "text", text: "request: state must be a non-empty string" }] }) });
     expect(await text.run()).toEqual({ deny: "noul: request: state must be a non-empty string" });
     expect(text.fetched).toHaveLength(0);
@@ -341,6 +479,17 @@ describe("fallback to $.http.fetch", () => {
     await t.run();
     expect(t.fetched).toHaveLength(2);
     expect(outage(t)).toHaveLength(0);
+  });
+
+  it("a call abandoned while the fallback reads the time left sends nothing", async () => {
+    const t = await rig({ noMcp: true });
+    const ac = new AbortController();
+    const clock = (t.$ as { clock: { now: () => Promise<number> } }).clock;
+    const real = clock.now;
+    let reads = 0;
+    clock.now = async () => (++reads === 4 && ac.abort(), real());
+    expect(await t.run("noul", {}, ac.signal)).toEqual({ deny: "noul: the call was abandoned" });
+    expect(t.fetched).toHaveLength(0);
   });
 
   it("a call with no System One access (Haiku) never touches the server", async () => {
@@ -385,7 +534,7 @@ describe("the configuration of the server", () => {
     const t = await rig({ env: { TYPESAFE_API_KEY: "k", JEV_URL: "https://jev.example/v1/systemone", TYPESAFE_DEFAULT_MODEL: " m " } });
     await t.run();
     await t.run();
-    expect(t.configs().map((c) => c.args)).toEqual([{ key: "k", jevUrl: "https://jev.example/v1/systemone", model: "m" }]);
+    expect(t.configs().map((c) => c.args)).toEqual([{ key: "k", jevUrl: "https://jev.example/v1/systemone", model: "m", gen: 1 }]);
     expect(t.mcpCalls.map((c) => c.tool)).toEqual(["config", "request", "request"]);
   });
   it("is sent again when a value changed", async () => {
@@ -393,11 +542,14 @@ describe("the configuration of the server", () => {
     await t.run();
     t.env["TYPESAFE_API_KEY"] = "k2";
     await t.run();
-    expect(t.configs().map((c) => c.args)).toEqual([{ key: "k" }, { key: "k2" }]);
+    expect(t.configs().map((c) => c.args)).toEqual([{ key: "k", gen: 1 }, { key: "k2", gen: 2 }]);
   });
-  it("is sent again after a failed request, read fresh, before the next one", async () => {
+  it.each([
+    ["http", { kind: "http", status: 503 }],
+    ["error", { kind: "error", code: "network", message: "fetch failed" }],
+  ])("is sent again after a failed request (%s), read fresh, before the next one", async (_name, failed) => {
     let n = 0;
-    const t = await rig({ onCall: () => (++n === 1 ? outcome({ kind: "http", status: 503 }) : okOutcome) });
+    const t = await rig({ onCall: () => (++n === 1 ? outcome(failed) : okOutcome) });
     await t.run();
     expect(t.configs()).toHaveLength(1);
     await t.run();
@@ -405,6 +557,13 @@ describe("the configuration of the server", () => {
     await t.run();
     expect(t.configs()).toHaveLength(2);
     expect(t.mcpCalls.map((c) => c.tool)).toEqual(["config", "request", "config", "request", "request"]);
+  });
+  it("is not resent after an aborted request", async () => {
+    let n = 0;
+    const t = await rig({ onCall: () => (++n === 1 ? outcome({ kind: "error", code: "aborted", message: "the call was abandoned" }) : okOutcome) });
+    await t.run();
+    await t.run();
+    expect(t.configs()).toHaveLength(1);
   });
   it("is not resent after an abandoned request", async () => {
     let first = true;
@@ -436,10 +595,24 @@ describe("the configuration of the server", () => {
     expect(JSON.parse((await p).result ?? "null")).toEqual(NOUL_ANSWER);
     expect(silent.fetched).toHaveLength(1);
   });
+  it("a hung config call is not shared with the next run: it sends its own config call and the request", async () => {
+    let n = 0;
+    const t = await rig({ onConfig: () => (++n === 1 ? NEVER() : { isError: false, content: [{ type: "text", text: "{\"configured\":true}" }], structuredContent: { configured: true } }) });
+    const p = t.run();
+    await t.until("config", 1);
+    t.fire(3000);
+    await p;
+    expect(t.fetched).toHaveLength(1);
+    t.clock.now += 120_000;
+    await t.run();
+    expect(t.configs()).toHaveLength(2);
+    expect(t.requests()).toHaveLength(1);
+    expect(t.fetched).toHaveLength(1);
+  });
   it("session.start sends it ahead of the first request, only with System One access", async () => {
     const t = await rig();
     await t.hooks.get("session.start")?.(t.$, { cwd: "/p" }, async () => ({}));
-    expect(t.configs().map((c) => c.args)).toEqual([{ key: "k" }]);
+    expect(t.configs().map((c) => c.args)).toEqual([{ key: "k", gen: 1 }]);
     await t.run();
     expect(t.configs()).toHaveLength(1);
     const none = await rig({ env: {} });
@@ -465,6 +638,15 @@ describe("Haiku takes over after an HTTP error status", () => {
       expect(t.completed[0]?.["timeoutMs"]).toBe(16_000);
     });
   }
+  it("batch: an HTTP 500 is taken over by Haiku, which answers every question of the batch", async () => {
+    const t = await rig({
+      complete: () => ({ isAnswered: true, text: JSON.stringify({ answers: { q0: { type: "noul", noul: 0.7 }, q1: { type: "noul", noul: 0.2 } } }), usage: {} }),
+      onCall: () => outcome({ kind: "http", status: 500, reason: "boom" }),
+    });
+    const r = await t.run("batch", { state: "s", questions: [{ type: "noul", instructions: "a?" }, { type: "noul", instructions: "b?" }] });
+    expect(JSON.parse(r.result ?? "null")).toHaveLength(2);
+    expect(t.completed).toHaveLength(1);
+  });
   it("the same through the fetch path", async () => {
     const t = await rig({ noMcp: true, complete: () => HAIKU_OK });
     t.$.http.fetch = () => {
@@ -484,6 +666,36 @@ describe("Haiku takes over after an HTTP error status", () => {
     expect((await t.run("noul", { timeout: 5 })).deny).toBe("noul: HTTP 500: boom; no time left for the Haiku fallback");
     expect(t.completed).toHaveLength(0);
   });
+  it("overflow haiku after the 400 refusal gets the time left, and none left is the refusal", async () => {
+    for (const [used, expected] of [[3500, 500], [4000, undefined]] as const) {
+      const t = await rig({
+        complete: () => HAIKU_OK,
+        onCall: (c) => {
+          if (c.tool === "request") t.clock.now += used;
+          return outcome({ kind: "http", status: 400, reason: "too big", refusal: { tokens: 40025, nctx: 32768 } });
+        },
+      });
+      const r = await t.run("noul", { timeout: 4, overflow: "haiku" });
+      expect(t.completed[0]?.["timeoutMs"]).toBe(expected);
+      if (expected === undefined) expect(r.deny).toMatch(/state too large/);
+    }
+  });
+  it("overflow truncate after the 400 refusal sends the cut with the time left, and none left is the refusal", async () => {
+    for (const [used, expected] of [[3500, 500], [4000, undefined]] as const) {
+      const t = await rig({
+        onCall: (c) => {
+          if (c.tool === "request") t.clock.now += used;
+          return outcome({ kind: "http", status: 400, reason: "too big", refusal: { tokens: 40025, nctx: 32768 } });
+        },
+      });
+      const r = await t.run("noul", { timeout: 4, overflow: "truncate", state: "a".repeat(9000) });
+      const timeouts = t.requests().map((c) => c.args["timeoutMs"]);
+      expect(timeouts).toEqual(expected === undefined ? [4000] : [4000, expected]);
+      expect(r.deny).toMatch(/state too large/);
+      // sized to the 500 ms left (the 1000-token floor), not to the 4 s the call started with
+      if (expected !== undefined) expect(String(t.requests()[1].args["state"]).length).toBeLessThan(400); // the 4 s budget would keep about 900
+    }
+  });
   it("when Haiku fails too, the error carries both reasons", async () => {
     const t = await rig({ complete: () => ({ isAnswered: false, reason: "overloaded" }), onCall: () => outcome({ kind: "http", status: 500, reason: "boom" }) });
     const r = await t.hooks.get("tool.call")?.(t.$, { tool: TOOL("noul"), ...BASE }, Object.assign(async () => ({}), { signal: new AbortController().signal }));
@@ -498,8 +710,19 @@ describe("Haiku takes over after an HTTP error status", () => {
   });
   it("an abandoned call is not handed to Haiku", async () => {
     const ac = new AbortController();
-    const t = await rig({ complete: () => HAIKU_OK, onCall: () => (ac.abort(), outcome({ kind: "http", status: 500 })) });
+    const t = await rig({ complete: () => HAIKU_OK, onCall: () => outcome({ kind: "http", status: 500 }) });
+    const real = t.$.clock.now;
+    // the abort comes after the HTTP outcome is back: the first clock read then is takeOver's own
+    (t.$.clock as { now: () => Promise<number> }).now = () => (t.requests().length > 0 && ac.abort(), real());
     expect((await t.run("noul", {}, ac.signal)).deny).toBe("noul: the call was abandoned");
+    expect(t.completed).toHaveLength(0);
+  });
+  it("a call abandoned after a context refusal, while the time left is read, is not handed to Haiku", async () => {
+    const ac = new AbortController();
+    const t = await rig({ complete: () => HAIKU_OK, onCall: () => outcome({ kind: "http", status: 400, refusal: { tokens: 40000, nctx: 32768 } }) });
+    const real = t.$.clock.now;
+    (t.$.clock as { now: () => Promise<number> }).now = () => (t.requests().length > 0 && ac.abort(), real());
+    expect((await t.run("noul", { overflow: "haiku" }, ac.signal)).deny).toBe("noul: the call was abandoned");
     expect(t.completed).toHaveLength(0);
   });
   it("a context refusal still follows the overflow mode, not Haiku", async () => {
@@ -507,5 +730,97 @@ describe("Haiku takes over after an HTTP error status", () => {
     const t = await rig({ complete: () => HAIKU_OK, onCall: () => refusal });
     expect((await t.run("noul", { overflow: "error" })).deny).toMatch(/^noul: state too large/);
     expect(t.completed).toHaveLength(0);
+  });
+});
+
+describe("concurrent calls with different env", () => {
+  it("each request is served with the config of its own call, whatever order the config answers come in", async () => {
+    for (const order of [[0, 1], [1, 0]]) {
+      let held: { key: unknown; gen: unknown } | undefined; // the server's one global config, replaced by every config call
+      const served: [unknown, unknown][] = [];
+      const release: (() => void)[] = [];
+      const t = await rig({
+        onConfig: (c) => new Promise((resolve) => release.push(() => ((held = { key: c.args["key"], gen: c.args["gen"] }), resolve(outcome({ configured: true }))))),
+        onCall: (c) => {
+          if (held === undefined || c.args["configGen"] !== held.gen) return outcome({ kind: "error", code: "unconfigured", message: "x" });
+          served.push([c.args["state"], held.key]);
+          return okOutcome;
+        },
+      });
+      t.env["TYPESAFE_API_KEY"] = "kA";
+      const a = t.run("noul", { state: "A" });
+      await t.until("config", 1);
+      t.env["TYPESAFE_API_KEY"] = "kB";
+      const b = t.run("noul", { state: "B" });
+      await t.until("config", 2);
+      for (const i of order) release[i]();
+      // a refused request makes its call send its config again
+      for (let i = 0; i < 20; i++) {
+        await new Promise((r) => setImmediate(r));
+        release.splice(0).forEach((f) => f());
+      }
+      await Promise.all([a, b]);
+      for (const [state, key] of served) expect(key).toBe(state === "A" ? "kA" : "kB");
+      expect(served).toHaveLength(2);
+    }
+  });
+});
+
+describe("concurrent calls with the same env", () => {
+  it("share one config call, so no request is refused for another call's generation", async () => {
+    let held: unknown;
+    const t = await rig({
+      onConfig: (c) => ((held = c.args["gen"]), outcome({ configured: true })),
+      onCall: (c) => (c.args["configGen"] === held ? okOutcome : outcome({ kind: "error", code: "unconfigured", message: "x" })),
+    });
+    const rs = await Promise.all([t.run(), t.run(), t.run()]);
+    expect(rs.every((r) => r.deny === undefined)).toBe(true);
+    expect(t.requests()).toHaveLength(3);
+  });
+});
+
+describe("concurrent calls after a server restart", () => {
+  it("a config another call already sent again serves this call's retry, so neither retried request is refused", async () => {
+    let held: unknown;
+    let hold = false;
+    const answers: (() => void)[] = [];
+    const t = await rig({
+      onConfig: (c) => ((held = c.args["gen"]), outcome({ configured: true })),
+      onCall: (c) => {
+        const r = c.args["configGen"] === held ? okOutcome : outcome({ kind: "error", code: "unconfigured", message: "x" });
+        return hold ? new Promise((resolve) => answers.push(() => resolve(r))) : r;
+      },
+    });
+    expect((await t.run()).deny).toBeUndefined();
+    held = undefined; // the server restarted
+    hold = true;
+    // the clock stops once the second config was sent, between a retry's config and its request
+    let open: () => void = () => {};
+    const gate = new Promise<void>((r) => (open = r));
+    const now = t.$.clock.now;
+    t.$.clock.now = async () => (t.configs().length >= 2 ? (await gate, now()) : now());
+    const tick = async () => {
+      for (let i = 0; i < 20; i++) await new Promise((r) => setImmediate(r));
+    };
+    const a = t.run();
+    const b = t.run();
+    await t.until("request", 3);
+    hold = false;
+    answers[0](); // A: unconfigured, sends the config again and waits at the clock
+    await t.until("config", 2);
+    await tick();
+    answers[1](); // B: unconfigured, while A's request is not sent yet
+    await tick();
+    open();
+    const rs = await Promise.all([a, b]);
+    expect(rs.map((r) => r.deny)).toEqual([undefined, undefined]);
+    expect(t.configs()).toHaveLength(2);
+  });
+});
+
+describe("sendOutcome doc", () => {
+  it("does not claim the server reads its own environment (it is given the env)", () => {
+    const src = readFileSync(new URL("../src/hooks/transport.mts", import.meta.url), "utf8");
+    expect(src).not.toMatch(/server reads its own environment/);
   });
 });

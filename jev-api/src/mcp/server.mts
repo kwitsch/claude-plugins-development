@@ -43,6 +43,8 @@ const MAX_TIMEOUT_MS = 30_000;
 const MAX_BODY_BYTES = 1_048_576;
 /** How many cancelled call ids are remembered for a request that has not arrived yet. */
 const MAX_TOMBSTONES = 256;
+/** How many configs the server keeps by generation (concurrent calls with different env each keep theirs). */
+const MAX_CONFIGS = 16;
 /** How long a remembered cancel lives (ms); `JEV_API_TOMBSTONE_MS` overrides it, for tests only. */
 const TOMBSTONE_MS = ((): number => {
   const raw = process.env["JEV_API_TOMBSTONE_MS"]?.trim();
@@ -77,7 +79,7 @@ const SERVER_INFO_META = { "io.modelcontextprotocol/serverInfo": SERVER_INFO };
 const TOOLS: Tool[] = [
   {
     name: "request",
-    description: `${INTERNAL} Sends one System One request to the endpoint the server's environment configures and answers its outcome. The timeout ends the HTTP request and closes the connection.`,
+    description: `${INTERNAL} Sends one System One request to the endpoint set by the \`config\` tool and answers its outcome. The timeout ends the HTTP request and closes the connection.`,
     inputSchema: {
       type: "object",
       properties: {
@@ -85,6 +87,7 @@ const TOOLS: Tool[] = [
         state: { type: "string", minLength: 1, description: "The text the questions are about." },
         questions: { type: "object", description: "The `questions` object of the System One request." },
         timeoutMs: { type: "integer", minimum: 1, maximum: MAX_TIMEOUT_MS, description: "How long the HTTP request may take, in milliseconds." },
+        configGen: { type: "integer", description: "The `gen` of the `config` call whose configuration serves this request; unknown means `unconfigured`." },
       },
       required: ["callId", "state", "questions", "timeoutMs"],
       additionalProperties: false,
@@ -100,6 +103,7 @@ const TOOLS: Tool[] = [
         base: { type: "string", description: "TYPESAFE_BASE_URL." },
         jevUrl: { type: "string", description: "JEV_URL." },
         model: { type: "string", description: "TYPESAFE_DEFAULT_MODEL." },
+        gen: { type: "integer", description: "Generation number the mod gives this configuration; `request` names it with `configGen`." },
       },
       additionalProperties: false,
     },
@@ -155,8 +159,8 @@ function field(v: unknown): string | undefined {
  * Reads a response body up to {@link MAX_BODY_BYTES}.
  *
  * @param res - The response.
- * @returns The body text.
- * @throws When the body is longer than the limit (`response too large`), or when the request is aborted while reading.
+ * @returns The body text; an error status (not `res.ok`) with a body over the limit is cut there, so its status survives.
+ * @throws When a 2xx body is longer than the limit (`response too large`), or when the request is aborted while reading.
  */
 async function readBody(res: Response): Promise<string> {
   const reader = res.body?.getReader();
@@ -169,11 +173,14 @@ async function readBody(res: Response): Promise<string> {
     total += value.length;
     if (total > MAX_BODY_BYTES) {
       await reader.cancel().catch(() => undefined);
-      throw new Error("response too large");
+      if (res.ok) throw new Error("response too large");
+      // an error body is only read for its status and reason: keep the prefix
+      chunks.push(value.subarray(0, value.length - (total - MAX_BODY_BYTES)));
+      break;
     }
     chunks.push(value);
   }
-  return Buffer.concat(chunks).toString("utf8");
+  return new TextDecoder().decode(Buffer.concat(chunks)); // strips a BOM like Response.text()
 }
 
 /**
@@ -184,8 +191,10 @@ function startServer(): void {
   const byRpc = new Map<RequestId, Flight>();
   /** `request` calls in flight, by call id (`cancel`). */
   const byCall = new Map<string, Flight>();
-  /** What the mod set with `config`; undefined until it did. */
+  /** What the mod set with its newest `config` call (used by a request without `configGen`); undefined until it did. */
   let config: HttpEnv | undefined;
+  /** The last `MAX_CONFIGS` configs by the generation the mod numbered them with (insertion order is age). */
+  const configs = new Map<number, HttpEnv>();
   /** Cancels that arrived before their request: call id to expiry (insertion order is age). */
   const tombstones = new Map<string, number>();
   const send = (msg: JSONRPCResultResponse | JSONRPCErrorResponse) => process.stdout.write(JSON.stringify(msg) + "\n");
@@ -244,7 +253,10 @@ function startServer(): void {
     if (typeof questions !== "object" || questions === null || Array.isArray(questions)) return invalid("request", "questions must be an object");
     if (typeof timeoutMs !== "number" || !Number.isInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > MAX_TIMEOUT_MS) return invalid("request", `timeoutMs must be a whole number from 1 to ${MAX_TIMEOUT_MS}`);
     if (byCall.has(callId)) return invalid("request", "callId is already in use by a running request");
-    const cfg = config;
+    const gen = args["configGen"];
+    if (gen !== undefined && !Number.isInteger(gen)) return invalid("request", "configGen must be a whole number");
+    // a request is served with the config it was synced with, even when other calls sent newer ones since; an unknown generation (restart, evicted) makes the mod send its own again
+    const cfg = gen === undefined ? config : configs.get(gen as number);
     if (cfg === undefined) return outcomeResult({ kind: "error", code: "unconfigured", message: "the server has no configuration yet" });
     if (!cfg.key && !cfg.base && !cfg.jevUrl) return outcomeResult({ kind: "error", code: "config", message: "no System One access configured: set TYPESAFE_API_KEY, TYPESAFE_BASE_URL or JEV_URL" });
     if (cancelledEarly(callId)) return outcomeResult({ kind: "error", code: "aborted", message: "the call was abandoned" });
@@ -273,13 +285,20 @@ function startServer(): void {
   };
 
   /**
-   * Handles `tools/call` `config`: replaces the configuration the requests use.
+   * Handles `tools/call` `config`: sets the newest configuration and keeps it under its generation `gen`.
    *
    * @param args - The call's arguments (a trust boundary: checked here).
    * @returns The tool result.
    */
   const runConfig = (args: Record<string, unknown>): CallToolResult => {
+    const gen = args["gen"];
+    if (gen !== undefined && !Number.isInteger(gen)) return invalid("config", "gen must be a whole number");
     config = { key: field(args["key"]), base: field(args["base"]), jevUrl: field(args["jevUrl"]), model: field(args["model"]) };
+    if (gen !== undefined) {
+      configs.delete(gen as number);
+      configs.set(gen as number, config);
+      if (configs.size > MAX_CONFIGS) configs.delete(configs.keys().next().value as number);
+    }
     return toolResult({ configured: true });
   };
 

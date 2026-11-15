@@ -143,13 +143,57 @@ export function hide(text: string, url: string, placeholder: string): string {
   } catch {
     // The engine quotes a URL it cannot parse as given.
   }
-  return text.replaceAll(href, placeholder).replaceAll(url, placeholder);
+  // Also the percent-encoded echo (`http%3A%2F%2F...`), any hex case.
+  const enc = [...new Set([href, url])].map((u) => escapeRe(encodeURIComponent(u))).join("|");
+  return text.replaceAll(href, placeholder).replaceAll(url, placeholder).replace(new RegExp(enc, "gi"), placeholder);
+}
+
+/**
+ * Escapes a text for use as a literal inside a regular expression.
+ *
+ * @param text - The text.
+ * @returns The escaped text.
+ */
+function escapeRe(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/**
+ * The written and parsed forms of a URL's path and query that `sendRequest` hides in an error text (a server echoes
+ * `req.url`, `/p?token=x`, without scheme and host); each is longer than a bare `/`, which would match every path.
+ *
+ * @param url - The URL.
+ * @returns The distinct forms.
+ */
+function pathForms(url: string): string[] {
+  const forms = [url.replace(/^[a-z][a-z\d+.-]*:\/\/[^/?#]*/i, "")];
+  try {
+    const u = new URL(url);
+    forms.push(u.pathname + u.search, u.search);
+  } catch {
+    // Not parseable: only the written form.
+  }
+  return [...new Set(forms)].filter((f) => f.length > 1);
+}
+
+/**
+ * The host name of a URL.
+ *
+ * @param url - The URL.
+ * @returns The host name, or a NUL character (never part of a key) when there is none or the URL does not parse.
+ */
+function hostOf(url: string): string {
+  try {
+    return new URL(url).hostname || "\0";
+  } catch {
+    return "\0";
+  }
 }
 
 /**
  * Replaces the bare host of a URL in an error text. A DNS failure quotes only the host (`getaddrinfo ENOTFOUND <host>`,
  * live on 2.1.325), which may be private too. Only whole host names are replaced, ignoring case: the host `jev` must
- * not turn `jev-latest` or `api.jev`, nor the host `10.0.0.5` turn `110.0.0.5`, into something else.
+ * not turn `jev-latest` or `api.jev`, nor the host `10.0.0.5` turn `110.0.0.5`, into something else. A host right after a percent escape (`http%3A%2F%2Fhost`) counts as whole.
  *
  * @param text - The text.
  * @param url - The endpoint URL; one that does not parse changes nothing.
@@ -166,7 +210,7 @@ export function hideHost(text: string, url: string): string {
   // An IPv6 host comes with brackets, an error text quotes the bare address.
   let t = text;
   for (const h of new Set([host, host.replace(/^\[(.*)\]$/, "$1")])) {
-    t = t.replace(new RegExp(`(?<![\\w.-])${h.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\w-])`, "gi"), "<host>");
+    t = t.replace(new RegExp(`(?:(?<![\\w.-])|(?<=%[0-9a-f]{2}))${escapeRe(h)}(?![\\w-])`, "gi"), "<host>");
   }
   return t;
 }
@@ -246,19 +290,53 @@ export async function sendRequest(env: HttpEnv, state: string, questionsObject: 
   if (key && /^https:/i.test(target.url)) headers["Authorization"] = `Bearer ${key}`;
   // Text that reaches the model (a fetch error, an error body a server may echo the request into) must not carry the endpoint
   // or the key: a runtime quotes a header value it rejects (a newline or a non-Latin1 character in the key), whole.
+  const pieces = new Set<string>(); // each query name, value and path segment of the custom part, raw and decoded
+  if (env.jevUrl || env.base) {
+    try {
+      const u = new URL(target.url);
+      const segs = u.pathname.split("/");
+      if (!env.jevUrl) segs.length = Math.max(0, segs.length - 2); // the fixed `v1/systemone` tail is public
+      const raw = [...segs, ...u.search.slice(1).split("&").flatMap((kv) => kv.split("=")), ...u.searchParams.keys(), ...u.searchParams.values()];
+      for (const r of raw) {
+        let d = r;
+        try {
+          d = decodeURIComponent(r);
+        } catch { /* a bad escape loses only this piece's decoded form */ }
+        for (const v of [r, d]) if (v.length >= MIN_REDACT_KEY) pieces.add(v);
+      }
+    } catch {
+      // Not parseable or a bad escape: the whole-URL forms above still apply.
+    }
+  }
+  const custom = env.jevUrl || env.base; // the default endpoint is public: nothing to hide
+  const place = env.jevUrl ? "<JEV_URL>" : "<TYPESAFE_BASE_URL>";
+  // Every literal that must not reach the model, replaced in ONE pass, longest first: a key inside a longer secret (a path segment,
+  // a query value) and a path inside the key must each hide the whole longer text, whatever the order of the parts.
+  const literals = new Map<string, string>();
+  if (custom) {
+    // A base path may carry a token too (a proxy path); without the fixed `/v1/systemone` tail, which hide() already wrote.
+    for (const f of pathForms(env.jevUrl ? target.url : target.url.slice(0, -"/v1/systemone".length))) literals.set(f, place);
+    for (const v of pieces) literals.set(v, place); // a server may echo one value alone
+  }
+  if (key && key.length >= MIN_REDACT_KEY) literals.set(key, "<TYPESAFE_API_KEY>"); // not a short key: it would match ordinary words
+  const literalRe = literals.size ? new RegExp([...literals.keys()].sort((x, y) => y.length - x.length).map(escapeRe).join("|"), "g") : undefined;
+  const hostLower = hostOf(target.url).toLowerCase();
+  const hostLits = custom ? [...literals].filter(([l]) => l.toLowerCase().includes(hostLower)).sort((x, y) => y[0].length - x[0].length) : [];
   const redact = (text: string): string => {
-    // In this order: the URL first (it may contain the key), the key before the host (a key may contain the host text).
-    const custom = env.jevUrl || env.base; // the default endpoint is public: nothing to hide
+    // The whole URL first (it may contain the key), the host before the literals (a host label may hold the key), then the literals.
     let t = custom ? hide(text, target.url, env.jevUrl ? "<JEV_URL>" : "<TYPESAFE_BASE_URL>/v1/systemone") : text;
-    if (key && key.length >= MIN_REDACT_KEY) t = t.replaceAll(key, "<TYPESAFE_API_KEY>"); // not a short key: it would match ordinary words
-    return custom ? hideHost(t, target.url) : t;
+    // Every literal that contains the host text (a key `jev.<rest>`, a query value `host.secret`) goes whole, longest first, before the host is cut out of it.
+    for (const [l, p] of hostLits) t = t.replaceAll(l, p);
+    if (custom) t = hideHost(t, target.url);
+    return literalRe ? t.replace(literalRe, (m) => literals.get(m) ?? m) : t;
   };
   try {
     const res = await doFetch(target.url, { method: "POST", headers, body: JSON.stringify({ model: env.model ?? DEFAULT_MODEL, state, questions: questionsObject }) });
     if (res.status >= 200 && res.status < 300) return { kind: "ok", status: res.status, text: res.text };
     const refusal = res.status === 400 ? contextRefusal(res.text) : undefined;
-    // Only a key made of number characters can sit inside a JSON number's text.
-    const why = detail(res.text, redact, key !== undefined && key.length >= MIN_REDACT_KEY && /^[-+.\deE]+$/.test(key));
+    // Only a key or endpoint piece made of number characters can sit inside a JSON number's text.
+    const numeric = (s?: string): boolean => s !== undefined && s.length >= MIN_REDACT_KEY && /^[-+.\deE]+$/.test(s);
+    const why = detail(res.text, redact, numeric(key) || [...pieces].some(numeric));
     let reason = why === undefined ? "" : why.trim(); // detail() already redacted it: a second pass would nest the host placeholder
     if (reason.length > MAX_DETAIL) {
       reason = reason.slice(0, MAX_DETAIL);

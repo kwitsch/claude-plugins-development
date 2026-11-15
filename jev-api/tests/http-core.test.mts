@@ -48,6 +48,15 @@ describe("hide and hideHost", () => {
   it("keeps the text when the URL does not parse", () => {
     expect(hideHost("text", "not a url")).toBe("text");
   });
+  it("hides the full percent-encoded URL, any hex case", () => {
+    expect(hide("echo http%3a%2F%2F127.0.0.1%3A8080%2Fv1%2Fsystemone!", "http://127.0.0.1:8080/v1/systemone", "<P>")).toBe("echo <P>!");
+  });
+  it("hides the host of a partial percent-encoded echo", () => {
+    const u = "http://127.0.0.1:8080/v1/systemone";
+    for (const s of ["cb=http%3A%2F%2F127.0.0.1%3A8080%2Fother", "cb=http%3a%2f%2f127.0.0.1%3a8080", "cb=http%3A%2F%2F127.0.0.1"]) {
+      expect(hideHost(hide(s, u, "<U>"), u)).not.toContain("127.0.0.1");
+    }
+  });
 });
 
 describe("detail", () => {
@@ -88,6 +97,17 @@ describe("contextRefusal", () => {
 describe("sendRequest", () => {
   const env = { jevUrl: "https://jev.example/v1/x?token=abc", key: KEY };
 
+  it("hides the whole host when a path segment is part of the host name", async () => {
+    const f = {
+      doFetch: async () => {
+        throw new Error("getaddrinfo ENOTFOUND jevproxy.corp-internal.example");
+      },
+    };
+    const out = await sendRequest({ jevUrl: "https://jevproxy.corp-internal.example/jevproxy" }, STATE, QUESTIONS, f.doFetch);
+    expect(JSON.stringify(out)).toContain("ENOTFOUND <host>");
+    expect(JSON.stringify(out)).not.toContain("corp-internal");
+  });
+
   it("sends the POST with model, state and questions, and returns a 2xx text unchanged", async () => {
     const f = fake({ status: 200, text: "{\"answers\":{}}" });
     const out = await sendRequest({ ...env, jevUrl: undefined, base: "https://api.example" }, STATE, QUESTIONS, f.doFetch);
@@ -113,6 +133,48 @@ describe("sendRequest", () => {
     const none = fake({ status: 200, text: "{}" });
     await sendRequest({ jevUrl: "https://jev.example/x" }, STATE, QUESTIONS, none.doFetch);
     expect(none.calls[0].init.headers["Authorization"]).toBeUndefined();
+  });
+  it("redacts the echoed path and query of the endpoint", async () => {
+    const body = JSON.stringify({ detail: "no route for POST /systemone?api_key=SECRETTOKEN123 on 127.0.0.1" });
+    const out = await sendRequest({ jevUrl: "http://127.0.0.1:1/systemone?api_key=SECRETTOKEN123" }, STATE, QUESTIONS, fake({ status: 404, text: body }).doFetch);
+    expect(JSON.stringify(out)).not.toContain("SECRETTOKEN123");
+  });
+  it("redacts the echoed path of a base URL", async () => {
+    const body = JSON.stringify({ detail: "no route for POST /proxy/SECRETTOKEN123/v1/systemone" });
+    const out = await sendRequest({ base: "http://127.0.0.1:1/proxy/SECRETTOKEN123" }, STATE, QUESTIONS, fake({ status: 404, text: body }).doFetch);
+    expect(JSON.stringify(out)).not.toContain("SECRETTOKEN123");
+  });
+  it("redacts a query value or a path segment echoed alone", async () => {
+    const body = JSON.stringify({ detail: [{ input: "S3cretT0kenValue" }] });
+    const q = await sendRequest({ jevUrl: "http://127.0.0.1:1/v1/systemone?token=S3cretT0kenValue" }, STATE, QUESTIONS, fake({ status: 422, text: body }).doFetch);
+    expect(JSON.stringify(q)).not.toContain("S3cretT0kenValue");
+    const p = await sendRequest({ base: "http://127.0.0.1:1/S3cretT0kenValue" }, STATE, QUESTIONS, fake({ status: 422, text: body }).doFetch);
+    expect(JSON.stringify(p)).not.toContain("S3cretT0kenValue");
+  });
+  it("redacts a bare query token and a query parameter name", async () => {
+    const body = JSON.stringify({ detail: "bad TOKENSECRET123" });
+    for (const q of ["?TOKENSECRET123", "?TOKENSECRET123=1"]) {
+      const out = await sendRequest({ jevUrl: "http://127.0.0.1:1/v1/systemone" + q }, STATE, QUESTIONS, fake({ status: 401, text: body }).doFetch);
+      expect(JSON.stringify(out)).not.toContain("TOKENSECRET123");
+    }
+  });
+  it("redacts a key that contains the endpoint path before the path", async () => {
+    const k = "Zq81kLp0Xw2/apiR7vT9mN4sY6bH3cJ";
+    const out = await sendRequest({ jevUrl: "https://jev.example/api", key: k }, STATE, QUESTIONS, async (_u, init) => ({ status: 401, text: JSON.stringify({ detail: "bad token: " + init.headers["Authorization"] }) }));
+    expect(JSON.stringify(out)).not.toMatch(/Zq81|R7vT9/);
+  });
+  it("hides the whole longer secret when the key is only a part of it", async () => {
+    const echo = async (u: string) => ({ status: 500, text: JSON.stringify({ detail: `no route ${new URL(u).pathname}${new URL(u).search}` }) });
+    const cases: [Record<string, string>, RegExp][] = [
+      [{ jevUrl: "https://h.example/proxy/KEY123456-tenant42/run", key: "KEY123456" }, /tenant42/],
+      [{ jevUrl: "https://h.example/run?token=SECRETKEY123privatepart", key: "SECRETKEY123" }, /privatepart/],
+      [{ base: "https://h.example/gw/abcdef99zz77/", key: "abcdef99" }, /zz77/],
+    ];
+    for (const [e, leak] of cases) expect(JSON.stringify(await sendRequest(e, STATE, QUESTIONS, echo))).not.toMatch(leak);
+    const dns = await sendRequest({ jevUrl: "https://kq83jd02-acme.proxy.example/run", key: "kq83jd02" }, STATE, QUESTIONS, async () => {
+      throw new Error("getaddrinfo ENOTFOUND kq83jd02-acme.proxy.example");
+    });
+    expect(JSON.stringify(dns)).not.toMatch(/acme|proxy\.example/);
   });
   it("treats every 2xx as ok and everything else as http", async () => {
     expect((await sendRequest(env, STATE, QUESTIONS, fake({ status: 299, text: "x" }).doFetch)).kind).toBe("ok");
@@ -142,6 +204,16 @@ describe("sendRequest", () => {
     expect(await sendRequest(env, STATE, QUESTIONS, fake(named("TimeoutError", "timeout after 4000ms")).doFetch)).toEqual({ kind: "error", code: "timeout", message: "timeout after 4000ms" });
     expect(await sendRequest(env, STATE, QUESTIONS, fake(named("AbortError", "the call was abandoned")).doFetch)).toEqual({ kind: "error", code: "aborted", message: "the call was abandoned" });
   });
+  it("hides a whole piece that contains the host, not only the host inside it", async () => {
+    const e = new Error("bad upstream proxy.corp.S3cretTok and seg proxy.corp-seg.Tok2");
+    const out = await sendRequest({ jevUrl: "https://proxy.corp/jev?upstream=proxy.corp.S3cretTok" }, STATE, QUESTIONS, fake(e).doFetch);
+    expect(JSON.stringify(out)).not.toContain("S3cretTok");
+    const out2 = await sendRequest({ jevUrl: "https://proxy.corp/proxy.corp.S3cretTok/jev" }, STATE, QUESTIONS, fake(new Error("echo proxy.corp.S3cretTok")).doFetch);
+    expect(JSON.stringify(out2)).not.toContain("S3cretTok");
+    const out3 = await sendRequest({ jevUrl: "https://proxy.corp/jev", key: "proxy.corp.KeyRest9" }, STATE, QUESTIONS, fake(new Error("k proxy.corp.KeyRest9")).doFetch);
+    expect(JSON.stringify(out3)).not.toContain("KeyRest9");
+  });
+
   it("redacts the URL, the host and a key of 6 or more characters in a network error", async () => {
     const e = new Error(`fetch failed https://jev.example/v1/x?token=abc key ${KEY} host jev.example`);
     expect(await sendRequest(env, STATE, QUESTIONS, fake(e).doFetch)).toEqual({ kind: "error", code: "network", message: "fetch failed <JEV_URL> key <TYPESAFE_API_KEY> host <host>" });
@@ -157,5 +229,19 @@ describe("sendRequest", () => {
     expect(await sendRequest({ jevUrl: "ftp://x" }, STATE, QUESTIONS, f.doFetch)).toEqual({ kind: "error", code: "config", message: "JEV_URL must be an http(s) URL" });
     expect(await sendRequest({ base: "https://b.example/?q" }, STATE, QUESTIONS, f.doFetch)).toMatchObject({ kind: "error", code: "config" });
     expect(f.calls).toHaveLength(0);
+  });
+});
+
+describe("sendRequest redaction of pieces", () => {
+  it("a bad percent escape in one segment does not stop redaction of a later query value", async () => {
+    const e = fake({ status: 422, text: "{\"detail\":\"bad token supersecret1\"}" });
+    const out = await sendRequest({ jevUrl: "https://h.example/p%zz/q?token=supersecret1" }, STATE, QUESTIONS, e.doFetch);
+    expect(out).toEqual({ kind: "http", status: 422, reason: "bad token <JEV_URL>" });
+  });
+
+  it("a numeric query value echoed as a JSON number is redacted", async () => {
+    const e = fake({ status: 422, text: "{\"detail\":{\"input\":98765432109876}}" });
+    const out = await sendRequest({ jevUrl: "https://h.example/x?token=98765432109876" }, STATE, QUESTIONS, e.doFetch);
+    expect(out).toEqual({ kind: "http", status: 422, reason: "{\"input\":\"<JEV_URL>\"}" });
   });
 });

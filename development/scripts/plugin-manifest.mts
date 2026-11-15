@@ -12,11 +12,14 @@ const TOP_LEVEL = ["name", "version", "description", "author", "keywords"] as co
  */
 const isObject = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
 
+/** Semantic Versioning 2.0.0 (semver.org): MAJOR.MINOR.PATCH with optional -prerelease and +build suffixes. */
+const SEMVER = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$/;
+
 /**
  * Claude Code plugin manifest built from a plugin's package.json. Throws on invalid input.
  *
  * @remarks
- * Copies `name`, `version`, `description` (required non-empty strings), `author` (optional object with a
+ * Copies `name`, `version` (required semver string), `description` (required non-empty strings), `author` (optional object with a
  * non-empty string `name`) and `keywords` (optional string array), then every key of the required
  * `claudePlugin` object (plugin-only manifest fields such as `userConfig`) verbatim. Other package.json keys
  * (`private`, `type`, `scripts`, `devDependencies`, …) are never copied. Absent optional keys are `undefined`,
@@ -31,6 +34,8 @@ export function pluginManifest(pkg: Record<string, unknown>): Record<string, unk
     const v = pkg[k];
     if (typeof v !== "string" || v === "") throw new Error(`package.json: missing "${k}"`);
   }
+  // the version is shown to Claude Code and used in release tags, so it must be a real semver
+  if (!SEMVER.test(pkg.version as string)) throw new Error(`package.json: "version" must be a semver version, got ${JSON.stringify(pkg.version)}`);
   const { author, keywords, claudePlugin } = pkg;
   if (author !== undefined && !(isObject(author) && typeof author.name === "string" && author.name !== "")) {
     throw new Error("package.json: \"author\" must be an object with a \"name\"");

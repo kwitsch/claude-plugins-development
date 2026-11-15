@@ -22,8 +22,10 @@ Legend: `[x]` finished (done, or closed without code: status `closed` in the tas
 
 ## Remaining
 
-- [ ] [F18](tasks/F18-haiku-call-not-cancelled-default-effort.md) `partial` low: the Haiku call carries the abort signal since 0.3.2; still no `effort` (thinking shares `maxTokens`, not measured)
-- [ ] [F19](tasks/F19-jevfort-compaction-wait-and-hook-budget.md) `partial` medium (jevfort): the compaction ranking budget is 9 s since 0.9.1 (~4.6 s measured); the hook is bypassed by `cc-plugin-sec-default` on 2.1.325, and the 15 s Haiku budget against the engine's 10 s hook budget was not checked on the compaction path
+Source: performance analysis of jev-api 0.5.0 on 2026-11-15, numbers in [EVALUATION-2026-11-15.md](EVALUATION-2026-11-15.md).
+
+- [ ] [F23](tasks/F23-server-rss-grows-young-generation.md) `open` low: the transport server's RSS grows from 49 MB to 133 MB (4k requests) and 224 MB (20k) while its JS heap stays at 12 MB; `--max-semi-space-size=1` keeps it at 96 to 109 MB at the same speed
+- [ ] [F24](tasks/F24-timeout-not-a-bound.md) `partial` low: a call's `timeout` does not bound it; one-off waits (registration 1 s, store 1 s, connect 3 s, `config` 3 s) come before the request and are not cut to the time left (the request itself is; 5003 ms and 3008 ms measured for a 1 s timeout)
 
 ## Closed without code (measurement records, decided 2026-11-13)
 
@@ -33,7 +35,9 @@ Legend: `[x]` finished (done, or closed without code: status `closed` in the tas
 - [x] [F13](tasks/F13-batch-shape-and-concurrency.md) Batch vs single requests, parallel calls
 - [x] [F14](tasks/F14-timers-and-memory.md) Timer cleanup and module memory
 - [x] [F15](tasks/F15-test-suite-runtime.md) Test-suite runtime
+- [x] [F18](tasks/F18-haiku-call-not-cancelled-default-effort.md) Haiku call: abort signal since 0.3.2; `effort` left at the default (calibration was measured there, no cut-off observed), closed 2026-11-15
 - [x] [F08](tasks/F08-haiku-prompt-repeats-criteria.md) Haiku prompt repeats identical criteria per question (26% of a compaction prompt)
+- [x] [F19](tasks/F19-jevfort-compaction-wait-and-hook-budget.md) jevfort compaction ranking wait and hook budget: the budget is a `$.clock.after` timer (not a hook wait) and 9 s; live check impossible while `cc-plugin-sec-default` bypasses `session.compact`, closed 2026-11-15
 - [x] [F20](tasks/F20-jevfort-budget-equals-api-timeout.md) jevfort's 4 s budget and jev-api's 4 s timeout race: jevfort always decides, harmless (re-run)
 
 ## Notes
@@ -42,4 +46,4 @@ Legend: `[x]` finished (done, or closed without code: status `closed` in the tas
 - F02 and F03 touched the same code (since the rewrite: `RegState`, `registerOne`, `ensureTools`, both hooks).
 - F05 and F06 touch `ask`/`askHaiku`'s race: do them together.
 - F16 and F17 touched the same registration code (since the rewrite: `RegState`, `registerOne`, `ensureTools`, both hooks); F03 (a bounded wait) was its first step, F16 its residual.
-- F19 was worked in jevfort and partly done by sizing (9 s), no live check of the engine's hook limit was run (skill `live-verify` would do it); F18 needs a live Haiku measurement before any `effort` change.
+- F19 was worked in jevfort (9 s budget, `$.clock.after` timer) and closed; no live check of the engine's hook limit was possible.

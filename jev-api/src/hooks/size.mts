@@ -66,12 +66,14 @@ export const HEAD_SHARE = 0.6;
 export type Knowledge = {
   /** Learned characters per token. */
   density: number;
-  /** The density as last written to (or read from) the store. */
+  /** The density as last written to (or read from) the store; NaN while the store read ran out of time (nothing is written). */
   persisted: number;
   /** How many samples the density holds. */
   samples: number;
   /** The server's context window in tokens. */
   nctx: number;
+  /** The endpoint and model `nctx` was learned from; another source resets it. */
+  nctxFor?: string;
   /** The read of the stored density: started by the first call, shared by the others. */
   loaded: Promise<void> | undefined;
 };
@@ -102,32 +104,51 @@ export function isTooBig(r: ToolResult | TooBig): r is TooBig {
 }
 
 /**
- * Reads the stored density once per module instance and waits for it at most {@link STORE_WAIT_MS}; every failure
- * (a missing key, a refused or hanging store, a value out of range) leaves the default in place.
+ * Reads the stored density once per module instance (again after a refused read) and waits for it at most
+ * {@link STORE_WAIT_MS}; a later answer of a slow store is still applied. Every failure (a missing key, a refused or
+ * hanging store, a value out of range) leaves the default density in place.
  *
  * @param $ - The engine.
  * @param k - What the module knows; its `loaded` is set by the first call.
  * @returns A promise that never rejects.
  */
 export function loadKnowledge($: Engine, k: Knowledge): Promise<void> {
+  /** Takes a store answer: the valid stored density (the default when missing or out of range) is what was persisted. */
+  const apply = (stored: unknown): void => {
+    const v = isRecord(stored) ? stored["v"] : undefined;
+    const ok = typeof v === "number" && Number.isFinite(v) && v >= MIN_DENSITY && v <= MAX_DENSITY;
+    k.persisted = ok ? v : DEFAULT_DENSITY;
+    const n = isRecord(stored) ? stored["n"] : undefined;
+    const count = typeof n === "number" && Number.isInteger(n) && n > 0 ? n : 0;
+    // a late or retried read holding more samples than learned meanwhile wins: few samples never overwrite it
+    if (ok && (k.samples === 0 || k.samples < count)) {
+      k.density = v;
+      k.samples = count;
+    }
+  };
+  /** A refused read is not cached: the next call reads again; until then learn() must not overwrite the unknown value. */
+  const failed = (): void => {
+    k.persisted = Number.NaN;
+    k.loaded = undefined;
+  };
   k.loaded ??= (async () => {
     let timer: { cancel(): void } | undefined;
     try {
-      const read = Promise.resolve($.store.get(DENSITY_KEY));
-      read.catch(() => undefined); // a late rejection after the wait must not go unhandled
+      // a sync throw must become a rejection: k.loaded is assigned only after this IIFE returns, so a sync failure would be memoized
+      const read = new Promise((resolve) => resolve($.store.get(DENSITY_KEY)));
       const late = new Promise<undefined>((resolve) => {
         timer = $.clock.after(STORE_WAIT_MS, () => resolve(undefined));
       });
-      const stored = await Promise.race([read, late]);
-      const v = isRecord(stored) ? stored["v"] : undefined;
-      if (typeof v === "number" && Number.isFinite(v) && v >= MIN_DENSITY && v <= MAX_DENSITY && k.samples === 0) {
-        k.density = v;
-        k.persisted = v;
-        const n = isRecord(stored) ? stored["n"] : undefined;
-        k.samples = typeof n === "number" && Number.isInteger(n) && n > 0 ? n : 0;
-      }
+      let timedOut = false;
+      const stored = await Promise.race([read, late.then(() => (timedOut = true, undefined))]);
+      if (timedOut) {
+        // a slow store still holds the real statistic: unknown until read, so learn() must not overwrite it; a late answer still counts
+        k.persisted = Number.NaN;
+        read.then(apply, failed);
+      } else apply(stored);
     } catch {
-      // best effort: the default density and an unreachable store must not fail a call
+      // best effort: an unreachable store must not fail a call
+      failed();
     } finally {
       timer?.cancel();
     }
@@ -150,6 +171,7 @@ export function learn($: Engine, k: Knowledge, chars: number, tokens: unknown): 
   if (!Number.isFinite(sample)) return;
   k.density = (1 - DENSITY_ALPHA) * k.density + DENSITY_ALPHA * Math.min(MAX_DENSITY, Math.max(MIN_DENSITY, sample));
   k.samples += 1;
+  if (Number.isNaN(k.persisted)) return;
   if (Math.abs(k.density - k.persisted) / k.persisted <= PERSIST_DELTA) return;
   k.persisted = k.density;
   try {

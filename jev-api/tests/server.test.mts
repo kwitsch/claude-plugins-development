@@ -138,6 +138,11 @@ describe("protocol", () => {
     const list = await c.rpc("tools/list");
     const tools = list["result"].tools as Msg[];
     assert.deepEqual(tools.map((t) => String(t["name"])).sort((a, b) => a.localeCompare(b)), ["cancel", "config", "request"]);
+    const req = tools.find((t) => t["name"] === "request");
+    assert.doesNotMatch(String(req?.["description"]), /environment/);
+    assert.match(String(req?.["description"]), /`config` tool/);
+    assert.equal(req?.["inputSchema"].properties.configGen.type, "integer");
+    assert.equal(tools.find((t) => t["name"] === "config")?.["inputSchema"].properties.gen.type, "integer");
     for (const t of tools) {
       assert.match(t["description"], /^Internal transport of the jev-api plugin; calls from the model are refused\./);
       assert.equal(t["_meta"]?.ui?.visibility, undefined); // a hidden tool is not callable by $.mcp.call
@@ -216,15 +221,11 @@ describe("request", () => {
     assert.deepEqual(outcomeOf(await c.request()), { kind: "http", status: 400, reason: "too big", refusal: { tokens: 40025, nctx: 32768 } });
   });
 
-  test("a refused connection is an error outcome without the host, the port or the key", async () => {
-    const c = start({ JEV_URL: "http://127.0.0.1:9/v1", TYPESAFE_API_KEY: KEY });
-    live.push(c);
-    const r = await c.request();
-    assert.equal(r["result"].isError, true);
-    const o = outcomeOf(r);
-    assert.equal(o["kind"], "error");
-    assert.equal(o["code"], "network");
-    assert.doesNotMatch(JSON.stringify(r), new RegExp(`${KEY}|127\\.0\\.0\\.1`));
+  test("a BOM-prefixed answer and refusal are decoded like fetch does (BOM stripped)", async () => {
+    const { s, c } = await boot({}, { body: "\uFEFF{\"answers\":{}}" });
+    assert.equal(outcomeOf(await c.request())["text"], "{\"answers\":{}}");
+    s.set({ status: 400, body: "\uFEFF" + JSON.stringify({ error: { code: 400, type: "exceed_context_size_error", message: "too big", n_prompt_tokens: 40025, n_ctx: 32768 } }) });
+    assert.deepEqual(outcomeOf(await c.request()), { kind: "http", status: 400, reason: "too big", refusal: { tokens: 40025, nctx: 32768 } });
   });
 
   test("without any System One variable the server answers a config error", async () => {
@@ -262,10 +263,59 @@ describe("request", () => {
     assert.equal(JSON.parse(b.seen[0].body).model, "m2");
   });
 
+  test("a request is served with the config of its own generation, even after newer configs from other calls (restart plus env change)", async () => {
+    const a = await stub();
+    const b = await stub();
+    stubs.push(a, b);
+    // a restarted server (no config), then the ping-pong of two calls with different env: A re-sends gen 3, B2 sends gen 4 before A's request arrives
+    const c = start({}, false);
+    live.push(c);
+    assert.equal(outcomeOf(await c.request({ callId: "a1", configGen: 1 }))["code"], "unconfigured");
+    await c.call("config", { jevUrl: b.url, gen: 2 });
+    await c.call("config", { jevUrl: a.url, gen: 3 });
+    await c.call("config", { jevUrl: b.url, gen: 4 });
+    assert.equal(outcomeOf(await c.request({ callId: "a1", configGen: 3 }))["kind"], "ok");
+    assert.equal(outcomeOf(await c.request({ callId: "b1", configGen: 2 }))["kind"], "ok");
+    assert.equal(outcomeOf(await c.request({ callId: "b2", configGen: 4 }))["kind"], "ok");
+    assert.equal(a.seen.length, 1);
+    assert.equal(b.seen.length, 2);
+    // only the last 16 generations are kept: an evicted or unknown one is unconfigured again
+    for (let g = 5; g <= 20; g++) await c.call("config", { jevUrl: b.url, gen: g });
+    assert.equal(outcomeOf(await c.request({ callId: "x", configGen: 4 }))["code"], "unconfigured");
+    assert.equal(outcomeOf(await c.request({ callId: "y", configGen: 5 }))["kind"], "ok");
+  });
+
+  test("a configGen or gen that is not a whole number is refused: no request is sent and the newest config stays", async () => {
+    const a = await stub();
+    const b = await stub();
+    stubs.push(a, b);
+    const c = start({}, false);
+    live.push(c);
+    await c.call("config", { jevUrl: a.url, gen: 1 });
+    const bad = await c.call("config", { jevUrl: b.url, gen: 1.5 });
+    assert.equal(bad["result"].isError, true);
+    assert.match(bad["result"].content[0].text, /gen must be a whole number/);
+    for (const configGen of ["1", null, 1.5]) {
+      const r = await c.request({ callId: `g${String(configGen)}`, configGen });
+      assert.equal(r["result"].isError, true);
+      assert.match(r["result"].content[0].text, /configGen must be a whole number/);
+    }
+    assert.equal(outcomeOf(await c.request({ callId: "n" }))["kind"], "ok");
+    assert.equal(a.seen.length, 1);
+    assert.equal(b.seen.length, 0);
+  });
+
   test("blank variables count as unset", async () => {
     const c = start({ JEV_URL: "  ", TYPESAFE_API_KEY: "\t" });
     live.push(c);
-    assert.equal(outcomeOf(await c.request())["code"], "config");
+    assert.deepEqual(outcomeOf(await c.request()), { kind: "error", code: "config", message: "no System One access configured: set TYPESAFE_API_KEY, TYPESAFE_BASE_URL or JEV_URL" });
+  });
+
+  test("a blank jevUrl in a config call is unset, not an invalid endpoint", async () => {
+    const c = start({});
+    live.push(c);
+    await c.call("config", { jevUrl: "  ", key: KEY });
+    assert.notEqual(outcomeOf(await c.request())["message"], "JEV_URL must be an http(s) URL");
   });
 
   test("an invalid JEV_URL is a config error and sends nothing", async () => {
@@ -314,6 +364,15 @@ describe("request", () => {
     assert.equal(outcomeOf(await c.request({ callId: "c2" }))["kind"], "ok");
   });
 
+  test("an error answer over 1 MiB keeps its status", async () => {
+    for (const status of [400, 503]) {
+      const { c } = await boot({}, { status, body: JSON.stringify({ detail: "x".repeat(1_100_000) }) });
+      const o = outcomeOf(await c.request());
+      assert.equal(o["kind"], "http");
+      assert.equal(o["status"], status);
+    }
+  });
+
   test("a state or question text with U+2028 or U+2029 is answered (readline would cut the line there)", async () => {
     const { s, c } = await boot({}, { body: "{\"answers\":{}}" });
     for (const [i, ch] of [" ", " "].entries()) {
@@ -339,9 +398,12 @@ describe("request", () => {
     await closedStub.close();
     const c = start({ JEV_URL: url, TYPESAFE_API_KEY: KEY });
     live.push(c);
-    const o = outcomeOf(await c.request());
+    const r = await c.request();
+    assert.equal(r["result"].isError, true);
+    const o = outcomeOf(r);
     assert.equal(o["code"], "network");
     assert.equal(o["message"], "fetch failed (ECONNREFUSED)");
+    assert.doesNotMatch(JSON.stringify(r), new RegExp(`${KEY}|127\\.0\\.0\\.1|:${new URL(url).port}`));
   });
 
   test("two requests run at the same time", async () => {
@@ -429,6 +491,7 @@ describe("timeout and cancel", () => {
   test("a blank JEV_API_TOMBSTONE_MS is unset: the cancel is remembered", async () => {
     const { s, c } = await boot({ JEV_API_TOMBSTONE_MS: " " });
     await c.call("cancel", { callId: "blank" });
+    await new Promise((r) => setTimeout(r, 2500)); // the default lifetime (60 s) is far longer
     assert.equal(outcomeOf(await c.request({ callId: "blank" }))["code"], "aborted");
     assert.equal(s.seen.length, 0);
   });
@@ -438,8 +501,10 @@ describe("timeout and cancel", () => {
     for (let i = 0; i < 300; i++) c.send({ id: 1000 + i, method: "tools/call", params: { name: "cancel", arguments: { callId: `t${i}` } } });
     await c.call("cancel", { callId: "t-last" });
     assert.equal(outcomeOf(await c.request({ callId: "t-last" }))["code"], "aborted"); // newest is kept
-    assert.equal(outcomeOf(await c.request({ callId: "t0" }))["kind"], "ok"); // oldest was evicted
-    assert.equal(s.seen.length, 1);
+    assert.equal(outcomeOf(await c.request({ callId: "t45" }))["code"], "aborted"); // 301 sent, newest 256 kept: t45 is the edge
+    assert.equal(outcomeOf(await c.request({ callId: "t44" }))["kind"], "ok"); // just evicted
+    assert.equal(outcomeOf(await c.request({ callId: "t0" }))["kind"], "ok");
+    assert.equal(s.seen.length, 2);
   });
 
   test("notifications/cancelled aborts the request with that JSON-RPC id and sends no answer for it", async () => {

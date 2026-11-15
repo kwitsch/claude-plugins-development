@@ -23,7 +23,7 @@ const okReply = (tokens?: number): Reply => httpReply(200, JSON.stringify({ mode
 const tooBig = (tokens: number, nctx = 32768): Reply => httpReply(400, JSON.stringify({ error: { code: 400, message: `request (${tokens} tokens) exceeds the available context size (${nctx} tokens), try increasing it`, type: "exceed_context_size_error", n_prompt_tokens: tokens, n_ctx: nctx } }));
 
 /** The `$.store` of a test: records every set and can be primed or made to fail. */
-type Store = { data: Map<string, unknown>; sets: [string, unknown][]; gets: string[]; failGet: boolean; failSet: boolean };
+type Store = { data: Map<string, unknown>; sets: [string, unknown][]; gets: string[]; failGet: boolean; failSet: boolean; late?: Promise<unknown> };
 
 /**
  * Stubs every `$` op the module uses: env (explicit), the clock, tool registration, `http.fetch` (answers come from
@@ -34,7 +34,7 @@ function setup(on: On, opts: { env?: Record<string, string>; replies?: Reply[]; 
   const specs: Record<string, unknown>[] = [];
   const store: Store = { data: new Map(Object.entries(opts.store ?? {})), sets: [], gets: [], failGet: false, failSet: false };
   mock.env(on, opts.env ?? JEV);
-  mock.clock(on);
+  const clock = mock.clock(on);
   on("tool.register", async (_$, e) => {
     specs.push(e);
     return { value: { tool: TOOL(String(e.name)) } };
@@ -47,6 +47,7 @@ function setup(on: On, opts: { env?: Record<string, string>; replies?: Reply[]; 
   });
   on("store.get", (_$, e) => {
     store.gets.push(String(e.key));
+    if (store.late) return store.late.then((value) => ({ value }));
     if (store.failGet) return { deny: "store unavailable" };
     return { value: store.data.get(String(e.key)) };
   });
@@ -57,7 +58,7 @@ function setup(on: On, opts: { env?: Record<string, string>; replies?: Reply[]; 
     return { value: undefined };
   });
   on("session.start", async (_$, e) => ({ cwd: e.cwd }));
-  return { fetched, specs, store };
+  return { fetched, specs, store, clock };
 }
 
 const BASE: Record<string, Record<string, unknown>> = {
@@ -184,6 +185,75 @@ for (const [name, bad] of [["out of range", { v: 99, n: 1 }], ["below 1", { v: 0
   });
 }
 
+test("a store read that outlasts the wait is never overwritten by a density learned from few samples", async ($, on) => {
+  const { store, clock, fetched } = setup(on, { replies: [okReply(3000)] });
+  let release = (_v: unknown) => {};
+  store.late = new Promise((r) => (release = r));
+  const first = call($, "noul", SMALL);
+  await $.session.start({ cwd: "/proj", surface: "terminal", isInteractive: true });
+  await clock.advance(1000);
+  expect((await first).deny).toBeUndefined();
+  expect(store.sets).toHaveLength(0);
+  // the late answer replaces the one-sample density: the next sample is folded into the stored 500
+  release({ v: 2, n: 500 });
+  await call($, "noul", SMALL);
+  expect(store.sets).toHaveLength(1);
+  const stored = store.sets[0][1] as { v: number; n: number };
+  expect(stored.v).toBeCloseTo(smoothed(2, promptChars(fetched[1]) / (3000 - 26)), 6);
+  expect(stored.n).toBe(501);
+});
+
+test("a store read that fails is never overwritten by a density learned from one sample", async ($, on) => {
+  const { store } = setup(on, { replies: [okReply(3000)], store: { density: { v: 2, n: 500 } } });
+  store.failGet = true;
+  await call($, "noul", { state: "a".repeat(20000), timeout: 30 });
+  expect(store.sets).toHaveLength(0);
+});
+
+test("a failed store read is read again by the next call, which then stores a large move", async ($, on) => {
+  // sample 20070 / 1974 is about 10, clamped to 8: the stored 3.0 (10 samples) moves to 4.0
+  const { store } = setup(on, { replies: [okReply(2000)], store: { density: { v: 3, n: 10 } } });
+  store.failGet = true;
+  await call($, "noul", SMALL);
+  expect(store.sets).toHaveLength(0);
+  store.failGet = false;
+  await call($, "noul", SMALL);
+  expect(store.gets).toEqual(["density", "density"]);
+  expect(store.sets).toHaveLength(1);
+  expect((store.sets[0][1] as { v: number; n: number }).v).toBeCloseTo(4, 6);
+});
+
+test("a store read that times out and is then refused is read again by the next call", async ($, on) => {
+  const { store, clock } = setup(on, { replies: [okReply(2000)], store: { density: { v: 3, n: 10 } } });
+  let refuse = (_e: unknown) => {};
+  store.late = new Promise((_, rej) => (refuse = rej));
+  const first = call($, "noul", SMALL);
+  await $.session.start({ cwd: "/proj", surface: "terminal", isInteractive: true });
+  await clock.advance(1000);
+  expect((await first).deny).toBeUndefined();
+  refuse(new Error("store gone"));
+  await clock.advance(0);
+  store.late = undefined;
+  await call($, "noul", SMALL);
+  expect(store.gets).toEqual(["density", "density"]);
+  expect(store.sets).toHaveLength(1);
+});
+
+test("a store read that answers after the wait still counts: a missing key lets a large move be stored", async ($, on) => {
+  const { store, clock } = setup(on, { replies: [okReply(2000)] });
+  let release = (_v: unknown) => {};
+  store.late = new Promise((r) => (release = r));
+  const first = call($, "noul", SMALL);
+  await $.session.start({ cwd: "/proj", surface: "terminal", isInteractive: true });
+  await clock.advance(1000);
+  expect((await first).deny).toBeUndefined();
+  expect(store.sets).toHaveLength(0);
+  release(undefined);
+  await call($, "noul", SMALL);
+  expect(store.gets).toEqual(["density"]);
+  expect(store.sets).toHaveLength(1);
+});
+
 test("the store is read once per module instance, not on every call", async ($, on) => {
   const { store } = setup(on, { replies: [okReply(5000)] });
   await call($, "noul", SMALL);
@@ -244,6 +314,15 @@ test("a rejection teaches the density from its exact token count", async ($, on)
   const { store, fetched } = setup(on, { replies: [tooBig(20000, 16384)] });
   await call($, "noul", BIG);
   expect((store.sets[0][1] as { v: number }).v).toBeCloseTo(smoothed(3, promptChars(fetched[0]) / (20000 - 26)), 6);
+});
+
+test("a learned context window does not outlive a model switch", async ($, on) => {
+  const env: Record<string, string> = { ...JEV, TYPESAFE_DEFAULT_MODEL: "small-ctx" };
+  const { fetched } = setup(on, { env, replies: [tooBig(15000, 8192), okReply()] });
+  expect((await call($, "noul", { state: "word ".repeat(12_000), timeout: 20, overflow: "error" })).deny).toContain("the limit is 8191");
+  env.TYPESAFE_DEFAULT_MODEL = "big-ctx";
+  expect((await call($, "noul", { state: "word ".repeat(12_000), timeout: 20, overflow: "error" })).deny).toBeUndefined();
+  expect(fetched.map((f) => f.body.model)).toEqual(["small-ctx", "big-ctx"]);
 });
 
 // --- Phase 4: the preflight and the overflow modes ---------------------------------------------------------------------
@@ -428,6 +507,13 @@ test("truncate mode cuts the middle of an oversized state to what the time budge
   expect(fetched[0].body.state).toBe(cut(state, keep));
 });
 
+test("truncate mode refuses instead of sending an empty state when the questions fill the budget", async ($, on) => {
+  const { fetched } = setup(on);
+  const r = await call($, "noul", { instructions: "Is this about animals? " + "x".repeat(3000), state: "The cat sat on the mat. ".repeat(400), timeout: 1, overflow: "truncate" });
+  expect(r.deny).toMatch(/state too large/);
+  expect(fetched).toHaveLength(0);
+});
+
 test("truncate mode sends a state that fits unchanged", async ($, on) => {
   const { fetched } = setup(on);
   await call($, "noul", { state: "Hello there!", timeout: 20, overflow: "truncate" });
@@ -448,13 +534,13 @@ test("truncate mode never leaves half of a surrogate pair at a cut", async ($, o
   }
 });
 
-test("truncate mode with a state that cannot keep a character still sends the marker alone", async ($, on) => {
+test("truncate mode with a state that cannot keep a character refuses and sends nothing", async ($, on) => {
   // 1 s time budget of about 1069 tokens: the 255 long options leave no room for any state at all.
   const criteria = Object.fromEntries(Array.from({ length: 255 }, (_, i) => [`option-${i}`, "d".repeat(200)]));
   const { fetched } = setup(on, { replies: [okReply()] });
-  await call($, "choice", { state: "x".repeat(20_000), criteria, timeout: 1, overflow: "truncate" });
-  expect(fetched).toHaveLength(1);
-  expect(fetched[0].body.state).toMatch(/^\n\[\.\.\. 20000 characters omitted \.\.\.\]\n$/);
+  const r = await call($, "choice", { state: "x".repeat(20_000), criteria, timeout: 1, overflow: "truncate" });
+  expect(r.deny).toMatch(/state too large/);
+  expect(fetched).toHaveLength(0);
 });
 
 test("after the server's refusal truncate retries once with the exact cut and answers", async ($, on) => {
@@ -483,6 +569,22 @@ test("a second refusal after the retry is answered with the numbers and nothing 
   const r = await call($, "noul", { state: "a".repeat(100_000), timeout: 30, overflow: "truncate" });
   expect(fetched).toHaveLength(2);
   expect(r.deny).toMatch(/^noul: state too large for System One: the request has 9000 tokens, the limit is 8191; shorten the state to about \d+ characters$/);
+});
+
+test("an HTTP error on the cut request after a refusal is taken over by Haiku", async ($, on) => {
+  setup(on, { replies: [tooBig(40025, 8192), httpReply(500, "boom")] });
+  on("model.complete", () => ({ value: { isAnswered: false, reason: "overloaded" } }));
+  const r = await $.tool.call({ tool: TOOL("noul"), ...BASE["noul"], state: "a".repeat(100_000), timeout: 30, overflow: "truncate" }) as Result;
+  expect(r.result).toBeUndefined();
+  expect(r.deny).toMatch(/^noul: .*500.*; fallback: overloaded$/);
+});
+
+test("an HTTP error on the cut request of the preflight path is taken over by Haiku", async ($, on) => {
+  setup(on, { replies: [httpReply(500, "boom")] });
+  on("model.complete", () => ({ value: { isAnswered: false, reason: "overloaded" } }));
+  const r = await $.tool.call({ tool: TOOL("noul"), ...BASE["noul"], state: HUGE, timeout: 20, overflow: "truncate" }) as Result;
+  expect(r.result).toBeUndefined();
+  expect(r.deny).toMatch(/^noul: .*500.*; fallback: overloaded$/);
 });
 
 test("after the server's refusal haiku answers through the model", async ($, on) => {

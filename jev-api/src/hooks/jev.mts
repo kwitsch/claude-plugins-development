@@ -5,8 +5,8 @@
  * @packageDocumentation
  */
 
-import { askHaiku, HAIKU_MAX_CHARS } from "./haiku.mjs";
-import { cutState, DEFAULT_DENSITY, estimateTokens, isTooBig, learn, MAX_DENSITY, OPTIMISTIC_FACTOR, preflightError, refusedDensity, stateForBudget, timeBudgetTokens, tooBigError } from "./size.mjs";
+import { askHaiku, HAIKU_MAX_CHARS, hasAnswerShape } from "./haiku.mjs";
+import { cutState, DEFAULT_CONTEXT_TOKENS, DEFAULT_DENSITY, estimateTokens, isTooBig, learn, MAX_DENSITY, OPTIMISTIC_FACTOR, preflightError, refusedDensity, stateForBudget, timeBudgetTokens, tooBigError } from "./size.mjs";
 import type { Knowledge, TooBig } from "./size.mjs";
 import { now, sendOutcome } from "./transport.mjs";
 import type { Link } from "./transport.mjs";
@@ -71,7 +71,7 @@ export async function ask($: Engine, tool: ToolName, state: string, questions: Q
   const list: Record<string, unknown>[] = [];
   for (const [i, q] of questions.entries()) {
     const answer = isRecord(answers) ? answers[ids[i]] : undefined;
-    if (!isRecord(answer) || answer["type"] !== q.type) return fail(tool, `response had no ${q.type} answer${tool === "batch" ? ` for questions[${i}]` : ""}`);
+    if (!isRecord(answer) || !hasAnswerShape(q, answer)) return fail(tool, `response had no valid ${q.type} answer${tool === "batch" ? ` for questions[${i}]` : ""}`);
     list.push(answer);
   }
   return { result: JSON.stringify(tool === "batch" ? list : list[0]) };
@@ -104,10 +104,15 @@ export async function answerJev($: Engine, tool: ToolName, input: { state: strin
     // Haiku failed too: the model reads both reasons, the HTTP one first
     return r.deny?.startsWith(`${tool}: fallback: `) ? fail(tool, `${why}; ${r.deny.slice(tool.length + 2)}`) : r;
   };
-  // A refusal also tells the server's context window: remembered for the rest of the instance.
-  const send = async (state: string) => {
-    const answer = await ask($, tool, state, input.questions, env, timeoutMs, signal, questionsChars, (chars, tokens) => learn($, know, chars, tokens), link);
-    if (isTooBig(answer)) know.nctx = answer.tooBig.limit + 1;
+  // A refusal also tells the server's context window: remembered while the endpoint and model stay the same.
+  const src = JSON.stringify([env.jevUrl, env.base, env.model]);
+  if (know.nctxFor !== src) know.nctx = DEFAULT_CONTEXT_TOKENS;
+  const send = async (state: string, requestMs: number = timeoutMs) => {
+    const answer = await ask($, tool, state, input.questions, env, requestMs, signal, questionsChars, (chars, tokens) => learn($, know, chars, tokens), link);
+    if (isTooBig(answer)) {
+      know.nctx = answer.tooBig.limit + 1;
+      know.nctxFor = src;
+    }
     return answer;
   };
   const limit = know.nctx - 1;
@@ -124,14 +129,29 @@ export async function answerJev($: Engine, tool: ToolName, input: { state: strin
     if (signal.aborted) return fail(tool, "the call was abandoned");
   }
   if (mode === "error") return refused ? tooBigError(tool, refused, budget) : preflightError(tool, estimate, budget, limit, timeoutMs, stateForBudget(budget, know.density, questionsChars));
-  if (mode === "haiku") return await askHaiku($, tool, cutState(input.state, HAIKU_MAX_CHARS), input.questions, timeoutMs, signal);
+  if (mode === "haiku") {
+    // after a refusal the request used part of the budget: Haiku gets the time left, as in takeOver; the preflight path sent nothing
+    const left = refused ? timeoutMs - ((await now($)) - started) : timeoutMs;
+    if (signal.aborted) return fail(tool, "the call was abandoned");
+    if (left < 1) return tooBigError(tool, refused!, budget);
+    return await askHaiku($, tool, cutState(input.state, HAIKU_MAX_CHARS), input.questions, Math.round(left), signal);
+  }
   // truncate: what the budget (the limit and the timeout) allows, at the learned density, or after a refusal at the exact density its count gave;
   // a cut sent without a refusal before it (the preflight said no) that is refused too gets one more cut at its exact density, so never more than two requests
-  const cut = (r: TooBig["tooBig"] | undefined) => send(cutState(input.state, stateForBudget(r ? Math.min(budget, r.limit) : budget, r ? refusedDensity(r) : know.density, questionsChars)));
-  let answer = await cut(refused);
+  // No state left to send (the questions alone fill the budget): the answer would be about an empty text, so refuse instead.
+  // a cut that follows a request gets the time left, as in takeOver, and is sized to it; the first cut of the preflight path has the whole timeout
+  const cut = async (r: TooBig["tooBig"] | undefined, afterRequest: boolean) => {
+    const left = afterRequest ? timeoutMs - ((await now($)) - started) : timeoutMs;
+    if (left < 1) return tooBigError(tool, r!, budget);
+    const cutBudget = Math.min(limit, timeBudgetTokens(left));
+    const keep = stateForBudget(r ? Math.min(cutBudget, r.limit) : cutBudget, r ? refusedDensity(r) : know.density, questionsChars);
+    if (keep <= 0 && input.state.length > 0) return r ? tooBigError(tool, r, budget) : preflightError(tool, estimate, budget, limit, timeoutMs, keep);
+    return send(cutState(input.state, keep), Math.round(left));
+  };
+  let answer = await cut(refused, !!refused);
   if (!refused && isTooBig(answer)) {
     if (signal.aborted) return fail(tool, "the call was abandoned");
-    answer = await cut(answer.tooBig);
+    answer = await cut(answer.tooBig, true);
   }
   if (isFailed(answer)) return await takeOver(answer.failed);
   return isTooBig(answer) ? tooBigError(tool, answer.tooBig, budget) : answer;

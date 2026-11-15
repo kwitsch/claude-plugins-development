@@ -22,21 +22,22 @@ const SRC = path.join(ROOT, "src");
 /**
  * Every file below a directory, recursively.
  *
+ * Symlinks are returned as files, never followed.
+ *
  * @param dir - Directory to walk; a missing one yields no files.
  * @returns The file paths.
  */
 const walk = (dir: string): string[] =>
   existsSync(dir)
-    ? readdirSync(dir, { recursive: true, withFileTypes: true })
-      .filter((d) => !d.isDirectory())
-      .map((d) => path.join(d.parentPath, d.name))
+    // a symlink is listed as a file and never descended into (a recursive readdir would follow it out of dir)
+    ? readdirSync(dir, { withFileTypes: true }).flatMap((d) => d.isDirectory() ? walk(path.join(dir, d.name)) : [path.join(dir, d.name)])
     : [];
 
 /** Where the bundled helper modules of a function-hooks plugin are written. */
 const libPath = (): string => path.join(PLUGIN, "hooks", "lib.mjs");
 
 /** The helper name of a sibling import source `./name.mjs`, else undefined. */
-const siblingName = (source: string): string | undefined => /^\.\/([\w-]+)\.mjs$/.exec(source)?.[1];
+const siblingName = (source: string): string | undefined => /^\.\/([^/]+)\.mjs$/.exec(source)?.[1];
 
 /**
  * Cuts spans out of code and puts their replacement in. A span followed by a line break takes it along when its
@@ -60,10 +61,10 @@ const splice = (code: string, spans: { start: number; end: number; text: string 
  * `plugin/hooks/hooks.json` does not list; the listed entry modules stay separate files (Claude Code reads them) and
  * import what they need from `./lib.mjs` instead of the helpers. Works on type-stripped code; imports and exports are
  * taken from the oxc-parser parse, never matched by line (a line of a multi-line template literal can look like one).
- * Relies on what the sources guarantee, all of it checked here: helpers import each other by `./name.mjs` with named
+ * Relies on what the sources guarantee, all of it checked here except the module-level state, which stays the author's duty: helpers import each other by `./name.mjs` with named
  * imports only (no `as`), export only declarations, their top-level names (imported or declared) are unique across
  * helpers (they were one file once; named imports of one other source, such as `node:path`, merge into one import),
- * and they keep no state at module level that a test kit reload could miss. Only the entries may import a helper: the
+ * and they keep no state at module level that a test kit reload could miss (not detected). Only the entries may import a helper: the
  * helper files are not shipped, so any other module importing one fails the build.
  *
  * @param compiled - Type-stripped code by output path.
@@ -79,11 +80,21 @@ function bundleLib(compiled: Map<string, string>): { members: string[]; entries:
     console.error(`bundleHooksLib: ${msg}`);
     return process.exit(1);
   };
-  /** The module's static imports and `export` statement starts, from the parse. */
-  const parse = (f: string, code: string): { imports: StaticImport[]; exports: number[] } => {
+  if (!listed.length) fail("hooks.json lists no modules");
+  for (const e of entryPaths) if (!compiled.has(e)) fail(`hooks.json lists ${path.relative(ROOT, e)}, which has no source`);
+  /** The module's static imports, `export` statement starts, re-export sources and literal dynamic import sources, from the parse. */
+  const parse = (f: string, code: string): { imports: StaticImport[]; exports: number[]; reexports: string[]; dynamics: string[] } => {
     const r = parseSync(f, code, { sourceType: "module" });
     if (r.errors.length) fail(`${path.relative(ROOT, f)} does not parse: ${r.errors[0].message}`);
-    return { imports: r.module.staticImports, exports: r.module.staticExports.map((e) => e.start) };
+    return {
+      imports: r.module.staticImports,
+      exports: r.module.staticExports.map((e) => e.start),
+      reexports: r.module.staticExports.flatMap((e) => e.entries.flatMap((x) => (x.moduleRequest ? [x.moduleRequest.value] : []))),
+      dynamics: r.module.dynamicImports.flatMap((d) => {
+        const m = /^(["'`])([^"'`$\\]*)\1$/.exec(code.slice(d.moduleRequest.start, d.moduleRequest.end).trim());
+        return m ? [m[2]] : [];
+      }),
+    };
   };
   /** The specifiers (`a`, `a as b`) of an import of helper `name`; fails on a namespace, default or side-effect import. */
   const namedSpecs = (f: string, imp: StaticImport, name: string): string[] => {
@@ -94,11 +105,25 @@ function bundleLib(compiled: Map<string, string>): { members: string[]; entries:
   };
   // a helper file is not shipped: a module outside the bundle (bin/, mcp/, a hooks subdirectory) must not import one
   const memberSet = new Set(members);
+  /** The helper file a specifier of module `f` names (a `?query` or `#fragment` ignored, as Node does), or undefined when it names no helper. */
+  const helperOf = (f: string, spec: string): string | undefined => {
+    if (!/^\.{0,2}\//.test(spec) && spec !== "." && spec !== "..") return undefined; // a bare specifier ("util") is a builtin or package, never a file
+    const target = path.resolve(path.dirname(f), spec.replace(/[?#].*$/, "").replace(/\.mjs$/, "") + ".mjs");
+    return memberSet.has(target) ? target : undefined;
+  };
   for (const [f, code] of compiled) {
     if (memberSet.has(f) || entryPaths.has(f)) continue;
-    for (const imp of parse(f, code).imports) {
-      const target = path.resolve(path.dirname(f), imp.moduleRequest.value);
-      if (memberSet.has(target)) fail(`${path.relative(ROOT, f)} imports ${path.relative(ROOT, target)}, which is bundled into lib.mjs`);
+    const p = parse(f, code);
+    for (const src of [...p.imports.map((i) => i.moduleRequest.value), ...p.reexports, ...p.dynamics]) {
+      const target = helperOf(f, src);
+      if (target !== undefined) fail(`${path.relative(ROOT, f)} imports, re-exports or dynamically imports ${path.relative(ROOT, target)}, which is bundled into lib.mjs`);
+    }
+  }
+  // a dynamic import("./helper.mjs") in an entry or a helper resolves to a file that is not shipped
+  for (const [f, code] of compiled) {
+    if (!memberSet.has(f) && !entryPaths.has(f)) continue;
+    for (const src of parse(f, code).dynamics) {
+      if (helperOf(f, src) !== undefined) fail(`${path.relative(ROOT, f)} dynamically imports ${src}, which is bundled into lib.mjs`);
     }
   }
   // the helpers in dependency order (a helper after the helpers it imports), the other imports (node:) hoisted
@@ -116,6 +141,9 @@ function bundleLib(compiled: Map<string, string>): { members: string[]; entries:
     for (const imp of imports) {
       const name = siblingName(imp.moduleRequest.value);
       if (name === undefined) {
+        // a helper reached by another spelling (`../hooks/a.mjs`, `././a.mjs`, `./a.mjs?v=1`) would stay imported though its file is deleted
+        const spec = imp.moduleRequest.value;
+        if (helperOf(f, spec) !== undefined) fail(`${path.relative(ROOT, f)} imports ${spec}, a helper, other than by ./name.mjs`);
         hoisted.add(code.slice(imp.start, imp.end).trim());
         continue;
       }
@@ -140,18 +168,22 @@ function bundleLib(compiled: Map<string, string>): { members: string[]; entries:
   for (const f of members) visit(f);
   // named imports of one source merge into one import (the same name from two helpers is bound once); others stay whole lines
   const named = new Map<string, Set<string>>();
-  const imports: string[] = [];
+  const imports = new Set<string>(); // identical lines (a default shared by two helpers) bind once
   for (const line of hoisted) {
-    const m = /^import\s*\{([^}]*)\}\s*from\s*(["'][^"']*["']);?$/.exec(line);
-    if (!m) imports.push(line);
-    else for (const s of m[1].split(",").map((x) => x.trim().replace(/\s+/g, " ")).filter(Boolean)) named.set(m[2], (named.get(m[2]) ?? new Set()).add(s));
+    const m = /^import\s*(?:([\w$]+)\s*,\s*)?\{([^}]*)\}\s*from\s*(["'][^"']*["']);?$/.exec(line);
+    if (!m) imports.add(line);
+    else {
+      if (m[1] !== undefined) imports.add(`import ${m[1]} from ${m[3]};`); // the default stays its own line
+      for (const s of m[2].split(",").map((x) => x.trim().replace(/\s+/g, " ")).filter(Boolean)) named.set(m[3], (named.get(m[3]) ?? new Set()).add(s));
+    }
   }
-  for (const [source, specs] of named) imports.push(`import { ${[...specs].join(", ")} } from ${source};`);
+  for (const [source, specs] of named) imports.add(`import { ${[...specs].join(", ")} } from ${source};`);
   // every hoisted import binds a name once (declared names are left to the Node parse below, which sees the real syntax)
   const seen = new Map<string, string>();
   const bind = (name: string, where: string): void => {
     const other = seen.get(name);
     if (other !== undefined) fail(`${name} is bound by ${other} and ${where}`);
+    if (name in globalThis) fail(`top-level name ${name} of a helper shadows the global ${name} for every other helper; rename it (${where})`);
     seen.set(name, where);
   };
   for (const line of imports) {
@@ -167,9 +199,18 @@ function bundleLib(compiled: Map<string, string>): { members: string[]; entries:
     // all imports of helpers become one import from lib.mjs, in the place of the first
     const taken: string[] = [];
     const spans: { start: number; end: number; text: string }[] = [];
-    for (const imp of parse(f, code).imports) {
+    const parsed = parse(f, code);
+    // any other spelling of a helper (`././a.mjs`, `../hooks/a.mjs`, `export ... from`) would survive as an import of a deleted file
+    const plain = new Set(parsed.imports.map((i) => i.moduleRequest.value).filter((v) => siblingName(v) !== undefined && helperOf(f, v) !== undefined));
+    for (const src of [...parsed.imports.map((i) => i.moduleRequest.value), ...parsed.reexports]) {
+      const isPlainImport = plain.has(src) && !parsed.reexports.includes(src);
+      if (helperOf(f, src) !== undefined && !isPlainImport) {
+        fail(`${path.relative(ROOT, f)} imports/re-exports ${src}, a helper, other than by a named import from ./name.mjs`);
+      }
+    }
+    for (const imp of parsed.imports) {
       const name = siblingName(imp.moduleRequest.value);
-      if (name === undefined || !byName.has(name)) continue;
+      if (name === undefined || helperOf(f, imp.moduleRequest.value) === undefined) continue;
       for (const n of namedSpecs(f, imp, name)) {
         taken.push(n);
         needed.add(n.split(" as ")[0]);
@@ -177,15 +218,38 @@ function bundleLib(compiled: Map<string, string>): { members: string[]; entries:
       spans.push({ start: imp.start, end: imp.end, text: "" });
     }
     // the first helper import becomes the lib.mjs import, the others go (with their line break)
-    if (spans.length) spans[0].text = `import { ${taken.sort().join(", ")} } from "./lib.mjs";`;
+    if (spans.length) spans[0].text = `import { ${taken.sort().join(", ")} } from "${path.relative(path.dirname(f), libPath()).split(path.sep).map((x, i) => (i === 0 && x !== ".." ? `./${x}` : x)).join("/")}";`;
     entries.set(f, splice(code, spans));
   }
   const text = ordered.map((f) => bodies.get(f) ?? "").join("\n");
-  const code = `${imports.join("\n")}\n${text}\nexport { ${[...needed].sort().join(", ")} };\n`;
+  const code = `${[...imports].join("\n")}\n${text}\nexport { ${[...needed].sort().join(", ")} };\n`;
   // Node's parse catches every duplicate top-level binding (a name declared in two helpers, or declared and imported)
   // before it ships; a line scan of the bodies would also match declaration-like lines inside template literals
   const check = spawnSync(process.execPath, ["--check", "--input-type=module"], { input: code, encoding: "utf8" });
   if (check.status !== 0) fail(`lib.mjs does not parse (a top-level name bound twice across helpers?):\n${check.stderr}`);
+  // a top-level name that is a global (`URL`, `Buffer`) captures that global in every other helper that uses it
+  // shortcut: any such name fails, though no other helper may use the global; rename it or upgrade to a free-reference scope pass
+  interface Node {
+    type: string;
+    name?: string;
+    id?: Node | null;
+    declarations?: { id: Node }[];
+    properties?: Node[];
+    elements?: (Node | null)[];
+    value?: Node;
+    argument?: Node;
+    left?: Node;
+  }
+  const ids = (n: Node | null | undefined): string[] => {
+    if (!n) return [];
+    if (n.type === "Identifier") return n.name === undefined ? [] : [n.name];
+    if (n.type === "AssignmentPattern") return ids(n.left);
+    return [...(n.properties ?? []), ...(n.elements ?? [])].flatMap((x) => ids(x?.value ?? x?.argument ?? x?.left ?? x));
+  };
+  for (const n of parseSync("lib.mjs", code, { sourceType: "module" }).program.body as unknown as Node[]) {
+    const names = n.type === "VariableDeclaration" ? (n.declarations ?? []).flatMap((d) => ids(d.id)) : n.type === "FunctionDeclaration" || n.type === "ClassDeclaration" ? ids(n.id) : [];
+    for (const name of names) if (name in globalThis) fail(`top-level name ${name} of a helper shadows the global ${name} for every other helper; rename it`);
+  }
   return { members, entries, code };
 }
 
@@ -196,9 +260,6 @@ const layout = spawnSync(
   { stdio: "inherit" },
 );
 if (layout.status !== 0) process.exit(layout.status ?? 1);
-
-// 1. remove stale build output (plugin/ holds no hand-written .mjs)
-for (const f of walk(PLUGIN)) if (f.endsWith(".mjs")) rmSync(f);
 
 // 2. compile: strip types file by file (.mts -> .mjs), then minify.
 // Type checking is not part of the build: `pnpm lint` (oxlint --type-check) does it.
@@ -231,6 +292,8 @@ if ((pkg["pluginBuild"] as { bundleHooksLib?: unknown } | undefined)?.bundleHook
   compiled.set(libPath(), lib.code);
 }
 
+/** Minified output per file; nothing under plugin/ is touched until every step has succeeded. */
+const minified = new Map<string, string>();
 for (const [out, code] of compiled) {
   // shipped output is for node, not humans: minify (drops comments, keeps the shebang and export names).
   // Function-hooks entry modules (the ones plugin/hooks/hooks.json lists, and every hooks/*.mjs when nothing is bundled)
@@ -251,9 +314,15 @@ for (const [out, code] of compiled) {
     for (const e of m.errors) console.error(`${path.relative(ROOT, out)}: ${e.message}`);
     process.exit(1);
   }
+  minified.set(out, m.code.endsWith("\n") ? m.code : m.code + "\n");
+}
+
+// 1. remove stale build output (plugin/ holds no hand-written .mjs); only now, so a failed build leaves the old output
+for (const f of walk(PLUGIN)) if (f.endsWith(".mjs") && !minified.has(f)) rmSync(f);
+for (const [out, code] of minified) {
   mkdirSync(path.dirname(out), { recursive: true });
-  writeFileSync(out, m.code.endsWith("\n") ? m.code : m.code + "\n");
-  if (m.code.startsWith("#!")) chmodSync(out, 0o755);
+  writeFileSync(out, code);
+  if (code.startsWith("#!")) chmodSync(out, 0o755);
 }
 
 // 3. manifest: generated from <name>/package.json (the only manifest source) by plugin-manifest.mts

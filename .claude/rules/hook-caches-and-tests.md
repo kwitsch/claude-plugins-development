@@ -34,3 +34,5 @@ Learned from the jevfort performance worklist (F01-F08) and the bug hunt after i
 - Every decision constant (threshold, cap, cut point, option that turns a feature off with 0 or `false`) gets a test on both sides of the edge.
 - No wall-clock thresholds in tests; inject the clock.
 - Docs, task files and rules that state numbers, defaults or "scanned once" claims are updated in the commit that changes the behaviour.
+
+- A value learned from one answer (context window, density) is keyed to what produced it (endpoint, model) and reset when that changes; a persisted value is replaced only after a successful read, never after a failed or timed-out one. A budget (timeout) is one deadline per call: later steps (fallback, retry, truncate re-send, second model) get the time left, not the full timeout. Redact secrets from error text in the order longest/most specific first, per segment, tolerating bad escapes, including numeric values; a once-per-outage log needs its own test that fails when the guard is removed.
