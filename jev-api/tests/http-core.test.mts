@@ -181,3 +181,11 @@ describe("sendRequest", () => {
     expect(f.calls).toHaveLength(0);
   });
 });
+
+describe("sendRequest redaction of pieces", () => {
+  it("a bad percent escape in one segment does not stop redaction of a later query value", async () => {
+    const e = fake({ status: 422, text: "{\"detail\":\"bad token supersecret1\"}" });
+    const out = await sendRequest({ jevUrl: "https://h.example/p%zz/q?token=supersecret1" }, STATE, QUESTIONS, e.doFetch);
+    expect(out).toEqual({ kind: "http", status: 422, reason: "bad token <JEV_URL>" });
+  });
+});

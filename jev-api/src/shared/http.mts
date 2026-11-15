@@ -276,7 +276,13 @@ export async function sendRequest(env: HttpEnv, state: string, questionsObject: 
       const segs = u.pathname.split("/");
       if (!env.jevUrl) segs.length = Math.max(0, segs.length - 2); // the fixed `v1/systemone` tail is public
       const raw = [...segs, ...u.search.slice(1).split("&").flatMap((kv) => kv.split("=").slice(1)), ...u.searchParams.values()];
-      for (const r of raw) for (const v of [r, decodeURIComponent(r)]) if (v.length >= MIN_REDACT_KEY) pieces.add(v);
+      for (const r of raw) {
+        let d = r;
+        try {
+          d = decodeURIComponent(r);
+        } catch { /* a bad escape loses only this piece's decoded form */ }
+        for (const v of [r, d]) if (v.length >= MIN_REDACT_KEY) pieces.add(v);
+      }
     } catch {
       // Not parseable or a bad escape: the whole-URL forms above still apply.
     }
