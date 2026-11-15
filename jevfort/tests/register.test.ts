@@ -1541,6 +1541,25 @@ test("A subagent's turn.complete does not drop the jev-api listing", async ($, o
   expect(ids(sent)).toEqual(["effort", "mechanical"]);
 });
 
+test("A subagent's turn.complete with jev-api listed keeps the turn's listing for the next main-loop step", async ($, on) => {
+  const tools = [...JEV_TOOLS];
+  setup(on, { messages: [user("what does this project do?")], tools, jev: byId({ effort: easy }) });
+  claudeBeneath(on, []);
+  followUps(on);
+  sessionStubs(on);
+  on("session.end", async () => ({}));
+
+  await $.session.start(START);
+  await drain($.turn.step({ ...step, turnId: "t2" }));
+  await $.turn.complete(answered("s1", "Found it.", { agentId: "a1" }));
+  // jev-api goes away mid-turn: the subagent's end must not have dropped the turn's listing, so the next step still asks Jev.
+  tools.length = 0;
+  await drain($.turn.step({ ...step, turnId: "t2b" }));
+  // A relisting would find jev-api missing and hide the band's effort row.
+  const ui = await $.ui.mount(BAND);
+  expect(await levelProps(ui, "low")).toBeDefined();
+});
+
 test("The band shows the session effort bold and Jev's choice blue", async ($, on) => {
   const { clock } = setup(on, { messages: [user("what does this project do?")], jev: byId({ effort: easy }) });
   claudeBeneath(on, []);
