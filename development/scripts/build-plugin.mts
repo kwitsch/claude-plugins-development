@@ -80,10 +80,18 @@ function bundleLib(compiled: Map<string, string>): { members: string[]; entries:
     return process.exit(1);
   };
   /** The module's static imports and `export` statement starts, from the parse. */
-  const parse = (f: string, code: string): { imports: StaticImport[]; exports: number[]; reexports: string[] } => {
+  const parse = (f: string, code: string): { imports: StaticImport[]; exports: number[]; reexports: string[]; dynamics: string[] } => {
     const r = parseSync(f, code, { sourceType: "module" });
     if (r.errors.length) fail(`${path.relative(ROOT, f)} does not parse: ${r.errors[0].message}`);
-    return { imports: r.module.staticImports, exports: r.module.staticExports.map((e) => e.start), reexports: r.module.staticExports.flatMap((e) => e.entries.flatMap((x) => (x.moduleRequest ? [x.moduleRequest.value] : []))) };
+    return {
+      imports: r.module.staticImports,
+      exports: r.module.staticExports.map((e) => e.start),
+      reexports: r.module.staticExports.flatMap((e) => e.entries.flatMap((x) => (x.moduleRequest ? [x.moduleRequest.value] : []))),
+      dynamics: r.module.dynamicImports.flatMap((d) => {
+        const m = /^(["'`])([^"'`$\\]*)\1$/.exec(code.slice(d.moduleRequest.start, d.moduleRequest.end).trim());
+        return m ? [m[2]] : [];
+      }),
+    };
   };
   /** The specifiers (`a`, `a as b`) of an import of helper `name`; fails on a namespace, default or side-effect import. */
   const namedSpecs = (f: string, imp: StaticImport, name: string): string[] => {
@@ -96,9 +104,17 @@ function bundleLib(compiled: Map<string, string>): { members: string[]; entries:
   const memberSet = new Set(members);
   for (const [f, code] of compiled) {
     if (memberSet.has(f) || entryPaths.has(f)) continue;
-    for (const imp of parse(f, code).imports) {
-      const target = path.resolve(path.dirname(f), imp.moduleRequest.value);
-      if (memberSet.has(target)) fail(`${path.relative(ROOT, f)} imports ${path.relative(ROOT, target)}, which is bundled into lib.mjs`);
+    const p = parse(f, code);
+    for (const src of [...p.imports.map((i) => i.moduleRequest.value), ...p.reexports, ...p.dynamics]) {
+      const target = path.resolve(path.dirname(f), src);
+      if (memberSet.has(target)) fail(`${path.relative(ROOT, f)} imports, re-exports or dynamically imports ${path.relative(ROOT, target)}, which is bundled into lib.mjs`);
+    }
+  }
+  // a dynamic import("./helper.mjs") in an entry or a helper resolves to a file that is not shipped
+  for (const [f, code] of compiled) {
+    if (!memberSet.has(f) && !entryPaths.has(f)) continue;
+    for (const src of parse(f, code).dynamics) {
+      if (memberSet.has(path.resolve(path.dirname(f), src))) fail(`${path.relative(ROOT, f)} dynamically imports ${src}, which is bundled into lib.mjs`);
     }
   }
   // the helpers in dependency order (a helper after the helpers it imports), the other imports (node:) hoisted

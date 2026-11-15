@@ -55,7 +55,7 @@ test("an entry's namespace import of a helper fails the build", () => {
 test("a module outside the bundle that imports a helper fails the build", () => {
   const r = build({ "a.mts": A, "register.mts": `import { one } from "./a.mjs";\nexport function register(on: unknown): number { return one; }\n`, "../bin/tool.mts": `import { one } from "../hooks/a.mjs";\nconsole.log(one);\n` });
   assert.equal(r.status, 1);
-  assert.match(r.stderr, /bin\/tool\.mjs imports plugin\/hooks\/a\.mjs, which is bundled into lib\.mjs/);
+  assert.match(r.stderr, /bin\/tool\.mjs imports, re-exports or dynamically imports plugin\/hooks\/a\.mjs, which is bundled into lib\.mjs/);
 });
 
 test("a helper's import from outside hooks/ stays in lib.mjs with its path, in front of the code", () => {
@@ -178,3 +178,21 @@ for (const line of [`export { one } from "./a.mjs";`, `export * from "./a.mjs";`
     assert.match(r.stderr, /register\.mjs imports\/re-exports/);
   });
 }
+
+test("a module outside the bundle that re-exports a helper fails the build", () => {
+  const r = build({ "a.mts": A, "register.mts": `import { one } from "./a.mjs";\nexport function register(on: unknown): number { return one; }\n`, "../bin/tool.mts": `export { one } from "../hooks/a.mjs";\n` });
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /bin\/tool\.mjs imports, re-exports or dynamically imports plugin\/hooks\/a\.mjs/);
+});
+
+test("a module outside the bundle that dynamically imports a helper fails the build", () => {
+  const r = build({ "a.mts": A, "register.mts": `import { one } from "./a.mjs";\nexport function register(on: unknown): number { return one; }\n`, "../bin/tool.mts": `export const load = () => import("../hooks/a.mjs");\n` });
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /bin\/tool\.mjs imports, re-exports or dynamically imports plugin\/hooks\/a\.mjs/);
+});
+
+test("an entry that dynamically imports a helper fails the build", () => {
+  const r = build({ "a.mts": A, "register.mts": `export async function register(on: unknown): Promise<number> { return (await import("./a.mjs")).one; }\n` });
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /register\.mjs dynamically imports \.\/a\.mjs/);
+});
