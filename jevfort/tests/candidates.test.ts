@@ -33,6 +33,11 @@ kitTest("quoted terms become searches, file names do not", async ($, on) => {
   expect(reads(keys)).toEqual(["read src/app.ts"]);
 });
 
+kitTest("two short code spans do not pair up the text between them as a term", async ($, on) => {
+  const { keys } = await ask($, on, user1("run `ls` and `cd` in the shell, then search `useAuth`"));
+  expect(searches(keys).map((k) => k.split(" -- ")[1])).toEqual(["'useAuth' ."]);
+});
+
 kitTest("a quoted term with an apostrophe is not searched", async ($, on) => {
   const { keys } = await ask($, on, user1("don't search `it's`"));
   expect(searches(keys)).toEqual([]);

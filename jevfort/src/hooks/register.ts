@@ -365,6 +365,17 @@ let compactQueued = false;
 let cacheTimer: { cancel(): void } | undefined;
 
 /**
+ * Redraws the effort band; a headless session has no mounted render site, which is no failure.
+ *
+ * @param $ - Engine interface.
+ */
+function redraw($: Engine): void {
+  try {
+    $.ui.invalidate("ui.render");
+  } catch { /* no mounted render site */ }
+}
+
+/**
  * Remembers the minutes the band shows and redraws it when they changed.
  *
  * @param $ - Engine interface.
@@ -373,9 +384,7 @@ let cacheTimer: { cancel(): void } | undefined;
 function showMinutes($: Engine, minutes: number | null): void {
   if (minutes === shownMinutes) return;
   shownMinutes = minutes;
-  try {
-    $.ui.invalidate("ui.render");
-  } catch { /* no mounted render site */ }
+  redraw($);
 }
 
 /**
@@ -391,9 +400,7 @@ function resetCache($: Engine): void {
   coldCompacted = false;
   compactQueued = false;
   shownMinutes = null;
-  try {
-    $.ui.invalidate("ui.render");
-  } catch { /* no mounted render site */ }
+  redraw($);
 }
 
 /**
@@ -525,9 +532,7 @@ async function jevApply($: Engine, missing: string[]): Promise<void> {
   if (!changed && !bandStale && (key || estimateRegistered)) return;
   jevState = key;
   bandStale = false;
-  try {
-    $.ui.invalidate("ui.render");
-  } catch { /* no mounted render site (headless): the band just is not redrawn */ }
+  redraw($);
   if (key) return;
   try {
     if (!estimateRegistered) await $.tool.register(ESTIMATE_SPEC);
@@ -616,7 +621,8 @@ async function projectCommands($: Engine, cwd: string): Promise<Candidate[]> {
     }
     const runner = await packageRunner($, cwd);
     for (const name of Object.keys(scripts).filter((n) => isSafeScript(n) && typeof scripts[n] === "string")) {
-      const command = name === "test" ? `${runner} test` : `${runner} run ${name}`;
+      // `bun test` is Bun's own test runner, not the package script: bun always goes through `run`.
+      const command = name === "test" && runner !== "bun" ? `${runner} test` : `${runner} run ${name}`;
       out.push(bash(command, `Run the project's "${name}" script (${clipScript(scripts[name])})`));
     }
   }
@@ -744,7 +750,8 @@ async function summarizeResult($: Engine, request: string, action: string, outpu
     prompt: `Request: ${clip(request, 2000)}\nAction: ${action}\nOutput:\n${clip(output, 12000)}`,
     maxTokens: 600,
     timeoutMs: 20000,
-  });
+    // A refused or failing request is no summary (the caller then asks Claude), never a failed step.
+  }).catch((err: unknown): Completion => ({ isAnswered: false, reason: String(err).slice(0, 80) }));
   if (!r.isAnswered) return { ok: false, reason: r.reason };
   const text = r.text.trim();
   return text ? { ok: true, text, usage: r.usage } : { ok: false, reason: "empty-reply" };
@@ -1073,6 +1080,8 @@ export const register = (on: On, options: Options): void => {
       turnRunning = false;
       agentTurn += 1;
     }
+    // Dropped also while jev-api is missing: a turn that began before it went away would leave its entry behind.
+    turns.delete(e.turnId);
     const missing = await jevMissing($);
     // No engine event reports a changed tool list: the next main-loop turn's first hook lists the jev-api tools again
     // (a subagent's completion mid-turn does not drop it, so a mid-turn listing glitch cannot flap the band; one that
@@ -1082,7 +1091,6 @@ export const register = (on: On, options: Options): void => {
       await contextCompact($, e, false, taskCompactPercent, forceCompactPercent).catch(() => undefined);
       return next(e);
     }
-    turns.delete(e.turnId);
     await contextCompact($, e, true, taskCompactPercent, forceCompactPercent).catch(() => undefined);
     // The compaction check above may have read the env and, through the batch call's own `tool.call` guard, listed the
     // tools again: drop the turn's reads again so the next turn reads the settings `env` and the tool listing afresh.
@@ -1133,7 +1141,7 @@ export const register = (on: On, options: Options): void => {
     // A new main-loop turn: the session effort bold, the last turn's choice cleared (also for a turn without a request).
     if (routing && e.index === 0 && !e.agentId) {
       band = isEffort(e.effort) ? { configured: e.effort } : {};
-      $.ui.invalidate("ui.render");
+      redraw($);
     }
 
     // One transcript read per step: the turn and, at main-loop step 0, the previous reply.
@@ -1151,7 +1159,7 @@ export const register = (on: On, options: Options): void => {
       debugEffort($, e, "held", held);
       if (!e.agentId) {
         band.chosen = held;
-        $.ui.invalidate("ui.render");
+        redraw($);
       }
       return true;
     };
@@ -1240,7 +1248,7 @@ export const register = (on: On, options: Options): void => {
       turn.effort = undefined;
       if (!e.agentId) {
         band.chosen = undefined;
-        $.ui.invalidate("ui.render");
+        redraw($);
       }
     }
     if (!r.ok) {
@@ -1259,7 +1267,7 @@ export const register = (on: On, options: Options): void => {
         turn.effort = est.effort !== e.effort ? est.effort : undefined;
         if (!e.agentId) {
           band.chosen = est.effort;
-          $.ui.invalidate("ui.render");
+          redraw($);
         }
       }
     }

@@ -56,8 +56,8 @@ export const SKILL_BLOCKLIST_KEY = "skillBlocklist";
 export const SAFE_MAKE = /^(test|tests|check|lint|build|typecheck)$/;
 /** Paths like src/app.ts, ./README.md, /abs/x.json: something with a file extension, also at a sentence end (`src/app.ts.`, `src/app.ts?`). */
 const PATH = /(?:^|[\s`'"([])((?:~|\.{1,2})?\/?[\w@.-]+(?:\/[\w@.-]+)*\.[A-Za-z][A-Za-z0-9]{0,7})(?=[.?!]*(?:$|[\s`'"),:;\]]))/g;
-/** Terms the user quoted: `useAuth`, "TODO: fix". */
-const QUOTED = /`([^`\n]{3,60})`|"([^"\n]{3,60})"/g;
+/** Terms the user quoted: `useAuth`, "TODO: fix". Spans of any short length pair up, so `ls` does not shift the next pair (`` `ls` and `cd` `` is two spans, not " and "); `quotedTerms` drops the short ones. */
+const QUOTED = /`([^`\n]{1,60})`|"([^"\n]{1,60})"/g;
 
 /**
  * File paths mentioned in `texts`, deduplicated, without versions, URLs and `..` paths.

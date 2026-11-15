@@ -32,7 +32,6 @@ export function makeKit(options: Record<string, unknown> = DEFAULTS) {
 
 export const CWD = "/proj";
 export const SID = "sid-1";
-/** The jev-api tool jevfort needs, as `$.tool.list()` lists it. */
 /** jev-api's batch tool, the name jevfort asks Jev through. */
 const JEV_BATCH = "mcp__jev-api__batch";
 const JEV_TOOL_PREFIX = "mcp__jev-api__";

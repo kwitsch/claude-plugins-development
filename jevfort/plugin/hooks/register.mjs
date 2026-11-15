@@ -144,12 +144,15 @@ let turnRunning = false;
 let coldCompacted = false;
 let compactQueued = false;
 let cacheTimer;
-function showMinutes($, minutes) {
-	if (minutes === shownMinutes) return;
-	shownMinutes = minutes;
+function redraw($) {
 	try {
 		$.ui.invalidate("ui.render");
 	} catch {}
+}
+function showMinutes($, minutes) {
+	if (minutes === shownMinutes) return;
+	shownMinutes = minutes;
+	redraw($);
 }
 function resetCache($) {
 	cacheExpires = 0;
@@ -158,9 +161,7 @@ function resetCache($) {
 	coldCompacted = false;
 	compactQueued = false;
 	shownMinutes = null;
-	try {
-		$.ui.invalidate("ui.render");
-	} catch {}
+	redraw($);
 }
 async function cacheTick($, autoCompactPercent) {
 	if (cacheExpires <= 0 && shownMinutes === null) return;
@@ -231,9 +232,7 @@ async function jevApply($, missing) {
 	if (!changed && !bandStale && (key || estimateRegistered)) return;
 	jevState = key;
 	bandStale = false;
-	try {
-		$.ui.invalidate("ui.render");
-	} catch {}
+	redraw($);
 	if (key) return;
 	try {
 		if (!estimateRegistered) await $.tool.register(ESTIMATE_SPEC);
@@ -291,7 +290,7 @@ async function projectCommands($, cwd) {
 		} catch {}
 		const runner = await packageRunner($, cwd);
 		for (const name of Object.keys(scripts).filter((n) => isSafeScript(n) && typeof scripts[n] === "string")) {
-			const command = name === "test" ? `${runner} test` : `${runner} run ${name}`;
+			const command = name === "test" && runner !== "bun" ? `${runner} test` : `${runner} run ${name}`;
 			out.push(bash(command, `Run the project's "${name}" script (${clipScript(scripts[name])})`));
 		}
 	}
@@ -393,7 +392,10 @@ async function summarizeResult($, request, action, output) {
 		prompt: `Request: ${clip(request, 2e3)}\nAction: ${action}\nOutput:\n${clip(output, 12e3)}`,
 		maxTokens: 600,
 		timeoutMs: 2e4
-	});
+	}).catch((err) => ({
+		isAnswered: false,
+		reason: String(err).slice(0, 80)
+	}));
 	if (!r.isAnswered) return {
 		ok: false,
 		reason: r.reason
@@ -636,13 +638,13 @@ export const register = (on, options) => {
 			turnRunning = false;
 			agentTurn += 1;
 		}
+		turns.delete(e.turnId);
 		const missing = await jevMissing($);
 		if (!turnRunning) dropTurnReads();
 		if (missing.length) {
 			await contextCompact($, e, false, taskCompactPercent, forceCompactPercent).catch(() => undefined);
 			return next(e);
 		}
-		turns.delete(e.turnId);
 		await contextCompact($, e, true, taskCompactPercent, forceCompactPercent).catch(() => undefined);
 		if (!turnRunning) dropTurnReads();
 		return next(e);
@@ -684,7 +686,7 @@ export const register = (on, options) => {
 		turns.set(e.turnId, turn);
 		if (routing && e.index === 0 && !e.agentId) {
 			band = isEffort(e.effort) ? { configured: e.effort } : {};
-			$.ui.invalidate("ui.render");
+			redraw($);
 		}
 		const messages = await $.session.messages(e.agentId ? { agentId: e.agentId } : {});
 		const ctx = turnOf(messages);
@@ -701,7 +703,7 @@ export const register = (on, options) => {
 			debugEffort($, e, "held", held);
 			if (!e.agentId) {
 				band.chosen = held;
-				$.ui.invalidate("ui.render");
+				redraw($);
 			}
 			return true;
 		};
@@ -802,7 +804,7 @@ export const register = (on, options) => {
 			turn.effort = undefined;
 			if (!e.agentId) {
 				band.chosen = undefined;
-				$.ui.invalidate("ui.render");
+				redraw($);
 			}
 		}
 		if (!r.ok) {
@@ -819,7 +821,7 @@ export const register = (on, options) => {
 				turn.effort = est.effort !== e.effort ? est.effort : undefined;
 				if (!e.agentId) {
 					band.chosen = est.effort;
-					$.ui.invalidate("ui.render");
+					redraw($);
 				}
 			}
 		}

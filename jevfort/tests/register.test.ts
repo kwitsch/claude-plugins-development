@@ -1028,12 +1028,13 @@ test("A package.json saved with a UTF-8 BOM still offers its scripts", async ($,
   expect(Object.keys(sent.find((q) => q.id === "next_action")?.criteria ?? {})).toContain("run npm test");
 });
 
-for (const [lock, runner] of [["pnpm-lock.yaml", "pnpm"], ["yarn.lock", "yarn"], ["bun.lockb", "bun"], ["bun.lock", "bun"], [undefined, "npm"]] as const) {
-  test(`${lock ?? "No lock file"} offers the test script as ${runner} test`, async ($, on) => {
+// `bun test` would start Bun's own test runner instead of the package script, so bun goes through `run`.
+for (const [lock, command] of [["pnpm-lock.yaml", "pnpm test"], ["yarn.lock", "yarn test"], ["bun.lockb", "bun run test"], ["bun.lock", "bun run test"], [undefined, "npm test"]] as const) {
+  test(`${lock ?? "No lock file"} offers the test script as ${command}`, async ($, on) => {
     const { sent } = setup(on, { messages: [user("run the tests")], packageJson: { scripts: { test: "vitest" } }, locks: lock ? [lock] : [], jev: () => undefined });
     claudeBeneath(on, []);
     await drain($.turn.step(step));
-    expect(Object.keys(sent.find((q) => q.id === "next_action")?.criteria ?? {})).toContain(`run ${runner} test`);
+    expect(Object.keys(sent.find((q) => q.id === "next_action")?.criteria ?? {})).toContain(`run ${command}`);
   });
 }
 
