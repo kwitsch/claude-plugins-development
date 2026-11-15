@@ -234,6 +234,17 @@ describe("timeout guard and abandonment", () => {
     expect(t.cancels()).toHaveLength(0);
   });
 
+  it("a dispatch abandoned while the time left is read sends no request", async () => {
+    const t = await rig();
+    await t.run(); // connects
+    const ctl = new AbortController();
+    let reads = 0; // 1 start time, 2 config sync, 3 call id, 4 time left
+    (t.$.clock as { now: () => Promise<number> }).now = async () => (++reads === 4 && ctl.abort(), 1_000_000);
+    expect(await t.run("noul", {}, ctl.signal)).toEqual({ deny: "noul: the call was abandoned" });
+    expect(reads).toBeGreaterThanOrEqual(3);
+    expect(t.requests()).toHaveLength(1);
+  });
+
   it("a settled call sends no cancel, also not when its signal aborts later or its guard fires", async () => {
     const t = await rig();
     const ctl = new AbortController();
