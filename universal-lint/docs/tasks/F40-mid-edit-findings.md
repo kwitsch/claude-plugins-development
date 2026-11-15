@@ -54,7 +54,7 @@ Not part of this task: 8 of the 133 are `MD025` on task documents (a markdownlin
 2. The newest edit owns the report: a held lint reports nothing when a newer record of file and owner exists; every lint gates against the lines of all pending edits (hunks carried forward, chain-checked by digests, whole file when the chain is broken). The hold is quiet time: 20 s without a Write/Edit of the owner, on any file.
 3. `Stop` sweeps what is still pending for the main conversation. The sweep is what makes the drops of step 2 lossless (F23's residual: the later lint dies or skips).
 
-Full contract and residuals: `.claude/rules/settle-window.md`.
+Full contract and residuals: `docs/design/settle-window.md`.
 
 Rejected: a per-language list of "change not finished" rules that are deferred (a table per linter to maintain; steps 2 and 3 cover the same cases); a longer fixed hold alone (does not help the 82, and delays real findings); reporting only at turn end (long autonomous turns would get their findings hours late).
 

@@ -68,6 +68,10 @@ jobs:
       - name: Lint
         run: pnpm exec oxlint
 
+      # development/wiki: every page listed in the index, no dead link, well-formed log headings
+      - name: Wiki check
+        run: node development/scripts/wiki-check.ts
+
       # changed workspace packages plus everything depending on them (a claude-engine-vitest change re-tests its
       # plugins without a version bump). A change in the root package
       # (shared config, root tooling, lockfile, development/scripts, .github/) re-checks every package. Plugins get

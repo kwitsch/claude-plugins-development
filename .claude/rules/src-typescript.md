@@ -1,8 +1,7 @@
 ---
 paths:
-  - "*/src/**"
-  - "*/tests/**"
-  - "development/**"
+  - "**/*.mts"
+  - ".claude/skills/convert-plugin-ts/**"
 ---
 
 # Rule: TypeScript sources are `.ts`
@@ -11,8 +10,7 @@ graphmind indexes `.ts` symbols (signatures and types) but no `.mts` symbols (ch
 
 - No new `.mts` file in any `src/` directory, and no new `.mts` under `development/`. Hand-written sources under `<name>/src/` are `.ts`.
 - **First change in a plugin that still holds `.mts` converts that plugin in the same change.** When a change touches a plugin with `.mts` under `src/` or `tests/`, rename its `src/**/*.mts` and `tests/*.test.mts` to `.ts` in that change, not as a follow-up.
-- Import specifiers in `.ts` sources: relative siblings as `./name.js` (TypeScript NodeNext resolves it to `name.ts`). `development/scripts/build-plugin.ts` rewrites every relative `.js` import of a source to `.mjs`, so the shipped code keeps `./name.mjs` and `bundleHooksLib` works unchanged.
-- Scripts that Node runs directly (`development/scripts/*.ts`) import their siblings with the real extension (`./plugin-manifest.ts`); `allowImportingTsExtensions` is set in `tsconfig.base.json`.
+- Import specifiers after the rename: `plugin-src.md`.
 - The build accepts `.ts` and `.mts` in `src/` during the transition; `.d.ts` / `.d.mts` are not built.
 - A conversion is done only when all of these hold:
   1. `git status -- <name>/plugin` is empty after `pnpm --filter <name> build` (the shipped `.mjs` are byte-identical, so the rewrite changed nothing shipped);

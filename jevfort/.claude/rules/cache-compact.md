@@ -34,6 +34,9 @@ transcript and prompt.
   and keeps the promise pending until it ran; a refusal is not retried. The next response resets `coldCompacted`.
 - `turnRunning` is set at the first `turn.step` and cleared in `turn.complete`; the prompt-submit phase before it is not
   covered, so a cold tick there queues `/compact` behind the user's prompt.
+- It does not consult Claude Code's own Auto-compact setting (`plugin/README.md` says so). Author decision of the
+  0.7.0 review (2026-11-12), like the assumed 1-hour TTL, the uncovered prompt-submit phase and the Haiku path's
+  trade-off below: do not re-flag them.
 - Not verified live: `$.command.run` from a timer callback (read from the 2.1.322 binary: queued as a plugin-origin
   prompt entry); the kit tests cover it.
 
@@ -47,7 +50,8 @@ transcript and prompt.
 
 - Always registered, subagents pass. Jev ranking first (`withJevRanking`, only with jev-api and the `compaction`
   option), then with `haikuCompact` Haiku's summary as the returned `messages` (`precompute` is skipped with
-  `{ skip }`; a failure or a summary of 200 characters or fewer goes `next(...)`).
+  `{ skip }`; a failure, a summary of 200 characters or fewer or one that used all `COMPACT_MAX_TOKENS` (cut off) goes
+  `next(...)`).
 - `cacheExpires = 0` only once a compaction stands (the Haiku return or a `next(...)` result without `skip`, never for
   `precompute`).
 - Trade-off of the Haiku path (read from the 2.1.322 binary): answering `{ messages }` without `next` skips core's

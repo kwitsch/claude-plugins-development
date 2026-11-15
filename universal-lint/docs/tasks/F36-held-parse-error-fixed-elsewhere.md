@@ -8,7 +8,7 @@ area: bug - universal-lint/src/hooks/lint-file.ts (settleFindings, gateFinding, 
 
 ## Status
 
-Done, shipped in 0.16.1. Earlier state: open. Documented since 0.16.0 as residual (9) of `.claude/rules/hook-design.md` "Settle window (F34)" ("Open (found by the final code review, not fixed)") with a candidate fix but no task; reproduced by [EVALUATION-2026-11-14](../EVALUATION-2026-11-14.md) "Bug hunt".
+Done, shipped in 0.16.1. Earlier state: open. Documented since 0.16.0 as residual (9) of `docs/design/hook-design.md` "Settle window (F34)" ("Open (found by the final code review, not fixed)") with a candidate fix but no task; reproduced by [EVALUATION-2026-11-14](../EVALUATION-2026-11-14.md) "Bug hunt".
 
 ## Problem
 

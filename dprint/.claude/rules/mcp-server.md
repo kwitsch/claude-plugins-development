@@ -20,6 +20,10 @@ arguments are named constants or comments in the sources; this rule records beha
   `watch-paths` runs as its own `command` hook.
 - Scope never uses `process.cwd()`.
 - Needs dprint >= 0.50.
+- The config's `excludes` are not evaluated here: `dprint lsp` returns no edits for an excluded file (checked on
+  0.64.3).
+- dprint strips a UTF-8 BOM (lsp and `dprint fmt`, checked on 0.64.3), so a formatted file loses it. The decoder
+  keeps the BOM (`ignoreBOM`) only so its digest agrees with `fileWritten`'s.
 - Every tool in `tools/list` carries `HOOK_ONLY_META` (`ui.visibility: ["app"]`, effect: repo rule
   `.claude/rules/mcp-dual-era.md`). A deny rule behaves the same, but a plugin cannot ship one; the docs
   name the field only for cloud sessions, so `mcp-server.test.ts` pins it.

@@ -4,6 +4,13 @@ Development repository for Claude Code plugins. One top-level directory per plug
 
 `development/` holds shared developer tooling, no plugin: see `development/CLAUDE.md`.
 
+## Knowledge
+
+- Before researching how Claude Code, a tool or an external API behaves, or re-deciding something, read `development/wiki/index.md`: it lists what earlier sessions verified, decided and tripped over, in the wiki and in every rule and plugin document.
+- What a task establishes is written into the repository in the same change, each fact once: a constraint for certain files into a rule with `paths:`, knowledge about one plugin into that plugin's `CLAUDE.md`, rules or `docs/`, everything else into the wiki with the `wiki` skill (`.claude/skills/wiki/`).
+- Memory files (`CLAUDE.md`, rules) load into every agent that touches a matching file, so they hold constraints only, one or two lines each. Reasons, measurements, residuals, rejected alternatives and how something was verified go to a page that is not loaded by itself (a plugin's `docs/design/`, or the wiki for what spans plugins), linked from the constraint as `[topic](relative/path.md)`; never with an `@path` import, which loads the page anyway. Keep `paths:` as narrow as the constraint's reach.
+- The machine-local memory (graphmind, auto-memory) holds personal preferences and one-line pointers only, never the only copy of a fact about this repository.
+
 ## Layout per plugin (`<name>/`)
 
 `plugin/` (installable plugin; `.mjs` and `.claude-plugin/plugin.json` are build output), `src/**/*.ts` (built to `plugin/` at the same path), `tests/*.test.ts` (vitest, against `plugin/`), plus:

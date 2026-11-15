@@ -1,10 +1,3 @@
----
-paths:
-  - "src/hooks/**"
-  - "plugin/hooks/**"
-  - "tests/settle*.test.ts"
----
-
 # Settle window and owner routing (F34 0.16.0, rebuilt by F40 0.17.0)
 
 User requests: 2026-11-14 (F34) "a finding that a following edit already repaired must not wake Claude"; 2026-11-15 (F40) after a transcript mining of 133 wake-ups (`docs/tasks/F40-mid-edit-findings.md`): route findings to the agent that made the edit, report the final state of an edit burst once, sweep at turn end. F40 narrows "no debounce" (2026-11-06: the lint still starts at once, only the report waits) and replaces F23's "no superseded-lint drop" by a hand-off to the newest lint; F34's line-local rule (drop a finding only when a later edit rewrote its line), F35 (no hold for foreign or unlocated findings) and F36 (`gateFinding` mode `"drop"`) are gone.

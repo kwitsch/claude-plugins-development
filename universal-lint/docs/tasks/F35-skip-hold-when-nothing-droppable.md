@@ -40,7 +40,7 @@ Before the hold, ask whether the filter could drop anything at all: run `gateFin
 
 Cost: one extra gate pass over the finding text (regexes plus memoized `existsSync`), sub-millisecond against a 5 s saving. No change to the journal, the anchor or the hold length.
 
-Update the contract in `.claude/rules/hook-design.md` "Settle window (F34)" (net-neutral wording, the file is over its limit, see F37) and the README sentence "the hook holds them for a 5 second settle window" if it then needs a qualifier.
+Update the contract in `docs/design/hook-design.md` "Settle window (F34)" (net-neutral wording, the file is over its limit, see F37) and the README sentence "the hook holds them for a 5 second settle window" if it then needs a qualifier.
 
 ## Verification
 

@@ -50,6 +50,18 @@ Part rules (load with their files): `.claude/rules/register-hooks.md` (hooks, `$
   (`cache-compact.md`). Not ported: its settings panel, Handoff, cold band, swamp/limit alerts and the other bar
   features.
 
+## Standing user decisions (do not re-open in reviews)
+
+- No mode switch and no Bash or permission gate again (2026-11-08, 0.3.0): on/off is enabling or disabling the plugin.
+- `tool.check` never turns a verdict into `ask` or `deny` (2026-11-08, 0.2.0): a hook's `ask` brought prompts and
+  classifier refusals back in auto mode. It returns Claude Code's verdict or turns a mode's bare `ask` into `allow`
+  (`settled` names what is never loosened).
+- Jev's own vetted calls are approved over a mode's bare `ask`, as upstream does (2026-11-08, PR #46). An `ask` on a
+  `Read` stays.
+- The scratchpad allow covers `Edit`/`Write`/`NotebookEdit` only, in every permission mode; a Bash write into the
+  scratchpad keeps Claude Code's verdict (2026-11-08).
+- Effort decisions: `effort-routing.md`; compaction decisions: `cache-compact.md`.
+
 ## Pause after a timeout
 
 `askJev` keeps a module-level pause (`jevPause`): a timeout (only a timeout, a fast failure costs nothing; jevfort's own

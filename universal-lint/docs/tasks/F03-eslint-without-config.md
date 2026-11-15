@@ -3,7 +3,7 @@ id: F03
 title: Skip the eslint chain when no eslint/oxlint config exists
 status: done
 priority: high
-area: universal-lint/src/hooks/lint-file.ts (resolveOxlintConfig, runChainLint, lintResolved, ESLINT_CONFIG_FILENAMES), universal-lint/.claude/rules/languages.md
+area: universal-lint/src/hooks/lint-file.ts (resolveOxlintConfig, runChainLint, lintResolved, ESLINT_CONFIG_FILENAMES), universal-lint/docs/design/languages.md
 ---
 
 ## Status

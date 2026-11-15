@@ -1,9 +1,3 @@
----
-paths:
-  - "src/hooks/**"
-  - "tests/stylelint.test.ts"
----
-
 # CSS/SCSS: stylelint
 
 ## `.scss` limitation (accepted)

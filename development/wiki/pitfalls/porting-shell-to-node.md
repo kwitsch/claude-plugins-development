@@ -1,12 +1,8 @@
----
-paths:
-  - "*/src/**"
-  - "*/tests/**"
----
+# Porting shell scripts and CLI glue to Node
 
-# Rule: porting shell scripts and CLI glue to Node
+What silently changes when a shell hook script becomes Node code: regex semantics, the lookups the shell did, Claude Code's own config files, output budgets.
 
-Learned in the graphmind-helper bug hunt (a port of three setup hook scripts to a function-hooks module and an MCP wrapper). Every point was a real, reproduced defect.
+Learned in the graphmind-helper bug hunt (a port of three setup hook scripts to a function-hooks module and an MCP wrapper, Claude Code 2.1.325, 2026-11). Every point was a real, reproduced defect.
 
 ## Regex semantics differ from grep
 

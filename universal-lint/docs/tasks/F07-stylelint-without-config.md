@@ -3,7 +3,7 @@ id: F07
 title: Skip stylelint when the project has no stylelint config
 status: done
 priority: medium
-area: universal-lint/src/hooks/lint-file.ts (lintResolved, hasStylelintConfig, STYLELINT_CONFIG_FILENAMES, walkToRoot), universal-lint/.claude/rules/languages.md
+area: universal-lint/src/hooks/lint-file.ts (lintResolved, hasStylelintConfig, STYLELINT_CONFIG_FILENAMES, walkToRoot), universal-lint/docs/design/languages.md
 ---
 
 ## Status

@@ -3,7 +3,7 @@ id: F15
 title: Re-arm FileChanged watches after git checkout (prototype first)
 status: done
 priority: medium
-area: universal-lint/.claude/rules/hook-design.md, universal-lint/docs/TASKS.md
+area: universal-lint/docs/design/hook-design.md, universal-lint/docs/TASKS.md
 ---
 
 ## Status

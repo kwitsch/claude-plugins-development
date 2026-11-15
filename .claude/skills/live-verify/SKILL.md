@@ -6,7 +6,7 @@ argument-hint: "<plugin-name> <scenario>"
 
 # live-verify
 
-Recipe worked out for the dprint plugin; see `.claude/rules/claude-code-tool-hook-facts.md` (tool hooks, FileChanged, watchPaths), `.claude/rules/claude-code-hook-facts.md` (mods engine `$`) and `.claude/rules/claude-code-skill-facts.md` (tools a skill uses) for the facts it established.
+Recipe worked out for the dprint plugin; see `.claude/rules/claude-code-tool-hook-facts.md` (tool hooks, FileChanged, watchPaths), `.claude/rules/claude-code-hook-facts.md` (mods engine `$`) and `.claude/rules/claude-code-skill-facts.md` (tools a skill uses) for the facts it established. To see only what a hook payload or a hook's environment looks like, the smaller probe in `development/wiki/methods/hook-payload-probe.md` is enough. File what a run establishes with the `wiki` skill.
 
 ## Setup (always a throwaway)
 

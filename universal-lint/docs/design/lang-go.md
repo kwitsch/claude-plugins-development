@@ -1,9 +1,3 @@
----
-paths:
-  - "src/hooks/**"
-  - "tests/go.test.ts"
----
-
 # Go: golangci-lint/go vet, package scope, and cold GOCACHE
 
 - `.go` routes to `golangci-lint run` (first entry of the go chain) → `go vet` (second entry), both `targetsDir` and PATH-only. `selectLintTool` takes the first one on `PATH`, so with golangci-lint installed `go vet` never runs.

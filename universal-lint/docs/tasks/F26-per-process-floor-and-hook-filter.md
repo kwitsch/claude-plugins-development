@@ -3,7 +3,7 @@ id: F26
 title: Per-process floor (about 40 ms) for events the hook cannot act on
 status: done
 priority: low
-area: universal-lint/src/hooks/lint-file.ts (`createHash` wrapper), universal-lint/tests/manifest.test.ts, universal-lint/docs/tasks/F26-per-process-floor-and-hook-filter.md, universal-lint/docs/TASKS.md, universal-lint/.claude/rules/hook-design.md
+area: universal-lint/src/hooks/lint-file.ts (`createHash` wrapper), universal-lint/tests/manifest.test.ts, universal-lint/docs/tasks/F26-per-process-floor-and-hook-filter.md, universal-lint/docs/TASKS.md, universal-lint/docs/design/hook-design.md
 ---
 
 ## Status

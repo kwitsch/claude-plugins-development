@@ -18,10 +18,15 @@ paths:
 - The score's confidence is NOT checked: the discarded scores were as accurate as the kept ones, and a threshold
   dropped every `high`/`xhigh` prompt.
 - No model bias (never validated, it shifted the calibrated cuts per model); the tool's `model` input stays for callers
-  and is ignored. The cuts are for `d1-3b`; jev-api's Haiku fallback is not calibrated.
+  and is ignored. The cuts are for `d1-3b` and were not re-measured for jev-api's Haiku fallback, which jev-api
+  calibrates toward Jev on its side (`jev-api/.claude/rules/haiku-fallback.md`).
 - `tests/effort-fixture.test.ts` pins the acceptance numbers (A1 to A5).
 - Opus/Sonnet sessions are estimated every turn; Haiku/Fable sessions only on each loop's first turn, whose estimate is
   then held while the session effort is unchanged. A model switch starts a new first turn.
+- Standing user decisions (2026-11-08, PR #53; do not re-flag in reviews): the every-turn / first-turn split above; a
+  first Haiku/Fable turn whose estimate failed is not retried (`firstTurns` is written before Jev is asked, later turns
+  of that loop run at the session effort); the estimate is clamped to `minEffort`..`maxEffort` also when the session
+  effort lies above `maxEffort`.
 - Bounds: options `minEffort`/`maxEffort`; invalid or inverted values fall back to `low`/`xhigh`.
 - `words()` (`candidates.ts`) normalizes to NFC and splits at `[^\p{L}\p{M}\p{N}]`, so umlauts (also NFD-typed) and
   vowel signs survive; German prompts still share few words with English skill descriptions.

@@ -7,7 +7,7 @@ paths:
 
 # Rule: verified Claude Code tool-hook and FileChanged behaviour (2.1.323, checked live 2026-11-13)
 
-Facts a plugin author keeps getting wrong. Re-verify with the `live-verify` skill when the Claude Code version changes. Mods engine (`$`) facts: `claude-code-hook-facts.md`.
+Facts a plugin author keeps getting wrong. Re-verify with the `live-verify` skill when the Claude Code version changes. Mods engine (`$`) facts: `claude-code-hook-facts.md`. Hook filters, payload paths and the transcript records a hook leaves: `development/wiki/facts/claude-code-command-hooks.md`.
 
 ## Tool hooks
 

@@ -3,7 +3,7 @@ id: F29
 title: Timeout budget doc misses the cold Rust leaf crate and SessionStart on 9P
 status: done
 priority: low
-area: universal-lint/.claude/rules/hook-design.md (Timeout budget), universal-lint/.claude/rules/languages.md (Rust), universal-lint/src/hooks/lint-file.ts (NPX_SPAWN_TIMEOUT_MS TSDoc)
+area: universal-lint/docs/design/hook-design.md (Timeout budget), universal-lint/docs/design/languages.md (Rust), universal-lint/src/hooks/lint-file.ts (NPX_SPAWN_TIMEOUT_MS TSDoc)
 ---
 
 ## Status
@@ -49,8 +49,8 @@ Done: languages.md "Rust" last bullet names the cold leaf-crate loss and the fai
 
 ## Verification
 
-- `wc -c universal-lint/.claude/rules/hook-design.md` -> 39305; `git diff --quiet 63c2597 HEAD -- universal-lint/.claude/rules/hook-design.md` exits 0.
-- `grep -n '45,068' universal-lint/.claude/rules/languages.md` -> 1 match in the Rust section; `wc -c` of languages.md under 40,000.
+- `wc -c universal-lint/docs/design/hook-design.md` -> 39305; `git diff --quiet 63c2597 HEAD -- universal-lint/docs/design/hook-design.md` exits 0.
+- `grep -n '45,068' universal-lint/docs/design/languages.md` -> 1 match in the Rust section; `wc -c` of languages.md under 40,000.
 - `grep -n 'npx-cached' universal-lint/src/hooks/lint-file.ts` shows the new TSDoc; `const NPX_SPAWN_TIMEOUT_MS = 55000;` unchanged.
 - `pnpm --filter universal-lint build`, `pnpm lint`, `pnpm --filter universal-lint test`, `claude plugin validate universal-lint/plugin` pass.
 

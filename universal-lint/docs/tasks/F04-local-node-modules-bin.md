@@ -3,7 +3,7 @@ id: F04
 title: Run project-local node_modules/.bin/<tool> directly instead of npx
 status: done
 priority: high
-area: universal-lint/src/hooks/lint-file.ts (selectLintTool, localBin, runLintTool, runChainLint, walkUpToCwd, scopedTarget/outside), universal-lint/scripts/perf.mts, universal-lint/.claude/rules/hook-design.md, universal-lint/.claude/rules/languages.md, universal-lint/plugin/README.md
+area: universal-lint/src/hooks/lint-file.ts (selectLintTool, localBin, runLintTool, runChainLint, walkUpToCwd, scopedTarget/outside), universal-lint/scripts/perf.mts, universal-lint/docs/design/hook-design.md, universal-lint/docs/design/languages.md, universal-lint/plugin/README.md
 ---
 
 ## Status
