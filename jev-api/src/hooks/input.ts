@@ -4,10 +4,10 @@
  * @packageDocumentation
  */
 
-import { MAX_LEVELS, MAX_OPTIONS, MIN_LEVELS } from "./tools.mjs";
-import { OVERFLOWS, TYPES } from "./types.mjs";
-import type { Overflow, Question, QuestionType, ToolCall, ToolName } from "./types.mjs";
-import { isOptionalString, isOverflow, isRecord, isText, isType } from "./util.mjs";
+import { MAX_LEVELS, MAX_OPTIONS, MIN_LEVELS } from "./tools.js";
+import { OVERFLOWS, TYPES } from "./types.js";
+import type { Overflow, Question, QuestionType, ToolCall, ToolName } from "./types.js";
+import { isOptionalString, isOverflow, isRecord, isText, isType } from "./util.js";
 
 /**
  * Validates one question's fields and builds the System One question. Values pass through unchanged.

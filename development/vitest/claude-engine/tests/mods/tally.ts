@@ -1,5 +1,5 @@
 // The first-mod example of the docs: counts tool calls, /tally reports them.
-import type { On } from "../../index.mts";
+import type { On } from "../../index.ts";
 
 let count = 0;
 export function register(on: On) {

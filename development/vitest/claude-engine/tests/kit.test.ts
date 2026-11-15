@@ -1,8 +1,8 @@
 // The kit's own rules: stubs before $, unanswered calls, skipped hooks and the engine report, origins, inline plugins.
 import { expect, test as vitest } from "vitest";
-import { createKit } from "../index.mts";
+import { createKit } from "../index.ts";
 
-const { test } = createKit({ module: new URL("./mods/probe.mts", import.meta.url), plugin: "probe", options: { a: 1, b: 1 } });
+const { test } = createKit({ module: new URL("./mods/probe.ts", import.meta.url), plugin: "probe", options: { a: 1, b: 1 } });
 /** The `text` of a command.run result. */
 const text = async (p: Promise<unknown>) => ((await p) as { text: string }).text;
 
@@ -48,7 +48,7 @@ test("a throwing hook is skipped and the chain goes on beneath it", async ($, on
 vitest("a failing test lists the skipped hooks under the engine reported", async () => {
   let body: (() => Promise<void>) | undefined;
   // Capture the wrapped body instead of registering a nested vitest test.
-  const { test: capture } = createKit({ module: new URL("./mods/probe.mts", import.meta.url), plugin: "probe", runner: (_name, _opts, fn) => (body = fn) });
+  const { test: capture } = createKit({ module: new URL("./mods/probe.ts", import.meta.url), plugin: "probe", runner: (_name, _opts, fn) => (body = fn) });
   capture("x", async ($, on) => {
     on("tool.call", () => ({ result: "stub" }));
     await $.tool.call({ tool: "Bash" });

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-// Usage: build-plugin.mts [plugin dir]  (default: the cwd; every plugin's `build` script runs it from its own dir)
-// Builds one plugin: src/**/*.mts -> plugin/**/*.mjs via oxc-transform (type stripping; type checks run in
+// Usage: build-plugin.ts [plugin dir]  (default: the cwd; every plugin's `build` script runs it from its own dir)
+// Builds one plugin: src/**/*.ts (and, until a plugin is migrated, *.mts) -> plugin/**/*.mjs via oxc-transform (type stripping; type checks run in
 // `pnpm lint`), minified with oxc-minify, then generates plugin/.claude-plugin/plugin.json from package.json.
 // Generated .mjs files and plugin/.claude-plugin/plugin.json must never be edited by hand.
 import { spawnSync } from "node:child_process";
@@ -10,7 +10,7 @@ import { fileURLToPath } from "node:url";
 import { minifySync } from "oxc-minify";
 import { parseSync, type StaticImport } from "oxc-parser";
 import { transformSync } from "oxc-transform";
-import { pluginManifest } from "./plugin-manifest.mts";
+import { pluginManifest } from "./plugin-manifest.ts";
 
 /** The plugin directory (holds package.json, src/ and plugin/). */
 const ROOT = path.resolve(process.argv[2] ?? ".");
@@ -256,32 +256,37 @@ function bundleLib(compiled: Map<string, string>): { members: string[]; entries:
 // 0. plugin/ ships only build output and hand-written plugin files (.claude/rules/plugin-build-output.md)
 const layout = spawnSync(
   process.execPath,
-  [path.join(path.dirname(fileURLToPath(import.meta.url)), "check-plugin-layout.mts"), ROOT],
+  [path.join(path.dirname(fileURLToPath(import.meta.url)), "check-plugin-layout.ts"), ROOT],
   { stdio: "inherit" },
 );
 if (layout.status !== 0) process.exit(layout.status ?? 1);
 
-// 2. compile: strip types file by file (.mts -> .mjs), then minify.
+// 2. compile: strip types file by file (.ts/.mts -> .mjs), then minify.
 // Type checking is not part of the build: `pnpm lint` (oxlint --type-check) does it.
 const files = walk(SRC);
-const stray = files.filter((f) => !f.endsWith(".mts"));
+const stray = files.filter((f) => !/\.m?ts$/.test(f));
 if (stray.length) {
-  // src/ holds only .mts: anything else (a .ts, a .js) would silently not ship
-  for (const f of stray) console.error(`${path.relative(ROOT, f)}: src/ holds only .mts sources`);
+  // src/ holds only TypeScript: anything else (a .js) would silently not ship
+  for (const f of stray) console.error(`${path.relative(ROOT, f)}: src/ holds only .ts sources`);
   process.exit(1);
 }
-const sources = files.filter((f) => !f.endsWith(".d.mts"));
+const sources = files.filter((f) => !/\.d\.m?ts$/.test(f));
 const pkg = JSON.parse(readFileSync(path.join(ROOT, "package.json"), "utf8")) as Record<string, unknown>;
 /** Type-stripped code per output file. */
 const compiled = new Map<string, string>();
 for (const src of sources) {
-  const out = path.join(PLUGIN, path.relative(SRC, src)).replace(/\.mts$/, ".mjs");
+  const out = path.join(PLUGIN, path.relative(SRC, src)).replace(/\.m?ts$/, ".mjs");
   const t = transformSync(src, readFileSync(src, "utf8"), { sourceType: "module", target: "es2022" });
   if (t.errors.length) {
     for (const e of t.errors) console.error(`${path.relative(ROOT, src)}: ${e.message}`);
     process.exit(1);
   }
-  compiled.set(out, t.code);
+  // sources import their siblings as `./name.js` (the form TypeScript resolves to name.ts); the shipped import is `./name.mjs`
+  const relJs = parseSync(src, t.code, { sourceType: "module" }).module.staticImports
+    .map((i) => i.moduleRequest)
+    .filter((r) => /^\.\.?\/.*\.js$/.test(r.value))
+    .map((r) => ({ start: r.start, end: r.end, text: JSON.stringify(r.value.replace(/\.js$/, ".mjs")) }));
+  compiled.set(out, splice(t.code, relJs));
 }
 
 // package.json `pluginBuild.bundleHooksLib: true`: the helper modules of plugin/hooks (everything hooks.json does not list) become one lib.mjs.
@@ -325,7 +330,7 @@ for (const [out, code] of minified) {
   if (code.startsWith("#!")) chmodSync(out, 0o755);
 }
 
-// 3. manifest: generated from <name>/package.json (the only manifest source) by plugin-manifest.mts
+// 3. manifest: generated from <name>/package.json (the only manifest source) by plugin-manifest.ts
 let manifest: Record<string, unknown>;
 try {
   manifest = pluginManifest(pkg);

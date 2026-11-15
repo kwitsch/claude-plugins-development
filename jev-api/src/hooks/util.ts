@@ -4,8 +4,8 @@
  * @packageDocumentation
  */
 
-import { OVERFLOWS, TYPES } from "./types.mjs";
-import type { Overflow, Question, QuestionType, ToolName, ToolResult } from "./types.mjs";
+import { OVERFLOWS, TYPES } from "./types.js";
+import type { Overflow, Question, QuestionType, ToolName, ToolResult } from "./types.js";
 
 /** How long one request may take, in seconds, when neither the call's `timeout` nor the `timeout` option is valid. */
 export const DEFAULT_TIMEOUT_S = 20;

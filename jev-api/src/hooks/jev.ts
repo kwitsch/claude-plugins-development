@@ -5,13 +5,13 @@
  * @packageDocumentation
  */
 
-import { askHaiku, HAIKU_MAX_CHARS, hasAnswerShape } from "./haiku.mjs";
-import { cutState, DEFAULT_CONTEXT_TOKENS, DEFAULT_DENSITY, estimateTokens, isTooBig, learn, MAX_DENSITY, OPTIMISTIC_FACTOR, preflightError, refusedDensity, stateForBudget, timeBudgetTokens, tooBigError } from "./size.mjs";
-import type { Knowledge, TooBig } from "./size.mjs";
-import { now, sendOutcome } from "./transport.mjs";
-import type { Link } from "./transport.mjs";
-import type { Engine, Env, Overflow, Question, ToolName, ToolResult } from "./types.mjs";
-import { fail, isRecord, json, questionId, questionsBody } from "./util.mjs";
+import { askHaiku, HAIKU_MAX_CHARS, hasAnswerShape } from "./haiku.js";
+import { cutState, DEFAULT_CONTEXT_TOKENS, DEFAULT_DENSITY, estimateTokens, isTooBig, learn, MAX_DENSITY, OPTIMISTIC_FACTOR, preflightError, refusedDensity, stateForBudget, timeBudgetTokens, tooBigError } from "./size.js";
+import type { Knowledge, TooBig } from "./size.js";
+import { now, sendOutcome } from "./transport.js";
+import type { Link } from "./transport.js";
+import type { Engine, Env, Overflow, Question, ToolName, ToolResult } from "./types.js";
+import { fail, isRecord, json, questionId, questionsBody } from "./util.js";
 
 /** A request that System One answered with an HTTP error status (4xx or 5xx) that is not a context refusal: Haiku takes the call over. */
 type Failed = {

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Usage: check-plugin-layout.mts <plugin dir>
+// Usage: check-plugin-layout.ts <plugin dir>
 // Fails when <plugin>/plugin/ holds a file the shipped plugin may not contain (.claude/rules/plugin-build-output.md).
 // An allowlist: sources, tests, CLAUDE.md or tooling files belong outside plugin/. Called by every plugin's
 // build (step 0) and by check-plugin-fresh.sh in CI.

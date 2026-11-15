@@ -1,4 +1,4 @@
-// The bundleHooksLib step of development/scripts/build-plugin.mts (jev-api is its user): helper import shapes the
+// The bundleHooksLib step of development/scripts/build-plugin.ts (jev-api is its user): helper import shapes the
 // bundler cannot rewrite must fail the build instead of shipping a broken lib.mjs.
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "vitest";
 
-const BUILD = path.resolve(import.meta.dirname, "../../development/scripts/build-plugin.mts");
+const BUILD = path.resolve(import.meta.dirname, "../../development/scripts/build-plugin.ts");
 
 /** Builds a fixture plugin whose hooks.json lists only register.mjs and returns the build's exit code, stderr, built register.mjs and lib.mjs. */
 const build = (files: Record<string, string>, modules = ["./register.mjs"]): { status: number | null; stderr: string; entry: string; lib: string; sub: string } => {

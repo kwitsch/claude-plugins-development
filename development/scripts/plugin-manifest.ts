@@ -1,5 +1,5 @@
 // Converts a plugin's package.json (the only manifest source) into its Claude Code plugin manifest,
-// plugin/.claude-plugin/plugin.json. Pure (no I/O): build-plugin.mts writes the result, tests import it.
+// plugin/.claude-plugin/plugin.json. Pure (no I/O): build-plugin.ts writes the result, tests import it.
 
 /** Manifest keys package.json carries as top-level npm fields; `claudePlugin` must not repeat them. */
 const TOP_LEVEL = ["name", "version", "description", "author", "keywords"] as const;

@@ -820,7 +820,7 @@ describe("concurrent calls after a server restart", () => {
 
 describe("sendOutcome doc", () => {
   it("does not claim the server reads its own environment (it is given the env)", () => {
-    const src = readFileSync(new URL("../src/hooks/transport.mts", import.meta.url), "utf8");
+    const src = readFileSync(new URL("../src/hooks/transport.ts", import.meta.url), "utf8");
     expect(src).not.toMatch(/server reads its own environment/);
   });
 });

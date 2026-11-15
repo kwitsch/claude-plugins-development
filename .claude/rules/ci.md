@@ -10,7 +10,7 @@ PR (`.github/workflows/pr.yml`), on every PR:
 - Plugin dirs: one whose `package.json` has a `claudePlugin` key, checked by `.github/scripts/is-plugin.sh` (also used by release.yml and sync.yml), so a plugin with uncommitted `plugin/` still fails the freshness check.
 - For PRs into `main`, per changed plugin dir: the `package.json` version must be higher than on `main`, and tag `<name>-<version>` must not exist here or in kwitsch/claude-plugins.
 - One workspace-wide `pnpm exec oxlint` must pass.
-- Per tested plugin: `pnpm --filter <name> lint` (only if the plugin defines a `lint` script), `build` and `test` must pass, and the committed `<name>/plugin/` must equal the fresh build (`check-plugin-fresh.sh`, which also runs `development/scripts/check-plugin-layout.mts`, the allowlist of what `plugin/` may ship; `development/scripts/build-plugin.mts` runs it as step 0 too).
+- Per tested plugin: `pnpm --filter <name> lint` (only if the plugin defines a `lint` script), `build` and `test` must pass, and the committed `<name>/plugin/` must equal the fresh build (`check-plugin-fresh.sh`, which also runs `development/scripts/check-plugin-layout.ts`, the allowlist of what `plugin/` may ship; `development/scripts/build-plugin.ts` runs it as step 0 too).
 - Tested set: pnpm's graph `...[origin/<base>]`, i.e. changed workspace packages plus their dependents. A `development/vitest/claude-engine/` change runs its tests and re-tests every plugin using it (no version bump for those); a change in the root package itself (shared config, `development/scripts/`, lockfile, `.github/`, docs) re-checks every package.
 - Job `changed-plugins` is the required status check on `main` (branch protection in GitHub settings): do not rename it.
 

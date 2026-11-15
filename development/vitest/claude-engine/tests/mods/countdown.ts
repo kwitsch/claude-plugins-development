@@ -1,5 +1,5 @@
 // The countdown example of the docs: a one-second timer that toasts at zero.
-import type { On } from "../../index.mts";
+import type { On } from "../../index.ts";
 
 export function register(on: On) {
   on("command.run", { command: "countdown" }, ($, e) => {

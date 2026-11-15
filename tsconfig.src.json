@@ -1,10 +1,11 @@
 {
   "extends": "./tsconfig.base.json",
   "include": [
+    "*/src/**/*.ts",
     "*/src/**/*.mts",
     "*/scripts/*.mts",
-    "development/scripts/*.mts",
-    "development/vitest/claude-engine/**/*.mts",
+    "development/scripts/*.ts",
+    "development/vitest/claude-engine/**/*.ts",
     "vitest.config.mts"
   ]
 }
