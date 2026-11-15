@@ -1,4 +1,4 @@
-import { DEFAULT_CONTEXT_TOKENS, DEFAULT_DENSITY, DEFAULT_OVERFLOW, DEFAULT_TIMEOUT_S, HAIKU_MAX_CHARS, PLUGIN, REGISTER_WAIT_MS, SERVER_TOOL_PREFIX, TOOLS, TOOL_PREFIX, answerJev, askHaiku, configureServer, cutState, ensureTools, fail, isOverflow, loadKnowledge, message, newLink, parseInput, seconds } from "./lib.mjs";
+import { DEFAULT_CONTEXT_TOKENS, DEFAULT_DENSITY, DEFAULT_OVERFLOW, DEFAULT_TIMEOUT_S, HAIKU_MAX_CHARS, PLUGIN, REGISTER_WAIT_MS, SERVER_TOOL_PREFIX, TOOLS, TOOL_PREFIX, answerJev, askHaiku, configureServer, cutState, ensureTools, fail, isOverflow, loadKnowledge, message, newLink, parseInput, seconds, untilAbort } from "./lib.mjs";
 export function register(on, options) {
 	const fallbackS = seconds(options?.["timeout"]) ?? DEFAULT_TIMEOUT_S;
 	const optionOverflow = options?.["overflow"];
@@ -46,7 +46,7 @@ export function register(on, options) {
 		try {
 			if (st.missing.size > 0) {
 				try {
-					await ensureTools($, st, REGISTER_WAIT_MS);
+					await untilAbort(ensureTools($, st, REGISTER_WAIT_MS), next.signal);
 				} catch {}
 			}
 			const input = parseInput(type, e);
@@ -60,7 +60,7 @@ export function register(on, options) {
 			if (next.signal.aborted) return fail(type, "the call was abandoned");
 			const timeoutMs = Math.max(1, Math.round((seconds(e["timeout"]) ?? fallbackS) * 1e3));
 			if (!key && !base && !jevUrl) return await askHaiku($, type, cutState(input.state, HAIKU_MAX_CHARS), input.questions, timeoutMs, next.signal);
-			await loadKnowledge($, know);
+			await untilAbort(loadKnowledge($, know), next.signal);
 			if (next.signal.aborted) return fail(type, "the call was abandoned");
 			return await answerJev($, type, input, input.overflow ?? defaultOverflow, {
 				key,

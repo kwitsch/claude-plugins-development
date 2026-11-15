@@ -141,3 +141,28 @@ export function questionsBody(tool: ToolName, questions: Question[]): Record<str
 export function questionId(tool: ToolName, i: number): string {
   return tool === "batch" ? `q${i}` : QUESTION_ID;
 }
+
+/**
+ * Waits for `p`, or ends at once when `signal` aborts (the shared work behind `p` goes on in the background).
+ *
+ * @param p - The wait.
+ * @param signal - Aborts when the call is abandoned.
+ * @returns Settles like `p`, or at the abort, whichever comes first; the abort listener is removed either way.
+ */
+export async function untilAbort(p: Promise<unknown>, signal: AbortSignal): Promise<void> {
+  let onAbort: (() => void) | undefined;
+  try {
+    await Promise.race([
+      p,
+      new Promise<void>((resolve) => {
+        if (signal.aborted) resolve();
+        else {
+          onAbort = resolve;
+          signal.addEventListener("abort", onAbort, { once: true });
+        }
+      }),
+    ]);
+  } finally {
+    if (onAbort) signal.removeEventListener("abort", onAbort);
+  }
+}

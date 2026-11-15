@@ -28,7 +28,7 @@ import { TOOL_PREFIX } from "./tools.mjs";
 import { configureServer, newLink, PLUGIN, SERVER_TOOL_PREFIX } from "./transport.mjs";
 import { DEFAULT_OVERFLOW, TOOLS } from "./types.mjs";
 import type { On, Options, ToolName } from "./types.mjs";
-import { DEFAULT_TIMEOUT_S, fail, isOverflow, message, seconds } from "./util.mjs";
+import { DEFAULT_TIMEOUT_S, fail, isOverflow, message, seconds, untilAbort } from "./util.mjs";
 
 /**
  * Registers the module's hooks.
@@ -76,7 +76,7 @@ export function register(on: On, options?: Options): void {
       // best effort and bounded: a failed or hanging registration must not hold the answer
       if (st.missing.size > 0) {
         try {
-          await ensureTools($, st, REGISTER_WAIT_MS);
+          await untilAbort(ensureTools($, st, REGISTER_WAIT_MS), next.signal);
         } catch {
           // best effort (a hook above refusing $.clock): the call is answered anyway
         }
@@ -92,7 +92,7 @@ export function register(on: On, options?: Options): void {
       // A whole number of milliseconds, at least 1: $.model.complete refuses anything else (2.01 s * 1000 is 2009.9999999999998).
       const timeoutMs = Math.max(1, Math.round((seconds(e["timeout"]) ?? fallbackS) * 1000));
       if (!key && !base && !jevUrl) return await askHaiku($, type, cutState(input.state, HAIKU_MAX_CHARS), input.questions, timeoutMs, next.signal);
-      await loadKnowledge($, know);
+      await untilAbort(loadKnowledge($, know), next.signal);
       if (next.signal.aborted) return fail(type, "the call was abandoned");
       return await answerJev($, type, input, input.overflow ?? defaultOverflow, { key, base, jevUrl, model }, timeoutMs, next.signal, know, link);
     } catch (err) {

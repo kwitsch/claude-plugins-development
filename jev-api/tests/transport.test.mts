@@ -22,7 +22,7 @@ type Rig = Awaited<ReturnType<typeof rig>>;
  *
  * @param opts - `connect` answers `$.mcp.connect` (default: connected); `onCall` answers `$.mcp.call` (default: an ok outcome for `request`, `{cancelled:true}` for `cancel`); `noMcp` leaves `$.mcp` out like the older tests' world; `options` is the plugin's userConfig; `env` the env values.
  */
-async function rig(opts: { connect?: () => Promise<unknown>; onCall?: (c: Call) => unknown; noMcp?: boolean; onConfig?: (c: Call) => unknown; complete?: (r: Args) => unknown; options?: Record<string, unknown>; env?: Record<string, string> } = {}) {
+async function rig(opts: { connect?: () => Promise<unknown>; onCall?: (c: Call) => unknown; noMcp?: boolean; onConfig?: (c: Call) => unknown; complete?: (r: Args) => unknown; store?: () => Promise<unknown>; register?: () => Promise<unknown>; options?: Record<string, unknown>; env?: Record<string, string> } = {}) {
   const { register } = await import("../plugin/hooks/register.mjs");
   const hooks = new Map<string, (...a: unknown[]) => Promise<unknown>>();
   register((event: string, hook: (...a: unknown[]) => Promise<unknown>) => void hooks.set(event, hook), opts.options);
@@ -47,6 +47,8 @@ async function rig(opts: { connect?: () => Promise<unknown>; onCall?: (c: Call) 
     },
     model: { complete: (r: Args) => (completed.push(r), Promise.resolve(opts.complete ? opts.complete(r) : { isAnswered: false, reason: "unavailable" })) },
     ui: { log: (t: string) => void logs.push(t) },
+    ...(opts.store ? { store: { get: opts.store, set: async () => undefined } } : {}),
+    ...(opts.register ? { tool: { register: opts.register } } : {}),
     ...(opts.noMcp ? {} : {
       mcp: {
         connect: async () => (connects.n++, opts.connect ? opts.connect() : { isConnected: true, server: SERVER }),
@@ -348,6 +350,22 @@ describe("fallback to $.http.fetch", () => {
     await new Promise((r) => setImmediate(r));
     expect(t.fetched).toHaveLength(0);
   });
+
+  for (const [name, hang] of [["store read", "store"], ["tool registration", "register"]] as const) {
+    it(`a call abandoned while the ${name} is pending is answered before its timer and sends nothing`, async () => {
+      // the store case needs the registration to finish, or the call is abandoned before it reaches the store
+      let reached = false;
+      const t = await rig({ register: async () => ({}), [hang]: () => (reached = true, NEVER()) });
+      const ac = new AbortController();
+      const pending = t.run("noul", {}, ac.signal);
+      for (let i = 0; i < 100 && !reached; i++) await new Promise((r) => setImmediate(r));
+      expect(reached).toBe(true);
+      ac.abort();
+      expect(await pending).toEqual({ deny: "noul: the call was abandoned" });
+      expect(t.fetched).toHaveLength(0);
+      expect(t.requests()).toHaveLength(0);
+    });
+  }
 
   it("a throwing request call falls back for that call, marks the link down and logs once", async () => {
     const t = await rig({ onCall: () => Promise.reject(new Error("transport closed")) });
