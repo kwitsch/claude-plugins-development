@@ -231,6 +231,7 @@ const client = (cwd: string, key = cwd): DprintLsp => {
     // evict the idle children of cwds the session left long ago
     for (const [k, old] of clients) {
       if (clients.size < MAX_CLIENTS) break;
+      if (old.busy) continue; // closing it would fail its in-flight formats; the map may exceed the cap for a while
       old.close();
       clients.delete(k);
     }

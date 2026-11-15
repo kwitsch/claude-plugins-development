@@ -282,6 +282,24 @@ test("applyTextEdits: a position past the end of a CRLF line clamps before the \
   );
 });
 
+test("format_pre: more concurrent roots than the client cap all format (a busy client is not evicted)", async () => {
+  const tmp = mkdtempSync(path.join(tmpdir(), "dprint-evict-"));
+  const roots: string[] = [];
+  for (let i = 0; i < 9; i++) {
+    const r = path.join(tmp, `r${i}`);
+    mkdirSync(path.join(r, ".git"), { recursive: true });
+    writeFileSync(path.join(r, "dprint.json"), JSON.stringify({ json: {}, plugins: ["npm:@dprint/json@0.25.2"] }));
+    roots.push(r);
+  }
+  try {
+    const res = await Promise.all(roots.map((r, i) => formatPre({ cwd: r, agent_id: "", session_id: "ev" + i, scratchpad_dir: "", tool_name: "Write", tool_input: { file_path: path.join(r, "x.json"), content: "{\n\"a\": 1\n}\n" } })));
+    res.forEach((x, i) => assert.ok("hookSpecificOutput" in x, `root ${i} was formatted`));
+  } finally {
+    disposeLsp();
+    rmSync(tmp, { recursive: true, force: true });
+  }
+}, 60_000);
+
 test("trimToEdit: a highly repetitive file jumps to the widest span after the step cap instead of blocking", () => {
   // 10 identical 2000-line blocks: no span under ~18000 lines is unique
   const block = Array.from({ length: 2000 }, (_, i) => `l${i}\n`).join("");
