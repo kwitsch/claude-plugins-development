@@ -185,6 +185,18 @@ for (const line of [`export { one } from "./a.mjs";`, `export * from "./a.mjs";`
   });
 }
 
+test.each(["../hooks/a.mjs#x", "../hooks/a.mjs?v=1"])("a module outside the bundle importing a helper as %s fails the build", (spec) => {
+  const r = build({ "a.mts": A, "register.mts": `import { one } from "./a.mjs";\nexport function register(on: unknown): number { return one; }\n`, "../bin/t.mts": `import { one } from "${spec}";\nconsole.log(one);\n` });
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /bin\/t\.mjs imports, re-exports or dynamically imports plugin\/hooks\/a\.mjs/);
+});
+
+test("an entry dynamically importing a helper with a query fails the build", () => {
+  const r = build({ "a.mts": A, "register.mts": `export const load = () => import("./a.mjs?v=1");\nexport function register(on: unknown): number { return 1; }\n` });
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /dynamically imports/);
+});
+
 test("a module outside the bundle that re-exports a helper fails the build", () => {
   const r = build({ "a.mts": A, "register.mts": `import { one } from "./a.mjs";\nexport function register(on: unknown): number { return one; }\n`, "../bin/tool.mts": `export { one } from "../hooks/a.mjs";\n` });
   assert.equal(r.status, 1);

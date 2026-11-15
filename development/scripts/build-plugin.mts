@@ -102,19 +102,24 @@ function bundleLib(compiled: Map<string, string>): { members: string[]; entries:
   };
   // a helper file is not shipped: a module outside the bundle (bin/, mcp/, a hooks subdirectory) must not import one
   const memberSet = new Set(members);
+  /** The helper file a specifier of module `f` names (a `?query` or `#fragment` ignored, as Node does), or undefined when it names no helper. */
+  const helperOf = (f: string, spec: string): string | undefined => {
+    const target = path.resolve(path.dirname(f), spec.replace(/[?#].*$/, "").replace(/\.mjs$/, "") + ".mjs");
+    return memberSet.has(target) ? target : undefined;
+  };
   for (const [f, code] of compiled) {
     if (memberSet.has(f) || entryPaths.has(f)) continue;
     const p = parse(f, code);
     for (const src of [...p.imports.map((i) => i.moduleRequest.value), ...p.reexports, ...p.dynamics]) {
-      const target = path.resolve(path.dirname(f), src);
-      if (memberSet.has(target)) fail(`${path.relative(ROOT, f)} imports, re-exports or dynamically imports ${path.relative(ROOT, target)}, which is bundled into lib.mjs`);
+      const target = helperOf(f, src);
+      if (target !== undefined) fail(`${path.relative(ROOT, f)} imports, re-exports or dynamically imports ${path.relative(ROOT, target)}, which is bundled into lib.mjs`);
     }
   }
   // a dynamic import("./helper.mjs") in an entry or a helper resolves to a file that is not shipped
   for (const [f, code] of compiled) {
     if (!memberSet.has(f) && !entryPaths.has(f)) continue;
     for (const src of parse(f, code).dynamics) {
-      if (memberSet.has(path.resolve(path.dirname(f), src))) fail(`${path.relative(ROOT, f)} dynamically imports ${src}, which is bundled into lib.mjs`);
+      if (helperOf(f, src) !== undefined) fail(`${path.relative(ROOT, f)} dynamically imports ${src}, which is bundled into lib.mjs`);
     }
   }
   // the helpers in dependency order (a helper after the helpers it imports), the other imports (node:) hoisted
@@ -134,7 +139,7 @@ function bundleLib(compiled: Map<string, string>): { members: string[]; entries:
       if (name === undefined) {
         // a helper reached by another spelling (`../hooks/a.mjs`, `././a.mjs`, `./a.mjs?v=1`) would stay imported though its file is deleted
         const spec = imp.moduleRequest.value;
-        if (memberSet.has(path.resolve(path.dirname(f), spec.replace(/[?#].*$/, "").replace(/\.mjs$/, "") + ".mjs"))) fail(`${path.relative(ROOT, f)} imports ${spec}, a helper, other than by ./name.mjs`);
+        if (helperOf(f, spec) !== undefined) fail(`${path.relative(ROOT, f)} imports ${spec}, a helper, other than by ./name.mjs`);
         hoisted.add(code.slice(imp.start, imp.end).trim());
         continue;
       }
@@ -191,7 +196,7 @@ function bundleLib(compiled: Map<string, string>): { members: string[]; entries:
     const plain = new Set(parsed.imports.map((i) => i.moduleRequest.value).filter((v) => byName.has(siblingName(v) ?? "")));
     for (const src of [...parsed.imports.map((i) => i.moduleRequest.value), ...parsed.reexports]) {
       const isPlainImport = plain.has(src) && !parsed.reexports.includes(src);
-      if (memberSet.has(path.resolve(path.dirname(f), src.replace(/[?#].*$/, "").replace(/\.mjs$/, "") + ".mjs")) && !isPlainImport) {
+      if (helperOf(f, src) !== undefined && !isPlainImport) {
         fail(`${path.relative(ROOT, f)} imports/re-exports ${src}, a helper, other than by a named import from ./name.mjs`);
       }
     }
