@@ -52,7 +52,7 @@ const SCRATCH = "/tmp/claude-1000/-proj/sid-1/scratchpad/x.md";
 async function writeDecision($: Runner, on: Parameters<typeof setup>[0], tools: string[]) {
   setup(on, { messages: [], jev: () => undefined, tools: tools.map(jev) });
   on("tool.check", () => ({ decision: "ask" }));
-  return (await $.tool.check({ tool: "Write", input: { file_path: SCRATCH }, tool_use_id: "toolu_jm" })).decision;
+  return ((await $.tool.check({ tool: "Write", input: { file_path: SCRATCH }, tool_use_id: "toolu_jm" })) as { decision: string }).decision;
 }
 
 test("jevMissing: with batch listed the scratchpad write is allowed", async ($, on) => {
