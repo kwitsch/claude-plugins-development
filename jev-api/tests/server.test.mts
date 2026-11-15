@@ -275,7 +275,14 @@ describe("request", () => {
   test("blank variables count as unset", async () => {
     const c = start({ JEV_URL: "  ", TYPESAFE_API_KEY: "\t" });
     live.push(c);
-    assert.equal(outcomeOf(await c.request())["code"], "config");
+    assert.deepEqual(outcomeOf(await c.request()), { kind: "error", code: "config", message: "no System One access configured: set TYPESAFE_API_KEY, TYPESAFE_BASE_URL or JEV_URL" });
+  });
+
+  test("a blank jevUrl in a config call is unset, not an invalid endpoint", async () => {
+    const c = start({});
+    live.push(c);
+    await c.call("config", { jevUrl: "  ", key: KEY });
+    assert.notEqual(outcomeOf(await c.request())["message"], "JEV_URL must be an http(s) URL");
   });
 
   test("an invalid JEV_URL is a config error and sends nothing", async () => {
