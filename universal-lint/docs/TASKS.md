@@ -60,7 +60,9 @@ Legend: `[x]` finished. `[ ]` not finished; tag = `open` (code change, not start
 
 - [x] [F36](tasks/F36-held-parse-error-fixed-elsewhere.md) A held parse error is dropped by any later edit `done` priority:low. Shipped in 0.16.1: `gateFinding(..., "drop")`.
 
-- [x] [F35](tasks/F35-skip-hold-when-nothing-droppable.md) Skip the settle hold when no held diagnostic can be dropped `done` priority:medium. Shipped in 0.16.1: foreign-only and unlocated-only findings are reported at once.
+- [x] [F35](tasks/F35-skip-hold-when-nothing-droppable.md) Skip the settle hold when no held diagnostic can be dropped `done` priority:medium. Shipped in 0.16.1: foreign-only and unlocated-only findings are reported at once. Obsolete since F40 (0.17.0): every finding waits for the quiet time.
+
+- [x] [F40](tasks/F40-mid-edit-findings.md) Mid-edit findings: route to the editing agent, report a burst's final state once, sweep at turn end `done` priority:high. Shipped in 0.17.0 on user request (2026-11-15) after mining 133 wake-ups (82 came from subagent edits and went to the main conversation): a subagent's edits are linted at its `SubagentStop` and reported to it; the newest edit of a file owns the report and gates against the lines of all pending edits; findings wait for 20 s without an edit of the agent; `Stop` sweeps what is left. Replaces F34's line-local rule, F35 and F36.
 
 ## Remaining
 
@@ -70,13 +72,13 @@ Found by [EVALUATION-2026-11-14](EVALUATION-2026-11-14.md) on 0.16.0.
 
 Found by [EVALUATION-2026-11-14b](EVALUATION-2026-11-14b.md) on 0.16.1.
 
-- [ ] [F38](tasks/F38-settle-docs-after-f36.md) Settle-window docs still describe the 0.16.0 parse-error rule `open` priority:low. README "edits elsewhere drop nothing" and settle-window.md "Lines." (`gateFinding(..., false)`) predate F36; docs only.
-- [ ] [F39](tasks/F39-settle-process-test-wall-time.md) settle-process.test.ts now sets the test suite's wall time `open` priority:low. 14 sequential hold-bound tests, 17.4 -> 25.5 s, suite 22.5 -> 25.5 s; tests only.
+- [x] [F38](tasks/F38-settle-docs-after-f36.md) Settle-window docs still describe the 0.16.0 parse-error rule `closed` priority:low. Closed in 0.17.0: F40 removed the rule and rewrote both texts (README paragraph, `settle-window.md`, which now starts with `#`).
+- [ ] [F39](tasks/F39-settle-process-test-wall-time.md) settle-process.test.ts now sets the test suite's wall time `open` priority:low. 14 sequential hold-bound tests, 17.4 -> 25.5 s, suite 22.5 -> 25.5 s; tests only. After F40 (0.17.0): 28 tests, the file takes about 29 s and the suite 30 s (one run).
 
 ## Dependencies
 
 - F37 before or with F35/F36: all three touch `hook-design.md` "Settle window (F34)"; F35's precheck counts a parse error as droppable, so F36 does not change it.
-- F38 and F39 are independent; both change files under `universal-lint/` and need a version bump, so they can share one patch release.
+- F39 is independent (tests only).
 
 - Before each task: re-run `node universal-lint/scripts/perf.mts` (F01, done) for a fresh baseline; each task's Verification compares against it.
 - F02 + F03 together remove all false eslint findings seen in this analysis; F02 alone (the safety net) covers projects that have a config but no reachable binary. F04's walk from the file's directory fixes the sub-package case (91 of 128 historical pnpm findings).
