@@ -168,16 +168,16 @@ function bundleLib(compiled: Map<string, string>): { members: string[]; entries:
   for (const f of members) visit(f);
   // named imports of one source merge into one import (the same name from two helpers is bound once); others stay whole lines
   const named = new Map<string, Set<string>>();
-  const imports: string[] = [];
+  const imports = new Set<string>(); // identical lines (a default shared by two helpers) bind once
   for (const line of hoisted) {
     const m = /^import\s*(?:([\w$]+)\s*,\s*)?\{([^}]*)\}\s*from\s*(["'][^"']*["']);?$/.exec(line);
-    if (!m) imports.push(line);
+    if (!m) imports.add(line);
     else {
-      if (m[1] !== undefined) imports.push(`import ${m[1]} from ${m[3]};`); // the default stays its own line
+      if (m[1] !== undefined) imports.add(`import ${m[1]} from ${m[3]};`); // the default stays its own line
       for (const s of m[2].split(",").map((x) => x.trim().replace(/\s+/g, " ")).filter(Boolean)) named.set(m[3], (named.get(m[3]) ?? new Set()).add(s));
     }
   }
-  for (const [source, specs] of named) imports.push(`import { ${[...specs].join(", ")} } from ${source};`);
+  for (const [source, specs] of named) imports.add(`import { ${[...specs].join(", ")} } from ${source};`);
   // every hoisted import binds a name once (declared names are left to the Node parse below, which sees the real syntax)
   const seen = new Map<string, string>();
   const bind = (name: string, where: string): void => {
@@ -222,7 +222,7 @@ function bundleLib(compiled: Map<string, string>): { members: string[]; entries:
     entries.set(f, splice(code, spans));
   }
   const text = ordered.map((f) => bodies.get(f) ?? "").join("\n");
-  const code = `${imports.join("\n")}\n${text}\nexport { ${[...needed].sort().join(", ")} };\n`;
+  const code = `${[...imports].join("\n")}\n${text}\nexport { ${[...needed].sort().join(", ")} };\n`;
   // Node's parse catches every duplicate top-level binding (a name declared in two helpers, or declared and imported)
   // before it ships; a line scan of the bodies would also match declaration-like lines inside template literals
   const check = spawnSync(process.execPath, ["--check", "--input-type=module"], { input: code, encoding: "utf8" });

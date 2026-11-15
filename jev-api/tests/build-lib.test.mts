@@ -334,6 +334,17 @@ test("a default plus named import merges with another helper's named import of t
   assert.equal(r.status, 0, r.stderr);
 });
 
+test("two helpers binding the same default (mixed or plain) from one source build", () => {
+  for (const b of [`import path, { dirname } from "node:path";\nexport const two = (): string => dirname("b") + path.sep;\n`, `import path from "node:path";\nexport const two = (): string => path.sep;\n`]) {
+    const r = build({
+      "a.mts": `import path, { join } from "node:path";\nexport const one = join("a") + path.sep;\n`,
+      "b.mts": b,
+      "register.mts": `import { one } from "./a.mjs";\nimport { two } from "./b.mjs";\nexport function register(on: unknown): string { return one + two(); }\n`,
+    });
+    assert.equal(r.status, 0, r.stderr);
+  }
+});
+
 test("a failed build keeps the previous plugin/ output", () => {
   const dir = mkdtempSync(path.join(tmpdir(), "failed-build-"));
   try {
