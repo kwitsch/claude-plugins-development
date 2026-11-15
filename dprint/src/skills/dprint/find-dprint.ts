@@ -1,6 +1,6 @@
 /**
- * Shared dprint lookup used by `check-dprint.mts`, `run-dprint.mts` and the MCP server's lsp client
- * (`mcp/lsp.mts`) and watch list (`mcp/watch-list.mts`). The project config lookup is `find-config.mts`.
+ * Shared dprint lookup used by `check-dprint.ts`, `run-dprint.ts` and the MCP server's lsp client
+ * (`mcp/lsp.ts`) and watch list (`mcp/watch-list.ts`). The project config lookup is `find-config.ts`.
  *
  * @packageDocumentation
  */
@@ -93,7 +93,9 @@ async function runProbe(npx: string): Promise<boolean> {
  */
 function probeNpx(npx: string): Promise<boolean> {
   const hit = probes.get(npx);
-  if (hit && (hit.failedAt === undefined || Date.now() - hit.failedAt < NPX_RETRY_MS)) return hit.ok;
+  // a failure stamped in the future (the wall clock stepped back) counts as expired
+  const age = hit?.failedAt === undefined ? 0 : Date.now() - hit.failedAt;
+  if (hit && (hit.failedAt === undefined || (age >= 0 && age < NPX_RETRY_MS))) return hit.ok;
   const entry: { ok: Promise<boolean>; failedAt?: number } = { ok: runProbe(npx) };
   void entry.ok.then((ok) => {
     if (!ok) entry.failedAt = Date.now();

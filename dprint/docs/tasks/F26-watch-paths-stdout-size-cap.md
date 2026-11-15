@@ -3,12 +3,12 @@ id: F26
 title: Check whether Claude Code's hook stdout cap truncates huge watchPaths JSON
 status: closed
 priority: none
-area: dprint/src/mcp/watch-paths.mts (main, WATCH_LIMIT)
+area: dprint/src/mcp/watch-paths.ts (main, WATCH_LIMIT)
 ---
 
 ## Status
 
-Closed 2026-11-13: measurement record (not truncated on Claude Code 2.1.316), no code action; re-test after a Claude Code upgrade. `WATCH_LIMIT` now lives in `watch-list.mts`.
+Closed 2026-11-13: measurement record (not truncated on Claude Code 2.1.316), no code action; re-test after a Claude Code upgrade. `WATCH_LIMIT` now lives in `watch-list.ts`.
 
 Earlier state: Open, no action expected. Analysis verdict: refuted for Claude Code 2.1.316 (the cap does not precede the hookSpecificOutput parse). Re-test only after a Claude Code upgrade or if FileChanged silently stops on large repos.
 
@@ -22,7 +22,7 @@ Real headless sessions, plain `--debug`: 18,903 chars (11 runs), 761,031 chars (
 
 ## Code locations
 
-`WATCH_LIMIT` (module const) and `main` in dprint/src/mcp/watch-paths.mts (single `JSON.stringify` to stdout).
+`WATCH_LIMIT` (module const) and `main` in dprint/src/mcp/watch-paths.ts (single `JSON.stringify` to stdout).
 
 ## Approach
 

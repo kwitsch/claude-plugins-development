@@ -11,7 +11,7 @@ import { afterEach, beforeEach, test } from "vitest";
 const PLUGIN = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../plugin");
 const SCRIPT = path.join(PLUGIN, "skills/dprint/check-dprint.mjs");
 // the built script is minified; MIN_VERSION is read from its source
-const SOURCE = path.resolve(PLUGIN, "../src/skills/dprint/check-dprint.mts");
+const SOURCE = path.resolve(PLUGIN, "../src/skills/dprint/check-dprint.ts");
 const MIN = /^const MIN_VERSION = "([0-9.]+)";$/m.exec(readFileSync(SOURCE, "utf8"))?.[1];
 
 let tmp, bin, home;

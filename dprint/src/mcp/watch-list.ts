@@ -10,8 +10,8 @@
 import { execFile } from "node:child_process";
 import path from "node:path";
 import { promisify } from "node:util";
-import { findConfig } from "../skills/dprint/find-config.mjs";
-import { dprintArgv, findDprint } from "../skills/dprint/find-dprint.mjs";
+import { findConfig } from "../skills/dprint/find-config.js";
+import { dprintArgv, findDprint } from "../skills/dprint/find-dprint.js";
 
 /**
  * Most files watched per cwd.
@@ -49,7 +49,13 @@ export async function dprintFilePaths(cwd: string): Promise<string[]> {
     if (!/unrecognized subcommand/.test((e as { stderr?: string }).stderr ?? "")) throw e;
     out = await run("output-file-paths");
   }
-  const lines = out.split("\n").filter(Boolean);
+  // a file name may hold a newline: a line that is not absolute continues the previous path
+  const lines: string[] = [];
+  for (const l of out.split("\n")) {
+    if (!l) continue;
+    if (path.isAbsolute(l) || lines.length === 0) lines.push(l);
+    else lines[lines.length - 1] += "\n" + l;
+  }
   if (lines.length > WATCH_LIMIT) {
     process.stderr.write(
       `[dprint-hooks] file list: ${lines.length} files above ${WATCH_LIMIT}, FileChanged and Bash formatting off\n`,

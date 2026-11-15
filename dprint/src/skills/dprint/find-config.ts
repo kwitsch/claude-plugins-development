@@ -1,11 +1,11 @@
 /**
- * Locate the dprint project config for a directory, shared by `mcp/format.mts` and `scan-plugins.mts`.
+ * Locate the dprint project config for a directory, shared by `mcp/format.ts` and `scan-plugins.ts`.
  *
  * @packageDocumentation
  */
 import { existsSync } from "node:fs";
 import path from "node:path";
-import { CONFIG_NAMES } from "./config-names.mjs";
+import { CONFIG_NAMES } from "./config-names.js";
 
 /** A found config: the directory holding it and its entry of {@link CONFIG_NAMES}. */
 export type FoundConfig = {

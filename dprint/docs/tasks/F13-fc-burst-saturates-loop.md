@@ -3,7 +3,7 @@ id: F13
 title: Bound FileChanged burst load on the MCP server event loop
 status: done
 priority: none
-area: dprint/src/mcp/format.mts (fileChanged, acquireChangeSlot, releaseChangeSlot, MAX_ACTIVE_CHANGES, MAX_WAITING_CHANGES)
+area: dprint/src/mcp/format.ts (fileChanged, acquireChangeSlot, releaseChangeSlot, MAX_ACTIVE_CHANGES, MAX_WAITING_CHANGES)
 ---
 
 ## Status
@@ -22,7 +22,7 @@ Claude Code fires FileChanged mcp_tool hooks concurrently (real session: 120 eve
 
 ## Code locations
 
-- `acquireChangeSlot` / `releaseChangeSlot` (FIFO hand-over of the slot to `waitingChanges`) and constants `MAX_ACTIVE_CHANGES = 8`, `MAX_WAITING_CHANGES = 1000`, `activeChanges`, `waitingChanges` in dprint/src/mcp/format.mts.
+- `acquireChangeSlot` / `releaseChangeSlot` (FIFO hand-over of the slot to `waitingChanges`) and constants `MAX_ACTIVE_CHANGES = 8`, `MAX_WAITING_CHANGES = 1000`, `activeChanges`, `waitingChanges` in dprint/src/mcp/format.ts.
 - `fileChanged` in the same file: size check, then `acquireChangeSlot`, file read only after the slot is held, then one `execFileAsync("git", ["--no-optional-locks","status","--porcelain","--untracked-files=normal","--ignored=matching","--", fp])`; `releaseChangeSlot` in `finally`.
 
 ## Approach
@@ -31,7 +31,7 @@ Implemented as validated: (1) slot semaphore (8 slots, FIFO, bounded queue) acqu
 
 ## Verification
 
-- tests/mcp-server.test.mts: "60 concurrent file_changed events are all formatted".
+- tests/mcp-server.test.ts: "60 concurrent file_changed events are all formatted".
 - Re-measure: send 50-122 file_changed events at once plus a format_pre 50 ms into the burst; target format_pre < 30 ms.
 - `pnpm --filter dprint build && pnpm --filter dprint test`.
 

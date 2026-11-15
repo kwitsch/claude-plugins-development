@@ -3,7 +3,7 @@ id: F02
 title: Format YAML Edits (range answer null no longer means already formatted)
 status: done
 priority: none
-area: dprint/src/mcp/format.mts (formatPre), dprint/src/mcp/lsp.mts (DprintLsp.formatNow)
+area: dprint/src/mcp/format.ts (formatPre), dprint/src/mcp/lsp.ts (DprintLsp.formatNow)
 ---
 
 ## Status
@@ -22,7 +22,7 @@ Real dprint 0.64.3: yaml 50-line dirty file: range -> null, whole -> 126 edits; 
 
 - `formatPre` Edit branch (`lsp.format(uri, M)` whole, `changed`)
 - `DprintLsp.formatNow` (only `textDocument/formatting`)
-- `tests/mcp-server.test.mts`: stub mode `range-null` (rangeFormatting answers null, formatting answers edits), test "rangeFormatting answering null (yaml plugin) -> Edit still formatted", and "Edit whose trim would drop the deleted repeated line -> {}" (also uses `range-null`)
+- `tests/mcp-server.test.ts`: stub mode `range-null` (rangeFormatting answers null, formatting answers edits), test "rangeFormatting answering null (yaml plugin) -> Edit still formatted", and "Edit whose trim would drop the deleted repeated line -> {}" (also uses `range-null`)
 
 ## Approach
 

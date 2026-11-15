@@ -3,7 +3,7 @@ id: F25
 title: Cut watch-paths SessionStart/CwdChanged cost on large repos
 status: done
 priority: low
-area: dprint/src/mcp/format.mts (realish), dprint/src/mcp/watch-paths.mts (watchList, execFileSync timeout)
+area: dprint/src/mcp/format.ts (realish), dprint/src/mcp/watch-paths.ts (watchList, execFileSync timeout)
 ---
 
 ## Status
@@ -20,15 +20,15 @@ Medians ms (orig / realpathSync.native / dir-cached): 39 files 86/83/85; 500 fil
 
 ## Code locations
 
-- `realish` (module const) in dprint/src/mcp/format.mts, used by `scopeOf`/`inScope`.
-- `watchList` in dprint/src/mcp/watch-paths.mts: `execFileSync(... timeout: 10_000 ...)` and `WATCH_LIMIT` check before `inScope` filtering.
+- `realish` (module const) in dprint/src/mcp/format.ts, used by `scopeOf`/`inScope`.
+- `watchList` in dprint/src/mcp/watch-paths.ts: `execFileSync(... timeout: 10_000 ...)` and `WATCH_LIMIT` check before `inScope` filtering.
 
 ## Approach
 
 1. `realish`: `realpathSync` -> `realpathSync.native` (halves the pass, identical results; no gain on 9P). Optional: per-Scope Map of directory realpaths plus an `lstat` decision per file (~15 lines, 246 ms flat / 221 ms deep at 5k); it touches the shared security-relevant `inScope` helper, take it only if the cost proves user-visible.
 2. Lower the `dprint file-paths` `execFileSync` timeout from 10_000 to ~3_000 ms (cap the SessionStart stall; see F14).
 3. Keep `WATCH_LIMIT` as is (cheap early exit ~110 ms; counting is by design).
-   Not recommended: splitting `scopeOf`/`inScope` out of format.mts (saves ~15 ms of imports).
+   Not recommended: splitting `scopeOf`/`inScope` out of format.ts (saves ~15 ms of imports).
 
 ## Verification
 
@@ -36,7 +36,7 @@ Medians ms (orig / realpathSync.native / dir-cached): 39 files 86/83/85; 500 fil
 
 ## Constraints
 
-Edit src/ not plugin/*.mjs; `pnpm --filter dprint build && pnpm --filter dprint test`; fail open (stdout JSON object or nothing, exit 0); zero-dep node:; TSDoc on every symbol; version bump in dprint/plugin.json AND dprint/package.json; watch-paths.mts must not import server.mjs.
+Edit src/ not plugin/*.mjs; `pnpm --filter dprint build && pnpm --filter dprint test`; fail open (stdout JSON object or nothing, exit 0); zero-dep node:; TSDoc on every symbol; version bump in dprint/plugin.json AND dprint/package.json; watch-paths.ts must not import server.mjs.
 
 ## Related
 

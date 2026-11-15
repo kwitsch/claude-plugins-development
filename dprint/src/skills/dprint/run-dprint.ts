@@ -13,8 +13,8 @@
  */
 
 import { spawnSync } from "node:child_process";
-import { findConfig } from "./find-config.mjs";
-import { dprintArgv, findDprint } from "./find-dprint.mjs";
+import { findConfig } from "./find-config.js";
+import { dprintArgv, findDprint } from "./find-dprint.js";
 
 /**
  * Validate the arguments, check that dprint is set up and run it.

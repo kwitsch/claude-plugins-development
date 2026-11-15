@@ -3,7 +3,7 @@ id: F20
 title: Optional no-op error listeners on server stdout/stderr
 status: closed
 priority: none
-area: dprint/src/mcp/server.mts (startServer, process.stdout/stderr), dprint/src/mcp/lsp.mts (DprintLsp.start)
+area: dprint/src/mcp/server.ts (startServer, process.stdout/stderr), dprint/src/mcp/lsp.ts (DprintLsp.start)
 ---
 
 ## Status
@@ -14,7 +14,7 @@ Earlier state: Open, verdict REFUTED (worth fixing: no). No change required. Onl
 
 ## Problem
 
-Hypothesis: an `'error'` event on the dprint child's stdout/stderr or on the MCP server's own stdout/stderr is unhandled, would throw, and exit the server; interactive Claude Code never restarts a stdio server mid-session (formatting silently off until /mcp Reconnect). `lsp.mts` registers `error` only on `child.stdin`; `server.mts` writes to `process.stdout`/`process.stderr` without listeners and has no `uncaughtException` handler.
+Hypothesis: an `'error'` event on the dprint child's stdout/stderr or on the MCP server's own stdout/stderr is unhandled, would throw, and exit the server; interactive Claude Code never restarts a stdio server mid-session (formatting silently off until /mcp Reconnect). `lsp.ts` registers `error` only on `child.stdin`; `server.ts` writes to `process.stdout`/`process.stderr` without listeners and has no `uncaughtException` handler.
 
 ## Evidence
 
@@ -25,8 +25,8 @@ Hypothesis: an `'error'` event on the dprint child's stdout/stderr or on the MCP
 
 ## Code locations
 
-- `DprintLsp.start` in dprint/src/mcp/lsp.mts: `child.stdin.on("error", () => {})` exists; stdout/stderr have only `data` listeners (leave as is).
-- `startServer` in dprint/src/mcp/server.mts: `send` writes `process.stdout`; stderr logs via `process.stderr.write` (no listeners).
+- `DprintLsp.start` in dprint/src/mcp/lsp.ts: `child.stdin.on("error", () => {})` exists; stdout/stderr have only `data` listeners (leave as is).
+- `startServer` in dprint/src/mcp/server.ts: `send` writes `process.stdout`; stderr logs via `process.stderr.write` (no listeners).
 
 ## Approach
 

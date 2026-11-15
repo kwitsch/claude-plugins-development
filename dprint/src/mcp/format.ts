@@ -14,10 +14,10 @@ import { existsSync, lstatSync, readFileSync, realpathSync, statSync, writeFileS
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
-import { findConfig } from "../skills/dprint/find-config.mjs";
-import type { BashFinishedInput, BashStartedInput, CwdChangedInput, DrainNoticesInput, FileChangedInput, FileWrittenInput, FormatPreInput, WorktreeEnteredInput, WorktreeExitedInput } from "./hook-inputs.mjs";
-import { DprintLsp } from "./lsp.mjs";
-import { dprintFilePaths } from "./watch-list.mjs";
+import { findConfig } from "../skills/dprint/find-config.js";
+import type { BashFinishedInput, BashStartedInput, CwdChangedInput, DrainNoticesInput, FileChangedInput, FileWrittenInput, FormatPreInput, WorktreeEnteredInput, WorktreeExitedInput } from "./hook-inputs.js";
+import { DprintLsp } from "./lsp.js";
+import { dprintFilePaths } from "./watch-list.js";
 
 /** Hook output: empty (`{}`) to let the event through unchanged, else a notice and, for `format_pre`, the rewritten tool input. */
 export type HookResult = {
@@ -231,6 +231,7 @@ const client = (cwd: string, key = cwd): DprintLsp => {
     // evict the idle children of cwds the session left long ago
     for (const [k, old] of clients) {
       if (clients.size < MAX_CLIENTS) break;
+      if (old.busy) continue; // closing it would fail its in-flight formats; the map may exceed the cap for a while
       old.close();
       clients.delete(k);
     }
@@ -643,6 +644,9 @@ async function formatOnDisk(sc: Scope, s: { fp: string; real: string }, signal?:
     try {
       // cancelled while waiting for the slot: give it back without reading or spawning anything
       if (signal?.aborted) return false;
+      // the file may have grown while this event waited for the slot: check the cap again before the read
+      // the file may have grown while this event waited for the slot: check the cap again before the read
+      if (overCap(statSync(s.fp).size, s.fp)) return false;
       // read after the slot is held: waiting events must not each keep up to 1 MiB of text alive
       // fatal decoder: a non-UTF-8 file throws (fails open) instead of being rewritten with U+FFFD
       const text = utf8.decode(readFileSync(s.fp));
@@ -1070,6 +1074,8 @@ export async function formatPre(
     if (await isGitIgnored(s.real)) return {};
     // cancelled meanwhile: spawn and format nothing (checked again before the second Edit format)
     if (signal?.aborted) return {};
+    // the file may have grown while git check-ignore ran: check the cap again before the read
+    if (args.tool_name === "Edit" && overCap(statSync(fp).size + Buffer.byteLength(ti.new_string ?? ""), fp)) return {};
     const uri = pathToFileURL(fp).href;
 
     if (args.tool_name === "Write") {

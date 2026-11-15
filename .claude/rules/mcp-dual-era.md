@@ -7,8 +7,8 @@ paths:
 
 # Rule: MCP servers are dual-era from the start
 
-Every plugin MCP server (`<name>/src/mcp/server.mts`, zero-dependency stdio node script) answers **both** protocol eras:
-2025-11-25 (`initialize`) and 2026-07-28 (`server/discover`, stateless). Model: `dprint/src/mcp/server.mts` (tools,
+Every plugin MCP server (`<name>/src/mcp/server.ts`, zero-dependency stdio node script) answers **both** protocol eras:
+2025-11-25 (`initialize`) and 2026-07-28 (`server/discover`, stateless). Model: `dprint/src/mcp/server.ts` (tools,
 hooks only, no tasks). Facts below were verified live on Claude Code 2.1.323 (2026-11-13) with a throwaway stdio `.mjs`
 server unless marked _static_ (read from the binary) or _spec_ (modelcontextprotocol.io/specification/2026-07-28).
 

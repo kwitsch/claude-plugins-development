@@ -3,7 +3,7 @@ id: F15
 title: Negative cache for a missing dprint binary
 status: done
 priority: none
-area: dprint/src/mcp/lsp.mts (DprintLsp.start, noDprintUntil, NOT_FOUND_RETRY_MS)
+area: dprint/src/mcp/lsp.ts (DprintLsp.start, noDprintUntil, NOT_FOUND_RETRY_MS)
 ---
 
 ## Status
@@ -12,7 +12,7 @@ Done. After `findDprint()` returned null, `DprintLsp.start()` rejects "dprint no
 
 ## Problem
 
-`start()` called `findDprint()` on every attempt while no child ran. `findDprint` (dprint/src/skills/dprint/find-dprint.mts) does a synchronous accessSync/statSync walk of every PATH dir. On a default WSL PATH (61 entries, 44 under /mnt/c on 9P) a miss costs 95-114 ms per call; 41 ms with 20 /mnt entries; 0.13 ms on a plain Linux PATH. A project with a dprint config but no binary paid this per Write/Edit/FileChanged event, and a 50-event burst blocked the whole server for 5.9 s (a format_pre mid-burst waited 5.5 s).
+`start()` called `findDprint()` on every attempt while no child ran. `findDprint` (dprint/src/skills/dprint/find-dprint.ts) does a synchronous accessSync/statSync walk of every PATH dir. On a default WSL PATH (61 entries, 44 under /mnt/c on 9P) a miss costs 95-114 ms per call; 41 ms with 20 /mnt entries; 0.13 ms on a plain Linux PATH. A project with a dprint config but no binary paid this per Write/Edit/FileChanged event, and a 50-event burst blocked the whole server for 5.9 s (a format_pre mid-burst waited 5.5 s).
 
 ## Evidence
 
@@ -22,12 +22,12 @@ Done. After `findDprint()` returned null, `DprintLsp.start()` rejects "dprint no
 
 ## Code locations
 
-- `DprintLsp.noDprintUntil` (field), `NOT_FOUND_RETRY_MS`, and `start()` in dprint/src/mcp/lsp.mts: first `if (this.ready)`, then `Date.now() < this.noDprintUntil` rejects, then `findDprint()`; a miss sets `noDprintUntil`.
-- tests: dprint/tests/mcp-server.test.mts "no dprint on PATH or in ~/.dprint/bin -> {}".
+- `DprintLsp.noDprintUntil` (field), `NOT_FOUND_RETRY_MS`, and `start()` in dprint/src/mcp/lsp.ts: first `if (this.ready)`, then `Date.now() < this.noDprintUntil` rejects, then `findDprint()`; a miss sets `noDprintUntil`.
+- tests: dprint/tests/mcp-server.test.ts "no dprint on PATH or in ~/.dprint/bin -> {}".
 
 ## Approach
 
-Implemented as proposed but as an instance field (analysis proposed a module-level variable), so a new client (new cwd or evicted child) searches again. find-dprint.mts unchanged (skill scripts call it once per process).
+Implemented as proposed but as an instance field (analysis proposed a module-level variable), so a new client (new cwd or evicted child) searches again. find-dprint.ts unchanged (skill scripts call it once per process).
 
 ## Verification
 

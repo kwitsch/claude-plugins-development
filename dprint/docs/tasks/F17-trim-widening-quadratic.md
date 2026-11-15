@@ -3,7 +3,7 @@ id: F17
 title: Cap trimToEdit uniqueness widening
 status: done
 priority: none
-area: dprint/src/mcp/format.mts (trimToEdit)
+area: dprint/src/mcp/format.ts (trimToEdit)
 ---
 
 ## Status
@@ -22,7 +22,7 @@ The widening loop grows the kept span one line per iteration and on each step jo
 
 ## Code locations
 
-- `trimToEdit` in dprint/src/mcp/format.mts: counter `steps`, `if (++steps === 1001)` branch sets `bA -= aA - lo; aA = lo; bB += hi - aB; aB = hi` (jump to the widest span `lo`..`hi`), then the normal uniqueness check and widen loop; `lineDiff` (separate 25M-cell guard) is unchanged.
+- `trimToEdit` in dprint/src/mcp/format.ts: counter `steps`, `if (++steps === 1001)` branch sets `bA -= aA - lo; aA = lo; bB += hi - aB; aB = hi` (jump to the widest span `lo`..`hi`), then the normal uniqueness check and widen loop; `lineDiff` (separate 25M-cell guard) is unchanged.
 
 ## Approach
 
@@ -30,7 +30,7 @@ Implemented: cap with `// shortcut:` comment (limit 1000, upgrade if a real work
 
 ## Verification
 
-- tests/mcp-format.test.mts (trimToEdit cases). Missing regression test worth adding: 20k lines of 10 identical 2000-line blocks with one changed line, assert it returns (non-null large Edit or null) in < 200 ms and, if non-null, that `oldString` occurs exactly once in `original`.
+- tests/mcp-format.test.ts (trimToEdit cases). Missing regression test worth adding: 20k lines of 10 identical 2000-line blocks with one changed line, assert it returns (non-null large Edit or null) in < 200 ms and, if non-null, that `oldString` occurs exactly once in `original`.
 - `pnpm --filter dprint build && pnpm --filter dprint test`.
 
 ## Constraints

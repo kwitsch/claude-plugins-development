@@ -3,7 +3,7 @@ id: F29
 title: Bound the per-Bash watch-list mtime scan in bash_finished
 status: done
 priority: low
-area: dprint/src/mcp/format.mts (bashFinished, cachedWatchList, watchCache), dprint/src/mcp/watch-list.mts (dprintFilePaths)
+area: dprint/src/mcp/format.ts (bashFinished, cachedWatchList, watchCache), dprint/src/mcp/watch-list.ts (dprintFilePaths)
 ---
 
 ## Status
@@ -25,9 +25,9 @@ One WSL2 machine, real dprint 0.64.3, built server over stdio (evaluation 2026-1
 
 ## Code locations
 
-- `bashFinished` in dprint/src/mcp/format.mts: `(await cachedWatchList(sc)).filter((f) => statSync(f.fp).mtimeMs > since - 1000)`.
-- `cachedWatchList` / `watchCache` in dprint/src/mcp/format.mts (list read once per cwd, cleared by `setCwd`; the F24 shortcut comment lives there).
-- `dprintFilePaths` / `WATCH_LIMIT` in dprint/src/mcp/watch-list.mts.
+- `bashFinished` in dprint/src/mcp/format.ts: `(await cachedWatchList(sc)).filter((f) => statSync(f.fp).mtimeMs > since - 1000)`.
+- `cachedWatchList` / `watchCache` in dprint/src/mcp/format.ts (list read once per cwd, cleared by `setCwd`; the F24 shortcut comment lives there).
+- `dprintFilePaths` / `WATCH_LIMIT` in dprint/src/mcp/watch-list.ts.
 
 ## Approach
 
@@ -47,7 +47,7 @@ Trap: the mtime window (`since - 1000`) must stay; a file already dirty before t
 
 ## Constraints
 
-Edit `src/`, never `plugin/**/*.mjs`; zero-dep `node:` builtins; fail open (`{}`); TSDoc on every symbol; `watch-list.mts` must not import `format.mts` or `server.mts`; version bump in `dprint/package.json`.
+Edit `src/`, never `plugin/**/*.mjs`; zero-dep `node:` builtins; fail open (`{}`); TSDoc on every symbol; `watch-list.ts` must not import `format.ts` or `server.ts`; version bump in `dprint/package.json`.
 
 ## Related
 

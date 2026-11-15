@@ -3,7 +3,7 @@ id: F05
 title: FileChanged burst handling without silent drops
 status: done
 priority: none
-area: dprint/src/mcp/format.mts (fileChanged, acquireChangeSlot, releaseChangeSlot)
+area: dprint/src/mcp/format.ts (fileChanged, acquireChangeSlot, releaseChangeSlot)
 ---
 
 ## Status
@@ -23,7 +23,7 @@ Offline burst (real dprint): 100 modified files: 50/100 formatted before; after 
 - `fileChanged` (order before the slot: `event === "unlink"`, `scopeOf`/`inScope`, `findConfig`, `statSync` size vs `MAX_CHANGED_BYTES`; after the slot: read, digest vs `written`, lone-CR check, git status spawn, lsp format, write)
 - `acquireChangeSlot`, `releaseChangeSlot` (slot handed to the oldest waiter instead of decremented), `activeChanges`, `waitingChanges`
 - constants `MAX_ACTIVE_CHANGES`, `MAX_WAITING_CHANGES`
-- test: "60 concurrent file_changed events are all formatted" in `tests/mcp-server.test.mts`
+- test: "60 concurrent file_changed events are all formatted" in `tests/mcp-server.test.ts`
 
 ## Approach
 

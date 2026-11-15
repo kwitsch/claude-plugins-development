@@ -11,7 +11,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { afterEach, beforeEach, test } from "vitest";
 import { DprintLsp } from "../plugin/mcp/lsp.mjs";
 import { findConfig } from "../plugin/skills/dprint/find-config.mjs";
-import type { HookResult } from "../src/mcp/format.mts";
+import type { HookResult } from "../src/mcp/format.ts";
 
 const PLUGIN = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -1295,6 +1295,17 @@ test("watch-paths.mjs prints the in-cwd dprint file paths as watchPaths on Sessi
       watchPaths: [path.join(repo, "a.ts")],
     },
   });
+});
+
+test("watch-paths.mjs keeps a file name with a newline as one path", () => {
+  writeFileSync(
+    path.join(bin, "dprint"),
+    "#!/usr/bin/env bash\nprintf '%s\\n' \"$PWD/a.ts\" \"$PWD/new\" \"line.ts\"\n",
+  );
+  chmodSync(path.join(bin, "dprint"), 0o755);
+  const r = watch({ hook_event_name: "SessionStart", cwd: repo });
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(JSON.parse(r.stdout).hookSpecificOutput.watchPaths, [path.join(repo, "a.ts"), path.join(repo, "new\nline.ts")]);
 });
 
 test("DPRINT_WATCH_DIRECTORIES=1: watch-paths.mjs prints the directories of the files, nested ones collapsed", async () => {
