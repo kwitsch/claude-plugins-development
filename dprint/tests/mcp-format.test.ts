@@ -282,7 +282,10 @@ test("applyTextEdits: a position past the end of a CRLF line clamps before the \
   );
 });
 
-test("format_pre: more concurrent roots than the client cap all format (a busy client is not evicted)", async () => {
+// Needs a real dprint on PATH with its json plugin in the cache or reachable (CI has neither): skipped there, run locally.
+const realDprint = spawnSync("dprint", ["--version"], { encoding: "utf8" }).status === 0;
+
+test.skipIf(!realDprint)("format_pre: more concurrent roots than the client cap all format (a busy client is not evicted)", async () => {
   const tmp = mkdtempSync(path.join(tmpdir(), "dprint-evict-"));
   const roots: string[] = [];
   for (let i = 0; i < 9; i++) {
