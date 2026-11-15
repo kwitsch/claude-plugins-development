@@ -169,3 +169,12 @@ test("a helper whose file name has a dot or a non-ASCII letter is bundled into l
   assert.doesNotMatch(r.entry, /size\.util\.mjs|größe\.mjs/);
   assert.match(r.entry, /from "\.\/lib\.mjs"/);
 });
+
+const ENTRY_TAIL = `\nexport function register(on: unknown): number { return 1; }\n`;
+for (const line of [`export { one } from "./a.mjs";`, `export * from "./a.mjs";`, `export { one as uno } from "./a.mjs";`, `import { one } from "././a.mjs";\nconsole.log(one);`, `import { one } from "../hooks/a.mjs";\nconsole.log(one);`]) {
+  test(`an entry that reaches a helper as \`${line.split("\n")[0]}\` fails the build`, () => {
+    const r = build({ "a.mts": A, "register.mts": line + ENTRY_TAIL });
+    assert.equal(r.status, 1);
+    assert.match(r.stderr, /register\.mjs imports\/re-exports/);
+  });
+}

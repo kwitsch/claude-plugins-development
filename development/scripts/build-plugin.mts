@@ -80,10 +80,10 @@ function bundleLib(compiled: Map<string, string>): { members: string[]; entries:
     return process.exit(1);
   };
   /** The module's static imports and `export` statement starts, from the parse. */
-  const parse = (f: string, code: string): { imports: StaticImport[]; exports: number[] } => {
+  const parse = (f: string, code: string): { imports: StaticImport[]; exports: number[]; reexports: string[] } => {
     const r = parseSync(f, code, { sourceType: "module" });
     if (r.errors.length) fail(`${path.relative(ROOT, f)} does not parse: ${r.errors[0].message}`);
-    return { imports: r.module.staticImports, exports: r.module.staticExports.map((e) => e.start) };
+    return { imports: r.module.staticImports, exports: r.module.staticExports.map((e) => e.start), reexports: r.module.staticExports.flatMap((e) => e.entries.flatMap((x) => (x.moduleRequest ? [x.moduleRequest.value] : []))) };
   };
   /** The specifiers (`a`, `a as b`) of an import of helper `name`; fails on a namespace, default or side-effect import. */
   const namedSpecs = (f: string, imp: StaticImport, name: string): string[] => {
@@ -167,7 +167,16 @@ function bundleLib(compiled: Map<string, string>): { members: string[]; entries:
     // all imports of helpers become one import from lib.mjs, in the place of the first
     const taken: string[] = [];
     const spans: { start: number; end: number; text: string }[] = [];
-    for (const imp of parse(f, code).imports) {
+    const parsed = parse(f, code);
+    // any other spelling of a helper (`././a.mjs`, `../hooks/a.mjs`, `export ... from`) would survive as an import of a deleted file
+    const plain = new Set(parsed.imports.map((i) => i.moduleRequest.value).filter((v) => byName.has(siblingName(v) ?? "")));
+    for (const src of [...parsed.imports.map((i) => i.moduleRequest.value), ...parsed.reexports]) {
+      const isPlainImport = plain.has(src) && !parsed.reexports.includes(src);
+      if (memberSet.has(path.resolve(path.dirname(f), src.replace(/\.mjs$/, "") + ".mjs")) && !isPlainImport) {
+        fail(`${path.relative(ROOT, f)} imports/re-exports ${src}, a helper, other than by a named import from ./name.mjs`);
+      }
+    }
+    for (const imp of parsed.imports) {
       const name = siblingName(imp.moduleRequest.value);
       if (name === undefined || !byName.has(name)) continue;
       for (const n of namedSpecs(f, imp, name)) {
