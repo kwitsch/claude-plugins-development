@@ -6,17 +6,21 @@ paths:
 
 # Config, HTML, log, search and diff compressors (`policy.mts`)
 
+All five are ports of upstream headroom read 2026-10-11 at 976aa71. Each has its
+own `*_enabled` toggle and `/headroom` table. Wiring (route steps, `overFold`,
+`ELIDE_AFTER`, the `cur === text` fold rule, Read, line-numbered and tagged text
+left whole, Grep not excluded): `## Content router` (`policy-router.md`). Facts
+also stated in a function's TSDoc are not repeated here.
+
 ## Config compressor
 
-A port of upstream headroom's structured-config compressor
-(`headroom/transforms/config_compressor.py`, the `collapse_runs`,
+Port of `headroom/transforms/config_compressor.py`, the `collapse_runs`,
 `expand_runs`, `fold_repeated_blocks` and `unfold_repeated_blocks` helpers and
 `compact_lossless(…, "config")` of `headroom/transforms/lossless_compaction.py`,
-and `_try_detect_structured_config` of `content_detector.py`, read 2026-10-11
-at 976aa71) into `src/hooks/policy.mts` as `compressConfig`, `configFlavor`,
-`isIniAssign` and the fold helpers, reached through the content router's
-`structured_config` route (`config` then `elide`). It has its own toggle,
-`config_compressor_enabled`, and its own `config` table (`texts`, `saved`).
+and `_try_detect_structured_config` of `content_detector.py`, as
+`compressConfig`, `configFlavor`, `isIniAssign` and the fold helpers; route
+`structured_config`. Toggle `config_compressor_enabled`, table `config`
+(`texts`, `saved`).
 
 Ported verbatim:
 
@@ -33,7 +37,8 @@ Ported verbatim:
 - Tier 2: whole-line comments (`^\s*#`; INI only column-0 `#` or `;`) and,
   outside INI, blank lines are dropped behind
   `[N comment/blank lines elided. Retrieve original: hash=H]`, the original
-  stored first; skipped for a YAML block scalar (`key: |`, or a sequence item `- |`) or a TOML multi-line string.
+  stored first; skipped for a YAML block scalar (`key: |`, or a sequence item
+  `- |`) or a TOML multi-line string.
 - Tier 1: runs of 2+ identical lines become `... (repeated N times)`, then a
   run of 3 to 64 lines repeating the lines D back (K <= D) becomes
   `... (repeats K lines from D lines back)` when its characters exceed the
@@ -56,9 +61,7 @@ Deviations:
   upstream's flavor vectors (`x = "1"` is TOML, `x = hello` INI) but can claim
   text a parser would reject; Tier 1 verifies itself and Tier 2 keeps the
   original retrievable, so a wrong label costs nothing irreversible.
-- `isIniAssign` is a linear scanner accepting exactly what upstream's
-  `_INI_ASSIGN_RE` matches: its lazy run plus `\s*` backtracks quadratically on
-  whitespace-heavy lines.
+- `isIniAssign` is a linear scanner for `_INI_ASSIGN_RE` (reason in its TSDoc).
 - INI also refuses Tier 2 around `"""` or `'''`, since its flavor is not
   parser-confirmed.
 - The inverse helpers stop once their output would outgrow the text being
@@ -73,14 +76,11 @@ Deviations:
 
 ## HTML extractor
 
-A bounded, hand-written stand-in for upstream headroom's HTML extractor
-(`headroom/transforms/html_extractor.py`, which runs trafilatura, with its
-`content_router.py` wiring and `_DENSE_ELIDE_AFTER` membership, read
-2026-10-11 at 976aa71) in `src/hooks/policy.mts` as `extractHtml`, reached through
-the content router's `html` route (`extract`, then `elide` on the extraction).
-It has its own toggle, `html_extractor_enabled`, and its own `html extractor`
-table (`pages`, `saved`). It shares the tag lexer `tagAt` (upstream
-`tag_protector.rs` `parse_tag_at`) with the tag protector.
+Bounded, hand-written stand-in for `headroom/transforms/html_extractor.py`
+(trafilatura) with its `content_router.py` wiring and `_DENSE_ELIDE_AFTER`
+membership, as `extractHtml`; route `html`. Toggle `html_extractor_enabled`,
+table `html extractor` (`pages`, `saved`). Shares the tag lexer `tagAt`
+(upstream `tag_protector.rs` `parse_tag_at`) with the tag protector.
 
 Ported verbatim:
 
@@ -93,25 +93,15 @@ Ported verbatim:
 
 Deviations:
 
-- No trafilatura (a third-party package; the mod takes no dependencies). One
-  forward pass skips comments, `<!…>` and `<?…>` declarations and the
-  boilerplate or non-text elements `head`, `script`, `style`, `noscript`,
-  `template`, `svg`, `math`, `iframe`, `object`, `embed`, `canvas`, `audio`,
-  `video`, `picture`, `nav`, `footer`, `aside`, `button`, `select` and
-  `textarea` (open tag to the first case-insensitive
-  close tag, or to the end when unclosed), and renders the rest: `#` headings,
-  `- ` list items, `[text](href)` links (not `#…` or `javascript:`), `| ` table
-  cells with one row per line, a line break per block element, whitespace kept
-  only inside `<pre>`, and `&amp; &lt; &gt; &quot; &apos; &nbsp;` plus decimal
-  and hex references decoded. No main-content scoring and no metadata, so its
-  output differs from upstream's and keeps more of the page.
-- The original page stays retrievable: the extraction ends with
-  `[HTML extracted to text: N characters of markup removed. Retrieve original: hash=H]`
-  and the page goes to the `offloaded` store. Upstream's HTML path cannot be
-  undone.
-- The pass draws on a budget of 4 per character + 4096 (the lexer charges
-  every character it scans), and a page that exhausts it passes through; so
-  does a page whose extraction plus retrieval line is not shorter.
+- No trafilatura (a third-party package; the mod takes no dependencies): one
+  forward pass (dropped elements: `HTML_DROP`; rendering, budget and the
+  not-shorter gate: `extractHtml`'s TSDoc). Tables render one row per line;
+  the decoded entities are `&amp; &lt; &gt; &quot; &apos; &nbsp;` plus decimal
+  and hex references (`HTML_ENTITY_RE`). Close tags match case-insensitively.
+  No main-content scoring and no metadata, so its output differs from
+  upstream's and keeps more of the page.
+- The original page stays retrievable (retrieval line, `offloaded` store);
+  upstream's HTML path cannot be undone.
 - Misroute risk: dense grep or log output carrying a doctype, an `<html>` tag
   or 3 structural tags can be labelled `html` (the HTML branch precedes search
   and log, as on upstream's regex path), and the extractor would then strip
@@ -119,15 +109,12 @@ Deviations:
 
 ## Log compressor
 
-A port of upstream headroom's log compressor
-(`crates/headroom-core/src/transforms/log_compressor.rs` `compress_with_store`
-with `LogCompressorConfig::default()`, the Rust port of
+Port of `crates/headroom-core/src/transforms/log_compressor.rs`
+`compress_with_store` with `LogCompressorConfig::default()` (the Rust port of
 `headroom/transforms/log_compressor.py`) and of the `log` kind of
-`headroom/transforms/lossless_compaction.py` `compact_lossless`, read
-2026-10-11 at 976aa71, into `src/hooks/policy.mts` as `compressLog` and `foldLog`,
-reached through the content router's `build` route (`log`, `logfold`, `elide`).
-It has its own toggle, `log_compressor_enabled`, and its own `logs` table
-(`texts`, `saved`); the fold counts there too.
+`lossless_compaction.py` `compact_lossless`, as `compressLog` and `foldLog`;
+route `build`. Toggle `log_compressor_enabled`, table `logs` (`texts`,
+`saved`); the fold counts there too.
 
 Ported verbatim:
 
@@ -146,10 +133,11 @@ Ported verbatim:
   terminator rules, the 20-line cap that re-opens a continuing trace, and the
   runtime-frame collapse of an oversized trace (`RUNTIME_FRAME_PREFIXES` and
   `RUNTIME_FRAME_MARKERS`, 3 head frames, 5 app frames,
-  `      [... N frames collapsed]` scored 0.8).
+  `[... N frames collapsed]` indented by 6 spaces, scored 0.8).
 - The summary-line rules, the pytest `short test summary info` scan (CRLF
-  tolerant) and its cap reserve (each section's totals line and the first `E `
-  line), the scores (error and fail 1.0, warn 0.5, info and unknown 0.1, debug
+  tolerant) and its cap reserve (each section's totals line and the first line
+  starting with `E` and a space), the scores (error and fail 1.0, warn 0.5,
+  info and unknown 0.1, debug
   0.05, trace 0.02, +0.3 in a trace, +0.4 on a summary line, at most 1), the
   warning dedupe key (the text before the first `:` or `=` verbatim, then
   digits → N, `0x…` → ADDR, `/…/` → /PATH/, in that order), the cap order
@@ -161,38 +149,28 @@ Ported verbatim:
 - The fold: ANSI colour codes dropped one-way, then `collapse_runs`, kept only
   when `expand_runs` gives the de-coloured text back and the result is shorter.
 
-Deviations:
+Deviations (beyond `compressLog`'s TSDoc):
 
-- The retrieval line is always added, `[N lines compressed to M<descriptor>.
-  Retrieve original: hash=H]`, with no `min_compression_ratio_for_ccr` (0.5)
-  gate and "Retrieve original" in place of "Retrieve more"; the hash is
-  `contentHash`. A result that is not shorter, marker included, declines.
-- The simhash diversity count of `computeOptimalK` is charged to a budget of 4
-  per character + 4096 comparisons; an exhausted budget keeps 100 lines (many
-  distinct lines: high diversity, where upstream lands on the maximum too).
-- The format detector is not ported: it only labels the result.
+- The skipped gate is `min_compression_ratio_for_ccr` (0.5); upstream's line
+  says "Retrieve more".
+- The simhash budget is 4 per character + 4096 comparisons; an exhausted
+  budget keeps 100 lines because many distinct lines mean high diversity,
+  where upstream lands on the maximum too.
+- The format detector only labels the result upstream.
 - JS `\d`, `\w` and `\b` are ASCII-only where Rust's are Unicode (the dedupe key,
   the level words' boundaries already were ASCII upstream).
 
-Wiring: the `build` route runs `log` (adopted only through `overFold`: at most
-95% of `foldLog`'s length when the fold shrinks the text), then `logfold` (only
-while the text is still the route's input), then `elide`. An adopted lossy log
-is handed on to the elider (`ELIDE_AFTER`); an adopted fold ends the route.
-Read output, line-numbered text and text holding a tag span are left whole.
-
 ## Search compressor
 
-A port of upstream headroom's search compressor
-(`crates/headroom-core/src/transforms/search_compressor.rs`
-`compress_with_store` with `SearchCompressorConfig::default()`, the Rust port of
+Port of `crates/headroom-core/src/transforms/search_compressor.rs`
+`compress_with_store` with `SearchCompressorConfig::default()` (the Rust port of
 `headroom/transforms/search_compressor.py`, scoring through
 `crates/headroom-core/src/signals/keyword_detector.rs` in its Search context)
 and of the `search` kind of `lossless_compaction.py` `compact_lossless`
-(`search_heading`, `search_dir_heading` and their inverses), read 2026-10-11 at
-976aa71, into `src/hooks/policy.mts` as `compressSearch` and `foldSearch`, reached
-through the `search` route (`search`, `searchfold`, `elide`). It has its own
-toggle, `search_compressor_enabled`, and its own `search` table (`texts`,
-`saved`); the fold counts there too.
+(`search_heading`, `search_dir_heading` and their inverses), as
+`compressSearch` and `foldSearch`; route `search`. Toggle
+`search_compressor_enabled`, table `search` (`texts`, `saved`); the fold
+counts there too.
 
 Ported verbatim:
 
@@ -211,45 +189,32 @@ Ported verbatim:
   first, the last, then the best by (score, line), at most 5 and unique by
   (line, content), back in line order; `file:line:content` rows in path order
   with `[... and N more matches in FILE]`.
-- The fold: the file-heading and directory-heading forms, each kept only when
-  its inverse gives the text back exactly, the smaller one when shorter;
-  timestamped log rows are never grep rows (`_TIMESTAMP_ROW_RE`).
+- The fold: timestamped log rows are never grep rows (`_TIMESTAMP_ROW_RE`).
 
-Deviations:
+Deviations (beyond `compressSearch`'s TSDoc):
 
-- The retrieval line is always added, `[N matches compressed to M. Retrieve
-  original: hash=H]`, with no `min_matches_for_ccr` (10) or ratio (0.8) gate and
-  "Retrieve original" in place of "Retrieve more"; the hash is `contentHash`.
-- Every candidate-marker scan of one text (the dash tier's path checks) draws on
-  one budget of 4 per character + 4096; an exhausted budget declines the text
-  (upstream rescans a line per marker, quadratic on hostile input). The simhash
-  count has its own budget, as for the log compressor.
-- Context words are lowercased with `toLowerCase` (upstream: ASCII lowercase),
-  deduped newest first and capped so substring matching stays under about 16M
-  character comparisons (`contextWords`); CJK query bigrams are not added.
+- The skipped gates are `min_matches_for_ccr` (10) and the ratio (0.8);
+  upstream's line says "Retrieve more".
+- The path-check budget is 4 per character + 4096, shared by every
+  candidate-marker scan of one text (upstream rescans a line per marker,
+  quadratic on hostile input). The simhash count has its own budget, as for
+  the log compressor.
+- Context words are lowercased with `toLowerCase` (upstream: ASCII
+  lowercase), deduped newest first and capped so substring matching stays
+  under about 16M character comparisons (`contextWords`).
 - A line number beyond `Number.MAX_SAFE_INTEGER` leaves its line unparsed
   (upstream: u64). Paths sort by UTF-16 code units (upstream: UTF-8 bytes), and
   scores sum in doubles where upstream sums f32.
 - Lines are matched with `[^\n]*` where Python's fold regexes use `.`, which in
   JS would also stop at a `\r`.
 
-Wiring: the `search` route runs `search` (adopted only through `overFold`
-against `foldSearch`), `searchfold` (only on the route's input), then `elide`.
-An adopted search rewrite is handed on to the elider; an adopted fold ends the
-route. Read output, line-numbered text and tagged text are left whole. Claude
-Code's Grep tool is compressed like any other (upstream's `DEFAULT_EXCLUDE_TOOLS`
-is not adopted; see `## Content router` (`policy-router.md`)).
-
 ## Diff compressor
 
-A port of upstream headroom's diff compressor
-(`crates/headroom-core/src/transforms/diff_compressor.rs` `compress_with_store`
-with `DiffCompressorConfig::default()`) and of the `diff` kind of
-`lossless_compaction.py` `compact_lossless` (`diff_strip_index`), read
-2026-10-11 at 976aa71, into `src/hooks/policy.mts` as `compressDiff` and
-`foldDiff`, reached through the `diff` route (`diff`, `difffold`, `elide`). It
-has its own toggle, `diff_compressor_enabled`, and its own `diff` table
-(`texts`, `saved`); the index strip counts there too.
+Port of `crates/headroom-core/src/transforms/diff_compressor.rs`
+`compress_with_store` with `DiffCompressorConfig::default()` and of the `diff`
+kind of `lossless_compaction.py` `compact_lossless` (`diff_strip_index`), as
+`compressDiff` and `foldDiff`; route `diff`. Toggle `diff_compressor_enabled`,
+table `diff` (`texts`, `saved`); the index strip counts there too.
 
 Ported verbatim:
 
@@ -273,29 +238,19 @@ Ported verbatim:
 - The fold: `index <sha>..<sha> [mode]` lines dropped when that shortens the
   text, with no inverse check; the router only folds diff-labelled text.
 
-Deviations:
+Deviations (beyond `compressDiff`'s TSDoc):
 
 - Upstream always returns the normalised output and adds `Retrieve full diff:
-  hash=…` only when the output has under 80% of the lines, so a weaker
-  compression is lossy with no retrieval. Here a result is returned only when it
-  is strictly shorter, marker included, and it always ends with `[N lines
-  compressed to M. Retrieve original: hash=H]` (M counts the lines before the
-  marker); the hash is `contentHash`.
-- Hunks are scored only when a surviving file has more than 10 of them: the
-  score is read nowhere else, so no output changes.
-- Context words are deduped and capped (`contextWords`; upstream counts a
-  repeated word twice and matches every word), and CJK query bigrams are not
-  added.
+  hash=…` only under 80% of the lines, so a weaker compression is lossy with
+  no retrieval. Here M in the retrieval line counts the lines before the
+  marker.
+- Context words: upstream counts a repeated word twice and matches every word;
+  CJK query bigrams are not added.
 - The footer counts every file and line, not only the 20 the cap keeps, and
   ends with `; N files omitted: <b-paths>` (at most `DIFF_OMITTED_NAMES`, 10,
   names, then `…`) when the cap dropped files (user decision; upstream's footer
   counts only the kept files and records the dropped names in its stats alone).
 - The `diff --git a/(.+) b/(.+)$` header test is hand-written (the regex would
-  backtrack quadratically on a long line with many ` b/`).
-
-Wiring: the `diff` route runs `diff` (adopted only through `overFold` against
-`foldDiff`), `difffold` (only on the route's input), then `elide`. A diff
-rewrite or an index strip ends the route: DIFF is not in upstream's
-`_DENSE_ELIDE_AFTER`. The lossy diff breaks `git apply` (stale hunk counts,
-normalised mode and binary lines), as upstream; the retrieval line restores the
-exact diff.
+  backtrack quadratically on a long line with many `b/` after a space).
+- The lossy diff breaks `git apply` (stale hunk counts, normalised mode and
+  binary lines), as upstream; the retrieval line restores the exact diff.

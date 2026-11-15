@@ -1,7 +1,7 @@
 /**
  * Phase 3: when Claude starts a general-purpose subagent, Jev may pick a more specialised agent type. An explicit
  * choice by Claude is kept without asking Jev. Pure: the `agent.offer` and `tool.call {tool: "Agent"}` hooks
- * live in `register.mts`.
+ * live in `register.ts`.
  *
  * @packageDocumentation
  */

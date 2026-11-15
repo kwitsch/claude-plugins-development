@@ -6,7 +6,7 @@ argument-hint: "<plugin-name> <scenario>"
 
 # live-verify
 
-Recipe worked out for the dprint plugin; see `.claude/rules/claude-code-hook-facts.md` for the facts it established.
+Recipe worked out for the dprint plugin; see `.claude/rules/claude-code-tool-hook-facts.md` (tool hooks, FileChanged, watchPaths), `.claude/rules/claude-code-hook-facts.md` (mods engine `$`) and `.claude/rules/claude-code-skill-facts.md` (tools a skill uses) for the facts it established.
 
 ## Setup (always a throwaway)
 

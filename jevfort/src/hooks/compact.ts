@@ -2,7 +2,7 @@
  * Phase 3: before a compaction, Jev scores how relevant each recent tool result is to the current work. The ranking
  * drops no message (that could break tool call/result pairs); the summarizer is told what to keep in detail. Also the
  * transcript text and system prompt of a Haiku-written compaction (`haikuTranscript`), whose one summary message
- * replaces the whole conversation. Pure: the `session.compact` hook lives in `register.mts`.
+ * replaces the whole conversation. Pure: the `session.compact` hook lives in `register.ts`.
  *
  * @packageDocumentation
  */

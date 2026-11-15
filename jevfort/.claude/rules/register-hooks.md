@@ -46,6 +46,13 @@ the shapes below: `inline-headroom/docs/claude-code-verification.md`.
   listing raised beneath `next(e)` applies nothing. A new hook needs the guard too; `session.start` must not start with
   it (beneath it, jev-api has not registered batch yet). The render hooks read `jevState` instead (no `$.tool`, `$.store` or `jevMissing` call while
   drawing).
+- Turn reads: `jevTools` shares its life with `toolListing` (the whole listing; step 0 offers its deferred tools from
+  it), `skillList` (step 0's offerable skills) and `haikuPath` (whether jev-api has no Jev env var set and answers
+  through Haiku, read through `$.env.get`; a settings `env` change counts from the next turn). `dropTurnReads` drops
+  them at every main-loop `turn.complete`, after a main-loop `session.compact` between turns, and at the next main-loop
+  step when a background subagent read them between turns (`readBetweenTurns`, not set by the `session.start`
+  baseline); a subagent completion mid-turn keeps them. So jev-api appearing or going away takes effect from the next
+  turn.
 - `jevApply` registers the `estimate_effort` tool with `$.tool.register(ESTIMATE_SPEC)` whatever `routing` says (a
   throw is retried by the next listing) when the jev-api tools become listed: at `session.start`'s baseline after
   `next(e)` (jev-api registers its tools in its own `session.start`) or at a later turn's listing. There is no
@@ -56,13 +63,16 @@ the shapes below: `inline-headroom/docs/claude-code-verification.md`.
   rule still wins).
 - Effort band: the `ui.render` hook with matcher `{ component: "AbovePrompt" }` draws `Box`/`Text`/`Button` from
   `$.ui.resolve(e)` (detached factories) out of the closure state `band` (written at main-loop step 0 in `turn.step`:
-  `configured` = step-0 `e.effort`, `chosen` = the estimate or held effort) and `autoOff` (flipped by the Button
-  `key: "auto"`, reset at `session.start` and `session.end`). The effort row is hidden with `routing: false` and while
+  `configured` = step-0 `e.effort`, `chosen` = the estimate of any source or the held Haiku/Fable effort) and `autoOff`
+  (flipped by the Button `key: "auto"`, reset at `session.start`, `session.end` and by a reload, never stored). Drawn
+  in terminal and desktop only: one row of the efforts from `minEffort` to `maxEffort` (plus the session or chosen
+  effort when outside that range), session effort bold, chosen blue, the rest dim, then the `Jev auto: on/off` Button.
+  Subagent turns do not update it; `autoOff` leaves take-steps, bypass and the `estimate_effort` tool alone. The effort row is hidden with `routing: false` and while
   `jevState !== ""`; then the hook draws only the cache countdown (above `await next(e)`, in a column Box, so another
   plugin's band beneath survives) or, without a countdown, passes; it always passes while `e.props.hasSurvey`.
   `onPress` only flips the flag and calls `$.ui.invalidate` (no storage call; it runs after the frame, so a throw sets `bandStale` and the next applied listing redraws). While `autoOff`,
   the step-0 effort block (first-turn record, estimate, hold) is skipped; the flag is read again after Jev's answer, so a press during the wait keeps the session effort and the band's choice.
-- Cache countdown / auto-compact / Haiku compaction (see `CLAUDE.md`): `turn.step` wraps `next` in `cacheWatch`
+- Cache countdown / auto-compact / Haiku compaction (see `cache-compact.md`): `turn.step` wraps `next` in `cacheWatch`
   (passes chunks, reads the result's `usage` in a try/catch), `turn.complete` clears `turnRunning` before its readiness
   guard, the `session.compact` hook is registered whatever `compaction` says (only the Jev ranking honours it: a
   closure const) and has no guard of its own (only `withJevRanking` checks readiness). The cache work in `turn.step`
@@ -83,8 +93,7 @@ Every mod-side storage (`$.mcp.call`) call must be awaited by a running hook of 
 core routes `$.mcp.call` through `$.tool.call` and its permission check, although the typings promise no prompt. A
 plugin's own hooks see a call it raises only while one of its hooks runs; a call raised after the hook returned (an
 unawaited chain, a `$.clock.every` callback) skips them, so in `default` mode the user gets a permission dialog per
-call and a headless session denies it. jevfort uses `$.store`, `$.tool.call` (jev-api's batch tool) and `$.fs`, and every
-Every `askJev` is awaited in-frame.
+call and a headless session denies it. jevfort uses `$.store`, `$.tool.call` (jev-api's batch tool) and `$.fs`; every `askJev` is awaited in-frame.
 
 ## Tests: the jev-api fake
 

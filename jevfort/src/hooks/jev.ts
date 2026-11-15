@@ -1,7 +1,7 @@
 /**
  * TypeSafe System One question and answer shapes, answer readers and the name of the jev-api tool jevfort needs. All
  * questions of one decision go to jev-api's `batch` tool in one call (one System One request). Pure: the call itself
- * (`askJev`) lives in `register.mts`, the only module that may use the engine API.
+ * (`askJev`) lives in `register.ts`, the only module that may use the engine API.
  *
  * @packageDocumentation
  */

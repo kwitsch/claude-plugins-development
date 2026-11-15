@@ -1,7 +1,7 @@
 /**
  * Actions Jev may take itself. Code builds the list; Jev only picks from it, so every argument is a known value and
  * never generated text. Pure: `buildCandidates` and `packageRunner` (filesystem, command and tool lists) live in
- * `register.mts` and use the exported constants and helpers below.
+ * `register.ts` and use the exported constants and helpers below.
  *
  * @packageDocumentation
  */

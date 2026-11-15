@@ -2,7 +2,7 @@
 
 Development repository for Claude Code plugins. One top-level directory per plugin, named after the plugin.
 
-`development/` holds shared developer tooling, no plugin: `development/scripts/` the build scripts every plugin uses (`build-plugin.ts`, `check-plugin-layout.ts`, `plugin-manifest.ts`); `development/vitest/claude-engine/` the workspace package `claude-engine-vitest` (no `plugin/`), the shared vitest stand-in for Claude Code's mod test kit (`claude-code/testing`), a `workspace:*` devDependency of plugins with function-hooks modules. Not versioned or released.
+`development/` holds shared developer tooling, no plugin: see `development/CLAUDE.md`.
 
 ## Layout per plugin (`<name>/`)
 
@@ -37,7 +37,7 @@ claude plugin validate <name>/plugin
 
 - `.mjs` (and `.js`) is build output only; every hand-written module is `.ts` (Node 24 and vitest strip the types; `src/` is compiled by `pnpm build`; a plugin not yet migrated still holds `.mts` until its first change, see `.claude/rules/src-typescript.md`).
 - Never edit `*/plugin/**/*.mjs` or `*/plugin/.claude-plugin/plugin.json` — change `src/` or `<name>/package.json` and run `pnpm build`. `.claude/settings.json` denies these writes.
-- Version bump = edit `version` in `<name>/package.json`, then `pnpm build`. Any change under `<name>/` merged to `main` needs a bump to a version higher than on `main` that is not yet tagged `<name>-<version>` here or in kwitsch/claude-plugins.
+- Version bump = edit `version` in `<name>/package.json`, then `pnpm build`. Any change under `<name>/` merged to `main` needs a bump to a version higher than on `main` that is not yet tagged `<name>-<version>` here or in kwitsch/claude-plugins, except a change of Claude memory only (`CLAUDE.md` at any depth, files under `<name>/.claude/`): it ships nothing, needs no bump and is not released (`.github/scripts/memory-only.sh`).
 - New plugin: use the `scaffold-plugin` skill (`.claude/skills/scaffold-plugin/`). Never hand-copy the layout.
 - Runtime code in `plugin/` must be zero-dependency Node (`node:` builtins only); `node_modules` is not shipped.
 - MCP servers are dual-era (2025-11-25 `initialize` and 2026-07-28 `server/discover`, tasks only when asked): follow `.claude/rules/mcp-dual-era.md`, model `dprint/src/mcp/server.mts`.

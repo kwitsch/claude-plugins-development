@@ -1,6 +1,6 @@
 /**
  * Whole-turn bypass: once Jev has taken the one action a simple request needs, a small model reports the result
- * instead of the main Claude model. Pure: the model call (`summarizeResult`) lives in `register.mts`.
+ * instead of the main Claude model. Pure: the model call (`summarizeResult`) lives in `register.ts`.
  *
  * @packageDocumentation
  */

@@ -1,6 +1,6 @@
 /**
  * Prompt-cache countdown (ported from HeyCubit/effortless). Pure: the timer, the
- * usage read and the `/compact` run live in `register.mts`.
+ * usage read and the `/compact` run live in `register.ts`.
  *
  * @packageDocumentation
  */

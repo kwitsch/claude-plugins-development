@@ -1,37 +1,22 @@
 ---
 paths:
-  - "*/plugin/hooks/**"
-  - "*/src/**"
+  - "*/src/hooks/**"
+  - "development/vitest/claude-engine/**"
 ---
 
-# Rule: verified Claude Code hook behaviour (2.1.323, checked live 2026-11-13)
+# Rule: verified mods engine (`$`) behaviour for function-hooks modules (2.1.323, checked live 2026-11-13)
 
-Facts a plugin author keeps getting wrong. Re-verify with the `live-verify` skill when the Claude Code version changes.
-
-## Tool hooks
-
-- A Bash command that exits non-zero fires **`PostToolUseFailure`**, not `PostToolUse`. A hook that must see every finished Bash call is wired to both (the output's `hookEventName` must match the event, pass `${hook_event_name}`), and a start/finish pair is keyed by `${tool_use_id}` (Pre and both Post events carry it). `scripts/hooks.mts`-style input validators need `PostToolUseFailure` fields (`error`, `is_interrupt`).
-- Claude Code's own **Edit** with an empty `new_string` also deletes the line break after `old_string` (with `replace_all`: only occurrences followed by a line break); uniqueness is checked on the unwidened `old_string`. Edits are matched on the LF view of CRLF files and the file's line endings are written back. A hook that returns `updatedInput` must model exactly this.
-- Edit's `structuredPatch` (jsdiff) counts only `\n` and `\r\n` as line breaks. Tools that also count U+2028/U+2029 (tsc, eslint), a lone `\r` (eslint, markdownlint) or U+0085 (yamllint) number lines differently below such a character: do not map their line numbers through the patch for that file (universal-lint bug hunt).
-- `updatedInput` replaces the whole tool input; `additionalContext` of PostToolUse/PostToolUseFailure/PreToolUse reaches the model.
-- `mcp_tool` hooks call tools of the plugin's MCP server (hook-only tools carry `_meta.ui.visibility: ["app"]`); `${var}` templates that do not exist for an event are an error: `scripts/hooks.mts --check` guards them.
-- A tool's `tool.call` result in a function-hooks module arrives as `{ result }`; the worktree tools' output carries both `worktreePath` and `restoredCwd` (ExitWorktree: use `restoredCwd`).
+Facts a plugin author keeps getting wrong. Re-verify with the `live-verify` skill when the Claude Code version changes. Tool hooks, FileChanged and watchPaths: `claude-code-tool-hook-facts.md`; tools a skill uses: `claude-code-skill-facts.md`.
 
 ## Function-hooks module state (graphmind-helper bug hunt, 2.1.325)
 
+- A tool's `tool.call` result in a function-hooks module arrives as `{ result }`; the worktree tools' output carries both `worktreePath` and `restoredCwd` (ExitWorktree: use `restoredCwd`).
 - A real MCP tool's `$.tool.call` result is `{ result: [{ type: "text", text }], text }`; a tool registered through `$.tool.register` answers `{ result: "<text>" }`. Read `text`, then a string `result`, then the text parts; an empty text is no answer.
 - A dispatch can be abandoned (interrupt, a hook above settled first, budget): `next.signal` aborts and whatever the hook returns is dropped. Check `next.signal?.aborted` after the last `await` and commit no conversation state (sent once, shown, searched) for an abandoned dispatch, or the next prompt never gets what this one lost.
 - Conversation state in module memory is reset on `session.start`, on `session.end` (raised for `/clear` and `/resume`, where no `session.start` follows) and after a main-conversation `session.compact` (the summary loses injected context). Skip the compaction reset for `trigger: "precompute"`, for an event with `agentId` (a subagent's transcript) and when `next`'s result carries `skip`. Machine-level caches (binary path, tool list) may survive the reset.
 - A cache flag set before an `await` lets parallel calls race past it: re-check the flag after the await before spending a once-per-session action.
 
-## FileChanged and watchPaths
-
-- FileChanged hooks only ever get `change` and `add` events (never `unlink`). Claude Code watches each listed **file** on its own: a watched file that is unlinked and recreated (editor save, `git checkout`) loses its watch, racily, and the watch count only falls; files created later are never watched.
-- `watchPaths` returned by a FileChanged hook is honoured, but re-listing on every event does not repair lost watches.
-- A **directory** in `watchPaths` is watched recursively and survives unlink+create, new files and new subdirectories (also on 9P for changes made from WSL), but every event below it reaches the hook: about 100 events per second (3000 files = 35 s of hook backlog), `.git` writes included. Offer it as an opt-in (env var), never as the default.
-- SessionStart and CwdChanged `command` hooks can print `watchPaths`; `mcp_tool` hooks of SessionStart are skipped while the server connects.
-
-## Mods engine (`$`) behaviour (function-hooks modules; 2.1.323 typings, checked live on 2.1.325 except where marked)
+## Mods engine (`$`) behaviour (2.1.323 typings, checked live on 2.1.325 except where marked)
 
 - `$.model.complete(request, options?)`: `signal` is an option (second argument), not a request field; `maxTokens` and `timeoutMs` must be whole numbers >= 1 (round seconds * 1000: `2.01 * 1000` is 2009.9999999999998, a refused value); its own timeout comes back as `{ isAnswered: false, reason: "aborted" }`, so tell it from an abandoned call by your own signal.
 - `$.http.fetch` errors quote the URL, a DNS failure only the bare host (`getaddrinfo ENOTFOUND <host>`), and a runtime quotes a rejected header value whole (a key with a newline). Redact in this order: URL, secret, host (whole names only, ignoring case, IPv6 without brackets); a secret may contain the host text, a host may be part of ordinary words.
@@ -39,7 +24,6 @@ Facts a plugin author keeps getting wrong. Re-verify with the `live-verify` skil
 - The built-in `cc-plugin-sec-default` bypasses user-tier hooks of several events, now including `session.compact` (debug log `bypassed by cc-plugin-sec-default (tier user)`): a hook that must run there cannot be a user-tier plugin hook.
 - An in-flight `$.tool.call` does not use up the hook's 10 s budget (a 30 s call inside `prompt.submit` was not cut); the engine caps one `$.http.fetch` at 30 s.
 - Registration (typings and an in-process harness, not measured live): `$.tool.register` rejects until the session is bound (before `session.start`): retry per hook with back-off instead of memoizing a failure, and bound the wait for a registration that never answers (pay it once per tool).
-
 - A `tool.call` hook's own `isError` is dropped by core: the model gets the text as a normal result (live, 2.1.325). Answer a failure with `{ deny: "<tool>: <reason>" }`, which reaches the model as an error result. A result read back through `$.tool.call` carries `isError: true` or `deny`.
 - `$.tool.register` input schemas are not enforced (`enum`, `required`, `type` and bounds only describe the tool to the model): the hook gets whatever was sent, so validate every input in the `tool.call` hook.
 - `$.fs.write` follows symlinks (live, 2.1.325): never overwrite a fixed path inside the project (a committed symlink sends the write outside the cwd); write a new file name after a `$.fs.exists` check.
@@ -54,10 +38,3 @@ Facts a plugin author keeps getting wrong. Re-verify with the `live-verify` skil
 - A tool call refused before it ran comes back as an error result whose text starts with `The user doesn't want to proceed with this tool use`, `Permission for this tool use was denied`, `Permission to use … has been denied` or `Hook '<name>' blocked` (2.1.325); a failed run does not match. A plugin acting on a result must not treat these as tool output.
 - `$.fs.stat` answers `isLink` for a symlink; `$.fs` has no realpath or lstat otherwise. Claude Code already allows in-project reads, so its `ask` on a `Read` means the path resolves outside the working directories: never loosen that ask.
 - For live checks run `claude -p --plugin-dir <plugin> --setting-sources project`, so the user's own settings and installed plugins stay out of the run; `/reload-plugins` may leave a generated `.claude-plugin/types/` folder and a `tsconfig.json` in `plugin/` (untracked, the layout check refuses them): delete them before building.
-
-## MCP and misc
-
-- The `initialize` answer carries a version the server supports, never the client's echo. See `mcp-dual-era.md`.
-- `claude plugin validate <plugin>` warns `ICON_MISSING` and (for function-hooks modules) "gating hook without .catch" by design; neither is a failure.
-- Tools a skill tells Claude to use (universal-lint bug hunt): Glob returns at most 100 files without saying so (list folders with `git ls-files` or `find`); Write refuses to overwrite an existing file that was not Read in the session, so `mktemp` then Write fails (let Write create a new path); a named skill argument gets only the first word of the command text, `$ARGUMENTS` gets all of it.
-- In `claude -p`, `AskUserQuestion` is disabled, so interactive skill flows stop at their first question without changing anything.

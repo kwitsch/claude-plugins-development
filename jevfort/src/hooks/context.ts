@@ -1,6 +1,6 @@
 /**
  * The turn as Jev sees it: the request, the steps after it, and compact summaries. Pure; the transcript read
- * (`readTurn`, `previousReply`) lives in `register.mts`.
+ * (`readTurn`, `previousReply`) lives in `register.ts`.
  *
  * @packageDocumentation
  */

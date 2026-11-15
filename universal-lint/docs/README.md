@@ -15,18 +15,18 @@ All of F01-F33 shipped or were closed docs-only in universal-lint 0.15.1-0.15.29
 ## How to work a task
 
 1. Pick the first unchecked task in `TASKS.md` (stage order, then priority) whose dependencies are done. Read its detail document plus the documents under its `Related` section.
-2. Read `../CLAUDE.md` and the rule files it names, at least `../.claude/rules/hook-design.md` (fail-open contract, timeout budget, edit-range gate, file detection) and `../.claude/rules/languages.md`. Several tasks touch documented user decisions; the task says so under `Constraints`. Ask before changing one.
+2. Read `../CLAUDE.md` and the rule files it names, at least `../.claude/rules/hook-design.md` (fail-open contract, timeout budget), `edit-range-gate.md`, `file-detection.md`, `npx-and-local-bin.md` and `languages.md` with the `lang-*.md` file of the language the task touches. Several tasks touch documented user decisions; the task says so under `Constraints`. Ask before changing one.
 3. Locate code by the symbol names in `Code locations` (`src/hooks/lint-file.mts` unless stated otherwise); line numbers are deliberately absent because they drift.
 4. Re-measure the baseline numbers the task cites (see F01) before and after the change. The numbers in these documents are from one machine and one day.
 5. Implement in `src/`, add the tests named under `Verification`, then run `pnpm --filter universal-lint build && pnpm --filter universal-lint test && pnpm lint`. Never edit `plugin/**/*.mjs` or `plugin/.claude-plugin/plugin.json` by hand.
 6. Any change under `universal-lint/` merged to `main` needs a version bump: `version` in `universal-lint/package.json` (the only manifest source), then `pnpm --filter universal-lint build`.
-7. Update the rule file that documents the changed behaviour (usually `hook-design.md` or `languages.md`; keep each rule file under 40,000 characters).
+7. Update the rule file that documents the changed behaviour (usually `hook-design.md`, one of the files split from it, or a `lang-*.md`; keep each rule file under 40,000 characters).
 8. Update the task: set `status` in its frontmatter, adjust `Status`/`Approach` to what shipped, and tick it in `TASKS.md` (move it to the done section).
 
 ## Conventions
 
 - Fail open everywhere in the hook path: every guard failure, skip, missing tool, timeout or internal error ends with no output and exit `0` (at most a one-line `universal-lint: …` note on stderr, as the watch-list limit and the FileChanged slot give-up write; exit 0 never wakes Claude). Only real findings produce the `universal-lint…: …` text on stderr with exit `2` (asyncRewake). A false finding is worse than a missed one, because it wakes Claude.
-- Linting never modifies the user's files or repo (no `--fix`, no installs into the project tree). Persistent plugin state goes under `${CLAUDE_PLUGIN_DATA || os.tmpdir()}` only, written atomically (temp file + `renameSync`, as `recordWritten` does and the PATH probe store `probe-<hashPath(PATH)>.json` (F11); FileChanged slot files (`fc-slots/`) are the exception: claimed by an exclusive `wx` create holding the pid, see `.claude/rules/hook-design.md` "File detection"), and an unreadable cache means "probe again".
+- Linting never modifies the user's files or repo (no `--fix`, no installs into the project tree). Persistent plugin state goes under `${CLAUDE_PLUGIN_DATA || os.tmpdir()}` only, written atomically (temp file + `renameSync`, as `recordWritten` does and the PATH probe store `probe-<hashPath(PATH)>.json` (F11); FileChanged slot files (`fc-slots/`) are the exception: claimed by an exclusive `wx` create holding the pid, see `.claude/rules/file-detection.md` "Slot cap"), and an unreadable cache means "probe again".
 - No debounce for Write/Edit (user decision 2026-11-06): every Write/Edit lints right away in its own process. No `userConfig` (permanent). Command hooks, no MCP server (user decision 2026-11-06).
 - Runtime code stays zero-dependency Node (`node:` builtins only). New symbols get TSDoc (`.claude/rules/tsdoc.md` at the repo root).
 

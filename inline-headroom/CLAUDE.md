@@ -34,7 +34,7 @@ Path-scoped rules in `.claude/rules/` load when you work on matching files:
 
 - `register-hooks.md` (`register.mts`, its test, `hooks.json`): engine pitfalls, in-frame storage calls, the
   compression wiring shared by every lever, the effort-routing caveat.
-- `policy-smartcrusher.md`, `policy-dedup-elider.md`, `policy-compressors.md`, `policy-text-tags.md`,
+- `policy-smartcrusher.md`, `policy-lossless-compaction.md`, `policy-dedup-elider.md`, `policy-compressors.md`, `policy-text-tags.md`,
   `policy-router.md` (`policy.mts`, its test): each lever's port notes and deviations from upstream headroom.
 - `storage-server.md` (`src/mcp/`, `.mcp.json`, the storage test): protocol, service singleton, schema and
   migrations, the `/headroom` counters table.
