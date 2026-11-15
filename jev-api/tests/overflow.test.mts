@@ -23,7 +23,7 @@ const okReply = (tokens?: number): Reply => httpReply(200, JSON.stringify({ mode
 const tooBig = (tokens: number, nctx = 32768): Reply => httpReply(400, JSON.stringify({ error: { code: 400, message: `request (${tokens} tokens) exceeds the available context size (${nctx} tokens), try increasing it`, type: "exceed_context_size_error", n_prompt_tokens: tokens, n_ctx: nctx } }));
 
 /** The `$.store` of a test: records every set and can be primed or made to fail. */
-type Store = { data: Map<string, unknown>; sets: [string, unknown][]; gets: string[]; failGet: boolean; failSet: boolean };
+type Store = { data: Map<string, unknown>; sets: [string, unknown][]; gets: string[]; failGet: boolean; failSet: boolean; late?: Promise<unknown> };
 
 /**
  * Stubs every `$` op the module uses: env (explicit), the clock, tool registration, `http.fetch` (answers come from
@@ -34,7 +34,7 @@ function setup(on: On, opts: { env?: Record<string, string>; replies?: Reply[]; 
   const specs: Record<string, unknown>[] = [];
   const store: Store = { data: new Map(Object.entries(opts.store ?? {})), sets: [], gets: [], failGet: false, failSet: false };
   mock.env(on, opts.env ?? JEV);
-  mock.clock(on);
+  const clock = mock.clock(on);
   on("tool.register", async (_$, e) => {
     specs.push(e);
     return { value: { tool: TOOL(String(e.name)) } };
@@ -47,6 +47,7 @@ function setup(on: On, opts: { env?: Record<string, string>; replies?: Reply[]; 
   });
   on("store.get", (_$, e) => {
     store.gets.push(String(e.key));
+    if (store.late) return store.late.then((value) => ({ value }));
     if (store.failGet) return { deny: "store unavailable" };
     return { value: store.data.get(String(e.key)) };
   });
@@ -57,7 +58,7 @@ function setup(on: On, opts: { env?: Record<string, string>; replies?: Reply[]; 
     return { value: undefined };
   });
   on("session.start", async (_$, e) => ({ cwd: e.cwd }));
-  return { fetched, specs, store };
+  return { fetched, specs, store, clock };
 }
 
 const BASE: Record<string, Record<string, unknown>> = {
@@ -183,6 +184,19 @@ for (const [name, bad] of [["out of range", { v: 99, n: 1 }], ["below 1", { v: 0
     expect((store.sets[0][1] as { v: number }).v).toBeCloseTo(smoothed(3, promptChars(fetched[0]) / (3000 - 26)), 6);
   });
 }
+
+test("a store read that outlasts the wait is never overwritten by a density learned from few samples", async ($, on) => {
+  const { store, clock } = setup(on, { replies: [okReply(3000)] });
+  let release = (_v: unknown) => {};
+  store.late = new Promise((r) => (release = r));
+  const first = call($, "noul", SMALL);
+  await $.session.start({ cwd: "/proj", surface: "terminal", isInteractive: true });
+  await clock.advance(1000);
+  release({ v: 2, n: 500 });
+  expect((await first).deny).toBeUndefined();
+  await call($, "noul", SMALL);
+  expect(store.sets).toHaveLength(0);
+});
 
 test("the store is read once per module instance, not on every call", async ($, on) => {
   const { store } = setup(on, { replies: [okReply(5000)] });

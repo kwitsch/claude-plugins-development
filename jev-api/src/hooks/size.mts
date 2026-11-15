@@ -66,7 +66,7 @@ export const HEAD_SHARE = 0.6;
 export type Knowledge = {
   /** Learned characters per token. */
   density: number;
-  /** The density as last written to (or read from) the store. */
+  /** The density as last written to (or read from) the store; NaN while the store read ran out of time (nothing is written). */
   persisted: number;
   /** How many samples the density holds. */
   samples: number;
@@ -120,7 +120,10 @@ export function loadKnowledge($: Engine, k: Knowledge): Promise<void> {
       const late = new Promise<undefined>((resolve) => {
         timer = $.clock.after(STORE_WAIT_MS, () => resolve(undefined));
       });
-      const stored = await Promise.race([read, late]);
+      let timedOut = false;
+      const stored = await Promise.race([read, late.then(() => (timedOut = true, undefined))]);
+      // a slow store still holds the real statistic: unknown until read, so learn() must not overwrite it
+      if (timedOut) k.persisted = Number.NaN;
       const v = isRecord(stored) ? stored["v"] : undefined;
       if (typeof v === "number" && Number.isFinite(v) && v >= MIN_DENSITY && v <= MAX_DENSITY && k.samples === 0) {
         k.density = v;
@@ -152,6 +155,7 @@ export function learn($: Engine, k: Knowledge, chars: number, tokens: unknown): 
   if (!Number.isFinite(sample)) return;
   k.density = (1 - DENSITY_ALPHA) * k.density + DENSITY_ALPHA * Math.min(MAX_DENSITY, Math.max(MIN_DENSITY, sample));
   k.samples += 1;
+  if (Number.isNaN(k.persisted)) return;
   if (Math.abs(k.density - k.persisted) / k.persisted <= PERSIST_DELTA) return;
   k.persisted = k.density;
   try {
