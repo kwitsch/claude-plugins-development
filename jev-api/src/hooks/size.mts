@@ -72,6 +72,8 @@ export type Knowledge = {
   samples: number;
   /** The server's context window in tokens. */
   nctx: number;
+  /** The endpoint and model `nctx` was learned from; another source resets it. */
+  nctxFor?: string;
   /** The read of the stored density: started by the first call, shared by the others. */
   loaded: Promise<void> | undefined;
 };

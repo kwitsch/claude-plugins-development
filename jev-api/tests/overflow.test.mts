@@ -246,6 +246,15 @@ test("a rejection teaches the density from its exact token count", async ($, on)
   expect((store.sets[0][1] as { v: number }).v).toBeCloseTo(smoothed(3, promptChars(fetched[0]) / (20000 - 26)), 6);
 });
 
+test("a learned context window does not outlive a model switch", async ($, on) => {
+  const env: Record<string, string> = { ...JEV, TYPESAFE_DEFAULT_MODEL: "small-ctx" };
+  const { fetched } = setup(on, { env, replies: [tooBig(15000, 8192), okReply()] });
+  expect((await call($, "noul", { state: "word ".repeat(12_000), timeout: 20, overflow: "error" })).deny).toContain("the limit is 8191");
+  env.TYPESAFE_DEFAULT_MODEL = "big-ctx";
+  expect((await call($, "noul", { state: "word ".repeat(12_000), timeout: 20, overflow: "error" })).deny).toBeUndefined();
+  expect(fetched.map((f) => f.body.model)).toEqual(["small-ctx", "big-ctx"]);
+});
+
 // --- Phase 4: the preflight and the overflow modes ---------------------------------------------------------------------
 
 /** The tokens a timeout in seconds allows: the positive root of 1.3 * (0.7 t + 1.8e-5 t^2) = ms, as the plugin computes it. */

@@ -6,7 +6,7 @@
  */
 
 import { askHaiku, HAIKU_MAX_CHARS } from "./haiku.mjs";
-import { cutState, DEFAULT_DENSITY, estimateTokens, isTooBig, learn, MAX_DENSITY, OPTIMISTIC_FACTOR, preflightError, refusedDensity, stateForBudget, timeBudgetTokens, tooBigError } from "./size.mjs";
+import { cutState, DEFAULT_CONTEXT_TOKENS, DEFAULT_DENSITY, estimateTokens, isTooBig, learn, MAX_DENSITY, OPTIMISTIC_FACTOR, preflightError, refusedDensity, stateForBudget, timeBudgetTokens, tooBigError } from "./size.mjs";
 import type { Knowledge, TooBig } from "./size.mjs";
 import { now, sendOutcome } from "./transport.mjs";
 import type { Link } from "./transport.mjs";
@@ -105,9 +105,14 @@ export async function answerJev($: Engine, tool: ToolName, input: { state: strin
     return r.deny?.startsWith(`${tool}: fallback: `) ? fail(tool, `${why}; ${r.deny.slice(tool.length + 2)}`) : r;
   };
   // A refusal also tells the server's context window: remembered for the rest of the instance.
+  const src = JSON.stringify([env.jevUrl, env.base, env.model]);
+  if (know.nctxFor !== src) know.nctx = DEFAULT_CONTEXT_TOKENS;
   const send = async (state: string) => {
     const answer = await ask($, tool, state, input.questions, env, timeoutMs, signal, questionsChars, (chars, tokens) => learn($, know, chars, tokens), link);
-    if (isTooBig(answer)) know.nctx = answer.tooBig.limit + 1;
+    if (isTooBig(answer)) {
+      know.nctx = answer.tooBig.limit + 1;
+      know.nctxFor = src;
+    }
     return answer;
   };
   const limit = know.nctx - 1;
