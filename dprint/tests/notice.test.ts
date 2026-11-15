@@ -1,4 +1,4 @@
-// Tests for the built plugin/hooks/notice.mjs (Claude Code function-hooks module) on claude-engine-vitest, the
+// Tests for the built plugin/hooks/register.mjs (Claude Code function-hooks module) on claude-engine-vitest, the
 // workspace's vitest stand-in for the official `claude-code/testing` kit: stubs answer fs.exists (backed by node:fs),
 // session.cwd, env.get, process.run and ui.toast, and mock.clock(on).settle() waits for the detached check. The
 // first test records the registration list by hand (the kit does not expose it); the last three read the built file.
@@ -9,10 +9,10 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, afterEach, beforeEach, test as plainTest, vi } from "vitest";
-import { register } from "../plugin/hooks/notice.mjs";
+import { register } from "../plugin/hooks/register.mjs";
 import { CONFIG_NAMES } from "../plugin/skills/dprint/config-names.mjs";
 
-const { test, mock } = createKit({ module: new URL("../plugin/hooks/notice.mjs", import.meta.url), plugin: "dprint" });
+const { test, mock } = createKit({ module: new URL("../plugin/hooks/register.mjs", import.meta.url), plugin: "dprint" });
 
 const PLUGIN = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../plugin");
 const HOME = "/home/u";
@@ -409,16 +409,18 @@ test("a rejecting session.cwd -> next's result unchanged, no throw, no toast", a
 });
 
 plainTest("the module's inlined config names equal the shared CONFIG_NAMES; no imports", () => {
-  const src = readFileSync(path.join(PLUGIN, "hooks/notice.mjs"), "utf8");
-  const m = /CONFIG_NAMES = (\[[^\]]*\])/.exec(src);
+  const lib = readFileSync(path.join(PLUGIN, "hooks/lib.mjs"), "utf8");
+  const m = /CONFIG_NAMES=(\[[^\]]*\])/.exec(lib);
   assert.ok(m, "inlined CONFIG_NAMES");
-  assert.deepEqual(JSON.parse(m[1].replace(/,\s*\]$/, "]")), [...CONFIG_NAMES]);
-  assert.doesNotMatch(src, /^import/m);
+  assert.deepEqual(JSON.parse(m[1].replaceAll("`", "\"")), [...CONFIG_NAMES]);
+  assert.doesNotMatch(lib, /^import/m);
+  const entry = readFileSync(path.join(PLUGIN, "hooks/register.mjs"), "utf8");
+  assert.deepEqual(entry.match(/^import .*$/gm), ["import { afterCwdChanged, afterSessionCwd } from \"./lib.mjs\";"]);
 });
 
 plainTest("the probe constants, MIN_VERSION and version regex equal the shared sources'", () => {
   const read = (f) => readFileSync(path.join(PLUGIN, "..", "src", f), "utf8");
-  const notice = read("hooks/notice.ts");
+  const notice = read("hooks/probe.ts");
   const find = read("skills/dprint/find-dprint.ts");
   const check = read("skills/dprint/check-dprint.ts");
   const num = (src, name) => new RegExp(`const ${name} = ([\\d_]+);`).exec(src)?.[1];
@@ -426,7 +428,7 @@ plainTest("the probe constants, MIN_VERSION and version regex equal the shared s
   assert.equal(num(notice, "PROBE_TIMEOUT_MS"), num(find, "NPX_PROBE_TIMEOUT_MS"));
   assert.ok(num(find, "NPX_RETRY_MS"));
   assert.equal(num(notice, "PROBE_RETRY_MS"), num(find, "NPX_RETRY_MS"));
-  const min = (src) => /^const MIN_VERSION = "([0-9.]+)";$/m.exec(src)?.[1];
+  const min = (src) => /^(?:export )?const MIN_VERSION = "([0-9.]+)";$/m.exec(src)?.[1];
   assert.ok(min(check));
   assert.equal(min(notice), min(check));
   const versionRe = "/^dprint (\\d+)\\.(\\d+)\\.(\\d+)(-\\S+)?/";
@@ -436,16 +438,18 @@ plainTest("the probe constants, MIN_VERSION and version regex equal the shared s
 });
 
 plainTest("built module keeps the names Claude Code's static check needs (no mangling)", () => {
-  const src = readFileSync(path.join(PLUGIN, "hooks/notice.mjs"), "utf8");
+  const src = readFileSync(path.join(PLUGIN, "hooks/register.mjs"), "utf8");
   assert.match(src, /export const register = \(on\) =>/);
-  assert.match(src, /async function onSessionCwd\(\$, e, next\)/);
+  assert.match(src, /async function onSessionStart\(\$, e, next\)/);
   assert.match(src, /async function onCwdChanged\(\$, e, next\)/);
-  assert.match(src, /\$\.fs\.exists\(/);
-  assert.match(src, /\$\.ui\.toast\(/);
-  assert.match(src, /\$\.session\.cwd\(\)/);
-  assert.match(src, /\$\.process\.run\(/);
-  assert.match(src, /\$\.env\.get\("HOME"\)/);
-  assert.match(src, /\$\.env\.get\("PATH"\)/);
+  // the helpers live in the compressed lib.mjs, which the engine checks too: `$` and the engine calls stay spelled
+  const lib = readFileSync(path.join(PLUGIN, "hooks/lib.mjs"), "utf8");
+  assert.match(lib, /\$\.fs\.exists\(/);
+  assert.match(lib, /\$\.ui\.toast\(/);
+  assert.match(lib, /\$\.session\.cwd\(\)/);
+  assert.match(lib, /\$\.process\.run\(/);
+  assert.match(lib, /\$\.env\.get\(`HOME`\)/);
+  assert.match(lib, /\$\.env\.get\(`PATH`\)/);
 });
 
 test("worktree tool output in the engine's { result } shape: ExitWorktree checks restoredCwd, never the worktree it left", async ($, on) => {
