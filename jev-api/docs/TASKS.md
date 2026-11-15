@@ -25,7 +25,7 @@ Legend: `[x]` finished (done, or closed without code: status `closed` in the tas
 Source: performance analysis of jev-api 0.5.0 on 2026-11-15, numbers in [EVALUATION-2026-11-15.md](EVALUATION-2026-11-15.md).
 
 - [ ] [F23](tasks/F23-server-rss-grows-young-generation.md) `open` low: the transport server's RSS grows from 49 MB to 133 MB (4k requests) and 224 MB (20k) while its JS heap stays at 12 MB; `--max-semi-space-size=1` keeps it at 96 to 109 MB at the same speed
-- [ ] [F24](tasks/F24-timeout-not-a-bound.md) `open` low: a call's `timeout` does not bound it; one-off waits (registration 1 s, store 1 s, connect 3 s, `config` 3 s) come before the request and are not cut to the time left (5003 ms and 3008 ms measured for a 1 s timeout)
+- [ ] [F24](tasks/F24-timeout-not-a-bound.md) `partial` low: a call's `timeout` does not bound it; one-off waits (registration 1 s, store 1 s, connect 3 s, `config` 3 s) come before the request and are not cut to the time left (the request itself is; 5003 ms and 3008 ms measured for a 1 s timeout)
 
 ## Closed without code (measurement records, decided 2026-11-13)
 

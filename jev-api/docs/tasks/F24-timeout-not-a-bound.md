@@ -1,14 +1,14 @@
 ---
 id: F24
 title: "A call's timeout does not bound it: one-off waits for registration, store, connect and config come before the request"
-status: open
+status: partial
 priority: low
 area: jev-api/src/hooks (transport.mts ensureServer, syncConfig, sendOutcome; register.mts onToolCall; size.mts loadKnowledge; registry.mts ensureTools)
 ---
 
 ## Status
 
-Open. Found in the performance analysis of 2026-11-15 ([EVALUATION-2026-11-15.md](../EVALUATION-2026-11-15.md), "One-off waits before a request"). Nothing implemented.
+Partial. Found in the performance analysis of 2026-11-15 ([EVALUATION-2026-11-15.md](../EVALUATION-2026-11-15.md), "One-off waits before a request"). Step 3 shipped: b4cd930 (fallback) and ea54af3 (server request) give the request only the time left; none left answers `timeout after <ms>ms` without sending. Open: the unbounded waits themselves (steps 1, 2, 4).
 
 ## Problem
 
@@ -29,10 +29,10 @@ Proven (harness, built `plugin/hooks/register.mjs` with a fake `$`, `timeout` 1 
 
 | Case                                                                   | Result                                                                               |
 | ---------------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
-| `$.mcp.connect` never answers, first call                              | 3003 ms, answered through `$.http.fetch`; the next call 0 ms                         |
+| `$.mcp.connect` never answers, first call (measured before b4cd930; now `timeout after 1000ms` after 3 s, nothing fetched) | 3003 ms, answered through `$.http.fetch`; the next call 0 ms                         |
 | registration, `store.get` and `$.mcp.connect` never answer, first call | 5003 ms; the next call 0 ms                                                          |
 | a network error, then the `config` call never answers                  | the next call 3001 ms, then 0 ms                                                     |
-| the built server stopped with `SIGSTOP` after a success, 3 calls       | 2502 ms (`timeout after 1000ms`), 3008 ms (through `$.http.fetch`), 4 ms; 1 log line |
+| the built server stopped with `SIGSTOP` after a success, 3 calls (measured before b4cd930/ea54af3; the 3008 ms row now is `timeout after 1000ms`, nothing fetched) | 2502 ms (`timeout after 1000ms`), 3008 ms (through `$.http.fetch`), 4 ms; 1 log line |
 
 The last row also shows that F22's constraint "the next call waits for the guard again until the server answers" is out of date: the guard timeout sets `dirty`, the next call's `config` call waits 3 s, marks the server down and falls back.
 
@@ -40,7 +40,7 @@ Not measured: how often these waits happen in a real session (engine `$.mcp.conn
 
 ## Code locations
 
-- `transport.mts`: `ensureServer` (connect race against `CONNECT_WAIT_MS`), `syncConfig` (`stopOn($, CONNECT_WAIT_MS, signal)`), `sendOutcome` (falls back with `fetchViaEngine($, timeoutMs, signal)`, the full timeout), `callServer` (`timeoutMs + SERVER_GUARD_MS`).
+- `transport.mts`: `ensureServer` (connect race against `CONNECT_WAIT_MS`), `syncConfig` (`stopOn($, CONNECT_WAIT_MS, signal)`), `sendOutcome` (falls back with `fetchViaEngine($, Math.round(left), signal)`, the time left, and answers `timeout after <ms>ms` when `left < 1`), `callServer` (`timeoutMs + SERVER_GUARD_MS`).
 - `register.mts`: `onToolCall` (`ensureTools($, st, REGISTER_WAIT_MS)`, `loadKnowledge`, then `answerJev`).
 - `size.mts`: `loadKnowledge` (`STORE_WAIT_MS`); `registry.mts`: `ensureTools`.
 
