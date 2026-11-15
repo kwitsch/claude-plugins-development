@@ -1297,6 +1297,17 @@ test("watch-paths.mjs prints the in-cwd dprint file paths as watchPaths on Sessi
   });
 });
 
+test("watch-paths.mjs keeps a file name with a newline as one path", () => {
+  writeFileSync(
+    path.join(bin, "dprint"),
+    "#!/usr/bin/env bash\nprintf '%s\\n' \"$PWD/a.ts\" \"$PWD/new\" \"line.ts\"\n",
+  );
+  chmodSync(path.join(bin, "dprint"), 0o755);
+  const r = watch({ hook_event_name: "SessionStart", cwd: repo });
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(JSON.parse(r.stdout).hookSpecificOutput.watchPaths, [path.join(repo, "a.ts"), path.join(repo, "new\nline.ts")]);
+});
+
 test("DPRINT_WATCH_DIRECTORIES=1: watch-paths.mjs prints the directories of the files, nested ones collapsed", async () => {
   stubDprint();
   const r = spawnSync(process.execPath, [WATCH], {
