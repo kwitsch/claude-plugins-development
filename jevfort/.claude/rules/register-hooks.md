@@ -1,17 +1,17 @@
 ---
 paths:
-  - "src/hooks/register.mts"
-  - "tests/register.test.mts"
-  - "tests/phase3.test.mts"
+  - "src/hooks/register.ts"
+  - "tests/register.test.ts"
+  - "tests/phase3.test.ts"
   - "plugin/hooks/hooks.json"
 ---
 
-# `register.mts`: hooks, `$` use and engine pitfalls
+# `register.ts`: hooks, `$` use and engine pitfalls
 
-`plugin/hooks/hooks.json` (hand-written) is exactly `{"modules": ["./register.mjs"]}`. `src/hooks/register.mts` holds
-every hook and every `$` use and imports the pure modules `./jev.mjs`, `./policy.mjs`, `./candidates.mjs`,
-`./context.mjs`, `./cache.mjs`, `./agents.mjs`, `./compact.mjs`, `./summarize.mjs`.
-Tested by `tests/register.test.mts` (kit-style tests on the workspace package `claude-engine-vitest`). Evidence for
+`plugin/hooks/hooks.json` (hand-written) is exactly `{"modules": ["./register.mjs"]}`. `src/hooks/register.ts` holds
+every hook and every `$` use and imports the pure modules `./jev.js`, `./policy.js`, `./candidates.js`,
+`./context.js`, `./cache.js`, `./agents.js`, `./compact.js`, `./summarize.js` (bundled into `plugin/hooks/lib.mjs`).
+Tested by `tests/register.test.ts` (kit-style tests on the workspace package `claude-engine-vitest`). Evidence for
 the shapes below: `inline-headroom/docs/claude-code-verification.md`.
 
 ## Engine pitfalls (change how the code must be written)
@@ -88,7 +88,7 @@ Every `askJev` is awaited in-frame.
 
 ## Tests: the jev-api fake
 
-`tests/register.test.mts` and `tests/phase3.test.mts` stub `tool.list` (jev-api's batch tool) and `tool.call`. The
+`tests/register.test.ts` and `tests/phase3.test.ts` stub `tool.list` (jev-api's batch tool) and `tool.call`. The
 kit resolves a mod's `$.tool.call` to the stub's `value` and rejects with a bare `{ deny }`, while the real engine
 resolves `{ deny }` (typings), so the fake answers a batch call with `{ value: { result: "<JSON array of answers>" } }`
 or `{ value: { deny: "batch: <reason>" } }` and passes every other tool on with `next(e)`. It records each batch question on its own (with its `type`), so assertions read per

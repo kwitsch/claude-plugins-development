@@ -11,7 +11,7 @@ Development repository for Claude Code plugins. One top-level directory per plug
 - `package.json`: the only manifest source (`name`, `version`, `description`, `author`, `keywords`; plugin-only fields such as `userConfig` under `claudePlugin`, which is required, `{}` at least, and marks the package as a plugin) and the pnpm scripts `build` (`node ../development/scripts/build-plugin.ts`), `test`, optional `lint`. Edit here only.
 - `src/bin/`: scripts used from several places (skills, hooks, MCP), built to `plugin/bin/*.mjs`, which Claude Code puts on the Bash PATH while the plugin is enabled.
 - `scripts/`: optional plugin-specific build steps and dev-only tools (`.mts`, run by Node 24's type stripping, never shipped), e.g. dprint's `hooks.mts` (build) and universal-lint's `perf.mts` (hook cost measurement).
-- `CLAUDE.md`: developer notes, never inside `plugin/` (a plugin-root CLAUDE.md is not loaded and triggers a validate warning). Notes for single parts go in `<name>/.claude/rules/*.md` with `paths:` relative to `<name>/` (loaded when Claude works on matching files; keep each under 40,000 characters, the on-demand load limit); `src/` holds only `.mts`.
+- `CLAUDE.md`: developer notes, never inside `plugin/` (a plugin-root CLAUDE.md is not loaded and triggers a validate warning). Notes for single parts go in `<name>/.claude/rules/*.md` with `paths:` relative to `<name>/` (loaded when Claude works on matching files; keep each under 40,000 characters, the on-demand load limit); `src/` holds only `.ts` (the `.mts` of unmigrated plugins: see `.claude/rules/src-typescript.md`).
 - Hand-written plugin content (`SKILL.md`, `hooks/hooks.json`, `agents/*.md`, `README.md`) lives directly in `plugin/` and is edited there.
 
 ## Workspace-wide lint and test config
@@ -35,7 +35,7 @@ claude plugin validate <name>/plugin
 
 ## Rules
 
-- `.mjs` (and `.js`) is build output only; every hand-written module is `.ts` (Node 24 and vitest strip the types; `src/` is compiled by `pnpm build`; the `.mts` of plugins not yet migrated are listed in `.claude/rules/src-typescript.md`).
+- `.mjs` (and `.js`) is build output only; every hand-written module is `.ts` (Node 24 and vitest strip the types; `src/` is compiled by `pnpm build`; a plugin not yet migrated still holds `.mts` until its first change, see `.claude/rules/src-typescript.md`).
 - Never edit `*/plugin/**/*.mjs` or `*/plugin/.claude-plugin/plugin.json` — change `src/` or `<name>/package.json` and run `pnpm build`. `.claude/settings.json` denies these writes.
 - Version bump = edit `version` in `<name>/package.json`, then `pnpm build`. Any change under `<name>/` merged to `main` needs a bump to a version higher than on `main` that is not yet tagged `<name>-<version>` here or in kwitsch/claude-plugins.
 - New plugin: use the `scaffold-plugin` skill (`.claude/skills/scaffold-plugin/`). Never hand-copy the layout.

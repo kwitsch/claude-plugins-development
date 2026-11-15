@@ -10,8 +10,7 @@ paths:
 graphmind indexes `.ts` symbols (signatures and types) but no `.mts` symbols (checked 2026-11-15: `graphmind outline` of a `.mts` source is empty, of the same code as `.ts` it lists every function and type). New sources must therefore be `.ts`.
 
 - No new `.mts` file in any `src/` directory, and no new `.mts` under `development/`. Hand-written sources under `<name>/src/` are `.ts`.
-- **First change in a plugin that still holds `.mts` converts that plugin in the same change.** When a change touches a plugin with `.mts` under `src/` or `tests/`, rename its `src/**/*.mts` and `tests/*.test.mts` to `.ts` in that change, not as a follow-up. Done for `jev-api` (2026-11-15); the other plugins still hold `.mts` and convert on their first change.
-- Import specifiers in `.ts` sources: relative siblings as `./name.js` (TypeScript NodeNext resolves it to `name.ts`). `development/scripts/build-plugin.ts` rewrites every relative `.js` import of a source to `.mjs`, so the shipped code keeps `./name.mjs` and `bundleHooksLib` works unchanged.
+- **First change in a plugin that still holds `.mts` converts that plugin in the same change.** When a change touches a plugin with `.mts` under `src/` or `tests/`, rename its `src/**/*.mts` and `tests/*.test.mts` to `.ts` in that change, not as a follow-up.- Import specifiers in `.ts` sources: relative siblings as `./name.js` (TypeScript NodeNext resolves it to `name.ts`). `development/scripts/build-plugin.ts` rewrites every relative `.js` import of a source to `.mjs`, so the shipped code keeps `./name.mjs` and `bundleHooksLib` works unchanged.
 - Scripts that Node runs directly (`development/scripts/*.ts`) import their siblings with the real extension (`./plugin-manifest.ts`); `allowImportingTsExtensions` is set in `tsconfig.base.json`.
 - The build accepts `.ts` and `.mts` in `src/` during the transition; `.d.ts` / `.d.mts` are not built.
 - A conversion is done only when all of these hold:

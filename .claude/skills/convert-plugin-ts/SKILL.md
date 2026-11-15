@@ -50,7 +50,7 @@ Follow `.claude/rules/hook-tests.md`. Procedure that worked:
 
 ## 6. Docs, release, report
 
-- The plugin's `CLAUDE.md` (file names, test setup) and the sentence "Done for ..." in `.claude/rules/src-typescript.md`.
+- The plugin's `CLAUDE.md` (file names, test setup). No status list: the rule file states no progress, `git ls-files '<plugin>/src/*.mts'` shows what is left.
 - Version bump in `<plugin>/package.json` and `pnpm --filter <plugin> build` (a change under `<plugin>/` needs one, see the root `CLAUDE.md`); `plugin.json` comes from the build, never by hand.
 - Commit in logical steps (rename and imports, hooks bundle, tests, docs). Open or update the PR; report the checks of step 5, the test counts and what was not exercised.
 
