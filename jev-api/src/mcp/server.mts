@@ -176,7 +176,7 @@ async function readBody(res: Response): Promise<string> {
     }
     chunks.push(value);
   }
-  return Buffer.concat(chunks).toString("utf8");
+  return new TextDecoder().decode(Buffer.concat(chunks)); // strips a BOM like Response.text()
 }
 
 /**

@@ -216,6 +216,13 @@ describe("request", () => {
     assert.deepEqual(outcomeOf(await c.request()), { kind: "http", status: 400, reason: "too big", refusal: { tokens: 40025, nctx: 32768 } });
   });
 
+  test("a BOM-prefixed answer and refusal are decoded like fetch does (BOM stripped)", async () => {
+    const { s, c } = await boot({}, { body: "\uFEFF{\"answers\":{}}" });
+    assert.equal(outcomeOf(await c.request())["text"], "{\"answers\":{}}");
+    s.set({ status: 400, body: "\uFEFF" + JSON.stringify({ error: { code: 400, type: "exceed_context_size_error", message: "too big", n_prompt_tokens: 40025, n_ctx: 32768 } }) });
+    assert.deepEqual(outcomeOf(await c.request()), { kind: "http", status: 400, reason: "too big", refusal: { tokens: 40025, nctx: 32768 } });
+  });
+
   test("a refused connection is an error outcome without the host, the port or the key", async () => {
     const c = start({ JEV_URL: "http://127.0.0.1:9/v1", TYPESAFE_API_KEY: KEY });
     live.push(c);
