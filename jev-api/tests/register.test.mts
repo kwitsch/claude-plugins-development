@@ -1518,3 +1518,38 @@ it("session.start registers after the bind although a pre-bind attempt fails aft
   await new Promise((r) => setTimeout(r, 20));
   expect(logs).toEqual(["registering batch failed: real failure"]);
 });
+
+// A stale pre-bind attempt settling after session.start must not drop the fresh attempt's pending entry (else the next call registers the hanging tool twice).
+it("a stale attempt settling does not start a duplicate registration of a hanging tool", async () => {
+  let bound = false;
+  let release: () => void = () => undefined;
+  const stale = new Promise<void>((r) => (release = r));
+  const post: string[] = [];
+  const { run, hooks, $ } = await direct({
+    tool: {
+      register: async (spec: { name: string }) => {
+        if (!bound) {
+          await stale;
+          throw new Error("session not bound");
+        }
+        post.push(spec.name);
+        if (spec.name === "batch") return new Promise(() => {});
+        return { tool: TOOL(spec.name) };
+      },
+    },
+    clock: {
+      after: (_ms: number, fn: () => void) => {
+        const t = setTimeout(fn, 0);
+        return { cancel: () => clearTimeout(t) };
+      },
+    },
+  });
+  await run("noul");
+  bound = true;
+  await hooks.get("session.start")?.($, { cwd: "/p" }, Object.assign(async (e: unknown) => e, { signal: new AbortController().signal }));
+  release();
+  await new Promise((r) => setTimeout(r, 20));
+  await run("noul");
+  await run("noul");
+  expect(post.filter((n) => n === "batch")).toEqual(["batch"]);
+});
