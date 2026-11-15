@@ -428,6 +428,9 @@ describe("fallback to $.http.fetch", () => {
     const garbage = await rig({ onCall: () => ({ isError: false, content: [{ type: "text", text: "hello" }] }) });
     expect(JSON.parse((await garbage.run()).result ?? "null")).toEqual(NOUL_ANSWER);
     expect(garbage.fetched).toHaveLength(1);
+    const odd = await rig({ onCall: () => ({ isError: false, content: [null, 3, { type: "text" }] as never }) });
+    expect(JSON.parse((await odd.run()).result ?? "null")).toEqual(NOUL_ANSWER);
+    expect(odd.fetched).toHaveLength(1);
     const text = await rig({ onCall: () => ({ isError: true, content: [{ type: "text", text: "request: state must be a non-empty string" }] }) });
     expect(await text.run()).toEqual({ deny: "noul: request: state must be a non-empty string" });
     expect(text.fetched).toHaveLength(0);

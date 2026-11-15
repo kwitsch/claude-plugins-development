@@ -312,7 +312,8 @@ export async function configureServer($: Engine, link: Link, env: HttpEnv, signa
  */
 function readOutcome(r: McpResult | null | undefined): Outcome | undefined {
   if (!isRecord(r)) return undefined;
-  const text = Array.isArray(r.content) ? r.content.find((c) => c.type === "text")?.text : undefined;
+  const t = Array.isArray(r.content) ? (r.content as unknown[]).find((c) => isRecord(c) && c["type"] === "text" && typeof c["text"] === "string") : undefined;
+  const text = isRecord(t) ? (t["text"] as string) : undefined;
   const sc = isRecord(r.structuredContent) ? r.structuredContent : text === undefined ? undefined : json(text);
   if (isRecord(sc)) {
     if (sc["kind"] === "ok" && typeof sc["status"] === "number" && typeof sc["text"] === "string") return sc as unknown as Outcome;
