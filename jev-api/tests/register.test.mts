@@ -207,6 +207,8 @@ test("invalid input is rejected without a request", async ($, on) => {
   await bad("noul", { state: "  " }, "state must be a non-empty string");
   await bad("noul", { criteria: { maybe: "x" } }, "criteria must be an object with optional string fields true and false");
   await bad("noul", { criteria: { true: 1 } }, "criteria must be an object with optional string fields true and false");
+  await bad("noul", { criteria: { false: 5 } }, "criteria must be an object with optional string fields true and false");
+  await bad("noul", { criteria: { true: "a", false: [] } }, "criteria must be an object with optional string fields true and false");
   await bad("noul", { criteria: ["x"] }, "criteria must be an object with optional string fields true and false");
   await bad("noul", { criteria: null }, "criteria must be an object with optional string fields true and false");
   await bad("choice", { criteria: {} }, "criteria must map 1 to 255 non-blank option names to string descriptions");
