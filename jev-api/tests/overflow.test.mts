@@ -571,6 +571,22 @@ test("a second refusal after the retry is answered with the numbers and nothing 
   expect(r.deny).toMatch(/^noul: state too large for System One: the request has 9000 tokens, the limit is 8191; shorten the state to about \d+ characters$/);
 });
 
+test("an HTTP error on the cut request after a refusal is taken over by Haiku", async ($, on) => {
+  setup(on, { replies: [tooBig(40025, 8192), httpReply(500, "boom")] });
+  on("model.complete", () => ({ value: { isAnswered: false, reason: "overloaded" } }));
+  const r = await $.tool.call({ tool: TOOL("noul"), ...BASE["noul"], state: "a".repeat(100_000), timeout: 30, overflow: "truncate" }) as Result;
+  expect(r.result).toBeUndefined();
+  expect(r.deny).toMatch(/^noul: .*500.*; fallback: overloaded$/);
+});
+
+test("an HTTP error on the cut request of the preflight path is taken over by Haiku", async ($, on) => {
+  setup(on, { replies: [httpReply(500, "boom")] });
+  on("model.complete", () => ({ value: { isAnswered: false, reason: "overloaded" } }));
+  const r = await $.tool.call({ tool: TOOL("noul"), ...BASE["noul"], state: HUGE, timeout: 20, overflow: "truncate" }) as Result;
+  expect(r.result).toBeUndefined();
+  expect(r.deny).toMatch(/^noul: .*500.*; fallback: overloaded$/);
+});
+
 test("after the server's refusal haiku answers through the model", async ($, on) => {
   const { fetched } = setup(on, { replies: [tooBig(40025)] });
   on("model.complete", () => ({ value: { isAnswered: true, text: JSON.stringify({ answers: { answer: { type: "noul", noul: 0.9 } } }), usage: {} } }));
