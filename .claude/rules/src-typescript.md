@@ -22,3 +22,6 @@ graphmind indexes `.ts` symbols (signatures and types) but no `.mts` symbols (ch
   5. `graphmind build` in the worktree lists the plugin's `src/**/*.ts` symbols with their types.
      A failure of 1 to 5 points at the build script, and every later plugin would hit it too: fix the script before converting the next plugin.
 - Tests: `vitest` runs `*.test.ts` as well as `*.test.mts`; the kit `claude-engine-vitest` loads mods by `new URL("./mods/<name>.ts", ...)`.
+- The typed sources show errors the `.mjs` imports hid: expect new lint findings in tests (missing fields in fixtures, a `lib` method newer than ES2022) and fix them in the fixture, not with a cast.
+- A `build` script path in `<name>/package.json` that changes (the `.mts` to `.ts` rename of `development/scripts/`) is a change under `<name>/` for every plugin: each one needs a version bump and a rebuilt `plugin/` (only `plugin.json` changes) before the PR can merge.
+- A conversion that bundles the hooks (`pluginBuild.bundleHooksLib`) also moves the tests to the standard of `.claude/rules/hook-tests.md`: they import only `register.mjs` through the kit.
