@@ -746,10 +746,17 @@ export const register = (on, options) => {
 		const questions = {};
 		let candidates = [];
 		if (takeSteps && !ctx.command && turn.taken < MAX_TAKES_PER_TURN && (!takeOnlyForBypass || bypass && e.index === 0 && !e.agentId)) {
-			candidates = (await buildCandidates($, ctx.request, ctx.steps, calls, e.index, turn.cache)).filter((c) => !(last && sameCall(last, {
-				tool: c.tool,
-				input: c.input
-			})));
+			const build = buildCandidates($, ctx.request, ctx.steps, calls, e.index, turn.cache);
+			build.catch(() => undefined);
+			const timer = deadline($, TIMEOUT_MS);
+			try {
+				candidates = (await Promise.race([build, timer.elapsed]) ?? []).filter((c) => !(last && sameCall(last, {
+					tool: c.tool,
+					input: c.input
+				})));
+			} finally {
+				timer.cancel();
+			}
 			if (candidates.length) questions.next_action = nextActionQuestion(candidates);
 		}
 		let estimate;

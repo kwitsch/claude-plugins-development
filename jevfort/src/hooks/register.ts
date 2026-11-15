@@ -1184,7 +1184,15 @@ export const register = (on: On, options: Options): void => {
     let candidates: Candidate[] = [];
     // Not on a slash-command turn: its skill text is not in the transcript, so Jev (and the Haiku summary) would answer the bare command and the skill never runs.
     if (takeSteps && !ctx.command && turn.taken < MAX_TAKES_PER_TURN && (!takeOnlyForBypass || (bypass && e.index === 0 && !e.agentId))) {
-      candidates = (await buildCandidates($, ctx.request, ctx.steps, calls, e.index, turn.cache)).filter((c) => !(last && sameCall(last, { tool: c.tool, input: c.input })));
+      // A hung engine read (a stalled file system) must not hold the step: past TIMEOUT_MS it goes on without candidates.
+      const build = buildCandidates($, ctx.request, ctx.steps, calls, e.index, turn.cache);
+      build.catch(() => undefined);
+      const timer = deadline($, TIMEOUT_MS);
+      try {
+        candidates = ((await Promise.race([build, timer.elapsed])) ?? []).filter((c) => !(last && sameCall(last, { tool: c.tool, input: c.input })));
+      } finally {
+        timer.cancel();
+      }
       if (candidates.length) questions.next_action = nextActionQuestion(candidates);
     }
     // Step 0: the effort estimate, or a Haiku/Fable turn's held first-turn estimate.

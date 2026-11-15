@@ -16,7 +16,6 @@ export const DEFAULTS = {
   maxEffort: "xhigh",
 };
 
-
 /** The kit's mock helpers, as createKit returns them. */
 export type MockKit = ReturnType<typeof createKit>["mock"];
 
@@ -74,7 +73,7 @@ export type Chunk = { kind: string; [k: string]: unknown };
 /** The test's `$` (the kit does not export its type): `$.<ns>.<event>` fires an event. */
 export type Runner = Parameters<Parameters<ReturnType<typeof makeKit>["test"]>[2]>[0];
 /** The options of `setup`: the messages, Jev's answers and what the environment holds. */
-export type SetupOpts = { messages: Msg[]; jev: Jev; cwd?: () => string; files?: string[]; links?: string[]; packageJson?: object | string; makefile?: string; env?: Record<string, string>; store?: Record<string, unknown>; existsDenied?: boolean; locks?: string[]; sizes?: Record<string, number>; tools?: { name: string; description: string; mcp: boolean }[] | null };
+export type SetupOpts = { messages: Msg[]; jev: Jev; cwd?: () => string; files?: string[]; links?: string[]; packageJson?: object | string; makefile?: string; env?: Record<string, string>; store?: Record<string, unknown>; existsDenied?: boolean; statHangs?: boolean; locks?: string[]; sizes?: Record<string, number>; tools?: { name: string; description: string; mcp: boolean }[] | null };
 
 // Answers every call the mod makes on `$`. The batch tool is listed and answered from `jev`; a mod's `$.tool.call`
 // resolves to the stub's `value`: the tool result `{ result }`, or `{ deny }` as the real engine resolves a deny (a bare
@@ -97,6 +96,7 @@ export function setupWith(mock: MockKit, on: On, opts: SetupOpts) {
   on("fs.exists", (_$, e) => (opts.existsDenied ? { deny: "EACCES" } : { value: (Boolean(opts.packageJson) && e.path === `${CWD}/package.json`) || (opts.locks ?? []).some((f) => e.path === `${CWD}/${f}`) }));
   on("fs.stat", (_$, e) => {
     statted.push(String(e.path));
+    if (opts.statHangs) return new Promise<never>(() => {});
     const isLink = (opts.links ?? []).includes(String(e.path));
     return isLink || (opts.files ?? []).includes(String(e.path)) ? { value: { kind: "file", size: opts.sizes?.[String(e.path)] ?? 100, mtimeMs: 0, isLink } } : { deny: "ENOENT" };
   });

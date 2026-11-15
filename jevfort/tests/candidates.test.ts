@@ -446,3 +446,17 @@ kitTest("a tool search for another tool does not hide the related one", async ($
   const { keys } = await ask($, on, [user("send a slack message"), other], { tools });
   expect(keys.filter((k) => k.startsWith("load "))).toEqual(["load slack-tools"]);
 });
+
+kitTest("a never-settling fs.stat does not hold the step: it goes to Claude after 4000 ms", async ($, on) => {
+  const seen: unknown[] = [];
+  const { clock, statted } = setup(on, { messages: user1("look at src/app.ts"), jev: () => undefined, statHangs: true });
+  claudeBeneath(on, seen);
+  const run = drain($.turn.step(step));
+  // The module loads by dynamic import: flush until the hung stat is out, so the budget timer is running.
+  while (statted.length < 1) await clock.advance(0);
+  await clock.advance(3999);
+  expect(seen).toHaveLength(0);
+  await clock.advance(1);
+  await run;
+  expect(seen).toHaveLength(1);
+});
