@@ -234,6 +234,24 @@ test("a symlinked directory below plugin/ fails the layout check and its target 
   }
 });
 
+test("a symlinked plugin.json fails the layout check and its target survives the build", () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "symlink-"));
+  try {
+    mkdirSync(path.join(dir, "p/src"), { recursive: true });
+    mkdirSync(path.join(dir, "p/plugin/.claude-plugin"), { recursive: true });
+    mkdirSync(path.join(dir, "outside"));
+    writeFileSync(path.join(dir, "outside/victim.txt"), "PRECIOUS");
+    writeFileSync(path.join(dir, "p/src/x.mts"), "export const a = 1;\n");
+    writeFileSync(path.join(dir, "p/package.json"), JSON.stringify({ name: "fixture", version: "0.0.1", description: "d", author: { name: "x" }, keywords: [], type: "module", claudePlugin: {} }));
+    symlinkSync("../../../outside/victim.txt", path.join(dir, "p/plugin/.claude-plugin/plugin.json"));
+    const r = spawnSync(process.execPath, [BUILD, path.join(dir, "p")], { encoding: "utf8" });
+    assert.equal(r.status, 1);
+    assert.equal(readFileSync(path.join(dir, "outside/victim.txt"), "utf8"), "PRECIOUS");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("a helper's top-level name that shadows a global used by another helper fails the build", () => {
   const r = build({
     "a.mts": `const URL = "not the global";\nexport const a = (): string => URL;\n`,

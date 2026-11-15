@@ -3,7 +3,7 @@
 // Fails when <plugin>/plugin/ holds a file the shipped plugin may not contain (.claude/rules/plugin-build-output.md).
 // An allowlist: sources, tests, CLAUDE.md or tooling files belong outside plugin/. Called by every plugin's
 // build (step 0) and by check-plugin-fresh.sh in CI.
-import { existsSync, readdirSync, statSync } from "node:fs";
+import { existsSync, lstatSync, readdirSync } from "node:fs";
 import path from "node:path";
 
 // no tests/ dir, *.test.* or CLAUDE.md anywhere; then the allowlist itself
@@ -17,10 +17,10 @@ const root = path.join(process.argv[2] ?? ".", "plugin");
  * @returns The file and symlink paths.
  */
 const list = (dir: string): string[] => readdirSync(dir, { withFileTypes: true }).flatMap((d) => d.isDirectory() ? list(path.join(dir, d.name)) : [path.join(dir, d.name)]);
-// a symlink to a directory is stray whatever its name: the build must not touch what it points at
+// a symlink is stray whatever its name: the build must not touch what it points at
 const stray = (existsSync(root) ? list(root) : [])
   .map((f) => path.relative(root, f).split(path.sep).join("/"))
-  .filter((f) => !ALLOWED.test(f) || statSync(path.join(root, f), { throwIfNoEntry: false })?.isDirectory());
+  .filter((f) => !ALLOWED.test(f) || lstatSync(path.join(root, f)).isSymbolicLink());
 if (stray.length) {
   console.error(`${root} holds files the shipped plugin may not contain (sources and tests belong in src/ and tests/):`);
   for (const f of stray) console.error(`  ${f}`);
