@@ -8,6 +8,7 @@ export function register(on, options) {
 		names,
 		missing: new Set(TOOLS),
 		pending: new Map(),
+		gen: 0,
 		retryAt: new Map(),
 		failures: new Map(),
 		stuck: new Set()
@@ -22,13 +23,10 @@ export function register(on, options) {
 	const link = newLink();
 	on("session.start", async function onSessionStart($, e, next) {
 		try {
+			st.gen++;
 			st.retryAt.clear();
 			st.failures.clear();
 			st.stuck.clear();
-			const inFlight = [...st.pending.keys()];
-			if (st.missing.size > 0) await ensureTools($, st, 5 * REGISTER_WAIT_MS);
-			st.retryAt.clear();
-			for (const type of inFlight) st.failures.delete(type);
 			if (st.missing.size > 0) await ensureTools($, st, 5 * REGISTER_WAIT_MS);
 		} catch {}
 		try {

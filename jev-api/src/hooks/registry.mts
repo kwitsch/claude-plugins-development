@@ -25,7 +25,9 @@ export type RegState = {
   /** The tools not registered yet. */
   missing: Set<ToolName>;
   /** The tools whose registration is under way. */
-  pending: Map<ToolName, Promise<void>>;
+  pending: Map<ToolName, { p: Promise<void>; gen: number }>;
+  /** Bumped by session.start: an attempt begun under an older generation (before the bind) is stale, its failure is not recorded. */
+  gen: number;
   /** When a failed tool may be tried again (ms since epoch). */
   retryAt: Map<ToolName, number>;
   /** Failed attempts per tool. */
@@ -42,6 +44,7 @@ export type RegState = {
  * @param type - The tool to register.
  */
 export async function registerOne($: Engine, st: RegState, type: ToolName): Promise<void> {
+  const g = st.gen;
   try {
     const r = await $.tool.register({ name: type, ...SPECS[type] });
     // Only a mcp__<plugin>__<type> name: a hook above answering anything else must not make this hook claim another tool.
@@ -49,6 +52,7 @@ export async function registerOne($: Engine, st: RegState, type: ToolName): Prom
     if (typeof tool === "string" && tool.startsWith("mcp__") && tool.endsWith(`__${type}`)) st.names.set(tool, type);
     st.missing.delete(type);
   } catch (err) {
+    if (g !== st.gen) return; // stale pre-bind attempt: session.start already started a fresh one
     const n = (st.failures.get(type) ?? 0) + 1;
     st.failures.set(type, n);
     // The first retry is immediate (the next hook), then RETRY_BASE_MS, twice that, ... up to MAX_RETRY_MS: a tool the engine keeps refusing must not cost every call.
@@ -77,20 +81,22 @@ export async function registerOne($: Engine, st: RegState, type: ToolName): Prom
 export async function ensureTools($: Engine, st: RegState, ms: number): Promise<void> {
   const now = Date.now();
   for (const type of TOOLS) {
-    if (!st.missing.has(type) || st.pending.has(type) || (st.retryAt.get(type) ?? 0) > now) continue;
+    if (!st.missing.has(type) || st.pending.get(type)?.gen === st.gen || (st.retryAt.get(type) ?? 0) > now) continue;
     const p = registerOne($, st, type);
-    st.pending.set(type, p);
+    const entry = { p, gen: st.gen };
+    st.pending.set(type, entry);
     void p.then(() => {
+      if (st.pending.get(type) !== entry) return; // replaced by a fresh attempt
       st.pending.delete(type);
       st.stuck.delete(type); // a tool that hung once is waited for again when it is retried
     });
   }
-  const waiting = [...st.pending].filter(([type]) => !st.stuck.has(type));
+  const waiting = [...st.pending].filter(([type, { gen }]) => gen === st.gen && !st.stuck.has(type));
   if (waiting.length === 0) return;
   let timer: { cancel(): void } | undefined;
   try {
     const late = await Promise.race([
-      Promise.all(waiting.map(([, p]) => p)).then(() => false),
+      Promise.all(waiting.map(([, { p }]) => p)).then(() => false),
       new Promise<boolean>((resolve) => {
         timer = $.clock.after(ms, () => resolve(true));
       }),

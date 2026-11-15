@@ -1482,3 +1482,39 @@ describe.skipIf(!process.env.JEV_URL)("live JEV System One (JEV_URL)", () => {
     expect((JSON.parse(String(res.result)) as { type: string }[]).map((a) => a.type)).toEqual(["noul", "choice", "score"]);
   });
 });
+
+// A pre-bind attempt that outlasts session.start's waits and fails later is stale: session.start registers after the bind, and the real failure is logged.
+it("session.start registers after the bind although a pre-bind attempt fails after its waits", async () => {
+  let bound = false;
+  let release: () => void = () => undefined;
+  const stale = new Promise<void>((r) => (release = r));
+  const tries: string[] = [];
+  const logs: string[] = [];
+  const { run, hooks, $ } = await direct({
+    tool: {
+      register: async (spec: { name: string }) => {
+        if (!bound) {
+          await stale;
+          throw new Error("session not bound");
+        }
+        tries.push(spec.name);
+        if (spec.name === "batch") throw new Error("real failure");
+        return { tool: TOOL(spec.name) };
+      },
+    },
+    ui: { log: async (text: string) => void logs.push(text) },
+    clock: {
+      after: (_ms: number, fn: () => void) => {
+        const t = setTimeout(fn, 0);
+        return { cancel: () => clearTimeout(t) };
+      },
+    },
+  });
+  await run("noul");
+  bound = true;
+  await hooks.get("session.start")?.($, { cwd: "/p" }, Object.assign(async (e: unknown) => e, { signal: new AbortController().signal }));
+  expect(tries).toEqual(["noul", "choice", "score", "batch"]);
+  release();
+  await new Promise((r) => setTimeout(r, 20));
+  expect(logs).toEqual(["registering batch failed: real failure"]);
+});

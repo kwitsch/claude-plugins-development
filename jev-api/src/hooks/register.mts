@@ -48,24 +48,20 @@ export function register(on: On, options?: Options): void {
   // `$` reaches a module only inside its hooks, so the tools register in the first hook that runs (session.start, or an earlier tool call).
   // The engine accepts `$` only as an argument to a top-level function, hence `ensureTools` and the state object.
   // A tool whose registration failed stays in `missing`: the next hook tries it again (after a growing delay), no timers.
-  const st: RegState = { names, missing: new Set<ToolName>(TOOLS), pending: new Map(), retryAt: new Map(), failures: new Map(), stuck: new Set() };
+  const st: RegState = { names, missing: new Set<ToolName>(TOOLS), pending: new Map(), gen: 0, retryAt: new Map(), failures: new Map(), stuck: new Set() };
   // What this instance learned about System One's size limits; the density comes back from the store in the first call that needs it.
   const know: Knowledge = { density: DEFAULT_DENSITY, persisted: DEFAULT_DENSITY, samples: 0, nctx: DEFAULT_CONTEXT_TOKENS, loaded: undefined };
   // The HTTP transport: the plugin's MCP server while it is available, `$.http.fetch` while it is not (see transport.mts).
   const link = newLink();
   on("session.start", async function onSessionStart($, e, next) {
     try {
-      // Binding the session is what earlier refusals were about: drop their back-off so this retry really runs.
-      // A stuck mark ("waited for once") is stale after the bind too: session.start waits for pre-bind attempts itself.
-      // Their failure count goes too: the once-per-tool log must stay for the first real failure after the bind.
+      // Binding the session is what earlier refusals were about: a new generation makes every attempt begun before it stale
+      // (it settles without a failure count, back-off or log, and ensureTools starts a fresh one), and the back-off, failure
+      // count (the once-per-tool log stays for the first real failure after the bind) and stuck marks go.
+      st.gen++;
       st.retryAt.clear();
       st.failures.clear();
       st.stuck.clear();
-      const inFlight = [...st.pending.keys()];
-      if (st.missing.size > 0) await ensureTools($, st, 5 * REGISTER_WAIT_MS);
-      // an attempt begun before the bind may have failed during that wait: retry it now
-      st.retryAt.clear();
-      for (const type of inFlight) st.failures.delete(type);
       if (st.missing.size > 0) await ensureTools($, st, 5 * REGISTER_WAIT_MS);
     } catch {
       // best effort (a hook above refusing $.clock): the session.start chain goes on
