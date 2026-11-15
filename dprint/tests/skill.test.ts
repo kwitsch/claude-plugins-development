@@ -71,7 +71,7 @@ test("README documents the config gate, the 15 s toast module and all six config
   const { CONFIG_NAMES } = await import(
     "../plugin/skills/dprint/config-names.mjs"
   );
-  assert.match(readme, /hooks\/notice\.mjs/);
+  assert.match(readme, /hooks\/register\.mjs/);
   assert.match(readme, /15 s toast/);
   assert.match(readme, /only when the working directory or an ancestor has a dprint config/);
   for (const n of CONFIG_NAMES) assert.ok(readme.includes(`\`${n}\``), n);

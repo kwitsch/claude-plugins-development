@@ -2,21 +2,25 @@
 paths:
   - "src/hooks/**"
   - "plugin/hooks/**"
-  - "tests/notice.test.mts"
+  - "tests/notice.test.ts"
 ---
 
 # notice (function-hooks toast)
 
-`plugin/hooks/hooks.json` lists `"modules": ["./notice.mjs"]` (Claude Code function hooks, early-access API): a toast
+`plugin/hooks/hooks.json` lists `"modules": ["./register.mjs"]` (Claude Code function hooks, early-access API): a toast
 when the working directory has a dprint config but dprint cannot run.
 
 ## Constraints
 
-- `notice.mts` imports nothing. It inlines copies of `CONFIG_NAMES` (`config-names.mts`), `MIN_VERSION` and
-  check-dprint's `dprint X.Y.Z` regex (`check-dprint.mts`); `tests/notice.test.mts` fails when a copy drifts, so
-  change both places.
-- Build: `hooks/*.mjs` stay unminified (root `plugin-src.md`, `hooks-lib-bundle.md`): the static module check also
-  rejects shadowed names, and whitespace removal would turn string literals into template literals.
+- Layout: `src/hooks/register.ts` (entry: the four `on(...)` calls with inline named hook functions, the state object
+  `NoticeState`), `probe.ts` (constants, probe, toast, cwd logic; every function takes `$` and the state), `types.ts`.
+  Build: `bundleHooksLib` ships `register.mjs` plus one compressed `lib.mjs` (root `hooks-lib-bundle.md`). State
+  belongs in `register()`, never at module level.
+- The hooks module imports nothing from the skill scripts. `probe.ts` inlines copies of `CONFIG_NAMES`
+  (`config-names.ts`), `MIN_VERSION` and check-dprint's `dprint X.Y.Z` regex (`check-dprint.ts`);
+  `tests/notice.test.ts` fails when a copy drifts, so change both places.
+- The engine's static check wants hooks as named function literals declared in the entry (a top-level helper cannot
+  hold the state), so the entry's hooks are thin and call `afterSessionCwd`/`afterCwdChanged` in `probe.ts`.
 - `claude plugin validate plugin` checks the module and lists `process.run`, `env.get` and the env vars
   `DPRINT_INSTALL`, `HOME` and `PATH` among its uses (its "gating hook without .catch" warning: root
   `claude-code-tool-hook-facts.md`).
@@ -58,6 +62,6 @@ with `$.process.run`:
 
 ## Tests
 
-`tests/notice.test.mts` drives the built module through `createKit` from `claude-engine-vitest` (stubs for
+`tests/notice.test.ts` drives the built module through `createKit` from `claude-engine-vitest` (stubs for
 `fs.exists`, `session.cwd`, `env.get`, `process.run`, `ui.toast`; `mock.clock(on).settle()` waits for the detached
 check).

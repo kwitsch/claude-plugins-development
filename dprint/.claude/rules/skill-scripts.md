@@ -2,7 +2,7 @@
 paths:
   - "src/skills/dprint/**"
   - "plugin/skills/dprint/**"
-  - "tests/{check-dprint,scan-plugins,run-dprint,skill}.test.mts"
+  - "tests/{check-dprint,scan-plugins,run-dprint,skill}.test.ts"
   - "README.md"
 ---
 
@@ -11,25 +11,25 @@ paths:
 Built to `plugin/skills/dprint/`, next to the hand-written `SKILL.md`, the `*.reference.md` contracts and
 `dprint-plugins.json`:
 
-- `check-dprint.mts`: dprint detection and minimum-version check (contract: `check-dprint.reference.md`).
-- `scan-plugins.mts`: read-only scan of the project's file types against its dprint config, reads
+- `check-dprint.ts`: dprint detection and minimum-version check (contract: `check-dprint.reference.md`).
+- `scan-plugins.ts`: read-only scan of the project's file types against its dprint config, reads
   `dprint-plugins.json` (contract: `scan-plugins.reference.md`).
-- `run-dprint.mts`: check/fmt dispatcher with the not-set-up gate (contract: `run-dprint.reference.md`).
-- Shared modules (also imported by `src/mcp/`): `config-names.mts` (the six dprint config file names in
-  `CONFIG_NAMES`), `find-config.mts`, `find-dprint.mts`.
+- `run-dprint.ts`: check/fmt dispatcher with the not-set-up gate (contract: `run-dprint.reference.md`).
+- Shared modules (also imported by `src/mcp/`): `config-names.ts` (the six dprint config file names in
+  `CONFIG_NAMES`), `find-config.ts`, `find-dprint.ts`.
 
 ## Resolution (single source; the MCP and notice rules refer here)
 
-- `findDprint` (`find-dprint.mts`, async): `PATH`, then `$DPRINT_INSTALL/bin` (default `~/.dprint/bin`, the installer's target), then `npx --yes dprint` (async probe, a
+- `findDprint` (`find-dprint.ts`, async): `PATH`, then `$DPRINT_INSTALL/bin` (default `~/.dprint/bin`, the installer's target), then `npx --yes dprint` (async probe, a
   failure re-probed after 30 s). `dprintArgv` builds the spawn arguments from the returned argv prefix.
-- `findConfig` (`find-config.mts`): first of `CONFIG_NAMES` in a directory or its ancestors, never above the
+- `findConfig` (`find-config.ts`): first of `CONFIG_NAMES` in a directory or its ancestors, never above the
   git/worktree root (nearest dir holding `.git`). Used by `run-dprint`, `scan-plugins` and `mcp/format`.
 
 ## Changing `MIN_VERSION`
 
-Defined only in `check-dprint.mts`. Edit it there, update the "Minimum dprint version" line in `README.md`, rebuild,
-and change the inlined copy in `src/hooks/notice.mts` too (`tests/notice.test.mts` fails while the two differ). Tests
-read the value from the `.mts` source (the built script is minified).
+Defined only in `check-dprint.ts`. Edit it there, update the "Minimum dprint version" line in `README.md`, rebuild,
+and change the inlined copy in `src/hooks/probe.ts` too (`tests/notice.test.ts` fails while the two differ). Tests
+read the value from the `.ts` source (the built script is minified).
 
 ## Refreshing `dprint-plugins.json`
 
