@@ -1,12 +1,12 @@
 ---
 name: bughunt
-description: Run a structured bug hunt on a plugin in this repository as a Workflow - per hunt lens rounds of parallel read-only hunters (sonnet), every finding confirmed by an independent verifier (opus) before a fixer (model chosen by the verifier) fixes it with a test that fails without the fix, per-lens round caps and no-finding counters, then simplify, code-review and a learnings pass. Use when the user asks for a bug hunt, a deep review, "find all bugs", an automated, repeated or looped hunt, or a final verification of a plugin before merge.
+description: Run a structured bug hunt on a plugin in this repository as a Workflow - rounds with one rotating hunt lens each and parallel read-only hunters per area, every finding confirmed by an independent verifier (opus) before a fixer (model chosen by the verifier) fixes it with a test that fails without the fix, round cap and no-finding counter, then simplify, code-review and a learnings pass. Use when the user asks for a bug hunt, a deep review, "find all bugs", an automated, repeated or looped hunt, or a final verification of a plugin before merge.
 argument-hint: "<plugin-name> [maxRounds=10] [noFinding=3]"
 ---
 
 # bughunt
 
-Worked out on the dprint plugin (16 rounds, about 40 confirmed defects). The method matters more than the number of rounds. The first argument is the plugin directory name (stop with one line if `<plugin>/package.json` does not exist); optional `maxRounds` (default 10) and `noFinding` (default 3), both counted **per hunt lens**.
+Worked out on the dprint plugin (16 rounds, about 40 confirmed defects). The method matters more than the number of rounds. The first argument is the plugin directory name (stop with one line if `<plugin>/package.json` does not exist); optional `maxRounds` (default 10) and `noFinding` (default 3), both counted over the rounds of the whole hunt.
 
 The user's request for this skill is the opt-in for the Workflow tool (load `workflow-authoring` first if it is not loaded).
 
@@ -16,7 +16,7 @@ The user's request for this skill is the opt-in for the Workflow tool (load `wor
 
 - A hunter's finding is only a claim. It goes to Fix only after a verifier reproduced it independently and confirmed it; a refuted finding is dropped and stays in the "already found" list so no hunter reports it again.
 - Verify also rates the fix: `sonnet` for a local, well-understood change; `opus` for a cross-cutting, subtle or risky one (concurrency, caches, protocol), with effort `low|medium|high`.
-- **Counters per lens.** Each hunt lens runs its own rounds. A lens round counts as _no finding_ when none of its findings was confirmed by a verifier (empty report, all refuted, or a failed hunter or verifier); a confirmed finding resets that lens's no-finding counter. A lens retires after `noFinding` no-finding rounds in a row or after `maxRounds` rounds of its own. The hunt ends when every lens is retired, or on a blocked fix.
+- **One lens per round.** The lenses rotate round by round; the hunters of a round are one per area, all on that round's lens, so a round costs as many hunt jobs as there are areas. A round counts as _no finding_ when no finding was confirmed by a verifier (empty report, all refuted, or a failed hunter or verifier); a confirmed finding resets the counter. The hunt ends after `noFinding` no-finding rounds in a row, after `maxRounds` rounds, or on a blocked fix.
 
 ## jev-api first
 
@@ -36,10 +36,10 @@ Scout also sets the hunter model and effort **per hunt lens** (the lenses are li
 
 `Workflow` with the script below, `args = { plugin, worktree, date, areas, lenses, maxRounds, noFinding, fix }`.
 
-- **Hunt**: per active lens one read-only hunter per area in parallel (model and effort of the lens from Scout, default `sonnet`/`medium`), each with the lens, the keys and titles already found, and the rule "report only defects you reproduced, with the repro and its output". Brief hunters to use real tools (real dprint/git/node, the built `plugin/` output, the test stub) instead of reading alone, and "high bar: no style, speculation or documented limitations".
+- **Hunt**: one read-only hunter per area in parallel, all on the round's lens (model and effort of that lens from Scout, default `sonnet`/`medium`), each with the lens, the keys and titles already found, and the rule "report only defects you reproduced, with the repro and its output". Brief hunters to use real tools (real dprint/git/node, the built `plugin/` output, the test stub) instead of reading alone, and "high bar: no style, speculation or documented limitations".
 - **Verify**: one verifier per new finding, in parallel, model and effort from the finding's `verifyModel`/`verifyEffort` set by the hunter (default `opus`/`medium`); it re-runs the repro itself, reads the code, refutes documented limits and style, and rates the fix.
 - **Fix** (sequential, one agent per confirmed finding, model and effort from the verifier): fix the root cause once in the shared code, add a test that fails without the fix (revert the line to check; a regression test that passes on the old code proves nothing), build, `pnpm lint`, plugin tests, commit and push. The first fix bumps `<plugin>/package.json` once per branch.
-- **Lenses** (the newest fix is the most likely place for the next defect: three rounds in a row found a regression of the previous fix): newest diff and the last fixes; interactions between fixes; TOCTOU, races and symlink swaps; caches keyed too coarsely, stale state, leaks; per-turn or per-session caches and buffers added for speed (every event that must drop or flush them, `.claude/rules/hook-caches-and-tests.md`); slow or unusual file systems, odd names and encodings; fail-open paths and missing error handling at trust boundaries; docs contradicting code and tests that cannot fail.
+- **Lenses**, rotating in this order, one per round (the newest fix is the most likely place for the next defect: three rounds in a row found a regression of the previous fix): newest diff and the last fixes; interactions between fixes; TOCTOU, races and symlink swaps; caches keyed too coarsely, stale state, leaks; per-turn or per-session caches and buffers added for speed (every event that must drop or flush them, `.claude/rules/hook-caches-and-tests.md`); slow or unusual file systems, odd names and encodings; fail-open paths and missing error handling at trust boundaries; docs contradicting code and tests that cannot fail.
 - **Close** (when anything was fixed): one agent runs `/simplify`, `/code-review high --fix`, build, lint, tests, then the learnings pass below; commit and push, clean tree, head equal to its upstream.
 
 No agent narrates between tool calls (no human reads it); the structured results are all that comes back.
@@ -62,11 +62,11 @@ At the end of the hunt, before the final report, check what the hunt taught that
 
 ## Finish
 
-`gh pr view` first; when the branch has no PR (and `fix` is not false), `gh pr create --draft`, title `<plugin>: bug hunt (<n> fixes, <r> rounds)`, body = per-lens table (rounds, found, confirmed, refuted, fixed, stop reason) and what stayed unexercised. No attribution lines. Bump the version once per PR. Report the PR URL, the stop reason per lens and the limits of the hunt.
+`gh pr view` first; when the branch has no PR (and `fix` is not false), `gh pr create --draft`, title `<plugin>: bug hunt (<n> fixes, <r> rounds)`, body = per-round table (lens, found, confirmed, refuted, fixed), the stop reason and what stayed unexercised. No attribution lines. Bump the version once per PR. Report the PR URL, the stop reason and the limits of the hunt.
 
 ## What to claim
 
-Never claim "no bugs". A retired lens only means its rounds found nothing; earlier clean rounds were repeatedly followed by new defects. Report: what was checked, what was fixed, which limits stay unexercised and why (for example a downloaded installer that auto mode will not run, a mount that was not available).
+Never claim "no bugs". A stop after clean rounds only means those rounds found nothing; earlier clean rounds were repeatedly followed by new defects. Report: what was checked, what was fixed, which limits stay unexercised and why (for example a downloaded installer that auto mode will not run, a mount that was not available).
 
 ## Session mechanics learned
 
@@ -80,9 +80,9 @@ Never claim "no bugs". A retired lens only means its rounds found nothing; earli
 ```js
 export const meta = {
   name: 'bughunt',
-  description: 'Bug hunt on one plugin: sonnet hunters per lens and area, opus verifier per finding, fixer chosen by the verifier, per-lens round and no-finding caps',
+  description: 'Bug hunt on one plugin: one rotating lens per round, hunters per area, verifier per finding, fixer chosen by the verifier, round and no-finding caps',
   phases: [
-    { title: 'Hunt', detail: 'read-only sonnet hunters per lens and area, parallel' },
+    { title: 'Hunt', detail: 'read-only hunters per area for the round lens, parallel' },
     { title: 'Verify', detail: 'one opus verifier per finding, parallel' },
     { title: 'Fix', detail: 'one fixer per confirmed finding, sequential' },
     { title: 'Close', detail: 'simplify, code-review, learnings' },
@@ -162,53 +162,41 @@ const closePrompt = () => `Close the bug hunt of plugin "${plugin}" in the git w
 Return status clean|fixed|blocked and one sentence.`
 
 const seen = []
-const lenses = LENSES.map((lens) => ({ model: 'sonnet', effort: 'medium', ...(args.lenses ?? []).find((x) => x.lens === lens), lens, rounds: 0, dry: 0, stop: null, found: 0, confirmed: 0, refuted: 0, fixed: 0 }))
-const confirmedList = []
+const lenses = LENSES.map((lens) => ({ model: 'sonnet', effort: 'medium', ...(args.lenses ?? []).find((x) => x.lens === lens), lens }))
+const rounds = []
 let fixed = 0
 let blocked = false
-let round = 0
+let dry = 0
+let stop = `maxRounds ${maxRounds}`
 
-while (!blocked) {
-  const active = lenses.filter((l) => !l.stop)
-  if (!active.length) break
-  round++
-  // Hunt: every active lens, every area, in parallel.
-  const hunts = await parallel(active.flatMap((l, li) => areas.map((a) => async () => ({ l, report: await run(huntPrompt(a, l.lens, seen), { label: `r${round}:l${li}:${a.name}`, phase: 'Hunt', model: l.model, effort: l.effort, schema: FINDINGS }) }))))
+for (let round = 1; round <= maxRounds && !blocked; round++) {
+  // One lens per round, rotating; the areas hunt in parallel.
+  const l = lenses[(round - 1) % lenses.length]
+  const hunts = await parallel(areas.map((a) => () => run(huntPrompt(a, l.lens, seen), { label: `r${round}:${a.name}`, phase: 'Hunt', model: l.model, effort: l.effort, schema: FINDINGS })))
   const fresh = []
-  for (const h of hunts) {
-    if (!h?.report) continue
-    for (const f of h.report.findings) {
-      if (seen.some((s) => s.key.toLowerCase() === f.key.toLowerCase())) continue
-      seen.push({ key: f.key, title: f.title })
-      fresh.push({ ...f, lens: h.l })
-      h.l.found++
-    }
+  for (const f of hunts.filter(Boolean).flatMap((r) => r.findings)) {
+    if (seen.some((s) => s.key.toLowerCase() === f.key.toLowerCase())) continue
+    seen.push({ key: f.key, title: f.title })
+    fresh.push(f)
   }
-  // Verify: one opus verifier per new finding, in parallel.
+  // Verify: one verifier per new finding, in parallel.
   const verdicts = await parallel(fresh.map((f) => () => run(verifyPrompt(f), { label: `r${round}:v:${f.key}`, phase: 'Verify', model: f.verifyModel ?? 'opus', effort: f.verifyEffort ?? 'medium', schema: VERIFY })))
-  const confirmedNow = []
-  fresh.forEach((f, i) => {
-    const v = verdicts[i]
-    if (v?.verdict === 'confirmed') { f.lens.confirmed++; confirmedNow.push({ ...f, ...v }); confirmedList.push(f.key) }
-    else if (v) f.lens.refuted++
-  })
-  // Per-lens counters: a lens round without a confirmed finding of that lens is a no-finding round.
-  for (const l of active) {
-    l.rounds++
-    const hit = confirmedNow.some((f) => f.lens === l)
-    l.dry = hit ? 0 : l.dry + 1
-    if (l.dry >= noFinding) l.stop = `${noFinding} rounds without a confirmed finding`
-    else if (l.rounds >= maxRounds) l.stop = `maxRounds ${maxRounds}`
-  }
-  log(`round ${round}: ${fresh.length} new, ${confirmedNow.length} confirmed, ${active.filter((l) => !l.stop).length} lenses active`)
+  const confirmedNow = fresh.flatMap((f, i) => (verdicts[i]?.verdict === 'confirmed' ? [{ ...f, ...verdicts[i] }] : []))
   // Fix: sequential, model and effort chosen by the verifier.
+  let roundFixed = 0
   if (doFix) {
     for (const f of confirmedNow) {
       const r = await run(fixPrompt(f, fixed === 0), { label: `r${round}:${f.key}`, phase: 'Fix', model: f.fixModel ?? 'sonnet', effort: f.fixEffort ?? 'medium', schema: FIX })
       if (!r || r.verdict === 'blocked') { blocked = true; log(`${f.key}: blocked`); break }
-      if (r.verdict === 'fixed') { f.lens.fixed++; fixed++ }
+      if (r.verdict === 'fixed') { roundFixed++; fixed++ }
     }
   }
+  rounds.push({ round, lens: l.lens, found: fresh.length, confirmed: confirmedNow.length, refuted: fresh.length - confirmedNow.length, fixed: roundFixed })
+  log(`round ${round}: ${fresh.length} new, ${confirmedNow.length} confirmed, ${roundFixed} fixed`)
+  if (blocked) { stop = 'blocked fix'; break }
+  // No verifier-confirmed finding (empty report, all refuted, failed agent) is a no-finding round.
+  dry = confirmedNow.length ? 0 : dry + 1
+  if (dry >= noFinding) { stop = `${noFinding} rounds without a confirmed finding`; break }
 }
 
 let close = null
@@ -216,5 +204,5 @@ if (fixed > 0 && !blocked) {
   args.summary = seen.map((s) => s.title).join('; ')
   close = await run(closePrompt(), { label: 'close', phase: 'Close', model: 'sonnet', effort: 'medium', schema: CLOSE })
 }
-return { stop: blocked ? 'blocked fix' : 'all lenses retired', rounds: round, fixed, lenses: lenses.map(({ lens, rounds, found, confirmed, refuted, fixed, stop }) => ({ lens, rounds, found, confirmed, refuted, fixed, stop })), close, confirmed: confirmedList, seen }
+return { stop, rounds, fixed, close, seen }
 ```
