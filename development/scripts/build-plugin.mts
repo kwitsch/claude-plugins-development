@@ -105,6 +105,7 @@ function bundleLib(compiled: Map<string, string>): { members: string[]; entries:
   const memberSet = new Set(members);
   /** The helper file a specifier of module `f` names (a `?query` or `#fragment` ignored, as Node does), or undefined when it names no helper. */
   const helperOf = (f: string, spec: string): string | undefined => {
+    if (!/^\.{0,2}\//.test(spec) && spec !== "." && spec !== "..") return undefined; // a bare specifier ("util") is a builtin or package, never a file
     const target = path.resolve(path.dirname(f), spec.replace(/[?#].*$/, "").replace(/\.mjs$/, "") + ".mjs");
     return memberSet.has(target) ? target : undefined;
   };

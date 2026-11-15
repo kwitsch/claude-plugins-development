@@ -260,3 +260,8 @@ test("an entry in a subfolder keeps its own sibling import", () => {
   assert.match(r.sub, /from\s*"\.\/util\.mjs"/);
   assert.match(r.entry, /from\s*"\.\/lib\.mjs"/);
 });
+
+test("a bare builtin import named like a helper is not a helper import", () => {
+  const r = build({ "util.mts": A, "fmt.mts": `import { inspect } from "util";\nimport { one } from "./util.mjs";\nexport const two = (): string => inspect(one);\n`, "register.mts": `import { two } from "./fmt.mjs";\nexport function register(on: unknown): string { return two(); }\n` });
+  assert.equal(r.status, 0, r.stderr);
+});
