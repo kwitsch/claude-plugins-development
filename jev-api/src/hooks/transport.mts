@@ -398,6 +398,7 @@ export async function sendOutcome($: Engine, link: Link, env: HttpEnv, state: st
   if (signal.aborted) return ABANDONED;
   // the fallback gets only the time the connect, config and request steps left, not the whole timeout again
   const left = timeoutMs - ((await now($)) - started);
+  if (signal.aborted) return ABANDONED;
   if (left < 1) return { kind: "error", code: "timeout", message: `timeout after ${timeoutMs}ms` };
   return sendRequest(env, state, questionsObject, fetchViaEngine($, Math.round(left), signal));
 }

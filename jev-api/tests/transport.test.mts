@@ -396,6 +396,17 @@ describe("fallback to $.http.fetch", () => {
     expect(outage(t)).toHaveLength(0);
   });
 
+  it("a call abandoned while the fallback reads the time left sends nothing", async () => {
+    const t = await rig({ noMcp: true });
+    const ac = new AbortController();
+    const clock = (t.$ as { clock: { now: () => Promise<number> } }).clock;
+    const real = clock.now;
+    let reads = 0;
+    clock.now = async () => (++reads === 4 && ac.abort(), real());
+    expect(await t.run("noul", {}, ac.signal)).toEqual({ deny: "noul: the call was abandoned" });
+    expect(t.fetched).toHaveLength(0);
+  });
+
   it("a call with no System One access (Haiku) never touches the server", async () => {
     const t = await rig({ env: {} });
     (t.$ as Record<string, unknown>)["model"] = { complete: async () => ({ isAnswered: true, text: JSON.stringify({ answers: { answer: NOUL_ANSWER } }), usage: {} }) };
