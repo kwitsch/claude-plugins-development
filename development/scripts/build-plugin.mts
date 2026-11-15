@@ -191,7 +191,7 @@ function bundleLib(compiled: Map<string, string>): { members: string[]; entries:
     const plain = new Set(parsed.imports.map((i) => i.moduleRequest.value).filter((v) => byName.has(siblingName(v) ?? "")));
     for (const src of [...parsed.imports.map((i) => i.moduleRequest.value), ...parsed.reexports]) {
       const isPlainImport = plain.has(src) && !parsed.reexports.includes(src);
-      if (memberSet.has(path.resolve(path.dirname(f), src.replace(/\.mjs$/, "") + ".mjs")) && !isPlainImport) {
+      if (memberSet.has(path.resolve(path.dirname(f), src.replace(/[?#].*$/, "").replace(/\.mjs$/, "") + ".mjs")) && !isPlainImport) {
         fail(`${path.relative(ROOT, f)} imports/re-exports ${src}, a helper, other than by a named import from ./name.mjs`);
       }
     }
