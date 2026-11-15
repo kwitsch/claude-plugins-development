@@ -529,9 +529,12 @@ describe("the configuration of the server", () => {
     await t.run();
     expect(t.configs().map((c) => c.args)).toEqual([{ key: "k", gen: 1 }, { key: "k2", gen: 2 }]);
   });
-  it("is sent again after a failed request, read fresh, before the next one", async () => {
+  it.each([
+    ["http", { kind: "http", status: 503 }],
+    ["error", { kind: "error", code: "network", message: "fetch failed" }],
+  ])("is sent again after a failed request (%s), read fresh, before the next one", async (_name, failed) => {
     let n = 0;
-    const t = await rig({ onCall: () => (++n === 1 ? outcome({ kind: "http", status: 503 }) : okOutcome) });
+    const t = await rig({ onCall: () => (++n === 1 ? outcome(failed) : okOutcome) });
     await t.run();
     expect(t.configs()).toHaveLength(1);
     await t.run();
@@ -539,6 +542,13 @@ describe("the configuration of the server", () => {
     await t.run();
     expect(t.configs()).toHaveLength(2);
     expect(t.mcpCalls.map((c) => c.tool)).toEqual(["config", "request", "config", "request", "request"]);
+  });
+  it("is not resent after an aborted request", async () => {
+    let n = 0;
+    const t = await rig({ onCall: () => (++n === 1 ? outcome({ kind: "error", code: "aborted", message: "the call was abandoned" }) : okOutcome) });
+    await t.run();
+    await t.run();
+    expect(t.configs()).toHaveLength(1);
   });
   it("is not resent after an abandoned request", async () => {
     let first = true;
