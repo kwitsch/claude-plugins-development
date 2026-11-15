@@ -3,7 +3,7 @@ id: F17
 title: Persist rtk rewrite probe results across hook processes
 status: done
 priority: low
-area: universal-lint/src/hooks/lint-file.mts (getRtkPrefix, rtkPrefixCache, parseRtkPrefix, runLintTool, RTK_PROBE_TIMEOUT_MS), universal-lint/.claude/rules/hook-design.md
+area: universal-lint/src/hooks/lint-file.ts (getRtkPrefix, rtkPrefixCache, parseRtkPrefix, runLintTool, RTK_PROBE_TIMEOUT_MS), universal-lint/.claude/rules/hook-design.md
 ---
 
 ## Status

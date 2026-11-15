@@ -3,7 +3,7 @@ id: F27
 title: Test the performance-relevant hook paths
 status: done
 priority: low
-area: universal-lint/tests/*.test.mts, universal-lint/tests/support/lint-hook.mts
+area: universal-lint/tests/*.test.ts, universal-lint/tests/support/lint-hook.ts
 ---
 
 ## Status
@@ -12,23 +12,23 @@ Done in 0.15.24. Audit of the eight proposed tests plus the perf paths added sin
 
 ### Audit
 
-| #   | Item                                        | Verdict                                                             | Where                                                                                                                                                                                             |
-| --- | ------------------------------------------- | ------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 1   | rtk banner (F02)                            | Obsolete                                                            | rtk removed in 0.15.0, tests/rtk.test.mts deleted in e411490                                                                                                                                      |
-| 2   | Local bin (F04)                             | Covered                                                             | npx-fallback.test.mts: local bin runs and npx never, nearest bin wins, keyed by bin name, no exec bit falls back to npx, never above cwd, PATH beats local; tsc.test.mts: `node_modules/.bin/tsc` |
-| 3   | stdin late/large (F05)                      | Covered                                                             | core.test.mts `runLate` + `PAD` (512 KiB, written late through a pipe), Edit and Write: exit 0, shellcheck ran, digest written                                                                    |
-| 4   | Slots (F10)                                 | Covered                                                             | file-detection.test.mts: 20 concurrent FileChanged, max overlap <= `FILE_CHANGED_SLOTS`; unusable slot dir fails open; give-up. registry.test.mts `acquireSlot` units                             |
-| 5   | Probe persistence (F11/F17)                 | Covered (F11, by proxy); rtk half obsolete                          | core.test.mts probe block: persisted miss served, TTL expiry, hit revalidated, PATH change gives a separate file, corrupt or unusable store fails open                                            |
-| 6   | Timeout (F18)                               | Covered at the spawnGroup seam                                      | spawn-group.test.mts: ETIMEDOUT and group gone, SIGKILL after grace, ENOENT, ENOBUFS at 11 MB, normal exit, hook SIGTERM kills live groups                                                        |
-| 7   | 2 MB + located line, surfaced and truncated | Added by this task                                                  | truncation.test.mts "output over 1 MiB keeps its finding and is truncated"                                                                                                                        |
-| 8   | Driver (F16)                                | Covered                                                             | skill.test.mts: one shellcheck call for 3 files, tsc once per tsconfig, single reruns after skip or kill, block cap per file, split per argv prefix                                               |
-| +   | npx cache (F09)                             | Covered                                                             | npx-fallback.test.mts cache direct, cold cache, stale and future stamp, no exec bit, lock, above-cwd, npm_config env only on npx                                                                  |
-| +   | Project-check lock (F13)                    | Covered                                                             | file-detection.test.mts: 10 .ts give 1 tsc, 5 .go, 5 .rs, newer change reruns, unusable lock dir; registry `coalesceProjectCheck` units                                                           |
-| +   | configExists (F20)                          | Covered (behaviour)                                                 | registry.test.mts configExists block                                                                                                                                                              |
-| +   | gateFinding memo (F21)                      | Covered (behaviour); count not observable without a production seam | registry.test.mts gateFinding block                                                                                                                                                               |
-| +   | Lazy crypto (F26)                           | Covered (static)                                                    | manifest.test.mts: no static node:crypto import, createRequire fallback                                                                                                                           |
-| +   | WATCH_LIMIT (F08/F12)                       | Covered                                                             | file-detection.test.mts limit tests                                                                                                                                                               |
-| +   | LOC_PATH_RE cost (found in F27)             | Fixed and added by this task                                        | registry.test.mts gateFinding block, "a long whitespace-free line (minified) stays linear and keeps the located hit"                                                                              |
+| #   | Item                                        | Verdict                                                             | Where                                                                                                                                                                                           |
+| --- | ------------------------------------------- | ------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | rtk banner (F02)                            | Obsolete                                                            | rtk removed in 0.15.0, tests/rtk.test.ts deleted in e411490                                                                                                                                     |
+| 2   | Local bin (F04)                             | Covered                                                             | npx-fallback.test.ts: local bin runs and npx never, nearest bin wins, keyed by bin name, no exec bit falls back to npx, never above cwd, PATH beats local; tsc.test.ts: `node_modules/.bin/tsc` |
+| 3   | stdin late/large (F05)                      | Covered                                                             | core.test.ts `runLate` + `PAD` (512 KiB, written late through a pipe), Edit and Write: exit 0, shellcheck ran, digest written                                                                   |
+| 4   | Slots (F10)                                 | Covered                                                             | file-detection.test.ts: 20 concurrent FileChanged, max overlap <= `FILE_CHANGED_SLOTS`; unusable slot dir fails open; give-up. registry.test.ts `acquireSlot` units                             |
+| 5   | Probe persistence (F11/F17)                 | Covered (F11, by proxy); rtk half obsolete                          | core.test.ts probe block: persisted miss served, TTL expiry, hit revalidated, PATH change gives a separate file, corrupt or unusable store fails open                                           |
+| 6   | Timeout (F18)                               | Covered at the spawnGroup seam                                      | spawn-group.test.ts: ETIMEDOUT and group gone, SIGKILL after grace, ENOENT, ENOBUFS at 11 MB, normal exit, hook SIGTERM kills live groups                                                       |
+| 7   | 2 MB + located line, surfaced and truncated | Added by this task                                                  | truncation.test.ts "output over 1 MiB keeps its finding and is truncated"                                                                                                                       |
+| 8   | Driver (F16)                                | Covered                                                             | skill.test.ts: one shellcheck call for 3 files, tsc once per tsconfig, single reruns after skip or kill, block cap per file, split per argv prefix                                              |
+| +   | npx cache (F09)                             | Covered                                                             | npx-fallback.test.ts cache direct, cold cache, stale and future stamp, no exec bit, lock, above-cwd, npm_config env only on npx                                                                 |
+| +   | Project-check lock (F13)                    | Covered                                                             | file-detection.test.ts: 10 .ts give 1 tsc, 5 .go, 5 .rs, newer change reruns, unusable lock dir; registry `coalesceProjectCheck` units                                                          |
+| +   | configExists (F20)                          | Covered (behaviour)                                                 | registry.test.ts configExists block                                                                                                                                                             |
+| +   | gateFinding memo (F21)                      | Covered (behaviour); count not observable without a production seam | registry.test.ts gateFinding block                                                                                                                                                              |
+| +   | Lazy crypto (F26)                           | Covered (static)                                                    | manifest.test.ts: no static node:crypto import, createRequire fallback                                                                                                                          |
+| +   | WATCH_LIMIT (F08/F12)                       | Covered                                                             | file-detection.test.ts limit tests                                                                                                                                                              |
+| +   | LOC_PATH_RE cost (found in F27)             | Fixed and added by this task                                        | registry.test.ts gateFinding block, "a long whitespace-free line (minified) stays linear and keeps the located hit"                                                                             |
 
 ### LOC_PATH_RE fix
 
@@ -36,7 +36,7 @@ Done in 0.15.24. Audit of the eight proposed tests plus the perf paths added sin
 
 ### Mutation record
 
-- A: `MAX_BUFFER_BYTES = 1024 * 1024` -> the truncation test fails (status 0 vs 2, ctx empty); spawn-group.test.mts ENOBUFS test passes `maxBuffer` explicitly and stays green, confirming the gap.
+- A: `MAX_BUFFER_BYTES = 1024 * 1024` -> the truncation test fails (status 0 vs 2, ctx empty); spawn-group.test.ts ENOBUFS test passes `maxBuffer` explicitly and stays green, confirming the gap.
 - B: `truncate` returns `collapsed` uncapped -> the truncation test fails (endsWith/length assertions, or harness ENOBUFS with status null).
 - C: lookbehind removed from `LOC_PATH_RE` -> the registry gateFinding test fails by vitest timeout.
   All restored; `git diff universal-lint/src` shows only the regex line and its TSDoc line.
@@ -47,7 +47,7 @@ No test asserted that output above the 1 MB spawnSync default survives (`MAX_BUF
 
 ## Code locations
 
-tests/skill.test.mts, truncation.test.mts, registry.test.mts, npx-fallback.test.mts, file-detection.test.mts, tsc.test.mts; tests/support/lint-hook.mts (`recStub`).
+tests/skill.test.ts, truncation.test.ts, registry.test.ts, npx-fallback.test.ts, file-detection.test.ts, tsc.test.ts; tests/support/lint-hook.ts (`recStub`).
 
 ## Approach
 

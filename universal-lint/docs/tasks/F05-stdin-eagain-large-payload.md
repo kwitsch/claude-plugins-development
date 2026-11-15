@@ -3,12 +3,12 @@ id: F05
 title: Read hook stdin robustly; payloads over about 190 KB are silently not linted
 status: done
 priority: medium
-area: universal-lint/src/hooks/lint-file.mts (main, recordWrittenFor, recordWritten, fileChangedHandler), universal-lint/tests/core.test.mts, universal-lint/.claude/rules/hook-design.md, universal-lint/.claude/rules/tests.md, universal-lint/scripts/perf.mts
+area: universal-lint/src/hooks/lint-file.ts (main, recordWrittenFor, recordWritten, fileChangedHandler), universal-lint/tests/core.test.ts, universal-lint/.claude/rules/hook-design.md, universal-lint/.claude/rules/tests.md, universal-lint/scripts/perf.mts
 ---
 
 ## Status
 
-Done in 0.15.4. `main` is `async` and reads the payload with `await json(process.stdin)` to EOF; fail-open, the findings contract, the dispatch and `hooks.json` are unchanged (details: `.claude/rules/hook-design.md` "stdin"). Root cause: the `node:process` import makes fd 0 a non-blocking pipe handle, so the sync read threw EAGAIN for a late or larger-than-pipe-buffer writer (even `cat p512.json | lint-file.mjs` failed; a file redirect worked). Tests: `tests/core.test.mts` test.each over a 512 KB Edit and Write payload written 100 ms late through a spawn pipe, both failing against 0.15.3. Cost: the current baseline is in [F01](F01-measurement-baseline.md) "Measured" (the 0.15.4 table is no longer kept); the live `claude -p` big.md check was not re-run.
+Done in 0.15.4. `main` is `async` and reads the payload with `await json(process.stdin)` to EOF; fail-open, the findings contract, the dispatch and `hooks.json` are unchanged (details: `.claude/rules/hook-design.md` "stdin"). Root cause: the `node:process` import makes fd 0 a non-blocking pipe handle, so the sync read threw EAGAIN for a late or larger-than-pipe-buffer writer (even `cat p512.json | lint-file.mjs` failed; a file redirect worked). Tests: `tests/core.test.ts` test.each over a 512 KB Edit and Write payload written 100 ms late through a spawn pipe, both failing against 0.15.3. Cost: the current baseline is in [F01](F01-measurement-baseline.md) "Measured" (the 0.15.4 table is no longer kept); the live `claude -p` big.md check was not re-run.
 
 ## Problem
 

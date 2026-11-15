@@ -3,7 +3,7 @@ id: F34
 title: Settle window - a finding that the next edit already repaired never wakes Claude
 status: done
 priority: medium
-area: universal-lint/src/hooks/lint-file.mts (recordEdit, settleFindings, editHunks, carryLine, gateFinding, lintResolved, lintFileHandler, fileChangedHandler)
+area: universal-lint/src/hooks/lint-file.ts (recordEdit, settleFindings, editHunks, carryLine, gateFinding, lintResolved, lintFileHandler, fileChangedHandler)
 ---
 
 ## Status
@@ -34,7 +34,7 @@ Decider findings of the design review (headless run) that shaped the result: rec
 
 ## Verification
 
-- `pnpm lint`, `pnpm --filter universal-lint build`, `pnpm --filter universal-lint test` (358 tests; `tests/settle.test.mts` units, `tests/settle-process.test.mts` real hook processes with a stub shellcheck: hold length, line rewritten without reproducing, edit elsewhere, reproduced error, Write and FileChanged supersession, echo records nothing, empty patch records nothing, slot free during the hold).
+- `pnpm lint`, `pnpm --filter universal-lint build`, `pnpm --filter universal-lint test` (358 tests; `tests/settle.test.ts` units, `tests/settle-process.test.ts` real hook processes with a stub shellcheck: hold length, line rewritten without reproducing, edit elsewhere, reproduced error, Write and FileChanged supersession, echo records nothing, empty patch records nothing, slot free during the hold).
 - Live, Claude Code 2.1.325, interactive (tmux), stub shellcheck flagging `BAD` lines, `UNIVERSAL_LINT_SETTLE_MS=15000`: Write of a flagged line then an Edit of that line 1 s later: no wake in 50 s; Write then an Edit of another line: the finding woke Claude 16 s after the Write. Not exercised: the 5 s default in a live session (the seam only changes the number), slow file systems, tsc-length lints (supersession is off there when an edit lands during the lint).
 - Headless `claude -p` (same version): the PostToolUse hook is **not** backgrounded (debug log "Slow PostToolUse hooks: 46026ms for Write", the next tool call starts after the hook ended), so there the hold delays the turn by up to 5 s per lint with findings and can never be superseded; the finding reaches the model in the same turn as before. Accepted, documented in the README and `hook-design.md`.
 

@@ -2,7 +2,7 @@
 paths:
   - "src/hooks/**"
   - "plugin/hooks/**"
-  - "tests/{core,registry,tsc,yaml}.test.mts"
+  - "tests/{core,registry,tsc,yaml}.test.ts"
 ---
 
 # Edit-range gate (do not "fix" without reading this)

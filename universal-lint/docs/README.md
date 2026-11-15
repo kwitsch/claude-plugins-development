@@ -16,7 +16,7 @@ All of F01-F33 shipped or were closed docs-only in universal-lint 0.15.1-0.15.29
 
 1. Pick the first unchecked task in `TASKS.md` (stage order, then priority) whose dependencies are done. Read its detail document plus the documents under its `Related` section.
 2. Read `../CLAUDE.md` and the rule files it names, at least `../.claude/rules/hook-design.md` (fail-open contract, timeout budget), `edit-range-gate.md`, `file-detection.md`, `npx-and-local-bin.md` and `languages.md` with the `lang-*.md` file of the language the task touches. Several tasks touch documented user decisions; the task says so under `Constraints`. Ask before changing one.
-3. Locate code by the symbol names in `Code locations` (`src/hooks/lint-file.mts` unless stated otherwise); line numbers are deliberately absent because they drift.
+3. Locate code by the symbol names in `Code locations` (`src/hooks/lint-file.ts` unless stated otherwise); line numbers are deliberately absent because they drift.
 4. Re-measure the baseline numbers the task cites (see F01) before and after the change. The numbers in these documents are from one machine and one day.
 5. Implement in `src/`, add the tests named under `Verification`, then run `pnpm --filter universal-lint build && pnpm --filter universal-lint test && pnpm lint`. Never edit `plugin/**/*.mjs` or `plugin/.claude-plugin/plugin.json` by hand.
 6. Any change under `universal-lint/` merged to `main` needs a version bump: `version` in `universal-lint/package.json` (the only manifest source), then `pnpm --filter universal-lint build`.

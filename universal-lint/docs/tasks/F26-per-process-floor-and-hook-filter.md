@@ -3,7 +3,7 @@ id: F26
 title: Per-process floor (about 40 ms) for events the hook cannot act on
 status: done
 priority: low
-area: universal-lint/src/hooks/lint-file.mts (`createHash` wrapper), universal-lint/tests/manifest.test.mts, universal-lint/docs/tasks/F26-per-process-floor-and-hook-filter.md, universal-lint/docs/TASKS.md, universal-lint/.claude/rules/hook-design.md
+area: universal-lint/src/hooks/lint-file.ts (`createHash` wrapper), universal-lint/tests/manifest.test.ts, universal-lint/docs/tasks/F26-per-process-floor-and-hook-filter.md, universal-lint/docs/TASKS.md, universal-lint/.claude/rules/hook-design.md
 ---
 
 ## Status
@@ -50,11 +50,11 @@ The non-exported `createHash` wrapper (lazy `node:crypto` via `process.getBuilti
 
 ## Verification
 
-Bench (31 spawns, medians): `.json` Write no-op 46.0 -> 39.5 ms, `unlink` 44.8 -> 37.8 ms. manifest.test.mts asserts the built hook has no static `node:crypto` import. manifest.test.mts pins `PostToolUse[0]` and must be updated with any hooks.json change. `node universal-lint/scripts/perf.mts 5` exits 0.
+Bench (31 spawns, medians): `.json` Write no-op 46.0 -> 39.5 ms, `unlink` 44.8 -> 37.8 ms. manifest.test.ts asserts the built hook has no static `node:crypto` import. manifest.test.ts pins `PostToolUse[0]` and must be updated with any hooks.json change. `node universal-lint/scripts/perf.mts 5` exits 0.
 
 ## Constraints
 
-A filter must never drop `EXT_MAP`/`TYPE_CHECK_EXTS` files; the digest skip stays. A FileChanged matcher changes the documented "no matcher on the three non-tool events" rule (hook-design.md). It is an explicit trade-off: confirm with the user and update hook-design.md and manifest.test.mts. No `userConfig`. Version bump.
+A filter must never drop `EXT_MAP`/`TYPE_CHECK_EXTS` files; the digest skip stays. A FileChanged matcher changes the documented "no matcher on the three non-tool events" rule (hook-design.md). It is an explicit trade-off: confirm with the user and update hook-design.md and manifest.test.ts. No `userConfig`. Version bump.
 
 ## Related
 

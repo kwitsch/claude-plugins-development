@@ -3,12 +3,12 @@ id: F16
 title: "Skill driver: one linter call per tool group and one tsc per tsconfig"
 status: done
 priority: medium
-area: universal-lint/src/skills/universal-lint/lint-files.mts (top-level loop, mkArgs), universal-lint/src/hooks/lint-file.mts (lintFileHandler, lintResolved, runChainLint, buildArgv, runTypeCheck, scopedTarget roots), universal-lint/.claude/rules/skill-driver.md
+area: universal-lint/src/skills/universal-lint/lint-files.ts (top-level loop, mkArgs), universal-lint/src/hooks/lint-file.ts (lintFileHandler, lintResolved, runChainLint, buildArgv, runTypeCheck, scopedTarget roots), universal-lint/.claude/rules/skill-driver.md
 ---
 
 ## Status
 
-Done in 0.15.14. `lintFilesHandler` (`src/hooks/lint-file.mts`) is the driver's batch entry: it scopes every listed file once against one `realish(cwd)`, plans each with the hook's own resolution (`chainEntryFor`, `planChainLint`, extracted verbatim from `lintResolved`/`runChainLint` in a separate commit), runs each chain tool once per group of files sharing tool, local bin, spawn cwd and argv prefix (go/cargo once per package dir / crate; at most `BATCH_MAX_FILES` = 100 files per spawn), classifies with `chainOutcome`, and runs tsc once per resolved tsconfig through the unchanged `runTypeCheck`. The report is one block per tool run (`universal-lint: <tool> found issues in <targets>:`), summary `universal-lint: N block(s) with findings.`; no edit-range gate, no `coalesceProjectCheck`. A multi-file chunk with a skip verdict, spawn error, signal or timeout reruns its files singly (at most 100 single spawns per chunk); only a file whose single run also fails is dropped. Hook PostToolUse and FileChanged paths unchanged.
+Done in 0.15.14. `lintFilesHandler` (`src/hooks/lint-file.ts`) is the driver's batch entry: it scopes every listed file once against one `realish(cwd)`, plans each with the hook's own resolution (`chainEntryFor`, `planChainLint`, extracted verbatim from `lintResolved`/`runChainLint` in a separate commit), runs each chain tool once per group of files sharing tool, local bin, spawn cwd and argv prefix (go/cargo once per package dir / crate; at most `BATCH_MAX_FILES` = 100 files per spawn), classifies with `chainOutcome`, and runs tsc once per resolved tsconfig through the unchanged `runTypeCheck`. The report is one block per tool run (`universal-lint: <tool> found issues in <targets>:`), summary `universal-lint: N block(s) with findings.`; no edit-range gate, no `coalesceProjectCheck`. A multi-file chunk with a skip verdict, spawn error, signal or timeout reruns its files singly (at most 100 single spawns per chunk); only a file whose single run also fails is dropped. Hook PostToolUse and FileChanged paths unchanged.
 
 Measured on WSL2 ext4, node 24, `scratchpad/f16bench/` fixture, median of 5 driver runs (before = committed `plugin/` of 05996a1, 0.15.13):
 
@@ -33,15 +33,15 @@ The driver calls `lintFileHandler` per file: one linter spawn (and one npx start
 
 ## Code locations
 
-lint-files.mts loop `for (const p of paths) { lintFileHandler(mkArgs(resolved)) }` and its `shortcut:` comment; `lintFileHandler(args, scoped = postToolScope(args))`; `scopedTarget(cwd, file, scratchpad?, roots?)`; `lintResolved`, `runChainLint`, `buildArgv` (single target appended last), `runTypeCheck`.
+lint-files.ts loop `for (const p of paths) { lintFileHandler(mkArgs(resolved)) }` and its `shortcut:` comment; `lintFileHandler(args, scoped = postToolScope(args))`; `scopedTarget(cwd, file, scratchpad?, roots?)`; `lintResolved`, `runChainLint`, `buildArgv` (single target appended last), `runTypeCheck`.
 
 ## Approach
 
-Step 0 (cheap, do anyway): compute `roots = { cwd: realpath(cwd) }` once in the driver and pass `scopedTarget(cwd, p, undefined, roots)` as `lintFileHandler`'s second argument. Step 1: export a batch entry from lint-file.mts that groups scoped files by (language entry, resolved config: oxlint `-c`, markdownlint/yamllint guard config, Go package dir, Cargo manifest), calls `buildArgv` with N targets per group, and runs tsc once per resolved tsconfig (memo keyed by tsconfig path). Classification per group; report labelled per group. Many of today's costs vanish with F03 (no-config eslint) and F09 (npx), so measure after those.
+Step 0 (cheap, do anyway): compute `roots = { cwd: realpath(cwd) }` once in the driver and pass `scopedTarget(cwd, p, undefined, roots)` as `lintFileHandler`'s second argument. Step 1: export a batch entry from lint-file.ts that groups scoped files by (language entry, resolved config: oxlint `-c`, markdownlint/yamllint guard config, Go package dir, Cargo manifest), calls `buildArgv` with N targets per group, and runs tsc once per resolved tsconfig (memo keyed by tsconfig path). Classification per group; report labelled per group. Many of today's costs vanish with F03 (no-config eslint) and F09 (npx), so measure after those.
 
 ## Verification
 
-skill.test.mts: a 3-file list records one linter invocation with 3 targets and one tsc call per tsconfig. Bench: 10 .md ≤ about 1.5 s (≤ 0.5 s with F09), 10 .mts ≤ about 1 s, 10 ts300 files ≈ 0.3 s + chain. Hook per-event behaviour unchanged (existing tests).
+skill.test.ts: a 3-file list records one linter invocation with 3 targets and one tsc call per tsconfig. Bench: 10 .md ≤ about 1.5 s (≤ 0.5 s with F09), 10 .mts ≤ about 1 s, 10 ts300 files ≈ 0.3 s + chain. Hook per-event behaviour unchanged (existing tests).
 
 ## Constraints
 

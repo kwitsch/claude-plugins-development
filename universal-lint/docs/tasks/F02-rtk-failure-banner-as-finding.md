@@ -3,7 +3,7 @@ id: F02
 title: rtk failure banners are reported as eslint findings (false rewake, pnpm install in the repo)
 status: done
 priority: high
-area: universal-lint/src/hooks/lint-file.mts (tryRtk, runLintTool npx-fallback branch, getRtkPrefix, classifyExit 'eslint', gateFinding)
+area: universal-lint/src/hooks/lint-file.ts (tryRtk, runLintTool npx-fallback branch, getRtkPrefix, classifyExit 'eslint', gateFinding)
 ---
 
 ## Status
@@ -37,7 +37,7 @@ Safety net in `tryRtk` (or the npx branch only): treat an rtk result whose outpu
 
 ## Verification
 
-Test (rtk.test.mts or npx-fallback.test.mts): an rtk stub whose `lint` verb prints `ESLint output (JSON parse failed: ...)` and exits 1 FAST, plus an npx stub that records its call: expect `npx --yes` to run and no banner in the finding. Same with a pnpm-style "Command \"eslint\" not found" banner. Bench: flat-config project with a fresh cache shows the real `no-unused-vars` finding (first run about 7.5 s cold, then about 1.9 s). In a pnpm fixture without node_modules, no `node_modules/` appears after the hook. This check passes only with the skip-rtk variant (or with F03 or F04), not with the banner filter alone.
+Test (rtk.test.ts or npx-fallback.test.ts): an rtk stub whose `lint` verb prints `ESLint output (JSON parse failed: ...)` and exits 1 FAST, plus an npx stub that records its call: expect `npx --yes` to run and no banner in the finding. Same with a pnpm-style "Command \"eslint\" not found" banner. Bench: flat-config project with a fresh cache shows the real `no-unused-vars` finding (first run about 7.5 s cold, then about 1.9 s). In a pnpm fixture without node_modules, no `node_modules/` appears after the hook. This check passes only with the skip-rtk variant (or with F03 or F04), not with the banner filter alone.
 
 ## Constraints
 

@@ -1,7 +1,7 @@
 ---
 paths:
   - "src/hooks/**"
-  - "tests/rust.test.mts"
+  - "tests/rust.test.ts"
 ---
 
 # Rust: cargo clippy/check, manifest targeting, and the clippy-component gap

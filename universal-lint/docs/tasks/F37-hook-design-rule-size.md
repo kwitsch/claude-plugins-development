@@ -24,7 +24,7 @@ None. `universal-lint/.claude/rules/hook-design.md` (frontmatter `paths:` and se
 
 ## Approach
 
-Move the "Settle window (F34, 0.16.0)" section (about 6,000 characters) into its own path-scoped rule, e.g. `universal-lint/.claude/rules/settle-window.md` with the same `paths:` plus `tests/settle*.test.mts`, and leave a one-line pointer in hook-design.md; add the new file to `universal-lint/CLAUDE.md` "Parts". Alternatively shorten the "Measured cost" pointers into `docs/README.md`. Keep every rule moved verbatim (no behaviour text lost), and keep each file under 40,000 characters.
+Move the "Settle window (F34, 0.16.0)" section (about 6,000 characters) into its own path-scoped rule, e.g. `universal-lint/.claude/rules/settle-window.md` with the same `paths:` plus `tests/settle*.test.ts`, and leave a one-line pointer in hook-design.md; add the new file to `universal-lint/CLAUDE.md` "Parts". Alternatively shorten the "Measured cost" pointers into `docs/README.md`. Keep every rule moved verbatim (no behaviour text lost), and keep each file under 40,000 characters.
 
 ## Verification
 
@@ -40,4 +40,4 @@ F01 (Constraints), F34 (added the section), F35, F36.
 
 ## Verification result
 
-Shipped in 0.16.1: the "Settle window (F34, 0.16.0)" section moved verbatim to `.claude/rules/settle-window.md` (paths: `src/hooks/**`, `plugin/hooks/**`, `tests/settle*.test.mts`), pointer left in hook-design.md, `CLAUDE.md` "Parts" updated. `wc -m`: hook-design.md 36,717 (was 42,336), settle-window.md 5,846.
+Shipped in 0.16.1: the "Settle window (F34, 0.16.0)" section moved verbatim to `.claude/rules/settle-window.md` (paths: `src/hooks/**`, `plugin/hooks/**`, `tests/settle*.test.ts`), pointer left in hook-design.md, `CLAUDE.md` "Parts" updated. `wc -m`: hook-design.md 36,717 (was 42,336), settle-window.md 5,846.

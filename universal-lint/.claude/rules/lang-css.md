@@ -1,7 +1,7 @@
 ---
 paths:
   - "src/hooks/**"
-  - "tests/stylelint.test.mts"
+  - "tests/stylelint.test.ts"
 ---
 
 # CSS/SCSS: stylelint

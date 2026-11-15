@@ -3,7 +3,7 @@ id: F13
 title: Run tsc / go vet / cargo once per FileChanged burst, not once per file
 status: done
 priority: medium
-area: universal-lint/src/hooks/lint-file.mts (coalesceProjectCheck, runTypeCheck, runChainLint, lintResolved, slotStale, FILE_CHANGED_BUDGET_MS), universal-lint/.claude/rules/hook-design.md
+area: universal-lint/src/hooks/lint-file.ts (coalesceProjectCheck, runTypeCheck, runChainLint, lintResolved, slotStale, FILE_CHANGED_BUDGET_MS), universal-lint/.claude/rules/hook-design.md
 ---
 
 ## Status
@@ -47,7 +47,7 @@ Residuals (hook-design.md "Project-check lock"): WSL drvfs/9P clock skew between
 
 ## Verification
 
-Vitest (`tests/file-detection.test.mts`): 10 concurrent FileChanged `.ts` events whose writes landed before the first run, stub tsc sleeping 1000 ms with one injected finding: exactly 1 call, the finding reported by exactly one process (exit 2), the other nine exit 0 with empty stderr; 5 `.go` events: exactly 1 `go vet` call; 5 `.rs` events: exactly 1 `cargo check` call; a write after the last completed run: one more call, and a newer non-future stamp covers the next change; an unusable `fc-locks` dir runs tsc unlocked. Unit tests of `coalesceProjectCheck` (`tests/registry.test.mts`): covered skip, stamp + release, errored run (no stamp), stale-lock reclaim, deadline runs unlocked. Manual burst (Status): ts200 N=50 and go20/rs20 N=20, <= 2 spawns per burst (measured above), assuming the writes landed before the first run.
+Vitest (`tests/file-detection.test.ts`): 10 concurrent FileChanged `.ts` events whose writes landed before the first run, stub tsc sleeping 1000 ms with one injected finding: exactly 1 call, the finding reported by exactly one process (exit 2), the other nine exit 0 with empty stderr; 5 `.go` events: exactly 1 `go vet` call; 5 `.rs` events: exactly 1 `cargo check` call; a write after the last completed run: one more call, and a newer non-future stamp covers the next change; an unusable `fc-locks` dir runs tsc unlocked. Unit tests of `coalesceProjectCheck` (`tests/registry.test.ts`): covered skip, stamp + release, errored run (no stamp), stale-lock reclaim, deadline runs unlocked. Manual burst (Status): ts200 N=50 and go20/rs20 N=20, <= 2 spawns per burst (measured above), assuming the writes landed before the first run.
 
 ## Constraints
 

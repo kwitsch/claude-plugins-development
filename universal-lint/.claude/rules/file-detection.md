@@ -2,7 +2,7 @@
 paths:
   - "src/hooks/**"
   - "plugin/hooks/**"
-  - "tests/{file-detection,core,registry}.test.mts"
+  - "tests/{file-detection,core,registry}.test.ts"
 ---
 
 # File detection: FileChanged + watch list (do not "fix" without reading this)

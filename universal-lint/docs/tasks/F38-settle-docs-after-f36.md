@@ -21,7 +21,7 @@ Minor, same file: `settle-window.md` is the only rule file of the plugin whose f
 
 ## Evidence
 
-- `src/hooks/lint-file.mts` `settleFindings` at HEAD `8197268`: `gateFinding(f, survives, resolved, "drop")` (filter) and `gateFinding(f, () => false, resolved, "drop")` (F35 precheck).
+- `src/hooks/lint-file.ts` `settleFindings` at HEAD `8197268`: `gateFinding(f, survives, resolved, "drop")` (filter) and `gateFinding(f, () => false, resolved, "drop")` (F35 precheck).
 - `grep -n "edits elsewhere drop nothing" universal-lint/plugin/README.md`: 1 hit (the settle paragraph).
 - `grep -n "resolved, false)" universal-lint/.claude/rules/settle-window.md`: 1 hit (bullet "Lines.").
 - Behaviour itself confirmed by EVALUATION-2026-11-14b "Parse-error repro": the Write's held `SC1009` at EOF is dropped after the Edit that fixed line 2.

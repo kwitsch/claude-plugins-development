@@ -63,7 +63,7 @@ Why it does not pay:
 
 ## Verification
 
-No code changed, so no new tests. The measurements above were taken with `node universal-lint/scripts/perf.mts` against the committed plugin/ 0.15.18 (TMPDIR and fixture on /mnt/c for the 9P column). The existing suite (`tests/file-detection.test.mts` FileChanged and watch-list tests, `tests/manifest.test.mts` wiring) stays green against the rebuilt plugin/, whose `.mjs` files are byte-identical.
+No code changed, so no new tests. The measurements above were taken with `node universal-lint/scripts/perf.mts` against the committed plugin/ 0.15.18 (TMPDIR and fixture on /mnt/c for the 9P column). The existing suite (`tests/file-detection.test.ts` FileChanged and watch-list tests, `tests/manifest.test.ts` wiring) stays green against the rebuilt plugin/, whose `.mjs` files are byte-identical.
 
 ## Constraints
 

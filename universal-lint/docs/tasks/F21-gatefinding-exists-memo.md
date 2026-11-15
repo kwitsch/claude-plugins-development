@@ -3,7 +3,7 @@ id: F21
 title: Memoize existsSync in gateFinding
 status: done
 priority: low
-area: universal-lint/src/hooks/lint-file.mts (gateFinding, lintResolved)
+area: universal-lint/src/hooks/lint-file.ts (gateFinding, lintResolved)
 ---
 
 ## Status

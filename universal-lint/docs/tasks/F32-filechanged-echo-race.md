@@ -3,7 +3,7 @@ id: F32
 title: Measure how often the FileChanged echo of Claude's own write beats the digest
 status: done
 priority: low
-area: universal-lint/src/hooks/lint-file.mts (fileChangedHandler, recordWritten, recordWrittenFor, main)
+area: universal-lint/src/hooks/lint-file.ts (fileChangedHandler, recordWritten, recordWrittenFor, main)
 ---
 
 ## Status

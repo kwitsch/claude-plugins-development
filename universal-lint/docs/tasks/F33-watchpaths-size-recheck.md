@@ -3,7 +3,7 @@ id: F33
 title: watchPaths JSON size and watch count need no change; re-check on Claude Code upgrades
 status: done
 priority: low
-area: universal-lint/src/hooks/lint-file.mts (watchPathsHandler, watchList, WATCH_LIMIT)
+area: universal-lint/src/hooks/lint-file.ts (watchPathsHandler, watchList, WATCH_LIMIT)
 ---
 
 ## Status
@@ -20,7 +20,7 @@ About 180-200 bytes per path: 2275 paths 412,588 bytes; 3000 paths 595 KB; 4800 
 
 ## Code locations
 
-`watchPathsHandler` (one `JSON.stringify` to stdout via `main`), `watchList`, `WATCH_LIMIT` (5000, `lint-file.mts` L109; the check is `list.size > WATCH_LIMIT`, so exactly 5000 files are watched and 5001 are not; output has no trailing newline; the over-limit note goes to stderr only).
+`watchPathsHandler` (one `JSON.stringify` to stdout via `main`), `watchList`, `WATCH_LIMIT` (5000, `lint-file.ts` L109; the check is `list.size > WATCH_LIMIT`, so exactly 5000 files are watched and 5001 are not; output has no trailing newline; the over-limit note goes to stderr only).
 
 ## Approach
 

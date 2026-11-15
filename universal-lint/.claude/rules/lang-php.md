@@ -1,7 +1,7 @@
 ---
 paths:
   - "src/hooks/**"
-  - "tests/php.test.mts"
+  - "tests/php.test.ts"
 ---
 
 # PHP: phpstan/psalm and the vendor/bin gap

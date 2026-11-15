@@ -1,7 +1,7 @@
 ---
 paths:
   - "src/hooks/**"
-  - "tests/{oxlint,core}.test.mts"
+  - "tests/{oxlint,core}.test.ts"
 ---
 
 # JS/TS: eslint vs oxlint

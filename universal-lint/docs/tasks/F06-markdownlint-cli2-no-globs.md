@@ -3,7 +3,7 @@ id: F06
 title: Pass --no-globs to markdownlint-cli2
 status: done
 priority: medium
-area: universal-lint/src/hooks/lint-file.mts (REGISTRY.markdown), universal-lint/tests/markdown.test.mts, universal-lint/tests/registry.test.mts, universal-lint/.claude/rules/line-length-guard.md, universal-lint/.claude/rules/hook-design.md
+area: universal-lint/src/hooks/lint-file.ts (REGISTRY.markdown), universal-lint/tests/markdown.test.ts, universal-lint/tests/registry.test.ts, universal-lint/.claude/rules/line-length-guard.md, universal-lint/.claude/rules/hook-design.md
 ---
 
 ## Status
@@ -30,7 +30,7 @@ Shipped: the markdownlint-cli2 entry of `REGISTRY.markdown` has the static args 
 
 Test: the markdownlint-cli2 stub records `--no-globs` before the file argument. Bench on the globs fixture: header reads `Linting: 1 file`; a foreign issue in another .md no longer surfaces.
 
-- [x] Test: `tests/markdown.test.mts` (project-config and npx tests expect `--no-globs` before the file; classic markdownlint never gets it); `tests/registry.test.mts` pins the exact argv with and without a project config.
+- [x] Test: `tests/markdown.test.ts` (project-config and npx tests expect `--no-globs` before the file; classic markdownlint never gets it); `tests/registry.test.ts` pins the exact argv with and without a project config.
 - [x] Bench (manual, 2026-11-07, numbers in this doc's "Measured" section): header `Linting: 1 file`; the foreign `d1.md` finding no longer surfaces on an `a.md` Write (exit 0); `a2.md` still exits 2 with its own MD041.
 
 ## Constraints
