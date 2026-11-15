@@ -147,6 +147,19 @@ describe("sendRequest", () => {
     const out = await sendRequest({ jevUrl: "https://jev.example/api", key: k }, STATE, QUESTIONS, async (_u, init) => ({ status: 401, text: JSON.stringify({ detail: "bad token: " + init.headers["Authorization"] }) }));
     expect(JSON.stringify(out)).not.toMatch(/Zq81|R7vT9/);
   });
+  it("hides the whole longer secret when the key is only a part of it", async () => {
+    const echo = async (u: string) => ({ status: 500, text: JSON.stringify({ detail: `no route ${new URL(u).pathname}${new URL(u).search}` }) });
+    const cases: [Record<string, string>, RegExp][] = [
+      [{ jevUrl: "https://h.example/proxy/KEY123456-tenant42/run", key: "KEY123456" }, /tenant42/],
+      [{ jevUrl: "https://h.example/run?token=SECRETKEY123privatepart", key: "SECRETKEY123" }, /privatepart/],
+      [{ base: "https://h.example/gw/abcdef99zz77/", key: "abcdef99" }, /zz77/],
+    ];
+    for (const [e, leak] of cases) expect(JSON.stringify(await sendRequest(e, STATE, QUESTIONS, echo))).not.toMatch(leak);
+    const dns = await sendRequest({ jevUrl: "https://kq83jd02-acme.proxy.example/run", key: "kq83jd02" }, STATE, QUESTIONS, async () => {
+      throw new Error("getaddrinfo ENOTFOUND kq83jd02-acme.proxy.example");
+    });
+    expect(JSON.stringify(dns)).not.toMatch(/acme|proxy\.example/);
+  });
   it("treats every 2xx as ok and everything else as http", async () => {
     expect((await sendRequest(env, STATE, QUESTIONS, fake({ status: 299, text: "x" }).doFetch)).kind).toBe("ok");
     expect((await sendRequest(env, STATE, QUESTIONS, fake({ status: 300, text: "x" }).doFetch)).kind).toBe("http");

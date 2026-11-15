@@ -156,17 +156,40 @@ export function hide(text: string, url: string, placeholder: string): string {
  * @returns The text without the path and query.
  */
 export function hidePath(text: string, url: string, placeholder: string): string {
-  const given = url.replace(/^[a-z][a-z\d+.-]*:\/\/[^/?#]*/i, "");
-  const forms = [given];
+  let t = text;
+  for (const f of pathForms(url)) t = t.replaceAll(f, placeholder);
+  return t;
+}
+
+/**
+ * The written and parsed forms of a URL's path and query that {@link hidePath} replaces (each longer than a bare `/`).
+ *
+ * @param url - The URL.
+ * @returns The distinct forms.
+ */
+export function pathForms(url: string): string[] {
+  const forms = [url.replace(/^[a-z][a-z\d+.-]*:\/\/[^/?#]*/i, "")];
   try {
     const u = new URL(url);
     forms.push(u.pathname + u.search, u.search);
   } catch {
     // Not parseable: only the written form.
   }
-  let t = text;
-  for (const f of new Set(forms)) if (f.length > 1) t = t.replaceAll(f, placeholder);
-  return t;
+  return [...new Set(forms)].filter((f) => f.length > 1);
+}
+
+/**
+ * The host name of a URL.
+ *
+ * @param url - The URL.
+ * @returns The host name, or a NUL character (never part of a key) when there is none or the URL does not parse.
+ */
+export function hostOf(url: string): string {
+  try {
+    return new URL(url).hostname || "\0";
+  } catch {
+    return "\0";
+  }
 }
 
 /**
@@ -287,17 +310,25 @@ export async function sendRequest(env: HttpEnv, state: string, questionsObject: 
       // Not parseable or a bad escape: the whole-URL forms above still apply.
     }
   }
+  const custom = env.jevUrl || env.base; // the default endpoint is public: nothing to hide
+  const place = env.jevUrl ? "<JEV_URL>" : "<TYPESAFE_BASE_URL>";
+  // Every literal that must not reach the model, replaced in ONE pass, longest first: a key inside a longer secret (a path segment,
+  // a query value) and a path inside the key must each hide the whole longer text, whatever the order of the parts.
+  const literals = new Map<string, string>();
+  if (custom) {
+    // A base path may carry a token too (a proxy path); without the fixed `/v1/systemone` tail, which hide() already wrote.
+    for (const f of pathForms(env.jevUrl ? target.url : target.url.slice(0, -"/v1/systemone".length))) literals.set(f, place);
+    for (const v of pieces) literals.set(v, place); // a server may echo one value alone
+  }
+  if (key && key.length >= MIN_REDACT_KEY) literals.set(key, "<TYPESAFE_API_KEY>"); // not a short key: it would match ordinary words
+  const literalRe = literals.size ? new RegExp([...literals.keys()].sort((x, y) => y.length - x.length).map((l) => l.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|"), "g") : undefined;
   const redact = (text: string): string => {
-    // In this order: the URL first (it may contain the key), the key before the path and the host (a key may contain their text).
-    const custom = env.jevUrl || env.base; // the default endpoint is public: nothing to hide
+    // The whole URL first (it may contain the key), the host before the literals (a host label may hold the key), then the literals.
     let t = custom ? hide(text, target.url, env.jevUrl ? "<JEV_URL>" : "<TYPESAFE_BASE_URL>/v1/systemone") : text;
-    // A base path may carry a token too (a proxy path); hide it without the fixed `/v1/systemone` tail, which hide() already wrote.
-    if (key && key.length >= MIN_REDACT_KEY) t = t.replaceAll(key, "<TYPESAFE_API_KEY>"); // not a short key: it would match ordinary words
-    if (custom) t = env.jevUrl ? hidePath(t, target.url, "<JEV_URL>") : hidePath(t, target.url.slice(0, -"/v1/systemone".length), "<TYPESAFE_BASE_URL>");
-    if (!custom) return t;
-    t = hideHost(t, target.url); // before the pieces: a piece may also be part of the host name
-    for (const v of [...pieces].sort((a, b) => b.length - a.length)) t = t.replaceAll(v, env.jevUrl ? "<JEV_URL>" : "<TYPESAFE_BASE_URL>"); // a server may echo one value alone
-    return t;
+    // A key that contains the host text (`jev.<rest>`) goes first, whole; a host that contains the key goes before it.
+    if (custom && key && key.length >= MIN_REDACT_KEY && key.toLowerCase().includes(hostOf(target.url).toLowerCase())) t = t.replaceAll(key, "<TYPESAFE_API_KEY>");
+    if (custom) t = hideHost(t, target.url);
+    return literalRe ? t.replace(literalRe, (m) => literals.get(m) ?? m) : t;
   };
   try {
     const res = await doFetch(target.url, { method: "POST", headers, body: JSON.stringify({ model: env.model ?? DEFAULT_MODEL, state, questions: questionsObject }) });
