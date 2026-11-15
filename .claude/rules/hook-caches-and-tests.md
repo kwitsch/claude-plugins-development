@@ -38,3 +38,11 @@ Most defects were regressions of performance fixes or tests that could not fail.
 ## Learned values, deadlines and error text
 
 - A value learned from one answer (context window, density) is keyed to what produced it (endpoint, model) and reset when that changes; a persisted value is replaced only after a successful read, never after a failed or timed-out one. A budget (timeout) is one deadline per call: later steps (fallback, retry, truncate re-send, second model) get the time left, not the full timeout. Redact secrets from error text in the order longest/most specific first, per segment, tolerating bad escapes, including numeric values; a once-per-outage log needs its own test that fails when the guard is removed.
+
+## Learned in a bug hunt
+
+- Order the size cap check before every `await` that can queue (slot wait, `git check-ignore`), then read right after; checking after the wait lets queued calls hold large reads.
+- Retry timers (negative-result caches) use a monotonic clock, or reset on a backwards step; a wall clock stepping back pins the failure past its retry time.
+- Evicting a pooled client (LRU) must not close one with in-flight work: skip busy clients or let the last user close it.
+- Parse multi-path output (git, `find`) NUL-separated, never split on newlines: a file name may hold one.
+- Doc comments name modules that exist; grep for removed file names after a deletion.
