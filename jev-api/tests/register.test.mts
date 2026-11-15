@@ -1274,6 +1274,35 @@ it("a tool that hung once is waited for again at its next retry", async () => {
   expect(waits.filter((ms) => ms === 1000)).toHaveLength(2);
 });
 
+// A tool that fails while another is still awaited is not marked stuck by the timed-out wait, so its retry is waited for.
+it("a tool that failed during the wait is not marked stuck", async () => {
+  const waits: number[] = [];
+  let rejectScore: (() => void) | undefined;
+  let scoreTries = 0;
+  const { run } = await direct({
+    tool: {
+      register: (spec: { name: string }) => {
+        if (spec.name === "noul") return new Promise(() => {});
+        if (spec.name !== "score") return Promise.resolve({ tool: TOOL(spec.name) });
+        scoreTries++;
+        return scoreTries === 1 ? new Promise((_, rej) => (rejectScore = () => rej(new Error("late")))) : new Promise(() => {});
+      },
+    },
+    ui: { log: async () => undefined },
+    clock: {
+      after: (ms: number, fn: () => void) => {
+        waits.push(ms);
+        const t = ms === 1000 ? setTimeout(() => (rejectScore?.(), void new Promise((r) => setTimeout(r, 5)).then(fn)), 0) : undefined;
+        return { cancel: () => clearTimeout(t) };
+      },
+    },
+  });
+  await run("noul"); // score fails mid-wait, noul hangs
+  await new Promise((r) => setTimeout(r, 5));
+  await run("noul"); // score's retry must be waited for again
+  expect(waits.filter((ms) => ms === 1000)).toHaveLength(2);
+});
+
 // A hook above refusing $.clock must not stop the session.start chain.
 it("session.start goes on when waiting for the registration throws", async () => {
   const { hooks, $ } = await direct({
