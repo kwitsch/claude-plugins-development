@@ -177,6 +177,7 @@ function bundleLib(compiled: Map<string, string>): { members: string[]; entries:
   const bind = (name: string, where: string): void => {
     const other = seen.get(name);
     if (other !== undefined) fail(`${name} is bound by ${other} and ${where}`);
+    if (name in globalThis) fail(`top-level name ${name} of a helper shadows the global ${name} for every other helper; rename it (${where})`);
     seen.set(name, where);
   };
   for (const line of imports) {
