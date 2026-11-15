@@ -674,6 +674,33 @@ it("session.start retries tools whose pre-bind attempt fails during its wait", a
   expect(tries.filter(Boolean)).toHaveLength(4);
 });
 
+// The in-flight pre-bind attempt is the tool's second refusal (5 s back-off): session.start still retries it.
+it("session.start retries a pre-bind attempt that was the tool's second refusal", async () => {
+  let bound = false;
+  let slow = false;
+  const tries: boolean[] = [];
+  const { run, hooks, $ } = await direct({
+    tool: {
+      register: async (spec: { name: string }) => {
+        const b = bound;
+        tries.push(b);
+        if (slow) await new Promise((r) => setTimeout(r, 50));
+        if (!b) throw new Error("session not bound");
+        return { tool: TOOL(spec.name) };
+      },
+    },
+    ui: { log: async () => undefined },
+  });
+  await run("noul"); // first refusal of every tool, fast
+  slow = true;
+  const call = run("noul"); // second attempt, in flight at the bind
+  await new Promise((r) => setTimeout(r, 10));
+  bound = true;
+  await hooks.get("session.start")?.($, { cwd: "/p" }, Object.assign(async (e: unknown) => e, { signal: new AbortController().signal }));
+  await call;
+  expect(tries.filter(Boolean)).toHaveLength(4);
+});
+
 // A pre-bind attempt that outlasts the call's wait is marked stuck: session.start waits for it and retries it too.
 it("session.start retries tools whose pre-bind attempt outlasts the call's wait", async () => {
   let bound = false;
