@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "vitest";
-import { makeEnv } from "./support/lint-hook.mts";
+import { makeEnv } from "./support/lint-hook.ts";
 
 test("yamllint finds an issue: additionalContext returned", () => {
   const e = makeEnv();

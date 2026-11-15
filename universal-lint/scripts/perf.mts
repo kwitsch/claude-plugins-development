@@ -96,7 +96,7 @@ function makeFixtures(dir: string): Case[] {
   const changed = (event: string, f: string): object => ({ hook_event_name: "FileChanged", event, file_path: join(dir, f), cwd: dir });
   /** SessionStart payload for `cwd`. */
   const start = (cwd: string): object => ({ hook_event_name: "SessionStart", source: "startup", cwd });
-  /** Edit hunk replacing line 1 of a.ts (EDIT_L1 shape from tests/tsc.test.mts). */
+  /** Edit hunk replacing line 1 of a.ts (EDIT_L1 shape from tests/tsc.test.ts). */
   const edit = { structuredPatch: [{ oldStart: 1, oldLines: 2, newStart: 1, newLines: 2, lines: ["-export const x = 1;", "+export const x: number = 1;", " export const y: string = \"2\";"] }] };
   return [
     { name: "floor node -e 0", cwd: dir, payload: null, expect: 0 },

@@ -1,7 +1,7 @@
 // Go directory-scoping and golangci-lint/go-vet fallback; ported from test/universal-lint/go.bats.
 import assert from "node:assert/strict";
 import { test } from "vitest";
-import { makeEnv } from "./support/lint-hook.mts";
+import { makeEnv } from "./support/lint-hook.ts";
 
 test("go fallback: only go(vet) stub present -> used, targets the directory", () => {
   const e = makeEnv();

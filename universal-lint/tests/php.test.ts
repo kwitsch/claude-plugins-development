@@ -1,7 +1,7 @@
 // PHP (phpstan/psalm) fallback and classification cases; ported from test/universal-lint/php.bats.
 import assert from "node:assert/strict";
 import { test } from "vitest";
-import { makeEnv } from "./support/lint-hook.mts";
+import { makeEnv } from "./support/lint-hook.ts";
 
 test("phpstan on PATH, reports issues (exit 1) -> additionalContext returned", () => {
   const e = makeEnv();

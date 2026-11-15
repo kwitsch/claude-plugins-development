@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { accessSync, constants, readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "vitest";
-import { HOOK, PLUGIN } from "./support/lint-hook.mts";
+import { HOOK, PLUGIN } from "./support/lint-hook.ts";
 
 const json = (rel: string) => JSON.parse(readFileSync(path.join(PLUGIN, rel), "utf8"));
 

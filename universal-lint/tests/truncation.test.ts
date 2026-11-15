@@ -1,7 +1,7 @@
 // MAX_CONTEXT_CHARS output capping and MAX_BUFFER_BYTES output collection; ported from test/universal-lint/truncation.bats.
 import assert from "node:assert/strict";
 import { test } from "vitest";
-import { makeEnv } from "./support/lint-hook.mts";
+import { makeEnv } from "./support/lint-hook.ts";
 
 test("output over MAX_CONTEXT_CHARS is capped and marked truncated", () => {
   const e = makeEnv();

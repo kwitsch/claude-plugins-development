@@ -7,7 +7,7 @@ import path from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { test } from "vitest";
 import { spawnGroup } from "../plugin/hooks/lint-file.mjs";
-import { HOOK, makeEnv, payload } from "./support/lint-hook.mts";
+import { HOOK, makeEnv, payload } from "./support/lint-hook.ts";
 
 /**
  * Options as `buildSpawnOpts` builds them, with a test-chosen timeout (the F18 test seam).

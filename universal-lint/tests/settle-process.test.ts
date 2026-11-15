@@ -6,7 +6,7 @@ import path from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { expect, test } from "vitest";
 import { hashPath } from "../plugin/hooks/lint-file.mjs";
-import { HOOK, type LintEnv, makeEnv, payload } from "./support/lint-hook.mts";
+import { HOOK, type LintEnv, makeEnv, payload } from "./support/lint-hook.ts";
 
 /** The 4-line script the scenarios edit. */
 const SH4 = "echo a\necho $1\necho b\necho $2\n";

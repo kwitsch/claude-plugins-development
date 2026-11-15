@@ -5,8 +5,8 @@ import { chmodSync, mkdirSync, readdirSync, readFileSync, rmSync, symlinkSync, w
 import path from "node:path";
 import { test } from "vitest";
 import { FILE_CHANGED_SLOTS } from "../plugin/hooks/lint-file.mjs";
-import { HOOK, makeEnv } from "./support/lint-hook.mts";
-import type { LintEnv } from "./support/lint-hook.mts";
+import { HOOK, makeEnv } from "./support/lint-hook.ts";
+import type { LintEnv } from "./support/lint-hook.ts";
 
 /**
  * Run the hermetic env's git in `dir`.

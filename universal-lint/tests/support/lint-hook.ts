@@ -1,4 +1,4 @@
-// Shared harness for the universal-lint tests (not a test file: vitest only runs *.test.mts).
+// Shared harness for the universal-lint tests (not a test file: vitest only runs *.test.ts).
 // Hermetic: PATH holds only bash, node, git plus the linter stubs a test adds; HOME and CLAUDE_PLUGIN_DATA are per-test.
 import { spawnSync } from "node:child_process";
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
