@@ -67,7 +67,8 @@ the shapes below: `inline-headroom/docs/claude-code-verification.md`.
   effort when outside that range), session effort bold, chosen blue, the rest dim, then the `Jev auto: on/off` Button.
   Subagent turns do not update it; `autoOff` leaves take-steps, bypass and the `estimate_effort` tool alone. The effort row is hidden with `routing: false` and while
   `jevState !== ""`; then the hook draws only the cache countdown (above `await next(e)`, in a column Box, so another
-  plugin's band beneath survives) or, without a countdown, passes; it always passes while `e.props.hasSurvey`.
+  plugin's band beneath survives) or, without a countdown, passes; it always passes while `e.props.hasSurvey`. With
+  the effort row it does not call `next(e)`: the row takes the whole site and a band of a plugin beneath is not drawn.
   `onPress` only flips the flag and calls `$.ui.invalidate` (no storage call; it runs after the frame, so a throw sets `bandStale` and the next applied listing redraws). While `autoOff`,
   the step-0 effort block (first-turn record, estimate, hold) is skipped; the flag is read again after Jev's answer, so a press during the wait keeps the session effort and the band's choice.
 - Cache countdown / auto-compact / Haiku compaction (see `cache-compact.md`): `cacheWatch` passes chunks; only the Jev

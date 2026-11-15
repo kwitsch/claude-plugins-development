@@ -5,7 +5,7 @@
   "scripts": {
     "build": "pnpm -r build",
     "test": "pnpm -r test",
-    "lint": "oxlint && pnpm -r lint"
+    "lint": "oxlint && node development/scripts/wiki-check.ts && pnpm -r lint"
   },
   "devDependencies": {
     "@types/node": "^26.6.6",

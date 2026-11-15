@@ -31,6 +31,10 @@ imports `./policy.mjs`. Tested by `tests/register.test.mts`. Evidence for the sh
   registers no `prompt.compose` hook. Since 2.1.310 core reports each skipped hook once per session as a user-visible
   notice; the one for `tool.check` (the mod's own storage call, re-dispatched beneath the user tier) is unavoidable
   while the mod writes storage and is documented in the README.
+- On 2.1.325 it bypasses user-tier `session.compact` hooks too (root `claude-code-hook-facts.md`), so the dedup reset
+  does not run on a compaction: the corpus keeps the compacted results and a later repeat folds into a pointer to one
+  (recovery: `headroom_retrieve` from `folded`). The README Notes and `policy-dedup-elider.md` describe the reset as
+  it is coded.
 
 ## Storage calls must run in-frame
 

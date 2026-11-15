@@ -6,7 +6,7 @@ paths:
 
 # Rule: verified mods engine (`$`) behaviour for function-hooks modules (2.1.323, checked live 2026-11-13)
 
-Facts a plugin author keeps getting wrong. Re-verify with the `live-verify` skill when the Claude Code version changes. Tool hooks, FileChanged and watchPaths: `claude-code-tool-hook-facts.md`; tools a skill uses: `claude-code-skill-facts.md`.
+Facts a plugin author keeps getting wrong. Re-verify with the `live-verify` skill when the Claude Code version changes. Tool hooks, FileChanged and watchPaths: `claude-code-tool-hook-facts.md`; tools a skill uses: `claude-code-skill-facts.md`. This file holds what every hooks edit needs; the long tail (load and hook order, tool registration and permissions, `$.http`/`$.model`/`$.clock` details, transcript rows and compaction, kit versus engine) is in `development/wiki/facts/mods-engine-*.md` and `test-kit-vs-engine.md`.
 
 ## Module load and static check (fail validate, test or the load)
 
