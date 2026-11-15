@@ -2,7 +2,7 @@
 // bundler cannot rewrite must fail the build instead of shipping a broken lib.mjs.
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "vitest";
@@ -213,4 +213,22 @@ test("an entry that dynamically imports a helper fails the build", () => {
   const r = build({ "a.mts": A, "register.mts": `export async function register(on: unknown): Promise<number> { return (await import("./a.mjs")).one; }\n` });
   assert.equal(r.status, 1);
   assert.match(r.stderr, /register\.mjs dynamically imports \.\/a\.mjs/);
+});
+
+test("a symlinked directory below plugin/ fails the layout check and its target survives the build", () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "symlink-"));
+  try {
+    mkdirSync(path.join(dir, "p/src"), { recursive: true });
+    mkdirSync(path.join(dir, "p/plugin/skills"), { recursive: true });
+    mkdirSync(path.join(dir, "outside"));
+    writeFileSync(path.join(dir, "outside/precious.mjs"), "keep me");
+    writeFileSync(path.join(dir, "p/src/x.mts"), "export const a = 1;\n");
+    writeFileSync(path.join(dir, "p/package.json"), JSON.stringify({ name: "fixture", version: "0.0.1", description: "d", author: { name: "x" }, keywords: [], type: "module", claudePlugin: {} }));
+    symlinkSync("../../../outside", path.join(dir, "p/plugin/skills/shared.json"));
+    const r = spawnSync(process.execPath, [BUILD, path.join(dir, "p")], { encoding: "utf8" });
+    assert.equal(r.status, 1);
+    assert.equal(readFileSync(path.join(dir, "outside/precious.mjs"), "utf8"), "keep me");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

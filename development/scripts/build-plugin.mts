@@ -22,14 +22,15 @@ const SRC = path.join(ROOT, "src");
 /**
  * Every file below a directory, recursively.
  *
+ * Symlinks are returned as files, never followed.
+ *
  * @param dir - Directory to walk; a missing one yields no files.
  * @returns The file paths.
  */
 const walk = (dir: string): string[] =>
   existsSync(dir)
-    ? readdirSync(dir, { recursive: true, withFileTypes: true })
-      .filter((d) => !d.isDirectory())
-      .map((d) => path.join(d.parentPath, d.name))
+    // a symlink is listed as a file and never descended into (a recursive readdir would follow it out of dir)
+    ? readdirSync(dir, { withFileTypes: true }).flatMap((d) => d.isDirectory() ? walk(path.join(dir, d.name)) : [path.join(dir, d.name)])
     : [];
 
 /** Where the bundled helper modules of a function-hooks plugin are written. */
