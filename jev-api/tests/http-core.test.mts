@@ -196,6 +196,16 @@ describe("sendRequest", () => {
     expect(await sendRequest(env, STATE, QUESTIONS, fake(named("TimeoutError", "timeout after 4000ms")).doFetch)).toEqual({ kind: "error", code: "timeout", message: "timeout after 4000ms" });
     expect(await sendRequest(env, STATE, QUESTIONS, fake(named("AbortError", "the call was abandoned")).doFetch)).toEqual({ kind: "error", code: "aborted", message: "the call was abandoned" });
   });
+  it("hides a whole piece that contains the host, not only the host inside it", async () => {
+    const e = new Error("bad upstream proxy.corp.S3cretTok and seg proxy.corp-seg.Tok2");
+    const out = await sendRequest({ jevUrl: "https://proxy.corp/jev?upstream=proxy.corp.S3cretTok" }, STATE, QUESTIONS, fake(e).doFetch);
+    expect(JSON.stringify(out)).not.toContain("S3cretTok");
+    const out2 = await sendRequest({ jevUrl: "https://proxy.corp/proxy.corp.S3cretTok/jev" }, STATE, QUESTIONS, fake(new Error("echo proxy.corp.S3cretTok")).doFetch);
+    expect(JSON.stringify(out2)).not.toContain("S3cretTok");
+    const out3 = await sendRequest({ jevUrl: "https://proxy.corp/jev", key: "proxy.corp.KeyRest9" }, STATE, QUESTIONS, fake(new Error("k proxy.corp.KeyRest9")).doFetch);
+    expect(JSON.stringify(out3)).not.toContain("KeyRest9");
+  });
+
   it("redacts the URL, the host and a key of 6 or more characters in a network error", async () => {
     const e = new Error(`fetch failed https://jev.example/v1/x?token=abc key ${KEY} host jev.example`);
     expect(await sendRequest(env, STATE, QUESTIONS, fake(e).doFetch)).toEqual({ kind: "error", code: "network", message: "fetch failed <JEV_URL> key <TYPESAFE_API_KEY> host <host>" });

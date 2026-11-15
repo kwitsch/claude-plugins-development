@@ -310,11 +310,13 @@ export async function sendRequest(env: HttpEnv, state: string, questionsObject: 
   }
   if (key && key.length >= MIN_REDACT_KEY) literals.set(key, "<TYPESAFE_API_KEY>"); // not a short key: it would match ordinary words
   const literalRe = literals.size ? new RegExp([...literals.keys()].sort((x, y) => y.length - x.length).map((l) => l.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|"), "g") : undefined;
+  const hostLower = hostOf(target.url).toLowerCase();
+  const hostLits = custom ? [...literals].filter(([l]) => l.toLowerCase().includes(hostLower)).sort((x, y) => y[0].length - x[0].length) : [];
   const redact = (text: string): string => {
     // The whole URL first (it may contain the key), the host before the literals (a host label may hold the key), then the literals.
     let t = custom ? hide(text, target.url, env.jevUrl ? "<JEV_URL>" : "<TYPESAFE_BASE_URL>/v1/systemone") : text;
-    // A key that contains the host text (`jev.<rest>`) goes first, whole; a host that contains the key goes before it.
-    if (custom && key && key.length >= MIN_REDACT_KEY && key.toLowerCase().includes(hostOf(target.url).toLowerCase())) t = t.replaceAll(key, "<TYPESAFE_API_KEY>");
+    // Every literal that contains the host text (a key `jev.<rest>`, a query value `host.secret`) goes whole, longest first, before the host is cut out of it.
+    for (const [l, p] of hostLits) t = t.replaceAll(l, p);
     if (custom) t = hideHost(t, target.url);
     return literalRe ? t.replace(literalRe, (m) => literals.get(m) ?? m) : t;
   };
