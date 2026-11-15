@@ -4,10 +4,10 @@
  * @packageDocumentation
  */
 
-import { SPECS } from "./tools.mjs";
-import { TOOLS } from "./types.mjs";
-import type { Engine, ToolName } from "./types.mjs";
-import { message } from "./util.mjs";
+import { SPECS } from "./tools.js";
+import { TOOLS } from "./types.js";
+import type { Engine, ToolName } from "./types.js";
+import { message } from "./util.js";
 
 /** How long an owned tool call waits for the tools to register before it goes on (ms; session.start waits five times as long): a registration that never answers must not hold a call. */
 export const REGISTER_WAIT_MS = 1000;

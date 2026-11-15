@@ -13,7 +13,7 @@
   },
   "type": "module",
   "scripts": {
-    "build": "node ../development/scripts/build-plugin.mts",
+    "build": "node ../development/scripts/build-plugin.ts",
     "test": "vitest run --config \"$(git rev-parse --show-toplevel)/vitest.config.mts\""
   },
   "claudePlugin": {}

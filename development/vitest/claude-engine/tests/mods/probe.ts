@@ -1,5 +1,5 @@
 // A probe for the kit's own semantics: origins, a throwing hook, an unanswered call, a mods API call another plugin hooks.
-import type { On } from "../../index.mts";
+import type { On } from "../../index.ts";
 
 export function register(on: On, options?: unknown) {
   on("command.run", { command: "origin" }, (_$, _e, next) => ({ text: JSON.stringify(next.origin) }));

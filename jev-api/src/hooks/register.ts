@@ -6,7 +6,7 @@
  * @remarks
  * EARLY ACCESS API. No engine type import (the engine typings are not in the repo): the used `$` members and
  * events are typed structurally in `types.mts`. Only this file is listed in `hooks.json`, and
- * `development/scripts/build-plugin.mts` (`pluginBuild.bundleHooksLib`) keeps only `register.mjs` unmangled,
+ * `development/scripts/build-plugin.ts` (`pluginBuild.bundleHooksLib`) keeps only `register.mjs` unmangled,
  * uncompressed and with its whitespace, since the engine's static check wants `$`/`on` spelled as such and no
  * `$.<noun>` passed as a bare value; every hook is a named function literal. Its siblings (`types`, `util`, `tools`,
  * `input`, `haiku`, `size`, `jev`, `transport`, `registry`) are bundled into one `./lib.mjs` (compressed and stripped of
@@ -17,18 +17,18 @@
  * @packageDocumentation
  */
 
-import { askHaiku, HAIKU_MAX_CHARS } from "./haiku.mjs";
-import { parseInput } from "./input.mjs";
-import { answerJev } from "./jev.mjs";
-import { ensureTools, REGISTER_WAIT_MS } from "./registry.mjs";
-import type { RegState } from "./registry.mjs";
-import { cutState, DEFAULT_CONTEXT_TOKENS, DEFAULT_DENSITY, loadKnowledge } from "./size.mjs";
-import type { Knowledge } from "./size.mjs";
-import { TOOL_PREFIX } from "./tools.mjs";
-import { configureServer, newLink, PLUGIN, SERVER_TOOL_PREFIX } from "./transport.mjs";
-import { DEFAULT_OVERFLOW, TOOLS } from "./types.mjs";
-import type { On, Options, ToolName } from "./types.mjs";
-import { DEFAULT_TIMEOUT_S, fail, isOverflow, message, seconds, untilAbort } from "./util.mjs";
+import { askHaiku, HAIKU_MAX_CHARS } from "./haiku.js";
+import { parseInput } from "./input.js";
+import { answerJev } from "./jev.js";
+import { ensureTools, REGISTER_WAIT_MS } from "./registry.js";
+import type { RegState } from "./registry.js";
+import { cutState, DEFAULT_CONTEXT_TOKENS, DEFAULT_DENSITY, loadKnowledge } from "./size.js";
+import type { Knowledge } from "./size.js";
+import { TOOL_PREFIX } from "./tools.js";
+import { configureServer, newLink, PLUGIN, SERVER_TOOL_PREFIX } from "./transport.js";
+import { DEFAULT_OVERFLOW, TOOLS } from "./types.js";
+import type { On, Options, ToolName } from "./types.js";
+import { DEFAULT_TIMEOUT_S, fail, isOverflow, message, seconds, untilAbort } from "./util.js";
 
 /**
  * Registers the module's hooks.

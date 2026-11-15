@@ -12,10 +12,10 @@
  * @packageDocumentation
  */
 
-import { named, sendRequest } from "../shared/http.mjs";
-import type { DoFetch, HttpEnv, Outcome } from "../shared/http.mjs";
-import type { Engine, McpResult } from "./types.mjs";
-import { isRecord, json, message } from "./util.mjs";
+import { named, sendRequest } from "../shared/http.js";
+import type { DoFetch, HttpEnv, Outcome } from "../shared/http.js";
+import type { Engine, McpResult } from "./types.js";
+import { isRecord, json, message } from "./util.js";
 
 /** This plugin's name: the origin of its own calls in `tool.check`, and part of its server's tool names. */
 export const PLUGIN = "jev-api";

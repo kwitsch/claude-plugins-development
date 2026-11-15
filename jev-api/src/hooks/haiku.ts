@@ -4,8 +4,8 @@
  * @packageDocumentation
  */
 
-import type { Engine, Question, ToolName, ToolResult } from "./types.mjs";
-import { fail, isRecord, json, message, questionId, questionsBody } from "./util.mjs";
+import type { Engine, Question, ToolName, ToolResult } from "./types.js";
+import { fail, isRecord, json, message, questionId, questionsBody } from "./util.js";
 
 /** The model that stands in for Jev when none of the System One variables is set. */
 export const HAIKU_MODEL = "claude-haiku-5-5";

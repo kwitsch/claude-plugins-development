@@ -1,5 +1,5 @@
 // The hello-tabs pane of the docs: two tabs, the second counts presses and saves the count.
-import type { On } from "../../index.mts";
+import type { On } from "../../index.ts";
 
 export function register(on: On) {
   let tab = "one";

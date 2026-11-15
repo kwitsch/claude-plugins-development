@@ -4,8 +4,8 @@
  * @packageDocumentation
  */
 
-import type { Engine, ToolName, ToolResult } from "./types.mjs";
-import { fail, isRecord, MAX_TIMEOUT_S } from "./util.mjs";
+import type { Engine, ToolName, ToolResult } from "./types.js";
+import { fail, isRecord, MAX_TIMEOUT_S } from "./util.js";
 
 /** The context window of System One in tokens (`n_ctx`, measured live 2026-11-14: a prompt of this many tokens is refused, one less passes). The server's own `n_ctx` replaces it once a rejection reports it. */
 export const DEFAULT_CONTEXT_TOKENS = 32768;

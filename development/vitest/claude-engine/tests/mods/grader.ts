@@ -1,5 +1,5 @@
 // The grader example of the docs: /grade asks a model and reports PASS or FAIL.
-import type { On } from "../../index.mts";
+import type { On } from "../../index.ts";
 
 export function register(on: On) {
   on("command.run", { command: "grade" }, async ($, e) => {

@@ -19,8 +19,8 @@
 import type { CallToolResult, DiscoverResult, Implementation, JSONRPCErrorResponse, JSONRPCRequest, JSONRPCResultResponse, ListToolsResult, ServerCapabilities, Tool } from "@modelcontextprotocol/server";
 import { readFileSync } from "node:fs";
 import process from "node:process";
-import { messageOf, named, sendRequest } from "../shared/http.mjs";
-import type { HttpEnv, Outcome } from "../shared/http.mjs";
+import { messageOf, named, sendRequest } from "../shared/http.js";
+import type { HttpEnv, Outcome } from "../shared/http.js";
 
 /** Server name reported on `initialize`; the `.mcp.json` key is `http`, the engine names the server `plugin:jev-api:http`. */
 const SERVER_NAME = "jev-api-http";

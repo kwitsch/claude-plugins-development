@@ -1,8 +1,8 @@
 // The docs' kit examples (https://code.claude.com/docs/en/plugins/mods/test.md), ported by changing imports only.
 import { expect } from "vitest";
-import { createKit } from "../index.mts";
+import { createKit } from "../index.ts";
 
-const mod = (name: string) => new URL(`./mods/${name}.mts`, import.meta.url);
+const mod = (name: string) => new URL(`./mods/${name}.ts`, import.meta.url);
 
 {
   const { test } = createKit({ module: mod("tally"), plugin: "first-mod" });

@@ -4,9 +4,9 @@
  * @packageDocumentation
  */
 
-import { DEFAULT_OVERFLOW, OVERFLOWS, TYPES } from "./types.mjs";
-import type { ToolName, ToolSpec } from "./types.mjs";
-import { DEFAULT_TIMEOUT_S, MAX_TIMEOUT_S } from "./util.mjs";
+import { DEFAULT_OVERFLOW, OVERFLOWS, TYPES } from "./types.js";
+import type { ToolName, ToolSpec } from "./types.js";
+import { DEFAULT_TIMEOUT_S, MAX_TIMEOUT_S } from "./util.js";
 
 /** The `state` input property shared by the tools. */
 export const STATE = { type: "string", description: "The text the question is about." };
