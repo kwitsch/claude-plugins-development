@@ -115,7 +115,7 @@ The built-in `cc-plugin-sec-default` passes `session.compact` on past every user
 
 `package.json` is the only manifest source (`claudePlugin.userConfig`, 14 options). `pnpm build` compiles
 `src/**/*.ts` to `plugin/**/*.mjs` (`plugin/hooks/register.mjs` unmangled; the other helpers bundle into `plugin/hooks/lib.mjs`, `pluginBuild.bundleHooksLib: true`) and generates
-`plugin/.claude-plugin/plugin.json`. Tests (`tests/*.test.ts`, vitest + `claude-engine-vitest`) run against `plugin/`; helper unit tests import the `src/hooks/*.ts` sources directly (their `plugin/` names are gone after bundling).
+`plugin/.claude-plugin/plugin.json`. Tests (`tests/*.test.ts`, vitest + `claude-engine-vitest`) run against `plugin/`: they import only `plugin/hooks/register.mjs`, through the shared kit `tests/support/kit.ts` (the standard of jev-api). Pure helpers are tested through the hooks, not by importing `src/`.
 
 ## Commands
 

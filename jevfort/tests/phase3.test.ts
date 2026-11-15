@@ -1,11 +1,11 @@
-// Phase 3 (subagent types, compaction) of the built plugin/hooks/*.mjs: upstream jev-pilot
-// tests/phase3.test.ts. The pure tests come first; the kit tests follow.
+// Phase 3 (subagent types, compaction) through the built plugin/hooks/register.mjs: upstream jev-pilot
+// tests/phase3.test.ts, as kit tests only (the standard of jev-api: no import of the sources).
 import { createKit } from "claude-engine-vitest";
 import type { On } from "claude-engine-vitest";
-import { expect, test as pureTest } from "vitest";
-import { compactInstructions, compactItems } from "../src/hooks/compact.ts";
-import type { SessionMessage } from "../src/hooks/context.ts";
-import { JEV_BATCH } from "../src/hooks/jev.ts";
+import { expect } from "vitest";
+
+/** jev-api's batch tool, the name jevfort asks Jev through. */
+const JEV_BATCH = "mcp__jev-api__batch";
 
 // The manifest defaults (jevfort/package.json claudePlugin.userConfig): the kit does not fill userConfig defaults.
 const DEFAULTS = {
@@ -138,8 +138,8 @@ test("An agent type no longer offered in a later turn is not a switch target", a
   expect(Object.keys(sent[0].criteria as object)).toEqual(["general-purpose", "Explore"]);
 });
 
-pureTest("Compaction instructions keep relevant results and mark stale ones", () => {
-  const messages: SessionMessage[] = [
+test("Compaction instructions keep relevant results and mark stale ones", async ($, on) => {
+  const messages: Msg[] = [
     { role: "user", text: "fix the failing date test", toolUses: [] },
     {
       role: "assistant",
@@ -151,22 +151,35 @@ pureTest("Compaction instructions keep relevant results and mark stale ones", ()
       ],
     },
   ];
-  const items = compactItems(messages);
-  expect(items.map((i) => i.label)).toEqual(["Read /proj/todo.js", "Bash ls", "Bash npm test"]);
-  const text = compactInstructions(items, [2.5, 0.2, 2.9]) ?? "";
-  expect(text).toContain("Keep exact details (paths, errors, decisions, values) from: Read /proj/todo.js; Bash npm test.");
-  expect(text).toContain("dropped: Bash ls.");
+  // The ranking scores of the three results, by their labels: the first and last are kept, the middle one is stale.
+  const scores: Record<string, number> = { "Read /proj/todo.js": 2.5, "Bash ls": 0.2, "Bash npm test": 2.9 };
+  base(on, (q) => {
+    const label = Object.keys(scores).find((l) => q.instructions.includes(`Call: ${l}.`));
+    return { type: "score", score: label === undefined ? 0.3 : scores[label], probabilities: {}, confidence: 0.8 };
+  }, messages);
+  let instructions = "";
+  on("session.compact", (_$, e) => {
+    instructions = typeof e.instructions === "string" ? e.instructions : "";
+    return { skip: "test" };
+  });
+  await $.session.compact({ trigger: "manual", messages });
+  expect(instructions).toContain("Keep exact details (paths, errors, decisions, values) from: Read /proj/todo.js; Bash npm test.");
+  expect(instructions).toContain("dropped: Bash ls.");
 });
 
-pureTest("compactItems keeps the newest 30 results, results cut at 500 and command labels at 80 characters", () => {
+test("the ranking covers the newest 30 results, cut at 500 characters, and their command labels at 80", async ($, on) => {
   const uses = Array.from({ length: 35 }, (_, i) => ({ tool_use_id: `t${i + 1}`, tool: "Bash", input: { command: "x".repeat(200) }, text: "r".repeat(2000) }));
-  const items = compactItems([{ role: "assistant", text: "", toolUses: uses }]);
-  expect(items).toHaveLength(30);
-  expect(items[0].id).toBe("t6");
-  expect(items[29].id).toBe("t35");
-  for (const i of items) {
-    expect(i.result).toBe(`${"r".repeat(500)}… [1500 more chars]`);
-    expect(i.label).toBe(`Bash ${"x".repeat(80)}… [120 more chars]`);
+  const messages: Msg[] = [
+    { role: "user", text: "fix the failing date test", toolUses: [] },
+    { role: "assistant", text: "", toolUses: uses },
+  ];
+  const sent = base(on, () => ({ type: "score", score: 0.3, probabilities: {}, confidence: 0.8 }), messages);
+  on("session.compact", () => ({ skip: "test" }));
+  await $.session.compact({ trigger: "manual", messages });
+  expect(sent).toHaveLength(30);
+  for (const q of sent) {
+    expect(q.instructions).toContain(`Bash ${"x".repeat(80)}… [120 more chars]`);
+    expect(q.instructions).toContain(`${"r".repeat(500)}… [1500 more chars]`);
   }
 });
 

@@ -1,24 +1,48 @@
-// The jev-api tool name jevfort needs, and whether a tool listing lacks it (built plugin/hooks/jev.mjs).
-import assert from "node:assert/strict";
-import { test } from "vitest";
-import { JEV_BATCH, JEV_TOOL_PREFIX, JEV_TOOLS, missingJevTools } from "../src/hooks/jev.ts";
+// The jev-api tool jevfort needs (`mcp__jev-api__batch`), through the built plugin/hooks/register.mjs: a listing that
+// has it lets `estimate_effort` ask Jev, a listing that lacks it answers the default effort without asking.
+import { expect } from "vitest";
+import { byId, DEFAULTS, makeKit, mech, type Runner, scored } from "./support/kit.ts";
 
-test("the needed tool is jev-api's batch", () => {
-  assert.equal(JEV_TOOL_PREFIX, "mcp__jev-api__");
-  assert.equal(JEV_BATCH, "mcp__jev-api__batch");
-  assert.deepEqual(JEV_TOOLS, [JEV_BATCH]);
+const { test, setup } = makeKit(DEFAULTS);
+const BATCH = "mcp__jev-api__batch";
+const jev = (name: string) => ({ name, description: name, mcp: true });
+
+/**
+ * Calls the estimate tool once.
+ *
+ * @param $ - The test's `$`.
+ * @returns The effort and its source.
+ */
+async function estimate($: Runner) {
+  const res = (await $.tool.call({ tool: "mcp__jevfort__estimate_effort", model: "opus", defaultEffort: "high", minEffort: "low", maxEffort: "xhigh", prompt: "add a retry" })) as { result?: string };
+  return JSON.parse(res.result ?? "null") as { effort: string; source: string };
+}
+
+test("the needed tool is jev-api's batch: a listing with it lets the estimate ask Jev", async ($, on) => {
+  const { sent } = setup(on, { messages: [], jev: byId({ effort: scored(1.6), mechanical: mech(0.1) }), tools: [jev(BATCH)] });
+  expect(await estimate($)).toEqual({ effort: "medium", source: "jev" });
+  expect(sent.map((q) => q.id)).toEqual(["effort", "mechanical"]);
 });
 
-test("nothing is missing when batch is listed", () => {
-  assert.deepEqual(missingJevTools([JEV_BATCH]), []);
-  assert.deepEqual(missingJevTools(["Bash", JEV_BATCH, "mcp__jevfort__estimate_effort"]), []);
+test("nothing is missing when batch is listed among other tools", async ($, on) => {
+  setup(on, { messages: [], jev: byId({ effort: scored(1.6), mechanical: mech(0.1) }), tools: [jev("Bash"), jev(BATCH), jev("mcp__jevfort__estimate_effort")] });
+  expect(await estimate($)).toEqual({ effort: "medium", source: "jev" });
 });
 
-test("jev-api 0.1's single-question tools alone are not enough", () => {
-  assert.deepEqual(missingJevTools(["mcp__jev-api__noul", "mcp__jev-api__choice", "mcp__jev-api__score"]), [JEV_BATCH]);
+test("jev-api 0.1's single-question tools alone are not enough: the estimate falls back", async ($, on) => {
+  const { sent } = setup(on, { messages: [], jev: byId({ effort: scored(1.6), mechanical: mech(0.1) }), tools: ["noul", "choice", "score"].map((t) => jev(`mcp__jev-api__${t}`)) });
+  expect(await estimate($)).toEqual({ effort: "high", source: "fallback" });
+  expect(sent).toHaveLength(0);
 });
 
-test("an empty listing or a similar name misses batch", () => {
-  assert.deepEqual(missingJevTools([]), [JEV_BATCH]);
-  assert.deepEqual(missingJevTools(["mcp__other__batch", "batch", "mcp__jev-api__batches"]), [JEV_BATCH]);
+test("an empty listing misses batch", async ($, on) => {
+  const { sent } = setup(on, { messages: [], jev: byId({ effort: scored(1.6), mechanical: mech(0.1) }), tools: [] });
+  expect(await estimate($)).toEqual({ effort: "high", source: "fallback" });
+  expect(sent).toHaveLength(0);
+});
+
+test("a similar name misses batch", async ($, on) => {
+  const { sent } = setup(on, { messages: [], jev: byId({ effort: scored(1.6), mechanical: mech(0.1) }), tools: ["mcp__other__batch", "batch", "mcp__jev-api__batches"].map(jev) });
+  expect(await estimate($)).toEqual({ effort: "high", source: "fallback" });
+  expect(sent).toHaveLength(0);
 });

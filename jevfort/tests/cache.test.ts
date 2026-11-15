@@ -1,14 +1,17 @@
 // Cache countdown, auto-compact and Haiku compaction (ported from HeyCubit/effortless) of the built plugin/hooks/*.mjs.
 // None of it needs jev-api: the kit tests list no tools.
 import { createKit } from "claude-engine-vitest";
-import { expect, test as pureTest } from "vitest";
-import { CACHE_TTL, cacheColor, cacheLabel, cacheTtlOf, minutesLeft, nextTtl } from "../src/hooks/cache.ts";
-import { COMPACT_MAX_TOKENS, compactTranscript, haikuTranscript } from "../src/hooks/compact.ts";
+import { expect } from "vitest";
 
 /** Options passed to the kit: effort routing, compaction and Haiku compaction on, auto-compact at 60%. */
 const DEFAULTS = { routing: true, compaction: true, haikuCompact: true, autoCompactPercent: 60 };
 /** Test kit bound to the built `plugin/hooks/register.mjs`. */
 const { test, mock } = createKit({ module: new URL("../plugin/hooks/register.mjs", import.meta.url), plugin: "jevfort", options: DEFAULTS });
+
+/** The cache lifetimes the countdown assumes (ms): 5 minutes and 1 hour. */
+const CACHE_TTL = { "5m": 5 * 60_000, "1h": 60 * 60_000 } as const;
+/** The output cap of a Haiku compaction summary (tokens). */
+const COMPACT_MAX_TOKENS = 16_000;
 
 /** Usage of one main-loop step that writes 900 tokens to the one-hour cache. */
 const usage1h = { input_tokens: 5, output_tokens: 5, cache_read_input_tokens: 0, cache_creation_input_tokens: 900, cache_creation: { ephemeral_1h_input_tokens: 900 } };
@@ -21,36 +24,96 @@ const BENEATH = { type: "Text", props: {}, children: ["beneath"] };
 /** The band's countdown text (` cache 59m`), or `undefined` when it shows none. */
 const label = async (ui: { find(q: { type: string; text: RegExp }): Promise<{ children: unknown[] } | undefined> }) => (await ui.find({ type: "Text", text: /cache/ }))?.children[0];
 
-pureTest("cache lifetime: from the write, or 1h once a warm read after 5 minutes shows it", () => {
-  expect(cacheTtlOf(usage1h)).toBe("1h");
-  expect(cacheTtlOf({ cache_creation: { ephemeral_5m_input_tokens: 10 } })).toBe("5m");
-  expect(cacheTtlOf(null)).toBeUndefined();
-  const warm = { input_tokens: 10, cache_read_input_tokens: 900, cache_creation_input_tokens: 0 };
-  expect(nextTtl(warm, "5m", CACHE_TTL["5m"] + 1)).toBe("1h");
-  expect(nextTtl(warm, "5m", 1000)).toBe("5m");
-  // A short 5-minute tail over a warm 1-hour read never lowers the lifetime.
-  expect(nextTtl({ ...warm, cache_creation: { ephemeral_5m_input_tokens: 5 } }, "1h", 1000)).toBe("1h");
+/** A 5-minute cache write: the usage names the 5-minute lifetime. */
+const usage5m = { input_tokens: 5, output_tokens: 5, cache_read_input_tokens: 0, cache_creation_input_tokens: 900, cache_creation: { ephemeral_5m_input_tokens: 900 } };
+/** A warm read of 900 tokens with no write: the cache was still there. */
+const warmRead = { input_tokens: 10, output_tokens: 5, cache_read_input_tokens: 900, cache_creation_input_tokens: 0 };
+/** Usage as Claude Code 2.1.322 reports it: four counts and the model, no `cache_creation` detail. */
+const cold = { input_tokens: 5, output_tokens: 5, cache_read_input_tokens: 0, cache_creation_input_tokens: 90_000, model: "claude-opus-5-5" };
+
+test("a 1-hour cache write starts a 59-minute countdown", async ($, on) => {
+  on("ui.render", () => BENEATH);
+  const { clock } = chatSetup(on, 10);
+  await $.session.start(START);
+  const ui = await $.ui.mount(BAND);
+  await respond($);
+  await clock.settle();
+  expect(await label(ui)).toBe(" cache 59m");
+  await ui.unmount();
 });
 
-pureTest("countdown: minutes, label and colour", () => {
-  expect(minutesLeft(0, 5)).toBeNull();
-  expect(minutesLeft(1000, 2000)).toBe(0);
-  expect(minutesLeft(61_000, 0)).toBe(2);
-  expect(cacheLabel(0)).toBe("cache cold");
-  expect(cacheLabel(1)).toBe("cache <1m");
-  expect(cacheLabel(59)).toBe("cache 58m");
-  expect(cacheColor(59)).toBeUndefined();
-  expect(cacheColor(21)).toBe("yellow");
-  expect(cacheColor(6)).toBe("red");
-  expect(cacheColor(0)).toBe("cyan");
+test("a 5-minute cache write starts a countdown of about 5 minutes", async ($, on) => {
+  on("ui.render", () => BENEATH);
+  const { clock, state } = chatSetup(on, 10);
+  state.usage = usage5m;
+  await $.session.start(START);
+  const ui = await $.ui.mount(BAND);
+  await respond($);
+  await clock.settle();
+  expect(await label(ui)).toMatch(/^ cache [45]m$/);
+  await ui.unmount();
 });
 
-pureTest("the engine's own usage names no cache lifetime: the assumed 1 hour stays", () => {
-  // Claude Code 2.1.322 reports a step's usage as the four counts and the model, without `cache_creation`.
-  const cold = { input_tokens: 5, output_tokens: 5, cache_read_input_tokens: 0, cache_creation_input_tokens: 90_000, model: "claude-opus-5-5" };
-  expect(cacheTtlOf(cold)).toBeUndefined();
-  expect(nextTtl(cold, "1h", 20 * 60_000)).toBe("1h");
-  expect(nextTtl({ ...cold, cache_read_input_tokens: 90_000, cache_creation_input_tokens: 0 }, "1h", 20 * 60_000)).toBe("1h");
+test("a warm read after the 5-minute lifetime shows the 1-hour lifetime", async ($, on) => {
+  on("ui.render", () => BENEATH);
+  const { clock, state } = chatSetup(on, 10);
+  state.usage = usage5m;
+  await $.session.start(START);
+  const ui = await $.ui.mount(BAND);
+  await respond($);
+  await clock.advance(CACHE_TTL["5m"] + 1_000);
+  state.usage = warmRead;
+  await respond($);
+  await clock.settle();
+  expect(await label(ui)).toBe(" cache 59m");
+  await ui.unmount();
+});
+
+test("a 5-minute write over a warm 1-hour read keeps the 1-hour lifetime", async ($, on) => {
+  on("ui.render", () => BENEATH);
+  const { clock, state } = chatSetup(on, 10);
+  await $.session.start(START);
+  const ui = await $.ui.mount(BAND);
+  await respond($);
+  await clock.advance(6 * 60_000);
+  state.usage = { ...warmRead, cache_creation: { ephemeral_5m_input_tokens: 5 } };
+  await respond($);
+  await clock.settle();
+  expect(await label(ui)).toBe(" cache 59m");
+  await ui.unmount();
+});
+
+test("the countdown turns yellow at 21 minutes left, red at 6, and cyan once cold", async ($, on) => {
+  on("ui.render", () => BENEATH);
+  const { clock } = chatSetup(on, 10);
+  await $.session.start(START);
+  const ui = await $.ui.mount(BAND);
+  await respond($);
+  await clock.settle();
+  const colour = async () => (await ui.find({ type: "Text", text: /cache/ }))?.props.color;
+  expect(await colour()).toBeUndefined();
+  await clock.advance(39 * 60_000);
+  expect(await colour()).toBe("yellow");
+  await clock.advance(15 * 60_000);
+  expect(await colour()).toBe("red");
+  await clock.advance(6 * 60_000);
+  expect(await label(ui)).toBe(" cache cold");
+  expect(await colour()).toBe("cyan");
+  await ui.unmount();
+});
+
+test("usage that names no lifetime keeps the assumed 1-hour countdown", async ($, on) => {
+  on("ui.render", () => BENEATH);
+  const { clock, state } = chatSetup(on, 10);
+  state.usage = cold;
+  await $.session.start(START);
+  const ui = await $.ui.mount(BAND);
+  await respond($);
+  await clock.advance(20 * 60_000);
+  await clock.settle();
+  const minutes = Number(/(\d+)m$/.exec(String(await label(ui)))?.[1]);
+  expect(minutes).toBeGreaterThanOrEqual(38);
+  await ui.unmount();
 });
 
 /** An assistant row with one finished tool call. */
@@ -60,9 +123,10 @@ const result = (id: string, text: string) => ({ role: "user" as const, text: "",
 /** A row with nothing to print but its text. */
 const filler = (role: "user" | "assistant") => ({ role, text: "more", toolUses: [] });
 
-pureTest("the Haiku transcript prints each result once, keeps the tail whole and cuts old tool results", () => {
+test("the Haiku transcript prints each result once, keeps the tail whole and cuts old tool results", async ($, on) => {
+  const asked = haikuSetup(on, "S".repeat(300));
   const messages = [
-    { role: "user" as const, text: "go", toolUses: [] },
+    { role: "user", text: "go", toolUses: [] },
     call("old", `OLDMARK${"x".repeat(4993)}`),
     result("old", `OLDMARK${"x".repeat(4993)}`),
     filler("assistant"),
@@ -75,18 +139,22 @@ pureTest("the Haiku transcript prints each result once, keeps the tail whole and
     // A call whose result no user row carries yet is printed from the call.
     call("pending", "PENDMARK"),
   ];
-  const t = compactTranscript(messages);
-  expect(t.split("OLDMARK")).toHaveLength(2);
-  expect(t).toContain("3000 more chars");
-  expect(t.split("NEWMARK")).toHaveLength(2);
-  expect(t.match(/§/g)).toHaveLength(5000);
-  expect(t.split("PENDMARK")).toHaveLength(2);
-  expect(haikuTranscript(messages)).toBeDefined();
+  await $.session.compact({ trigger: "manual", messages, instructions: "" });
+  expect(asked).toHaveLength(1);
+  const prompt = asked[0];
+  expect(prompt.split("OLDMARK")).toHaveLength(2);
+  expect(prompt).toContain("3000 more chars");
+  expect(prompt.split("NEWMARK")).toHaveLength(2);
+  expect(prompt.match(/§/g)).toHaveLength(5000);
+  expect(prompt.split("PENDMARK")).toHaveLength(2);
 });
 
-pureTest("a transcript too long even in the short form gets no Haiku summary", () => {
+test("a transcript too long even in the short form gets no Haiku summary", async ($, on) => {
+  on("session.compact", () => ({ skip: "test" }));
+  const asked = haikuSetup(on, "S".repeat(300));
   const huge = { role: "user" as const, text: "z".repeat(1_300_000), toolUses: [] };
-  expect(haikuTranscript([huge, huge])).toBeUndefined();
+  await $.session.compact({ trigger: "manual", messages: [huge, huge], instructions: "" });
+  expect(asked).toHaveLength(0);
 });
 
 /** A session with a long enough transcript, no jev-api tools and a Haiku that answers `text`. */
@@ -195,7 +263,7 @@ async function respond($: Parameters<Parameters<typeof test>[2]>[0]) {
 function chatSetup(on: Parameters<typeof mock.clock>[0], percent: number, run: () => unknown = () => ({ value: undefined })) {
   mock.store(on, {});
   const clock = mock.clock(on);
-  const state = { compacts: 0, hold: false, held: [] as Array<() => void> };
+  const state = { compacts: 0, hold: false, held: [] as Array<() => void>, usage: usage1h as Record<string, unknown> };
   on("session.cwd", () => ({ value: "/proj" }));
   on("ui.status", () => ({ value: undefined }));
   on("tool.list", () => ({ value: [] }));
@@ -203,8 +271,8 @@ function chatSetup(on: Parameters<typeof mock.clock>[0], percent: number, run: (
   on("session.end", async () => ({}));
   on("turn.complete", async () => ({}));
   on("turn.step", async function*(_$, e) {
-    yield { kind: "stop", stopReason: "end_turn", usage: usage1h };
-    return { turnId: e.turnId, index: e.index, answer: "ok", toolUses: [], stopReason: "end_turn", usage: usage1h };
+    yield { kind: "stop", stopReason: "end_turn", usage: state.usage };
+    return { turnId: e.turnId, index: e.index, answer: "ok", toolUses: [], stopReason: "end_turn", usage: state.usage };
   });
   on("session.usage", () => {
     const answer = { value: { context: { tokens: 1, window: 100, percent } } };
