@@ -67,7 +67,8 @@ export function hasAnswerShape(q: Question, a: Record<string, unknown>): boolean
     const options = Object.keys(q.criteria);
     return typeof a["choice"] === "string" && options.includes(a["choice"]) && hasProbabilities(a["probabilities"], options);
   }
-  return typeof a["score"] === "number" && Number.isFinite(a["score"]) && hasProbabilities(a["probabilities"], q.criteria.map((_, i) => String(i)));
+  const score = a["score"];
+  return typeof score === "number" && Number.isFinite(score) && score >= 0 && score <= q.criteria.length - 1 && hasProbabilities(a["probabilities"], q.criteria.map((_, i) => String(i)));
 }
 
 /**

@@ -501,6 +501,8 @@ test("a System One answer with invalid fields is an error, for noul, choice and 
   await bad("choice", { type: "choice", choice: "greeting", confidence: 0.8, probabilities: { greeting: 0.8 } });
   await bad("score", { ...ANSWERS.score as object, score: "high" });
   await bad("score", { ...ANSWERS.score as object, probabilities: { 0: 0.5 } });
+  await bad("score", { ...ANSWERS.score as object, score: 99 });
+  await bad("score", { ...ANSWERS.score as object, score: -0.5 });
 });
 
 test("a response without answers is an error", async ($, on) => {
