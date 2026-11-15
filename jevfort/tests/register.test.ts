@@ -1836,6 +1836,21 @@ test("a blank Jev variable counts as unset, as in jev-api: Haiku budget and time
   expect(sent.every((q) => q.timeout === 14)).toBe(true);
 });
 
+test("an estimate_effort call between session.start and the first turn: its env read is dropped, the first turn counts the new JEV_URL", async ($, on) => {
+  const env: Record<string, string> = {};
+  const { sent } = setup(on, { messages: [user("what does this project do?")], jev: byId({ effort: scored(1.6), mechanical: mech(0.1) }), env });
+  claudeBeneath(on, []);
+  sessionStubs(on);
+  await $.session.start(START);
+  await estimateCall($);
+  expect(sent.at(-1)?.timeout).toBe(14);
+  env.JEV_URL = "https://jev.example/x";
+  const before = sent.length;
+  await drain($.turn.step(step));
+  expect(ids(sent.slice(before))).toEqual(["effort", "mechanical"]);
+  expect(sent.slice(before).every((q) => q.timeout === 4)).toBe(true);
+});
+
 test("a settings env change between turns counts from the next turn, also after the task-end check read the env", async ($, on) => {
   const env: Record<string, string> = {};
   const { sent } = setup(on, { messages: [user("what does this project do?"), { role: "assistant", text: "It does X.", toolUses: [] }], jev: () => undefined, env });
