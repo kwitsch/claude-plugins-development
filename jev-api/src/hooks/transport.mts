@@ -104,6 +104,16 @@ function stopOn($: Engine, ms: number, signal: AbortSignal): Stop {
   };
 }
 
+/**
+ * The outcome of a call that used up its timeout.
+ *
+ * @param ms - The call's whole timeout.
+ * @returns The outcome.
+ */
+function timedOut(ms: number): Outcome {
+  return { kind: "error", code: "timeout", message: `timeout after ${ms}ms` };
+}
+
 /** The outcome of a call whose dispatch was abandoned. */
 const ABANDONED = { kind: "error", code: "aborted", message: "the call was abandoned" } as const satisfies Outcome;
 
@@ -271,7 +281,7 @@ async function syncConfig($: Engine, link: Link, server: string, env: HttpEnv, s
     if (r === "aborted") return ABANDONED;
     if (r === "timeout") {
       // the call's own budget ran out, the server is not at fault: no down, and the pending config call stays shared
-      if (waitMs < CONNECT_WAIT_MS) return { kind: "error", code: "timeout", message: `timeout after ${timeoutMs}ms` };
+      if (waitMs < CONNECT_WAIT_MS) return timedOut(timeoutMs);
       if (link.syncing?.gen === gen) link.syncing = undefined; // a hung call is not shared with the next one
       return { down: `no answer to the config call within ${CONNECT_WAIT_MS} ms` };
     }
@@ -360,7 +370,7 @@ async function callServer($: Engine, server: string, callId: string, gen: number
     const r = await Promise.race([call, wait.stop]);
     if (r === "timeout") {
       cancel();
-      return { kind: "error", code: "timeout", message: `timeout after ${timeoutMs}ms` };
+      return timedOut(timeoutMs);
     }
     if (r === "aborted") {
       cancel();
@@ -392,7 +402,7 @@ export async function sendOutcome($: Engine, link: Link, env: HttpEnv, state: st
   // the shared connect runs on in the background when the call is abandoned or out of time
   const gate = stopOn($, timeoutMs, signal);
   const server = await Promise.race([ensureServer($, link), gate.stop]).finally(() => gate.done());
-  if (server === "timeout") return { kind: "error", code: "timeout", message: `timeout after ${timeoutMs}ms` };
+  if (server === "timeout") return timedOut(timeoutMs);
   if (server === "aborted") return ABANDONED;
   if (server !== undefined) {
     /** The generation the last attempt's request named. */
@@ -411,7 +421,7 @@ export async function sendOutcome($: Engine, link: Link, env: HttpEnv, state: st
       // the request gets only the time the connect and config steps left
       const left = timeoutMs - ((await now($)) - started);
       if (signal.aborted) return ABANDONED;
-      if (left < 1) return { kind: "error", code: "timeout", message: `timeout after ${timeoutMs}ms` };
+      if (left < 1) return timedOut(timeoutMs);
       return callServer($, server, callId, configured.gen, state, questionsObject, Math.round(left), signal);
     };
     let outcome = await attempt();
@@ -432,6 +442,6 @@ export async function sendOutcome($: Engine, link: Link, env: HttpEnv, state: st
   // the fallback gets only the time the connect, config and request steps left, not the whole timeout again
   const left = timeoutMs - ((await now($)) - started);
   if (signal.aborted) return ABANDONED;
-  if (left < 1) return { kind: "error", code: "timeout", message: `timeout after ${timeoutMs}ms` };
+  if (left < 1) return timedOut(timeoutMs);
   return sendRequest(env, state, questionsObject, fetchViaEngine($, Math.round(left), signal));
 }

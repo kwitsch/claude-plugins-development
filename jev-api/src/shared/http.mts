@@ -144,8 +144,18 @@ export function hide(text: string, url: string, placeholder: string): string {
     // The engine quotes a URL it cannot parse as given.
   }
   // Also the percent-encoded echo (`http%3A%2F%2F...`), any hex case.
-  const enc = [...new Set([href, url])].map((u) => encodeURIComponent(u).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|");
+  const enc = [...new Set([href, url])].map((u) => escapeRe(encodeURIComponent(u))).join("|");
   return text.replaceAll(href, placeholder).replaceAll(url, placeholder).replace(new RegExp(enc, "gi"), placeholder);
+}
+
+/**
+ * Escapes a text for use as a literal inside a regular expression.
+ *
+ * @param text - The text.
+ * @returns The escaped text.
+ */
+function escapeRe(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 /**
@@ -200,7 +210,7 @@ export function hideHost(text: string, url: string): string {
   // An IPv6 host comes with brackets, an error text quotes the bare address.
   let t = text;
   for (const h of new Set([host, host.replace(/^\[(.*)\]$/, "$1")])) {
-    t = t.replace(new RegExp(`(?:(?<![\\w.-])|(?<=%[0-9a-f]{2}))${h.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\w-])`, "gi"), "<host>");
+    t = t.replace(new RegExp(`(?:(?<![\\w.-])|(?<=%[0-9a-f]{2}))${escapeRe(h)}(?![\\w-])`, "gi"), "<host>");
   }
   return t;
 }
@@ -309,7 +319,7 @@ export async function sendRequest(env: HttpEnv, state: string, questionsObject: 
     for (const v of pieces) literals.set(v, place); // a server may echo one value alone
   }
   if (key && key.length >= MIN_REDACT_KEY) literals.set(key, "<TYPESAFE_API_KEY>"); // not a short key: it would match ordinary words
-  const literalRe = literals.size ? new RegExp([...literals.keys()].sort((x, y) => y.length - x.length).map((l) => l.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|"), "g") : undefined;
+  const literalRe = literals.size ? new RegExp([...literals.keys()].sort((x, y) => y.length - x.length).map(escapeRe).join("|"), "g") : undefined;
   const hostLower = hostOf(target.url).toLowerCase();
   const hostLits = custom ? [...literals].filter(([l]) => l.toLowerCase().includes(hostLower)).sort((x, y) => y[0].length - x[0].length) : [];
   const redact = (text: string): string => {
