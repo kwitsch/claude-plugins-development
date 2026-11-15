@@ -220,6 +220,28 @@ function bundleLib(compiled: Map<string, string>): { members: string[]; entries:
   // before it ships; a line scan of the bodies would also match declaration-like lines inside template literals
   const check = spawnSync(process.execPath, ["--check", "--input-type=module"], { input: code, encoding: "utf8" });
   if (check.status !== 0) fail(`lib.mjs does not parse (a top-level name bound twice across helpers?):\n${check.stderr}`);
+  // a top-level name that is a global (`URL`, `Buffer`) captures that global in every other helper that uses it
+  // shortcut: any such name fails, though no other helper may use the global; rename it or upgrade to a free-reference scope pass
+  interface Node {
+    type: string;
+    name?: string;
+    id?: Node | null;
+    declarations?: { id: Node }[];
+    properties?: Node[];
+    elements?: (Node | null)[];
+    value?: Node;
+    argument?: Node;
+    left?: Node;
+  }
+  const ids = (n: Node | null | undefined): string[] => {
+    if (!n) return [];
+    if (n.type === "Identifier") return n.name === undefined ? [] : [n.name];
+    return [...(n.properties ?? []), ...(n.elements ?? [])].flatMap((x) => ids(x?.value ?? x?.argument ?? x?.left ?? x));
+  };
+  for (const n of parseSync("lib.mjs", code, { sourceType: "module" }).program.body as unknown as Node[]) {
+    const names = n.type === "VariableDeclaration" ? (n.declarations ?? []).flatMap((d) => ids(d.id)) : n.type === "FunctionDeclaration" || n.type === "ClassDeclaration" ? ids(n.id) : [];
+    for (const name of names) if (name in globalThis) fail(`top-level name ${name} of a helper shadows the global ${name} for every other helper; rename it`);
+  }
   return { members, entries, code };
 }
 

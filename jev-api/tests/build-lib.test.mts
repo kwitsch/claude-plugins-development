@@ -232,3 +232,13 @@ test("a symlinked directory below plugin/ fails the layout check and its target 
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("a helper's top-level name that shadows a global used by another helper fails the build", () => {
+  const r = build({
+    "a.mts": `const URL = "not the global";\nexport const a = (): string => URL;\n`,
+    "b.mts": `export const host = (u: string): string => new URL(u).host;\n`,
+    "register.mts": `import { a } from "./a.mjs";\nimport { host } from "./b.mjs";\nexport const both = (u: string): string => a() + host(u);\n`,
+  });
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /shadows the global URL/);
+});
