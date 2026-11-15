@@ -339,6 +339,50 @@ test("watch list: an empty read (dprint missing) is retried after 5 minutes, not
   }
 });
 
+test("format_pre Edit: a file that grows over the cap while git check-ignore runs is skipped, not read", async () => {
+  const tmp = mkdtempSync(path.join(tmpdir(), "dprint-edit-cap-"));
+  const bin = path.join(tmp, "bin");
+  const repo = path.join(tmp, "repo");
+  mkdirSync(bin);
+  mkdirSync(repo);
+  spawnSync("/usr/bin/git", ["init", "-q", repo]);
+  writeFileSync(path.join(repo, "dprint.json"), "{}");
+  const realGit = spawnSync("sh", ["-c", "command -v git"], { encoding: "utf8" }).stdout.trim();
+  // the fake git sleeps 2 s on check-ignore, so the Edit is still waiting for git when the file grows
+  writeFileSync(path.join(bin, "git"), `#!/bin/sh\ncase "$*" in *check-ignore*) sleep 2;; esac\nexec "${realGit}" "$@"\n`);
+  chmodSync(path.join(bin, "git"), 0o755);
+  for (const t of ["bash", "sleep"]) symlinkSync(spawnSync("sh", ["-c", `command -v ${t}`], { encoding: "utf8" }).stdout.trim(), path.join(bin, t));
+  const file = path.join(repo, "e.json");
+  writeFileSync(file, "{\"a\":   1}\n");
+  const oldPath = process.env.PATH;
+  const oldHome = process.env.HOME;
+  process.env.PATH = bin;
+  process.env.HOME = tmp;
+  const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+  try {
+    const call = formatPre({
+      cwd: repo,
+      agent_id: "",
+      session_id: "editcap",
+      scratchpad_dir: "",
+      tool_name: "Edit",
+      tool_input: { file_path: file, old_string: "1", new_string: "2" },
+    });
+    await new Promise((r) => setTimeout(r, 300)); // git check-ignore is still running
+    writeFileSync(file, "{\"x\":[" + Array.from({ length: 150_000 }, (_, i) => `${i}  `).join(",") + "]}\n");
+    assert.deepEqual(await call, {});
+    const logged = stderr.mock.calls.map((c) => String(c[0])).join("");
+    assert.match(logged, /format skipped \(over 1048576 bytes\): .*e\.json/, "the cap is checked again before the read");
+    assert.doesNotMatch(logged, /format_pre failed open/, "the 2 MiB file never reaches the formatter");
+  } finally {
+    stderr.mockRestore();
+    disposeLsp();
+    process.env.PATH = oldPath;
+    process.env.HOME = oldHome;
+    rmSync(tmp, { recursive: true, force: true });
+  }
+}, 30_000);
+
 test("file_changed: a file that grows over the cap while it waits for a slot is skipped, not read", async () => {
   const tmp = mkdtempSync(path.join(tmpdir(), "dprint-cap-"));
   const bin = path.join(tmp, "bin");

@@ -1073,6 +1073,8 @@ export async function formatPre(
     if (await isGitIgnored(s.real)) return {};
     // cancelled meanwhile: spawn and format nothing (checked again before the second Edit format)
     if (signal?.aborted) return {};
+    // the file may have grown while git check-ignore ran: check the cap again before the read
+    if (args.tool_name === "Edit" && overCap(statSync(fp).size + Buffer.byteLength(ti.new_string ?? ""), fp)) return {};
     const uri = pathToFileURL(fp).href;
 
     if (args.tool_name === "Write") {
