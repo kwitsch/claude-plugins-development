@@ -261,6 +261,28 @@ describe("request", () => {
     assert.equal(JSON.parse(b.seen[0].body).model, "m2");
   });
 
+  test("a request is served with the config of its own generation, even after newer configs from other calls (restart plus env change)", async () => {
+    const a = await stub();
+    const b = await stub();
+    stubs.push(a, b);
+    // a restarted server (no config), then the ping-pong of two calls with different env: A re-sends gen 3, B2 sends gen 4 before A's request arrives
+    const c = start({}, false);
+    live.push(c);
+    assert.equal(outcomeOf(await c.request({ callId: "a1", configGen: 1 }))["code"], "unconfigured");
+    await c.call("config", { jevUrl: b.url, gen: 2 });
+    await c.call("config", { jevUrl: a.url, gen: 3 });
+    await c.call("config", { jevUrl: b.url, gen: 4 });
+    assert.equal(outcomeOf(await c.request({ callId: "a1", configGen: 3 }))["kind"], "ok");
+    assert.equal(outcomeOf(await c.request({ callId: "b1", configGen: 2 }))["kind"], "ok");
+    assert.equal(outcomeOf(await c.request({ callId: "b2", configGen: 4 }))["kind"], "ok");
+    assert.equal(a.seen.length, 1);
+    assert.equal(b.seen.length, 2);
+    // only the last 16 generations are kept: an evicted or unknown one is unconfigured again
+    for (let g = 5; g <= 20; g++) await c.call("config", { jevUrl: b.url, gen: g });
+    assert.equal(outcomeOf(await c.request({ callId: "x", configGen: 4 }))["code"], "unconfigured");
+    assert.equal(outcomeOf(await c.request({ callId: "y", configGen: 5 }))["kind"], "ok");
+  });
+
   test("blank variables count as unset", async () => {
     const c = start({ JEV_URL: "  ", TYPESAFE_API_KEY: "\t" });
     live.push(c);

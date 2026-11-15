@@ -43,6 +43,8 @@ const MAX_TIMEOUT_MS = 30_000;
 const MAX_BODY_BYTES = 1_048_576;
 /** How many cancelled call ids are remembered for a request that has not arrived yet. */
 const MAX_TOMBSTONES = 256;
+/** How many configs the server keeps by generation (concurrent calls with different env each keep theirs). */
+const MAX_CONFIGS = 16;
 /** How long a remembered cancel lives (ms); `JEV_API_TOMBSTONE_MS` overrides it, for tests only. */
 const TOMBSTONE_MS = ((): number => {
   const raw = process.env["JEV_API_TOMBSTONE_MS"]?.trim();
@@ -187,10 +189,10 @@ function startServer(): void {
   const byRpc = new Map<RequestId, Flight>();
   /** `request` calls in flight, by call id (`cancel`). */
   const byCall = new Map<string, Flight>();
-  /** What the mod set with `config`; undefined until it did. */
+  /** What the mod set with its newest `config` call (used by a request without `configGen`); undefined until it did. */
   let config: HttpEnv | undefined;
-  /** The generation of `config` (the mod numbers its config calls); undefined when the mod sent none. */
-  let configGen: number | undefined;
+  /** The last `MAX_CONFIGS` configs by the generation the mod numbered them with (insertion order is age). */
+  const configs = new Map<number, HttpEnv>();
   /** Cancels that arrived before their request: call id to expiry (insertion order is age). */
   const tombstones = new Map<string, number>();
   const send = (msg: JSONRPCResultResponse | JSONRPCErrorResponse) => process.stdout.write(JSON.stringify(msg) + "\n");
@@ -249,9 +251,9 @@ function startServer(): void {
     if (typeof questions !== "object" || questions === null || Array.isArray(questions)) return invalid("request", "questions must be an object");
     if (typeof timeoutMs !== "number" || !Number.isInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > MAX_TIMEOUT_MS) return invalid("request", `timeoutMs must be a whole number from 1 to ${MAX_TIMEOUT_MS}`);
     if (byCall.has(callId)) return invalid("request", "callId is already in use by a running request");
-    const cfg = config;
-    // the request was synced with another config than the one held now (concurrent calls with different env): the mod sends its own again
-    if (cfg === undefined || (typeof args["configGen"] === "number" && args["configGen"] !== configGen)) return outcomeResult({ kind: "error", code: "unconfigured", message: "the server has no configuration yet" });
+    // a request is served with the config it was synced with, even when other calls sent newer ones since; an unknown generation (restart, evicted) makes the mod send its own again
+    const cfg = typeof args["configGen"] === "number" ? configs.get(args["configGen"]) : config;
+    if (cfg === undefined) return outcomeResult({ kind: "error", code: "unconfigured", message: "the server has no configuration yet" });
     if (!cfg.key && !cfg.base && !cfg.jevUrl) return outcomeResult({ kind: "error", code: "config", message: "no System One access configured: set TYPESAFE_API_KEY, TYPESAFE_BASE_URL or JEV_URL" });
     if (cancelledEarly(callId)) return outcomeResult({ kind: "error", code: "aborted", message: "the call was abandoned" });
     byCall.set(callId, flight);
@@ -279,14 +281,19 @@ function startServer(): void {
   };
 
   /**
-   * Handles `tools/call` `config`: replaces the configuration the requests use.
+   * Handles `tools/call` `config`: sets the newest configuration and keeps it under its generation `gen`.
    *
    * @param args - The call's arguments (a trust boundary: checked here).
    * @returns The tool result.
    */
   const runConfig = (args: Record<string, unknown>): CallToolResult => {
     config = { key: field(args["key"]), base: field(args["base"]), jevUrl: field(args["jevUrl"]), model: field(args["model"]) };
-    configGen = typeof args["gen"] === "number" ? args["gen"] : undefined;
+    const gen = args["gen"];
+    if (typeof gen === "number") {
+      configs.delete(gen);
+      configs.set(gen, config);
+      if (configs.size > MAX_CONFIGS) configs.delete(configs.keys().next().value as number);
+    }
     return toolResult({ configured: true });
   };
 
