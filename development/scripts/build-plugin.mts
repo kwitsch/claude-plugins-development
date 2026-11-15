@@ -261,9 +261,6 @@ const layout = spawnSync(
 );
 if (layout.status !== 0) process.exit(layout.status ?? 1);
 
-// 1. remove stale build output (plugin/ holds no hand-written .mjs)
-for (const f of walk(PLUGIN)) if (f.endsWith(".mjs")) rmSync(f);
-
 // 2. compile: strip types file by file (.mts -> .mjs), then minify.
 // Type checking is not part of the build: `pnpm lint` (oxlint --type-check) does it.
 const files = walk(SRC);
@@ -295,6 +292,8 @@ if ((pkg["pluginBuild"] as { bundleHooksLib?: unknown } | undefined)?.bundleHook
   compiled.set(libPath(), lib.code);
 }
 
+/** Minified output per file; nothing under plugin/ is touched until every step has succeeded. */
+const minified = new Map<string, string>();
 for (const [out, code] of compiled) {
   // shipped output is for node, not humans: minify (drops comments, keeps the shebang and export names).
   // Function-hooks entry modules (the ones plugin/hooks/hooks.json lists, and every hooks/*.mjs when nothing is bundled)
@@ -315,9 +314,15 @@ for (const [out, code] of compiled) {
     for (const e of m.errors) console.error(`${path.relative(ROOT, out)}: ${e.message}`);
     process.exit(1);
   }
+  minified.set(out, m.code.endsWith("\n") ? m.code : m.code + "\n");
+}
+
+// 1. remove stale build output (plugin/ holds no hand-written .mjs); only now, so a failed build leaves the old output
+for (const f of walk(PLUGIN)) if (f.endsWith(".mjs") && !minified.has(f)) rmSync(f);
+for (const [out, code] of minified) {
   mkdirSync(path.dirname(out), { recursive: true });
-  writeFileSync(out, m.code.endsWith("\n") ? m.code : m.code + "\n");
-  if (m.code.startsWith("#!")) chmodSync(out, 0o755);
+  writeFileSync(out, code);
+  if (code.startsWith("#!")) chmodSync(out, 0o755);
 }
 
 // 3. manifest: generated from <name>/package.json (the only manifest source) by plugin-manifest.mts
