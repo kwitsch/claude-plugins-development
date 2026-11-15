@@ -30,11 +30,13 @@ First action, before reading anything: check whether the session already is in a
 
 Split the plugin into areas (protocol/server, core logic, scripts/skills, hooks wiring + docs; fewer for a small plugin) and note per area the files. The script cannot read the file system, so this goes into `args.areas` as `[{ name, files }]`.
 
+Scout also sets the hunter model and effort **per hunt lens** (the lenses are listed under Run), by how hard that lens is to hunt in this plugin: `sonnet` for lenses that are mostly reading and grepping (docs against code, fail-open paths in a small plugin), `opus` for those that need deep reasoning (races, cache invalidation, interactions between fixes); effort `medium` or `high`. Ask the jev-api tools first (`choice` for the model, `score` for the effort, one `batch` per lens). Pass them as `args.lenses = [{ lens, model, effort }]` using the lens texts below verbatim; a lens left out runs `sonnet`/`medium`.
+
 ## Run
 
-`Workflow` with the script below, `args = { plugin, worktree, date, areas, maxRounds, noFinding, fix }`.
+`Workflow` with the script below, `args = { plugin, worktree, date, areas, lenses, maxRounds, noFinding, fix }`.
 
-- **Hunt**: per active lens one read-only hunter per area in parallel (`sonnet`/`medium`), each with the lens, the keys and titles already found, and the rule "report only defects you reproduced, with the repro and its output". Brief hunters to use real tools (real dprint/git/node, the built `plugin/` output, the test stub) instead of reading alone, and "high bar: no style, speculation or documented limitations".
+- **Hunt**: per active lens one read-only hunter per area in parallel (model and effort of the lens from Scout, default `sonnet`/`medium`), each with the lens, the keys and titles already found, and the rule "report only defects you reproduced, with the repro and its output". Brief hunters to use real tools (real dprint/git/node, the built `plugin/` output, the test stub) instead of reading alone, and "high bar: no style, speculation or documented limitations".
 - **Verify**: one verifier per new finding, in parallel, model and effort from the finding's `verifyModel`/`verifyEffort` set by the hunter (default `opus`/`medium`); it re-runs the repro itself, reads the code, refutes documented limits and style, and rates the fix.
 - **Fix** (sequential, one agent per confirmed finding, model and effort from the verifier): fix the root cause once in the shared code, add a test that fails without the fix (revert the line to check; a regression test that passes on the old code proves nothing), build, `pnpm lint`, plugin tests, commit and push. The first fix bumps `<plugin>/package.json` once per branch.
 - **Lenses** (the newest fix is the most likely place for the next defect: three rounds in a row found a regression of the previous fix): newest diff and the last fixes; interactions between fixes; TOCTOU, races and symlink swaps; caches keyed too coarsely, stale state, leaks; per-turn or per-session caches and buffers added for speed (every event that must drop or flush them, `.claude/rules/hook-caches-and-tests.md`); slow or unusual file systems, odd names and encodings; fail-open paths and missing error handling at trust boundaries; docs contradicting code and tests that cannot fail.
@@ -160,7 +162,7 @@ const closePrompt = () => `Close the bug hunt of plugin "${plugin}" in the git w
 Return status clean|fixed|blocked and one sentence.`
 
 const seen = []
-const lenses = LENSES.map((lens) => ({ lens, rounds: 0, dry: 0, stop: null, found: 0, confirmed: 0, refuted: 0, fixed: 0 }))
+const lenses = LENSES.map((lens) => ({ model: 'sonnet', effort: 'medium', ...(args.lenses ?? []).find((x) => x.lens === lens), lens, rounds: 0, dry: 0, stop: null, found: 0, confirmed: 0, refuted: 0, fixed: 0 }))
 const confirmedList = []
 let fixed = 0
 let blocked = false
@@ -171,7 +173,7 @@ while (!blocked) {
   if (!active.length) break
   round++
   // Hunt: every active lens, every area, in parallel.
-  const hunts = await parallel(active.flatMap((l, li) => areas.map((a) => async () => ({ l, report: await run(huntPrompt(a, l.lens, seen), { label: `r${round}:l${li}:${a.name}`, phase: 'Hunt', model: 'sonnet', effort: 'medium', schema: FINDINGS }) }))))
+  const hunts = await parallel(active.flatMap((l, li) => areas.map((a) => async () => ({ l, report: await run(huntPrompt(a, l.lens, seen), { label: `r${round}:l${li}:${a.name}`, phase: 'Hunt', model: l.model, effort: l.effort, schema: FINDINGS }) }))))
   const fresh = []
   for (const h of hunts) {
     if (!h?.report) continue
