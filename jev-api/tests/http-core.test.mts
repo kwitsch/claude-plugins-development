@@ -188,4 +188,10 @@ describe("sendRequest redaction of pieces", () => {
     const out = await sendRequest({ jevUrl: "https://h.example/p%zz/q?token=supersecret1" }, STATE, QUESTIONS, e.doFetch);
     expect(out).toEqual({ kind: "http", status: 422, reason: "bad token <JEV_URL>" });
   });
+
+  it("a numeric query value echoed as a JSON number is redacted", async () => {
+    const e = fake({ status: 422, text: "{\"detail\":{\"input\":98765432109876}}" });
+    const out = await sendRequest({ jevUrl: "https://h.example/x?token=98765432109876" }, STATE, QUESTIONS, e.doFetch);
+    expect(out).toEqual({ kind: "http", status: 422, reason: "{\"input\":\"<JEV_URL>\"}" });
+  });
 });

@@ -302,8 +302,9 @@ export async function sendRequest(env: HttpEnv, state: string, questionsObject: 
     const res = await doFetch(target.url, { method: "POST", headers, body: JSON.stringify({ model: env.model ?? DEFAULT_MODEL, state, questions: questionsObject }) });
     if (res.status >= 200 && res.status < 300) return { kind: "ok", status: res.status, text: res.text };
     const refusal = res.status === 400 ? contextRefusal(res.text) : undefined;
-    // Only a key made of number characters can sit inside a JSON number's text.
-    const why = detail(res.text, redact, key !== undefined && key.length >= MIN_REDACT_KEY && /^[-+.\deE]+$/.test(key));
+    // Only a key or endpoint piece made of number characters can sit inside a JSON number's text.
+    const numeric = (s?: string): boolean => s !== undefined && s.length >= MIN_REDACT_KEY && /^[-+.\deE]+$/.test(s);
+    const why = detail(res.text, redact, numeric(key) || [...pieces].some(numeric));
     let reason = why === undefined ? "" : why.trim(); // detail() already redacted it: a second pass would nest the host placeholder
     if (reason.length > MAX_DETAIL) {
       reason = reason.slice(0, MAX_DETAIL);
