@@ -269,6 +269,18 @@ export async function sendRequest(env: HttpEnv, state: string, questionsObject: 
   if (key && /^https:/i.test(target.url)) headers["Authorization"] = `Bearer ${key}`;
   // Text that reaches the model (a fetch error, an error body a server may echo the request into) must not carry the endpoint
   // or the key: a runtime quotes a header value it rejects (a newline or a non-Latin1 character in the key), whole.
+  const pieces = new Set<string>(); // each query value and path segment of the custom part, raw and decoded
+  if (env.jevUrl || env.base) {
+    try {
+      const u = new URL(target.url);
+      const segs = u.pathname.split("/");
+      if (!env.jevUrl) segs.length = Math.max(0, segs.length - 2); // the fixed `v1/systemone` tail is public
+      const raw = [...segs, ...u.search.slice(1).split("&").flatMap((kv) => kv.split("=").slice(1)), ...u.searchParams.values()];
+      for (const r of raw) for (const v of [r, decodeURIComponent(r)]) if (v.length >= MIN_REDACT_KEY) pieces.add(v);
+    } catch {
+      // Not parseable or a bad escape: the whole-URL forms above still apply.
+    }
+  }
   const redact = (text: string): string => {
     // In this order: the URL first (it may contain the key), the key before the path and the host (a key may contain their text).
     const custom = env.jevUrl || env.base; // the default endpoint is public: nothing to hide
@@ -276,6 +288,8 @@ export async function sendRequest(env: HttpEnv, state: string, questionsObject: 
     // A base path may carry a token too (a proxy path); hide it without the fixed `/v1/systemone` tail, which hide() already wrote.
     if (key && key.length >= MIN_REDACT_KEY) t = t.replaceAll(key, "<TYPESAFE_API_KEY>"); // not a short key: it would match ordinary words
     if (custom) t = env.jevUrl ? hidePath(t, target.url, "<JEV_URL>") : hidePath(t, target.url.slice(0, -"/v1/systemone".length), "<TYPESAFE_BASE_URL>");
+    if (custom) { for (const v of pieces) t = t.replaceAll(v, env.jevUrl ? "<JEV_URL>" : "<TYPESAFE_BASE_URL>"); // a server may echo one value alone
+     }
     return custom ? hideHost(t, target.url) : t;
   };
   try {

@@ -124,6 +124,13 @@ describe("sendRequest", () => {
     const out = await sendRequest({ base: "http://127.0.0.1:1/proxy/SECRETTOKEN123" }, STATE, QUESTIONS, fake({ status: 404, text: body }).doFetch);
     expect(JSON.stringify(out)).not.toContain("SECRETTOKEN123");
   });
+  it("redacts a query value or a path segment echoed alone", async () => {
+    const body = JSON.stringify({ detail: [{ input: "S3cretT0kenValue" }] });
+    const q = await sendRequest({ jevUrl: "http://127.0.0.1:1/v1/systemone?token=S3cretT0kenValue" }, STATE, QUESTIONS, fake({ status: 422, text: body }).doFetch);
+    expect(JSON.stringify(q)).not.toContain("S3cretT0kenValue");
+    const p = await sendRequest({ base: "http://127.0.0.1:1/S3cretT0kenValue" }, STATE, QUESTIONS, fake({ status: 422, text: body }).doFetch);
+    expect(JSON.stringify(p)).not.toContain("S3cretT0kenValue");
+  });
   it("redacts a key that contains the endpoint path before the path", async () => {
     const k = "Zq81kLp0Xw2/apiR7vT9mN4sY6bH3cJ";
     const out = await sendRequest({ jevUrl: "https://jev.example/api", key: k }, STATE, QUESTIONS, async (_u, init) => ({ status: 401, text: JSON.stringify({ detail: "bad token: " + init.headers["Authorization"] }) }));
