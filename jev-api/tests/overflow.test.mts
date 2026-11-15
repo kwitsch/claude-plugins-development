@@ -186,16 +186,21 @@ for (const [name, bad] of [["out of range", { v: 99, n: 1 }], ["below 1", { v: 0
 }
 
 test("a store read that outlasts the wait is never overwritten by a density learned from few samples", async ($, on) => {
-  const { store, clock } = setup(on, { replies: [okReply(3000)] });
+  const { store, clock, fetched } = setup(on, { replies: [okReply(3000)] });
   let release = (_v: unknown) => {};
   store.late = new Promise((r) => (release = r));
   const first = call($, "noul", SMALL);
   await $.session.start({ cwd: "/proj", surface: "terminal", isInteractive: true });
   await clock.advance(1000);
-  release({ v: 2, n: 500 });
   expect((await first).deny).toBeUndefined();
-  await call($, "noul", SMALL);
   expect(store.sets).toHaveLength(0);
+  // the late answer replaces the one-sample density: the next sample is folded into the stored 500
+  release({ v: 2, n: 500 });
+  await call($, "noul", SMALL);
+  expect(store.sets).toHaveLength(1);
+  const stored = store.sets[0][1] as { v: number; n: number };
+  expect(stored.v).toBeCloseTo(smoothed(2, promptChars(fetched[1]) / (3000 - 26)), 6);
+  expect(stored.n).toBe(501);
 });
 
 test("a store read that fails is never overwritten by a density learned from one sample", async ($, on) => {
@@ -203,6 +208,34 @@ test("a store read that fails is never overwritten by a density learned from one
   store.failGet = true;
   await call($, "noul", { state: "a".repeat(20000), timeout: 30 });
   expect(store.sets).toHaveLength(0);
+});
+
+test("a failed store read is read again by the next call, which then stores a large move", async ($, on) => {
+  // sample 20070 / 1974 is about 10, clamped to 8: the stored 3.0 (10 samples) moves to 4.0
+  const { store } = setup(on, { replies: [okReply(2000)], store: { density: { v: 3, n: 10 } } });
+  store.failGet = true;
+  await call($, "noul", SMALL);
+  expect(store.sets).toHaveLength(0);
+  store.failGet = false;
+  await call($, "noul", SMALL);
+  expect(store.gets).toEqual(["density", "density"]);
+  expect(store.sets).toHaveLength(1);
+  expect((store.sets[0][1] as { v: number; n: number }).v).toBeCloseTo(4, 6);
+});
+
+test("a store read that answers after the wait still counts: a missing key lets a large move be stored", async ($, on) => {
+  const { store, clock } = setup(on, { replies: [okReply(2000)] });
+  let release = (_v: unknown) => {};
+  store.late = new Promise((r) => (release = r));
+  const first = call($, "noul", SMALL);
+  await $.session.start({ cwd: "/proj", surface: "terminal", isInteractive: true });
+  await clock.advance(1000);
+  expect((await first).deny).toBeUndefined();
+  expect(store.sets).toHaveLength(0);
+  release(undefined);
+  await call($, "noul", SMALL);
+  expect(store.gets).toEqual(["density"]);
+  expect(store.sets).toHaveLength(1);
 });
 
 test("the store is read once per module instance, not on every call", async ($, on) => {

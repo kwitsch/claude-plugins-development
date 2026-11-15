@@ -104,36 +104,50 @@ export function isTooBig(r: ToolResult | TooBig): r is TooBig {
 }
 
 /**
- * Reads the stored density once per module instance and waits for it at most {@link STORE_WAIT_MS}; every failure
- * (a missing key, a refused or hanging store, a value out of range) leaves the default in place.
+ * Reads the stored density once per module instance (again after a refused read) and waits for it at most
+ * {@link STORE_WAIT_MS}; a later answer of a slow store is still applied. Every failure (a missing key, a refused or
+ * hanging store, a value out of range) leaves the default density in place.
  *
  * @param $ - The engine.
  * @param k - What the module knows; its `loaded` is set by the first call.
  * @returns A promise that never rejects.
  */
 export function loadKnowledge($: Engine, k: Knowledge): Promise<void> {
+  /** Takes a store answer: the valid stored density (the default when missing or out of range) is what was persisted. */
+  const apply = (stored: unknown): void => {
+    const v = isRecord(stored) ? stored["v"] : undefined;
+    const ok = typeof v === "number" && Number.isFinite(v) && v >= MIN_DENSITY && v <= MAX_DENSITY;
+    k.persisted = ok ? v : DEFAULT_DENSITY;
+    const n = isRecord(stored) ? stored["n"] : undefined;
+    const count = typeof n === "number" && Number.isInteger(n) && n > 0 ? n : 0;
+    // a late or retried read holding more samples than learned meanwhile wins: few samples never overwrite it
+    if (ok && (k.samples === 0 || k.samples < count)) {
+      k.density = v;
+      k.samples = count;
+    }
+  };
+  /** A refused read is not cached: the next call reads again; until then learn() must not overwrite the unknown value. */
+  const failed = (): void => {
+    k.persisted = Number.NaN;
+    k.loaded = undefined;
+  };
   k.loaded ??= (async () => {
     let timer: { cancel(): void } | undefined;
     try {
       const read = Promise.resolve($.store.get(DENSITY_KEY));
-      read.catch(() => undefined); // a late rejection after the wait must not go unhandled
       const late = new Promise<undefined>((resolve) => {
         timer = $.clock.after(STORE_WAIT_MS, () => resolve(undefined));
       });
       let timedOut = false;
       const stored = await Promise.race([read, late.then(() => (timedOut = true, undefined))]);
-      // a slow store still holds the real statistic: unknown until read, so learn() must not overwrite it
-      if (timedOut) k.persisted = Number.NaN;
-      const v = isRecord(stored) ? stored["v"] : undefined;
-      if (typeof v === "number" && Number.isFinite(v) && v >= MIN_DENSITY && v <= MAX_DENSITY && k.samples === 0) {
-        k.density = v;
-        k.persisted = v;
-        const n = isRecord(stored) ? stored["n"] : undefined;
-        k.samples = typeof n === "number" && Number.isInteger(n) && n > 0 ? n : 0;
-      }
+      if (timedOut) {
+        // a slow store still holds the real statistic: unknown until read, so learn() must not overwrite it; a late answer still counts
+        k.persisted = Number.NaN;
+        read.then(apply, failed);
+      } else apply(stored);
     } catch {
-      // best effort: an unreachable store must not fail a call; its value is unknown, so learn() must not overwrite it
-      k.persisted = Number.NaN;
+      // best effort: an unreachable store must not fail a call
+      failed();
     } finally {
       timer?.cancel();
     }
