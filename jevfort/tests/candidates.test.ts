@@ -140,6 +140,12 @@ kitTest("Claude's config is never offered with a case or backup variant", async 
   expect(reads(keys)).toEqual([]);
 });
 
+kitTest("Claude's config copies with a backup or tilde suffix are never offered", async ($, on) => {
+  const paths = ["/home/u/.claude.json.bak", "/home/u/.claude.json~", "/proj/.claude/settings.json.bak"];
+  const { keys } = await ask($, on, user1(`read ${paths.join(" and ")}`), { cwd: () => "/home/u", files: paths });
+  expect(reads(keys)).toEqual([]);
+});
+
 kitTest("Claude's transcripts and tasks are never offered inside a project, in any case", async ($, on) => {
   const paths = ["/home/u/proj/tasks/a1.OUTPUT", "/home/u/notes/a.JSONL"];
   const { keys } = await ask($, on, user1(`read ${paths.join(" and ")}`), { cwd: () => "/home/u/proj", files: paths });
