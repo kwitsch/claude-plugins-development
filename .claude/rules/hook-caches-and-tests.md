@@ -6,7 +6,7 @@ paths:
 
 # Rule: caches, buffers and regression tests in hook code
 
-Learned from the jevfort performance worklist (F01-F08) and the bug hunt after it (14 rounds, 78+ fixes): most defects were regressions of the performance fixes or tests that could not fail. Every point below was a reproduced defect.
+Most defects were regressions of performance fixes or tests that could not fail. Every point below was a reproduced defect.
 
 ## A cache added for speed
 

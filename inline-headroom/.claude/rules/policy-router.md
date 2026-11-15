@@ -4,8 +4,6 @@ paths:
   - "tests/policy.test.mts"
 ---
 
-# Content router (`policy.mts`)
-
 ## Content router
 
 A port of upstream headroom's content detection into `src/hooks/policy.mts` as
