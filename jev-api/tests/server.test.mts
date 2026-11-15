@@ -445,6 +445,7 @@ describe("timeout and cancel", () => {
   test("a blank JEV_API_TOMBSTONE_MS is unset: the cancel is remembered", async () => {
     const { s, c } = await boot({ JEV_API_TOMBSTONE_MS: " " });
     await c.call("cancel", { callId: "blank" });
+    await new Promise((r) => setTimeout(r, 2500)); // the default lifetime (60 s) is far longer
     assert.equal(outcomeOf(await c.request({ callId: "blank" }))["code"], "aborted");
     assert.equal(s.seen.length, 0);
   });
@@ -454,8 +455,10 @@ describe("timeout and cancel", () => {
     for (let i = 0; i < 300; i++) c.send({ id: 1000 + i, method: "tools/call", params: { name: "cancel", arguments: { callId: `t${i}` } } });
     await c.call("cancel", { callId: "t-last" });
     assert.equal(outcomeOf(await c.request({ callId: "t-last" }))["code"], "aborted"); // newest is kept
-    assert.equal(outcomeOf(await c.request({ callId: "t0" }))["kind"], "ok"); // oldest was evicted
-    assert.equal(s.seen.length, 1);
+    assert.equal(outcomeOf(await c.request({ callId: "t45" }))["code"], "aborted"); // 301 sent, newest 256 kept: t45 is the edge
+    assert.equal(outcomeOf(await c.request({ callId: "t44" }))["kind"], "ok"); // just evicted
+    assert.equal(outcomeOf(await c.request({ callId: "t0" }))["kind"], "ok");
+    assert.equal(s.seen.length, 2);
   });
 
   test("notifications/cancelled aborts the request with that JSON-RPC id and sends no answer for it", async () => {
