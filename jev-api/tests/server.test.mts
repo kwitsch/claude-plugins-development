@@ -141,6 +141,8 @@ describe("protocol", () => {
     const req = tools.find((t) => t["name"] === "request");
     assert.doesNotMatch(String(req?.["description"]), /environment/);
     assert.match(String(req?.["description"]), /`config` tool/);
+    assert.equal(req?.["inputSchema"].properties.configGen.type, "integer");
+    assert.equal(tools.find((t) => t["name"] === "config")?.["inputSchema"].properties.gen.type, "integer");
     for (const t of tools) {
       assert.match(t["description"], /^Internal transport of the jev-api plugin; calls from the model are refused\./);
       assert.equal(t["_meta"]?.ui?.visibility, undefined); // a hidden tool is not callable by $.mcp.call
