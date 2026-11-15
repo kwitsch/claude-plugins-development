@@ -693,6 +693,19 @@ describe("concurrent calls with different env", () => {
   });
 });
 
+describe("concurrent calls with the same env", () => {
+  it("share one config call, so no request is refused for another call's generation", async () => {
+    let held: unknown;
+    const t = await rig({
+      onConfig: (c) => ((held = c.args["gen"]), outcome({ configured: true })),
+      onCall: (c) => (c.args["configGen"] === held ? okOutcome : outcome({ kind: "error", code: "unconfigured", message: "x" })),
+    });
+    const rs = await Promise.all([t.run(), t.run(), t.run()]);
+    expect(rs.every((r) => r.deny === undefined)).toBe(true);
+    expect(t.requests()).toHaveLength(3);
+  });
+});
+
 describe("sendOutcome doc", () => {
   it("does not claim the server reads its own environment (it is given the env)", () => {
     const src = readFileSync(new URL("../src/hooks/transport.mts", import.meta.url), "utf8");

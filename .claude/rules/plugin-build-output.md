@@ -15,3 +15,5 @@ Everything else is forbidden (`*.ts`/`*.mts`, `tests/`, `*.test.*`, `CLAUDE.md`,
 Runtime imports: `node:` builtins only.
 
 `.gitattributes` marks build output and the lockfile `linguist-generated` (collapsed in PRs); `*/plugin/**/*.mjs` is also `-diff -merge`: resolve conflicts there by rebuilding.
+
+- Build steps that clean or write under `plugin/` must not follow symlinks: a symlinked directory inside `plugin/` made the stale-output cleanup delete `.mjs` files outside the plugin, and a symlinked `plugin.json` was written through to a file outside. Use `lstat`, skip links, and make the layout check reject them.

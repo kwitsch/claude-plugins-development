@@ -53,6 +53,8 @@ export type Link = {
   sentGen: number;
   /** Generations handed out: one per config call, so a request can name the config it was synced with. */
   gen: number;
+  /** The newest config call in flight, shared by calls that need the same values: each of their requests names this generation, so a second identical call must not bump it. */
+  syncing: { text: string; gen: number; call: Promise<{ value: McpResult } | { error: unknown }> } | undefined;
   /** Set by a failed request: the next request sends the configuration again, read fresh from the environment. */
   dirty: boolean;
 };
@@ -63,7 +65,7 @@ export type Link = {
  * @returns The link.
  */
 export function newLink(): Link {
-  return { server: undefined, retryAt: 0, counter: 0, logged: false, connecting: undefined, sent: undefined, sentGen: 0, gen: 0, dirty: false };
+  return { server: undefined, retryAt: 0, counter: 0, logged: false, connecting: undefined, sent: undefined, sentGen: 0, gen: 0, syncing: undefined, dirty: false };
 }
 
 /** What stops a wait: its time ran out, or the call was abandoned. */
@@ -243,17 +245,32 @@ async function syncConfig($: Engine, link: Link, server: string, env: HttpEnv, s
   const args = { ...(env.key ? { key: env.key } : {}), ...(env.base ? { base: env.base } : {}), ...(env.jevUrl ? { jevUrl: env.jevUrl } : {}), ...(env.model ? { model: env.model } : {}) };
   const text = JSON.stringify(args);
   if (link.sent === text && !link.dirty) return { gen: link.sentGen };
-  const gen = ++link.gen;
+  // the newest config call in flight with the same values is shared: a second one would bump the generation and the server would refuse the first call's request
+  const live = link.syncing;
+  const reuse = live !== undefined && live.text === text && live.gen === link.gen;
+  const gen = reuse ? live.gen : ++link.gen;
   let wait: Stop | undefined;
   try {
-    const call = new Promise<McpResult>((resolve) => resolve($.mcp.call(server, "config", { ...args, gen }))).then(
-      (value) => ({ value }),
-      (error: unknown) => ({ error }),
-    );
+    const call = reuse
+      ? live.call
+      : new Promise<McpResult>((resolve) => resolve($.mcp.call(server, "config", { ...args, gen }))).then(
+        (value) => ({ value }),
+        (error: unknown) => ({ error }),
+      );
+    if (!reuse) {
+      const mine = { text, gen, call };
+      link.syncing = mine;
+      void call.then(() => {
+        if (link.syncing === mine) link.syncing = undefined;
+      });
+    }
     wait = stopOn($, CONNECT_WAIT_MS, signal);
     const r = await Promise.race([call, wait.stop]);
     if (r === "aborted") return ABANDONED;
-    if (r === "timeout") return { down: `no answer to the config call within ${CONNECT_WAIT_MS} ms` };
+    if (r === "timeout") {
+      if (link.syncing?.gen === gen) link.syncing = undefined; // a hung call is not shared with the next one
+      return { down: `no answer to the config call within ${CONNECT_WAIT_MS} ms` };
+    }
     if ("error" in r) return { down: message(r.error) };
     if (!isRecord(r.value) || r.value.isError === true) return { down: "the server refused its configuration" };
     // only the newest config sent may be recorded as the server's: an older answer can arrive after a newer one was sent
