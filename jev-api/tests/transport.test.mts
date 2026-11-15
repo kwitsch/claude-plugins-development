@@ -1,4 +1,5 @@
 // Tests of the MCP transport of the jev-api mod: the hooks driven directly with a hand-made `$` (the kit cannot abandon a dispatch).
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 const TOOL = (type: string) => `mcp__jev-api__${type}`;
@@ -610,5 +611,12 @@ describe("Haiku takes over after an HTTP error status", () => {
     const t = await rig({ complete: () => HAIKU_OK, onCall: () => refusal });
     expect((await t.run("noul", { overflow: "error" })).deny).toMatch(/^noul: state too large/);
     expect(t.completed).toHaveLength(0);
+  });
+});
+
+describe("sendOutcome doc", () => {
+  it("does not claim the server reads its own environment (it is given the env)", () => {
+    const src = readFileSync(new URL("../src/hooks/transport.mts", import.meta.url), "utf8");
+    expect(src).not.toMatch(/server reads its own environment/);
   });
 });

@@ -348,7 +348,7 @@ async function callServer($: Engine, server: string, callId: string, state: stri
  *
  * @param $ - The engine.
  * @param link - The transport state.
- * @param env - The env values, trimmed (the fetch path needs them; the server reads its own environment).
+ * @param env - The env values, trimmed (sent to the server with the config tool, and used directly by the fetch path).
  * @param state - The text the questions are about.
  * @param questionsObject - The `questions` of the request body.
  * @param timeoutMs - How long the request may take.
