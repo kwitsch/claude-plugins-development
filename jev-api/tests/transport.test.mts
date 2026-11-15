@@ -602,6 +602,15 @@ describe("Haiku takes over after an HTTP error status", () => {
       expect(t.completed[0]?.["timeoutMs"]).toBe(16_000);
     });
   }
+  it("batch: an HTTP 500 is taken over by Haiku, which answers every question of the batch", async () => {
+    const t = await rig({
+      complete: () => ({ isAnswered: true, text: JSON.stringify({ answers: { q0: { type: "noul", noul: 0.7 }, q1: { type: "noul", noul: 0.2 } } }), usage: {} }),
+      onCall: () => outcome({ kind: "http", status: 500, reason: "boom" }),
+    });
+    const r = await t.run("batch", { state: "s", questions: [{ type: "noul", instructions: "a?" }, { type: "noul", instructions: "b?" }] });
+    expect(JSON.parse(r.result ?? "null")).toHaveLength(2);
+    expect(t.completed).toHaveLength(1);
+  });
   it("the same through the fetch path", async () => {
     const t = await rig({ noMcp: true, complete: () => HAIKU_OK });
     t.$.http.fetch = () => {

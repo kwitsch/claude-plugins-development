@@ -89,7 +89,7 @@ Result: `{"type":"score","score":<expected level>,"confidence":<0..1>,"legend":{
 | `timeout`   | number, optional                         | HTTP timeout of the request in seconds (see Options)                                                                                 |
 | `questions` | array of at least one question, required | Each is `{ "type": "noul" \| "choice" \| "score", "instructions", "criteria" }` with that tool's `instructions` and `criteria` rules |
 
-All questions go out in one System One request. Result: a JSON array of the answers in question order, each exactly as the matching single tool returns it. The call is all or nothing: an invalid question (the error names it, `questions[<index>]: ...`), an HTTP error or a missing answer fails the whole call.
+All questions go out in one System One request. Result: a JSON array of the answers in question order, each exactly as the matching single tool returns it. The call is all or nothing: an invalid question (the error names it, `questions[<index>]: ...`), an HTTP error that Haiku cannot take over (see Errors) or a missing answer fails the whole call.
 
 ## HTTP transport
 
