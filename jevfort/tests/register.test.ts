@@ -1895,6 +1895,29 @@ test("the task-end check's tool listing is dropped too: the next turn lists agai
   expect(calls()).toBe(before.calls);
 });
 
+test("a background subagent's tool.check between turns lists the tools; the next turn lists again and asks nothing", async ($, on) => {
+  const tools = [...JEV_TOOLS];
+  let lists = 0;
+  on("tool.list", (_$, e, next) => {
+    lists++;
+    return next(e);
+  });
+  const { calls } = setup(on, { messages: [user("what does this project do?"), { role: "assistant", text: "It does X.", toolUses: [] }], jev: () => undefined, tools });
+  on("command.list", () => ({ value: [] }));
+  on("turn.complete", () => ({}));
+  on("tool.check", () => ({ decision: "ask" }));
+  claudeBeneath(on, []);
+  await $.turn.complete(answered("t1", "It does X."));
+  const before = calls();
+  await $.tool.check({ tool: "Read", input: { file_path: `${CWD}/a.ts` }, tool_use_id: "bg1", agentId: "bg" });
+  const listed = lists;
+  expect(listed).toBeGreaterThan(0);
+  tools.length = 0;
+  await drain($.turn.step({ ...step, turnId: "t2" }));
+  expect(lists).toBeGreaterThan(listed);
+  expect(calls()).toBe(before);
+});
+
 // Context-fill compaction: from taskCompactPercent the first judged task end compacts, from forceCompactPercent any turn end does.
 const finished = byId({ end: { type: "noul", noul: 0.9 } });
 const intermediate = byId({ end: { type: "noul", noul: 0.1 } });
