@@ -57,6 +57,35 @@ test("minEffort and maxEffort are effort-level strings defaulting to low and xhi
   assert.deepEqual({ ...manifest.userConfig.maxEffort, title: "", description: "" }, { type: "string", title: "", description: "", options: levels, default: "xhigh" });
 });
 
+test("every userConfig key pins type, default, min and max, and the default matches the README Options table", () => {
+  const pct = (d: number) => ({ type: "number", default: d, min: 0, max: 100 });
+  const bool = { type: "boolean", default: true };
+  const effort = (d: string) => ({ type: "string", default: d });
+  const expected: Record<string, Record<string, unknown>> = {
+    routing: bool,
+    takeSteps: bool,
+    subagents: bool,
+    bypass: bool,
+    agentTypes: bool,
+    compaction: bool,
+    haikuCompact: bool,
+    takeOnlyForBypass: bool,
+    takeThreshold: { type: "number", default: 0.85 },
+    taskCompactPercent: pct(80),
+    forceCompactPercent: pct(95),
+    autoCompactPercent: pct(60),
+    minEffort: effort("low"),
+    maxEffort: effort("xhigh"),
+  };
+  const readme = readFileSync(new URL("../plugin/README.md", import.meta.url), "utf8");
+  const rows = new Map([...readme.matchAll(/^\| `(\w+)`\s*\| `([^`]+)`/gm)].map((m) => [m[1], m[2]]));
+  for (const [k, v] of Object.entries(manifest.userConfig as Record<string, Record<string, unknown>>)) {
+    const { type, default: def, min, max } = v;
+    assert.deepEqual({ type, default: def, min, max }, { min: undefined, max: undefined, ...expected[k] }, k);
+    assert.equal(rows.get(k), String(def), k);
+  }
+});
+
 test("hooks.json is exactly the mods module list", () => {
   assert.deepEqual(json("hooks/hooks.json"), { modules: ["./register.mjs"] });
 });
