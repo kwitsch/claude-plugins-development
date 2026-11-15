@@ -562,6 +562,20 @@ describe("Haiku takes over after an HTTP error status", () => {
       if (expected === undefined) expect(r.deny).toMatch(/state too large/);
     }
   });
+  it("overflow truncate after the 400 refusal sends the cut with the time left, and none left is the refusal", async () => {
+    for (const [used, expected] of [[3500, 500], [4000, undefined]] as const) {
+      const t = await rig({
+        onCall: (c) => {
+          if (c.tool === "request") t.clock.now += used;
+          return outcome({ kind: "http", status: 400, reason: "too big", refusal: { tokens: 40025, nctx: 32768 } });
+        },
+      });
+      const r = await t.run("noul", { timeout: 4, overflow: "truncate", state: "a".repeat(9000) });
+      const timeouts = t.requests().map((c) => c.args["timeoutMs"]);
+      expect(timeouts).toEqual(expected === undefined ? [4000] : [4000, expected]);
+      expect(r.deny).toMatch(/state too large/);
+    }
+  });
   it("when Haiku fails too, the error carries both reasons", async () => {
     const t = await rig({ complete: () => ({ isAnswered: false, reason: "overloaded" }), onCall: () => outcome({ kind: "http", status: 500, reason: "boom" }) });
     const r = await t.hooks.get("tool.call")?.(t.$, { tool: TOOL("noul"), ...BASE }, Object.assign(async () => ({}), { signal: new AbortController().signal }));

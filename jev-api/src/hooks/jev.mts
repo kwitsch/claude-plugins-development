@@ -107,8 +107,8 @@ export async function answerJev($: Engine, tool: ToolName, input: { state: strin
   // A refusal also tells the server's context window: remembered for the rest of the instance.
   const src = JSON.stringify([env.jevUrl, env.base, env.model]);
   if (know.nctxFor !== src) know.nctx = DEFAULT_CONTEXT_TOKENS;
-  const send = async (state: string) => {
-    const answer = await ask($, tool, state, input.questions, env, timeoutMs, signal, questionsChars, (chars, tokens) => learn($, know, chars, tokens), link);
+  const send = async (state: string, requestMs: number = timeoutMs) => {
+    const answer = await ask($, tool, state, input.questions, env, requestMs, signal, questionsChars, (chars, tokens) => learn($, know, chars, tokens), link);
     if (isTooBig(answer)) {
       know.nctx = answer.tooBig.limit + 1;
       know.nctxFor = src;
@@ -138,15 +138,19 @@ export async function answerJev($: Engine, tool: ToolName, input: { state: strin
   // truncate: what the budget (the limit and the timeout) allows, at the learned density, or after a refusal at the exact density its count gave;
   // a cut sent without a refusal before it (the preflight said no) that is refused too gets one more cut at its exact density, so never more than two requests
   // No state left to send (the questions alone fill the budget): the answer would be about an empty text, so refuse instead.
-  const cut = (r: TooBig["tooBig"] | undefined) => {
-    const keep = stateForBudget(r ? Math.min(budget, r.limit) : budget, r ? refusedDensity(r) : know.density, questionsChars);
+  // a cut that follows a request gets the time left, as in takeOver, and is sized to it; the first cut of the preflight path has the whole timeout
+  const cut = async (r: TooBig["tooBig"] | undefined, afterRequest: boolean) => {
+    const left = afterRequest ? timeoutMs - ((await now($)) - started) : timeoutMs;
+    if (left < 1) return tooBigError(tool, r!, budget);
+    const cutBudget = Math.min(limit, timeBudgetTokens(left));
+    const keep = stateForBudget(r ? Math.min(cutBudget, r.limit) : cutBudget, r ? refusedDensity(r) : know.density, questionsChars);
     if (keep <= 0 && input.state.length > 0) return r ? tooBigError(tool, r, budget) : preflightError(tool, estimate, budget, limit, timeoutMs, keep);
-    return send(cutState(input.state, keep));
+    return send(cutState(input.state, keep), Math.round(left));
   };
-  let answer = await cut(refused);
+  let answer = await cut(refused, !!refused);
   if (!refused && isTooBig(answer)) {
     if (signal.aborted) return fail(tool, "the call was abandoned");
-    answer = await cut(answer.tooBig);
+    answer = await cut(answer.tooBig, true);
   }
   if (isFailed(answer)) return await takeOver(answer.failed);
   return isTooBig(answer) ? tooBigError(tool, answer.tooBig, budget) : answer;
