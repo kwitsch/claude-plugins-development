@@ -60,10 +60,10 @@ const splice = (code: string, spans: { start: number; end: number; text: string 
  * `plugin/hooks/hooks.json` does not list; the listed entry modules stay separate files (Claude Code reads them) and
  * import what they need from `./lib.mjs` instead of the helpers. Works on type-stripped code; imports and exports are
  * taken from the oxc-parser parse, never matched by line (a line of a multi-line template literal can look like one).
- * Relies on what the sources guarantee, all of it checked here: helpers import each other by `./name.mjs` with named
+ * Relies on what the sources guarantee, all of it checked here except the module-level state, which stays the author's duty: helpers import each other by `./name.mjs` with named
  * imports only (no `as`), export only declarations, their top-level names (imported or declared) are unique across
  * helpers (they were one file once; named imports of one other source, such as `node:path`, merge into one import),
- * and they keep no state at module level that a test kit reload could miss. Only the entries may import a helper: the
+ * and they keep no state at module level that a test kit reload could miss (not detected). Only the entries may import a helper: the
  * helper files are not shipped, so any other module importing one fails the build.
  *
  * @param compiled - Type-stripped code by output path.
