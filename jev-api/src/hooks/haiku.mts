@@ -63,7 +63,10 @@ export function hasAnswerShape(q: Question, a: Record<string, unknown>): boolean
   if (a["type"] !== q.type) return false;
   if (q.type === "noul") return isUnit(a["noul"]);
   if (!isUnit(a["confidence"])) return false;
-  if (q.type === "choice") return typeof a["choice"] === "string" && Object.keys(q.criteria).includes(a["choice"]) && hasProbabilities(a["probabilities"], Object.keys(q.criteria));
+  if (q.type === "choice") {
+    const options = Object.keys(q.criteria);
+    return typeof a["choice"] === "string" && options.includes(a["choice"]) && hasProbabilities(a["probabilities"], options);
+  }
   return typeof a["score"] === "number" && Number.isFinite(a["score"]) && hasProbabilities(a["probabilities"], q.criteria.map((_, i) => String(i)));
 }
 

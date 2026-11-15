@@ -147,27 +147,13 @@ export function hide(text: string, url: string, placeholder: string): string {
 }
 
 /**
- * Replaces the path and query of a URL in an error text, as parsed and as written: a server echoes `req.url` (`/p?token=x`)
- * without scheme and host. A bare `/` stays (it would match every path in the text).
- *
- * @param text - The text.
- * @param url - The endpoint URL.
- * @param placeholder - What stands in its place.
- * @returns The text without the path and query.
- */
-export function hidePath(text: string, url: string, placeholder: string): string {
-  let t = text;
-  for (const f of pathForms(url)) t = t.replaceAll(f, placeholder);
-  return t;
-}
-
-/**
- * The written and parsed forms of a URL's path and query that {@link hidePath} replaces (each longer than a bare `/`).
+ * The written and parsed forms of a URL's path and query that `sendRequest` hides in an error text (a server echoes
+ * `req.url`, `/p?token=x`, without scheme and host); each is longer than a bare `/`, which would match every path.
  *
  * @param url - The URL.
  * @returns The distinct forms.
  */
-export function pathForms(url: string): string[] {
+function pathForms(url: string): string[] {
   const forms = [url.replace(/^[a-z][a-z\d+.-]*:\/\/[^/?#]*/i, "")];
   try {
     const u = new URL(url);
@@ -184,7 +170,7 @@ export function pathForms(url: string): string[] {
  * @param url - The URL.
  * @returns The host name, or a NUL character (never part of a key) when there is none or the URL does not parse.
  */
-export function hostOf(url: string): string {
+function hostOf(url: string): string {
   try {
     return new URL(url).hostname || "\0";
   } catch {
