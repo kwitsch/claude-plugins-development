@@ -2,7 +2,7 @@
 
 How `npx` finds and refreshes a package, and Node runtime traps that hit hook scripts.
 
-How universal-lint uses these: [npx-and-local-bin.md](../../../universal-lint/.claude/rules/npx-and-local-bin.md). How dprint probes for a runner: [notice-hook.md](../../../dprint/.claude/rules/notice-hook.md).
+How universal-lint uses these: [npx-and-local-bin.md](../../../universal-lint/docs/design/npx-and-local-bin.md). How dprint probes for a runner: [notice-hook.md](../../../dprint/.claude/rules/notice-hook.md).
 
 ## npx (npm 11.19.1, probed 2026-11-07)
 

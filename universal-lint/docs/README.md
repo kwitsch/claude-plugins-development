@@ -15,18 +15,18 @@ All of F01-F33 shipped or were closed docs-only in universal-lint 0.15.1-0.15.29
 ## How to work a task
 
 1. Pick the first unchecked task in `TASKS.md` (stage order, then priority) whose dependencies are done. Read its detail document plus the documents under its `Related` section.
-2. Read `../CLAUDE.md` and the rule files it names, at least `../.claude/rules/hook-design.md` (fail-open contract, timeout budget), `edit-range-gate.md`, `file-detection.md`, `npx-and-local-bin.md` and `languages.md` with the `lang-*.md` file of the language the task touches. Several tasks touch documented user decisions; the task says so under `Constraints`. Ask before changing one.
+2. Read `../CLAUDE.md`, the rule `../.claude/rules/lint-file.md` (the constraints) and the design pages in `design/` for the areas the task touches, at least `design/hook-design.md` (fail-open contract, timeout budget), `edit-range-gate.md`, `file-detection.md`, `npx-and-local-bin.md` and `languages.md` with the `lang-*.md` page of the language the task touches. Several tasks touch documented user decisions; the task says so under `Constraints`. Ask before changing one.
 3. Locate code by the symbol names in `Code locations` (`src/hooks/lint-file.ts` unless stated otherwise); line numbers are deliberately absent because they drift.
 4. Re-measure the baseline numbers the task cites (see F01) before and after the change. The numbers in these documents are from one machine and one day.
 5. Implement in `src/`, add the tests named under `Verification`, then run `pnpm --filter universal-lint build && pnpm --filter universal-lint test && pnpm lint`. Never edit `plugin/**/*.mjs` or `plugin/.claude-plugin/plugin.json` by hand.
 6. Any change under `universal-lint/` merged to `main` needs a version bump: `version` in `universal-lint/package.json` (the only manifest source), then `pnpm --filter universal-lint build`.
-7. Update the rule file that documents the changed behaviour (usually `hook-design.md`, one of the files split from it, or a `lang-*.md`; keep each rule file under 40,000 characters).
+7. Update the design page in `design/` that documents the changed behaviour (usually `hook-design.md`, one of the pages split from it, or a `lang-*.md`). A new or changed constraint also gets its one line in `../.claude/rules/lint-file.md`; reasons, numbers and residuals stay in the design page.
 8. Update the task: set `status` in its frontmatter, adjust `Status`/`Approach` to what shipped, and tick it in `TASKS.md` (move it to the done section).
 
 ## Conventions
 
 - Fail open everywhere in the hook path: every guard failure, skip, missing tool, timeout or internal error ends with no output and exit `0` (at most a one-line `universal-lint: …` note on stderr, as the watch-list limit and the FileChanged slot give-up write; exit 0 never wakes Claude). Only real findings produce the `universal-lint…: …` text on stderr with exit `2` (asyncRewake). A false finding is worse than a missed one, because it wakes Claude.
-- Linting never modifies the user's files or repo (no `--fix`, no installs into the project tree). Persistent plugin state goes under `${CLAUDE_PLUGIN_DATA || os.tmpdir()}` only, written atomically (temp file + `renameSync`, as `recordWritten` does and the PATH probe store `probe-<hashPath(PATH)>.json` (F11); FileChanged slot files (`fc-slots/`) are the exception: claimed by an exclusive `wx` create holding the pid, see `.claude/rules/file-detection.md` "Slot cap"), and an unreadable cache means "probe again".
+- Linting never modifies the user's files or repo (no `--fix`, no installs into the project tree). Persistent plugin state goes under `${CLAUDE_PLUGIN_DATA || os.tmpdir()}` only, written atomically (temp file + `renameSync`, as `recordWritten` does and the PATH probe store `probe-<hashPath(PATH)>.json` (F11); FileChanged slot files (`fc-slots/`) are the exception: claimed by an exclusive `wx` create holding the pid, see `docs/design/file-detection.md` "Slot cap"), and an unreadable cache means "probe again".
 - No debounce for Write/Edit (user decision 2026-11-06): every Write/Edit lints right away in its own process. No `userConfig` (permanent). Command hooks, no MCP server (user decision 2026-11-06).
 - Runtime code stays zero-dependency Node (`node:` builtins only). New symbols get TSDoc (`.claude/rules/tsdoc.md` at the repo root).
 
@@ -35,7 +35,7 @@ All of F01-F33 shipped or were closed docs-only in universal-lint 0.15.1-0.15.29
 - Original 0.14.0 analysis: the `TASKS.md` header and each task's Evidence section.
 - Before/after numbers of a change: that task's Status or "Measured" section.
 - Current baseline: `tasks/F01-measurement-baseline.md`, "Measured" (0.15.29 medians, machine label); 0.16.0 medians, the 0.15.30 A/B and the settle-window costs (hold, journal, digests, bursts): `EVALUATION-2026-11-14.md`; 0.16.1 medians, the F35/F36 effect, the precheck cost and bursts with an own-line finding per file: `EVALUATION-2026-11-14b.md`.
-- Harness and live-hook recipe: `../.claude/rules/hook-design.md`, "Measured cost".
+- Harness and live-hook recipe: `design/hook-design.md`, "Measured cost".
 - Final verification of 0.15.30: 321 tests pass, `pnpm lint` exit 0, `claude plugin validate` passes (non-blocking ICON_MISSING warning, pre-existing), all 16 `perf.mts` cases ok; the table is the F01 "Measured" section.
 
 ## Re-check recipes (Claude Code or toolchain upgrades)

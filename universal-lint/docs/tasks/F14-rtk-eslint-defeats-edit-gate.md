@@ -3,7 +3,7 @@ id: F14
 title: Bypass rtk lint on Edit; its compacted output has no line locations, so the edit-range gate passes everything
 status: done
 priority: medium
-area: universal-lint/src/hooks/lint-file.ts (gateFinding, LOC_PATH_RE, LOC_ROW_RE, LOC_SHELLCHECK_RE, runLintTool, getRtkPrefix, tryRtk), universal-lint/.claude/rules/hook-design.md
+area: universal-lint/src/hooks/lint-file.ts (gateFinding, LOC_PATH_RE, LOC_ROW_RE, LOC_SHELLCHECK_RE, runLintTool, getRtkPrefix, tryRtk), universal-lint/docs/design/hook-design.md
 ---
 
 ## Status

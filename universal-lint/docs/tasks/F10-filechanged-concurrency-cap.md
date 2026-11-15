@@ -3,7 +3,7 @@ id: F10
 title: Cap concurrent FileChanged lints across hook processes (slot files)
 status: done
 priority: high
-area: universal-lint/src/hooks/lint-file.ts (fileChangedHandler, lintResolved, acquireSlot, slotStale, FILE_CHANGED_SLOTS, FILE_CHANGED_BUDGET_MS, main), universal-lint/.claude/rules/hook-design.md
+area: universal-lint/src/hooks/lint-file.ts (fileChangedHandler, lintResolved, acquireSlot, slotStale, FILE_CHANGED_SLOTS, FILE_CHANGED_BUDGET_MS, main), universal-lint/docs/design/hook-design.md
 ---
 
 ## Status

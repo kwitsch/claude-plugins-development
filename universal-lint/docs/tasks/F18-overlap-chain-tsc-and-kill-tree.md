@@ -3,7 +3,7 @@ id: F18
 title: Overlap chain lint and tsc; kill the whole process tree on timeout
 status: done
 priority: low
-area: universal-lint/src/hooks/lint-file.ts (spawnGroup, KILL_GRACE_MS, spawnBin, runNpx, runLintTool, runChainLint, runTypeCheck, lintResolved, coalesceProjectCheck, lintFileHandler, fileChangedHandler, lintFilesHandler, main), universal-lint/src/skills/universal-lint/lint-files.ts, universal-lint/.claude/rules/hook-design.md
+area: universal-lint/src/hooks/lint-file.ts (spawnGroup, KILL_GRACE_MS, spawnBin, runNpx, runLintTool, runChainLint, runTypeCheck, lintResolved, coalesceProjectCheck, lintFileHandler, fileChangedHandler, lintFilesHandler, main), universal-lint/src/skills/universal-lint/lint-files.ts, universal-lint/docs/design/hook-design.md
 ---
 
 ## Status

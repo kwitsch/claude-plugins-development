@@ -4,16 +4,17 @@ Hook-driven plugin (plus one user-only on-demand skill): six `command` hooks sha
 
 ## Parts
 
-Each part has a path-scoped rule in `.claude/rules/` (loaded when you work on matching files). Do not "fix" any behaviour documented there without reading the rule first:
+Two layers. The path-scoped rules in `.claude/rules/` load when you work on matching files and hold the constraints only. The design pages in `docs/design/` hold the reasons, measurements, accepted residuals and rejected alternatives; they are not loaded by themselves. Do not "fix" any behaviour of an area without reading its design page first:
 
-- Hook `lint-file` (`src/hooks/lint-file.ts`):
-  - `hook-design.md`: six command hooks with one entry, command hooks instead of an MCP server, timeout budget, runtime behaviour, measured per-event cost and the `scripts/perf.mts` harness.
-  - `settle-window.md`: who gets a finding and when (owner routing, the journal of pending edits, the quiet-time hold, the Stop/SubagentStop sweep; F34, F40).
-  - `edit-range-gate.md`: Edit-range gate. `file-detection.md`: scope, watch list, FileChanged gates, slot cap, project-check lock, digest store, path exclusions. `npx-and-local-bin.md`: local `node_modules/.bin`, npx fallback, PATH probe cache.
-  - `typescript-check.md` (the `tsc` pass), `line-length-guard.md` (YAML/Markdown max-line-length guard).
-  - `languages.md` (why JSON is not covered) and one file per language: `lang-jsts.md`, `lang-css.md`, `lang-php.md`, `lang-rust.md`, `lang-go.md`.
-- Skill `universal-lint` (`plugin/skills/universal-lint/`, driver `src/skills/universal-lint/lint-files.ts`): `skill-driver.md`.
-- Tests: `tests.md`.
+- Hook `lint-file` (`src/hooks/lint-file.ts`): rule `lint-file.md`, one section per area, each naming its design page:
+  - `docs/design/hook-design.md`: six command hooks with one entry, command hooks instead of an MCP server, timeout budget, runtime behaviour, measured per-event cost and the `scripts/perf.mts` harness.
+  - `docs/design/settle-window.md`: who gets a finding and when (owner routing, the journal of pending edits, the quiet-time hold, the Stop/SubagentStop sweep; F34, F40).
+  - `docs/design/edit-range-gate.md`: Edit-range gate. `docs/design/file-detection.md`: scope, watch list, FileChanged gates, slot cap, project-check lock, digest store, path exclusions. `docs/design/npx-and-local-bin.md`: local `node_modules/.bin`, npx fallback, PATH probe cache.
+  - `docs/design/typescript-check.md` (the `tsc` pass), `docs/design/line-length-guard.md` (YAML/Markdown max-line-length guard).
+  - `docs/design/languages.md` (why JSON is not covered) and one page per language: `lang-jsts.md`, `lang-css.md`, `lang-php.md`, `lang-rust.md`, `lang-go.md`.
+- Skill `universal-lint` (`plugin/skills/universal-lint/`, driver `src/skills/universal-lint/lint-files.ts`): rule `skill-driver.md`.
+- Tests: rule `tests.md`.
+- Comments in `src/` still name the design pages by their old path `.claude/rules/<name>.md`; the file names are unchanged. Correct them with the next source change (a comment-only change of `src/` would force a release).
 
 ## No `userConfig` (deliberate, permanent)
 

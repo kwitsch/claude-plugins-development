@@ -99,7 +99,7 @@ A Write/Edit now reads and hashes the file three times (`recordWritten`, the jou
 | --- | -------- | ------ | ---------------------------------------------------------------------------------------------------------- | ---------------------------- |
 | F35 | medium   | open   | findings the settle filter can never drop (foreign-file only, unlocated only) are still held 5 s           | settle bench (5078-5081 ms)  |
 | F36 | low      | open   | a held parse error is reported although a later edit fixed its cause on another line (residual (9))        | repro (exit 2 after 5064 ms) |
-| F37 | low      | open   | `.claude/rules/hook-design.md` is 42,361 characters, over the repo's 40,000-character rule limit           | `wc -m` (0.15.30: 36,010)    |
+| F37 | low      | open   | `docs/design/hook-design.md` is 42,361 characters, over the repo's 40,000-character rule limit             | `wc -m` (0.15.30: 36,010)    |
 | -   | none     | -      | extra digests (+2.5 ms/MB), journal prune (linear, 5.6 ms at 5000 entries), parked RSS 56 MB per held lint | benches above, no task       |
 
 ## Remaining findings

@@ -16,7 +16,7 @@ Every Write/Edit lint that found something exited 2 at once, so Claude was woken
 
 ## Decision
 
-Hold the **report**, never the lint: a lint with findings sleeps `SETTLE_MS` (5 s) and then drops the diagnostics, located in the linted file, on lines that a later edit removed or replaced; the later edit's own lint reports what persists there. Full contract, journal format, coordinate anchor and residuals: `.claude/rules/hook-design.md` "Settle window (F34)".
+Hold the **report**, never the lint: a lint with findings sleeps `SETTLE_MS` (5 s) and then drops the diagnostics, located in the linted file, on lines that a later edit removed or replaced; the later edit's own lint reports what persists there. Full contract, journal format, coordinate anchor and residuals: `docs/design/hook-design.md` "Settle window (F34)".
 
 Approaches (design/spec in the session scratchpad, jev-api `choice` A at 0.81):
 

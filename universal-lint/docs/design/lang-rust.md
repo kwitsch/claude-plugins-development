@@ -1,9 +1,3 @@
----
-paths:
-  - "src/hooks/**"
-  - "tests/rust.test.ts"
----
-
 # Rust: cargo clippy/check, manifest targeting, and the clippy-component gap
 
 - `.rs` routes to `cargo-clippy` (chain[0], richer) → `cargo check` (chain[1], compile-only fallback). Both are `manifestPath` tools and PATH-only (rustup-distributed; no valid npx equivalent, so no `npmSpec`).

@@ -1,9 +1,3 @@
----
-paths:
-  - "src/hooks/**"
-  - "tests/{checkstyle,core}.test.ts"
----
-
 # JSON: not covered (do not "fix" without reading this)
 
 - `.json` is intentionally absent from `EXT_MAP` — not a bug.

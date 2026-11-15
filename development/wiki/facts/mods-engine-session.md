@@ -2,7 +2,7 @@
 
 What `$.session.messages` returns, how prompts and slash commands a plugin raises are queued, what a `session.compact` hook replaces, and which usage figures a mod can see.
 
-Basics (meta rows omitted, state resets, `$.command.run` resolving after the compaction, `prompt.submit` `turnId`) are in [claude-code-hook-facts.md](../../../.claude/rules/claude-code-hook-facts.md).
+The constraints that follow load by themselves with [claude-code-hook-facts.md](../../../.claude/rules/claude-code-hook-facts.md); this page is the detail and the evidence.
 
 ## `$.session.messages` rows
 
@@ -15,13 +15,15 @@ Basics (meta rows omitted, state resets, `$.command.run` resolving after the com
   - a local command is a `<command-name>/x</command-name>` plus `<command-message>` row (`/cost` shows as `/usage`); a slash-command skill's turn shows only its `<command-message>/<command-name>/<command-args>` row, the expanded skill text is absent
   - long pasted text arrives as `<pasted_content id=..>` text
   - absent from the list: `@file` attachments, hook `additionalContext`, user messages queued mid-turn
-- A prompt a plugin submits with `$.prompt.submit` is stored and returned wrapped: `The <plugin> plugin sent a message:\n<text>\n\nThis is how Claude Code surfaces a prompt a plugin submits between turns ...` (live 2.1.325).
+- Meta rows are omitted. A slash command that started a turn appears with its arguments raw (a `<` stays as it is); a local command has no stdout row (live 2.1.325).
+- A prompt a plugin submits with `$.prompt.submit` carries no origin marker in the rows. It is stored and returned wrapped: `The <plugin> plugin sent a message:\n<text>\n\nThis is how Claude Code surfaces a prompt a plugin submits between turns ...` (live 2.1.325).
 - A user prompt may itself begin with a transcript tag (`<system-reminder>`, `<bash-stdout>`) followed by own text: classify a row as transcript-only by matching the whole row, never a prefix (kit probe, 2026-11-14).
 
 ## `prompt.submit` origins
 
 - `origin.kind` is `composer` for a typed prompt, `sdk` for a `claude -p` or SDK prompt, `plugin` (with `name`) for a `$.prompt.submit`, which reaches the calling plugin's other hooks, and `task-notification` for a background-task notice, whose `isMeta` is undefined (typings, live 2.1.325).
 - Slash commands never go through `prompt.submit` (binary 2.1.322).
+- The event carries `turnId` only for a prompt typed while a turn runs; it is absent while idle, which tells a mid-turn prompt from a new request (live 2.1.325).
 
 ## `$.command.run`
 
@@ -29,6 +31,7 @@ Basics (meta rows omitted, state resets, `$.command.run` resolving after the com
 - It is not refused from a `$.clock.every` callback after the hook frame ended (binary 2.1.322, not run live).
 - It rejects at once when the command is not enabled (`DISABLE_COMPACT`) or the session was stopped and nobody has sent input since; later when the entry is removed from the queue, interrupted, or the command threw (binary 2.1.322).
 - `/compact` answers `Not enough messages` and `Compaction failed` as `{ text, level: "error" }`: the promise resolves although nothing was compacted (binary 2.1.322).
+- `$.command.run({ command: "compact" })` resolves once the compaction ran, that is after the turn. A "compaction queued" flag has to be cleared on resolve as well as on reject, because the `session.compact` hook that would clear it may be bypassed (live 2.1.325).
 
 ## `session.compact`
 

@@ -3,12 +3,12 @@ id: F28
 title: Document the WSL Windows-PATH penalty (mostly inside child processes)
 status: done
 priority: medium
-area: universal-lint/plugin/README.md (troubleshooting), universal-lint/.claude/rules/hook-design.md
+area: universal-lint/plugin/README.md (troubleshooting), universal-lint/docs/design/hook-design.md
 ---
 
 ## Status
 
-Closed docs-only in 0.15.25, no code change. Shipped: a "Troubleshooting" section ("Slow lints on WSL") at the end of `plugin/README.md` (cause, the `go vet` example, the two user options `appendWindowsPath = false` in `/etc/wsl.conf` or a `/mnt`-trimmed PATH for Claude Code, and the statement that the plugin never rewrites PATH), and one sentence on the "Selection (`selectLintTool`)" bullet of `.claude/rules/hook-design.md`. The re-measurement on 0.15.25 (Evidence) refutes this task's original premise that a trimmed PATH speeds up every lint by 0.1-0.6 s: after rtk's removal (0.15.0), the direct local and npx-cached bins (F04, F09) and the persisted `onPath` probes (F11), the hook itself shows no real-vs-/mnt gap in the direction a /mnt penalty would cause (largest median difference 15 ms, and there the real PATH is the faster one). The remaining WSL cost is inside child processes that search PATH themselves; `go vet` is the one measured example.
+Closed docs-only in 0.15.25, no code change. Shipped: a "Troubleshooting" section ("Slow lints on WSL") at the end of `plugin/README.md` (cause, the `go vet` example, the two user options `appendWindowsPath = false` in `/etc/wsl.conf` or a `/mnt`-trimmed PATH for Claude Code, and the statement that the plugin never rewrites PATH), and one sentence on the "Selection (`selectLintTool`)" bullet of `docs/design/hook-design.md`. The re-measurement on 0.15.25 (Evidence) refutes this task's original premise that a trimmed PATH speeds up every lint by 0.1-0.6 s: after rtk's removal (0.15.0), the direct local and npx-cached bins (F04, F09) and the persisted `onPath` probes (F11), the hook itself shows no real-vs-/mnt gap in the direction a /mnt penalty would cause (largest median difference 15 ms, and there the real PATH is the faster one). The remaining WSL cost is inside child processes that search PATH themselves; `go vet` is the one measured example.
 
 GCCGO env on the go vet spawn: not pursued (user decision). The cost stays at about 95 ms per `go vet` run on WSL (go 1.22.2, one-file package). Reasons: Go's `work` package `init()` runs `LookPath` on `GCCGO` (or `gccgo`) on every go command (`go vet`, and `go list` under golangci-lint too) regardless of `-compiler`; an OS env `GCCGO` overrides a user's `go env -w GCCGO=...` (`cfg.Getenv` reads `os.Getenv` first, then the GOENV file; verified empirically), so an unconditional spawn-env override breaks gccgo users with exit 2 on every edit, unless the hook spawns `go env` first, which costs more than it saves. The benefit is WSL-only and gccgo-absent-only (9 `.go` edits in the mined transcripts); the README's `appendWindowsPath = false` fix removes the cost for every child process at once; and the plugin does not rewrite tool-resolution env (this task's PATH stance; F24 set only output-noise npm flags).
 
@@ -40,7 +40,7 @@ Superseded by Status: the original "trimmed PATH speeds up every lint by 0.1-0.6
 
 ## Verification
 
-Docs review. Re-measure with `pnpm --filter universal-lint build`, then `node universal-lint/scripts/perf.mts 5` (real vs /mnt-trimmed PATH) and the `go vet` loop described in Evidence. Checks: `wc -c universal-lint/.claude/rules/hook-design.md` below 40000; the README section names `appendWindowsPath = false`, `wsl --shutdown` and the trimmed-PATH one-liner and contains no `GCCGO` and no hook-side figure; `pnpm --filter universal-lint test` and `claude plugin validate universal-lint/plugin` pass.
+Docs review. Re-measure with `pnpm --filter universal-lint build`, then `node universal-lint/scripts/perf.mts 5` (real vs /mnt-trimmed PATH) and the `go vet` loop described in Evidence. Checks: `wc -c universal-lint/docs/design/hook-design.md` below 40000; the README section names `appendWindowsPath = false`, `wsl --shutdown` and the trimmed-PATH one-liner and contains no `GCCGO` and no hook-side figure; `pnpm --filter universal-lint test` and `claude plugin validate universal-lint/plugin` pass.
 
 ## Constraints
 

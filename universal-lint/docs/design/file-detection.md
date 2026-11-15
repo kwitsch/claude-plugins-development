@@ -1,10 +1,3 @@
----
-paths:
-  - "src/hooks/**"
-  - "plugin/hooks/**"
-  - "tests/{file-detection,core,registry}.test.ts"
----
-
 # File detection: FileChanged + watch list (do not "fix" without reading this)
 
 - **Scope (`scopedTarget`, port of dprint's `realish`/`inScope`), shared by every event** (PostToolUse through `resolveLintTarget`, the skill driver through it, FileChanged, the watch list): the path resolved against the payload `cwd` (never `process.cwd()`) must exist, have a lintable extension (`EXT_MAP` or `TYPE_CHECK_EXTS`), its real path must lie strictly inside realpath(cwd), not be excluded, not lie inside realpath(`scratchpad_dir`) when the payload has one, and not be a dangling link. The lint keeps the lexical path; the real path is the digest key. A Write/Edit through a symlink pointing outside the cwd, or into a scratchpad inside it, is not linted.

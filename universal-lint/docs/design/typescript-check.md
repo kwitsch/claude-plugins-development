@@ -1,9 +1,3 @@
----
-paths:
-  - "src/hooks/**"
-  - "tests/{tsc,registry,oxlint}.test.ts"
----
-
 # TypeScript type-checking (`tsc`)
 
 - `.ts`/`.tsx`/`.mts`/`.cts` get a **second, independent** whole-project `tsc --noEmit` beyond the JS/TS chain (eslint or oxlint); plain `.js`/`.jsx`/`.mjs`/`.cjs` never trigger it. Both findings surface in one `additionalContext`, each truncated independently at `MAX_CONTEXT_CHARS`, then the joined whole once more.

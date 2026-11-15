@@ -2,7 +2,7 @@
 
 What happens to a tool a plugin registers with `$.tool.register`, how one plugin calls another's tool, and what a `tool.check` hook can and cannot decide.
 
-Basics (errors as `{ deny }`, no schema enforcement, registration retry, no permission check) are in [claude-code-hook-facts.md](../../../.claude/rules/claude-code-hook-facts.md).
+The constraints that follow load by themselves with [claude-code-hook-facts.md](../../../.claude/rules/claude-code-hook-facts.md); this page is the detail and the evidence.
 
 ## Registration
 
@@ -12,11 +12,16 @@ Basics (errors as `{ deny }`, no schema enforcement, registration retry, no perm
 - Registrations survive a hot reload of the plugin: the reload loads a fresh module, but the tool registry forgets a plugin's tools only when the plugin unloads. There is no `$.tool.unregister` (binary 2.1.322).
 - A registered tool that no hook answers gets core's permission step and then the error text `<plugin> registered the tool <name> but no tool.call hook answered this call`. A plugin must therefore answer its registered tools in every state, also "inactive" (binary 2.1.322).
 - `$.tool.list()` builds each description through the tool's own prompt function, cached per tool; it raises no `agent.offer` (binary 2.1.322).
+- `$.tool.register` rejects until the session is bound, that is before `session.start`. A memoized failure then lasts for the whole session: retry per hook with back-off, and bound the wait for a registration that never answers, paying it once per tool (typings and an in-process harness, not measured live).
+- Input schemas are not enforced: `enum`, `required`, `type`, `minItems`, `maxItems` and bounds only describe the tool to the model; a call that breaks them reaches the `tool.call` hook unchanged (live 2.1.325).
 
 ## Serving a tool
 
 - A matched hook, `on("tool.call", { tool: "mcp__<plugin>__<name>" }, ...)`, answers its calls even when the module saw no `session.start`, and passes `claude plugin validate`. Cost per foreign tool call: about 15-40 µs for a matched hook (the engine filters before dispatch), about 80 µs plus 0.35 ms per MB of input and result for a matcher-less hook that returns `next(e)` (`claude plugin test` 2.1.322, measured 2026-11-11).
 - A matcher leaf is compared with `===` or is a `RegExp`; an array means any-of (typings 2.1.322).
+- A hook's own `{ isError: true, result }` reaches the model as a normal tool result (no `is_error`, text only), while `{ deny: text }` reaches it as `<tool_use_error>text</tool_use_error>` with `is_error: true` and no `permission_denials` entry. A result read back through `$.tool.call` carries `isError: true` or `deny` (live 2.1.322 and 2.1.325).
+- Result shapes: a hook-served tool answers `{ result: "<text>" }`, a real MCP tool `{ result: [{ type: "text", text }], text }`; a `tool.call` result has no `exitCode`. The worktree tools' output carries both `worktreePath` and `restoredCwd` (for ExitWorktree use `restoredCwd`) (live 2.1.325).
+- A tool call refused before it ran comes back as an error result whose text starts with `The user doesn't want to proceed with this tool use`, `Permission for this tool use was denied`, `Permission to use … has been denied` or `Hook '<name>' blocked`; a failed run does not match these (live 2.1.325).
 - A `{ deny }` text or a result reaches the model whole: a 400 KB deny arrived as a 400,073-character tool result. Cap any text a server controls (live 2.1.325).
 
 ## Permissions
@@ -36,5 +41,7 @@ Basics (errors as `{ deny }`, no schema enforcement, registration retry, no perm
 
 - The event carries only `tool`, `input` and `tool_use_id`: no permission mode, session id or scratchpad directory. `$` exposes no permission mode either (typings, live 2.1.319).
 - `next(e)` answers `{ decision, reason?, rule? }`; `rule` is set only when a settings rule decided, so a hook can tell a settings `ask` from a mode's ask (typings).
+- A hook that returns an existing `allow` with a new `reason` makes `cc-plugin-sec-default` warn the user that a plugin tried to reword an allow rule, and report the hook as skipped; returning the verdict unchanged avoids both (live 2.1.325).
+- Claude Code already allows in-project reads, so its `ask` on a `Read` means the path resolves outside the working directories (live 2.1.325).
 - `tool.check` runs before the permission mode settles an ask. A hook that answers `ask` puts the call to the mode's decider and forces the prompt in auto mode: a hook that only wants to loosen must never return `ask` (live 2.1.319).
 - For a call to a plugin's own MCP server tool, the hook sees `origin { plugin: <own>, tier: "user" }` when the mod itself called it through `$.mcp.call`, and `{ plugin: "engine", tier: "core" }` for the model's direct call. Answering `{ decision: "deny", reason }` for the latter keeps the model off the tool, even when it is in `--allowedTools`; the notice `its tool.check hook was skipped (cc-plugin-sec-default)` still appears, the deny applies (live 2.1.325).

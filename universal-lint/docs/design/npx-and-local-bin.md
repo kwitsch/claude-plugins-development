@@ -1,10 +1,3 @@
----
-paths:
-  - "src/hooks/**"
-  - "plugin/hooks/**"
-  - "tests/{npx-fallback,registry,core}.test.ts"
----
-
 # Local `node_modules/.bin`, npx fallback, PATH probe cache (do not "fix" without reading this)
 
 ## Local `node_modules/.bin` and npx fallback

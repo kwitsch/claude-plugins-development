@@ -1,10 +1,3 @@
----
-paths:
-  - "src/hooks/**"
-  - "plugin/hooks/**"
-  - "tests/{core,registry,tsc,yaml}.test.ts"
----
-
 # Edit-range gate (do not "fix" without reading this)
 
 - After an `Edit` the hook exits 2 only when a diagnostic is not proven to sit in the edited file outside the edited lines. No registered tool (shellcheck, checkstyle, ktlint, eslint, oxlint, ruff check, golangci-lint, go vet, yamllint, markdownlint(-cli2), stylelint, phpstan, psalm, cargo clippy/check) nor `tsc` has a line-range check mode (`golangci-lint --new-from-rev`/`psalm --diff` are git-based; `ruff format --line-range` is not a check), so the scan stays file/project-scoped and `gateFinding` filters the raw text afterwards. `buildArgv`/`classifyExit` are unchanged.

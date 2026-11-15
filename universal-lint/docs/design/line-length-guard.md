@@ -1,9 +1,3 @@
----
-paths:
-  - "src/hooks/**"
-  - "tests/{yaml,markdown,registry}.test.ts"
----
-
 # YAML/Markdown line-length guard (do not "fix" without reading this)
 
 - `yamllint` (`line-length`, `error` level at 80 — NOT `warning`, despite no `--strict`) and both markdownlint tools (`MD013`, `error` at 80) ship a max-line-length rule in their bundled defaults. Left alone, every YAML/Markdown file without project linter config would get noise the project never asked for.

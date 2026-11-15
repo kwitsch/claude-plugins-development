@@ -1,9 +1,3 @@
----
-paths:
-  - "src/hooks/**"
-  - "tests/{oxlint,core}.test.ts"
----
-
 # JS/TS: eslint vs oxlint
 
 - `.js .jsx .mjs .cjs .ts .tsx .mts .cts` run `REGISTRY.jsts` (eslint), the alternate chain `REGISTRY.oxlint` (not in `EXT_MAP`), or no chain lint; `lintResolved` decides via `resolveOxlintConfig` and the eslint-name walk.

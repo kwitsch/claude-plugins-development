@@ -1,12 +1,3 @@
----
-paths:
-  - "src/hooks/**"
-  - "plugin/hooks/**"
-  - "tests/{core,npx-fallback,truncation,manifest,registry,tsc}.test.ts"
-  - "tests/file-detection.test.ts"
-  - "scripts/perf.mts"
----
-
 # Hook design (do not "fix" without reading this)
 
 - **Six `command` hooks, one entry:** every event runs `"${CLAUDE_PLUGIN_ROOT}/hooks/lint-file.mjs"` (the placeholder is quoted so a plugin path with a space survives; `claude plugin validate` warns otherwise); `main()` dispatches on `hook_event_name`. No hooks.json `async` flag (the hook itself has an async `main` since 0.15.4, see the stdin sub-bullet), no `statusMessage` (silent), no matcher on the five non-tool events. No `if` or FileChanged matcher filter (F26, Claude Code 2.1.321): `if` takes one rule per handler (46 handlers to keep in step with `EXT_MAP`) and a FileChanged matcher also registers watch entries, matches case-sensitively and cannot skip the hook's own echoes or `unlink`; the saving is ~40 ms background CPU per spawn.

@@ -1,9 +1,3 @@
----
-paths:
-  - "src/hooks/**"
-  - "tests/php.test.ts"
----
-
 # PHP: phpstan/psalm and the vendor/bin gap
 
 - `phpstan` (chain[0]) and `psalm` (chain[1]) are file-scoped static analyzers — real-bug-catching, not style (like `tsc` vs `eslint`) — and PATH-only (Composer-distributed, no `npmSpec`).

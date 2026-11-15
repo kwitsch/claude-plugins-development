@@ -3,7 +3,7 @@ id: F13
 title: Run tsc / go vet / cargo once per FileChanged burst, not once per file
 status: done
 priority: medium
-area: universal-lint/src/hooks/lint-file.ts (coalesceProjectCheck, runTypeCheck, runChainLint, lintResolved, slotStale, FILE_CHANGED_BUDGET_MS), universal-lint/.claude/rules/hook-design.md
+area: universal-lint/src/hooks/lint-file.ts (coalesceProjectCheck, runTypeCheck, runChainLint, lintResolved, slotStale, FILE_CHANGED_BUDGET_MS), universal-lint/docs/design/hook-design.md
 ---
 
 ## Status

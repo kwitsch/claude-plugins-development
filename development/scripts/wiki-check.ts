@@ -1,7 +1,9 @@
 #!/usr/bin/env node
 // Usage: wiki-check.ts
 // Fails when development/wiki/ is inconsistent (development/wiki/CLAUDE.md): a page the index does not list, a
-// relative link that leads nowhere, a page without a `# Title` first line, or a malformed log heading.
+// relative link that leads nowhere, a page without a `# Title` first line, or a malformed log heading. Also fails on
+// a dead relative link in a memory file (CLAUDE.md, .claude/rules/*.md, at the root and per top-level directory):
+// rules link to wiki and design pages instead of repeating them, so a moved page must not leave a rule pointing nowhere.
 // Part of `pnpm lint` and of the PR workflow. What needs judgement (stale or contradicting facts) is the `wiki`
 // skill's `lint` action.
 import assert from "node:assert/strict";
@@ -80,7 +82,25 @@ const list = (dir: string): string[] =>
     return d.name.endsWith(".md") ? [path.relative(root, abs).split(path.sep).join("/")] : [];
   });
 const found = problems(new Map(list(root).map((rel) => [rel, readFileSync(path.join(root, rel), "utf8")])), (rel) => existsSync(path.join(root, rel)));
+
+const repo = path.resolve(root, "../..");
+/**
+ * The memory files of one directory: its `CLAUDE.md` and its `.claude/rules/*.md`.
+ *
+ * @param dir - Directory to look in.
+ * @returns Absolute paths of the files that exist.
+ */
+const memoryFiles = (dir: string): string[] => {
+  const rules = path.join(dir, ".claude/rules");
+  return [path.join(dir, "CLAUDE.md"), ...(existsSync(rules) ? readdirSync(rules).filter((n) => n.endsWith(".md")).map((n) => path.join(rules, n)) : [])].filter((f) => existsSync(f));
+};
+const tops = readdirSync(repo, { withFileTypes: true }).filter((d) => d.isDirectory() && d.name !== "node_modules" && !d.name.startsWith(".")).map((d) => path.join(repo, d.name));
+for (const file of [repo, ...tops].flatMap(memoryFiles)) {
+  for (const target of links(readFileSync(file, "utf8"))) {
+    if (!existsSync(path.resolve(path.dirname(file), target))) found.push(`${path.relative(repo, file)}: link to ${target} leads nowhere`);
+  }
+}
 if (found.length > 0) {
-  console.error(`development/wiki: ${found.length} problem(s)\n${found.join("\n")}`);
+  console.error(`knowledge links: ${found.length} problem(s)\n${found.join("\n")}`);
   process.exit(1);
 }

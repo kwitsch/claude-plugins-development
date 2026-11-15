@@ -14,6 +14,8 @@ The repository's knowledge base for agent sessions: what earlier sessions verifi
 
 A fact has one home. A page links to a rule instead of repeating it, and a rule links to a page for background.
 
+Rules and `CLAUDE.md` files load into every agent that touches a matching file; pages here and a plugin's `docs/` load only when someone follows a link. So a rule keeps the constraint in a line or two and links, as `[topic](relative/path.md)`, to the page with the reasons, the evidence, the residuals and the rejected alternatives: this wiki for what spans plugins, `<plugin>/docs/design/` for one plugin (model: `universal-lint/.claude/rules/lint-file.md`). `wiki-check.ts` fails on a dead link in a rule.
+
 ## Layout
 
 - `index.md`: the catalog. One line per page (link plus what a reader finds there), grouped by kind, and one line per knowledge source outside this directory (rules, plugin docs, skills). Read it first; it is the only file a session needs to find the rest.

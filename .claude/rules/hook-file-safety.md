@@ -1,7 +1,6 @@
 ---
 paths:
   - "*/src/**"
-  - "*/tests/**"
 ---
 
 # Rule: plugin code that reads or writes the user's files from hooks

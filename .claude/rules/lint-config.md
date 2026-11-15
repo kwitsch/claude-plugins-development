@@ -1,7 +1,6 @@
 ---
 paths:
-  - "**/*.mts"
-  - "**/*.ts"
+  - "vitest.config.mts"
   - "tsconfig*.json"
   - ".oxlintrc.json"
   - "**/package.json"
