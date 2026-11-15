@@ -324,3 +324,12 @@ test("a bare builtin import named like a helper is not a helper import", () => {
   const r = build({ "util.mts": A, "fmt.mts": `import { inspect } from "util";\nimport { one } from "./util.mjs";\nexport const two = (): string => inspect(one);\n`, "register.mts": `import { two } from "./fmt.mjs";\nexport function register(on: unknown): string { return two(); }\n` });
   assert.equal(r.status, 0, r.stderr);
 });
+
+test("a default plus named import merges with another helper's named import of the same source", () => {
+  const r = build({
+    "a.mts": `import path, { join } from "node:path";\nexport const one = join("a") + path.sep;\n`,
+    "b.mts": `import { join } from "node:path";\nexport const two = (): string => join("b");\n`,
+    "register.mts": `import { one } from "./a.mjs";\nimport { two } from "./b.mjs";\nexport function register(on: unknown): string { return one + two(); }\n`,
+  });
+  assert.equal(r.status, 0, r.stderr);
+});

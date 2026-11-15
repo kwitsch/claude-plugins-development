@@ -170,9 +170,12 @@ function bundleLib(compiled: Map<string, string>): { members: string[]; entries:
   const named = new Map<string, Set<string>>();
   const imports: string[] = [];
   for (const line of hoisted) {
-    const m = /^import\s*\{([^}]*)\}\s*from\s*(["'][^"']*["']);?$/.exec(line);
+    const m = /^import\s*(?:([\w$]+)\s*,\s*)?\{([^}]*)\}\s*from\s*(["'][^"']*["']);?$/.exec(line);
     if (!m) imports.push(line);
-    else for (const s of m[1].split(",").map((x) => x.trim().replace(/\s+/g, " ")).filter(Boolean)) named.set(m[2], (named.get(m[2]) ?? new Set()).add(s));
+    else {
+      if (m[1] !== undefined) imports.push(`import ${m[1]} from ${m[3]};`); // the default stays its own line
+      for (const s of m[2].split(",").map((x) => x.trim().replace(/\s+/g, " ")).filter(Boolean)) named.set(m[3], (named.get(m[3]) ?? new Set()).add(s));
+    }
   }
   for (const [source, specs] of named) imports.push(`import { ${[...specs].join(", ")} } from ${source};`);
   // every hoisted import binds a name once (declared names are left to the Node parse below, which sees the real syntax)
