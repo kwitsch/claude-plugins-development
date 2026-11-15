@@ -88,6 +88,17 @@ describe("contextRefusal", () => {
 describe("sendRequest", () => {
   const env = { jevUrl: "https://jev.example/v1/x?token=abc", key: KEY };
 
+  it("hides the whole host when a path segment is part of the host name", async () => {
+    const f = {
+      doFetch: async () => {
+        throw new Error("getaddrinfo ENOTFOUND jevproxy.corp-internal.example");
+      },
+    };
+    const out = await sendRequest({ jevUrl: "https://jevproxy.corp-internal.example/jevproxy" }, STATE, QUESTIONS, f.doFetch);
+    expect(JSON.stringify(out)).toContain("ENOTFOUND <host>");
+    expect(JSON.stringify(out)).not.toContain("corp-internal");
+  });
+
   it("sends the POST with model, state and questions, and returns a 2xx text unchanged", async () => {
     const f = fake({ status: 200, text: "{\"answers\":{}}" });
     const out = await sendRequest({ ...env, jevUrl: undefined, base: "https://api.example" }, STATE, QUESTIONS, f.doFetch);

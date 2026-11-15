@@ -294,9 +294,10 @@ export async function sendRequest(env: HttpEnv, state: string, questionsObject: 
     // A base path may carry a token too (a proxy path); hide it without the fixed `/v1/systemone` tail, which hide() already wrote.
     if (key && key.length >= MIN_REDACT_KEY) t = t.replaceAll(key, "<TYPESAFE_API_KEY>"); // not a short key: it would match ordinary words
     if (custom) t = env.jevUrl ? hidePath(t, target.url, "<JEV_URL>") : hidePath(t, target.url.slice(0, -"/v1/systemone".length), "<TYPESAFE_BASE_URL>");
-    if (custom) { for (const v of pieces) t = t.replaceAll(v, env.jevUrl ? "<JEV_URL>" : "<TYPESAFE_BASE_URL>"); // a server may echo one value alone
-     }
-    return custom ? hideHost(t, target.url) : t;
+    if (!custom) return t;
+    t = hideHost(t, target.url); // before the pieces: a piece may also be part of the host name
+    for (const v of pieces) t = t.replaceAll(v, env.jevUrl ? "<JEV_URL>" : "<TYPESAFE_BASE_URL>"); // a server may echo one value alone
+    return t;
   };
   try {
     const res = await doFetch(target.url, { method: "POST", headers, body: JSON.stringify({ model: env.model ?? DEFAULT_MODEL, state, questions: questionsObject }) });
