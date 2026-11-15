@@ -46,3 +46,21 @@ test("a similar name misses batch", async ($, on) => {
   expect(await estimate($)).toEqual({ effort: "high", source: "fallback" });
   expect(sent).toHaveLength(0);
 });
+
+// A hook that consults jevMissing: the scratchpad allow is only given while jev-api's batch is listed.
+const SCRATCH = "/tmp/claude-1000/-proj/sid-1/scratchpad/x.md";
+async function writeDecision($: Runner, on: Parameters<typeof setup>[0], tools: string[]) {
+  setup(on, { messages: [], jev: () => undefined, tools: tools.map(jev) });
+  on("tool.check", () => ({ decision: "ask" }));
+  return (await $.tool.check({ tool: "Write", input: { file_path: SCRATCH }, tool_use_id: "toolu_jm" })).decision;
+}
+
+test("jevMissing: with batch listed the scratchpad write is allowed", async ($, on) => {
+  expect(await writeDecision($, on, [BATCH])).toBe("allow");
+});
+
+for (const tools of [[], ["noul", "choice", "score"].map((t) => `mcp__jev-api__${t}`), ["mcp__other__batch", "batch", "mcp__jev-api__batches"]]) {
+  test(`jevMissing: the scratchpad write stays ask with [${tools.join(", ")}]`, async ($, on) => {
+    expect(await writeDecision($, on, tools)).toBe("ask");
+  });
+}
