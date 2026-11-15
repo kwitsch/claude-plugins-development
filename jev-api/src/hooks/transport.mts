@@ -379,7 +379,11 @@ export async function sendOutcome($: Engine, link: Link, env: HttpEnv, state: st
       const callId = `${(await now($)).toString(36)}-${n}`;
       // after the await: a dispatch abandoned while the clock was read sends nothing
       if (signal.aborted) return ABANDONED;
-      return callServer($, server, callId, state, questionsObject, timeoutMs, signal);
+      // the request gets only the time the connect and config steps left
+      const left = timeoutMs - ((await now($)) - started);
+      if (signal.aborted) return ABANDONED;
+      if (left < 1) return { kind: "error", code: "timeout", message: `timeout after ${timeoutMs}ms` };
+      return callServer($, server, callId, state, questionsObject, Math.round(left), signal);
     };
     let outcome = await attempt();
     if (!("down" in outcome) && outcome.kind === "error" && outcome.code === "unconfigured") {

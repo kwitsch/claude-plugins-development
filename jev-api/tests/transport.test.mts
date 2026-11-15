@@ -100,6 +100,17 @@ describe("the request goes through the server", () => {
     expect(Object.keys(call.args).sort((a, b) => a.localeCompare(b))).toEqual(["callId", "questions", "state", "timeoutMs"]);
   });
 
+  it("the request gets only the time the connect and the config call left, and none left is a timeout", async () => {
+    for (const [used, expected] of [[2900, 1100], [4000, undefined]] as [number, number | undefined][]) {
+      const t = await rig({ connect: async () => (t.clock.now += used / 2, { isConnected: true, server: SERVER }), onConfig: () => (t.clock.now += used / 2, outcome({ configured: true })) });
+      const r = await t.run("noul", { timeout: 4 });
+      if (expected === undefined) {
+        expect(t.requests()).toHaveLength(0);
+        expect(r.deny).toContain("timeout after 4000ms");
+      } else expect(t.requests()[0].args["timeoutMs"]).toBe(expected);
+    }
+  });
+
   it("connects once and keeps the server for later calls", async () => {
     const t = await rig();
     await t.run();
