@@ -238,6 +238,7 @@ function bundleLib(compiled: Map<string, string>): { members: string[]; entries:
   const ids = (n: Node | null | undefined): string[] => {
     if (!n) return [];
     if (n.type === "Identifier") return n.name === undefined ? [] : [n.name];
+    if (n.type === "AssignmentPattern") return ids(n.left);
     return [...(n.properties ?? []), ...(n.elements ?? [])].flatMap((x) => ids(x?.value ?? x?.argument ?? x?.left ?? x));
   };
   for (const n of parseSync("lib.mjs", code, { sourceType: "module" }).program.body as unknown as Node[]) {

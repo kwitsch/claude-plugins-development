@@ -244,6 +244,16 @@ test("a helper's top-level name that shadows a global used by another helper fai
   assert.match(r.stderr, /shadows the global URL/);
 });
 
+test("a destructured helper name with a default that shadows a global fails the build", () => {
+  const r = build({
+    "a.mts": `const { URL = 1 } = { URL: 2 } as { URL?: number };\nexport const a = (): number => URL;\n`,
+    "b.mts": `export const host = (u: string): string => new URL(u).host;\n`,
+    "register.mts": `import { a } from "./a.mjs";\nimport { host } from "./b.mjs";\nexport const both = (u: string): string => a() + host(u);\n`,
+  });
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /shadows the global URL/);
+});
+
 test("a hoisted import that shadows a global used by another helper fails the build", () => {
   const r = build({
     "a.mts": `import { setTimeout } from "node:timers/promises";\nexport async function pause(): Promise<void> { await setTimeout(1); }\n`,
