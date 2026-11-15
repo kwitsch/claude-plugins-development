@@ -109,6 +109,19 @@ export function checkAnswer(q: Question, a: unknown): Record<string, unknown> | 
 }
 
 /**
+ * Output tokens an option name needs in Haiku's reply: ASCII at about 3 characters per token (kept pessimistic), any
+ * other UTF-16 unit (CJK measured at about 1 token per character) as one token.
+ *
+ * @param key - The option name.
+ * @returns The token estimate.
+ */
+function nameTokens(key: string): number {
+  let other = 0;
+  for (let i = 0; i < key.length; i++) if (key.charCodeAt(i) > 0x7f) other++;
+  return Math.ceil((key.length - other) / 3) + other;
+}
+
+/**
  * The output budget of one Haiku call: a base per question plus the tokens of every option or level the answer lists
  * with its probability (a `choice` with 255 options needs thousands of tokens), capped.
  *
@@ -119,8 +132,16 @@ export function haikuTokens(questions: Question[]): number {
   let n = 256;
   for (const q of questions) {
     n += 256;
-    if (q.type === "choice") { for (const key of Object.keys(q.criteria)) n += Math.ceil(key.length / 3) + 12; }
-    else if (q.type === "score") n += 16 * q.criteria.length;
+    if (q.type === "choice") {
+      // an option name is echoed twice (`choice` field, `probabilities` key): count the longest once more
+      let longest = 0;
+      for (const key of Object.keys(q.criteria)) {
+        const t = nameTokens(key);
+        n += t + 12;
+        longest = Math.max(longest, t);
+      }
+      n += longest;
+    } else if (q.type === "score") n += 16 * q.criteria.length;
   }
   return Math.min(HAIKU_MAX_TOKENS, n);
 }
