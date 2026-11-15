@@ -625,6 +625,27 @@ it("a failed registration is retried by the next call, only for the tools still 
   expect(tries).toHaveLength(5); // nothing is missing any more
 });
 
+// Refusals before the session is bound must not back off the retry in session.start.
+it("session.start retries tools refused before the session was bound", async () => {
+  let bound = false;
+  const tries: boolean[] = [];
+  const { run, hooks, $ } = await direct({
+    tool: {
+      register: async (spec: { name: string }) => {
+        tries.push(bound);
+        if (!bound) throw new Error("session not bound");
+        return { tool: TOOL(spec.name) };
+      },
+    },
+    ui: { log: async () => undefined },
+  });
+  await run("noul");
+  await run("noul");
+  bound = true;
+  await hooks.get("session.start")?.($, { cwd: "/p" }, Object.assign(async (e: unknown) => e, { signal: new AbortController().signal }));
+  expect(tries.filter(Boolean)).toHaveLength(4);
+});
+
 // F03: a registration that never answers must not hold the call.
 it("a registration that never answers does not hold the call", async () => {
   const { run, fetched } = await direct({

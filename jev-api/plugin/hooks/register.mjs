@@ -22,6 +22,7 @@ export function register(on, options) {
 	const link = newLink();
 	on("session.start", async function onSessionStart($, e, next) {
 		try {
+			st.retryAt.clear();
 			if (st.missing.size > 0) await ensureTools($, st, 5 * REGISTER_WAIT_MS);
 		} catch {}
 		try {

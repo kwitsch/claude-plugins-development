@@ -55,6 +55,8 @@ export function register(on: On, options?: Options): void {
   const link = newLink();
   on("session.start", async function onSessionStart($, e, next) {
     try {
+      // Binding the session is what earlier refusals were about: drop their back-off so this retry really runs.
+      st.retryAt.clear();
       if (st.missing.size > 0) await ensureTools($, st, 5 * REGISTER_WAIT_MS);
     } catch {
       // best effort (a hook above refusing $.clock): the session.start chain goes on
