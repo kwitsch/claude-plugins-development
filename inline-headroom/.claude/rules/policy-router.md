@@ -4,7 +4,7 @@ paths:
   - "tests/policy.test.mts"
 ---
 
-## Content router
+# Content router
 
 A port of upstream headroom's content detection into `src/hooks/policy.mts` as
 `detectContentType`: the branch heuristics of
