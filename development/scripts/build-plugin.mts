@@ -36,7 +36,7 @@ const walk = (dir: string): string[] =>
 const libPath = (): string => path.join(PLUGIN, "hooks", "lib.mjs");
 
 /** The helper name of a sibling import source `./name.mjs`, else undefined. */
-const siblingName = (source: string): string | undefined => /^\.\/([\w-]+)\.mjs$/.exec(source)?.[1];
+const siblingName = (source: string): string | undefined => /^\.\/([^/]+)\.mjs$/.exec(source)?.[1];
 
 /**
  * Cuts spans out of code and puts their replacement in. A span followed by a line break takes it along when its

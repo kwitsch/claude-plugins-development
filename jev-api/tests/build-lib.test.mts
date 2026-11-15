@@ -158,3 +158,14 @@ test("declaration-like lines inside a helper's template literal bind no name", (
   });
   assert.equal(two.status, 0, two.stderr);
 });
+
+test("a helper whose file name has a dot or a non-ASCII letter is bundled into lib.mjs", () => {
+  const r = build({
+    "size.util.mts": `export const one = 1;\n`,
+    "größe.mts": `export const two = 2;\n`,
+    "register.mts": `import { one } from "./size.util.mjs";\nimport { two } from "./größe.mjs";\nexport function register(on: unknown): number { return one + two; }\n`,
+  });
+  assert.equal(r.status, 0, r.stderr);
+  assert.doesNotMatch(r.entry, /size\.util\.mjs|größe\.mjs/);
+  assert.match(r.entry, /from "\.\/lib\.mjs"/);
+});
