@@ -7,8 +7,6 @@ paths:
 
 # Local `node_modules/.bin`, npx fallback, PATH probe cache (do not "fix" without reading this)
 
-Selection order (`selectLintTool`: PATH, then local bin, then npx) and the timeout budget are in `hook-design.md`.
-
 ## Local `node_modules/.bin` and npx fallback
 
 - `eslint`, `oxlint`, `markdownlint-cli2`, `markdownlint` and `stylelint` (the chain entries with `npmSpec`), when absent from `PATH`, run the nearest `node_modules/.bin/<name>` from the file's directory up to `cwd` inclusive (`localBin` over `walkUpToCwd`; directories outside `cwd` never count), keyed by bin name (`markdownlint`'s package is `markdownlint-cli`) (user decision, F04, 0.15.3; `tsc` keeps its own cwd-only lookup, see `typescript-check.md`).

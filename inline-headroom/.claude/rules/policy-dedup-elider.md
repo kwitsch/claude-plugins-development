@@ -78,12 +78,9 @@ the file verbatim for the next Edit's `old_string`, and a later Bash `cat` of
 the same file still folds against it. Upstream protects only its verbatim
 exclude list (WebSearch, WebFetch, the retrieve tools, `view`).
 
-Behaviour change (0.7.0): with `tag_protector_enabled` on (the default) a line
-a custom tag span touches never starts a fold, and a run ends before the first
-such line (both mod-side; see `## Tag protector` (`policy-text-tags.md`)), so a repeated
-`<system-reminder>` block stays verbatim while the runs around it still fold.
-Tagged lines are still indexed. A text the tag scan cannot finish within its
-budget is only indexed.
+Behaviour change (0.7.0): the tag protector's dedup rules (`## Tag protector`
+(`policy-text-tags.md`)) keep a repeated `<system-reminder>` block verbatim
+while the runs around it still fold.
 
 ## Dense line elider
 
@@ -151,10 +148,8 @@ retrieval line then follows the extractor's, and its stored original is the
 extraction. With `html_extractor_enabled` off, or when the extractor declines,
 the elider runs on the page exactly as before.
 
-Behaviour change (0.7.0): with `tag_protector_enabled` on (the default) a line
-a custom tag span touches is never dense (mod-side; see `## Tag protector` (`policy-text-tags.md`)),
-and after an HTML extraction the spans are those of the extracted text. A text
-the tag scan cannot finish within its budget is not elided at all.
+Behaviour change (0.7.0): the tag protector's elider rules (`## Tag protector`
+(`policy-text-tags.md`)).
 
 Behaviour change (0.8.0): on `build`, `search` and `text` the elider now sees
 the log compressor's, the search compressor's or the text crusher's lossy

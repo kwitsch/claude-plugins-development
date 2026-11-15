@@ -9,7 +9,7 @@ paths:
 
 # Cache countdown, auto-compact and compaction
 
-Ported from HeyCubit/effortless `hooks/register.tsx`. None needs jev-api: the work runs before the readiness guard of
+None needs jev-api: the work runs before the readiness guard of
 `turn.step`/`turn.complete`, and `session.compact` has no guard except around the Jev ranking (hook wiring:
 `register-hooks.md`). `cache.ts` is pure (TTL detection, minutes, label, colour); `compact.ts` holds the Haiku
 transcript and prompt.
@@ -24,10 +24,7 @@ transcript and prompt.
   1-hour account looks the same and would compact a warm chat.
 - A 15 s `$.clock.every` (started in `session.start`, cancelled and restarted there; a reload re-raises
   `session.start`) runs `cacheTick`, which redraws the band when the minute changed.
-- `resetCache` resets the countdown from `session.start` and `session.end` (raised instead of `session.start` for
-  /clear and an in-process /resume; `session.end` also resets the first-turn estimates, the band and `autoOff`).
-- The band draws the countdown also when the effort row is hidden, above (column Box) whatever another plugin's
-  `AbovePrompt` hook beneath draws.
+- `resetCache` resets the countdown from `session.start` and `session.end` (`session.end` also resets the first-turn estimates, the band and `autoOff`).
 
 ## Auto-compact on a cold cache
 
@@ -43,8 +40,8 @@ transcript and prompt.
 ## Context-fill compaction
 
 - `contextCompact` asks the task-end question (`taskEndQuestion`) as its own request.
-- Its `compactQueued` is also cleared when its `$.command.run("compact")` resolves (it resolves once the compaction
-  ran), so a later full turn end compacts again even when `session.compact` is bypassed.
+- Its `compactQueued` is also cleared when its `$.command.run("compact")` resolves (engine fact: root
+  `claude-code-hook-facts.md`), so a later full turn end compacts again even when `session.compact` is bypassed.
 
 ## `session.compact`
 
@@ -62,9 +59,8 @@ transcript and prompt.
 
 The built-in `cc-plugin-sec-default` passes `session.compact` on past every user-tier hook (debug log:
 `jevfort: session.compact bypassed by cc-plugin-sec-default (tier user); beneath runs`, and
-`its session.compact hook was skipped`), as it does for `prompt.compose`, `prompt.section`, `prompt.context` and
-`classic.Stop` (for `tool.check` only a re-dispatch notice appears, the verdict stays allow:
-`inline-headroom/docs/claude-code-verification.md`). So the Jev ranking, the Haiku compaction and the
+`its session.compact hook was skipped`), as for the events in `register-hooks.md` (for `tool.check` only a
+re-dispatch notice appears, the verdict stays allow: `inline-headroom/docs/claude-code-verification.md`). So the Jev ranking, the Haiku compaction and the
 `cacheExpires = 0` reset do not run; core compacts on its own. Seen with a manual `/compact` in `claude -p`; an
 interactive session and an auto-compaction were not tried. Nothing in this plugin can get past a prepend-tier hook; the
 code and its tests stay as they are (the kit runs the hook).

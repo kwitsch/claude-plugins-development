@@ -19,8 +19,7 @@ Part rules (load with their files): `.claude/rules/register-hooks.md` (hooks, `$
 - Jev is asked only through jev-api's tool `mcp__jev-api__batch` (upstream sends its own HTTP request): `askJev` raises
   one `$.tool.call` with all questions of the decision (one System One request, needs jev-api >= 0.2.0), all or
   nothing. Each call passes its budget as jev-api's `timeout` (values: `register-hooks.md`), so jev-api stops waiting
-  when jevfort does, not after its default 20 s; the HTTP request itself cannot be aborted and runs on until it settles
-  or hits the engine's 30 s cap.
+  when jevfort does, not after its default 20 s (jev-api's timeout and cancel: `jev-api/CLAUDE.md`).
 - jevfort makes no network request and reads no endpoint or key: those are jev-api's environment (`TYPESAFE_API_KEY`,
   `TYPESAFE_BASE_URL`, `JEV_URL`, `TYPESAFE_DEFAULT_MODEL`). With none of the first three set jev-api answers through
   Haiku; `askJev` reads them once per turn (`haikuPath`) and then uses the longer Haiku budget. No `userConfig` entry
@@ -31,9 +30,8 @@ Part rules (load with their files): `.claude/rules/register-hooks.md` (hooks, `$
   which has only `noul`/`choice`/`score`) jevfort is inactive: every hook passes through untouched (also the
   scratchpad-write allow) except the render hooks, the `estimate_effort` handling and the Jev-free cache countdown,
   Haiku compaction and auto-compact.
-- Coupling: jevfort relies on jev-api's `batch` name, input (`state` string, `questions` array of
-  `{ type, instructions, criteria? }`) and answer (a JSON array of answers, `type` plus the System One fields, in
-  question order); no code is imported. The runtime check catches a renamed tool; changed shapes surface as `askJev`
+- Coupling: jevfort relies on jev-api's `batch` name, input and answer shape (defined in `jev-api/CLAUDE.md`); no
+  code is imported. The runtime check catches a renamed tool; changed shapes surface as `askJev`
   errors and the fallback to Claude Code's own behaviour.
 - Every `$` use and every `on(...)` call lives in `src/hooks/register.ts` (engine rule), including upstream's `askJev`,
   `readTurn`, `previousReply`, `buildCandidates`, `packageRunner`, `summarizeResult` and the `register*` functions of
@@ -44,8 +42,7 @@ Part rules (load with their files): `.claude/rules/register-hooks.md` (hooks, `$
   absent value): `false` turns off the step-0 effort estimate and the band's effort row, not the cache countdown,
   `estimate_effort` or take-steps.
 - Effort band: a `ui.render` hook on `AbovePrompt` shows the session and the chosen effort and a `Jev auto: on/off`
-  Button; while off, step 0 skips the estimate and the Haiku/Fable hold, so the turn runs at the session effort
-  (details: `register-hooks.md`).
+  Button (details: `register-hooks.md`).
 - Output: nothing on the status line (no `$.ui.status`). The only output is one debug-log line per effort estimate,
   written by `debugEffort` through `$.ui.log(text, { to: "debug" })` (returns nothing; with `claude --debug`:
   `[jevfort] $.ui.log (to debug): effort <model>: session <e> → <chosen> · <source>`).
@@ -63,6 +60,4 @@ after the pause is the probe, any success resets it. The pause ends when the clo
 
 ## Layout
 
-- `plugin/hooks/register.mjs` is the unmangled entry; every other helper bundles into `plugin/hooks/lib.mjs`.
-- Tests import only `plugin/hooks/register.mjs`, through the shared kit `tests/support/kit.ts` (jev-api's standard).
-  Pure helpers are tested through the hooks, never by importing `src/`.
+- Tests share the kit `tests/support/kit.ts` (standard: root `.claude/rules/hook-tests.md`).

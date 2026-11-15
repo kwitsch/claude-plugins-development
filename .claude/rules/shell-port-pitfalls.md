@@ -30,6 +30,5 @@ Learned in the graphmind-helper bug hunt (a port of three setup hook scripts to 
 ## Output budgets and dedupe
 
 - Each hook output has its own character budget; merging two outputs the original sent separately (briefing and recall) under one budget silently drops the second.
-- Cut text by code point, not UTF-16 unit: a cut inside a surrogate pair leaves a lone surrogate that breaks the JSON sent to the API.
 - "Already shown" bookkeeping must follow what actually went out: a line counts as shown when it ends inside the cut (even if only its newline was cut), never when the whole block was cut. A notice without an entry id ("No ... found.") must not enter a block that is re-offered until its id is marked shown.
 - Entry ids are parsed at their fixed position (line start after markers), not anywhere in the line: a summary or a date can hold the same pattern.

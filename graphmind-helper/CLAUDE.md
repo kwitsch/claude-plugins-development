@@ -1,7 +1,5 @@
 # CLAUDE.md — graphmind-helper
 
-`plugin/` is the installable plugin. `plugin/.claude-plugin/plugin.json` and all `plugin/**/*.mjs` are build output of `src/` and `package.json` (`pnpm build`); do not edit them.
-
 ## Components
 
 - `src/hooks/register.mts`: the function-hooks module (`hooks.json` is `{"modules": ["./register.mjs"]}`), every `$` use. Hooks: `session.start` (reset, binary toast), `session.end` (reset), `session.compact` (reset after a main-conversation compaction, machine caches kept), `prompt.submit` (briefing on the first prompt, recall on every one, as `context` entries), `tool.call` (one unmatched hook: the once-per-session nudge as `context` on the result of the first search). It ports the scripts `graphmind setup` installs as `~/.claude/hooks/graphmind-{session,prompt,search}.sh` (checked against graphmind on 2026-11-14); keep behaviour in step with them. Its decisions and engine facts: `.claude/rules/hooks-module.md`.

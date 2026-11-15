@@ -8,13 +8,20 @@ paths:
 
 Facts a plugin author keeps getting wrong. Re-verify with the `live-verify` skill when the Claude Code version changes. Tool hooks, FileChanged and watchPaths: `claude-code-tool-hook-facts.md`; tools a skill uses: `claude-code-skill-facts.md`.
 
+## Module load and static check (fail validate, test or the load)
+
+- No `any`, no `import()` (a module holding `import()` does not load).
+- Only the module listed in `hooks.json` may use `$`: the engine rejects passing the mods API into functions imported from another file. It also rejects `$.<noun>` as a bare value (bound, passed or read; `typeof $.mcp?.connect` fails with `$.mcp is used as a value`), and the check covers every module of a bundled `lib.mjs`. Same-file helpers take the whole `$`.
+- One hook per event without a matcher (`registered twice without a matcher` fails validate and test).
+- `claude plugin validate <plugin>/plugin` runs this check, the vitest kit does not: run it after every hooks change.
+- Mod-side permission-checked calls (`$.tool.call`, `$.process.run`, storage through `$.mcp.call`) must be awaited inside a running hook of the module (in-frame; live 2.1.296): core routes `$.mcp.call` through `$.tool.call` and its permission check although the typings promise no prompt, and a plugin's own hooks see a call it raises only while one of its hooks runs. A call from an unawaited chain or a `$.clock.every` callback skips them: a permission dialog per call in `default` mode, denied headless.
+
 ## Function-hooks module state (graphmind-helper bug hunt, 2.1.325)
 
 - A tool's `tool.call` result in a function-hooks module arrives as `{ result }`; the worktree tools' output carries both `worktreePath` and `restoredCwd` (ExitWorktree: use `restoredCwd`).
 - A real MCP tool's `$.tool.call` result is `{ result: [{ type: "text", text }], text }`; a tool registered through `$.tool.register` answers `{ result: "<text>" }`. Read `text`, then a string `result`, then the text parts; an empty text is no answer.
 - A dispatch can be abandoned (interrupt, a hook above settled first, budget): `next.signal` aborts and whatever the hook returns is dropped. Check `next.signal?.aborted` after the last `await` and commit no conversation state (sent once, shown, searched) for an abandoned dispatch, or the next prompt never gets what this one lost.
-- Conversation state in module memory is reset on `session.start`, on `session.end` (raised for `/clear` and `/resume`, where no `session.start` follows) and after a main-conversation `session.compact` (the summary loses injected context). Skip the compaction reset for `trigger: "precompute"`, for an event with `agentId` (a subagent's transcript) and when `next`'s result carries `skip`. Machine-level caches (binary path, tool list) may survive the reset.
-- A cache flag set before an `await` lets parallel calls race past it: re-check the flag after the await before spending a once-per-session action.
+- Conversation state in module memory is reset on `session.start`, on `session.end` (raised for `/clear` and an in-process `/resume`, where no `session.start` follows and the session gets a new id and with it a new scratchpad directory: first-turn data, session-id lookups, recent-decision lists) and after a main-conversation `session.compact` (the summary loses injected context). Skip the compaction reset for `trigger: "precompute"`, for an event with `agentId` (a subagent's transcript) and when `next`'s result carries `skip`. Machine-level caches (binary path, tool list) may survive the reset.
 
 ## Mods engine (`$`) behaviour (2.1.323 typings, checked live on 2.1.325 except where marked)
 
@@ -32,7 +39,6 @@ Facts a plugin author keeps getting wrong. Re-verify with the `live-verify` skil
 - `$.session.messages` omits meta rows and carries no origin marker for a plugin's own `$.prompt.submit` text; a slash command that started a turn appears as a `<command-message>` row (arguments raw, a `<` stays), a local command (`/jev`) as a `<command-name>` row with no stdout row, and its skill text is not in the list.
 - A `tool.check` hook that returns an existing `allow` with a new `reason` makes `cc-plugin-sec-default` warn the user that a plugin tried to reword an allow rule: return an allow unchanged.
 - `$.clock.sleep(ms)` has no cancel: a budget raced with `Promise.race` stays pending after the race settled (one timer per call left behind). Use `$.clock.after(ms, fn)`, which returns `{ cancel }`, and cancel it in `finally` (typings; source: jevfort F08).
-- /clear and an in-process /resume raise `session.end` but no `session.start`, and give the session a new id and with it a new scratchpad directory: drop per-conversation state (first-turn data, session-id lookups, recent-decision lists) in `session.end` too.
 - A `prompt.submit` event carries `turnId` only for a prompt typed while a turn runs (absent while idle): use it to tell a mid-turn prompt from a new request.
 - `$.command.run({ command: "compact" })` resolves once the compaction ran (after the turn): clear a "compaction queued" flag on resolve as well as on reject; the `session.compact` hook that would clear it may be bypassed.
 - A tool call refused before it ran comes back as an error result whose text starts with `The user doesn't want to proceed with this tool use`, `Permission for this tool use was denied`, `Permission to use … has been denied` or `Hook '<name>' blocked` (2.1.325); a failed run does not match. A plugin acting on a result must not treat these as tool output.

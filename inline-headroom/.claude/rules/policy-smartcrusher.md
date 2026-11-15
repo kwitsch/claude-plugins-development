@@ -123,6 +123,3 @@ Deviations:
 - `numberChangePoints` is its own helper: the dict analyzer's `changePoints`
   needs 10 values and keeps a point only more than 5 past the previous one,
   which upstream's number crusher does not.
-
-With `tag_protector_enabled` on, a JSON text holding a custom tag runs without
-the lossy stage (details: `## Tag protector` (`policy-text-tags.md`)).

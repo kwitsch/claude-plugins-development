@@ -15,7 +15,7 @@ Learned from the jevfort performance worklist (F01-F08) and the bug hunt after i
 - An incremental scan ("only rows not seen yet") must restart when the earlier rows changed (fewer rows, a different first row), and must count a row only once it is final (a tool call without its result yet is not).
 - A budget loop over partly cached items uses `continue`, not `break`, once the budget is spent: items cached by an earlier pass are free.
 - Merging two requests into one keeps the old failure semantics explicitly (all or nothing), and the caller of the merged answer must not ask the second question again.
-- State read before an `await` and used after it is re-read after the `await` (an expiry, a flag, a timer epoch); bail out when it moved.
+- State read before an `await` and used after it is re-read after the `await` (an expiry, a flag, a timer epoch); bail out when it moved. A cache flag set before an `await` lets parallel calls race past it: re-check it before spending a once-per-session action.
 
 ## Buffered writes
 
@@ -23,7 +23,7 @@ Learned from the jevfort performance worklist (F01-F08) and the bug hunt after i
 
 ## Text and names
 
-- Every cut of user or model text (`slice`, a status line, a table cell, a tail) goes through one helper that drops a split surrogate; the "N more chars" note counts what was really dropped.
+- Every cut of user or model text (`slice`, a status line, a table cell, a tail) goes through one helper that cuts by code point and drops a split surrogate (a lone surrogate breaks the JSON sent to the API); the "N more chars" note counts what was really dropped.
 - A name allowlist (scripts, targets) also checks each word of the name (split at `:`, `-`, `_` and camelCase humps, also after an acronym run) against a deny list (`fix`, `write`, `format`, `update`, `watch`, `dev`, `serve`, ...).
 - Path deny patterns ignore case (APFS, Windows, WSL `/mnt/c`), refuse suffixed backups (`settings.json.bak`, `~`) and any `..` segment.
 - A model's choice outside the offered options (blocklisted, gone, made up) is no answer: check it with `Object.hasOwn(offered, choice)`.

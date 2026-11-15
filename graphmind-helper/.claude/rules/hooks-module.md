@@ -12,15 +12,15 @@ paths:
 - The briefing waits for the first `prompt.submit`: the MCP server starts concurrently with `session.start`.
 - Without the binary the module adds nothing (the toast explains).
 - Dedupe: the module adds nothing when the user settings (`~/.claude/settings.json`, or `$CLAUDE_CONFIG_DIR/settings.json` when that is set) name the setup's scripts (read once per conversation).
-- `$.tool.call` and `$.process.run` run in-frame of a hook (permission checks otherwise prompt); all of them are awaited inside `prompt.submit`/`tool.call`. Every failure fails open (the prompt or result passes unchanged).
+- `$.tool.call` and `$.process.run` run in-frame (root `claude-code-hook-facts.md`): all of them are awaited inside `prompt.submit`/`tool.call`. Every failure fails open (the prompt or result passes unchanged).
 
 ## Engine facts (checked live with `claude -p`, Claude Code 2.1.325)
 
 - The module loads as `graphmind-helper@inline` (events session.start, session.end, prompt.submit, tool.call); the plugin's MCP server connects as `plugin:graphmind-helper:graphmind` and `$.tool.call` reaches its tools as `mcp__plugin_graphmind-helper_graphmind__gm_*`.
-- A real MCP tool result is `{ result: [{ type: "text", text }], text }`, not a string (a build that read only strings silently added nothing): `textOf` reads `text`, then a string `result`, then the text parts.
+- `textOf` reads an MCP tool result in the order of root `claude-code-hook-facts.md` (a build that read only strings silently added nothing).
 - The first-prompt briefing (a `context` entry returned from `prompt.submit`) reaches the model verbatim; the nudge (`context` on a `tool.call` result) reaches it as "tool.call hook additional context".
 
 ## Live harness
 
-- Keep setup's hooks out with a temp `HOME`, a `CLAUDE_CONFIG_DIR` without them and `--setting-sources project`: the module reads `$CLAUDE_CONFIG_DIR/settings.json`, else `~/.claude/settings.json`, and stays silent (correctly) when they name the setup scripts. Copying the credentials into a scratch config dir was refused by the auto-mode classifier, so a live re-run needs the user.
+- Keep setup's hooks out with a temp `HOME`, a `CLAUDE_CONFIG_DIR` without them and `--setting-sources project` (see Dedupe above). Copying the credentials into a scratch config dir was refused by the auto-mode classifier, so a live re-run needs the user.
 - The last live run predates the parallel-recall refactor and the `CLAUDE_CONFIG_DIR` dedupe fix; since then only the kit tests ran. Not exercised live yet: a `graphmind setup` server (`mcp__graphmind__*`, kit test only), the setup-hooks dedupe, an unregistered project and init, the 10th-prompt checkpoint.

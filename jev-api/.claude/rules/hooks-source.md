@@ -11,18 +11,14 @@ Each module's header comment says what it holds; module history is in `docs/task
 
 ## Build and bundle
 
-- Only `register.mjs` is in `hooks.json`. It stays readable (unminified, unmangled): Claude Code's static check reads it.
-- `package.json` `pluginBuild.bundleHooksLib` makes `development/scripts/build-plugin.ts` bundle every other `hooks/*.ts` into one `plugin/hooks/lib.mjs` (compressed, whitespace removed, not mangled so `$` stays spelled) and point the entry's imports at it. Therefore:
-  - sources import each other as `./x.js`;
-  - top-level names stay unique across files;
-  - no module keeps state at module level: the test kit reloads only `register.mjs` per test.
+- `register.mjs` entry plus `lib.mjs` bundle (`pluginBuild.bundleHooksLib`): root `.claude/rules/hooks-lib-bundle.md` (constraints) and `src-typescript.md` (`./x.js` imports).
 - A hooks module may import from outside `hooks/` (`src/shared/http.ts`, pure, also imported by the MCP server), also through `lib.mjs`.
 
 ## Hooks
 
 - Three matcher-less hooks: `session.start`, `tool.call`, `tool.check` (the last one: `.claude/rules/http-mcp-server.md`).
 - `session.start` registers the four tools (a failed one is logged via `$.ui.log`) and records the name the engine returned for each (only in the `mcp__<plugin>__<type>` form) next to the default `mcp__jev-api__<type>` names.
-- `tool.call` answers those names and passes every other tool to `next(e)`.
+- `tool.call` answers those names.
 
 ## Registration (`registry.ts`)
 

@@ -7,24 +7,22 @@ paths:
 
 # `register.mts`: hooks, `$` use and engine pitfalls
 
-`plugin/hooks/hooks.json` (hand-written) is exactly `{"modules": ["./register.mjs"]}`. `src/hooks/register.mts` holds
-every hook and every `$` use and imports `./policy.mjs`. Tested by `tests/register.test.mts` (kit-style tests on the
-workspace package `claude-engine-vitest`). Evidence for the shapes below: `docs/claude-code-verification.md`.
+`plugin/hooks/hooks.json` (hand-written) is exactly `{"modules": ["./register.mjs"]}`. `src/hooks/register.mts`
+imports `./policy.mjs`. Tested by `tests/register.test.mts`. Evidence for the shapes below:
+`docs/claude-code-verification.md`.
 
 ## Engine pitfalls (change how the code must be written)
 
-- No `claude-code` type import: the used `$` members and events are typed structurally at the top of the file. No
-  `any`, no `import()` (a module holding `import()` does not load).
-- `policy.mts` must never reference `$`: the engine rejects passing the mods API into functions imported from another
-  file. It also rejects `$.<noun>` as a bare value (bound, passed or read), so same-file helpers take the whole `$`
-  typed `Engine` (`claude plugin validate` lists their calls as `$.mcp.call (via callStorage)`).
-- One hook per event without a matcher (`registered twice without a matcher` fails validate and test). Hence:
+- The general rules (no `any`/`import()`, no `$` outside `register.mts`, no bare `$.<noun>`, one matcher-less hook
+  per event): root `.claude/rules/claude-code-hook-facts.md`. The structural `$` types sit at the top of the file;
+  `policy.mts` never references `$`; same-file helpers take the whole `$` typed `Engine` (`claude plugin validate`
+  lists their calls as `$.mcp.call (via callStorage)`).
+- Hooks per event:
   `turn.complete` has one hook (storage write, subagent error cleanup, a finished agent's dedup-corpus reset);
   `session.compact` one (dedup reset); `tool.call` one (effort-error observer and the `headroom_retrieve` answer);
   `session.append` exactly one, with the matcher `{ door: "tool-result" }`, running every compression lever.
-- `tool.call` failure is `isError: true` or `deny: string`; there is no `exitCode`. An MCP tool's `tool.call` resolves
-  `{ ref, result, text }` with `result` the content-block array itself, not `{ content: [...] }` (that is
-  `$.mcp.call`'s shape).
+- A `tool.call` result has no `exitCode`. An MCP tool's `tool.call` also carries `ref`; its `result` is the
+  content-block array itself, not `{ content: [...] }` (that is `$.mcp.call`'s shape).
 - `$.mcp.connect(key)` takes the bare `.mcp.json` key (`"storage"`), never rejects, and resolves
   `{ isConnected: true, server }` (the namespaced name `$.mcp.call` takes) or `{ isConnected: false, reason, message }`.
   `structuredContent` is not forwarded for a tool without `outputSchema`, so `callStorage` reads the JSON text block.
@@ -36,31 +34,20 @@ workspace package `claude-engine-vitest`). Evidence for the shapes below: `docs/
 
 ## Storage calls must run in-frame
 
-Every mod-side storage call must be awaited by a running hook of this module
-(live on 2.1.296): core routes `$.mcp.call` through `$.tool.call` and its
-permission check, although the typings promise no prompt. A plugin's own hooks
-see a call it raises only while one of its hooks runs; a call raised after the
-hook returned (an unawaited chain, a `$.clock.every` callback) skips them, so
-in `default` mode the user gets a permission dialog per call and a headless
-session denies it. In-frame, the module's `tool.check` hook allows it
+Why: root `claude-code-hook-facts.md`. In-frame, the module's `tool.check` hook allows a storage call
 (`isOwnStorageCall`). Hence: `turn.complete` awaits its `stats_put`,
 `command.run` awaits the first `stats_sum`, and a refresh tick only sets
 `stale` and redraws, so the `ui.render` hook fetches.
 
 ## Compression wiring (shared by every lever)
 
-- One `session.append` hook with the matcher `{ door: "tool-result" }`,
-  registered while any compression lever is on (`compressOn` in
-  `register.mts`), rewrites each tool-result row before it is
+- The `session.append` hook, registered while any compression lever is on
+  (`compressOn` in `register.mts`), rewrites each tool-result row before it is
   first stored and sent, so the model, the transcript file and every later
   request read one form (prompt-cache safe). `rewriteToolResults` (pure, in
   `policy.mjs`) labels each text with `detectContentType`, runs that type's
-  `ROUTES` steps (crush then elide for `json_array`, config then elide for
-  `structured_config`, extract then elide on the extraction for `html`, log,
-  logfold then elide for `build`, search, searchfold then elide for `search`,
-  diff, difffold then elide for `diff`, split, textcrush, textfold then elide
-  for `text`, elide alone for `tabular` and `source_code`), then deduplicates a
-  single-text result (see `## Content router` (`policy-router.md`)).
+  `ROUTES` steps, then deduplicates a single-text result (see
+  `## Content router` (`policy-router.md`)).
 - Gates, each passing the row through with `next(e)`: `retrieveReady` (this
   module load registered the tool under `RETRIEVE_TOOL`; a marker must never
   name a missing tool), `origin.kind === "tool"`, and a subagent row
@@ -128,8 +115,7 @@ still defaults to `true` per the toggle convention in the plugin `CLAUDE.md`; th
 `/headroom` drop count are how a user measures whether it pays off. The
 `cache drop` log and the drop count cover the main loop only.
 
-`subagent_effort_routing_enabled` (default `true`, active only with
-`effort_routing_enabled`) applies the same clamp per `agentId`. It is a separate
+`subagent_effort_routing_enabled` applies the same clamp per `agentId`. It is a separate
 toggle (user decision) because the clamp overrides deliberately set effort
 (agent frontmatter `effort`, Agent tool `effort` param, Workflow `effort`
 option) and each subagent pays its own cache re-write on the switch, which

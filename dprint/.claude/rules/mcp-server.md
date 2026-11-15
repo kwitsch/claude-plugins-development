@@ -20,14 +20,12 @@ arguments are named constants or comments in the sources; this rule records beha
   `watch-paths` runs as its own `command` hook.
 - Scope never uses `process.cwd()`.
 - Needs dprint >= 0.50.
-- Every tool in `tools/list` carries `HOOK_ONLY_META` (`ui.visibility: ["app"]`): the model and ToolSearch never see
-  the tools, `mcp_tool` hooks still call them. A deny rule behaves the same, but a plugin cannot ship one; the docs
+- Every tool in `tools/list` carries `HOOK_ONLY_META` (`ui.visibility: ["app"]`, effect: repo rule
+  `.claude/rules/mcp-dual-era.md`). A deny rule behaves the same, but a plugin cannot ship one; the docs
   name the field only for cloud sessions, so `mcp-server.test.mts` pins it.
-- Dual-era (repo rule `.claude/rules/mcp-dual-era.md`): 2025-11-25 `initialize` and 2026-07-28 `server/discover`; no
-  tasks (every tool is a short hook call). `mcp-server.test.mts` covers both eras.
-- `notifications/cancelled` aborts the in-flight `tools/call`: no answer, one stderr line. Handlers get the
-  `AbortSignal` as second argument and check it before every spawn and write (`formatOnDisk` also after the slot
-  wait). A format already sent to `dprint lsp` runs on until the LSP answers or times out.
+- Dual-era (repo rule `.claude/rules/mcp-dual-era.md`), no tasks (every tool is a short hook call). `mcp-server.test.mts` covers both eras.
+- `notifications/cancelled` (repo rule): one stderr line; handlers get the `AbortSignal` as second argument
+  (`formatOnDisk` checks it also after the slot wait). A format already sent to `dprint lsp` runs on until the LSP answers or times out.
 
 ## Modules
 

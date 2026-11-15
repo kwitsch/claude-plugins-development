@@ -105,8 +105,7 @@ would eat most of any saving), since a shorter one is passed through whatever
 its label. The router compressors (log, search, diff, text crusher, relevance
 split) leave Read output and line-numbered (`N\t`, `cat -n`) text whole, as the
 HTML extractor does and dedup only indexes it, so the Edit tool can still match
-it, and decline a text holding a tag span. Dedup (`dedupBlock`) then runs over
-every type's final text, unchanged.
+it, and decline a text holding a tag span.
 
 Routing deviations from upstream:
 
@@ -130,13 +129,10 @@ Routing deviations from upstream:
 - Upstream's `DEFAULT_EXCLUDE_TOOLS` (`headroom/config.py`: Read, Glob, Grep,
   Write, Edit, WebSearch, WebFetch, Skill, … never lossily compressed) is not
   adopted: every lever rewrites results of any tool except error and protected
-  rows, and the router compressors and the HTML extractor also leave Read and
-  line-numbered text whole. Adopting the list would leave the search
+  rows (Read and line-numbered text: above). Adopting the list would leave the search
   compressor idle on Claude Code's Grep tool.
-- The relevance split routes only on `text` (user decision), ahead of the text
-  crusher and folding with `foldText`, never on `build` or `search` where
-  upstream runs it; it keeps any record run holding an `ERROR_KEYWORDS` line
-  and declines when no KEEP run would remain (see `## Relevance split` (`policy-text-tags.md`)).
+- The relevance split routes only on `text`: `## Relevance split`
+  (`policy-text-tags.md`).
 - A light router: no `is_mixed_content` / MIXED, no Magika or native detector,
   no `_strip_detection_envelope`, no embedded-JSON splice, no cross-kind
   lossless probing (`_lossless_first`: each step tries only its own kind's
@@ -147,11 +143,8 @@ Routing deviations from upstream:
 
 Decisions:
 
-- No userConfig toggle. The router has no behaviour of its own; which text a
-  lever sees is governed by that lever's toggle and documented per lever. The
-  router is infrastructure, and each future compressor brings its own toggle
-  (a deliberate no-toggle exception to the toggle convention in the plugin
-  `CLAUDE.md`).
+- No userConfig toggle (toggle convention, plugin `CLAUDE.md`): which text a
+  lever sees is governed by that lever's toggle and documented per lever.
 - Per-compressor `/headroom` tables exist (`compaction`, `config`, …), but
   per-type label counts stay omitted: a label alone saves nothing.
 

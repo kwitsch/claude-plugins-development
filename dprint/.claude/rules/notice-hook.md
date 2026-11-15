@@ -15,12 +15,11 @@ when the working directory has a dprint config but dprint cannot run.
 - `notice.mts` imports nothing. It inlines copies of `CONFIG_NAMES` (`config-names.mts`), `MIN_VERSION` and
   check-dprint's `dprint X.Y.Z` regex (`check-dprint.mts`); `tests/notice.test.mts` fails when a copy drifts, so
   change both places.
-- Build: `hooks/*.mjs` stay unminified (rule in `plugin-src.md`) because Claude Code's static module check needs named
-  hook functions, `$`/`on` spelled as such and no shadowed names; whitespace removal would turn string literals into
-  template literals.
-- `scripts/hooks.mts` validates only the `hooks` map; `claude plugin validate plugin` checks the module, lists
-  `process.run`, `env.get` and the env vars `DPRINT_INSTALL`, `HOME` and `PATH` among its uses, and warns "gating hook without .catch"
-  for three of its hooks. Expected: the check is detached with `.catch`.
+- Build: `hooks/*.mjs` stay unminified (root `plugin-src.md`, `hooks-lib-bundle.md`): the static module check also
+  rejects shadowed names, and whitespace removal would turn string literals into template literals.
+- `claude plugin validate plugin` checks the module and lists `process.run`, `env.get` and the env vars
+  `DPRINT_INSTALL`, `HOME` and `PATH` among its uses (its "gating hook without .catch" warning: root
+  `claude-code-tool-hook-facts.md`).
 
 ## When it checks
 
