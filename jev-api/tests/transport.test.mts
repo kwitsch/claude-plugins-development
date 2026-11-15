@@ -111,6 +111,17 @@ describe("the request goes through the server", () => {
     }
   });
 
+  it("a hung connect or config call does not hold the call past a shorter timeout", async () => {
+    for (const hang of ["connect", "config"]) {
+      const t = await rig(hang === "connect" ? { connect: NEVER } : { onConfig: NEVER });
+      const pending = t.run("noul", { timeout: 1 });
+      for (let i = 0; i < 50; i++) await new Promise((r) => setImmediate(r));
+      t.clock.now += 1000;
+      t.fire(1000);
+      expect((await pending).deny).toContain("timeout after 1000ms");
+    }
+  });
+
   it("connects once and keeps the server for later calls", async () => {
     const t = await rig();
     await t.run();
@@ -333,7 +344,7 @@ describe("fallback to $.http.fetch", () => {
       } else {
         expect(t.fetched).toHaveLength(1);
         expect(t.timers.filter((x) => x.ms === left)).toHaveLength(1);
-        expect(t.timers.filter((x) => x.ms === 4000)).toHaveLength(0);
+        expect(t.timers.filter((x) => x.ms === 4000 && !x.cancelled)).toHaveLength(0);
       }
     }
   });

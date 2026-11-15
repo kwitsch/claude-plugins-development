@@ -239,9 +239,10 @@ async function ensureServer($: Engine, link: Link): Promise<string | undefined> 
  * @param server - The server name.
  * @param env - The env values, trimmed.
  * @param signal - Aborts when the call is abandoned.
+ * @param waitMs - The most the config call may take (default {@link CONNECT_WAIT_MS}).
  * @returns `{ gen }`, the generation of the config this call's values were sent in (the request names it, so a server that holds another call's config refuses it), an outcome when the call was abandoned, or `{ down }` with the reason when the server failed.
  */
-async function syncConfig($: Engine, link: Link, server: string, env: HttpEnv, signal: AbortSignal): Promise<Outcome | { down: string } | { gen: number }> {
+async function syncConfig($: Engine, link: Link, server: string, env: HttpEnv, signal: AbortSignal, waitMs = CONNECT_WAIT_MS): Promise<Outcome | { down: string } | { gen: number }> {
   const args = { ...(env.key ? { key: env.key } : {}), ...(env.base ? { base: env.base } : {}), ...(env.jevUrl ? { jevUrl: env.jevUrl } : {}), ...(env.model ? { model: env.model } : {}) };
   const text = JSON.stringify(args);
   if (link.sent === text && !link.dirty) return { gen: link.sentGen };
@@ -264,7 +265,7 @@ async function syncConfig($: Engine, link: Link, server: string, env: HttpEnv, s
         if (link.syncing === mine) link.syncing = undefined;
       });
     }
-    wait = stopOn($, CONNECT_WAIT_MS, signal);
+    wait = stopOn($, Math.max(1, Math.min(CONNECT_WAIT_MS, waitMs)), signal);
     const r = await Promise.race([call, wait.stop]);
     if (r === "aborted") return ABANDONED;
     if (r === "timeout") {
@@ -385,23 +386,17 @@ async function callServer($: Engine, server: string, callId: string, gen: number
  */
 export async function sendOutcome($: Engine, link: Link, env: HttpEnv, state: string, questionsObject: Record<string, unknown>, timeoutMs: number, signal: AbortSignal): Promise<Outcome> {
   const started = await now($);
-  // the shared connect runs on in the background when the call is abandoned while it is pending
-  let onAbort = (): void => {};
-  const abandoned = new Promise<"aborted">((resolve) => {
-    if (signal.aborted) resolve("aborted");
-    else {
-      onAbort = () => resolve("aborted");
-      signal.addEventListener("abort", onAbort, { once: true });
-    }
-  });
-  const server = await Promise.race([ensureServer($, link), abandoned]).finally(() => signal.removeEventListener("abort", onAbort));
+  // the shared connect runs on in the background when the call is abandoned or out of time
+  const gate = stopOn($, timeoutMs, signal);
+  const server = await Promise.race([ensureServer($, link), gate.stop]).finally(() => gate.done());
+  if (server === "timeout") return { kind: "error", code: "timeout", message: `timeout after ${timeoutMs}ms` };
   if (server === "aborted") return ABANDONED;
   if (server !== undefined) {
     /** The generation the last attempt's request named. */
     let usedGen: number | undefined;
     /** The configuration, then the request. */
     const attempt = async (): Promise<Outcome | { down: string }> => {
-      const configured = await syncConfig($, link, server, env, signal);
+      const configured = await syncConfig($, link, server, env, signal, timeoutMs - ((await now($)) - started));
       if (!("gen" in configured)) return configured;
       usedGen = configured.gen;
       // a call id the server can tell apart from every other one of this session and of earlier ones; the counter moves
