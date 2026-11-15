@@ -12,7 +12,6 @@ const { test, mock } = makeKit(DEFAULTS);
 /** `setup` of this file: the kit's mock bound to the test's `on`. */
 const setup = (on: On, opts: SetupOpts) => setupWith(mock, on, opts);
 
-
 test("Jev takes a confident Read step without asking Claude", { options: { takeOnlyForBypass: false } }, async ($, on) => {
   const seen: unknown[] = [];
   setup(on, {
@@ -276,10 +275,16 @@ test("Further timeouts double the pause up to 10 min and no further", async ($, 
   // Pauses 30, 60, 120, 240, 480 s, then capped at 600 s twice.
   await timeoutAt(1);
   for (const [n, pause] of [[2, 30_000], [3, 60_000], [4, 120_000], [5, 240_000], [6, 480_000], [7, 600_000]] as const) {
-    await clock.advance(pause);
+    await clock.advance(pause - 1000);
+    await $.tool.call({ ...ESTIMATE });
+    expect(calls()).toBe(n - 1); // still paused 1 s before the end
+    await clock.advance(1000);
     await timeoutAt(n);
   }
-  await clock.advance(600_000);
+  await clock.advance(599_000);
+  await $.tool.call({ ...ESTIMATE });
+  expect(calls()).toBe(7);
+  await clock.advance(1000);
   await timeoutAt(8);
   expect(calls()).toBe(8);
 });
