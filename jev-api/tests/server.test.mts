@@ -138,6 +138,9 @@ describe("protocol", () => {
     const list = await c.rpc("tools/list");
     const tools = list["result"].tools as Msg[];
     assert.deepEqual(tools.map((t) => String(t["name"])).sort((a, b) => a.localeCompare(b)), ["cancel", "config", "request"]);
+    const req = tools.find((t) => t["name"] === "request");
+    assert.doesNotMatch(String(req?.["description"]), /environment/);
+    assert.match(String(req?.["description"]), /`config` tool/);
     for (const t of tools) {
       assert.match(t["description"], /^Internal transport of the jev-api plugin; calls from the model are refused\./);
       assert.equal(t["_meta"]?.ui?.visibility, undefined); // a hidden tool is not callable by $.mcp.call

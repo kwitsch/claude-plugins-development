@@ -77,7 +77,7 @@ const SERVER_INFO_META = { "io.modelcontextprotocol/serverInfo": SERVER_INFO };
 const TOOLS: Tool[] = [
   {
     name: "request",
-    description: `${INTERNAL} Sends one System One request to the endpoint the server's environment configures and answers its outcome. The timeout ends the HTTP request and closes the connection.`,
+    description: `${INTERNAL} Sends one System One request to the endpoint set by the \`config\` tool and answers its outcome. The timeout ends the HTTP request and closes the connection.`,
     inputSchema: {
       type: "object",
       properties: {
