@@ -223,6 +223,22 @@ test("a failed store read is read again by the next call, which then stores a la
   expect((store.sets[0][1] as { v: number; n: number }).v).toBeCloseTo(4, 6);
 });
 
+test("a store read that times out and is then refused is read again by the next call", async ($, on) => {
+  const { store, clock } = setup(on, { replies: [okReply(2000)], store: { density: { v: 3, n: 10 } } });
+  let refuse = (_e: unknown) => {};
+  store.late = new Promise((_, rej) => (refuse = rej));
+  const first = call($, "noul", SMALL);
+  await $.session.start({ cwd: "/proj", surface: "terminal", isInteractive: true });
+  await clock.advance(1000);
+  expect((await first).deny).toBeUndefined();
+  refuse(new Error("store gone"));
+  await clock.advance(0);
+  store.late = undefined;
+  await call($, "noul", SMALL);
+  expect(store.gets).toEqual(["density", "density"]);
+  expect(store.sets).toHaveLength(1);
+});
+
 test("a store read that answers after the wait still counts: a missing key lets a large move be stored", async ($, on) => {
   const { store, clock } = setup(on, { replies: [okReply(2000)] });
   let release = (_v: unknown) => {};
