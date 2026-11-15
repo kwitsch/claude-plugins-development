@@ -608,6 +608,8 @@ describe("Haiku takes over after an HTTP error status", () => {
       const timeouts = t.requests().map((c) => c.args["timeoutMs"]);
       expect(timeouts).toEqual(expected === undefined ? [4000] : [4000, expected]);
       expect(r.deny).toMatch(/state too large/);
+      // sized to the 500 ms left (the 1000-token floor), not to the 4 s the call started with
+      if (expected !== undefined) expect(String(t.requests()[1].args["state"]).length).toBeLessThan(400); // the 4 s budget would keep about 900
     }
   });
   it("when Haiku fails too, the error carries both reasons", async () => {
