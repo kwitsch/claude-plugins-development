@@ -55,6 +55,11 @@ kitTest("the tail of a quoted path with two spaces is not offered as another fil
   expect(reads(keys)).toEqual([]);
 });
 
+kitTest("a quote with two full paths offers both", async ($, on) => {
+  const { keys } = await ask($, on, user1("diff \"src/a.ts and lib/b.ts\" please"), { files: [`${CWD}/src/a.ts`, `${CWD}/lib/b.ts`] });
+  expect(reads(keys)).toEqual(["read src/a.ts", "read lib/b.ts"]);
+});
+
 kitTest("a file named in backticks with a space before it is not split off", async ($, on) => {
   const { keys } = await ask($, on, user1("see `my notes.md` and \"src/app.ts\""), { files: [`${CWD}/notes.md`, `${CWD}/src/app.ts`] });
   expect(reads(keys)).toEqual(["read src/app.ts"]);

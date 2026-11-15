@@ -74,12 +74,12 @@ export function mentionedPaths(texts: readonly string[], seen: Set<string> = new
       const p = m[1];
       const start = m.index + m[0].length - p.length;
       // A match that follows exactly one word inside a quoted span is the tail of a name with a space (`"docs/my notes.md"`),
-      // not a path of its own; a quote whose first word is a path (`"docs/my new notes.md"`) is one name; a longer quote (`"fix the bug in src/app.ts"`) still names its path.
+      // not a path of its own; a quote whose first word is a path head without extension (`"docs/my new notes.md"`) is one name, one whose first word is a full path (`"src/a.ts and src/b.ts"`) is not; a longer quote (`"fix the bug in src/app.ts"`) still names its path.
       // shortcut: `"fix src/app.ts"` (one word, then a path) is skipped too, an ambiguous case; refine if users quote that.
       // Matches come in ascending order and spans do not overlap, so a moving index finds the one candidate span.
       while (si < spans.length && spans[si][1] <= start) si++;
       const [a, b] = spans[si] ?? [0, 0];
-      if (start > a && start < b && /^(\S+\s+|\S*\/\S*\s.*\s)$/.test(text.slice(a + 1, start))) continue;
+      if (start > a && start < b && /^(\S+\s+|\S*\/[^\s.]*\s.*\s)$/.test(text.slice(a + 1, start))) continue;
       if (/^\d/.test(p) || /^https?:/.test(p) || p.includes("..")) continue;
       seen.add(p);
     }
