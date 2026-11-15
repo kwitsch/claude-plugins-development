@@ -644,6 +644,14 @@ describe("Haiku takes over after an HTTP error status", () => {
     expect((await t.run("noul", {}, ac.signal)).deny).toBe("noul: the call was abandoned");
     expect(t.completed).toHaveLength(0);
   });
+  it("a call abandoned after a context refusal, while the time left is read, is not handed to Haiku", async () => {
+    const ac = new AbortController();
+    const t = await rig({ complete: () => HAIKU_OK, onCall: () => outcome({ kind: "http", status: 400, refusal: { tokens: 40000, nctx: 32768 } }) });
+    const real = t.$.clock.now;
+    (t.$.clock as { now: () => Promise<number> }).now = () => (t.requests().length > 0 && ac.abort(), real());
+    expect((await t.run("noul", { overflow: "haiku" }, ac.signal)).deny).toBe("noul: the call was abandoned");
+    expect(t.completed).toHaveLength(0);
+  });
   it("a context refusal still follows the overflow mode, not Haiku", async () => {
     const refusal = outcome({ kind: "http", status: 400, refusal: { tokens: 40000, nctx: 32768 } });
     const t = await rig({ complete: () => HAIKU_OK, onCall: () => refusal });

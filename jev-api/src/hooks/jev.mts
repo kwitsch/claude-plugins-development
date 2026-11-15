@@ -132,6 +132,7 @@ export async function answerJev($: Engine, tool: ToolName, input: { state: strin
   if (mode === "haiku") {
     // after a refusal the request used part of the budget: Haiku gets the time left, as in takeOver; the preflight path sent nothing
     const left = refused ? timeoutMs - ((await now($)) - started) : timeoutMs;
+    if (signal.aborted) return fail(tool, "the call was abandoned");
     if (left < 1) return tooBigError(tool, refused!, budget);
     return await askHaiku($, tool, cutState(input.state, HAIKU_MAX_CHARS), input.questions, Math.round(left), signal);
   }
