@@ -103,7 +103,7 @@ export const SPECS: Record<ToolName, Omit<ToolSpec, "name">> = {
         overflow: OVERFLOW,
         questions: {
           type: "array",
-          description: "The questions, each with the input of the noul, choice or score tool minus state, plus its type.",
+          description: "The questions, each { type, instructions, criteria } with the noul, choice or score tool's instructions and criteria rules; timeout and overflow apply to the whole batch.",
           minItems: 1,
           items: {
             type: "object",

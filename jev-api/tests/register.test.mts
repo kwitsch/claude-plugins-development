@@ -52,6 +52,8 @@ test("session.start registers noul, choice, score and batch without any env var"
   expect(specs[0]).toMatchObject({ inputSchema: { type: "object", required: ["instructions", "state"] } });
   expect(specs[1]).toMatchObject({ inputSchema: { required: ["instructions", "state", "criteria"] } });
   expect(specs[2]).toMatchObject({ inputSchema: { required: ["instructions", "state", "criteria"] } });
+  const q = (specs[3] as { inputSchema: { properties: { questions: { description: string } } } }).inputSchema.properties.questions.description;
+  expect(q).toContain("timeout and overflow apply to the whole batch");
 });
 
 /** The test's `$` (the kit does not export its type). */
