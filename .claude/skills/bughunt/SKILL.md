@@ -40,10 +40,10 @@ Scout also picks the hunt lenses and sets the hunter model and effort **per lens
 
 - **Hunt**: one read-only hunter per lens and area, in parallel (model and effort of the lens from Scout), each with the lens and the rule "report only defects you reproduced, with the repro and its output". Brief hunters to use real tools (real dprint/git/node, the built `plugin/` output, the test stub) instead of reading alone, and "high bar: no style, speculation or documented limitations".
 - **Dedupe**: one `sonnet` job gets all findings and returns groups of finding indexes that describe the same defect with one merged title, repro and fix; the script computes each group's lenses from its members and adds any finding the job left out as its own group.
-- **Verify**: one `opus` verifier per deduplicated finding, in parallel; for every lens of the finding it re-runs that lens's repro itself, reads the code and refutes documented limits and style; then it rates the fix (`sonnet` for a local, well-understood change, `haiku` for a mechanical one; effort `low|medium|high`, not passed to `haiku`).
+- **Verify**: one verifier per deduplicated finding, in parallel, model and effort as the hunters classified the verify job (strongest of the merged findings, default `opus`/`medium`); for every lens of the finding it re-runs that lens's repro itself, reads the code and refutes documented limits and style; then it rates the fix (`sonnet` for a local, well-understood change, `haiku` for a mechanical one; effort `low|medium|high`, not passed to `haiku`).
 - **Fix** (queue, sequential): re-run the repro, fix the root cause once in the shared code, add a test that fails without the fix (revert the line to check; a regression test that passes on the old code proves nothing), build, `pnpm lint`, plugin tests, commit and push. The first fix bumps `<plugin>/package.json` once per branch. A blocked fix is reported and the queue goes on.
 - **Review** (`opus`, parallel to the next fix): read-only on the checkout, it reads the fix commit (`git show <sha>`), checks root cause versus symptom, that the test fails without the fix, other callers and regressions; to run something it uses a scratch copy outside the worktree. Approve or reject with concrete notes.
-- **Lenses** (the newest fix is the most likely place for the next defect): newest diff and the last fixes; interactions between fixes; TOCTOU, races and symlink swaps; caches keyed too coarsely, stale state, leaks; per-turn or per-session caches and buffers added for speed (every event that must drop or flush them, `.claude/rules/hook-caches-and-tests.md`); slow or unusual file systems, odd names and encodings; fail-open paths and missing error handling at trust boundaries; docs contradicting code and tests that cannot fail.
+- **Lenses** (hunters run before any fix of this run, so these two read the branch's earlier commits): newest diff and the last fixes; interactions between fixes; TOCTOU, races and symlink swaps; caches keyed too coarsely, stale state, leaks; per-turn or per-session caches and buffers added for speed (every event that must drop or flush them, `.claude/rules/hook-caches-and-tests.md`); slow or unusual file systems, odd names and encodings; fail-open paths and missing error handling at trust boundaries; docs contradicting code and tests that cannot fail.
 - **Close** (when anything was fixed): one agent runs `/simplify`, `/code-review high --fix`, build, lint, tests, then the learnings pass below; commit and push, clean tree, head equal to its upstream.
 
 No agent narrates between tool calls (no human reads it); the structured results are all that comes back.
@@ -183,9 +183,9 @@ const reviewPrompt = (job, commit) => `Review a fix of plugin "${plugin}" in the
 Finding ${job.f.key}: ${job.f.title}. Repro: ${job.f.repro}.
 Check: does it fix the root cause rather than the symptom, is every caller covered, does the test fail without the fix, does it add a regression or break an invariant, is anything beyond the finding changed. Reject only for a concrete defect you can name; style is no reason. Verdict approve, or reject with notes the fixer can act on.`
 
-const closePrompt = () => `Close the bug hunt of plugin "${plugin}" in the git worktree ${worktree} (stay there).
+const closePrompt = (summary) => `Close the bug hunt of plugin "${plugin}" in the git worktree ${worktree} (stay there).
 1. Skill "simplify" once on the branch changes, apply its fixes. 2. Skill "code-review" with args "high --fix" (never max). 3. \`pnpm --filter ${plugin} build\`, \`pnpm lint\`, \`pnpm --filter ${plugin} test\` until green.
-4. Learnings pass: follow "Close: learnings" in .claude/skills/bughunt/SKILL.md for the defect classes of this hunt: ${args.summary}. Only general facts go into .claude/rules/*.md (with paths:) or .claude/skills/.
+4. Learnings pass: follow "Close: learnings" in .claude/skills/bughunt/SKILL.md for the defect classes of this hunt: ${summary}. Only general facts go into .claude/rules/*.md (with paths:) or .claude/skills/.
 5. \`git add\`, commit ("${plugin}: bug hunt review and learnings", no Co-Authored-By), \`git push\`; then \`git status --short\` must be empty and \`git rev-parse HEAD\` equal \`git rev-parse @{u}\`, else commit and push again.
 Return status clean|fixed|blocked and one sentence.`
 
@@ -210,11 +210,14 @@ if (raw.length) {
 const found = groups.map((g) => {
   const ms = g.members.map((i) => raw[i])
   const sev = ['high', 'medium', 'low'].find((s) => ms.some((m) => m.severity === s))
-  return { key: g.key, title: g.title, repro: g.repro, fix: g.fix, severity: sev, reports: ms.map((m) => ({ lens: m.lens, repro: m.repro })), lensSet: [...new Set(ms.map((m) => m.lens))] }
+  // The hunters' classification of the verify job: the strongest model and highest effort asked for by any member.
+  const verifyModel = ms.some((m) => m.verifyModel === 'opus') || !ms.some((m) => m.verifyModel) ? 'opus' : 'sonnet'
+  const verifyEffort = ['high', 'medium', 'low'].find((e) => ms.some((m) => m.verifyEffort === e)) ?? 'medium'
+  return { key: g.key, title: g.title, repro: g.repro, fix: g.fix, severity: sev, verifyModel, verifyEffort, reports: ms.map((m) => ({ lens: m.lens, repro: m.repro })), lensSet: [...new Set(ms.map((m) => m.lens))] }
 })
 
 // Verify: one opus verifier per deduplicated finding, in parallel.
-const verdicts = await parallel(found.map((f) => () => run(verifyPrompt(f), { label: `verify:${f.key}`, phase: 'Verify', model: 'opus', effort: 'medium', schema: VERIFY })))
+const verdicts = await parallel(found.map((f) => () => run(verifyPrompt(f), { label: `verify:${f.key}`, phase: 'Verify', model: f.verifyModel, effort: f.verifyEffort, schema: VERIFY })))
 const verified = []
 found.forEach((f, i) => {
   const v = verdicts[i]
@@ -233,12 +236,15 @@ while (queue.length || pending.size) {
   const job = queue.shift()
   const model = job.f.fixModel
   const r = await run(fixPrompt(job, fixed === 0), { label: `fix:${job.f.key}`, phase: 'Fix', model, ...(model === 'haiku' ? {} : { effort: job.f.fixEffort }), schema: FIX })
-  if (!r || r.verdict === 'blocked') { job.res.fix = 'blocked'; log(`${job.f.key}: blocked`); continue }
-  if (r.verdict === 'refuted') { job.res.fix = 'refuted'; continue }
+  // After a rejected fix its commit stays on the branch: say so in the result.
+  const left = job.prevCommit ? ` (rejected fix ${job.prevCommit} stays on the branch)` : ''
+  if (!r || r.verdict === 'blocked') { job.res.fix = `blocked${left}`; log(`${job.f.key}: blocked`); continue }
+  if (r.verdict === 'refuted') { job.res.fix = `refuted${left}`; continue }
   fixed++
   job.res.fix = 'fixed'
   job.res.commit = r.commit
   const review = run(reviewPrompt(job, r.commit), { label: `review:${job.f.key}`, phase: 'Fix', model: 'opus', effort: 'medium', schema: REVIEW })
+    .catch(() => null)
     .then((rv) => {
       if (rv?.verdict === 'reject' && job.res.rejections < MAX_REJECTIONS) {
         job.res.rejections++
@@ -253,8 +259,7 @@ while (queue.length || pending.size) {
 
 let close = null
 if (fixed > 0) {
-  args.summary = verified.map((f) => f.title).join('; ')
-  close = await run(closePrompt(), { label: 'close', phase: 'Close', model: 'sonnet', effort: 'medium', schema: CLOSE })
+  close = await run(closePrompt(verified.map((f) => f.title).join('; ')), { label: 'close', phase: 'Close', model: 'sonnet', effort: 'medium', schema: CLOSE })
 }
-return { hunted: raw.length, failedHunts, deduped: found.length, verified: verified.length, fixed, results, close }
+return { hunted: raw.length, failedHunts, deduped: found.length, verified: verified.length, failedVerifies: verdicts.filter((v) => !v).length, fixed, results, close }
 ```
