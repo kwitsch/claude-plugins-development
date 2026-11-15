@@ -44,7 +44,7 @@ Scout also picks the hunt lenses and sets the hunter model and effort **per lens
 - **Fix** (queue, sequential): re-run the repro, fix the root cause once in the shared code, add a test that fails without the fix (revert the line to check; a regression test that passes on the old code proves nothing), build, `pnpm lint`, plugin tests, commit and push. The first fix bumps `<plugin>/package.json` once per branch. A blocked fix is reported and the queue goes on.
 - **Review** (`opus`, parallel to the next fix): read-only on the checkout, it reads the fix commit (`git show <sha>`), checks root cause versus symptom, that the test fails without the fix, other callers and regressions; to run something it uses a scratch copy outside the worktree. Approve or reject with concrete notes.
 - **Lenses** (hunters run before any fix of this run, so these two read the branch's earlier commits): newest diff and the last fixes; interactions between fixes; TOCTOU, races and symlink swaps; caches keyed too coarsely, stale state, leaks; per-turn or per-session caches and buffers added for speed (every event that must drop or flush them, `.claude/rules/hook-caches-and-tests.md`); slow or unusual file systems, odd names and encodings; fail-open paths and missing error handling at trust boundaries; docs contradicting code and tests that cannot fail.
-- **Close** (when anything was fixed): one agent runs `/simplify`, `/code-review high --fix`, build, lint, tests, then the learnings pass below; commit and push, clean tree, head equal to its upstream.
+- **Close** (when anything was fixed): the fix jobs report the files they changed, and one agent works only on those files. It first checks (jev-api `noul`) whether the code changes are too small or too simple for a simplifier (only documentation, or about 30 changed code lines or fewer without new logic): then `/simplify` and `/code-review` are both skipped, otherwise `/simplify` runs on the changed code files and `/code-review <level> --fix` on them, the level (`low`, `medium`, `high`, `xhigh`, never `max`) chosen from the size and risk of those changes, not fixed at `high`. Build, lint and tests only when one of them changed something; then the learnings pass below; commit and push, clean tree, head equal to its upstream.
 
 No agent narrates between tool calls (no human reads it); the structured results are all that comes back.
 
@@ -132,9 +132,9 @@ const VERIFY = {
   },
   required: ['lenses'],
 }
-const FIX = { type: 'object', properties: { verdict: { enum: ['fixed', 'refuted', 'blocked'] }, commit: { type: 'string' }, summary: { type: 'string' } }, required: ['verdict', 'summary'] }
+const FIX = { type: 'object', properties: { verdict: { enum: ['fixed', 'refuted', 'blocked'] }, commit: { type: 'string' }, files: { type: 'array', items: { type: 'string' } }, summary: { type: 'string' } }, required: ['verdict', 'summary'] }
 const REVIEW = { type: 'object', properties: { verdict: { enum: ['approve', 'reject'] }, notes: { type: 'string' } }, required: ['verdict', 'notes'] }
-const CLOSE = { type: 'object', properties: { status: { enum: ['clean', 'fixed', 'blocked'] }, summary: { type: 'string' } }, required: ['status', 'summary'] }
+const CLOSE = { type: 'object', properties: { status: { enum: ['clean', 'fixed', 'blocked'] }, simplify: { type: 'string' }, reviewLevel: { type: 'string' }, summary: { type: 'string' } }, required: ['status', 'summary'] }
 const { plugin, worktree, areas } = args
 const doFix = args.fix !== false
 const MAX_REJECTIONS = 2
@@ -177,17 +177,21 @@ ${job.notes ? `A previous fix (commit ${job.prevCommit}) was REJECTED in review.
 2. Fix the root cause once in ${plugin}/src (shared code, after grepping every caller), never in plugin/**/*.mjs. Add a test that fails without the fix (revert the line to check).
 3. \`pnpm --filter ${plugin} build\`, \`pnpm lint\`, \`pnpm --filter ${plugin} test\` until green; read the output.
 ${first ? `4. First fix of the branch: bump ${plugin}/package.json version once (only if \`git diff origin/main -- ${plugin}/package.json\` shows none), then rebuild.\n` : ''}5. \`git add\` what you changed, commit ("${plugin}: fix ${job.f.key}", no Co-Authored-By), \`git push -u origin HEAD\`.
-Return verdict fixed|refuted|blocked (blocked: cannot be made green; commit nothing broken), the commit sha and one sentence.`
+Return verdict fixed|refuted|blocked (blocked: cannot be made green; commit nothing broken), the commit sha, files (the repo-relative paths of the files the commit changed, from \`git show --name-only\`) and one sentence.`
 
 const reviewPrompt = (job, commit) => `Review a fix of plugin "${plugin}" in the git worktree ${worktree}. READ-ONLY: another fix job may be committing in this worktree right now, so do not edit, build or run tests there; read the fix with \`git show ${commit}\` and the code it touches. To run something, copy the commit into a scratch directory outside the worktree (\`git archive ${commit}\` and a symlink to node_modules).
 Finding ${job.f.key}: ${job.f.title}. Repro: ${job.f.repro}.
 Check: does it fix the root cause rather than the symptom, is every caller covered, does the test fail without the fix, does it add a regression or break an invariant, is anything beyond the finding changed. Reject only for a concrete defect you can name; style is no reason. Verdict approve, or reject with notes the fixer can act on.`
 
-const closePrompt = (summary) => `Close the bug hunt of plugin "${plugin}" in the git worktree ${worktree} (stay there).
-1. Skill "simplify" once on the branch changes, apply its fixes. 2. Skill "code-review" with args "high --fix" (never max). 3. \`pnpm --filter ${plugin} build\`, \`pnpm lint\`, \`pnpm --filter ${plugin} test\` until green.
-4. Learnings pass: follow "Close: learnings" in .claude/skills/bughunt/SKILL.md for the defect classes of this hunt: ${summary}. Only general facts go into .claude/rules/*.md (with paths:) or .claude/skills/.
-5. \`git add\`, commit ("${plugin}: bug hunt review and learnings", no Co-Authored-By), \`git push\`; then \`git status --short\` must be empty and \`git rev-parse HEAD\` equal \`git rev-parse @{u}\`, else commit and push again.
-Return status clean|fixed|blocked and one sentence.`
+const closePrompt = (summary, files) => `Close the bug hunt of plugin "${plugin}" in the git worktree ${worktree} (stay there).
+Files changed by the fix jobs (the only scope of simplify and code-review): ${files.join(', ')}.
+1. Size up the changes: \`git diff --stat origin/main...HEAD -- <those files>\`. Doc files (markdown, text, anything under docs/) never count as code. Ask the jev-api tools first (\`noul\`) whether the code changes are too small or too simple to need a simplifier: only documentation, or only a few lines (about 30 changed code lines or fewer) without new logic.
+2. Simplify: when that is a confident yes, skip it. Otherwise skill "simplify" restricted to the changed code files (revert any edit it makes elsewhere), apply its fixes.
+3. Code review: skip it under the same rule as simplify. Otherwise choose the level from the size and risk of the changes, jev-api \`score\` first: \`low\` few lines of simple code, \`medium\` moderate changes, \`high\` larger changes or concurrency, caches, security or protocol code, \`xhigh\` large and risky changes; never \`max\`. Run skill "code-review" with args "<level> --fix" and the changed code files as its target.
+4. Only when step 2 or 3 changed something: \`pnpm --filter ${plugin} build\`, \`pnpm lint\`, \`pnpm --filter ${plugin} test\` until green.
+5. Learnings pass: follow "Close: learnings" in .claude/skills/bughunt/SKILL.md for the defect classes of this hunt: ${summary}. Only general facts go into .claude/rules/*.md (with paths:) or .claude/skills/.
+6. \`git add\`, commit ("${plugin}: bug hunt review and learnings", no Co-Authored-By), \`git push\`; then \`git status --short\` must be empty and \`git rev-parse HEAD\` equal \`git rev-parse @{u}\`, else commit and push again.
+Return status clean|fixed|blocked, simplify (skipped or run, with the reason), reviewLevel (skipped or the level used) and one sentence.`
 
 // Hunt: every lens, every area, all in parallel.
 const hunts = await parallel(lenses.flatMap((l, li) => areas.map((a) => async () => ({ lens: li, report: await run(huntPrompt(a, l.lens), { label: `hunt:l${li}:${a.name}`, phase: 'Hunt', model: l.model, effort: l.effort, schema: FINDINGS }) }))))
@@ -231,6 +235,7 @@ const results = verified.map((f) => ({ key: f.key, lenses: f.lensSet.map((n) => 
 const queue = doFix ? verified.map((f, i) => ({ f, res: results[i], notes: null, prevCommit: null })) : []
 const pending = new Set()
 let fixed = 0
+const changed = new Set()
 while (queue.length || pending.size) {
   if (!queue.length) { await Promise.race(pending); continue }
   const job = queue.shift()
@@ -241,6 +246,7 @@ while (queue.length || pending.size) {
   if (!r || r.verdict === 'blocked') { job.res.fix = `blocked${left}`; log(`${job.f.key}: blocked`); continue }
   if (r.verdict === 'refuted') { job.res.fix = `refuted${left}`; continue }
   fixed++
+  for (const f of r.files ?? []) changed.add(f)
   job.res.fix = 'fixed'
   job.res.commit = r.commit
   const review = run(reviewPrompt(job, r.commit), { label: `review:${job.f.key}`, phase: 'Fix', model: 'opus', effort: 'medium', schema: REVIEW })
@@ -259,7 +265,7 @@ while (queue.length || pending.size) {
 
 let close = null
 if (fixed > 0) {
-  close = await run(closePrompt(verified.map((f) => f.title).join('; ')), { label: 'close', phase: 'Close', model: 'sonnet', effort: 'medium', schema: CLOSE })
+  close = await run(closePrompt(verified.map((f) => f.title).join('; '), [...changed]), { label: 'close', phase: 'Close', model: 'sonnet', effort: 'medium', schema: CLOSE })
 }
 return { hunted: raw.length, failedHunts, deduped: found.length, verified: verified.length, failedVerifies: verdicts.filter((v) => !v).length, fixed, results, close }
 ```
