@@ -894,7 +894,8 @@ export const register = (on, options) => {
 				].filter((r) => Boolean(r)),
 				sid: await $.session.id()
 			};
-			if (inScratchpad(asText(input.file_path ?? input.notebook_path ?? ""), scratchpad.sid, scratchpad.roots)) {
+			const target = e.tool === "NotebookEdit" ? input.notebook_path : input.file_path;
+			if (inScratchpad(asText(target ?? ""), scratchpad.sid, scratchpad.roots)) {
 				return {
 					...base,
 					decision: "allow",

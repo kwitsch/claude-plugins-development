@@ -574,6 +574,21 @@ for (const c of scratch) {
   });
 }
 
+// The path field is chosen by tool: a decoy in the other field must not decide the verdict.
+const decoys: { name: string; tool: string; input: Record<string, string>; expected: string }[] = [
+  { name: "NotebookEdit with a scratchpad decoy file_path", tool: "NotebookEdit", input: { notebook_path: "/home/u/real.ipynb", file_path: `${SP}/x` }, expected: "ask" },
+  { name: "Write with a notebook_path decoy in the scratchpad", tool: "Write", input: { file_path: "/home/u/real.md", notebook_path: `${SP}/x` }, expected: "ask" },
+  { name: "Edit with a notebook_path decoy in the scratchpad", tool: "Edit", input: { file_path: "/home/u/real.md", notebook_path: `${SP}/x` }, expected: "ask" },
+];
+for (const c of decoys) {
+  test(`Scratchpad decoy field is ignored: ${c.name} -> ${c.expected}`, async ($, on) => {
+    setup(on, { messages: [user("anything")], jev: () => undefined });
+    on("tool.check", () => ({ decision: "ask" }));
+
+    expect(await decision($, { tool: c.tool, input: c.input, tool_use_id: "toolu_sp" })).toBe(c.expected);
+  });
+}
+
 test("A settings ask rule beats the scratchpad allow", async ($, on) => {
   setup(on, { messages: [user("anything")], jev: () => undefined });
   on("tool.check", () => ({ decision: "ask", rule: "Write(/tmp/**)" }));

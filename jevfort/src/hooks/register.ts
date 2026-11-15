@@ -1312,7 +1312,9 @@ export const register = (on: On, options: Options): void => {
         roots: [await $.env.get("CLAUDE_CODE_TMPDIR"), await $.env.get("TMPDIR"), "/tmp"].filter((r): r is string => Boolean(r)),
         sid: await $.session.id(),
       };
-      if (inScratchpad(asText(input.file_path ?? input.notebook_path ?? ""), scratchpad.sid, scratchpad.roots)) {
+      // NotebookEdit names its target in notebook_path; the other write tools in file_path.
+      const target = e.tool === "NotebookEdit" ? input.notebook_path : input.file_path;
+      if (inScratchpad(asText(target ?? ""), scratchpad.sid, scratchpad.roots)) {
         return { ...base, decision: "allow", reason: "jevfort: write inside this session's scratchpad" };
       }
     }
