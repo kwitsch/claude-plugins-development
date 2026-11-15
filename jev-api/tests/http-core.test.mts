@@ -119,6 +119,11 @@ describe("sendRequest", () => {
     const out = await sendRequest({ jevUrl: "http://127.0.0.1:1/systemone?api_key=SECRETTOKEN123" }, STATE, QUESTIONS, fake({ status: 404, text: body }).doFetch);
     expect(JSON.stringify(out)).not.toContain("SECRETTOKEN123");
   });
+  it("redacts the echoed path of a base URL", async () => {
+    const body = JSON.stringify({ detail: "no route for POST /proxy/SECRETTOKEN123/v1/systemone" });
+    const out = await sendRequest({ base: "http://127.0.0.1:1/proxy/SECRETTOKEN123" }, STATE, QUESTIONS, fake({ status: 404, text: body }).doFetch);
+    expect(JSON.stringify(out)).not.toContain("SECRETTOKEN123");
+  });
   it("treats every 2xx as ok and everything else as http", async () => {
     expect((await sendRequest(env, STATE, QUESTIONS, fake({ status: 299, text: "x" }).doFetch)).kind).toBe("ok");
     expect((await sendRequest(env, STATE, QUESTIONS, fake({ status: 300, text: "x" }).doFetch)).kind).toBe("http");

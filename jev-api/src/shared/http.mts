@@ -273,7 +273,8 @@ export async function sendRequest(env: HttpEnv, state: string, questionsObject: 
     // In this order: the URL first (it may contain the key), the key before the host (a key may contain the host text).
     const custom = env.jevUrl || env.base; // the default endpoint is public: nothing to hide
     let t = custom ? hide(text, target.url, env.jevUrl ? "<JEV_URL>" : "<TYPESAFE_BASE_URL>/v1/systemone") : text;
-    if (env.jevUrl) t = hidePath(t, target.url, "<JEV_URL>"); // a base URL has no query and its path is fixed
+    // A base path may carry a token too (a proxy path); hide it without the fixed `/v1/systemone` tail, which hide() already wrote.
+    if (custom) t = env.jevUrl ? hidePath(t, target.url, "<JEV_URL>") : hidePath(t, target.url.slice(0, -"/v1/systemone".length), "<TYPESAFE_BASE_URL>");
     if (key && key.length >= MIN_REDACT_KEY) t = t.replaceAll(key, "<TYPESAFE_API_KEY>"); // not a short key: it would match ordinary words
     return custom ? hideHost(t, target.url) : t;
   };
