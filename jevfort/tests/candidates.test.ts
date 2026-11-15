@@ -50,6 +50,11 @@ kitTest("the tail of a quoted path with a space is not offered as another file",
   expect(reads(keys)).toEqual([]);
 });
 
+kitTest("the tail of a quoted path with two spaces is not offered as another file", async ($, on) => {
+  const { keys } = await ask($, on, user1("what does \"docs/my new notes.md\" say?"), { files: [`${CWD}/notes.md`] });
+  expect(reads(keys)).toEqual([]);
+});
+
 kitTest("a file named in backticks with a space before it is not split off", async ($, on) => {
   const { keys } = await ask($, on, user1("see `my notes.md` and \"src/app.ts\""), { files: [`${CWD}/notes.md`, `${CWD}/src/app.ts`] });
   expect(reads(keys)).toEqual(["read src/app.ts"]);
