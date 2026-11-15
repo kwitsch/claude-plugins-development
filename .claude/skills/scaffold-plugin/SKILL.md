@@ -34,10 +34,10 @@ sed "s/__NAME__/$name/g" "$T/README.md" > "$name/plugin/README.md"
 Per selected component:
 
 - **skill** → `plugin/skills/<skill-name>/SKILL.md` from `templates/SKILL.md` (frontmatter `name`, `description`; body = instructions).
-- **hook** → `src/hooks/<event-kebab>.mts` from `templates/hook.mts` and `plugin/hooks/hooks.json` from `templates/hooks.json` (set the event name and the `.mjs` path). Add `tests/<event-kebab>.test.mts` from `templates/hook.test.mts`.
-- **mods** → `src/hooks/register.mts` exporting `register(on, options)` with structural `$`/`on` types (model: `inline-headroom/src/hooks/register.mts`), and `plugin/hooks/hooks.json` `{"modules": ["./register.mjs"]}` (merged into the same file when `hook` is also chosen). Tests in `tests/register.test.mts` with `createKit` from `claude-engine-vitest` (`pnpm --filter <name> add -D claude-engine-vitest@workspace:*`).
+- **hook** → `src/hooks/<event-kebab>.ts` from `templates/hook.ts` and `plugin/hooks/hooks.json` from `templates/hooks.json` (set the event name and the `.mjs` path). Add `tests/<event-kebab>.test.ts` from `templates/hook.test.ts`.
+- **mods** → `src/hooks/register.ts` exporting `register(on, options)` with structural `$`/`on` types (model: `jev-api/src/hooks/register.ts`), and `plugin/hooks/hooks.json` `{"modules": ["./register.mjs"]}` (merged into the same file when `hook` is also chosen). Tests in `tests/register.test.ts` with `createKit` from `claude-engine-vitest` (`pnpm --filter <name> add -D claude-engine-vitest@workspace:*`).
 - **agent** → `plugin/agents/<agent-name>.md` with frontmatter `name`, `description`, `tools`.
-- **mcp** → `src/mcp/server.mts` (zero-dep stdio JSON-RPC) and `plugin/.mcp.json` pointing at `${CLAUDE_PLUGIN_ROOT}/mcp/server.mjs`. Dual-era from the start (answer `initialize` and `server/discover`): follow `.claude/rules/mcp-dual-era.md`, model `dprint/src/mcp/server.mts`. Add a test for both eras.
+- **mcp** → `src/mcp/server.ts` (zero-dep stdio JSON-RPC) and `plugin/.mcp.json` pointing at `${CLAUDE_PLUGIN_ROOT}/mcp/server.mjs`. Dual-era from the start (answer `initialize` and `server/discover`): follow `.claude/rules/mcp-dual-era.md`, model `jev-api/src/mcp/server.ts`. Add a test for both eras.
 
 If no `src/` files were created, still keep `src/` and the `package.json` — the build then only generates `plugin/.claude-plugin/plugin.json` from `package.json`.
 
@@ -60,6 +60,7 @@ List the created files and the three commands above. Do not commit unless asked.
 ## Rules recap
 
 - `<name>/package.json` is the only place for `version`, `description`, `author`, `keywords` and `claudePlugin` (required, `{}` at least: marks the package as a plugin for CI; holds plugin-only manifest fields such as `userConfig`); `pnpm build` generates the manifest `plugin/.claude-plugin/plugin.json`.
-- `src/**/*.mts` → `plugin/**/*.mjs`, same relative path.
-- Scripts used by several components (skills, hooks, MCP) go in `src/bin/*.mts` → `plugin/bin/*.mjs`.
+- `src/**/*.ts` → `plugin/**/*.mjs`, same relative path.
+- Scripts used by several components (skills, hooks, MCP) go in `src/bin/*.ts` → `plugin/bin/*.mjs`.
 - Runtime code: `node:` builtins only.
+- New sources are `.ts`, never `.mts` (`.claude/rules/src-typescript.md`): a relative import reads `./x.js` (the build rewrites it to `./x.mjs`). Tests follow `.claude/rules/hook-tests.md`: a function-hooks plugin binds `claude-engine-vitest` to `plugin/hooks/register.mjs` (a shared kit in `tests/support/` once it has several test files), a command hook spawns its built `.mjs`.

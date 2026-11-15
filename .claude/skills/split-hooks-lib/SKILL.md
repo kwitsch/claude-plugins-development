@@ -1,6 +1,6 @@
 ---
 name: split-hooks-lib
-description: Split the hooks module of a function-hooks plugin of this repository into a readable entry register.mts plus helper modules that the build bundles into one compressed plugin/hooks/lib.mjs, to keep the shipped size small. Use when the user asks to split a plugin's register.mts, to make a plugin smaller, to move a plugin to register.mjs plus lib.mjs, or when a hooks module has grown too large for one file.
+description: Split the hooks module of a function-hooks plugin of this repository into a readable entry register.ts plus helper modules that the build bundles into one compressed plugin/hooks/lib.mjs, to keep the shipped size small. Use when the user asks to split a plugin's register.ts, to make a plugin smaller, to move a plugin to register.mjs plus lib.mjs, or when a hooks module has grown too large for one file.
 argument-hint: "<plugin-name>"
 ---
 
@@ -8,18 +8,18 @@ argument-hint: "<plugin-name>"
 
 The repository prefers this layout for every function-hooks plugin (decided with jev-api 0.4.0, PR #99): `plugin/hooks/register.mjs` stays readable (Claude Code's static check reads it), everything else ships as one compressed `plugin/hooks/lib.mjs`. Do not apply it to plugins without a function-hooks module (command hooks, MCP servers only).
 
-The argument is the plugin directory name. Stop with one line if `<plugin>/src/hooks/register.mts` or `<plugin>/plugin/hooks/hooks.json` does not exist. Work in a worktree on a `feat/` branch (never nest, `EnterWorktree` when the session is not in one).
+The argument is the plugin directory name. Stop with one line if `<plugin>/src/hooks/register.ts` or `<plugin>/plugin/hooks/hooks.json` does not exist. A plugin that still holds `.mts` under `src/` or `tests/` is converted first, in the same change (`.claude/rules/src-typescript.md`: rename to `.ts`, imports `./x.js`); the split below then starts from `.ts`. Work in a worktree on a `feat/` branch (never nest, `EnterWorktree` when the session is not in one).
 
 ## 1. Check the plugin
 
-- `plugin/hooks/hooks.json` lists the entry modules (`{ "modules": ["./register.mjs"] }`). Every other `src/hooks/*.mts` becomes a helper and ends up in `lib.mjs`; the listed ones stay separate and unminified. A plugin that lists several entry modules is fine, each keeps its file.
-- Helpers must obey (the build checks the first three and fails with a message): import siblings only as named imports from `./name.mjs` (no default, no namespace import, no `import()`), no import cycles, unique top-level names across all helpers, and no state at module level (the test kit reloads only the entry per test, so module state would leak between tests; keep it inside `register()`).
+- `plugin/hooks/hooks.json` lists the entry modules (`{ "modules": ["./register.mjs"] }`). Every other `src/hooks/*.ts` becomes a helper and ends up in `lib.mjs`; the listed ones stay separate and unminified. A plugin that lists several entry modules is fine, each keeps its file.
+- Helpers must obey (the build checks the first three and fails with a message): import siblings only as named imports from `./name.js` (a `.ts` source; the build rewrites it to `./name.mjs`; no default, no namespace import, no `import()`), no import cycles, unique top-level names across all helpers, and no state at module level (the test kit reloads only the entry per test, so module state would leak between tests; keep it inside `register()`).
 - Everything the engine's static check reads stays in the entry: `$.env.get("NAME")` with a literal name, `on(...)` calls with named function literals, `$.command.register({ name })` literals. Helpers receive `$` as a parameter and may call any engine member whose argument is not statically checked; if unsure, keep the call in the entry.
 - Record the shipped size first: `wc -c <plugin>/plugin/hooks/*.mjs`.
 
 ## 2. Split the source by symbol
 
-Split along real boundaries, not by line count. Proven layout (jev-api): `types.mts` (engine, hook and domain types plus name lists), `util.mts` (guards, `json`, error builders, redaction), `tools.mts`/schemas, `input.mts` (validation), domain modules (one per concern), `registry.mts`, and `register.mts` with only `register(on, options)`. Constants go with the module that owns the rule, not with the first user.
+Split along real boundaries, not by line count. Proven layout (jev-api): `types.ts` (engine, hook and domain types plus name lists), `util.ts` (guards, `json`, error builders, redaction), `tools.ts`/schemas, `input.ts` (validation), domain modules (one per concern), `registry.ts`, and `register.ts` with only `register(on, options)`. Constants go with the module that owns the rule, not with the first user.
 
 Use the script in [split.reference.md](split.reference.md): list every top-level symbol per target file in its `MAP`, it cuts the TSDoc plus declaration chunks, adds `export` to moved declarations, generates the imports (types as `import type`), and fails on an unassigned or unknown symbol. Then:
 
