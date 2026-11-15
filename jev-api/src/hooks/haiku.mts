@@ -53,6 +53,21 @@ export function hasProbabilities(v: unknown, keys: string[]): v is Record<string
 }
 
 /**
+ * Whether an answer has the fields System One's format requires for the question (no calibration, no rebuild).
+ *
+ * @param q - The question.
+ * @param a - The answer.
+ * @returns True when the answer fits the question.
+ */
+export function hasAnswerShape(q: Question, a: Record<string, unknown>): boolean {
+  if (a["type"] !== q.type) return false;
+  if (q.type === "noul") return isUnit(a["noul"]);
+  if (!isUnit(a["confidence"])) return false;
+  if (q.type === "choice") return typeof a["choice"] === "string" && Object.keys(q.criteria).includes(a["choice"]) && hasProbabilities(a["probabilities"], Object.keys(q.criteria));
+  return typeof a["score"] === "number" && Number.isFinite(a["score"]) && hasProbabilities(a["probabilities"], q.criteria.map((_, i) => String(i)));
+}
+
+/**
  * Pushes a probability away from 0.5 in logit space by {@link NOUL_STRETCH}: Haiku's verbal probabilities are
  * timid next to Jev's.
  *

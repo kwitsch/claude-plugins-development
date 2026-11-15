@@ -484,12 +484,28 @@ test("a settled request cancels its timeout timer", async ($, on) => {
 // Case 13: missing or wrong-type answer.
 test("a wrong-type or missing answer is an error", async ($, on) => {
   setup(on, { env: { TYPESAFE_API_KEY: "k" }, reply: httpReply(200, JSON.stringify({ answers: { answer: ANSWERS.score } })) });
-  expect(await call($, "noul")).toEqual({ deny: "noul: response had no noul answer" });
+  expect(await call($, "noul")).toEqual({ deny: "noul: response had no valid noul answer" });
+});
+
+test("a System One answer with invalid fields is an error, for noul, choice and score", async ($, on) => {
+  let answer: unknown;
+  setup(on, { env: { TYPESAFE_API_KEY: "k" }, reply: () => httpReply(200, JSON.stringify({ answers: { answer } }))() });
+  const bad = async (type: string, a: unknown) => {
+    answer = a;
+    expect(await call($, type)).toEqual({ deny: `${type}: response had no valid ${type} answer` });
+  };
+  await bad("noul", { type: "noul", noul: 1.5 });
+  await bad("noul", { type: "noul" });
+  await bad("choice", { type: "choice", choice: "zzz", probabilities: "junk" });
+  await bad("choice", { type: "choice", choice: "greeting", probabilities: { greeting: 0.8, question: 0.2 } });
+  await bad("choice", { type: "choice", choice: "greeting", confidence: 0.8, probabilities: { greeting: 0.8 } });
+  await bad("score", { ...ANSWERS.score as object, score: "high" });
+  await bad("score", { ...ANSWERS.score as object, probabilities: { 0: 0.5 } });
 });
 
 test("a response without answers is an error", async ($, on) => {
   setup(on, { env: { TYPESAFE_API_KEY: "k" }, reply: httpReply(200, "{}") });
-  expect(await call($, "choice")).toEqual({ deny: "choice: response had no choice answer" });
+  expect(await call($, "choice")).toEqual({ deny: "choice: response had no valid choice answer" });
 });
 
 // batch: several questions in one request, keyed q0, q1, ... by index; the answers come back as an array in question order.
@@ -524,7 +540,7 @@ test("batch sends every question in one request and returns the answers in quest
 
 test("batch: one missing or wrong-type answer fails the whole call", async ($, on) => {
   setup(on, { env: { TYPESAFE_API_KEY: "k" }, reply: batchReply({ q0: ANSWERS.noul, q1: ANSWERS.score, q2: ANSWERS.score }) });
-  expect(await batch($)).toEqual({ deny: "batch: response had no choice answer for questions[1]" });
+  expect(await batch($)).toEqual({ deny: "batch: response had no valid choice answer for questions[1]" });
 });
 
 test("batch: an HTTP error is prefixed with batch", async ($, on) => {

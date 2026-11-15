@@ -167,7 +167,7 @@ describe("outcomes become the tool results of 0.4.0", () => {
   });
   it("an ok outcome with a wrong answer is the old response error", async () => {
     const t = await rig({ onCall: () => outcome({ kind: "ok", status: 200, text: "{\"answers\":{}}" }) });
-    expect(await t.run()).toEqual({ deny: "noul: response had no noul answer" });
+    expect(await t.run()).toEqual({ deny: "noul: response had no valid noul answer" });
   });
   it("a context refusal is the translated refusal in error mode", async () => {
     const t = await rig({ onCall: () => outcome({ kind: "http", status: 400, reason: "too big", refusal: { tokens: 40025, nctx: 32768 } }) });

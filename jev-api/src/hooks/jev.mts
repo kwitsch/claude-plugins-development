@@ -5,7 +5,7 @@
  * @packageDocumentation
  */
 
-import { askHaiku, HAIKU_MAX_CHARS } from "./haiku.mjs";
+import { askHaiku, HAIKU_MAX_CHARS, hasAnswerShape } from "./haiku.mjs";
 import { cutState, DEFAULT_CONTEXT_TOKENS, DEFAULT_DENSITY, estimateTokens, isTooBig, learn, MAX_DENSITY, OPTIMISTIC_FACTOR, preflightError, refusedDensity, stateForBudget, timeBudgetTokens, tooBigError } from "./size.mjs";
 import type { Knowledge, TooBig } from "./size.mjs";
 import { now, sendOutcome } from "./transport.mjs";
@@ -71,7 +71,7 @@ export async function ask($: Engine, tool: ToolName, state: string, questions: Q
   const list: Record<string, unknown>[] = [];
   for (const [i, q] of questions.entries()) {
     const answer = isRecord(answers) ? answers[ids[i]] : undefined;
-    if (!isRecord(answer) || answer["type"] !== q.type) return fail(tool, `response had no ${q.type} answer${tool === "batch" ? ` for questions[${i}]` : ""}`);
+    if (!isRecord(answer) || !hasAnswerShape(q, answer)) return fail(tool, `response had no valid ${q.type} answer${tool === "batch" ? ` for questions[${i}]` : ""}`);
     list.push(answer);
   }
   return { result: JSON.stringify(tool === "batch" ? list : list[0]) };
