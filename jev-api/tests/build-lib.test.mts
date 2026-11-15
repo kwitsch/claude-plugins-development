@@ -40,6 +40,12 @@ test("a helper importing a helper with an alias fails the build", () => {
   assert.match(r.stderr, /renames an import of \.\/a\.mjs/);
 });
 
+test.each(["../hooks/a.mjs", "././a.mjs", "./a.mjs?v=1"])("a helper importing a helper as %s fails the build", (spec) => {
+  const r = build({ "a.mts": A, "b.mts": `import { one as uno } from "${spec}";\nexport const two = (): number => uno + 1;\n`, "register.mts": REGISTER });
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /a helper, other than by \.\/name\.mjs/);
+});
+
 test("a namespace import of a helper fails the build", () => {
   const r = build({ "a.mts": A, "b.mts": `import * as A from "./a.mjs";\nexport const two = (): number => A.one + 1;\n`, "register.mts": REGISTER });
   assert.equal(r.status, 1);

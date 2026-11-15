@@ -132,6 +132,9 @@ function bundleLib(compiled: Map<string, string>): { members: string[]; entries:
     for (const imp of imports) {
       const name = siblingName(imp.moduleRequest.value);
       if (name === undefined) {
+        // a helper reached by another spelling (`../hooks/a.mjs`, `././a.mjs`, `./a.mjs?v=1`) would stay imported though its file is deleted
+        const spec = imp.moduleRequest.value;
+        if (memberSet.has(path.resolve(path.dirname(f), spec.replace(/[?#].*$/, "").replace(/\.mjs$/, "") + ".mjs"))) fail(`${path.relative(ROOT, f)} imports ${spec}, a helper, other than by ./name.mjs`);
         hoisted.add(code.slice(imp.start, imp.end).trim());
         continue;
       }
