@@ -285,6 +285,26 @@ describe("request", () => {
     assert.equal(outcomeOf(await c.request({ callId: "y", configGen: 5 }))["kind"], "ok");
   });
 
+  test("a configGen or gen that is not a whole number is refused: no request is sent and the newest config stays", async () => {
+    const a = await stub();
+    const b = await stub();
+    stubs.push(a, b);
+    const c = start({}, false);
+    live.push(c);
+    await c.call("config", { jevUrl: a.url, gen: 1 });
+    const bad = await c.call("config", { jevUrl: b.url, gen: 1.5 });
+    assert.equal(bad["result"].isError, true);
+    assert.match(bad["result"].content[0].text, /gen must be a whole number/);
+    for (const configGen of ["1", null, 1.5]) {
+      const r = await c.request({ callId: `g${String(configGen)}`, configGen });
+      assert.equal(r["result"].isError, true);
+      assert.match(r["result"].content[0].text, /configGen must be a whole number/);
+    }
+    assert.equal(outcomeOf(await c.request({ callId: "n" }))["kind"], "ok");
+    assert.equal(a.seen.length, 1);
+    assert.equal(b.seen.length, 0);
+  });
+
   test("blank variables count as unset", async () => {
     const c = start({ JEV_URL: "  ", TYPESAFE_API_KEY: "\t" });
     live.push(c);

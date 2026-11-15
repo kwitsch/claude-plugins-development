@@ -253,8 +253,10 @@ function startServer(): void {
     if (typeof questions !== "object" || questions === null || Array.isArray(questions)) return invalid("request", "questions must be an object");
     if (typeof timeoutMs !== "number" || !Number.isInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > MAX_TIMEOUT_MS) return invalid("request", `timeoutMs must be a whole number from 1 to ${MAX_TIMEOUT_MS}`);
     if (byCall.has(callId)) return invalid("request", "callId is already in use by a running request");
+    const gen = args["configGen"];
+    if (gen !== undefined && !Number.isInteger(gen)) return invalid("request", "configGen must be a whole number");
     // a request is served with the config it was synced with, even when other calls sent newer ones since; an unknown generation (restart, evicted) makes the mod send its own again
-    const cfg = typeof args["configGen"] === "number" ? configs.get(args["configGen"]) : config;
+    const cfg = gen === undefined ? config : configs.get(gen as number);
     if (cfg === undefined) return outcomeResult({ kind: "error", code: "unconfigured", message: "the server has no configuration yet" });
     if (!cfg.key && !cfg.base && !cfg.jevUrl) return outcomeResult({ kind: "error", code: "config", message: "no System One access configured: set TYPESAFE_API_KEY, TYPESAFE_BASE_URL or JEV_URL" });
     if (cancelledEarly(callId)) return outcomeResult({ kind: "error", code: "aborted", message: "the call was abandoned" });
@@ -289,11 +291,12 @@ function startServer(): void {
    * @returns The tool result.
    */
   const runConfig = (args: Record<string, unknown>): CallToolResult => {
-    config = { key: field(args["key"]), base: field(args["base"]), jevUrl: field(args["jevUrl"]), model: field(args["model"]) };
     const gen = args["gen"];
-    if (typeof gen === "number") {
-      configs.delete(gen);
-      configs.set(gen, config);
+    if (gen !== undefined && !Number.isInteger(gen)) return invalid("config", "gen must be a whole number");
+    config = { key: field(args["key"]), base: field(args["base"]), jevUrl: field(args["jevUrl"]), model: field(args["model"]) };
+    if (gen !== undefined) {
+      configs.delete(gen as number);
+      configs.set(gen as number, config);
       if (configs.size > MAX_CONFIGS) configs.delete(configs.keys().next().value as number);
     }
     return toolResult({ configured: true });
