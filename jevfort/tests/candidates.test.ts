@@ -340,6 +340,27 @@ kitTest("the same skill as the last call is not offered again", async ($, on) =>
   expect(skills(keys)).toEqual([]);
 });
 
+// Built-in commands are never offered as skills, whatever the prompt says (the Skill tool refuses them).
+for (const builtin of ["login", "diff", "help", "compact"]) {
+  kitTest(`built-in command /${builtin} is never offered as a skill`, async ($, on) => {
+    on("command.list", () => ({ value: [{ name: builtin, description: "merge pdf files", source: "user" }, { name: "pdf-merge", description: "merge pdf files", source: "user" }] }));
+    const { keys } = await ask($, on, user1("merge these two pdfs"));
+    expect(skills(keys)).toEqual(["skill pdf-merge"]);
+  });
+}
+
+// MCP sign-in tools (authenticate, complete_authentication) are never offered; the related tool beside them is.
+kitTest("MCP sign-in tools are never offered, a related tool of the same server is", async ($, on) => {
+  const tools = [
+    { name: "mcp__jev-api__batch", description: "Ask Jev", mcp: true },
+    { name: "mcp__claude_ai_Slack__authenticate", description: "Send Slack messages", mcp: true },
+    { name: "mcp__claude_ai_Slack__complete_authentication", description: "Send Slack messages", mcp: true },
+    { name: "mcp__claude_ai_Slack__send_message", description: "Send Slack messages", mcp: true },
+  ];
+  const { keys } = await ask($, on, user1("send a slack message"), { tools });
+  expect(keys.filter((k) => k.startsWith("load "))).toEqual(["load mcp__claude_ai_Slack__send_message"]);
+});
+
 // relevant() scans the prompt's words against the skill list once: a pasted log must not cost ten times the prompt's own scan.
 kitTest("relevant stays fast on a pasted log with many skills", async ($, on) => {
   const many = Array.from({ length: 300 }, (_, i) => ({ name: `tool-${i}`, description: `does thing ${i} with files`, source: "user" }));
