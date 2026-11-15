@@ -3,7 +3,7 @@ id: F10
 title: Even a no-change TS Edit formats the whole document (dprint-side sizing)
 status: done
 priority: low
-area: dprint upstream (@dprint/typescript ignores ranges); client side: dprint/src/mcp/format.mts formatPre
+area: dprint upstream (@dprint/typescript ignores ranges); client side: dprint/src/mcp/format.ts formatPre
 ---
 
 ## Status

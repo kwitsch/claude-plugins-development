@@ -3,7 +3,7 @@ id: F22
 title: Per-Write/Edit hook overhead breakdown (measurement baseline)
 status: closed
 priority: none
-area: dprint/plugin/hooks/hooks.json, dprint/src/mcp/server.mts, dprint/src/mcp/format.mts (formatPre, fileWritten)
+area: dprint/plugin/hooks/hooks.json, dprint/src/mcp/server.ts, dprint/src/mcp/format.ts (formatPre, fileWritten)
 ---
 
 ## Status
@@ -29,7 +29,7 @@ Claude Code 2.1.316, dprint 0.64.3, WSL2, headless `claude -p` sessions behind a
 
 ## Code locations
 
-`formatPre`, `fileWritten`, `fileChanged` in dprint/src/mcp/format.mts; tool dispatch in dprint/src/mcp/server.mts; hook wiring in dprint/plugin/hooks/hooks.json (PreToolUse `format_pre`, PostToolUse `file_written`, async FileChanged `file_changed`).
+`formatPre`, `fileWritten`, `fileChanged` in dprint/src/mcp/format.ts; tool dispatch in dprint/src/mcp/server.ts; hook wiring in dprint/plugin/hooks/hooks.json (PreToolUse `format_pre`, PostToolUse `file_written`, async FileChanged `file_changed`).
 
 ## Approach
 

@@ -61,12 +61,6 @@ function withConfig(dir: string, name = "dprint.json") {
 /** The toast text the module shows for `dir`; `problem` is the part after "but". */
 const toastText = (dir, problem = NOT_INSTALLED_TEXT) => `dprint: ${dir} (or a parent up to the git root) has a dprint config but ${problem}; run /dprint:dprint init`;
 
-/**
- * Registers every stub (before the test's first `$` call, as the kit requires) and returns what the module did.
- * `cwd`: session.cwd's answer, a string or a `{ deny }`; `exists(path)` and `run(argv)` return a stub result;
- * `home: null` leaves HOME unset, `home: { deny }` rejects env.get; `path` is the env PATH (`null` = unset);
- * `bins` are the fake executables fs.exists reports (every other path is answered by node:fs).
- */
 /** What `setup` stubs; see its comment. */
 interface SetupOptions {
   /** session.cwd's answer: a string or a `{ deny }`. */
@@ -87,6 +81,12 @@ interface SetupOptions {
   install?: string;
 }
 
+/**
+ * Registers every stub (before the test's first `$` call, as the kit requires) and returns what the module did.
+ * `cwd`: session.cwd's answer, a string or a `{ deny }`; `exists(path)` and `run(argv)` return a stub result;
+ * `home: null` leaves HOME unset, `home: { deny }` rejects env.get; `path` is the env PATH (`null` = unset);
+ * `bins` are the fake executables fs.exists reports (every other path is answered by node:fs).
+ */
 function setup($, on, { cwd = "", exists, run = () => OK, home = HOME, path: pathVar = PATH_DIRS, bins = [PATH_DPRINT], toolResult = () => NEXT, install }: SetupOptions = {}) {
   const exist = exists ?? ((p) => ({ value: p === HOME || bins.includes(p) || existsSync(p) }));
   const toasts: { text: string; timeoutMs?: number }[] = [];

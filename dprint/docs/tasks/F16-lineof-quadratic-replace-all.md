@@ -3,7 +3,7 @@ id: F16
 title: One-pass line counter for replace_all offsets
 status: done
 priority: none
-area: dprint/src/mcp/format.mts (lineCursor, formatPre editLines computation)
+area: dprint/src/mcp/format.ts (lineCursor, formatPre editLines computation)
 ---
 
 ## Status
@@ -22,7 +22,7 @@ Done. The per-occurrence `lineOf(text, idx)` (rescan from offset 0) was replaced
 
 ## Code locations
 
-- `lineCursor` in dprint/src/mcp/format.mts (`const lineCursor = (text) => (idx) => number`).
+- `lineCursor` in dprint/src/mcp/format.ts (`const lineCursor = (text) => (idx) => number`).
 - `formatPre` in the same file: `const lineAt = lineCursor(O)` used in `occ.map(...)` for `[lineAt(i), lineAt(i + oldStr.length - 1)]`; asked in ascending order because `occ` is ascending and non-overlapping (comment in source). The analysis patch also used a cursor for line numbers in `M`; the current source has only the `O` cursor.
 
 ## Approach
@@ -31,7 +31,7 @@ Implemented as in the analysis patch. Invariant to preserve: offsets passed to o
 
 ## Verification
 
-- tests/mcp-format.test.mts and tests/mcp-server.test.mts (replace_all cases) stay green.
+- tests/mcp-format.test.ts and tests/mcp-server.test.ts (replace_all cases) stay green.
 - Optional perf test: replace_all with 5000 occurrences in a 20k-line file, assert the lineCursor stage is < 50 ms (not needed for correctness).
 - `pnpm --filter dprint build && pnpm --filter dprint test`.
 

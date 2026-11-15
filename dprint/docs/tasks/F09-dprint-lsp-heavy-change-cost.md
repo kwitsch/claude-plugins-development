@@ -3,7 +3,7 @@ id: F09
 title: dprint lsp formatting cost scales with the amount of change (dprint-side)
 status: done
 priority: low
-area: dprint upstream (crates/dprint/src/commands/lsp/text.rs get_edits); client side: dprint/src/mcp/lsp.mts DprintLsp.formatNow
+area: dprint upstream (crates/dprint/src/commands/lsp/text.rs get_edits); client side: dprint/src/mcp/lsp.ts DprintLsp.formatNow
 ---
 
 ## Status

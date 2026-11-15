@@ -3,12 +3,12 @@ id: F24
 title: Make the FileChanged watch list survive new files and git checkout
 status: done
 priority: medium
-area: dprint/src/mcp/watch-paths.mts (watchList, main), dprint/src/mcp/format.mts (fileChanged), dprint/plugin/hooks/hooks.json (SessionStart/CwdChanged command hook)
+area: dprint/src/mcp/watch-paths.ts (watchList, main), dprint/src/mcp/format.ts (fileChanged), dprint/plugin/hooks/hooks.json (SessionStart/CwdChanged command hook)
 ---
 
 ## Status
 
-Done in 0.13.2 as an opt-in, default unchanged: `DPRINT_WATCH_DIRECTORIES=1` (environment of the Claude Code process, e.g. `env` in the settings) makes `watch-paths.mjs` print the directories of the listed files (nested ones collapsed, `watchDirectories` in `watch-list.mts`) instead of the files. Live validation (Claude Code 2.1.323, real dprint plugin, same harness as the smoke test, 2 runs per mode): with directories every scenario was formatted (in-place write, two delete-and-recreate rounds, an in-place write afterwards, a new file, a write after `git checkout`) and the watch count stayed at 60; with files (default) the same run lost the watches (count 9 to 0) and the later scenarios were not formatted. Directory watching is recursive, so everything below a watched directory reaches the hook: a burst of 3000 files in a new directory produced about 100 events per second (all delivered, 35 s) and `.git` writes appear as events too (`file_changed` returns `{}` for them without a spawn). That event volume is why it is not the default; a `pnpm install` into `node_modules` below the root would queue minutes of events. Earlier state:
+Done in 0.13.2 as an opt-in, default unchanged: `DPRINT_WATCH_DIRECTORIES=1` (environment of the Claude Code process, e.g. `env` in the settings) makes `watch-paths.mjs` print the directories of the listed files (nested ones collapsed, `watchDirectories` in `watch-list.ts`) instead of the files. Live validation (Claude Code 2.1.323, real dprint plugin, same harness as the smoke test, 2 runs per mode): with directories every scenario was formatted (in-place write, two delete-and-recreate rounds, an in-place write afterwards, a new file, a write after `git checkout`) and the watch count stayed at 60; with files (default) the same run lost the watches (count 9 to 0) and the later scenarios were not formatted. Directory watching is recursive, so everything below a watched directory reaches the hook: a burst of 3000 files in a new directory produced about 100 events per second (all delivered, 35 s) and `.git` writes appear as events too (`file_changed` returns `{}` for them without a spawn). That event volume is why it is not the default; a `pnpm install` into `node_modules` below the root would queue minutes of events. Earlier state:
 
 Reviewed 2026-11-13; live smoke test below confirms the problem (priority back to high). Designs depend on Claude Code watcher behavior (re-creation on an unchanged sorted list, honoring watchPaths from an mcp_tool FileChanged result, directory-watch event volume without `ignored`) that only a live `claude -p --plugin-dir dprint/plugin --debug` run with an inotify sampler can prove. Mitigated for Bash: `bash_finished` formats rewritten watched files via an mtime scan of the cached list. Still uncovered: files rewritten by non-Bash tools after a watch is lost, and new files (watch list and `bash_finished` cache are read once per cwd). The list is sorted since 0.12.1. Next step: live prototype of directories as watchPaths (option 2, re-list from FileChanged, was prototyped and does not work, see below).
 
@@ -55,8 +55,8 @@ Sessions burst-A/B (checkout burst + Write of a new file, checkout main, `git re
 
 ## Code locations
 
-- `watchList` and `main` in dprint/src/mcp/watch-paths.mts (`dprint file-paths`, `WATCH_LIMIT`, `inScope` filter; prints files only).
-- `fileChanged` in dprint/src/mcp/format.mts (handles `change`/`add`/`unlink`; `unlink` is ignored).
+- `watchList` and `main` in dprint/src/mcp/watch-paths.ts (`dprint file-paths`, `WATCH_LIMIT`, `inScope` filter; prints files only).
+- `fileChanged` in dprint/src/mcp/format.ts (handles `change`/`add`/`unlink`; `unlink` is ignored).
 - dprint/plugin/hooks/hooks.json: SessionStart + CwdChanged `command` hook (watch-paths.mjs) and FileChanged `file_changed` mcp_tool hook.
 
 ## Approach
@@ -64,17 +64,17 @@ Sessions burst-A/B (checkout burst + Write of a new file, checkout main, `git re
 Prototype FIRST (nothing is validated); decision it gates: which of the two designs ships.
 
 1. Directories as watchPaths (emit the dirs containing formatted files, or the cwd): chokidar then watches directories and reports add/unlink/change by name. MEASURE the event flood first: Claude Code sets no `ignored` option, so `.git`, `node_modules`, build output inside the cwd would all fire; check inotify watch count and events per `git checkout`, and that `fileChanged` filters non-dprint files cheaply (it gates on `findConfig`, `inScope`, and digest before any spawn). Directory entries must be real in-scope directories (use `inScope`/`scopeOf` semantics; skip `.git`, node_modules, scratchpad dir).
-2. Re-emit the file list from a FileChanged hook result after an `unlink` event (hook output `watchPaths`) so Claude re-creates the watcher. Needs `fileChanged` to return `hookSpecificOutput.watchPaths` and to share the listing code with watch-paths.mts (watch-paths.mjs must NOT import server.mjs; server importing it must not auto-run `main`). Check that the sorted-list comparison triggers re-creation and does not loop (also: `dprint file-paths` order is nondeterministic, sort the output).
+2. Re-emit the file list from a FileChanged hook result after an `unlink` event (hook output `watchPaths`) so Claude re-creates the watcher. Needs `fileChanged` to return `hookSpecificOutput.watchPaths` and to share the listing code with watch-paths.ts (watch-paths.mjs must NOT import server.mjs; server importing it must not auto-run `main`). Check that the sorted-list comparison triggers re-creation and does not loop (also: `dprint file-paths` order is nondeterministic, sort the output).
 3. Report the per-file watch loss to Claude Code with the burst-B numbers regardless.
    Interactions: WATCH_LIMIT (5000, counts raw files) and F25 cost scale with the design; directories shrink the list and the SessionStart JSON dramatically.
 
 ## Verification
 
-Offline: unit/integration test in dprint/tests/mcp-server.test.mts or a new test running `plugin/mcp/watch-paths.mjs` (existing tests at "watch-paths.mjs prints the in-cwd dprint file paths as watchPaths ..." show the harness). Real-session proof needs a headless `claude -p` run with `--plugin-dir dprint/plugin --debug` and an inotify watch-count sampler (`grep -c inotify /proc/<pid>/fdinfo/*`): create a new file, run `git checkout` rewriting watched files twice, assert events keep arriving and watch count stays stable.
+Offline: unit/integration test in dprint/tests/mcp-server.test.ts or a new test running `plugin/mcp/watch-paths.mjs` (existing tests at "watch-paths.mjs prints the in-cwd dprint file paths as watchPaths ..." show the harness). Real-session proof needs a headless `claude -p` run with `--plugin-dir dprint/plugin --debug` and an inotify watch-count sampler (`grep -c inotify /proc/<pid>/fdinfo/*`): create a new file, run `git checkout` rewriting watched files twice, assert events keep arriving and watch count stays stable.
 
 ## Constraints
 
-Edit src/ not plugin/*.mjs; `pnpm --filter dprint build && pnpm --filter dprint test`; fail open; zero-dep node:; TSDoc on every symbol; keep watch-paths.mts free of a server.mjs import; version bump in dprint/plugin.json AND dprint/package.json.
+Edit src/ not plugin/*.mjs; `pnpm --filter dprint build && pnpm --filter dprint test`; fail open; zero-dep node:; TSDoc on every symbol; keep watch-paths.ts free of a server.mjs import; version bump in dprint/plugin.json AND dprint/package.json.
 
 ## Related
 

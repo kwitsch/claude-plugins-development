@@ -3,7 +3,7 @@ id: F19
 title: Ignore stdout of a replaced dprint child
 status: done
 priority: none
-area: dprint/src/mcp/lsp.mts (DprintLsp.start stdout handler)
+area: dprint/src/mcp/lsp.ts (DprintLsp.start stdout handler)
 ---
 
 ## Status
@@ -21,7 +21,7 @@ On a request timeout the timer disposes the child synchronously; the queued next
 
 ## Code locations
 
-- `child.stdout.on("data", ...)` with `if (this.child === child)` guard in `DprintLsp.start` (dprint/src/mcp/lsp.mts). `dead()` already had the same identity check. Stderr forwarder is intentionally unguarded (cosmetic).
+- `child.stdout.on("data", ...)` with `if (this.child === child)` guard in `DprintLsp.start` (dprint/src/mcp/lsp.ts). `dead()` already had the same identity check. Stderr forwarder is intentionally unguarded (cosmetic).
 
 ## Approach
 
@@ -29,7 +29,7 @@ One-line guard as implemented. The `timeoutMs` constructor option (F14/F28) make
 
 ## Verification
 
-- Missing regression test worth adding (dprint/tests/mcp-server.test.mts or a DprintLsp-level test against the built plugin/mcp/lsp.mjs): PATH-first stub `dprint` whose `lsp` answers initialize, then on formatting stays silent until SIGTERM, then writes a valid Content-Length header + partial body and exits; construct `new DprintLsp({cwd, timeoutMs: 200})`, call `format(big)` and queue `format(small)`, expect the first to reject with timeout and the second NOT to reject with "initialize timed out". Cooldown applies per URI, so use a different URI for the second call.
+- Missing regression test worth adding (dprint/tests/mcp-server.test.ts or a DprintLsp-level test against the built plugin/mcp/lsp.mjs): PATH-first stub `dprint` whose `lsp` answers initialize, then on formatting stays silent until SIGTERM, then writes a valid Content-Length header + partial body and exits; construct `new DprintLsp({cwd, timeoutMs: 200})`, call `format(big)` and queue `format(small)`, expect the first to reject with timeout and the second NOT to reject with "initialize timed out". Cooldown applies per URI, so use a different URI for the second call.
 - `pnpm --filter dprint build && pnpm --filter dprint test`.
 
 ## Constraints

@@ -3,7 +3,7 @@ id: F23
 title: Re-verify the apparent Claude-side gap after format_pre updatedInput
 status: closed
 priority: none
-area: n/a (Claude Code behaviour; dprint/src/mcp/format.mts formatPre returns the updatedInput)
+area: n/a (Claude Code behaviour; dprint/src/mcp/format.ts formatPre returns the updatedInput)
 ---
 
 ## Status
@@ -23,7 +23,7 @@ In the first smoke session the Edit of a 2976-line `big.ts` showed ~1.3 s betwee
 
 ## Code locations
 
-None in this repo. formatPre in dprint/src/mcp/format.mts only produces `hookSpecificOutput.updatedInput`; the gap would be inside Claude Code.
+None in this repo. formatPre in dprint/src/mcp/format.ts only produces `hookSpecificOutput.updatedInput`; the gap would be inside Claude Code.
 
 ## Approach
 
