@@ -194,6 +194,26 @@ test("the Haiku transcript prints each result once, keeps the tail whole and cut
   expect(prompt.split("PENDMARK")).toHaveLength(2);
 });
 
+test("the Haiku transcript clips tool inputs at 400 characters, except in the last 6 messages", async ($, on) => {
+  const asked = haikuSetup(on, "S".repeat(300));
+  const big = (id: string, c: string) => ({ role: "assistant" as const, text: "", toolUses: [{ tool_use_id: id, tool: "Bash", input: { command: c.repeat(1000) }, text: "" }] });
+  const messages = [
+    { role: "user", text: "go", toolUses: [] },
+    filler("assistant"),
+    filler("user"),
+    big("a", "§"),
+    big("b", "¶"),
+    filler("user"),
+    filler("assistant"),
+    filler("user"),
+    filler("assistant"),
+    filler("user"),
+  ];
+  await $.session.compact({ trigger: "manual", messages, instructions: "" });
+  expect(asked[0].match(/§/g)?.length).toBeLessThan(500);
+  expect(asked[0].match(/¶/g)).toHaveLength(1000);
+});
+
 test("a transcript too long even in the short form gets no Haiku summary", async ($, on) => {
   on("session.compact", () => ({ skip: "test" }));
   const asked = haikuSetup(on, "S".repeat(300));

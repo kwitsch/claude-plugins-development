@@ -183,6 +183,16 @@ test("the ranking covers the newest 30 results, cut at 500 characters, and their
   }
 });
 
+test("the ranking scores the last 30 of 35 results, in order", async ($, on) => {
+  const uses = Array.from({ length: 35 }, (_, i) => ({ tool_use_id: `t${i + 1}`, tool: "Bash", input: { command: `cmd${i + 1}` }, text: "r" }));
+  const messages: Msg[] = [{ role: "assistant", text: "", toolUses: uses }];
+  const sent = base(on, () => ({ type: "score", score: 0.3, probabilities: {}, confidence: 0.8 }), messages);
+  on("session.compact", () => ({ skip: "test" }));
+  await $.session.compact({ trigger: "manual", messages });
+  expect(sent[0].instructions).toContain("Call: Bash cmd6.");
+  expect(sent[29].instructions).toContain("Call: Bash cmd35.");
+});
+
 test("session.compact passes the ranking to the summarizer", async ($, on) => {
   const messages: Msg[] = [
     { role: "user", text: "fix the failing date test", toolUses: [] },
