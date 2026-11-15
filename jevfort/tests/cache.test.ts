@@ -91,6 +91,43 @@ test("a 5-minute write over a warm 1-hour read keeps the 1-hour lifetime", async
   await ui.unmount();
 });
 
+/** A main-loop response with `read` tokens from the cache and `input` uncached, no write detail. */
+const readShare = (read: number, input: number) => ({ input_tokens: input, output_tokens: 5, cache_read_input_tokens: read, cache_creation_input_tokens: 0 });
+
+for (const [gap, expected] of [[4, /^ cache [45]m$/], [6, /^ cache 59m$/]] as const) {
+  test(`a warm read ${gap} minutes after a 5-minute write keeps a countdown of ${expected.source.includes("59") ? "1 hour" : "5 minutes"}`, async ($, on) => {
+    on("ui.render", () => BENEATH);
+    const { clock, state } = chatSetup(on, 10);
+    state.usage = usage5m;
+    await $.session.start(START);
+    const ui = await $.ui.mount(BAND);
+    await respond($);
+    await clock.advance(gap * 60_000);
+    state.usage = warmRead;
+    await respond($);
+    await clock.settle();
+    expect(await label(ui)).toMatch(expected);
+    await ui.unmount();
+  });
+}
+
+for (const [read, input, expected] of [[50, 50, /^ cache [45]m$/], [51, 49, /^ cache 59m$/]] as const) {
+  test(`a warm read of ${read} of ${read + input} prompt tokens after a 5-minute write ${expected.source.includes("59") ? "is mostly cached" : "is not mostly cached"}`, async ($, on) => {
+    on("ui.render", () => BENEATH);
+    const { clock, state } = chatSetup(on, 10);
+    state.usage = usage5m;
+    await $.session.start(START);
+    const ui = await $.ui.mount(BAND);
+    await respond($);
+    await clock.advance(6 * 60_000);
+    state.usage = readShare(read, input);
+    await respond($);
+    await clock.settle();
+    expect(await label(ui)).toMatch(expected);
+    await ui.unmount();
+  });
+}
+
 test("the countdown turns yellow at 21 minutes left, red at 6, and cyan once cold", async ($, on) => {
   on("ui.render", () => BENEATH);
   const { clock } = chatSetup(on, 10);
