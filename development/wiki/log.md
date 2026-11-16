@@ -39,3 +39,10 @@ Source: user request. The `docs/` directories of dprint, inline-headroom, jev-ap
 - **Repointed:** relative links and path references in the moved pages, the plugin `CLAUDE.md` files and rules, the root `CLAUDE.md`, the skills `perf-worklist`, `bughunt`, `live-verify` and `wiki`, `.coderabbit.yaml` and `plugin-docs-tasks.md` (`paths:` now `development/wiki/plugins/**`).
 - **Check:** `wiki-check.ts` requires only each plugin's `README.md` in the index; its other pages are reached from it and need no `# Title` (task files start with frontmatter). Dead links in them still fail.
 - **Decision reversed:** `decisions/repo-tooling.md` rejected a per-plugin folder in the wiki on 2026-11-15; the user asked for it on 2026-11-16.
+
+## [2026-11-16] ingest | Plugin sections: own index.md each, one TASKS.md standard
+
+Source: user request.
+
+- **Index:** every plugin has a section `plugins/<plugin>/index.md` (the former `README.md` of dprint, jev-api, jevfort and universal-lint, now with a generated "Pages" list; new ones for inline-headroom, graphmind-helper and jev-solver). `plugins/index.md` links all of them, the root index links only `plugins/index.md`. `wiki-check.ts` enforces both levels and that every plugin of the repository has a section; the `scaffold-plugin` skill creates the section.
+- **Task lists:** the four `TASKS.md` files were regenerated from the `tasks/` frontmatter into one format (sections Remaining, Done, Closed without code; one entry line with status tag and priority; the task title replaces the former free-text descriptions, which live in the task documents). Header prose, Dependencies and Notes were kept. `wiki-check.ts` compares each `TASKS.md` with the frontmatter. Format: `.claude/rules/plugin-docs-tasks.md`.

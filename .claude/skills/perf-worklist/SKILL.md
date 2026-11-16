@@ -80,7 +80,7 @@ const reviewPrompt = () => `Review the work of this run on the branch in the git
 Return status clean (nothing to change), fixed or blocked (not green), the commit sha and one summary sentence.`
 
 const analysisPrompt = () => `Run a fresh performance analysis of plugin "${plugin}" in the git worktree ${worktree}. Follow .claude/rules/plugin-docs-tasks.md and the method of the latest development/wiki/plugins/${plugin}/EVALUATION-*.md (and development/wiki/plugins/${plugin}/README.md if present). Date: ${date}.
-Write development/wiki/plugins/${plugin}/EVALUATION-${date}.md (a dated file; never edit old numbers; state what was and was not run). New findings: development/wiki/plugins/${plugin}/tasks/F<next free nn>-<slug>.md with status open, frontmatter and sections per the rule; update TASKS.md. Docs only: do not change code.
+Write development/wiki/plugins/${plugin}/EVALUATION-${date}.md (a dated file; never edit old numbers; state what was and was not run). New findings: development/wiki/plugins/${plugin}/tasks/F<next free nn>-<slug>.md with status open, frontmatter and sections per the rule; add each new task to TASKS.md in the standard entry format and the evaluation to the "Pages" list of the plugin's index.md. Docs only: do not change code.
 \`git add\` the docs, commit ("${plugin}: performance analysis ${date}", no Co-Authored-By) and \`git push -u origin HEAD\`. Then check that \`git status --short\` is empty and \`git rev-parse HEAD\` equals \`git rev-parse @{u}\`; otherwise commit and push again. Return the ids of the new open tasks.`
 
 const results = []

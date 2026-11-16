@@ -1,12 +1,26 @@
-# universal-lint docs (for Claude sessions)
+# universal-lint knowledge (for Claude sessions)
 
 Working documents for agent sessions. Not shipped (`plugin/` is the installable part), not user documentation. Language: English. The F01-F33 performance run is finished (0.15.1-0.15.29 plus the 0.15.30 closure), F34 shipped in 0.16.0; the evaluation of 2026-11-14 ([EVALUATION-2026-11-14.md](EVALUATION-2026-11-14.md)) opened F35-F37, shipped in 0.16.1; the second one of that day ([EVALUATION-2026-11-14b.md](EVALUATION-2026-11-14b.md), on 0.16.1) opened F38-F39. `TASKS.md` is the index.
 
-## Layout
+## Pages
 
-- `TASKS.md`: index and staged checklist of all performance tasks (F01-F39), with dependencies. Start here.
-- `EVALUATION-<date>.md`: dated evaluations (method, one-machine numbers, comparison, remaining findings, bug hunt, live validation); never edit old numbers, write a new dated file (a second run on the same day gets a letter suffix, `EVALUATION-2026-11-14b.md`).
-- `tasks/<id>-<slug>.md`: one detail document per task. Frontmatter: `id`, `title`, `status` (`done|partial|open|docs-only|measurement-only`), `priority`, `area`. Sections: Status, Problem, Evidence, Code locations, Approach, Verification, Constraints, Related.
+- [CLAUDE.md](../../../../universal-lint/CLAUDE.md): the plugin's overview and rule list (loads with the plugin's files).
+- [TASKS.md](TASKS.md): task list; `tasks/` holds one document per task. Start here for open work.
+- [EVALUATION-2026-11-14.md](EVALUATION-2026-11-14.md): universal-lint evaluation 2026-11-14 (plugin 0.16.0)
+- [EVALUATION-2026-11-14b.md](EVALUATION-2026-11-14b.md): universal-lint evaluation 2026-11-14b (plugin 0.16.1)
+- [design/edit-range-gate.md](design/edit-range-gate.md): Edit-range gate (do not "fix" without reading this)
+- [design/file-detection.md](design/file-detection.md): File detection: FileChanged + watch list (do not "fix" without reading this)
+- [design/hook-design.md](design/hook-design.md): Hook design (do not "fix" without reading this)
+- [design/lang-css.md](design/lang-css.md): CSS/SCSS: stylelint
+- [design/lang-go.md](design/lang-go.md): Go: golangci-lint/go vet, package scope, and cold GOCACHE
+- [design/lang-jsts.md](design/lang-jsts.md): JS/TS: eslint vs oxlint
+- [design/lang-php.md](design/lang-php.md): PHP: phpstan/psalm and the vendor/bin gap
+- [design/lang-rust.md](design/lang-rust.md): Rust: cargo clippy/check, manifest targeting, and the clippy-component gap
+- [design/languages.md](design/languages.md): JSON: not covered (do not "fix" without reading this)
+- [design/line-length-guard.md](design/line-length-guard.md): YAML/Markdown line-length guard (do not "fix" without reading this)
+- [design/npx-and-local-bin.md](design/npx-and-local-bin.md): Local `node_modules/.bin`, npx fallback, PATH probe cache (do not "fix" without reading this)
+- [design/settle-window.md](design/settle-window.md): Settle window and owner routing (F34 0.16.0, rebuilt by F40 0.17.0)
+- [design/typescript-check.md](design/typescript-check.md): TypeScript type-checking (`tsc`)
 
 ## What shipped
 
@@ -14,14 +28,14 @@ All of F01-F33 shipped or were closed docs-only in universal-lint 0.15.1-0.15.29
 
 ## How to work a task
 
-1. Pick the first unchecked task in `TASKS.md` (stage order, then priority) whose dependencies are done. Read its detail document plus the documents under its `Related` section.
-2. Read `../CLAUDE.md`, the rule `../.claude/rules/lint-file.md` (the constraints) and the design pages in `design/` for the areas the task touches, at least `design/hook-design.md` (fail-open contract, timeout budget), `edit-range-gate.md`, `file-detection.md`, `npx-and-local-bin.md` and `languages.md` with the `lang-*.md` page of the language the task touches. Several tasks touch documented user decisions; the task says so under `Constraints`. Ask before changing one.
+1. Pick the first open task from "Remaining" in `TASKS.md` (stage order, then priority) whose dependencies are done. Read its detail document plus the documents under its `Related` section.
+2. Read `universal-lint/CLAUDE.md`, the rule `universal-lint/.claude/rules/lint-file.md` (the constraints) and the design pages in `design/` for the areas the task touches, at least `design/hook-design.md` (fail-open contract, timeout budget), `edit-range-gate.md`, `file-detection.md`, `npx-and-local-bin.md` and `languages.md` with the `lang-*.md` page of the language the task touches. Several tasks touch documented user decisions; the task says so under `Constraints`. Ask before changing one.
 3. Locate code by the symbol names in `Code locations` (`src/hooks/lint-file.ts` unless stated otherwise); line numbers are deliberately absent because they drift.
 4. Re-measure the baseline numbers the task cites (see F01) before and after the change. The numbers in these documents are from one machine and one day.
 5. Implement in `src/`, add the tests named under `Verification`, then run `pnpm --filter universal-lint build && pnpm --filter universal-lint test && pnpm lint`. Never edit `plugin/**/*.mjs` or `plugin/.claude-plugin/plugin.json` by hand.
 6. Any change under `universal-lint/` merged to `main` needs a version bump: `version` in `universal-lint/package.json` (the only manifest source), then `pnpm --filter universal-lint build`.
-7. Update the design page in `design/` that documents the changed behaviour (usually `hook-design.md`, one of the pages split from it, or a `lang-*.md`). A new or changed constraint also gets its one line in `../.claude/rules/lint-file.md`; reasons, numbers and residuals stay in the design page.
-8. Update the task: set `status` in its frontmatter, adjust `Status`/`Approach` to what shipped, and tick it in `TASKS.md` (move it to the done section).
+7. Update the design page in `design/` that documents the changed behaviour (usually `hook-design.md`, one of the pages split from it, or a `lang-*.md`). A new or changed constraint also gets its one line in `universal-lint/.claude/rules/lint-file.md`; reasons, numbers and residuals stay in the design page.
+8. Update the task: set `status` in its frontmatter, adjust `Status`/`Approach` to what shipped, and update its `TASKS.md` entry (checkbox, section, status tag: `.claude/rules/plugin-docs-tasks.md`).
 
 ## Conventions
 

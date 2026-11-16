@@ -13,4 +13,4 @@ Mods-only plugin: a function-hooks module that registers the System One question
 - `tests/register.test.ts` has a live smoke block that runs only when `JEV_URL` is set in the shell (plus optional `TYPESAFE_API_KEY`, `TYPESAFE_DEFAULT_MODEL`); never put a URL in the repo.
   - Opt-in by user decision 2026-11-11: live verification against the real server, while CI (no `JEV_URL`) stays green.
   - In a shell that has `JEV_URL` set, a plain test run therefore sends four real requests (`noul`, `choice`, `score`, `batch`); `env -u JEV_URL` keeps a run offline.
-- Task list, evaluations and measurements: `development/wiki/plugins/jev-api/README.md`.
+- Task list, evaluations and measurements: `development/wiki/plugins/jev-api/index.md`.

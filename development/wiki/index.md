@@ -44,8 +44,6 @@ Catalog of what earlier sessions wrote down, in this wiki and elsewhere in the r
 
 Each plugin keeps its own knowledge: `CLAUDE.md` (overview and part list), `.claude/rules/` (one file per part) and a wiki section. [plugins/index.md](plugins/index.md) lists the sections (task list, one file per task, dated evaluations, design pages).
 
-- graphmind-helper: [CLAUDE.md](../../graphmind-helper/CLAUDE.md). Setup hooks and the MCP wrapper for graphmind.
-- jev-solver: [CLAUDE.md](../../jev-solver/CLAUDE.md). The task-solving skill and its phases.
 - The test kit: [README.md](../vitest/claude-engine/README.md).
 
 ## Skills (repeated workflows)

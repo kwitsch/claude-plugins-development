@@ -29,7 +29,11 @@ T="${CLAUDE_SKILL_DIR}/templates"
 sed -e "s/__NAME__/$name/g" -e "s/__DESCRIPTION__/<description>/g" -e "s/__AUTHOR__/$(git config user.name)/g" "$T/package.json" > "$name/package.json"
 sed "s/__NAME__/$name/g" "$T/CLAUDE.md" > "$name/CLAUDE.md"
 sed "s/__NAME__/$name/g" "$T/README.md" > "$name/plugin/README.md"
+mkdir -p "development/wiki/plugins/$name"
+sed "s/__NAME__/$name/g" "$T/wiki-index.md" > "development/wiki/plugins/$name/index.md"
 ```
+
+Then add `- [<name>](<name>/index.md): <description>` to `development/wiki/plugins/index.md` (alphabetical). Every plugin has a wiki section with its own `index.md`, linked from there; `wiki-check.ts` (part of `pnpm lint`) fails without it. A task list `TASKS.md` is added only when a worklist exists (format: `.claude/rules/plugin-docs-tasks.md`).
 
 Per selected component:
 

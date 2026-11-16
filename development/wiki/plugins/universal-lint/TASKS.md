@@ -8,72 +8,56 @@ Measurements: every number in these documents is from one machine on one day, of
 
 rtk support was removed in 0.15.0. rtk mentions in the open tasks and notes describe the measured 0.14.x behavior.
 
-Legend: `[x]` finished. `[ ]` not finished; tag = `open` (code change, not started), `partial`, `docs-only` (only a documentation change intended), `measurement-only` (measure first; any code change is decided afterwards).
-
-## Done
-
-- [x] [F01](tasks/F01-measurement-baseline.md) Per-event cost baseline and re-measurement harness: `node universal-lint/scripts/perf.mts`, numbers in its "Measured" section.
-- [x] [F02](tasks/F02-rtk-failure-banner-as-finding.md) rtk failure banners are reported as eslint findings (false rewake on every JS/TS edit, pnpm install in the repo). Obsolete: rtk support removed in 0.15.0.
-- [x] [F14](tasks/F14-rtk-eslint-defeats-edit-gate.md) Bypass `rtk lint` on Edit: its compacted output has no line locations, so the edit-range gate passes everything. Obsolete: rtk support removed in 0.15.0.
-- [x] [F17](tasks/F17-persist-rtk-probe.md) Persist `rtk rewrite` probe results across hook processes. Obsolete: rtk support removed in 0.15.0.
-- [x] [F31](tasks/F31-rtk-shellcheck-overhead.md) Measure rtk's overhead for shellcheck/ruff with the real tools. Obsolete: rtk support removed in 0.15.0.
-- [x] [F03](tasks/F03-eslint-without-config.md) Skip the eslint chain when no eslint/oxlint config exists. Shipped in 0.15.2.
-- [x] [F04](tasks/F04-local-node-modules-bin.md) Run project-local `node_modules/.bin/<tool>` directly instead of npx. Shipped in 0.15.3.
-- [x] [F05](tasks/F05-stdin-eagain-large-payload.md) Read hook stdin robustly: payloads over about 190 KB, or from a late writer, were silently not linted. Shipped in 0.15.4.
-- [x] [F06](tasks/F06-markdownlint-cli2-no-globs.md) Pass `--no-globs` to markdownlint-cli2 so a project config's top-level `globs` no longer makes every single-file lint lint the whole repo. Shipped in 0.15.5.
-- [x] [F07](tasks/F07-stylelint-without-config.md) Skip stylelint when the project has no stylelint config. Shipped in 0.15.6.
-- [x] [F08](tasks/F08-watchlist-early-stop.md) Stop the watch-list filter once `WATCH_LIMIT` is exceeded. Shipped in 0.15.7.
-- [x] [F09](tasks/F09-bypass-npx-cached-bin.md) Spawn the cached npx bin directly instead of `npx --yes`. Shipped in 0.15.8.
-- [x] [F10](tasks/F10-filechanged-concurrency-cap.md) Cap concurrent FileChanged lints across hook processes (slot files). Shipped in 0.15.9.
-- [x] [F11](tasks/F11-persist-path-probes.md) Persist `onPath` probe results across hook processes. Shipped in 0.15.10. F28 (docs: the WSL PATH cost outside the plugin) closed docs-only in 0.15.25.
-- [x] [F12](tasks/F12-watchlist-scope-fast-path.md) Cheapen the watch list's per-file scope check (extension first, per-call directory realpath memo). Shipped in 0.15.11.
-
-## Stage 2: structural changes
-
-- [x] [F13](tasks/F13-dedup-whole-project-checks.md) Run tsc / go vet / cargo once per FileChanged burst, not once per file. Shipped in 0.15.12.
-- [x] [F15](tasks/F15-rearm-watches-after-checkout.md) Re-arm FileChanged watches after `git checkout` (prototype first). Closed docs-only in 0.15.13: on Claude Code 2.1.319 the loss is limited to unlink-reported files (1 and 3 of 50 in two runs) and a re-emitted list cannot re-arm them (measured; upstream report in the task doc).
-- [x] [F16](tasks/F16-skill-driver-batching.md) Skill driver: one linter call per tool group and one tsc per tsconfig. Shipped in 0.15.14.
-
-## Stage 3: edge cases and low priority
-
-- [x] [F18](tasks/F18-overlap-chain-tsc-and-kill-tree.md) Overlap chain lint and tsc; kill the whole process tree on timeout `done` priority:low. Shipped in 0.15.15; timeout budget re-derived in hook-design.md.
-- [x] [F19](tasks/F19-watchlist-skip-generated.md) Keep `linguist-generated` files out of watchPaths `done` priority:low. Closed docs-only in 0.15.16: after F04/F09 a rewritten generated file costs ~125-235 ms of background lint with no findings (oxlint ignores `**/plugin/**`), and a watch-list-only attribute exclusion would break the shared-scope policy (user decision; reopen trigger in the task doc).
-- [x] [F20](tasks/F20-config-walk-readdir.md) One `readdirSync` per directory in the upward config walks (9P) `done` priority:low. Shipped in 0.15.17.
-- [x] [F21](tasks/F21-gatefinding-exists-memo.md) Memoize `existsSync` in `gateFinding` `done` priority:low. Shipped in 0.15.18.
-- [x] [F22](tasks/F22-filechanged-skip-without-git.md) FileChanged skip without a `git status` spawn (index blob id) `done` priority:low. Closed docs-only in 0.15.19: the git gate is ~5-9 ms of a ~52 ms skip on ext4 and ~130 ms on 9P (background, no 9P sessions); a safe map needs a lazy rebuild per index rewrite plus the full pitfall list (reopen trigger in the task doc).
-- [x] [F23](tasks/F23-superseded-and-duplicate-wakes.md) Superseded and duplicate findings re-wake Claude `done` priority:low. Closed docs-only in 0.15.20: the only safe drop (newer whole-file lint) still loses findings when that lint times out or skips, and 0 same-file pairs had a newer Write within 1.5 s (7 of the 1934 same-file pairs within 10 s); duplicate re-reports are intended (reopen triggers in the task doc).
-- [x] [F24](tasks/F24-npm-notice-in-findings.md) Keep "npm notice" lines out of npx-run findings `done` priority:low. Shipped in 0.15.21: the bare `npx --yes` spawn sets `npm_config_update_notifier`, `npm_config_fund` and `npm_config_audit` to `false`; no loglevel change, so install errors still show.
-- [x] [F25](tasks/F25-digest-size-bound.md) Bound digest hashing and FileChanged lint by file size `done` priority:low. Closed docs-only in 0.15.22: hashing costs about 11 ms per 10 MB against a 30-55 s lint and the digest store holds 6 files, and a size skip would make FileChanged lint the file or change lint policy (F19); reopen triggers in the task doc.
-- [x] [F26](tasks/F26-per-process-floor-and-hook-filter.md) Per-process floor (about 40 ms) for events the hook cannot act on `done` priority:low. Shipped in 0.15.23: `node:crypto` loads lazily (no-op spawn 46 -> 39.5 ms); no hooks.json filter (Claude Code 2.1.321: `if` needs 46 handlers, a FileChanged matcher cannot skip echoes or unlinks; prototype in the task doc).
-- [x] [F27](tasks/F27-tests-miss-perf-paths.md) Test the performance-relevant hook paths `done` priority:low. Shipped in 0.15.24: one missing hook test (2 MiB output under the buffer cap, truncation.test.ts) and the LOC_PATH_RE token-start anchor with its gateFinding test; the other items were covered by the tests added with F04, F05, F09, F10, F11, F13, F16, F18, F20, F21, F26 or are obsolete (rtk, removed in 0.15.0).
-
-## Measurement and docs-only
-
-- [x] [F28](tasks/F28-wsl-windows-path-docs.md) Document the WSL Windows-PATH penalty (mostly inside child processes) `done` priority:medium. Closed docs-only in 0.15.25: the hook itself shows no real-vs-/mnt gap (largest median difference 15 ms) and the remaining cost is inside child processes (`go vet`'s gccgo PATH scan, about 95 ms per run), GCCGO env not pursued (reopen trigger in the task doc).
-- [x] [F29](tasks/F29-timeout-budget-docs.md) Timeout budget doc: cold Rust leaf crate, SessionStart on 9P `done` priority:low. Closed docs-only in 0.15.26: rtk term obsolete (removed in 0.15.0); SessionStart on 9P about 2 ms per watched file (blocky-dev 861 ms), inside 30 s up to WATCH_LIMIT, hook-design.md unchanged; cold Rust leaf-crate loss documented in languages.md; NPX_SPAWN_TIMEOUT_MS TSDoc corrected.
-- [x] [F30](tasks/F30-go-rust-cost-model-docs.md) Document the Go/Rust cost model (scope, cold caches, bursts) `done` priority:low. Closed docs-only in 0.15.27: Rust per-crate scope (dependents unchecked), cargo build-directory lock, Go package scope and cold GOCACHE added to languages.md with 0.14.0 numbers; N full runs per burst only on PostToolUse (FileChanged coalesced by F13); cold leaf (F29) and gccgo scan (F28) restated in languages.md with their provenance.
-- [x] [F01](tasks/F01-measurement-baseline.md) F01 follow-ups `done` priority:low. Closed docs-only in 0.15.30: the burst case is covered by F10 (N=10/50 burst) and F13 (ts200/go20/rs20 burst counts); live `claude -p --debug-file` runs are covered by F26 and F32 (F32 isolated with `--settings`, `enabledPlugins` all false); the `--import` preload is obsolete (no later task needed a per-child breakdown, and F28 measured the gccgo scan by other means); the repo-explorer-mcp pin check is obsolete for perf (the hook cost is not doubled: each debug log reads one hooks.json per plugin id; F32's `--settings` isolation is the method if it is ever needed).
-- [x] [F32](tasks/F32-filechanged-echo-race.md) Measure how often the FileChanged echo of Claude's own write beats the digest `done` priority:low. Closed docs-only in 0.15.28: 55/61 echoed, 55 hits, 0 misses, race margin p50 600 ms (min 592, max 2083); >200 KB Edit (2): race margin 595/595/609/609 ms (min/p50/p90/max).
-- [x] [F33](tasks/F33-watchpaths-size-recheck.md) watchPaths JSON size and watch count need no change; re-check on Claude Code upgrades `done` priority:low. Closed docs-only in 0.15.29: on Claude Code 2.1.321, 4800 paths gave `provided 4800 watchPaths` and `FileChanged: watching 4800 paths` (counts match, no cap), 657,670 B SessionStart stdout of a direct hook run (same binary, same cwd), reproduced byte-for-byte by the session's debug record of the hook payload, about 137 B/path with the 126-character measured cwd prefix; 5001 paths gave no watch lines and 0 B stdout (stderr note only).
-
-- [x] [F34](tasks/F34-settle-window.md) Settle window: a finding that the next edit already repaired never wakes Claude `done` priority:medium. Shipped in 0.16.0 on user request (2026-11-14): findings are held 5 s and dropped when a later edit removed or replaced their line (per-edit journal with hunks and digests, digest-anchored coordinates, hold outside slot and locks); live-verified interactively, headless `-p` does not background the hook so the hold only delays that turn (documented residual).
-
-- [x] [F36](tasks/F36-held-parse-error-fixed-elsewhere.md) A held parse error is dropped by any later edit `done` priority:low. Shipped in 0.16.1: `gateFinding(..., "drop")`.
-
-- [x] [F35](tasks/F35-skip-hold-when-nothing-droppable.md) Skip the settle hold when no held diagnostic can be dropped `done` priority:medium. Shipped in 0.16.1: foreign-only and unlocated-only findings are reported at once. Obsolete since F40 (0.17.0): every finding waits for the quiet time.
-
-- [x] [F40](tasks/F40-mid-edit-findings.md) Mid-edit findings: route to the editing agent, report a burst's final state once, sweep at turn end `done` priority:high. Shipped in 0.17.0 on user request (2026-11-15) after mining 133 wake-ups (82 came from subagent edits and went to the main conversation): a subagent's edits are linted at its `SubagentStop` and reported to it; the newest edit of a file owns the report and gates against the lines of all pending edits; findings wait for 20 s without an edit of the agent; `Stop` sweeps what is left. Replaces F34's line-local rule, F35 and F36.
+Entry format and sections: `.claude/rules/plugin-docs-tasks.md`; `wiki-check.ts` checks them against the `tasks/` frontmatter.
 
 ## Remaining
 
-Found by [EVALUATION-2026-11-14](EVALUATION-2026-11-14.md) on 0.16.0.
+- [ ] [F39](tasks/F39-settle-process-test-wall-time.md) `open` low: settle-process.test.ts now sets the test suite's wall time
 
-- [x] [F37](tasks/F37-hook-design-rule-size.md) hook-design.md is over the 40,000-character rule limit `done` (0.16.1) priority:low. 42,361 characters (0.15.30: 36,010); docs only.
+## Done
 
-Found by [EVALUATION-2026-11-14b](EVALUATION-2026-11-14b.md) on 0.16.1.
+- [x] [F01](tasks/F01-measurement-baseline.md) `done` medium: Per-event cost baseline and re-measurement harness
+- [x] [F02](tasks/F02-rtk-failure-banner-as-finding.md) `done` high: rtk failure banners are reported as eslint findings (false rewake, pnpm install in the repo)
+- [x] [F03](tasks/F03-eslint-without-config.md) `done` high: Skip the eslint chain when no eslint/oxlint config exists
+- [x] [F04](tasks/F04-local-node-modules-bin.md) `done` high: Run project-local node_modules/.bin/<tool> directly instead of npx
+- [x] [F05](tasks/F05-stdin-eagain-large-payload.md) `done` medium: Read hook stdin robustly; payloads over about 190 KB are silently not linted
+- [x] [F06](tasks/F06-markdownlint-cli2-no-globs.md) `done` medium: Pass --no-globs to markdownlint-cli2
+- [x] [F07](tasks/F07-stylelint-without-config.md) `done` medium: Skip stylelint when the project has no stylelint config
+- [x] [F08](tasks/F08-watchlist-early-stop.md) `done` medium: Stop the watch-list filter once WATCH_LIMIT is exceeded
+- [x] [F09](tasks/F09-bypass-npx-cached-bin.md) `done` high: Spawn the cached npx bin directly instead of npx --yes
+- [x] [F10](tasks/F10-filechanged-concurrency-cap.md) `done` high: Cap concurrent FileChanged lints across hook processes (slot files)
+- [x] [F11](tasks/F11-persist-path-probes.md) `done` medium: Persist onPath probe results across hook processes
+- [x] [F12](tasks/F12-watchlist-scope-fast-path.md) `done` medium: Cheapen the watch list's per-file scope check (extension first, per-dir realpath cache)
+- [x] [F13](tasks/F13-dedup-whole-project-checks.md) `done` medium: Run tsc / go vet / cargo once per FileChanged burst, not once per file
+- [x] [F14](tasks/F14-rtk-eslint-defeats-edit-gate.md) `done` medium: Bypass rtk lint on Edit; its compacted output has no line locations, so the edit-range gate passes everything
+- [x] [F15](tasks/F15-rearm-watches-after-checkout.md) `done` medium: Re-arm FileChanged watches after git checkout (prototype first)
+- [x] [F16](tasks/F16-skill-driver-batching.md) `done` medium: Skill driver: one linter call per tool group and one tsc per tsconfig
+- [x] [F17](tasks/F17-persist-rtk-probe.md) `done` low: Persist rtk rewrite probe results across hook processes
+- [x] [F18](tasks/F18-overlap-chain-tsc-and-kill-tree.md) `done` low: Overlap chain lint and tsc; kill the whole process tree on timeout
+- [x] [F19](tasks/F19-watchlist-skip-generated.md) `done` low: Keep linguist-generated files out of watchPaths
+- [x] [F20](tasks/F20-config-walk-readdir.md) `done` low: One readdirSync per directory in the upward config walks (9P)
+- [x] [F21](tasks/F21-gatefinding-exists-memo.md) `done` low: Memoize existsSync in gateFinding
+- [x] [F22](tasks/F22-filechanged-skip-without-git.md) `done` low: FileChanged skip without a git status spawn (index blob id)
+- [x] [F23](tasks/F23-superseded-and-duplicate-wakes.md) `done` low: Superseded and duplicate findings re-wake Claude
+- [x] [F24](tasks/F24-npm-notice-in-findings.md) `done` low: Keep npm notice lines out of npx-run findings
+- [x] [F25](tasks/F25-digest-size-bound.md) `done` low: Bound digest hashing and FileChanged lint by file size
+- [x] [F26](tasks/F26-per-process-floor-and-hook-filter.md) `done` low: Per-process floor (about 40 ms) for events the hook cannot act on
+- [x] [F27](tasks/F27-tests-miss-perf-paths.md) `done` low: Test the performance-relevant hook paths
+- [x] [F28](tasks/F28-wsl-windows-path-docs.md) `done` medium: Document the WSL Windows-PATH penalty (mostly inside child processes)
+- [x] [F29](tasks/F29-timeout-budget-docs.md) `done` low: Timeout budget doc misses the cold Rust leaf crate and SessionStart on 9P
+- [x] [F30](tasks/F30-go-rust-cost-model-docs.md) `done` low: Document the Go/Rust cost model (scope, cold caches, bursts)
+- [x] [F31](tasks/F31-rtk-shellcheck-overhead.md) `done` low: Measure rtk's overhead for shellcheck/ruff with the real tools
+- [x] [F32](tasks/F32-filechanged-echo-race.md) `done` low: Measure how often the FileChanged echo of Claude's own write beats the digest
+- [x] [F33](tasks/F33-watchpaths-size-recheck.md) `done` low: watchPaths JSON size and watch count need no change; re-check on Claude Code upgrades
+- [x] [F34](tasks/F34-settle-window.md) `done` medium: Settle window - a finding that the next edit already repaired never wakes Claude
+- [x] [F35](tasks/F35-skip-hold-when-nothing-droppable.md) `done` medium: Skip the settle hold when no held diagnostic can be dropped
+- [x] [F36](tasks/F36-held-parse-error-fixed-elsewhere.md) `done` low: A held parse error is reported although a later edit fixed its cause on another line
+- [x] [F37](tasks/F37-hook-design-rule-size.md) `done` low: hook-design.md is over the 40,000-character rule limit
+- [x] [F40](tasks/F40-mid-edit-findings.md) `done` high: Mid-edit findings - route to the editing agent, report a burst's final state once, sweep at turn end
 
-- [x] [F38](tasks/F38-settle-docs-after-f36.md) Settle-window docs still describe the 0.16.0 parse-error rule `closed` priority:low. Closed in 0.17.0: F40 removed the rule and rewrote both texts (README paragraph, `settle-window.md`, which now starts with `#`).
-- [ ] [F39](tasks/F39-settle-process-test-wall-time.md) settle-process.test.ts now sets the test suite's wall time `open` priority:low. 14 sequential hold-bound tests, 17.4 -> 25.5 s, suite 22.5 -> 25.5 s; tests only. After F40 (0.17.0): 28 tests, the file takes about 29 s and the suite 30 s (one run).
+## Closed without code
+
+- [x] [F38](tasks/F38-settle-docs-after-f36.md) `closed` low: Settle-window docs still describe the 0.16.0 parse-error rule
 
 ## Dependencies
 
