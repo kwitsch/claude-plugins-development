@@ -52,7 +52,7 @@ No agent narrates between tool calls (no human reads it); the structured results
 
 - **Tests audit**: revert each change one at a time in a scratch copy and see whether any test fails; add what is missing. Check temp dirs, env restore (`PATH`/`HOME`/other env in `finally`), leaked processes, timing thresholds (`>= 290` for a 300 ms timer), flakiness over 5 runs and `--sequence.shuffle`. A negative test whose cases all run in a world where an earlier gate already returns nothing cannot fail: give each case a world where only its own gate blocks. A selection rule (which of several candidates wins) needs a test with several candidates. Every flag on a regex (`m`, `i`) and every TTL or reset branch gets a test that fails without it. Isolate user-level config of external tools (`HOME`, `XDG_CONFIG_HOME`, tool env such as `YAMLLINT_CONFIG_FILE`): a test that passes in CI fails on a machine with `~/.config/<tool>`.
 - **Randomized test** for the central invariant, seeded (mulberry32) so it is deterministic; run a bigger independent fuzz against the real tool once.
-- **Docs audit**: every number, default, limit, env var and event name in README, rules and docs must match the source. A claim about what an external tool does ("never edits X", "writes only Y") is checked by running it under a temp `HOME` and `CLAUDE_CONFIG_DIR` and listing what it wrote; after any fix that changes a path or env var, grep the README for the old one.
+- **Docs audit**: every number, default, limit, env var and event name in README, rules and the plugin's wiki section (development/wiki/plugins/<plugin>/: index, TASKS.md, evaluations, design, notes) must match the source. A claim about what an external tool does ("never edits X", "writes only Y") is checked by running it under a temp `HOME` and `CLAUDE_CONFIG_DIR` and listing what it wrote; after any fix that changes a path or env var, grep the README for the old one.
 - **Live checks** with the `live-verify` skill for the flows the tests cannot cover.
 - **Final gate**: the repository's `/code-review high` on the whole branch (the Close step does it), then CI green on the head commit (`gh pr checks`).
 
@@ -61,7 +61,7 @@ No agent narrates between tool calls (no human reads it); the structured results
 At the end of the hunt, before the final report, check what the hunt taught that holds beyond this plugin:
 
 1. List the confirmed defect classes and the Claude Code / tool behaviours you verified (compare with `.claude/rules/hook-file-safety.md`, `.claude/rules/claude-code-hook-facts.md`, `.claude/rules/claude-code-tool-hook-facts.md`, `.claude/rules/claude-code-skill-facts.md`, `.claude/rules/plugin-docs-tasks.md` and the other rules and skills).
-2. For each, decide: new general fact or defect class, correction of an existing rule or skill, or plugin-specific (stays in the plugin's wiki section `development/wiki/plugins/<plugin>/` and rules). Only what other plugins of this repository can use, written generally (no plugin names in the rule text except as the source), goes into `.claude/rules/*.md` (with `paths:`) or `.claude/skills/`.
+2. For each, decide: new general fact or defect class, correction of an existing rule or skill, or plugin-specific (stays in the plugin's wiki section `development/wiki/plugins/<plugin>/`: a task in `tasks/` and `TASKS.md`, reasons in `design/`, other records in `notes/`, each listed in its `index.md`; format in `.claude/rules/plugin-docs-tasks.md`; and in its rules). Only what other plugins of this repository can use, written generally (no plugin names in the rule text except as the source), goes into `.claude/rules/*.md` (with `paths:`) or `.claude/skills/`.
 3. Apply the additions and corrections in the same PR, say in one line which rules or skills changed (or that nothing new qualified).
 
 ## Finish
@@ -146,7 +146,7 @@ const LENSES = [
   'per-turn or per-session caches and buffers added for speed: every event that must drop or flush them',
   'slow or unusual file systems, odd file names and encodings',
   'fail-open paths and missing error handling at trust boundaries',
-  'docs, README and rules contradicting the code; tests that cannot fail',
+  'the plugin wiki section, README and rules contradicting the code; tests that cannot fail',
 ]
 const lenses = args.lenses ?? LENSES.map((lens) => ({ lens, model: 'sonnet', effort: 'medium' }))
 

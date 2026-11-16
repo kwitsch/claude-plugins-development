@@ -60,3 +60,7 @@ Source: user request.
 
 - **Text:** the five generic steps are one page, `plugins/how-to-work-a-task.md`; every plugin `index.md` with a task list holds only a link under `## How to work a task` (checked by `wiki-check.ts`). Plugin-specific steps of jev-api, jevfort and universal-lint moved to `## Task conventions` in their `index.md`.
 - **CI:** `.github/workflows/wiki.yml` runs the wiki check on PRs that change `development/wiki/**` or the check script (pr.yml ignores `development/**`).
+
+## [2026-11-16] lint | Skills that use the wiki follow the new layout
+
+Checked every skill that reads or writes the wiki. Updated: `perf-worklist` (open tasks = section Remaining, TASKS.md entry format, evaluation sections and name, plugin `index.md` Pages, how-to-work-a-task, wiki-check in jobs and analysis), `live-verify` (evaluation path and sections), `bughunt` (where plugin-specific findings go, docs audit scope), `wiki` (plugin index updates, extended lint description), `scaffold-plugin` (section and template, earlier). No change needed: `convert-plugin-ts`, `split-hooks-lib`, `refactor-plugin`.
