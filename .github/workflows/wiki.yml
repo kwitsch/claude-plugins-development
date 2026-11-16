@@ -1,0 +1,23 @@
+name: Wiki
+
+# development/** is ignored by pr.yml, so a PR that changes the wiki gets its own check here
+on:
+  pull_request:
+    paths:
+      - "development/wiki/**"
+      - "development/scripts/wiki-check.ts"
+
+permissions:
+  contents: read
+
+jobs:
+  wiki-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      # builtins only, no install needed; exits 1 on any problem
+      - name: Wiki check
+        run: node development/scripts/wiki-check.ts

@@ -14,6 +14,8 @@ PR (`.github/workflows/pr.yml`), on every PR except one that changes only `devel
 - Tested set: pnpm's graph `...[origin/<base>]`, i.e. changed workspace packages plus their dependents. A `development/vitest/claude-engine/` change runs its tests and re-tests every plugin using it (no version bump for those); a change in the root package itself (shared config, lockfile, `.github/`, docs) re-checks every package.
 - Job `changed-plugins` is the required status check on `main` via branch protection in GitHub settings (see root `CLAUDE.md`).
 
+Wiki (`.github/workflows/wiki.yml`): on a PR that changes `development/wiki/**` or `development/scripts/wiki-check.ts` (the paths pr.yml ignores), job `wiki-check` runs `node development/scripts/wiki-check.ts` and fails the PR on any problem. Not a required status check unless set in branch protection.
+
 Dependabot (`.github/dependabot.yml`, `.github/workflows/dependabot-automerge.yml`): weekly npm (pnpm workspace) and github-actions updates. Every update except a major one (patch, minor, pin/digest) gets auto-merge (squash) once `changed-plugins` is green; major updates need a manual merge. Dependabot PRs skip the version-bump check for a plugin as long as its `plugin/` is unchanged (the freshness check still catches a changed build).
 
 Release (`.github/workflows/release.yml`): On push to `main`, tag the pushed commit `<name>-<version>` for each plugin dir the push changed, then run Sync for every changed plugin's tag (a tag that already exists is not re-created but is still synced, which makes re-runs idempotent).

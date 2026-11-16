@@ -12,11 +12,12 @@ Working documents for agent sessions. Not shipped (`plugin/` is the installable 
 
 ## How to work a task
 
-1. Pick an open task from "Remaining" in `TASKS.md` (highest priority first), read it and its `Related` tasks. Check it against the current code first: symbols move.
-2. Read `jev-api/CLAUDE.md`. Locate code by the symbol names under `Code locations` (no line numbers on purpose).
-3. Change `src/hooks/register.ts` (or, for a task with area `jevfort/...`, the jevfort sources), add the test named under `Verification` to `tests/register.test.ts`, then `pnpm lint && pnpm --filter jev-api build && pnpm --filter jev-api test`. Never edit `plugin/**/*.mjs` by hand.
-4. Any change under `jev-api/` merged to `main` needs a version bump in `package.json`. jevfort calls `batch`: do not change its name, input or answer shape.
-5. Set `status` in the task, say what shipped (version, test), update its `TASKS.md` entry (checkbox, section, status tag: `.claude/rules/plugin-docs-tasks.md`) and note new numbers in a new dated evaluation instead of editing old ones.
+See [how-to-work-a-task.md](../how-to-work-a-task.md).
+
+## Task conventions
+
+- Read `jev-api/.claude/rules/hooks-source.md` first: the code is in `src/hooks/register.ts` and its modules (for a task with area `jevfort/...`, the jevfort sources); the test goes into `tests/register.test.ts`.
+- jevfort calls `batch`: do not change its name, input or answer shape.
 
 ## Conventions
 

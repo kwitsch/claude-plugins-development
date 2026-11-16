@@ -53,3 +53,10 @@ Source: user request after a structure review of `plugins/`.
 
 - **Layout:** `index.md`, `TASKS.md` + `tasks/`, `evaluations/EVALUATION-<date>[-<topic>].md`, `design/`, `notes/` (rule `.claude/rules/plugin-docs-tasks.md`). Moved: all evaluations into `evaluations/` (jevfort `-2`, `-3`, `-F01`, `-F04` became `-worklist`, `-option-removal`, `-f01`, `-f04`; universal-lint `14b` became `-v0.16.1`), `HAIKU-CALIBRATION.md` and the two inline-headroom pages into `notes/` (lower case). Evaluation headings unified to Method, Results, Bug hunt, Live validation. The plugin `index.md` Pages lists were regenerated.
 - **Check:** `wiki-check.ts` rejects other files in a section, requires the four evaluation headings, the task headings Status, Problem and Related, `## Pages` as the first section of an `index.md` and `## How to work a task` for a plugin with a task list.
+
+## [2026-11-16] ingest | One "How to work a task" text; wiki CI workflow
+
+Source: user request.
+
+- **Text:** the five generic steps are one page, `plugins/how-to-work-a-task.md`; every plugin `index.md` with a task list holds only a link under `## How to work a task` (checked by `wiki-check.ts`). Plugin-specific steps of jev-api, jevfort and universal-lint moved to `## Task conventions` in their `index.md`.
+- **CI:** `.github/workflows/wiki.yml` runs the wiki check on PRs that change `development/wiki/**` or the check script (pr.yml ignores `development/**`).

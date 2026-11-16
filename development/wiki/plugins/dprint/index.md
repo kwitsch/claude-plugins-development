@@ -10,11 +10,7 @@ Working documents for agent sessions. Not shipped (`plugin/` is the installable 
 
 ## How to work a task
 
-1. Pick an open task from "Remaining" in `TASKS.md` (highest priority first) and read its detail document plus the documents under its `Related` section.
-2. Read `dprint/CLAUDE.md` (build rules). Locate code by the symbol names in `Code locations`; line numbers are deliberately absent because they drift.
-3. Implement in `src/`, add the tests named under `Verification`, then `pnpm --filter dprint build && pnpm --filter dprint test && pnpm --filter dprint lint`. Never edit `plugin/**/*.mjs` or `plugin/.claude-plugin/plugin.json` by hand.
-4. Any change under `dprint/` merged to `main` needs a version bump (`version` in `package.json`, the only manifest source).
-5. Update the task: set `status` in its frontmatter, adjust `Status`/`Approach` to what shipped, and update its `TASKS.md` entry (checkbox, section, status tag: `.claude/rules/plugin-docs-tasks.md`).
+See [how-to-work-a-task.md](../how-to-work-a-task.md).
 
 ## Conventions
 

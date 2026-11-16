@@ -15,11 +15,12 @@ Working documents for agent sessions. Not shipped (`plugin/` is the installable 
 
 ## How to work a task
 
-1. Pick an open task from "Remaining" in `TASKS.md` (highest priority first), read it and its `Related` tasks. Check it against the current code first: symbols move.
-2. Read `jevfort/CLAUDE.md` and `jevfort/.claude/rules/register-hooks.md` (every `$` use lives in `src/hooks/register.ts`; storage calls must run in-frame). Locate code by the symbol names under `Code locations` (no line numbers on purpose).
-3. Change `src/hooks/*.ts`, add the test named under `Verification` (kit tests in `tests/register.test.ts`, `tests/phase3.test.ts`, pure ones in `tests/policy.test.ts`/`tests/candidates.test.ts`), then `pnpm lint && pnpm --filter jevfort build && pnpm --filter jevfort test`. Never edit `plugin/**/*.mjs` by hand.
-4. Any change under `jevfort/` merged to `main` needs a version bump in `package.json`. jev-api's `batch` name, input and answer shape stay as they are.
-5. Set `status` in the task, say what shipped (version, test), update its `TASKS.md` entry (checkbox, section, status tag: `.claude/rules/plugin-docs-tasks.md`) and note new numbers in a new dated evaluation instead of editing old ones.
+See [how-to-work-a-task.md](../how-to-work-a-task.md).
+
+## Task conventions
+
+- Read `jevfort/.claude/rules/register-hooks.md`: every `$` use lives in `src/hooks/register.ts`, storage calls must run in-frame. Code is in `src/hooks/*.ts`; kit tests are in `tests/register.test.ts` and `tests/phase3.test.ts`, pure ones in `tests/policy.test.ts` and `tests/candidates.test.ts`.
+- jev-api's `batch` name, input and answer shape stay as they are.
 
 ## Conventions
 

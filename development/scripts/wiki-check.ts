@@ -111,7 +111,9 @@ function layoutProblems(dir: string, files: ReadonlyMap<string, string>): string
   }
   const own = files.get(`${dir}/index.md`) ?? "";
   if (own !== "" && /^## .*$/m.exec(own)?.[0] !== "## Pages") out.push(`${dir}/index.md: the first section must be "## Pages"`);
-  if (files.has(`${dir}/TASKS.md`) && !/^## How to work a task$/m.test(own)) out.push(`${dir}/index.md: a plugin with a task list needs "## How to work a task"`);
+  if (files.has(`${dir}/TASKS.md`) && !/^## How to work a task\n\nSee \[how-to-work-a-task\.md\]\(\.\.\/how-to-work-a-task\.md\)\.\n(?=\n## |$)/m.test(own)) {
+    out.push(`${dir}/index.md: a plugin with a task list needs the section "## How to work a task" holding only the link to ../how-to-work-a-task.md`);
+  }
   return out;
 }
 
@@ -186,7 +188,7 @@ for (
     "plugins/p/extra.md: not an allowed file",
     "plugins/p/evaluations/EVAL-x.md: not an allowed file",
     "plugins/p/evaluations/EVALUATION-2026-11-14.md: missing the section \"## Results\"",
-    "plugins/p/index.md: a plugin with a task list needs \"## How to work a task\"",
+    "plugins/p/index.md: a plugin with a task list needs the section \"## How to work a task\" holding only the link",
     "plugins/p/TASKS.md: F02 has the wrong checkbox for status open",
     "plugins/p/TASKS.md: F03 says priority high, the task says low",
     "plugins/p/TASKS.md: entry \"- [x] bad line\" does not match",

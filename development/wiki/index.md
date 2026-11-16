@@ -25,6 +25,7 @@ Catalog of what earlier sessions wrote down, in this wiki and elsewhere in the r
 
 - [transcript-mining.md](methods/transcript-mining.md): measuring from local transcripts what a hook did across sessions (which records to count, how to find the triggering edit, traps).
 - [hook-payload-probe.md](methods/hook-payload-probe.md): a throwaway logging plugin to see hook payloads, hook environment and the effect of an exit code, for subagents and workflow agents too.
+- [plugins/how-to-work-a-task.md](plugins/how-to-work-a-task.md): the five steps for working a task of any plugin's task list (every plugin's `index.md` links it).
 - [scratch-test-harnesses.md](methods/scratch-test-harnesses.md): running a plugin's tests against a modified or older copy from the scratchpad (repro, mutation check, A/B measurement).
 
 ### Pitfalls
