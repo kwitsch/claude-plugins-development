@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Usage: wiki-check.ts
-// Fails when development/wiki/ is inconsistent (development/wiki/CLAUDE.md): a page the index does not list (below plugins/<name>/ only its README.md is required), a
+// Fails when development/wiki/ is inconsistent (development/wiki/CLAUDE.md): a page the index does not list (a plugin's pages are listed in plugins/index.md instead), a
 // relative link that leads nowhere, a page without a `# Title` first line, or a malformed log heading. Also fails on
 // a dead relative link in a memory file (CLAUDE.md, .claude/rules/*.md, at the root and per top-level directory):
 // rules link to wiki and design pages instead of repeating them, so a moved page must not leave a rule pointing nowhere.
@@ -12,8 +12,8 @@ import path from "node:path";
 
 /** Files of the wiki that are not topic pages. */
 const SPECIAL = new Set(["index.md", "log.md", "CLAUDE.md"]);
-/** A plugin's task documents, evaluations and design pages: only its `README.md` is listed in the index, and a task file starts with frontmatter instead of a `# Title`. */
-const PLUGIN_PAGE = /^plugins\/[^/]+\/(?!README\.md$)/;
+/** A page of a plugin's section: `plugins/index.md` (not the root index) lists its `README.md`, or every page when it has none; a task file starts with frontmatter instead of a `# Title`. */
+const PLUGIN_PAGE = /^plugins\/[^/]+\//;
 /** A log heading: `## [YYYY-MM-DD] ingest | <title>` or `## [YYYY-MM-DD] lint | <title>`. */
 const LOG_HEADING = /^## \[\d{4}-\d{2}-\d{2}\] (?:ingest|lint) \| \S/;
 
@@ -40,8 +40,14 @@ export function problems(files: ReadonlyMap<string, string>, exists: (rel: strin
   const index = files.get("index.md");
   if (index === undefined) return ["index.md is missing"];
   const listed = new Set(links(index).map((t) => path.posix.normalize(t)));
+  const pluginIndex = files.get("plugins/index.md") ?? "";
+  const pluginListed = new Set(links(pluginIndex).map((t) => path.posix.normalize(path.posix.join("plugins", t))));
   for (const [rel, text] of files) {
-    if (!SPECIAL.has(rel) && !PLUGIN_PAGE.test(rel)) {
+    if (PLUGIN_PAGE.test(rel)) {
+      const dir = rel.split("/").slice(0, 2).join("/");
+      const needed = files.has(`${dir}/README.md`) ? rel === `${dir}/README.md` : !rel.slice(dir.length + 1).includes("/");
+      if (needed && !pluginListed.has(rel)) out.push(`${rel}: not listed in plugins/index.md`);
+    } else if (!SPECIAL.has(rel)) {
       if (!listed.has(rel)) out.push(`${rel}: not listed in index.md`);
       if (!text.startsWith("# ")) out.push(`${rel}: the first line is not a "# Title"`);
     }
@@ -58,16 +64,20 @@ export function problems(files: ReadonlyMap<string, string>, exists: (rel: strin
 
 // self-check: a script that guards the wiki must not pass a broken one
 const broken = new Map([
-  ["index.md", "[a](facts/a.md) [gone](facts/gone.md) [out](../x.md) [web](https://example.invalid/y.md) `[code](no.md)`"],
+  ["index.md", "[a](facts/a.md) [gone](facts/gone.md) [out](../x.md) [p](plugins/index.md)[web](https://example.invalid/y.md) `[code](no.md)`"],
   ["log.md", "## [2026-11-15] ingest | first\n## 2026-11-15 lint\n"],
   ["facts/a.md", "# A\n[b](b.md#part)\n"],
   ["facts/b.md", "no title\n"],
+  ["plugins/index.md", "# P\n[p](p/README.md)\n"],
+  ["plugins/p/README.md", "# P\n"],
   ["plugins/p/tasks/F01.md", "---\ntitle: t\n---\n"],
+  ["plugins/q/a.md", "x\n"],
 ]);
 assert.deepEqual(problems(broken, (rel) => rel === "../x.md"), [
   "index.md: link to facts/gone.md leads nowhere",
   "facts/b.md: not listed in index.md",
   "facts/b.md: the first line is not a \"# Title\"",
+  "plugins/q/a.md: not listed in plugins/index.md",
   "log.md: heading \"## 2026-11-15 lint\" is not \"## [YYYY-MM-DD] ingest|lint | <title>\"",
 ]);
 

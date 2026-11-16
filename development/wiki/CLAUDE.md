@@ -24,7 +24,7 @@ Rules and `CLAUDE.md` files load into every agent that touches a matching file; 
 - `decisions/`: a decision that holds across plugins, with its date, the reason and what was rejected.
 - `methods/`: how to find something out or test something (a recipe that is not a skill).
 - `pitfalls/`: what went wrong in a session and how to avoid it.
-- `plugins/<plugin>/`: one plugin's task list (`TASKS.md`, `tasks/`), dated evaluations and design pages (`design/`), format in `.claude/rules/plugin-docs-tasks.md`. The index lists only each plugin's `README.md`; the other pages are reached from it. `wiki-check.ts` does not require a `# Title` there (task files start with frontmatter).
+- `plugins/<plugin>/`: one plugin's task list (`TASKS.md`, `tasks/`), dated evaluations and design pages (`design/`), format in `.claude/rules/plugin-docs-tasks.md`. `plugins/index.md` is the plugin sections' own index (the root index links only to it): it lists each plugin's `README.md`, or every page of a plugin without one; the other pages are reached from there. `wiki-check.ts` requires the `plugins/index.md` entries and does not require a `# Title` there (task files start with frontmatter).
 
 ## Page format
 

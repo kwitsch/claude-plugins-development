@@ -42,15 +42,10 @@ Catalog of what earlier sessions wrote down, in this wiki and elsewhere in the r
 
 ## Per plugin
 
-Each plugin keeps its own knowledge: `CLAUDE.md` (overview and part list), `.claude/rules/` (one file per part), and a wiki section `plugins/<plugin>/` where present (task list `TASKS.md`, one file per task, dated evaluations, design pages).
+Each plugin keeps its own knowledge: `CLAUDE.md` (overview and part list), `.claude/rules/` (one file per part) and a wiki section. [plugins/index.md](plugins/index.md) lists the sections (task list, one file per task, dated evaluations, design pages).
 
-- dprint: [CLAUDE.md](../../dprint/CLAUDE.md), [wiki section](plugins/dprint/README.md). Formatter hooks through an MCP server, the language-server client, the "no runner" notice.
 - graphmind-helper: [CLAUDE.md](../../graphmind-helper/CLAUDE.md). Setup hooks and the MCP wrapper for graphmind.
-- inline-headroom: [CLAUDE.md](../../inline-headroom/CLAUDE.md). Context compression policies; evidence of Claude Code behaviour in its wiki section ([claude-code-verification.md](plugins/inline-headroom/claude-code-verification.md), [linux-token-efficiency-concepts.md](plugins/inline-headroom/linux-token-efficiency-concepts.md)).
-- jev-api: [CLAUDE.md](../../jev-api/CLAUDE.md), [wiki section](plugins/jev-api/README.md). The System One question tools; the API's limits, latency and error bodies are in its rules [oversized-state.md](../../jev-api/.claude/rules/oversized-state.md), [hooks-source.md](../../jev-api/.claude/rules/hooks-source.md) and [http-mcp-server.md](../../jev-api/.claude/rules/http-mcp-server.md).
 - jev-solver: [CLAUDE.md](../../jev-solver/CLAUDE.md). The task-solving skill and its phases.
-- jevfort: [CLAUDE.md](../../jevfort/CLAUDE.md), [wiki section](plugins/jevfort/README.md). Effort estimation, taking steps, cache countdown and compaction; standing user decisions are in its `CLAUDE.md`.
-- universal-lint: [CLAUDE.md](../../universal-lint/CLAUDE.md), [wiki section](plugins/universal-lint/README.md). Lint hooks. Its rule [lint-file.md](../../universal-lint/.claude/rules/lint-file.md) holds the constraints; the reasons are in the design pages under `development/wiki/plugins/universal-lint/design/`, for example who gets a finding and when in [settle-window.md](plugins/universal-lint/design/settle-window.md).
 - The test kit: [README.md](../vitest/claude-engine/README.md).
 
 ## Skills (repeated workflows)
