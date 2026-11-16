@@ -28,7 +28,7 @@ jobs:
         run: |
           rc=0
           for p in $PLUGINS; do
-            # only package.json, src/ and plugin/ ship or build what ships; tests, docs, scripts, memory need no bump
+            # only package.json, src/ and plugin/ ship or build what ships; tests, scripts, memory need no bump
             if ! bash .github/scripts/ships.sh "$p" "origin/$BASE...HEAD"; then
               echo "::notice::$p: package.json, src/ and plugin/ unchanged, no version bump required"; continue
             fi

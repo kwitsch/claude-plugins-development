@@ -1,12 +1,12 @@
 ---
 name: perf-worklist
-description: Work off a plugin's performance task list (`<plugin>/docs/TASKS.md`) job by job with a Workflow - one sequential subagent per open task with a model and effort picked per task (cap opus, xhigh), commit and push after every job, then a fresh performance analysis. Runs the analysis first when no open task exists. Use when the user asks to work through, burn down or re-run the performance analysis and task list of a plugin.
+description: Work off a plugin's performance task list (`development/wiki/plugins/<plugin>/TASKS.md`) job by job with a Workflow - one sequential subagent per open task with a model and effort picked per task (cap opus, xhigh), commit and push after every job, then a fresh performance analysis. Runs the analysis first when no open task exists. Use when the user asks to work through, burn down or re-run the performance analysis and task list of a plugin.
 argument-hint: "<plugin-name>"
 ---
 
 # perf-worklist
 
-Systematic run over `<plugin>/docs/` (layout and task rules: `.claude/rules/plugin-docs-tasks.md`, pattern from `dprint/docs/`). The argument is the plugin directory name; stop with one line if `<plugin>/package.json` does not exist.
+Systematic run over `development/wiki/plugins/<plugin>/` (layout and task rules: `.claude/rules/plugin-docs-tasks.md`, pattern from `development/wiki/plugins/dprint/`). The argument is the plugin directory name; stop with one line if `<plugin>/package.json` does not exist.
 
 The user's request for this skill is the opt-in for the Workflow tool (load `workflow-authoring` first if it is not loaded).
 
@@ -16,7 +16,7 @@ First action, before reading anything: check whether the session already is in a
 
 ## Step 1: open tasks to jobs
 
-1. Read `<plugin>/docs/TASKS.md`. An open task is an unchecked `- [ ]` entry (tags `open`, `partial`, `docs-only`, `measurement-only`) or a task document with `status: open|partial|docs-only`. Read each open task's `tasks/<id>-<slug>.md`.
+1. Read `development/wiki/plugins/<plugin>/TASKS.md`. An open task is an unchecked `- [ ]` entry (tags `open`, `partial`, `docs-only`, `measurement-only`) or a task document with `status: open|partial|docs-only`. Read each open task's `tasks/<id>-<slug>.md`.
 2. **No open task** (or no list): run the analysis first (step 3 with `mode: "analyse"`), then repeat this step with the new list. Nothing open after the analysis: report that and stop.
 3. **One job per open task**, in the order of the `Dependencies` section of `TASKS.md` (else priority, then id). For every job pick `model` and `effort` (hard cap: `opus` and `xhigh`, never `max`):
    - Ask jev-api once per task (`mcp__jev-api__batch`, state = the task document text): `score` "How large and risky is the change?" with levels `[S: docs or one line, M: one function with tests, L: several functions or modules, XL: cross-cutting, concurrency or protocol change]`, rounded to the nearest level. Low confidence (below 0.5), an error or no configuration: judge it yourself from the same criteria and say so in one line.
@@ -31,7 +31,7 @@ After the last job and before the analysis, a review job runs (when at least one
 
 ## Step 3: analysis
 
-The script's last phase (and `mode: "analyse"`) runs one analysis agent (`opus`/`xhigh`, read-only on code, writes docs only): method of `<plugin>/docs/EVALUATION-*.md` (same machine, built output, 5+ repetitions where cheap, a comparison with the previous evaluation, never edit old numbers), new findings as `tasks/<id>-<slug>.md` with the next free `F<nn>` id and `status: open`, `TASKS.md` updated. It commits and pushes, and returns the new open ids.
+The script's last phase (and `mode: "analyse"`) runs one analysis agent (`opus`/`xhigh`, read-only on code, writes docs only): method of `development/wiki/plugins/<plugin>/EVALUATION-*.md` (same machine, built output, 5+ repetitions where cheap, a comparison with the previous evaluation, never edit old numbers), new findings as `tasks/<id>-<slug>.md` with the next free `F<nn>` id and `status: open`, `TASKS.md` updated. It commits and pushes, and returns the new open ids.
 
 The review and the analysis commit and push their own changes like every job; the run ends with a clean `git status` and the branch head equal to its upstream.
 
@@ -64,7 +64,7 @@ const QUIET = '\n\nNo narration: no text between tool calls, no plans, no progre
 const run = (prompt, opts) => agent(prompt + QUIET, opts)
 
 const jobPrompt = (j) => `Work performance task ${j.id} (${j.title}) of plugin "${plugin}" in the git worktree ${worktree} (stay there; run git and pnpm from its root).
-Read ${plugin}/docs/tasks/${j.file}, ${plugin}/docs/TASKS.md, ${plugin}/CLAUDE.md, .claude/rules/plugin-docs-tasks.md and the rules the task names.
+Read development/wiki/plugins/${plugin}/tasks/${j.file}, development/wiki/plugins/${plugin}/TASKS.md, ${plugin}/CLAUDE.md, .claude/rules/plugin-docs-tasks.md and the rules the task names.
 1. Check the task against the CURRENT code (moved files, renamed symbols, drift). Obsolete or not worth doing: status closed with the reason in the task document, no code.
 2. Otherwise: failing test first (it must fail without the fix), then the smallest root-cause change in ${plugin}/src, never in plugin/**/*.mjs. Measure before and after where the task asks for it.
 3. Run \`pnpm --filter ${plugin} build\`, \`pnpm lint\`, \`pnpm --filter ${plugin} test\`; fix until green. Read the output; never claim green unseen.
@@ -79,8 +79,8 @@ const reviewPrompt = () => `Review the work of this run on the branch in the git
 4. If anything changed: \`git add\` it, commit ("${plugin}: simplify and review fixes", no Co-Authored-By) and \`git push\`. Never touch plugin/**/*.mjs by hand. Then check that \`git status --short\` is empty and \`git rev-parse HEAD\` equals \`git rev-parse @{u}\`; otherwise commit and push again.
 Return status clean (nothing to change), fixed or blocked (not green), the commit sha and one summary sentence.`
 
-const analysisPrompt = () => `Run a fresh performance analysis of plugin "${plugin}" in the git worktree ${worktree}. Follow .claude/rules/plugin-docs-tasks.md and the method of the latest ${plugin}/docs/EVALUATION-*.md (and ${plugin}/docs/README.md if present). Date: ${date}.
-Write ${plugin}/docs/EVALUATION-${date}.md (a dated file; never edit old numbers; state what was and was not run). New findings: ${plugin}/docs/tasks/F<next free nn>-<slug>.md with status open, frontmatter and sections per the rule; update TASKS.md. Docs only: do not change code.
+const analysisPrompt = () => `Run a fresh performance analysis of plugin "${plugin}" in the git worktree ${worktree}. Follow .claude/rules/plugin-docs-tasks.md and the method of the latest development/wiki/plugins/${plugin}/EVALUATION-*.md (and development/wiki/plugins/${plugin}/README.md if present). Date: ${date}.
+Write development/wiki/plugins/${plugin}/EVALUATION-${date}.md (a dated file; never edit old numbers; state what was and was not run). New findings: development/wiki/plugins/${plugin}/tasks/F<next free nn>-<slug>.md with status open, frontmatter and sections per the rule; update TASKS.md. Docs only: do not change code.
 \`git add\` the docs, commit ("${plugin}: performance analysis ${date}", no Co-Authored-By) and \`git push -u origin HEAD\`. Then check that \`git status --short\` is empty and \`git rev-parse HEAD\` equals \`git rev-parse @{u}\`; otherwise commit and push again. Return the ids of the new open tasks.`
 
 const results = []

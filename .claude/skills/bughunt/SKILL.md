@@ -61,7 +61,7 @@ No agent narrates between tool calls (no human reads it); the structured results
 At the end of the hunt, before the final report, check what the hunt taught that holds beyond this plugin:
 
 1. List the confirmed defect classes and the Claude Code / tool behaviours you verified (compare with `.claude/rules/hook-file-safety.md`, `.claude/rules/claude-code-hook-facts.md`, `.claude/rules/claude-code-tool-hook-facts.md`, `.claude/rules/claude-code-skill-facts.md`, `.claude/rules/plugin-docs-tasks.md` and the other rules and skills).
-2. For each, decide: new general fact or defect class, correction of an existing rule or skill, or plugin-specific (stays in the plugin's `docs/` and rules). Only what other plugins of this repository can use, written generally (no plugin names in the rule text except as the source), goes into `.claude/rules/*.md` (with `paths:`) or `.claude/skills/`.
+2. For each, decide: new general fact or defect class, correction of an existing rule or skill, or plugin-specific (stays in the plugin's wiki section `development/wiki/plugins/<plugin>/` and rules). Only what other plugins of this repository can use, written generally (no plugin names in the rule text except as the source), goes into `.claude/rules/*.md` (with `paths:`) or `.claude/skills/`.
 3. Apply the additions and corrections in the same PR, say in one line which rules or skills changed (or that nothing new qualified).
 
 ## Finish
@@ -185,7 +185,7 @@ Check: does it fix the root cause rather than the symptom, is every caller cover
 
 const closePrompt = (summary, files) => `Close the bug hunt of plugin "${plugin}" in the git worktree ${worktree} (stay there).
 Files changed by the fix jobs (the only scope of simplify and code-review): ${files.join(', ')}.
-1. Size up the changes: \`git diff --stat origin/main...HEAD -- <those files>\`. Doc files (markdown, text, anything under docs/) never count as code. Ask the jev-api tools first (\`noul\`) whether the code changes are too small or too simple to need a simplifier: only documentation, or only a few lines (about 30 changed code lines or fewer) without new logic.
+1. Size up the changes: \`git diff --stat origin/main...HEAD -- <those files>\`. Doc files (markdown, text, anything under development/wiki/plugins/) never count as code. Ask the jev-api tools first (\`noul\`) whether the code changes are too small or too simple to need a simplifier: only documentation, or only a few lines (about 30 changed code lines or fewer) without new logic.
 2. Simplify: when that is a confident yes, skip it. Otherwise skill "simplify" restricted to the changed code files (revert any edit it makes elsewhere), apply its fixes.
 3. Code review: skip it under the same rule as simplify. Otherwise choose the level from the size and risk of the changes, jev-api \`score\` first: \`low\` few lines of simple code, \`medium\` moderate changes, \`high\` larger changes or concurrency, caches, security or protocol code, \`xhigh\` large and risky changes; never \`max\`. Run skill "code-review" with args "<level> --fix" and the changed code files as its target.
 4. Only when step 2 or 3 changed something: \`pnpm --filter ${plugin} build\`, \`pnpm lint\`, \`pnpm --filter ${plugin} test\` until green.

@@ -13,7 +13,7 @@ paths:
 
 # jev-api HTTP transport (bundled MCP server)
 
-Live evidence and measurements: `docs/tasks/F22-http-through-mcp-server.md`.
+Live evidence and measurements: `development/wiki/plugins/jev-api/tasks/F22-http-through-mcp-server.md`.
 
 ## Why a server
 

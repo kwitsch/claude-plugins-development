@@ -37,4 +37,4 @@ claude -p --plugin-dir <worktree>/<plugin>/plugin \
 
 ## Report
 
-Numbers from one machine, the Claude Code version, what was not exercised. Put results in the plugin's `docs/` evaluation, and stop when the next run would repeat an earlier one.
+Numbers from one machine, the Claude Code version, what was not exercised. Put results in the plugin's evaluation in `development/wiki/plugins/<plugin>/`, and stop when the next run would repeat an earlier one.

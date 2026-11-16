@@ -6,7 +6,7 @@ paths:
 
 # jev-api Haiku fallback
 
-History and calibration measurements: `docs/HAIKU-CALIBRATION.md`.
+History and calibration measurements: `development/wiki/plugins/jev-api/HAIKU-CALIBRATION.md`.
 
 ## When Haiku answers
 

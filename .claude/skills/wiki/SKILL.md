@@ -12,7 +12,7 @@ Schema, page format and the "where knowledge goes" table: `development/wiki/CLAU
 
 1. List the candidates: each thing this task established that a later session would otherwise have to find out again. Drop what only matters to this task (file lists, progress, a fix the code and its commit already show).
 2. Sort each candidate by the table in `development/wiki/CLAUDE.md`:
-   - a constraint for certain files goes into a rule, knowledge about one plugin into that plugin's `CLAUDE.md`, rules or `docs/`, a repeated workflow into a skill;
+   - a constraint for certain files goes into a rule, knowledge about one plugin into that plugin's `CLAUDE.md`, rules or wiki section `development/wiki/plugins/<plugin>/`, a repeated workflow into a skill;
    - the rest goes into a wiki page.
 3. Check the index before writing: extend the page that already covers the topic; create a new page only for a new topic. Never state a fact a rule or another page already holds: link to it.
 4. Write in the page format: how each fact is known `(live <version>)`, `(binary <version>)`, `(typings)`, `(docs)`, `(measured <date>)`; decisions with date, reason and rejected alternatives. A claim you did not verify and cannot source is left out. A fact that replaces an older one replaces its text; the page does not keep both.

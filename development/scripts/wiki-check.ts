@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Usage: wiki-check.ts
-// Fails when development/wiki/ is inconsistent (development/wiki/CLAUDE.md): a page the index does not list, a
+// Fails when development/wiki/ is inconsistent (development/wiki/CLAUDE.md): a page the index does not list (below plugins/<name>/ only its README.md is required), a
 // relative link that leads nowhere, a page without a `# Title` first line, or a malformed log heading. Also fails on
 // a dead relative link in a memory file (CLAUDE.md, .claude/rules/*.md, at the root and per top-level directory):
 // rules link to wiki and design pages instead of repeating them, so a moved page must not leave a rule pointing nowhere.
@@ -12,6 +12,8 @@ import path from "node:path";
 
 /** Files of the wiki that are not topic pages. */
 const SPECIAL = new Set(["index.md", "log.md", "CLAUDE.md"]);
+/** A plugin's task documents, evaluations and design pages: only its `README.md` is listed in the index, and a task file starts with frontmatter instead of a `# Title`. */
+const PLUGIN_PAGE = /^plugins\/[^/]+\/(?!README\.md$)/;
 /** A log heading: `## [YYYY-MM-DD] ingest | <title>` or `## [YYYY-MM-DD] lint | <title>`. */
 const LOG_HEADING = /^## \[\d{4}-\d{2}-\d{2}\] (?:ingest|lint) \| \S/;
 
@@ -39,7 +41,7 @@ export function problems(files: ReadonlyMap<string, string>, exists: (rel: strin
   if (index === undefined) return ["index.md is missing"];
   const listed = new Set(links(index).map((t) => path.posix.normalize(t)));
   for (const [rel, text] of files) {
-    if (!SPECIAL.has(rel)) {
+    if (!SPECIAL.has(rel) && !PLUGIN_PAGE.test(rel)) {
       if (!listed.has(rel)) out.push(`${rel}: not listed in index.md`);
       if (!text.startsWith("# ")) out.push(`${rel}: the first line is not a "# Title"`);
     }
@@ -60,6 +62,7 @@ const broken = new Map([
   ["log.md", "## [2026-11-15] ingest | first\n## 2026-11-15 lint\n"],
   ["facts/a.md", "# A\n[b](b.md#part)\n"],
   ["facts/b.md", "no title\n"],
+  ["plugins/p/tasks/F01.md", "---\ntitle: t\n---\n"],
 ]);
 assert.deepEqual(problems(broken, (rel) => rel === "../x.md"), [
   "index.md: link to facts/gone.md leads nowhere",

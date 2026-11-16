@@ -1,11 +1,11 @@
 ---
 paths:
-  - "*/docs/**"
+  - "development/wiki/plugins/**"
 ---
 
-# Rule: `<plugin>/docs/` (task lists and evaluations for agent sessions)
+# Rule: `development/wiki/plugins/<plugin>/` (task lists and evaluations for agent sessions)
 
-Pattern from `dprint/docs/` (analysis findings worked off as tasks). Not shipped, not user documentation, English.
+Pattern from `development/wiki/plugins/dprint/` (analysis findings worked off as tasks). Not shipped, not user documentation, English.
 
 - `TASKS.md` is the index with checkboxes (Done / Remaining / Closed without code); `tasks/<id>-<slug>.md` holds one task. Frontmatter: `id`, `title`, `status` (`done|partial|docs-only|open|closed`), `priority`, `area`. Sections: Status, Problem, Evidence, Code locations, Approach, Verification, Constraints, Related. No `# Heading` in the body: the frontmatter `title` already counts as the H1 (markdownlint MD025 on every file otherwise).
 - Check every open task against the **current** code before working it: docs drift (moved files, renamed symbols, a manifest file that no longer exists, rules that moved). Obsolete or "do not do" tasks get `status: closed` with the reason, not silent deletion. Keep the old paragraph under "Earlier state:" when a task is finished.

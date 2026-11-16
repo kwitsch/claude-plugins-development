@@ -13,7 +13,7 @@ paths:
   other step-0 questions in the same batch call. Upstream's difficulty->effort mapping and its difficulty question are
   gone.
 - Rule, calibrated on `tests/fixtures/effort-scores.json` (numbers in the `MECHANICAL_FROM`/`EFFORT_CUTS` comments,
-  history in `docs/EVALUATION-2026-11-15-live-notes.md`): p >= `MECHANICAL_FROM` gives `minEffort`; a missing or
+  history in `development/wiki/plugins/jevfort/EVALUATION-2026-11-15-live-notes.md`): p >= `MECHANICAL_FROM` gives `minEffort`; a missing or
   non-finite score gives the unclamped `defaultEffort`; otherwise `effortLevel(score)`, rounded and clamped.
 - The score's confidence is NOT checked: the discarded scores were as accurate as the kept ones, and a threshold
   dropped every `high`/`xhigh` prompt.
