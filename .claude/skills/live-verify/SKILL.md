@@ -37,4 +37,4 @@ claude -p --plugin-dir <worktree>/<plugin>/plugin \
 
 ## Report
 
-Numbers from one machine, the Claude Code version, what was not exercised. Put results in the plugin's `docs/` evaluation, and stop when the next run would repeat an earlier one.
+Numbers from one machine, the Claude Code version, what was not exercised. Put results in `development/wiki/plugins/<plugin>/evaluations/EVALUATION-<date>[-<topic>].md` (sections Method, Results, Bug hunt, Live validation; list it in the plugin's `index.md`; a Claude Code behaviour that holds beyond the plugin goes to `development/wiki/facts/` with the `wiki` skill), run `node development/scripts/wiki-check.ts`, and stop when the next run would repeat an earlier one.

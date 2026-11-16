@@ -2,7 +2,7 @@
 
 How to measure from the local transcripts what a hook really did across many sessions: how often it reported, to whom, how long after which edit.
 
-Record shapes this relies on: [claude-code-command-hooks.md](../facts/claude-code-command-hooks.md). First use: universal-lint task F40 (`universal-lint/docs/tasks/F40-mid-edit-findings.md`), 133 wake-ups over nine days.
+Record shapes this relies on: [claude-code-command-hooks.md](../facts/claude-code-command-hooks.md). First use: universal-lint task F40 (`development/wiki/plugins/universal-lint/tasks/F40-mid-edit-findings.md`), 133 wake-ups over nine days.
 
 ## Where the data is
 

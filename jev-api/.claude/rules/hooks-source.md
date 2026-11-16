@@ -7,7 +7,7 @@ paths:
 
 # jev-api hooks sources
 
-Each module's header comment says what it holds; module history is in `docs/tasks/` (F02, F16, F17 registration; F21 module split).
+Each module's header comment says what it holds; module history is in `development/wiki/plugins/jev-api/tasks/` (F02, F16, F17 registration; F21 module split).
 
 ## Build and bundle
 

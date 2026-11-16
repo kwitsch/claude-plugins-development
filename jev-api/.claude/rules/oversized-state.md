@@ -10,7 +10,7 @@ paths:
 
 # jev-api oversized state
 
-Measurements (token densities, latency table, live validation): `docs/tasks/F21-oversized-state-sent-blindly.md`.
+Measurements (token densities, latency table, live validation): `development/wiki/plugins/jev-api/tasks/F21-oversized-state-sent-blindly.md`.
 
 ## Limits (constants block in `size.ts`)
 

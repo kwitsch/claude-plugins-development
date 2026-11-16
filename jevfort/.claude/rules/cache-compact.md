@@ -64,7 +64,7 @@ transcript and prompt.
 The built-in `cc-plugin-sec-default` passes `session.compact` on past every user-tier hook (debug log:
 `jevfort: session.compact bypassed by cc-plugin-sec-default (tier user); beneath runs`, and
 `its session.compact hook was skipped`), as for the events in `register-hooks.md` (for `tool.check` only a
-re-dispatch notice appears, the verdict stays allow: `inline-headroom/docs/claude-code-verification.md`). So the Jev ranking, the Haiku compaction and the
+re-dispatch notice appears, the verdict stays allow: `development/wiki/plugins/inline-headroom/notes/claude-code-verification.md`). So the Jev ranking, the Haiku compaction and the
 `cacheExpires = 0` reset do not run; core compacts on its own. Seen with a manual `/compact` in `claude -p`; an
 interactive session and an auto-compaction were not tried. Nothing in this plugin can get past a prepend-tier hook; the
 code and its tests stay as they are (the kit runs the hook).

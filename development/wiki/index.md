@@ -25,6 +25,7 @@ Catalog of what earlier sessions wrote down, in this wiki and elsewhere in the r
 
 - [transcript-mining.md](methods/transcript-mining.md): measuring from local transcripts what a hook did across sessions (which records to count, how to find the triggering edit, traps).
 - [hook-payload-probe.md](methods/hook-payload-probe.md): a throwaway logging plugin to see hook payloads, hook environment and the effect of an exit code, for subagents and workflow agents too.
+- [plugins/how-to-work-a-task.md](plugins/how-to-work-a-task.md): the five steps for working a task of any plugin's task list (every plugin's `index.md` links it).
 - [scratch-test-harnesses.md](methods/scratch-test-harnesses.md): running a plugin's tests against a modified or older copy from the scratchpad (repro, mutation check, A/B measurement).
 
 ### Pitfalls
@@ -42,15 +43,8 @@ Catalog of what earlier sessions wrote down, in this wiki and elsewhere in the r
 
 ## Per plugin
 
-Each plugin keeps its own knowledge: `CLAUDE.md` (overview and part list), `.claude/rules/` (one file per part), and where present `docs/` (task list `TASKS.md`, one file per task, dated evaluations).
+Each plugin keeps its own knowledge: `CLAUDE.md` (overview and part list), `.claude/rules/` (one file per part) and a wiki section. [plugins/index.md](plugins/index.md) lists the sections (task list, one file per task, dated evaluations, design pages).
 
-- dprint: [CLAUDE.md](../../dprint/CLAUDE.md), [docs](../../dprint/docs/README.md). Formatter hooks through an MCP server, the language-server client, the "no runner" notice.
-- graphmind-helper: [CLAUDE.md](../../graphmind-helper/CLAUDE.md). Setup hooks and the MCP wrapper for graphmind.
-- inline-headroom: [CLAUDE.md](../../inline-headroom/CLAUDE.md). Context compression policies; evidence of Claude Code behaviour in its `docs/`.
-- jev-api: [CLAUDE.md](../../jev-api/CLAUDE.md), [docs](../../jev-api/docs/README.md). The System One question tools; the API's limits, latency and error bodies are in its rules [oversized-state.md](../../jev-api/.claude/rules/oversized-state.md), [hooks-source.md](../../jev-api/.claude/rules/hooks-source.md) and [http-mcp-server.md](../../jev-api/.claude/rules/http-mcp-server.md).
-- jev-solver: [CLAUDE.md](../../jev-solver/CLAUDE.md). The task-solving skill and its phases.
-- jevfort: [CLAUDE.md](../../jevfort/CLAUDE.md), [docs](../../jevfort/docs/README.md). Effort estimation, taking steps, cache countdown and compaction; standing user decisions are in its `CLAUDE.md`.
-- universal-lint: [CLAUDE.md](../../universal-lint/CLAUDE.md), [docs](../../universal-lint/docs/README.md). Lint hooks. Its rule [lint-file.md](../../universal-lint/.claude/rules/lint-file.md) holds the constraints; the reasons are in the design pages under `universal-lint/docs/design/`, for example who gets a finding and when in [settle-window.md](../../universal-lint/docs/design/settle-window.md).
 - The test kit: [README.md](../vitest/claude-engine/README.md).
 
 ## Skills (repeated workflows)

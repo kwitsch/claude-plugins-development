@@ -2,6 +2,7 @@ name: PR
 
 on:
   pull_request:
+    paths-ignore: ["development/**"]
 
 jobs:
   changed-plugins:
@@ -28,7 +29,7 @@ jobs:
         run: |
           rc=0
           for p in $PLUGINS; do
-            # only package.json, src/ and plugin/ ship or build what ships; tests, docs, scripts, memory need no bump
+            # only package.json, src/ and plugin/ ship or build what ships; tests, scripts, memory need no bump
             if ! bash .github/scripts/ships.sh "$p" "origin/$BASE...HEAD"; then
               echo "::notice::$p: package.json, src/ and plugin/ unchanged, no version bump required"; continue
             fi
@@ -68,13 +69,13 @@ jobs:
       - name: Lint
         run: pnpm exec oxlint
 
-      # development/wiki: every page listed in the index, no dead link, well-formed log headings
+      # development/wiki: every page listed in an index, no dead link, well-formed log headings
       - name: Wiki check
         run: node development/scripts/wiki-check.ts
 
       # changed workspace packages plus everything depending on them (a claude-engine-vitest change re-tests its
       # plugins without a version bump). A change in the root package
-      # (shared config, root tooling, lockfile, development/scripts, .github/) re-checks every package. Plugins get
+      # (shared config, root tooling, lockfile, .github/) re-checks every package. Plugins get
       # the full check, other packages their tests.
       - name: Build and test changed packages and their dependents
         run: |

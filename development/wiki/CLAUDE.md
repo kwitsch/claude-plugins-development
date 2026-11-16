@@ -4,17 +4,17 @@ The repository's knowledge base for agent sessions: what earlier sessions verifi
 
 ## Where knowledge goes
 
-| Kind of knowledge                                                                                                                    | Home                                                                             |
-| ------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------- |
-| A constraint that must be known before editing certain files                                                                         | a rule with `paths:` (`.claude/rules/`, `<plugin>/.claude/rules/`)               |
-| How one plugin works, its decisions and measurements                                                                                 | that plugin's `CLAUDE.md`, rules and `docs/`                                     |
-| A step-by-step workflow that is run again and again                                                                                  | a skill (`.claude/skills/`)                                                      |
-| Anything else worth keeping: behaviour of Claude Code or an external tool, a repo-wide decision and its reasons, a method, a pitfall | a page here                                                                      |
-| Personal preferences of the user, and one-line pointers to pages                                                                     | the machine-local memory (graphmind, auto-memory); never the only copy of a fact |
+| Kind of knowledge                                                                                                                    | Home                                                                                                    |
+| ------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------- |
+| A constraint that must be known before editing certain files                                                                         | a rule with `paths:` (`.claude/rules/`, `<plugin>/.claude/rules/`)                                      |
+| How one plugin works, its decisions and measurements                                                                                 | that plugin's `CLAUDE.md` and rules, its task list, evaluations and design pages in `plugins/<plugin>/` |
+| A step-by-step workflow that is run again and again                                                                                  | a skill (`.claude/skills/`)                                                                             |
+| Anything else worth keeping: behaviour of Claude Code or an external tool, a repo-wide decision and its reasons, a method, a pitfall | a page here                                                                                             |
+| Personal preferences of the user, and one-line pointers to pages                                                                     | the machine-local memory (graphmind, auto-memory); never the only copy of a fact                        |
 
 A fact has one home. A page links to a rule instead of repeating it, and a rule links to a page for background.
 
-Rules and `CLAUDE.md` files load into every agent that touches a matching file; pages here and a plugin's `docs/` load only when someone follows a link. So a rule keeps the constraint in a line or two and links, as `[topic](relative/path.md)`, to the page with the reasons, the evidence, the residuals and the rejected alternatives: this wiki for what spans plugins, `<plugin>/docs/design/` for one plugin (model: `universal-lint/.claude/rules/lint-file.md`). `wiki-check.ts` fails on a dead link in a rule.
+Rules and `CLAUDE.md` files load into every agent that touches a matching file; pages here load only when someone follows a link. So a rule keeps the constraint in a line or two and links, as `[topic](relative/path.md)`, to the page with the reasons, the evidence, the residuals and the rejected alternatives: this wiki for what spans plugins, `plugins/<plugin>/design/` for one plugin (model: `universal-lint/.claude/rules/lint-file.md`). `wiki-check.ts` fails on a dead link in a rule.
 
 ## Layout
 
@@ -24,6 +24,7 @@ Rules and `CLAUDE.md` files load into every agent that touches a matching file; 
 - `decisions/`: a decision that holds across plugins, with its date, the reason and what was rejected.
 - `methods/`: how to find something out or test something (a recipe that is not a skill).
 - `pitfalls/`: what went wrong in a session and how to avoid it.
+- `plugins/<plugin>/`: one plugin's `index.md`, task list (`TASKS.md`, `tasks/`), `evaluations/`, `design/` and `notes/`; fixed layout and formats in `.claude/rules/plugin-docs-tasks.md`. `plugins/index.md` (the root index links only to it) links the `index.md` of every plugin section; each section's `index.md` links all its pages except `tasks/*`, which `TASKS.md` lists. Every plugin has a section. `wiki-check.ts` enforces this, and that `TASKS.md` matches the `tasks/` frontmatter (format: `.claude/rules/plugin-docs-tasks.md`); task files start with frontmatter, so no `# Title` is required there.
 
 ## Page format
 

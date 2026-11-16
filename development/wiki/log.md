@@ -14,13 +14,13 @@ Source: the 217 entries of the graphmind project memory and the 8 auto-memory fi
   - dprint and inline-headroom (31): 12 already documented, 4 added (`dprint/CLAUDE.md`, dprint `mcp-server.md`, inline-headroom `register-hooks.md`), 4 outdated, 11 general.
 - **Not filed:** personal preferences of the user and facts about one machine's environment (they stay in the machine-local memory); notes about the marketplace repository's own files; claims nobody could verify.
 - **Re-verified live in this pass** (2.1.325, headless): the working directory a hook sees in a session started from a symlinked directory. The older note was right (the payload carries the real path), the rule `hook-file-safety.md` was wrong on that point and was corrected.
-- **Corrected while filing:** `universal-lint/docs/design/hook-design.md` said findings appear in transcripts as `hook_blocking_error` attachments; that holds for headless runs only.
+- **Corrected while filing:** `development/wiki/plugins/universal-lint/design/hook-design.md` said findings appear in transcripts as `hook_blocking_error` attachments; that holds for headless runs only.
 - **Found and left open** (outside the scope of an ingest, reported to the user):
   - `jev-api`: `logOutage` passes `$.ui.log` a text that starts with the plugin name, which the engine adds as well; not verified live.
-  - `universal-lint/docs/README.md` says to move a finished task to the "Done" section of `TASKS.md`; `TASKS.md` closes tasks in place. The same file and the `TASKS.md` notes still say "F01-F39".
+  - `development/wiki/plugins/universal-lint/README.md` says to move a finished task to the "Done" section of `TASKS.md`; `TASKS.md` closes tasks in place. The same file and the `TASKS.md` notes still say "F01-F39".
   - `inline-headroom`: README and `policy-dedup-elider.md` say a compaction empties the dedup corpus; the `session.compact` hook that does it is bypassed on 2.1.325.
   - `dprint/tests/mcp-format.test.ts` leaves one temp directory behind; dprint `skill-scripts.md` lists `README.md` under `paths:`, which matches nothing.
-  - `jevfort/docs/TASKS.md` cites a known limit that no longer exists.
+  - `development/wiki/plugins/jevfort/TASKS.md` cites a known limit that no longer exists.
 
 ## [2026-11-15] ingest | Memory files slimmed to constraints: root rules and universal-lint
 
@@ -28,6 +28,39 @@ Source: a measurement of on-demand memory loads in the transcripts of ten days a
 
 - **Moved into the wiki:** the rule `shell-port-pitfalls.md` as `pitfalls/porting-shell-to-node.md`; the protocol detail of `mcp-dual-era.md` as `facts/mcp-protocol-eras.md`; the explanations and evidence of `claude-code-hook-facts.md` into the four `facts/mods-engine-*.md` pages. The rules keep the constraints and link to the pages.
 - **Paths narrowed:** `lint-config.md` (config files only), `src-typescript.md` (`.mts` files and the conversion skill), `hook-file-safety.md` (no tests), `mcp-dual-era.md` (no `hooks.json`). Build-script notes moved from `plugin-src.md` and `hooks-lib-bundle.md` to `development/CLAUDE.md`.
-- **universal-lint:** its 13 hook rule files moved unchanged (frontmatter removed) to `universal-lint/docs/design/`; the new rule `universal-lint/.claude/rules/lint-file.md` holds the constraints per area and names each design page. References in 28 markdown files were repointed.
+- **universal-lint:** its 13 hook rule files moved unchanged (frontmatter removed) to `development/wiki/plugins/universal-lint/design/`; the new rule `universal-lint/.claude/rules/lint-file.md` holds the constraints per area and names each design page. References in 28 markdown files were repointed.
 - **Check:** `wiki-check.ts` now also fails on a dead relative link in any `CLAUDE.md` or rule file.
 - **Left open:** comments in `universal-lint/src/` still name the design pages as `.claude/rules/<name>.md` (a comment-only source change would force a release); the other plugins' rule files are not slimmed yet.
+
+## [2026-11-16] ingest | Plugin docs moved into the wiki
+
+Source: user request. The `docs/` directories of dprint, inline-headroom, jev-api, jevfort and universal-lint (144 files) moved with `git mv` to `plugins/<plugin>/` (`docs/design/` became `design/`).
+
+- **Repointed:** relative links and path references in the moved pages, the plugin `CLAUDE.md` files and rules, the root `CLAUDE.md`, the skills `perf-worklist`, `bughunt`, `live-verify` and `wiki`, `.coderabbit.yaml` and `plugin-docs-tasks.md` (`paths:` now `development/wiki/plugins/**`).
+- **Check:** `wiki-check.ts` requires only each plugin's `README.md` in the index; its other pages are reached from it and need no `# Title` (task files start with frontmatter). Dead links in them still fail.
+- **Decision reversed:** `decisions/repo-tooling.md` rejected a per-plugin folder in the wiki on 2026-11-15; the user asked for it on 2026-11-16.
+
+## [2026-11-16] ingest | Plugin sections: own index.md each, one TASKS.md standard
+
+Source: user request.
+
+- **Index:** every plugin has a section `plugins/<plugin>/index.md` (the former `README.md` of dprint, jev-api, jevfort and universal-lint, now with a generated "Pages" list; new ones for inline-headroom, graphmind-helper and jev-solver). `plugins/index.md` links all of them, the root index links only `plugins/index.md`. `wiki-check.ts` enforces both levels and that every plugin of the repository has a section; the `scaffold-plugin` skill creates the section.
+- **Task lists:** the four `TASKS.md` files were regenerated from the `tasks/` frontmatter into one format (sections Remaining, Done, Closed without code; one entry line with status tag and priority; the task title replaces the former free-text descriptions, which live in the task documents). Header prose, Dependencies and Notes were kept. `wiki-check.ts` compares each `TASKS.md` with the frontmatter. Format: `.claude/rules/plugin-docs-tasks.md`.
+
+## [2026-11-16] ingest | Plugin sections: one layout, enforced
+
+Source: user request after a structure review of `plugins/`.
+
+- **Layout:** `index.md`, `TASKS.md` + `tasks/`, `evaluations/EVALUATION-<date>[-<topic>].md`, `design/`, `notes/` (rule `.claude/rules/plugin-docs-tasks.md`). Moved: all evaluations into `evaluations/` (jevfort `-2`, `-3`, `-F01`, `-F04` became `-worklist`, `-option-removal`, `-f01`, `-f04`; universal-lint `14b` became `-v0.16.1`), `HAIKU-CALIBRATION.md` and the two inline-headroom pages into `notes/` (lower case). Evaluation headings unified to Method, Results, Bug hunt, Live validation. The plugin `index.md` Pages lists were regenerated.
+- **Check:** `wiki-check.ts` rejects other files in a section, requires the four evaluation headings, the task headings Status, Problem and Related, `## Pages` as the first section of an `index.md` and `## How to work a task` for a plugin with a task list.
+
+## [2026-11-16] ingest | One "How to work a task" text; wiki CI workflow
+
+Source: user request.
+
+- **Text:** the five generic steps are one page, `plugins/how-to-work-a-task.md`; every plugin `index.md` with a task list holds only a link under `## How to work a task` (checked by `wiki-check.ts`). Plugin-specific steps of jev-api, jevfort and universal-lint moved to `## Task conventions` in their `index.md`.
+- **CI:** `.github/workflows/wiki.yml` runs the wiki check on PRs that change `development/wiki/**` or the check script (pr.yml ignores `development/**`).
+
+## [2026-11-16] lint | Skills that use the wiki follow the new layout
+
+Checked every skill that reads or writes the wiki. Updated: `perf-worklist` (open tasks = section Remaining, TASKS.md entry format, evaluation sections and name, plugin `index.md` Pages, how-to-work-a-task, wiki-check in jobs and analysis), `live-verify` (evaluation path and sections), `bughunt` (where plugin-specific findings go, docs audit scope), `wiki` (plugin index updates, extended lint description), `scaffold-plugin` (section and template, earlier). No change needed: `convert-plugin-ts`, `split-hooks-lib`, `refactor-plugin`.

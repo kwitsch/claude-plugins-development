@@ -8,7 +8,7 @@ file; it is credited in `plugin/README.md`.
 
 Part rules (load with their files): `.claude/rules/register-hooks.md` (hooks, `$` use, engine pitfalls),
 `.claude/rules/cache-compact.md` (cache countdown, auto-compact, compaction, their known limits),
-`.claude/rules/effort-routing.md` (effort estimate). Measurements and history: `docs/`.
+`.claude/rules/effort-routing.md` (effort estimate). Measurements and history: `development/wiki/plugins/jevfort/`.
 
 ## Differences from upstream
 
@@ -68,7 +68,7 @@ Part rules (load with their files): `.claude/rules/register-hooks.md` (hooks, `$
 clock, or jev-api's `timeout after <n>ms` error when that ends first, as Haiku's 14 s does before the 15 s budget)
 stops all Jev requests for `PAUSE_MS` 30 s, doubling per further timeout up to `MAX_PAUSE_MS` 10 min; the first call
 after the pause is the probe, any success resets it. The pause ends when the clock reads earlier than the last timeout
-(a new session, a test). Cost of a hanging endpoint: `docs/EVALUATION-2026-11-15-live-notes.md`.
+(a new session, a test). Cost of a hanging endpoint: `development/wiki/plugins/jevfort/evaluations/EVALUATION-2026-11-15-live-notes.md`.
 
 ## Layout
 
