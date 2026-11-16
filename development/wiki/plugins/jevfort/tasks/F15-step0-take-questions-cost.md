@@ -8,7 +8,7 @@ area: jevfort/src/hooks/register.mts (onTurnStep, buildCandidates, projectComman
 
 ## Status
 
-Open. Found in the analysis after the option removal ([../EVALUATION-2026-11-14-3.md](../EVALUATION-2026-11-14-3.md)), plugin 0.12.0, from real System One timings of the batch inputs 0.12.0's built hooks produce and the real decision log of the installed 0.11.0 (the take rule is unchanged since `d1cf4ff`, 0.10.1). Approaches 1 and 2 need no decision; approach 3 does.
+Open. Found in the analysis after the option removal ([../EVALUATION-2026-11-14-option-removal.md](../evaluations/EVALUATION-2026-11-14-option-removal.md)), plugin 0.12.0, from real System One timings of the batch inputs 0.12.0's built hooks produce and the real decision log of the installed 0.11.0 (the take rule is unchanged since `d1cf4ff`, 0.10.1). Approaches 1 and 2 need no decision; approach 3 does.
 
 ## Problem
 

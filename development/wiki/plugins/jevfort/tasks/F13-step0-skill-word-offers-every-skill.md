@@ -10,7 +10,7 @@ area: jevfort/src/hooks/register.mts (buildCandidates, offerableSkills, onTurnSt
 
 Done in 0.12.0 (approach 1). `buildCandidates` at step 0 always offers `relevant(request, offerableSkills($))`, at most 8 related skills, whether or not the prompt says "skill". Approach 2 (no skill candidates under `takeOnlyForBypass`) was not done: it needs a decision and loses the `take` calibration rows.
 
-Earlier state: Open. Found in the performance analysis after the worklist ([../EVALUATION-2026-11-14-2.md](../EVALUATION-2026-11-14-2.md)), plugin 0.11.0. The code path is unchanged since the port (`ca6b468`), so the real decision log of the installed 0.10.1 applies.
+Earlier state: Open. Found in the performance analysis after the worklist ([../EVALUATION-2026-11-14-worklist.md](../evaluations/EVALUATION-2026-11-14-worklist.md)), plugin 0.11.0. The code path is unchanged since the port (`ca6b468`), so the real decision log of the installed 0.10.1 applies.
 
 ## Problem
 

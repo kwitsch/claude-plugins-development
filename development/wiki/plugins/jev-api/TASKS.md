@@ -1,8 +1,8 @@
 # jev-api performance tasks
 
-Source: performance analysis of jev-api 0.3.1 on 2026-11-13, numbers in [EVALUATION-2026-11-13.md](EVALUATION-2026-11-13.md). One document per finding in `tasks/`; read it before working on the task. Proven = measured in the harness or shown by the code; estimated = a derived figure (token counts, engine behaviour not run), marked as such in each task.
+Source: performance analysis of jev-api 0.3.1 on 2026-11-13, numbers in [EVALUATION-2026-11-13.md](evaluations/EVALUATION-2026-11-13.md). One document per finding in `tasks/`; read it before working on the task. Proven = measured in the harness or shown by the code; estimated = a derived figure (token counts, engine behaviour not run), marked as such in each task.
 
-Source: performance analysis of jev-api 0.5.0 on 2026-11-15, numbers in [EVALUATION-2026-11-15.md](EVALUATION-2026-11-15.md).
+Source: performance analysis of jev-api 0.5.0 on 2026-11-15, numbers in [EVALUATION-2026-11-15.md](evaluations/EVALUATION-2026-11-15.md).
 
 Entry format and sections: `.claude/rules/plugin-docs-tasks.md`; `wiki-check.ts` checks them against the `tasks/` frontmatter.
 

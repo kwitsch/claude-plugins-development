@@ -10,7 +10,7 @@ area: jevfort/src/hooks/register.mts (buildCandidates, packageRunner, askJev, sk
 
 Done in 0.11.0. Facts that do not change within a turn are read once per turn: the project probes and `cwd` live in the turn's `TurnCache` (`projectCommands`, its probes in parallel, `packageRunner`'s four lock probes too); the three env values (`haikuPath`), the whole tool listing behind `jevMissing` (`toolListing`, used by step 0) and the offerable skills (`offerableSkills`/`skillList`, shared by the classifier and step 0, dropped also by `blockSkill`) are module values dropped with `jevTools` at every main-loop `turn.complete` and at `session.start` (`dropTurnReads`); `turn.step` reads the transcript once (`turnOf(messages)`, `previousReply(messages)`).
 
-Earlier state: Open. Found in the performance analysis of 2026-11-14 ([../EVALUATION-2026-11-14.md](../EVALUATION-2026-11-14.md)), plugin 0.10.1.
+Earlier state: Open. Found in the performance analysis of 2026-11-14 ([../EVALUATION-2026-11-14.md](../evaluations/EVALUATION-2026-11-14.md)), plugin 0.10.1.
 
 ## Problem
 

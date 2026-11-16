@@ -1,6 +1,6 @@
 # jevfort evaluation 2026-11-14, F04 (plugin 0.11.0)
 
-Re-measurement of the mentioned-path probes after F04 ([tasks/F04-unbounded-stat-probes.md](tasks/F04-unbounded-stat-probes.md)): `buildCandidates` stats at most `MAX_STATS` (16) paths per call that the turn has not statted yet, and keeps every stat result in the per-turn state (`turns`, dropped at `turn.complete`). Earlier figures: [EVALUATION-2026-11-14.md](EVALUATION-2026-11-14.md) (0.10.1, `bench2` missing-path rows).
+Re-measurement of the mentioned-path probes after F04 ([tasks/F04-unbounded-stat-probes.md](../tasks/F04-unbounded-stat-probes.md)): `buildCandidates` stats at most `MAX_STATS` (16) paths per call that the turn has not statted yet, and keeps every stat result in the per-turn state (`turns`, dropped at `turn.complete`). Earlier figures: [EVALUATION-2026-11-14.md](EVALUATION-2026-11-14.md) (0.10.1, `bench2` missing-path rows).
 
 **One machine only**: the same WSL2 machine as the analysis (12 vCPUs, ext4 work tree, Node v24). Fake `$`, zero-cost `fs.stat`; the engine's real stat cost is still not measured.
 

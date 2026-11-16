@@ -8,7 +8,7 @@ area: development/wiki/plugins/universal-lint/design/hook-design.md (docs)
 
 ## Status
 
-Done in 0.16.1. Found by [EVALUATION-2026-11-14](../EVALUATION-2026-11-14.md) (docs drift check). Docs only, no code change.
+Done in 0.16.1. Found by [EVALUATION-2026-11-14](../evaluations/EVALUATION-2026-11-14.md) (docs drift check). Docs only, no code change.
 
 ## Problem
 

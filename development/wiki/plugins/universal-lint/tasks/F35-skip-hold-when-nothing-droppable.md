@@ -8,7 +8,7 @@ area: universal-lint/src/hooks/lint-file.ts (settleFindings, gateFinding)
 
 ## Status
 
-Done in 0.16.1 (shipped together with F36). Found by [EVALUATION-2026-11-14](../EVALUATION-2026-11-14.md) "Settle hold" on 0.16.0.
+Done in 0.16.1 (shipped together with F36). Found by [EVALUATION-2026-11-14](../evaluations/EVALUATION-2026-11-14.md) "Settle hold" on 0.16.0.
 
 ## Problem
 

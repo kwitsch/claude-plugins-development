@@ -87,6 +87,34 @@ function taskProblems(dir: string, files: ReadonlyMap<string, string>): string[]
   return out;
 }
 
+/** The files a plugin section may hold, relative to its directory. */
+const LAYOUT = /^(?:index\.md|TASKS\.md|tasks\/F\d+-[a-z0-9-]+\.md|evaluations\/EVALUATION-\d{4}-\d{2}-\d{2}(?:-[a-z0-9.]+)*\.md|design\/[a-z0-9-]+\.md|notes\/[a-z0-9-]+\.md)$/;
+/** Required `## ` headings of an evaluation and of a task file. */
+const EVALUATION_HEADINGS = ["Method", "Results", "Bug hunt", "Live validation"];
+const TASK_HEADINGS = ["Status", "Problem", "Related"];
+
+/**
+ * What is wrong with the file layout and the required headings of one plugin section.
+ *
+ * @param dir - Section directory, `plugins/<name>`.
+ * @param files - All wiki files with their text.
+ * @returns One line per problem.
+ */
+function layoutProblems(dir: string, files: ReadonlyMap<string, string>): string[] {
+  const out: string[] = [];
+  for (const [rel, text] of files) {
+    if (!rel.startsWith(`${dir}/`)) continue;
+    const sub = rel.slice(dir.length + 1);
+    const need = sub.startsWith("evaluations/") ? EVALUATION_HEADINGS : sub.startsWith("tasks/") ? TASK_HEADINGS : [];
+    if (!LAYOUT.test(sub)) out.push(`${rel}: not an allowed file of a plugin section (index.md, TASKS.md, tasks/F<nn>-<slug>.md, evaluations/EVALUATION-<date>[-<topic>].md, design/, notes/)`);
+    for (const h of need) if (!new RegExp(`^## ${h}\\b`, "m").test(text)) out.push(`${rel}: missing the section "## ${h}"`);
+  }
+  const own = files.get(`${dir}/index.md`) ?? "";
+  if (own !== "" && /^## .*$/m.exec(own)?.[0] !== "## Pages") out.push(`${dir}/index.md: the first section must be "## Pages"`);
+  if (files.has(`${dir}/TASKS.md`) && !/^## How to work a task$/m.test(own)) out.push(`${dir}/index.md: a plugin with a task list needs "## How to work a task"`);
+  return out;
+}
+
 /**
  * Everything that is wrong with a wiki.
  *
@@ -113,7 +141,7 @@ export function problems(files: ReadonlyMap<string, string>, exists: (rel: strin
       for (const rel of files.keys()) if (rel.startsWith(`${dir}/`) && rel !== `${dir}/index.md` && !rel.startsWith(`${dir}/tasks/`) && !mine.has(rel)) out.push(`${rel}: not listed in ${dir}/index.md`);
     }
     if (!pluginsIndex.has(`${dir}/index.md`)) out.push(`${dir}/index.md: not listed in plugins/index.md`);
-    out.push(...taskProblems(dir, files));
+    out.push(...taskProblems(dir, files), ...layoutProblems(dir, files));
   }
   for (const [rel, text] of files) {
     if (!PLUGIN_PAGE.test(rel) && !SPECIAL.has(rel)) {
@@ -132,36 +160,46 @@ export function problems(files: ReadonlyMap<string, string>, exists: (rel: strin
 }
 
 // self-check: a script that guards the wiki must not pass a broken one
-const task = (id: string, status: string, priority = "low") => `---\nid: ${id}\ntitle: t\nstatus: ${status}\npriority: ${priority}\narea: a\n---\n`;
+const task = (id: string, status: string, priority = "low") => `---\nid: ${id}\ntitle: t\nstatus: ${status}\npriority: ${priority}\narea: a\n---\n## Status\n## Problem\n## Related\n`;
 const broken = new Map([
   ["index.md", "[a](facts/a.md) [gone](facts/gone.md) [out](../x.md) [pl](plugins/index.md) [web](https://example.invalid/y.md) `[code](no.md)`"],
   ["log.md", "## [2026-11-15] ingest | first\n## 2026-11-15 lint\n"],
   ["facts/a.md", "# A\n[b](b.md#part)\n"],
   ["facts/b.md", "no title\n"],
   ["plugins/index.md", "# P\n[p](p/index.md)\n"],
-  ["plugins/p/index.md", "# P\n[TASKS](TASKS.md)\n"],
-  ["plugins/p/TASKS.md", "# p tasks\n\n## Remaining\n\n- [ ] [F01](tasks/F01.md) `open` low: t\n- [x] [F02](tasks/F02.md) `open` low: t\n\n## Done\n\n- [x] [F03](tasks/F03.md) `done` high: t\n- [x] bad line\n"],
-  ["plugins/p/tasks/F01.md", task("F01", "open")],
-  ["plugins/p/tasks/F02.md", task("F02", "open")],
-  ["plugins/p/tasks/F03.md", task("F03", "done")],
-  ["plugins/p/tasks/F04.md", task("F04", "done")],
+  ["plugins/p/index.md", "# P\n[TASKS](TASKS.md)\n## Pages\n"],
+  ["plugins/p/evaluations/EVALUATION-2026-11-14.md", "# E\n## Method\n"],
+  ["plugins/p/evaluations/EVAL-x.md", "# E\n"],
+  ["plugins/p/TASKS.md", "# p tasks\n\n## Remaining\n\n- [ ] [F01](tasks/F01-a.md) `open` low: t\n- [x] [F02](tasks/F02-a.md) `open` low: t\n\n## Done\n\n- [x] [F03](tasks/F03-a.md) `done` high: t\n- [x] bad line\n"],
+  ["plugins/p/tasks/F01-a.md", task("F01", "open")],
+  ["plugins/p/tasks/F02-a.md", task("F02", "open")],
+  ["plugins/p/tasks/F03-a.md", task("F03", "done")],
+  ["plugins/p/tasks/F04-a.md", task("F04", "done")],
   ["plugins/p/extra.md", "# Extra\n"],
   ["plugins/q/a.md", "x\n"],
 ]);
-assert.deepEqual(problems(broken, (rel) => rel === "../x.md", ["p", "r"]), [
-  "plugins/r/index.md is missing (every plugin has a wiki section)",
-  "plugins/p/extra.md: not listed in plugins/p/index.md",
-  "plugins/p/TASKS.md: F02 has the wrong checkbox for status open",
-  "plugins/p/TASKS.md: F03 says priority high, the task says low",
-  "plugins/p/TASKS.md: entry \"- [x] bad line\" does not match \"- [ ] [F01](tasks/<file>.md) `status` priority: title\"",
-  "plugins/p/TASKS.md: F04.md is not listed",
-  "plugins/q/index.md is missing",
-  "plugins/q/index.md: not listed in plugins/index.md",
-  "index.md: link to facts/gone.md leads nowhere",
-  "facts/b.md: not listed in index.md",
-  "facts/b.md: the first line is not a \"# Title\"",
-  "log.md: heading \"## 2026-11-15 lint\" is not \"## [YYYY-MM-DD] ingest|lint | <title>\"",
-]);
+const got = problems(broken, (rel) => rel === "../x.md", ["p", "r"]);
+for (
+  const want of [
+    "plugins/r/index.md is missing (every plugin has a wiki section)",
+    "plugins/p/extra.md: not listed in plugins/p/index.md",
+    "plugins/p/extra.md: not an allowed file",
+    "plugins/p/evaluations/EVAL-x.md: not an allowed file",
+    "plugins/p/evaluations/EVALUATION-2026-11-14.md: missing the section \"## Results\"",
+    "plugins/p/index.md: a plugin with a task list needs \"## How to work a task\"",
+    "plugins/p/TASKS.md: F02 has the wrong checkbox for status open",
+    "plugins/p/TASKS.md: F03 says priority high, the task says low",
+    "plugins/p/TASKS.md: entry \"- [x] bad line\" does not match",
+    "plugins/p/TASKS.md: F04-a.md is not listed",
+    "plugins/q/index.md is missing",
+    "plugins/q/index.md: not listed in plugins/index.md",
+    "index.md: link to facts/gone.md leads nowhere",
+    "facts/b.md: not listed in index.md",
+    "facts/b.md: the first line is not a \"# Title\"",
+    "log.md: heading \"## 2026-11-15 lint\" is not",
+  ]
+) assert.ok(got.some((g) => g.startsWith(want)), `self-check: no problem starting with "${want}" in\n${got.join("\n")}`);
+assert.equal(got.some((g) => g.startsWith("plugins/p/tasks/")), false, "self-check: a valid task file was flagged");
 
 const root = path.resolve(import.meta.dirname, "../wiki");
 /**

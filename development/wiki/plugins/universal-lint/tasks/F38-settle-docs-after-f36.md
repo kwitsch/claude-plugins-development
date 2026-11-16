@@ -10,7 +10,7 @@ area: universal-lint/plugin/README.md, development/wiki/plugins/universal-lint/d
 
 Closed in 0.17.0 without its own change: F40 removed the parse-error rule this task wanted documented (`gateFinding` has no `"drop"` mode any more) and rewrote the README paragraph and `settle-window.md` (first heading now `#`).
 
-Earlier state: Open. Found by [EVALUATION-2026-11-14b](../EVALUATION-2026-11-14b.md) (docs drift check on 0.16.1). Docs only, no code change.
+Earlier state: Open. Found by [EVALUATION-2026-11-14b](../evaluations/EVALUATION-2026-11-14-v0.16.1.md) (docs drift check on 0.16.1). Docs only, no code change.
 
 ## Problem
 

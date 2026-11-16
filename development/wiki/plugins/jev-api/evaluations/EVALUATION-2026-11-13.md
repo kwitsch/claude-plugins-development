@@ -1,10 +1,10 @@
 # jev-api evaluation 2026-11-13 (plugin 0.3.1)
 
-First performance analysis of the built `plugin/hooks/register.mjs` (0.3.1, `pnpm --filter jev-api build` reproduced the committed output byte for byte). Purpose: quantify the cost of the `tool.call` hook for tools it does not own, of registration, of the request path and of the Haiku fallback, and record failure modes found on the way. Findings F01-F15 in [TASKS.md](TASKS.md).
+First performance analysis of the built `plugin/hooks/register.mjs` (0.3.1, `pnpm --filter jev-api build` reproduced the committed output byte for byte). Purpose: quantify the cost of the `tool.call` hook for tools it does not own, of registration, of the request path and of the Haiku fallback, and record failure modes found on the way. Findings F01-F15 in [TASKS.md](../TASKS.md).
 
 **One machine only**: WSL2 (kernel 6.18.33.2-microsoft-standard-WSL2), 12 vCPUs, 9.7 GB RAM, ext4 work tree, Node v24.22.2, Claude Code 2.1.323 installed but not used for measurements. The real System One endpoint came from `JEV_URL` in the shell (a private host on the tailnet, model `jev-latest`); nothing about it is in the repo. Treat differences below ~20% as noise.
 
-## How it was measured
+## Method
 
 - Scratch scripts in the session scratchpad (`jevperf/stub.mjs`, `harness.mjs`, `mem2.mjs`, `realscale.mjs`; not committed). Rebuild from this description if needed.
 - **Stub**: a `node:http` server on 127.0.0.1 that takes the System One body `{ model, state, questions: { <id>: { type, instructions, criteria } } }` and answers `{ model, answers: { <id>: answer }, usage: {} }` in the shapes of `tests/register.test.mts` (noul probability; choice with every option's probability; score with legend and level probabilities), with a configurable delay; it counts requests and requests still open.
@@ -114,7 +114,7 @@ Not run in Claude Code: no `claude -p --plugin-dir` session, so the engine's own
 
 ## Re-run on 0.3.2 / jevfort 0.9.1
 
-Same day, same machine, Node v24.22.2, against the built `jev-api/plugin/hooks/register.mjs` (0.3.2) and `jevfort/plugin/hooks/*.mjs` (0.9.1) of branch `feat/jev-api-hardening` (worktree clean, no rebuild). Purpose: check F01-F07 against the built output with numbers and look for defects the fixes introduced. New findings F16-F20 in [TASKS.md](TASKS.md). The numbers above stay as measured on 0.3.1.
+Same day, same machine, Node v24.22.2, against the built `jev-api/plugin/hooks/register.mjs` (0.3.2) and `jevfort/plugin/hooks/*.mjs` (0.9.1) of branch `feat/jev-api-hardening` (worktree clean, no rebuild). Purpose: check F01-F07 against the built output with numbers and look for defects the fixes introduced. New findings F16-F20 in [TASKS.md](../TASKS.md). The numbers above stay as measured on 0.3.1.
 
 ### Method (re-run)
 

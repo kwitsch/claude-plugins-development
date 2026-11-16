@@ -1,6 +1,6 @@
 # jevfort performance tasks
 
-Source: performance analysis of jevfort 0.10.1 (with jev-api 0.3.2) on 2026-11-14, numbers in [EVALUATION-2026-11-14.md](EVALUATION-2026-11-14.md). One document per finding in `tasks/`; read it before working on the task. Re-analysis after the worklist (0.11.0, F13 and F14): [EVALUATION-2026-11-14-2.md](EVALUATION-2026-11-14-2.md). Re-analysis after the option removal (0.12.0, F15 and F16): [EVALUATION-2026-11-14-3.md](EVALUATION-2026-11-14-3.md). Proven = measured in the harness or against the real endpoint, or shown by the code; estimated = a derived figure (engine costs, 9P), marked as such in each task.
+Source: performance analysis of jevfort 0.10.1 (with jev-api 0.3.2) on 2026-11-14, numbers in [EVALUATION-2026-11-14.md](evaluations/EVALUATION-2026-11-14.md). One document per finding in `tasks/`; read it before working on the task. Re-analysis after the worklist (0.11.0, F13 and F14): [EVALUATION-2026-11-14-worklist.md](evaluations/EVALUATION-2026-11-14-worklist.md). Re-analysis after the option removal (0.12.0, F15 and F16): [EVALUATION-2026-11-14-option-removal.md](evaluations/EVALUATION-2026-11-14-option-removal.md). Proven = measured in the harness or against the real endpoint, or shown by the code; estimated = a derived figure (engine costs, 9P), marked as such in each task.
 
 Entry format and sections: `.claude/rules/plugin-docs-tasks.md`; `wiki-check.ts` checks them against the `tasks/` frontmatter.
 

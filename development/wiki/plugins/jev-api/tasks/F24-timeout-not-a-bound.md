@@ -8,7 +8,7 @@ area: jev-api/src/hooks (transport.mts ensureServer, syncConfig, sendOutcome; re
 
 ## Status
 
-Partial. Found in the performance analysis of 2026-11-15 ([EVALUATION-2026-11-15.md](../EVALUATION-2026-11-15.md), "One-off waits before a request"). Step 3 shipped: b4cd930 (fallback) and ea54af3 (server request) give the request only the time left; none left answers `timeout after <ms>ms` without sending. Open: the unbounded waits themselves (steps 1, 2, 4).
+Partial. Found in the performance analysis of 2026-11-15 ([EVALUATION-2026-11-15.md](../evaluations/EVALUATION-2026-11-15.md), "One-off waits before a request"). Step 3 shipped: b4cd930 (fallback) and ea54af3 (server request) give the request only the time left; none left answers `timeout after <ms>ms` without sending. Open: the unbounded waits themselves (steps 1, 2, 4).
 
 ## Problem
 

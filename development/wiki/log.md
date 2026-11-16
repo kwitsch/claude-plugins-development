@@ -46,3 +46,10 @@ Source: user request.
 
 - **Index:** every plugin has a section `plugins/<plugin>/index.md` (the former `README.md` of dprint, jev-api, jevfort and universal-lint, now with a generated "Pages" list; new ones for inline-headroom, graphmind-helper and jev-solver). `plugins/index.md` links all of them, the root index links only `plugins/index.md`. `wiki-check.ts` enforces both levels and that every plugin of the repository has a section; the `scaffold-plugin` skill creates the section.
 - **Task lists:** the four `TASKS.md` files were regenerated from the `tasks/` frontmatter into one format (sections Remaining, Done, Closed without code; one entry line with status tag and priority; the task title replaces the former free-text descriptions, which live in the task documents). Header prose, Dependencies and Notes were kept. `wiki-check.ts` compares each `TASKS.md` with the frontmatter. Format: `.claude/rules/plugin-docs-tasks.md`.
+
+## [2026-11-16] ingest | Plugin sections: one layout, enforced
+
+Source: user request after a structure review of `plugins/`.
+
+- **Layout:** `index.md`, `TASKS.md` + `tasks/`, `evaluations/EVALUATION-<date>[-<topic>].md`, `design/`, `notes/` (rule `.claude/rules/plugin-docs-tasks.md`). Moved: all evaluations into `evaluations/` (jevfort `-2`, `-3`, `-F01`, `-F04` became `-worklist`, `-option-removal`, `-f01`, `-f04`; universal-lint `14b` became `-v0.16.1`), `HAIKU-CALIBRATION.md` and the two inline-headroom pages into `notes/` (lower case). Evaluation headings unified to Method, Results, Bug hunt, Live validation. The plugin `index.md` Pages lists were regenerated.
+- **Check:** `wiki-check.ts` rejects other files in a section, requires the four evaluation headings, the task headings Status, Problem and Related, `## Pages` as the first section of an `index.md` and `## How to work a task` for a plugin with a task list.

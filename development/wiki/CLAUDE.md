@@ -24,7 +24,7 @@ Rules and `CLAUDE.md` files load into every agent that touches a matching file; 
 - `decisions/`: a decision that holds across plugins, with its date, the reason and what was rejected.
 - `methods/`: how to find something out or test something (a recipe that is not a skill).
 - `pitfalls/`: what went wrong in a session and how to avoid it.
-- `plugins/<plugin>/`: one plugin's task list (`TASKS.md`, `tasks/`), dated evaluations and design pages (`design/`), format in `.claude/rules/plugin-docs-tasks.md`. `plugins/index.md` (the root index links only to it) links the `index.md` of every plugin section; each section's `index.md` links all its pages except `tasks/*`, which `TASKS.md` lists. Every plugin has a section. `wiki-check.ts` enforces this, and that `TASKS.md` matches the `tasks/` frontmatter (format: `.claude/rules/plugin-docs-tasks.md`); task files start with frontmatter, so no `# Title` is required there.
+- `plugins/<plugin>/`: one plugin's `index.md`, task list (`TASKS.md`, `tasks/`), `evaluations/`, `design/` and `notes/`; fixed layout and formats in `.claude/rules/plugin-docs-tasks.md`. `plugins/index.md` (the root index links only to it) links the `index.md` of every plugin section; each section's `index.md` links all its pages except `tasks/*`, which `TASKS.md` lists. Every plugin has a section. `wiki-check.ts` enforces this, and that `TASKS.md` matches the `tasks/` frontmatter (format: `.claude/rules/plugin-docs-tasks.md`); task files start with frontmatter, so no `# Title` is required there.
 
 ## Page format
 

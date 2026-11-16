@@ -1,4 +1,4 @@
-# jevfort knowledge (for Claude sessions)
+# jevfort knowledge
 
 Working documents for agent sessions. Not shipped (`plugin/` is the installable part), not user documentation. Language: English. Format rules: `.claude/rules/plugin-docs-tasks.md`.
 
@@ -6,12 +6,12 @@ Working documents for agent sessions. Not shipped (`plugin/` is the installable 
 
 - [CLAUDE.md](../../../../jevfort/CLAUDE.md): the plugin's overview and rule list (loads with the plugin's files).
 - [TASKS.md](TASKS.md): task list; `tasks/` holds one document per task. Start here for open work.
-- [EVALUATION-2026-11-14-2.md](EVALUATION-2026-11-14-2.md): jevfort evaluation 2026-11-14 (2), after the worklist (plugin 0.11.0, jev-api 0.3.2)
-- [EVALUATION-2026-11-14-3.md](EVALUATION-2026-11-14-3.md): jevfort evaluation 2026-11-14 (3), after the option removal (plugin 0.12.0, jev-api 0.3.2)
-- [EVALUATION-2026-11-14-F01.md](EVALUATION-2026-11-14-F01.md): jevfort evaluation 2026-11-14, F01 (plugin 0.11.0, jev-api 0.3.2)
-- [EVALUATION-2026-11-14-F04.md](EVALUATION-2026-11-14-F04.md): jevfort evaluation 2026-11-14, F04 (plugin 0.11.0)
-- [EVALUATION-2026-11-14.md](EVALUATION-2026-11-14.md): jevfort evaluation 2026-11-14 (plugin 0.10.1, jev-api 0.3.2)
-- [EVALUATION-2026-11-15-live-notes.md](EVALUATION-2026-11-15-live-notes.md): Evaluation 2026-11-15: live notes moved out of CLAUDE.md
+- [evaluations/EVALUATION-2026-11-14-f01.md](evaluations/EVALUATION-2026-11-14-f01.md): evaluation: jevfort evaluation 2026-11-14, F01 (plugin 0.11.0, jev-api 0.3.2)
+- [evaluations/EVALUATION-2026-11-14-f04.md](evaluations/EVALUATION-2026-11-14-f04.md): evaluation: jevfort evaluation 2026-11-14, F04 (plugin 0.11.0)
+- [evaluations/EVALUATION-2026-11-14-option-removal.md](evaluations/EVALUATION-2026-11-14-option-removal.md): evaluation: jevfort evaluation 2026-11-14 (3), after the option removal (plugin 0.12.0, jev-api 0.3.2)
+- [evaluations/EVALUATION-2026-11-14-worklist.md](evaluations/EVALUATION-2026-11-14-worklist.md): evaluation: jevfort evaluation 2026-11-14 (2), after the worklist (plugin 0.11.0, jev-api 0.3.2)
+- [evaluations/EVALUATION-2026-11-14.md](evaluations/EVALUATION-2026-11-14.md): evaluation: jevfort evaluation 2026-11-14 (plugin 0.10.1, jev-api 0.3.2)
+- [evaluations/EVALUATION-2026-11-15-live-notes.md](evaluations/EVALUATION-2026-11-15-live-notes.md): evaluation: Evaluation 2026-11-15: live notes moved out of CLAUDE.md
 
 ## How to work a task
 

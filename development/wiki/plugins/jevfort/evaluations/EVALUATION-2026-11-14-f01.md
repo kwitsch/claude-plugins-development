@@ -1,6 +1,6 @@
 # jevfort evaluation 2026-11-14, F01 (plugin 0.11.0, jev-api 0.3.2)
 
-Re-measurement of the prompt classifier after F01 ([tasks/F01-classifier-skill-list-latency.md](tasks/F01-classifier-skill-list-latency.md)): `skillOptions` now offers only `relevant(request, dedupeSkills(...))` (at most 8) plus `none` and leaves the skill question out when no listed skill is related. Earlier figures: [EVALUATION-2026-11-14.md](EVALUATION-2026-11-14.md) (0.10.1).
+Re-measurement of the prompt classifier after F01 ([tasks/F01-classifier-skill-list-latency.md](../tasks/F01-classifier-skill-list-latency.md)): `skillOptions` now offers only `relevant(request, dedupeSkills(...))` (at most 8) plus `none` and leaves the skill question out when no listed skill is related. Earlier figures: [EVALUATION-2026-11-14.md](EVALUATION-2026-11-14.md) (0.10.1).
 
 **One machine only**: the same WSL2 machine as the analysis (12 vCPUs, ext4 work tree, Node v24.22.2). Real System One endpoint from `JEV_URL` and `TYPESAFE_API_KEY` in the shell.
 

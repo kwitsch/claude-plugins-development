@@ -1,6 +1,6 @@
 # dprint performance tasks
 
-Source: performance analysis of the dprint MCP server (findings F01-F28) and the re-evaluation of plugin 0.13.0, re-run on 0.13.2, in [EVALUATION-2026-11-13.md](EVALUATION-2026-11-13.md) (current numbers, comparison with the task documents and between the two versions, bug hunt, finding F29). One detail document per task in `tasks/`; read it before working on the task. Release carrying the finished work: dprint 0.8.0 (PR #19); F09, F10, F18, F25, F27 and part of F28: dprint 0.12.1; F04, F12: dprint 0.13.0.
+Source: performance analysis of the dprint MCP server (findings F01-F28) and the re-evaluation of plugin 0.13.0, re-run on 0.13.2, in [EVALUATION-2026-11-13.md](evaluations/EVALUATION-2026-11-13.md) (current numbers, comparison with the task documents and between the two versions, bug hunt, finding F29). One detail document per task in `tasks/`; read it before working on the task. Release carrying the finished work: dprint 0.8.0 (PR #19); F09, F10, F18, F25, F27 and part of F28: dprint 0.12.1; F04, F12: dprint 0.13.0.
 
 Entry format and sections: `.claude/rules/plugin-docs-tasks.md`; `wiki-check.ts` checks them against the `tasks/` frontmatter.
 

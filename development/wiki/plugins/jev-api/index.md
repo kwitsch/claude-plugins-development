@@ -1,4 +1,4 @@
-# jev-api knowledge (for Claude sessions)
+# jev-api knowledge
 
 Working documents for agent sessions. Not shipped (`plugin/` is the installable part), not user documentation. Language: English. Format rules: `.claude/rules/plugin-docs-tasks.md`.
 
@@ -6,9 +6,9 @@ Working documents for agent sessions. Not shipped (`plugin/` is the installable 
 
 - [CLAUDE.md](../../../../jev-api/CLAUDE.md): the plugin's overview and rule list (loads with the plugin's files).
 - [TASKS.md](TASKS.md): task list; `tasks/` holds one document per task. Start here for open work.
-- [EVALUATION-2026-11-13.md](EVALUATION-2026-11-13.md): jev-api evaluation 2026-11-13 (plugin 0.3.1)
-- [EVALUATION-2026-11-15.md](EVALUATION-2026-11-15.md): jev-api evaluation 2026-11-15 (plugin 0.5.0)
-- [HAIKU-CALIBRATION.md](HAIKU-CALIBRATION.md): Haiku fallback: history and calibration
+- [evaluations/EVALUATION-2026-11-13.md](evaluations/EVALUATION-2026-11-13.md): evaluation: jev-api evaluation 2026-11-13 (plugin 0.3.1)
+- [evaluations/EVALUATION-2026-11-15.md](evaluations/EVALUATION-2026-11-15.md): evaluation: jev-api evaluation 2026-11-15 (plugin 0.5.0)
+- [notes/haiku-calibration.md](notes/haiku-calibration.md): note: Haiku fallback: history and calibration
 
 ## How to work a task
 

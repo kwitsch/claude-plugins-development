@@ -1,10 +1,10 @@
 # jev-api evaluation 2026-11-15 (plugin 0.5.0)
 
-Fresh performance analysis of the built output of jev-api 0.5.0 (branch `refactoring/jev-api-261115` at `2b00669`; `pnpm --filter jev-api build` reproduced the committed `plugin/` byte for byte). Purpose: re-measure after the large changes since the 2026-11-13 runs (helper modules bundled into `lib.mjs`, oversized-state handling F21 in 0.4.0, the HTTP transport through the bundled MCP server F22 in 0.5.0) and compare with the earlier figures. New findings F23 and F24 in [TASKS.md](TASKS.md). [EVALUATION-2026-11-13.md](EVALUATION-2026-11-13.md) keeps its numbers.
+Fresh performance analysis of the built output of jev-api 0.5.0 (branch `refactoring/jev-api-261115` at `2b00669`; `pnpm --filter jev-api build` reproduced the committed `plugin/` byte for byte). Purpose: re-measure after the large changes since the 2026-11-13 runs (helper modules bundled into `lib.mjs`, oversized-state handling F21 in 0.4.0, the HTTP transport through the bundled MCP server F22 in 0.5.0) and compare with the earlier figures. New findings F23 and F24 in [TASKS.md](../TASKS.md). [EVALUATION-2026-11-13.md](EVALUATION-2026-11-13.md) keeps its numbers.
 
 **One machine only**: WSL2 (kernel 6.18.33.2-microsoft-standard-WSL2), 12 vCPUs, 9.7 GB RAM, ext4 work tree, Node v24.22.2, Claude Code 2.1.325 installed but used only for `claude plugin validate`. The real System One endpoint came from `JEV_URL` in the shell (a private host, not in the repo); the endpoint server was changed before this run (see F22, re-measured 2026-11-15), so its latencies are not comparable with 2026-11-13 one to one. Treat differences below ~20% as noise.
 
-## How it was measured
+## Method
 
 - Scratch scripts in the session scratchpad (`jevperf/stub.mjs`, `lib.mjs`, `load.mjs`, `hooks.mjs`, `path.mjs`, `cpu.mjs`, `tmo.mjs`, `memserver.mjs` with the preload `gcprobe.mjs`, `real.mjs`, `realscale.mjs`; not committed). Rebuild from this description if needed.
 - **Stub**: a `node:http` System One stand-in on 127.0.0.1, this time in its **own process** (answers in the shapes of the tests, configurable delay, counts requests, open requests, connections the client closed before the answer, and the most requests open at once). Because of the extra process, absolute loopback times are higher than on 2026-11-13 (bare fetch 1.5 ms against 0.3 ms); compare only within one table.

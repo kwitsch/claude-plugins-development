@@ -12,7 +12,7 @@ paths:
 every hook and every `$` use and imports the pure modules `./jev.js`, `./policy.js`, `./candidates.js`,
 `./context.js`, `./cache.js`, `./agents.js`, `./compact.js`, `./summarize.js` (bundled into `plugin/hooks/lib.mjs`).
 Tested by `tests/register.test.ts`. Evidence for
-the shapes below: `development/wiki/plugins/inline-headroom/claude-code-verification.md`.
+the shapes below: `development/wiki/plugins/inline-headroom/notes/claude-code-verification.md`.
 
 ## Engine pitfalls (change how the code must be written)
 

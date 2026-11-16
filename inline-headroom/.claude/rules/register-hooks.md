@@ -9,7 +9,7 @@ paths:
 
 `plugin/hooks/hooks.json` (hand-written) is exactly `{"modules": ["./register.mjs"]}`. `src/hooks/register.mts`
 imports `./policy.mjs`. Tested by `tests/register.test.mts`. Evidence for the shapes below:
-`development/wiki/plugins/inline-headroom/claude-code-verification.md`.
+`development/wiki/plugins/inline-headroom/notes/claude-code-verification.md`.
 
 ## Engine pitfalls (change how the code must be written)
 

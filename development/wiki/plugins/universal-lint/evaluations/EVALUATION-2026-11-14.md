@@ -1,10 +1,10 @@
 # universal-lint evaluation 2026-11-14 (plugin 0.16.0)
 
-First dated evaluation of universal-lint, run after the settle window (F34, 0.16.0) on branch `feat/lint-settle-window` (HEAD `cdc9421`). Purpose: check that the per-event cost of the F01-F33 work holds, measure what the settle window costs (journal, extra digests, the hold itself, bursts), compare with the F01 baseline (0.15.29) and with 0.15.30 on the same day, and record what is left. New findings F35-F37 in [TASKS.md](TASKS.md).
+First dated evaluation of universal-lint, run after the settle window (F34, 0.16.0) on branch `feat/lint-settle-window` (HEAD `cdc9421`). Purpose: check that the per-event cost of the F01-F33 work holds, measure what the settle window costs (journal, extra digests, the hold itself, bursts), compare with the F01 baseline (0.15.29) and with 0.15.30 on the same day, and record what is left. New findings F35-F37 in [TASKS.md](../TASKS.md).
 
 **One machine only**: WSL2 (kernel 6.18.33.2-microsoft-standard-WSL2), 12 cores, 9.5 GB RAM, ext4 work tree, Node v24.22.2, tsc 7.0.2 (native, on PATH), oxlint from the root `node_modules/.bin` (with `tsgolint`), Claude Code 2.1.325 installed but not used for measurements. None of shellcheck/ruff/yamllint/markdownlint-cli2/eslint/oxlint/stylelint on PATH (as in the F01 baseline), so the `.sh`/`.py`/`.yml` rows time the missing-tool path and the settle bench uses a stub shellcheck. PATH 62 dirs, 44 on `/mnt/c`. Load average 0.63 -> 2.30 during the harness runs, up to 5.4 during the burst bench. Treat differences below ~15% as noise. Re-measure before relying on a number.
 
-## How it was measured
+## Method
 
 - **Build**: `pnpm --filter universal-lint build` reproduced the committed `plugin/` byte for byte (`git status --short` empty afterwards).
 - **Harness**: `node universal-lint/scripts/perf.mts 10` (16 cases, real PATH and PATH minus `/mnt/`, one warm-up round plus 10 timed rounds, every run checked against its exit status and observable). The harness prints median (min-max), not p90. A/B: the 0.15.30 merge base (`7ad8ac8`) was cloned into the session scratchpad (root `node_modules` symlinked from this worktree, built `plugin/` as committed) and its own `perf.mts` was run alternately with this checkout's: 0.15.30, 0.16.0, 0.15.30, 0.16.0. The two harnesses differ only in `UNIVERSAL_LINT_SETTLE_MS=0`, which changes nothing here (no harness case has a finding).

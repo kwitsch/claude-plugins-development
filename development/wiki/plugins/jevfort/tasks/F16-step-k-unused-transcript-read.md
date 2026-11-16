@@ -8,7 +8,7 @@ area: jevfort/src/hooks/register.mts (onTurnStep)
 
 ## Status
 
-Open. Found in the analysis after the option removal ([../EVALUATION-2026-11-14-3.md](../EVALUATION-2026-11-14-3.md)), plugin 0.12.0. Before 0.12.0 the step measurement asked Jev at every step k > 0 and needed the transcript; its removal left the read in place.
+Open. Found in the analysis after the option removal ([../EVALUATION-2026-11-14-option-removal.md](../evaluations/EVALUATION-2026-11-14-option-removal.md)), plugin 0.12.0. Before 0.12.0 the step measurement asked Jev at every step k > 0 and needed the transcript; its removal left the read in place.
 
 ## Problem
 

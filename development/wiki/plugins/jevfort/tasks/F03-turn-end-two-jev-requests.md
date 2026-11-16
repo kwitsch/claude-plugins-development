@@ -8,7 +8,7 @@ area: jevfort/src/hooks/register.mts (onTurnComplete, checkDone, contextCompact,
 
 ## Status
 
-Done in 0.11.0. Found in the performance analysis of 2026-11-14 ([../EVALUATION-2026-11-14.md](../EVALUATION-2026-11-14.md)), plugin 0.10.1 (the task-end compaction came with 0.10.0).
+Done in 0.11.0. Found in the performance analysis of 2026-11-14 ([../EVALUATION-2026-11-14.md](../evaluations/EVALUATION-2026-11-14.md)), plugin 0.10.1 (the task-end compaction came with 0.10.0).
 
 ## Problem
 

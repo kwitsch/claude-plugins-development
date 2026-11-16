@@ -8,7 +8,7 @@ area: jev-api/plugin/.mcp.json (server start arguments), jev-api/src/mcp/server.
 
 ## Status
 
-Open. Found in the performance analysis of 2026-11-15 ([EVALUATION-2026-11-15.md](../EVALUATION-2026-11-15.md), "Timers, listeners, memory"). Nothing implemented.
+Open. Found in the performance analysis of 2026-11-15 ([EVALUATION-2026-11-15.md](../evaluations/EVALUATION-2026-11-15.md), "Timers, listeners, memory"). Nothing implemented.
 
 ## Problem
 

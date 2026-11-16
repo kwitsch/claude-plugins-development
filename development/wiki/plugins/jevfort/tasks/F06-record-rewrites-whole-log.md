@@ -10,7 +10,7 @@ area: jevfort/src/hooks/register.mts (record, readLog, stats, storeQueue, onProm
 
 Done in 0.11.0 (approach 1). `record()` only buffers the entry (`pending` in register.mts); `flushLog` writes the log and the counters with one `store.get` and one `store.set` each, in-frame from `turn.complete` (both return paths), `session.end` and the `/jev` command (before report, export and the counters are read; `clear` drops the pending entries). A 6-step turn now makes 2 `store.set` (was 20) and none before the first model request (was 3 records, 6 sets). A store failure drops the flushed batch, as a failing `record()` dropped its entry before. Trade-off: decisions of a session whose process dies without `turn.complete`/`session.end` (and those recorded after the last one) are lost; the in-memory buffer has no cap between flushes (`shortcut:` comment).
 
-Earlier state: Open. Found in the performance analysis of 2026-11-14 ([../EVALUATION-2026-11-14.md](../EVALUATION-2026-11-14.md)), plugin 0.10.1.
+Earlier state: Open. Found in the performance analysis of 2026-11-14 ([../EVALUATION-2026-11-14.md](../evaluations/EVALUATION-2026-11-14.md)), plugin 0.10.1.
 
 ## Problem
 

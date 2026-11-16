@@ -4,7 +4,7 @@ Fresh measurement of the built `plugin/mcp/server.mjs` after the F01-F28 work (l
 
 **One machine only**: WSL2 (kernel 6.18.33.2-microsoft-standard-WSL2), 12 vCPUs, 9.7 GB RAM, ext4 work tree, Node v24.22.2, real dprint 0.64.3 from PATH (`~/.local/bin/dprint`) with `@dprint/typescript` 0.96.1 and `@dprint/json` 0.25.2 from the local plugin cache. The same machine class as the old task documents, but a different day and load; treat differences below ~20% as noise. Re-measure before relying on a number.
 
-## How it was measured
+## Method
 
 - Scratch script outside the repo (`bench.mjs` in the session scratchpad, not committed). It creates a temp git repo (`dprint.json` with the typescript and json plugins, one commit) with: `small.ts` (14 lines, 350 B), `big.ts` (7490 lines, 205 KB, dprint-clean), `dirty500.ts` (518 lines, 12.6 KB, indentation stripped and spacing crammed: nearly every line differs from dprint's output), `dirtybig.ts` (7490 lines, 184 KB, same dirt), `huge.ts` (41906 lines, 1.15 MB), 40 small padding files, and a second repo with 50 dirs x 99 one-line `.ts` files (4951 files, the F25 layout).
 - The server is spawned with `node plugin/mcp/server.mjs`, `initialize` (2025-11-25), then `tools/call` over stdio. Every latency is the client-side round trip (write request line to read answer line) with `process.hrtime.bigint()`; it includes the stdio hop and JSON encoding but no Claude Code dispatch (F22 measured ~15 ms Claude-side per `mcp_tool` hook on top).

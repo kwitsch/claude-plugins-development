@@ -1,4 +1,4 @@
-# dprint knowledge (for Claude sessions)
+# dprint knowledge
 
 Working documents for agent sessions. Not shipped (`plugin/` is the installable part), not user documentation. Language: English.
 
@@ -6,7 +6,7 @@ Working documents for agent sessions. Not shipped (`plugin/` is the installable 
 
 - [CLAUDE.md](../../../../dprint/CLAUDE.md): the plugin's overview and rule list (loads with the plugin's files).
 - [TASKS.md](TASKS.md): task list; `tasks/` holds one document per task. Start here for open work.
-- [EVALUATION-2026-11-13.md](EVALUATION-2026-11-13.md): dprint MCP server evaluation 2026-11-13 (plugin 0.13.0, re-run on 0.13.2)
+- [evaluations/EVALUATION-2026-11-13.md](evaluations/EVALUATION-2026-11-13.md): evaluation: dprint MCP server evaluation 2026-11-13 (plugin 0.13.0, re-run on 0.13.2)
 
 ## How to work a task
 

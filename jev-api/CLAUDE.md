@@ -6,7 +6,7 @@ Mods-only plugin: a function-hooks module that registers the System One question
 - Every owned call is answered: a registered tool that no hook answers fails, so never call `next(e)` for `noul`/`choice`/`score`/`batch`, and the hook catches its own throws (a refused `$.env.get`) to answer them too. Every other tool goes to `next(e)`.
 - Errors are `{ deny: "<tool>: <reason>" }` (`batch` input errors name the question: `questions[<i>]: ...`).
 - The request goes through the bundled MCP server (`plugin/.mcp.json` key `http`), which enforces the timeout and cancels; `$.http.fetch` is only the fallback. Design: `.claude/rules/http-mcp-server.md`; evidence: `development/wiki/plugins/jev-api/tasks/F22-http-through-mcp-server.md`.
-- Haiku answers when no Jev variable is set or Jev answers an HTTP error: `.claude/rules/haiku-fallback.md`; history and calibration numbers: `development/wiki/plugins/jev-api/HAIKU-CALIBRATION.md`.
+- Haiku answers when no Jev variable is set or Jev answers an HTTP error: `.claude/rules/haiku-fallback.md`; history and calibration numbers: `development/wiki/plugins/jev-api/notes/haiku-calibration.md`.
 - Oversized states (preflight, overflow modes `error`/`truncate`/`haiku`, learned density): `.claude/rules/oversized-state.md`; measurements: `development/wiki/plugins/jev-api/tasks/F21-oversized-state-sent-blindly.md`.
 - Engine static-check pitfalls that shaped the code (no `any`, no `import()`, no bare `$.<noun>`, also in `lib.mjs`; run `claude plugin validate jev-api/plugin` after every hooks change): root `.claude/rules/claude-code-hook-facts.md`.
 - Code was copied from jevfort (types, URL regex, request/timeout race), not imported: plugins ship standalone.

@@ -9,7 +9,7 @@ the memory audit so the developer notes keep only directives. The current behavi
 Collected as written at the time; machine, harness and repetitions were not recorded with them. Re-measure before
 relying on a number.
 
-## Numbers
+## Results
 
 - Hanging Jev endpoint, before the timeout pause kicks in: +4 s before the first token of every turn (step 0), +4 s
   per Agent call and per subagent, +4 s for the task-end check (live). Earlier, with the done check:
@@ -24,7 +24,7 @@ relying on a number.
 - 0.7.0: cache countdown, Haiku compaction and auto-compact ported from HeyCubit/effortless.
 - 0.9.0: the effort rule above; the model bias removed by user decision (never validated, shifted the cuts per model).
 - 0.12.0: `/jev`, the decision log, the done check, model routing, the prompt classifier, step measurement and every
-  status-line message removed (`EVALUATION-2026-11-14-3.md`).
+  status-line message removed (`EVALUATION-2026-11-14-option-removal.md`).
 
 ## Bug hunt
 

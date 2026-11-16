@@ -10,7 +10,7 @@ area: jevfort/src/hooks/register.mts (onAgentCall, onAgentOffer), jevfort/src/ho
 
 Partial: approach 1 shipped in 0.12.0 (an Agent call with a specific type, `!GENERAL.has(claudeType)`, makes no Jev request; the 9% that could never switch no longer wait). Approaches 2 and 3 (smaller request, lower `SWITCH_AT` or drop the feature) stay open and need a decision; the `agent` decision log entries mentioned below were removed in 0.12.0 with the log.
 
-Earlier state: open. Found in the performance analysis after the worklist ([../EVALUATION-2026-11-14-2.md](../EVALUATION-2026-11-14-2.md)), plugin 0.11.0, from the real decision log of the installed 0.10.1 (the code is unchanged since the port, `ca6b468`). F01's decision left the agent-type choice as is (30 synthetic types 1.04 s, below the budget); the real log adds its benefit side.
+Earlier state: open. Found in the performance analysis after the worklist ([../EVALUATION-2026-11-14-worklist.md](../evaluations/EVALUATION-2026-11-14-worklist.md)), plugin 0.11.0, from the real decision log of the installed 0.10.1 (the code is unchanged since the port, `ca6b468`). F01's decision left the agent-type choice as is (30 synthetic types 1.04 s, below the budget); the real log adds its benefit side.
 
 ## Problem
 
