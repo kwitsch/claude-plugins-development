@@ -111,7 +111,7 @@ does not opt out of Prettier formatting; exclude the paths via `.prettierignore`
 
 - `prettier` and `ktlint` read `.editorconfig` natively (run flag-free). For the thirteen bundled `prettier` languages that is the whole mechanism — `indent_style`, `indent_size` and `max_line_length` included, Shell, Java and PHP with them.
 - `ktfmt` is always passed `--enable-editorconfig`; it applies `.editorconfig` to stdin input (via `--stdin-name`) from ktfmt 0.65 on — older releases format with ktfmt's default style.
-- For `ruff` and `black`, a minimal built-in resolver maps core `.editorconfig` properties (`indent_style`, `indent_size`, `max_line_length`, `end_of_line`) to CLI flags — **only** when no tool-native config governs the file. This mapping is intentionally partial (documented properties only).
+- For `ruff` and `black`, a minimal built-in resolver maps core `.editorconfig` properties (`indent_style`, `indent_size`, `max_line_length`) to CLI flags — **only** when no tool-native config governs the file. This mapping is intentionally partial (documented properties only).
 - For `rustfmt`, the same resolver maps `max_line_length`/`indent_style`/`indent_size` to `--config max_width`/`--config hard_tabs`/`--config tab_spaces` — **only** when no `rustfmt.toml`/`.rustfmt.toml` governs the file. `rustfmt` honors every tab/space combination, so there is no hard-conflict skip.
 - **Hard conflicts are skipped, not violated:** `black` is hard-fixed at 4-space indentation, so an `.editorconfig` declaring `indent_style = tab` leaves the Python file untouched rather than reformatted against its own config.
 - Go's style is fixed by design (tabs); a conforming `[*.go] indent_style = tab` is honored by construction.
