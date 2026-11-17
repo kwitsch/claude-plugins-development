@@ -47,16 +47,6 @@ export type Link = {
   logged: boolean;
   /** The connect in progress: concurrent calls share it. */
   connecting: Promise<string | undefined> | undefined;
-  /** The configuration the server was given last (as JSON); undefined while it has none (not sent yet, or the server restarted). */
-  sent: string | undefined;
-  /** The generation of `sent`: how many configs were sent when it was (the server holds the config of the newest generation sent that it received last). */
-  sentGen: number;
-  /** Generations handed out: one per config call, so a request can name the config it was synced with. */
-  gen: number;
-  /** The newest config call in flight, shared by calls that need the same values: each of their requests names this generation, so a second identical call must not bump it. */
-  syncing: { text: string; gen: number; call: Promise<{ value: McpResult } | { error: unknown }> } | undefined;
-  /** Set by a failed request: the next request sends the configuration again, read fresh from the environment. */
-  dirty: boolean;
 };
 
 /**
@@ -65,7 +55,7 @@ export type Link = {
  * @returns The link.
  */
 export function newLink(): Link {
-  return { server: undefined, retryAt: 0, counter: 0, logged: false, connecting: undefined, sent: undefined, sentGen: 0, gen: 0, syncing: undefined, dirty: false };
+  return { server: undefined, retryAt: 0, counter: 0, logged: false, connecting: undefined };
 }
 
 /** What stops a wait: its time ran out, or the call was abandoned. */
@@ -186,7 +176,6 @@ function logOutage($: Engine, link: Link, reason: string): void {
  */
 async function markDown($: Engine, link: Link, reason: string): Promise<void> {
   link.server = undefined;
-  link.sent = undefined; // a server that comes back may be a new process without its configuration
   link.retryAt = (await now($)) + RETRY_CONNECT_MS;
   logOutage($, link, reason);
 }
@@ -241,84 +230,6 @@ async function ensureServer($: Engine, link: Link): Promise<string | undefined> 
 }
 
 /**
- * Gives the server its configuration when it has none yet, when the values changed since it was sent, or after a failed
- * request (the environment is read again then): the server reads no environment of its own.
- *
- * @param $ - The engine.
- * @param link - The transport state.
- * @param server - The server name.
- * @param env - The env values, trimmed.
- * @param signal - Aborts when the call is abandoned.
- * @param waitMs - The most the config call may take (default {@link CONNECT_WAIT_MS}).
- * @param timeoutMs - The call's whole timeout, named in the outcome when `waitMs` (the time left) cuts the wait short.
- * @returns `{ gen }`, the generation of the config this call's values were sent in (the request names it, so a server that holds another call's config refuses it), an outcome when the call was abandoned, or `{ down }` with the reason when the server failed.
- */
-async function syncConfig($: Engine, link: Link, server: string, env: HttpEnv, signal: AbortSignal, waitMs = CONNECT_WAIT_MS, timeoutMs = waitMs): Promise<Outcome | { down: string } | { gen: number }> {
-  const args = { ...(env.key ? { key: env.key } : {}), ...(env.base ? { base: env.base } : {}), ...(env.jevUrl ? { jevUrl: env.jevUrl } : {}), ...(env.model ? { model: env.model } : {}) };
-  const text = JSON.stringify(args);
-  if (link.sent === text && !link.dirty) return { gen: link.sentGen };
-  // the newest config call in flight with the same values is shared: a second one would bump the generation and the server would refuse the first call's request
-  const live = link.syncing;
-  const reuse = live !== undefined && live.text === text && live.gen === link.gen;
-  const gen = reuse ? live.gen : ++link.gen;
-  let wait: Stop | undefined;
-  try {
-    const call = reuse
-      ? live.call
-      : new Promise<McpResult>((resolve) => resolve($.mcp.call(server, "config", { ...args, gen }))).then(
-        (value) => ({ value }),
-        (error: unknown) => ({ error }),
-      );
-    if (!reuse) {
-      const mine = { text, gen, call };
-      link.syncing = mine;
-      void call.then(() => {
-        if (link.syncing === mine) link.syncing = undefined;
-      });
-    }
-    wait = stopOn($, Math.max(1, Math.min(CONNECT_WAIT_MS, waitMs)), signal);
-    const r = await Promise.race([call, wait.stop]);
-    if (r === "aborted") return ABANDONED;
-    if (r === "timeout") {
-      // the call's own budget ran out, the server is not at fault: no down, and the pending config call stays shared
-      if (waitMs < CONNECT_WAIT_MS) return timedOut(timeoutMs);
-      if (link.syncing?.gen === gen) link.syncing = undefined; // a hung call is not shared with the next one
-      return { down: `no answer to the config call within ${CONNECT_WAIT_MS} ms` };
-    }
-    if ("error" in r) return { down: message(r.error) };
-    if (!isRecord(r.value) || r.value.isError === true) return { down: "the server refused its configuration" };
-    // only the newest config sent may be recorded as the server's: an older answer can arrive after a newer one was sent
-    if (gen === link.gen) {
-      link.sent = text;
-      link.sentGen = gen;
-      link.dirty = false;
-    }
-    return { gen };
-  } finally {
-    wait?.done();
-  }
-}
-
-/**
- * Sends the configuration to the server ahead of the first request (session start); best effort, never throws.
- *
- * @param $ - The engine.
- * @param link - The transport state.
- * @param env - The env values, trimmed.
- * @param signal - Aborts the wait.
- */
-export async function configureServer($: Engine, link: Link, env: HttpEnv, signal: AbortSignal): Promise<void> {
-  try {
-    const server = await ensureServer($, link);
-    if (server === undefined) return;
-    const r = await syncConfig($, link, server, env, signal);
-    if ("down" in r) await markDown($, link, r.down);
-  } catch {
-    // best effort: the first request sends the configuration again
-  }
-}
-
-/**
  * Reads the outcome out of an MCP tool result of the server.
  *
  * @param r - The `$.mcp.call` result (anything the engine resolves: a missing or odd one is no outcome).
@@ -344,14 +255,13 @@ function readOutcome(r: McpResult | null | undefined): Outcome | undefined {
  * @param $ - The engine.
  * @param server - The server name.
  * @param callId - The id the server knows the request by.
- * @param gen - The generation of the config this call was synced with.
  * @param state - The text the questions are about.
  * @param questionsObject - The `questions` of the request body.
  * @param timeoutMs - How long the HTTP request may take.
  * @param signal - Aborts when the call is abandoned.
  * @returns The outcome, or `{ down }` with the reason when the server failed (the call threw, the answer is no outcome): the caller falls back.
  */
-async function callServer($: Engine, server: string, callId: string, gen: number, state: string, questionsObject: Record<string, unknown>, timeoutMs: number, signal: AbortSignal): Promise<Outcome | { down: string }> {
+async function callServer($: Engine, server: string, callId: string, state: string, questionsObject: Record<string, unknown>, timeoutMs: number, signal: AbortSignal): Promise<Outcome | { down: string }> {
   let wait: Stop | undefined;
   /** Tells the server to abort this request; called at most once, by whichever of the guard and the abandonment wins the race. The answer is not awaited and its failure does not matter. */
   const cancel = (): void => {
@@ -362,7 +272,7 @@ async function callServer($: Engine, server: string, callId: string, gen: number
     }
   };
   try {
-    const call = new Promise<McpResult>((resolve) => resolve($.mcp.call(server, "request", { callId, configGen: gen, state, questions: questionsObject, timeoutMs }))).then(
+    const call = new Promise<McpResult>((resolve) => resolve($.mcp.call(server, "request", { callId, state, questions: questionsObject, timeoutMs }))).then(
       (value) => ({ value }),
       (error: unknown) => ({ error }),
     );
@@ -385,12 +295,12 @@ async function callServer($: Engine, server: string, callId: string, gen: number
 
 /**
  * Sends one System One request: through the transport server while it is available, else through `$.http.fetch`.
- * The server is given its configuration first when needed (`syncConfig`). A server that fails (cannot connect, the call throws, an answer that is no outcome) is marked down for
+ * The server reads its configuration from its own environment, the same one `env` was read from. A server that fails (cannot connect, the call throws, an answer that is no outcome) is marked down for
  * {@link RETRY_CONNECT_MS} and the call goes out through the fetch path instead.
  *
  * @param $ - The engine.
  * @param link - The transport state.
- * @param env - The env values, trimmed (sent to the server with the config tool, and used directly by the fetch path).
+ * @param env - The env values, trimmed (used by the fetch path only: the server reads its own environment).
  * @param state - The text the questions are about.
  * @param questionsObject - The `questions` of the request body.
  * @param timeoutMs - How long the request may take.
@@ -405,41 +315,23 @@ export async function sendOutcome($: Engine, link: Link, env: HttpEnv, state: st
   if (server === "timeout") return timedOut(timeoutMs);
   if (server === "aborted") return ABANDONED;
   if (server !== undefined) {
-    /** The generation the last attempt's request named. */
-    let usedGen: number | undefined;
-    /** The configuration, then the request. */
-    const attempt = async (): Promise<Outcome | { down: string }> => {
-      const configured = await syncConfig($, link, server, env, signal, timeoutMs - ((await now($)) - started), timeoutMs);
-      if (!("gen" in configured)) return configured;
-      usedGen = configured.gen;
-      // a call id the server can tell apart from every other one of this session and of earlier ones; the counter moves
-      // before the await, or calls that run side by side would read the same number
-      const n = ++link.counter;
-      const callId = `${(await now($)).toString(36)}-${n}`;
-      // after the await: a dispatch abandoned while the clock was read sends nothing
-      if (signal.aborted) return ABANDONED;
-      // the request gets only the time the connect and config steps left
-      const left = timeoutMs - ((await now($)) - started);
-      if (signal.aborted) return ABANDONED;
-      if (left < 1) return timedOut(timeoutMs);
-      return callServer($, server, callId, configured.gen, state, questionsObject, Math.round(left), signal);
-    };
-    let outcome = await attempt();
-    if (!("down" in outcome) && outcome.kind === "error" && outcome.code === "unconfigured") {
-      // the server was restarted and lost its configuration: send it again, once, unless another call already did
-      if (link.sentGen === usedGen) link.sent = undefined;
-      outcome = await attempt();
-    }
-    if (!("down" in outcome)) {
-      // a failed request (not an abandoned one) makes the next request read the environment again
-      if (outcome.kind === "http" || (outcome.kind === "error" && outcome.code !== "aborted")) link.dirty = true;
-      return outcome;
-    }
+    // a call id the server can tell apart from every other one of this session and of earlier ones; the counter moves
+    // before the await, or calls that run side by side would read the same number
+    const n = ++link.counter;
+    const callId = `${(await now($)).toString(36)}-${n}`;
+    // after the await: a dispatch abandoned while the clock was read sends nothing
+    if (signal.aborted) return ABANDONED;
+    // the request gets only the time the connect step left
+    const left = timeoutMs - ((await now($)) - started);
+    if (signal.aborted) return ABANDONED;
+    if (left < 1) return timedOut(timeoutMs);
+    const outcome = await callServer($, server, callId, state, questionsObject, Math.round(left), signal);
+    if (!("down" in outcome)) return outcome;
     await markDown($, link, outcome.down);
   }
   // after every await above: an abandoned dispatch sends nothing, the fetch cannot be cancelled
   if (signal.aborted) return ABANDONED;
-  // the fallback gets only the time the connect, config and request steps left, not the whole timeout again
+  // the fallback gets only the time the connect and request steps left, not the whole timeout again
   const left = timeoutMs - ((await now($)) - started);
   if (signal.aborted) return ABANDONED;
   if (left < 1) return timedOut(timeoutMs);

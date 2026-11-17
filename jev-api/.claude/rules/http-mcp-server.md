@@ -18,11 +18,11 @@ Live evidence and measurements: `development/wiki/plugins/jev-api/tasks/F22-http
 ## Why a server
 
 - `$.http.fetch` has no signal and no timeout; `$.mcp.call` is not cancelled when the dispatch is abandoned either (not by `next.signal`, not by the 10 s hook budget; the server gets no `notifications/cancelled`).
-- So `plugin/.mcp.json` starts `mcp/server.mjs` (key `http`, name `plugin:jev-api:http`, tools `request`, `config`, `cancel`; dual-era, no tasks) and `transport.ts` calls it with `$.mcp.connect("http")` and `$.mcp.call`. The mod's `$.http.fetch` is used only when the server is not available.
+- So `plugin/.mcp.json` starts `mcp/server.mjs` (key `http`, name `plugin:jev-api:http`, tools `request`, `cancel`; dual-era, no tasks) and `transport.ts` calls it with `$.mcp.connect("http")` and `$.mcp.call`. The mod's `$.http.fetch` is used only when the server is not available.
 
 ## Protocol
 
-- `request { callId, configGen?, state, questions, timeoutMs }`; `config` takes `gen` beside the four values. `request` takes no URL, header or key.
+- `request { callId, state, questions, timeoutMs }`. `request` takes no URL, header or key.
 - The server runs the shared `sendRequest` with `fetch` under `AbortSignal.any([AbortSignal.timeout(timeoutMs), cancel])`, so the timeout and a cancel really close the connection.
 - It answers an `Outcome`: `ok`; `http` with the redacted reason and the parsed context refusal; `error` (timeout, aborted, network, config). Redaction and the key never leave the server's code path.
 - Guard: the server ends the request at `timeoutMs`; the mod gives up at `timeoutMs + 1500` (`SERVER_GUARD_MS`) or on `next.signal`, answers at once and fires one `cancel { callId }` (not awaited).
@@ -33,14 +33,13 @@ Live evidence and measurements: `development/wiki/plugins/jev-api/tasks/F22-http
 
 ## Config
 
-- The server reads NO environment. The mod gives it `TYPESAFE_API_KEY`, `TYPESAFE_BASE_URL`, `JEV_URL`, `TYPESAFE_DEFAULT_MODEL` with the `config` tool (`syncConfig`): at `session.start` through `configureServer`, whenever the four values changed since the last config call, and after a failed request, where the values are read fresh from `$.env.get` (a key changed mid-session reaches the server).
-- The server keeps the last 16 configs by the generation the mod numbers them with and serves each request with the config of its own `configGen` (concurrent calls with different env do not overwrite each other's).
-- A server without that generation (just started, restarted, evicted) answers the `unconfigured` error; the mod sends the config again and repeats the request once.
-- A server that refuses its config or does not answer within 3 s is an outage (fallback).
+- The server reads `TYPESAFE_API_KEY`, `TYPESAFE_BASE_URL`, `JEV_URL`, `TYPESAFE_DEFAULT_MODEL` from its own environment once at start; the mod sends no config (the `config` tool, `configGen` and the `unconfigured` retry are gone). The server inherits the Claude process environment, and `$.env.get` reads that same `process.env`, which does not change in a running process (a settings `env` written mid-session reached neither the mod nor a respawned server, live 2.1.326), so both always agree. [Smoke test](../../../development/wiki/facts/mods-engine-io.md)
+- The server never exits for a missing configuration: Claude Code caches a failed start for 15 minutes across sessions (live 2.1.326). With none of the three variables set it answers a `config` error; the mod does not call it then (Haiku answers).
+- A server killed from outside is respawned by the next `$.mcp.call` (live 2.1.326).
 
 ## Keeping the model off the server's tools
 
-- A tool with `_meta.ui.visibility` without `model` is NOT callable by `$.mcp.call`, so all three tools are visible (deferred behind ToolSearch), `config` included.
+- A tool with `_meta.ui.visibility` without `model` is NOT callable by `$.mcp.call`, so both tools are visible (deferred behind ToolSearch).
 - The `tool.check` hook allows origin `jev-api` and denies every other origin for `mcp__plugin_jev-api_http__*` (also when allowed by `--allowedTools`). A notice that `cc-plugin-sec-default` skipped the hook appears, but the deny applies.
 
 ## Fallback

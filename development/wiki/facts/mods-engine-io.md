@@ -39,6 +39,10 @@ The constraints that follow load by themselves with [claude-code-hook-facts.md](
 - The model sees such a tool as `mcp__plugin_<plugin>_<key>__<tool>` (live 2.1.325).
 - A plugin's stdio MCP server inherits the whole environment of the Claude Code process, including the settings `env` block and the user's shell variables, without any `env` block in `.mcp.json`; `${VAR:-default}` interpolation in `.mcp.json` `env` works too (live 2.1.325).
 
+- A killed stdio server (`kill <pid>` from a Bash step) is respawned by the next `$.mcp.call`: `connect` still answered `isConnected: true` in 4 ms, the following `call` took about 45 ms and was answered by a new pid (live 2.1.326, throwaway probe plugin, 2026-11-17).
+- A server that exits right after start: `connect` answers `{ isConnected: false, reason: "failed", message: "... did not connect: Connection closed." }` after about 110 ms and does not retry within the session. The failure is cached across sessions: the next session's `connect` answers at once `Skipping connection (recent failure cached; retries automatically in 15 min, or edit the plugin config to retry now)`, even though the cause (a flag file) was gone. So a server must not exit to say "not configured" (live 2.1.326).
+- A respawned server inherits the environment the Claude process had at launch: a `.claude/settings.local.json` `env` written mid-session reached neither `$.env.get` nor the respawned server (both kept the old value, live 2.1.326).
+
 ## `$.ui`
 
 - `$.ui.log` lines are drawn as `<plugin>: <text>` (headless: `ui_log { plugin, text }`, debug log `[<plugin>] $.ui.log: <text>`): a mod must not prefix its own name. A refused `$.ui.log` is dropped and reported, never thrown into the hook (binary 2.1.322).

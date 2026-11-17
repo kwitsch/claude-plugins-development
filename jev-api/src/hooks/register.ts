@@ -25,7 +25,7 @@ import type { RegState } from "./registry.js";
 import { cutState, DEFAULT_CONTEXT_TOKENS, DEFAULT_DENSITY, loadKnowledge } from "./size.js";
 import type { Knowledge } from "./size.js";
 import { TOOL_PREFIX } from "./tools.js";
-import { configureServer, newLink, PLUGIN, SERVER_TOOL_PREFIX } from "./transport.js";
+import { newLink, PLUGIN, SERVER_TOOL_PREFIX } from "./transport.js";
 import { DEFAULT_OVERFLOW, TOOLS } from "./types.js";
 import type { On, Options, ToolName } from "./types.js";
 import { DEFAULT_TIMEOUT_S, fail, isOverflow, message, seconds, untilAbort } from "./util.js";
@@ -65,13 +65,6 @@ export function register(on: On, options?: Options): void {
       if (st.missing.size > 0) await ensureTools($, st, 5 * REGISTER_WAIT_MS);
     } catch {
       // best effort (a hook above refusing $.clock): the session.start chain goes on
-    }
-    // The server reads no environment: it gets the configuration here, and again whenever a request needs it (best effort, bounded by the connect wait).
-    try {
-      const [key, base, jevUrl, model] = (await Promise.all([$.env.get("TYPESAFE_API_KEY"), $.env.get("TYPESAFE_BASE_URL"), $.env.get("JEV_URL"), $.env.get("TYPESAFE_DEFAULT_MODEL")])).map((v) => v?.trim() || undefined);
-      if (key || base || jevUrl) await configureServer($, link, { key, base, jevUrl, model }, new AbortController().signal);
-    } catch {
-      // best effort: the first request sends the configuration
     }
     return next(e);
   });

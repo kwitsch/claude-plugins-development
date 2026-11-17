@@ -60,16 +60,9 @@ const stub = async (): Promise<Stub> => {
   };
 };
 
-/** A spawned server speaking newline JSON-RPC; every stdout line is parsed and kept. */
-const CONFIG_VARS = { TYPESAFE_API_KEY: "key", TYPESAFE_BASE_URL: "base", JEV_URL: "jevUrl", TYPESAFE_DEFAULT_MODEL: "model" } as const;
-/** Spawns the server (its own environment holds only PATH and the test switches) and gives it the System One variables of `env` with a `config` call, as the mod does; `configure: false` leaves it unconfigured. */
-const start = (env: Record<string, string>, configure = true) => {
-  const own = configure ? Object.fromEntries(Object.entries(env).filter(([k]) => !(k in CONFIG_VARS))) : env;
-  const child: ChildProcessWithoutNullStreams = spawn(process.execPath, [SERVER], { env: { PATH: process.env["PATH"] ?? "", ...own }, stdio: ["pipe", "pipe", "pipe"] });
-  if (configure) {
-    const args = Object.fromEntries(Object.entries(CONFIG_VARS).filter(([k]) => k in env).map(([k, field]) => [field, env[k]]));
-    child.stdin.write(JSON.stringify({ jsonrpc: "2.0", id: "config-0", method: "tools/call", params: { name: "config", arguments: args } }) + "\n");
-  }
+/** Spawns the server with an environment of PATH, the test switches and the System One variables of `env` (it reads them itself), and speaks newline JSON-RPC to it; every stdout line is parsed and kept. */
+const start = (env: Record<string, string>) => {
+  const child: ChildProcessWithoutNullStreams = spawn(process.execPath, [SERVER], { env: { PATH: process.env["PATH"] ?? "", ...env }, stdio: ["pipe", "pipe", "pipe"] });
   const lines: string[] = [];
   const waiting = new Map<number | string, (m: Msg) => void>();
   const got = new Map<number | string, Msg>();
@@ -128,7 +121,7 @@ describe(".mcp.json", () => {
 });
 
 describe("protocol", () => {
-  test("legacy handshake lists exactly request, cancel and config, visible to the model", async () => {
+  test("legacy handshake lists exactly request and cancel, visible to the model", async () => {
     const { c } = await boot();
     const init = await c.rpc("initialize", { protocolVersion: "2025-11-25", capabilities: {}, clientInfo: { name: "t", version: "0" } });
     assert.equal(init["result"].protocolVersion, "2025-11-25");
@@ -137,12 +130,10 @@ describe("protocol", () => {
     c.send({ method: "notifications/initialized" });
     const list = await c.rpc("tools/list");
     const tools = list["result"].tools as Msg[];
-    assert.deepEqual(tools.map((t) => String(t["name"])).sort((a, b) => a.localeCompare(b)), ["cancel", "config", "request"]);
+    assert.deepEqual(tools.map((t) => String(t["name"])).sort((a, b) => a.localeCompare(b)), ["cancel", "request"]);
     const req = tools.find((t) => t["name"] === "request");
-    assert.doesNotMatch(String(req?.["description"]), /environment/);
-    assert.match(String(req?.["description"]), /`config` tool/);
-    assert.equal(req?.["inputSchema"].properties.configGen.type, "integer");
-    assert.equal(tools.find((t) => t["name"] === "config")?.["inputSchema"].properties.gen.type, "integer");
+    assert.match(String(req?.["description"]), /environment/);
+    assert.equal(req?.["inputSchema"].properties.configGen, undefined);
     for (const t of tools) {
       assert.match(t["description"], /^Internal transport of the jev-api plugin; calls from the model are refused\./);
       assert.equal(t["_meta"]?.ui?.visibility, undefined); // a hidden tool is not callable by $.mcp.call
@@ -162,7 +153,7 @@ describe("protocol", () => {
     const l = await c.rpc("tools/list", { _meta: META });
     assert.equal(l["result"].resultType, "complete");
     assert.equal(typeof l["result"].ttlMs, "number");
-    assert.equal(l["result"].tools.length, 3);
+    assert.equal(l["result"].tools.length, 2);
   });
 
   test("an unsupported modern version answers -32022 and an unknown method -32601", async () => {
@@ -236,86 +227,33 @@ describe("request", () => {
     assert.deepEqual(outcomeOf(r), { kind: "error", code: "config", message: "no System One access configured: set TYPESAFE_API_KEY, TYPESAFE_BASE_URL or JEV_URL" });
   });
 
-  test("a server that was not given a configuration answers unconfigured and sends nothing", async () => {
-    const s = await stub();
-    stubs.push(s);
-    // the variables are in the server's own environment on purpose (no config call): it must not read them
-    const c = start({ JEV_URL: s.url, TYPESAFE_API_KEY: KEY }, false);
-    live.push(c);
-    assert.deepEqual(outcomeOf(await c.request()), { kind: "error", code: "unconfigured", message: "the server has no configuration yet" });
-    assert.equal(s.seen.length, 0);
-  });
-
-  test("a later config call replaces the endpoint, key and model; a blank field counts as unset", async () => {
+  test("the server reads the endpoint, key and model from its own environment; blank values count as unset", async () => {
     const a = await stub();
-    const b = await stub();
-    stubs.push(a, b);
-    const c = start({ JEV_URL: a.url, TYPESAFE_API_KEY: KEY });
+    stubs.push(a);
+    const c = start({ JEV_URL: a.url, TYPESAFE_API_KEY: "  ", TYPESAFE_DEFAULT_MODEL: " m2 " });
     live.push(c);
     assert.equal(outcomeOf(await c.request({ callId: "a" }))["kind"], "ok");
     assert.equal(a.seen.length, 1);
-    const r = await c.call("config", { jevUrl: b.url, key: "  ", model: " m2 " });
-    assert.deepEqual(r["result"].structuredContent, { configured: true });
-    assert.equal(outcomeOf(await c.request({ callId: "b" }))["kind"], "ok");
-    assert.equal(a.seen.length, 1);
-    assert.equal(b.seen.length, 1);
-    assert.equal(b.seen[0].headers["authorization"], undefined);
-    assert.equal(JSON.parse(b.seen[0].body).model, "m2");
+    assert.equal(a.seen[0].headers["authorization"], undefined);
+    assert.equal(JSON.parse(a.seen[0].body).model, "m2");
   });
 
-  test("a request is served with the config of its own generation, even after newer configs from other calls (restart plus env change)", async () => {
+  test("there is no config tool: a call to it, and a request naming a configGen, are refused", async () => {
     const a = await stub();
-    const b = await stub();
-    stubs.push(a, b);
-    // a restarted server (no config), then the ping-pong of two calls with different env: A re-sends gen 3, B2 sends gen 4 before A's request arrives
-    const c = start({}, false);
+    stubs.push(a);
+    const c = start({ JEV_URL: a.url, TYPESAFE_API_KEY: KEY });
     live.push(c);
-    assert.equal(outcomeOf(await c.request({ callId: "a1", configGen: 1 }))["code"], "unconfigured");
-    await c.call("config", { jevUrl: b.url, gen: 2 });
-    await c.call("config", { jevUrl: a.url, gen: 3 });
-    await c.call("config", { jevUrl: b.url, gen: 4 });
-    assert.equal(outcomeOf(await c.request({ callId: "a1", configGen: 3 }))["kind"], "ok");
-    assert.equal(outcomeOf(await c.request({ callId: "b1", configGen: 2 }))["kind"], "ok");
-    assert.equal(outcomeOf(await c.request({ callId: "b2", configGen: 4 }))["kind"], "ok");
+    const r = await c.call("config", { jevUrl: "http://127.0.0.1:1/x" });
+    assert.equal(r["error"].code, -32602);
+    assert.match(r["error"].message, /unknown tool: config/);
+    assert.equal(outcomeOf(await c.request({ callId: "a" }))["kind"], "ok");
     assert.equal(a.seen.length, 1);
-    assert.equal(b.seen.length, 2);
-    // only the last 16 generations are kept: an evicted or unknown one is unconfigured again
-    for (let g = 5; g <= 20; g++) await c.call("config", { jevUrl: b.url, gen: g });
-    assert.equal(outcomeOf(await c.request({ callId: "x", configGen: 4 }))["code"], "unconfigured");
-    assert.equal(outcomeOf(await c.request({ callId: "y", configGen: 5 }))["kind"], "ok");
-  });
-
-  test("a configGen or gen that is not a whole number is refused: no request is sent and the newest config stays", async () => {
-    const a = await stub();
-    const b = await stub();
-    stubs.push(a, b);
-    const c = start({}, false);
-    live.push(c);
-    await c.call("config", { jevUrl: a.url, gen: 1 });
-    const bad = await c.call("config", { jevUrl: b.url, gen: 1.5 });
-    assert.equal(bad["result"].isError, true);
-    assert.match(bad["result"].content[0].text, /gen must be a whole number/);
-    for (const configGen of ["1", null, 1.5]) {
-      const r = await c.request({ callId: `g${String(configGen)}`, configGen });
-      assert.equal(r["result"].isError, true);
-      assert.match(r["result"].content[0].text, /configGen must be a whole number/);
-    }
-    assert.equal(outcomeOf(await c.request({ callId: "n" }))["kind"], "ok");
-    assert.equal(a.seen.length, 1);
-    assert.equal(b.seen.length, 0);
   });
 
   test("blank variables count as unset", async () => {
     const c = start({ JEV_URL: "  ", TYPESAFE_API_KEY: "\t" });
     live.push(c);
     assert.deepEqual(outcomeOf(await c.request()), { kind: "error", code: "config", message: "no System One access configured: set TYPESAFE_API_KEY, TYPESAFE_BASE_URL or JEV_URL" });
-  });
-
-  test("a blank jevUrl in a config call is unset, not an invalid endpoint", async () => {
-    const c = start({});
-    live.push(c);
-    await c.call("config", { jevUrl: "  ", key: KEY });
-    assert.notEqual(outcomeOf(await c.request())["message"], "JEV_URL must be an http(s) URL");
   });
 
   test("an invalid JEV_URL is a config error and sends nothing", async () => {

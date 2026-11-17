@@ -9,10 +9,10 @@
  * Newline-delimited JSON-RPC 2.0, dual-era (2025-11-25 `initialize`, 2026-07-28 `server/discover`) as in
  * `.claude/rules/mcp-dual-era.md`, modelled on `dprint/src/mcp/server.mts`; no tasks. stdout carries JSON-RPC only.
  * The tools stay visible: a tool with `_meta.ui.visibility` without `model` is not callable by `$.mcp.call`
- * (measured), so the model is kept off them by the mod's `tool.check` hook. The server reads no environment: the mod
- * hands it the endpoint, key and model with the `config` tool (at session start, when they change, and after a failed
- * request), and `request` takes no URL, header or key. Without a `config` call (a server just started) `request`
- * answers an `unconfigured` error and the mod sends the config again.
+ * (measured), so the model is kept off them by the mod's `tool.check` hook. The server reads the endpoint, key and model
+ * from its own environment once at start (the Claude Code process environment it inherits, the same one the mod's
+ * `$.env.get` reads), and `request` takes no URL, header or key. It never exits for a missing configuration (Claude Code
+ * caches a failed start for 15 minutes): without any of the three variables `request` answers a `config` error.
  *
  * @packageDocumentation
  */
@@ -43,8 +43,6 @@ const MAX_TIMEOUT_MS = 30_000;
 const MAX_BODY_BYTES = 1_048_576;
 /** How many cancelled call ids are remembered for a request that has not arrived yet. */
 const MAX_TOMBSTONES = 256;
-/** How many configs the server keeps by generation (concurrent calls with different env each keep theirs). */
-const MAX_CONFIGS = 16;
 /** How long a remembered cancel lives (ms); `JEV_API_TOMBSTONE_MS` overrides it, for tests only. */
 const TOMBSTONE_MS = ((): number => {
   const raw = process.env["JEV_API_TOMBSTONE_MS"]?.trim();
@@ -79,7 +77,7 @@ const SERVER_INFO_META = { "io.modelcontextprotocol/serverInfo": SERVER_INFO };
 const TOOLS: Tool[] = [
   {
     name: "request",
-    description: `${INTERNAL} Sends one System One request to the endpoint set by the \`config\` tool and answers its outcome. The timeout ends the HTTP request and closes the connection.`,
+    description: `${INTERNAL} Sends one System One request to the endpoint of the server's environment (JEV_URL, TYPESAFE_BASE_URL, TYPESAFE_API_KEY) and answers its outcome. The timeout ends the HTTP request and closes the connection.`,
     inputSchema: {
       type: "object",
       properties: {
@@ -87,24 +85,8 @@ const TOOLS: Tool[] = [
         state: { type: "string", minLength: 1, description: "The text the questions are about." },
         questions: { type: "object", description: "The `questions` object of the System One request." },
         timeoutMs: { type: "integer", minimum: 1, maximum: MAX_TIMEOUT_MS, description: "How long the HTTP request may take, in milliseconds." },
-        configGen: { type: "integer", description: "The `gen` of the `config` call whose configuration serves this request; unknown means `unconfigured`." },
       },
       required: ["callId", "state", "questions", "timeoutMs"],
-      additionalProperties: false,
-    },
-  },
-  {
-    name: "config",
-    description: `${INTERNAL} Sets the endpoint, key and model the requests use (the server reads no environment of its own); each field is optional, blank counts as unset.`,
-    inputSchema: {
-      type: "object",
-      properties: {
-        key: { type: "string", description: "TYPESAFE_API_KEY." },
-        base: { type: "string", description: "TYPESAFE_BASE_URL." },
-        jevUrl: { type: "string", description: "JEV_URL." },
-        model: { type: "string", description: "TYPESAFE_DEFAULT_MODEL." },
-        gen: { type: "integer", description: "Generation number the mod gives this configuration; `request` names it with `configGen`." },
-      },
       additionalProperties: false,
     },
   },
@@ -146,7 +128,7 @@ function requestedVersion(params: RpcRequest["params"]): unknown {
 }
 
 /**
- * A string field of the `config` call, trimmed.
+ * A string environment value, trimmed.
  *
  * @param v - The field (a trust boundary: anything).
  * @returns The value, or undefined when it is not a string or blank.
@@ -191,10 +173,8 @@ function startServer(): void {
   const byRpc = new Map<RequestId, Flight>();
   /** `request` calls in flight, by call id (`cancel`). */
   const byCall = new Map<string, Flight>();
-  /** What the mod set with its newest `config` call (used by a request without `configGen`); undefined until it did. */
-  let config: HttpEnv | undefined;
-  /** The last `MAX_CONFIGS` configs by the generation the mod numbered them with (insertion order is age). */
-  const configs = new Map<number, HttpEnv>();
+  /** The configuration, read from the environment once at start (a process's environment does not change). */
+  const config: HttpEnv = { key: field(process.env["TYPESAFE_API_KEY"]), base: field(process.env["TYPESAFE_BASE_URL"]), jevUrl: field(process.env["JEV_URL"]), model: field(process.env["TYPESAFE_DEFAULT_MODEL"]) };
   /** Cancels that arrived before their request: call id to expiry (insertion order is age). */
   const tombstones = new Map<string, number>();
   const send = (msg: JSONRPCResultResponse | JSONRPCErrorResponse) => process.stdout.write(JSON.stringify(msg) + "\n");
@@ -253,18 +233,13 @@ function startServer(): void {
     if (typeof questions !== "object" || questions === null || Array.isArray(questions)) return invalid("request", "questions must be an object");
     if (typeof timeoutMs !== "number" || !Number.isInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > MAX_TIMEOUT_MS) return invalid("request", `timeoutMs must be a whole number from 1 to ${MAX_TIMEOUT_MS}`);
     if (byCall.has(callId)) return invalid("request", "callId is already in use by a running request");
-    const gen = args["configGen"];
-    if (gen !== undefined && !Number.isInteger(gen)) return invalid("request", "configGen must be a whole number");
-    // a request is served with the config it was synced with, even when other calls sent newer ones since; an unknown generation (restart, evicted) makes the mod send its own again
-    const cfg = gen === undefined ? config : configs.get(gen as number);
-    if (cfg === undefined) return outcomeResult({ kind: "error", code: "unconfigured", message: "the server has no configuration yet" });
-    if (!cfg.key && !cfg.base && !cfg.jevUrl) return outcomeResult({ kind: "error", code: "config", message: "no System One access configured: set TYPESAFE_API_KEY, TYPESAFE_BASE_URL or JEV_URL" });
+    if (!config.key && !config.base && !config.jevUrl) return outcomeResult({ kind: "error", code: "config", message: "no System One access configured: set TYPESAFE_API_KEY, TYPESAFE_BASE_URL or JEV_URL" });
     if (cancelledEarly(callId)) return outcomeResult({ kind: "error", code: "aborted", message: "the call was abandoned" });
     byCall.set(callId, flight);
     try {
       const timeout = AbortSignal.timeout(timeoutMs);
       const signal = AbortSignal.any([timeout, flight.controller.signal]);
-      const outcome = await sendRequest(cfg, state, questions as Record<string, unknown>, async (url, init) => {
+      const outcome = await sendRequest(config, state, questions as Record<string, unknown>, async (url, init) => {
         try {
           const res = await fetch(url, { ...init, signal });
           return { status: res.status, text: await readBody(res) };
@@ -282,24 +257,6 @@ function startServer(): void {
     } finally {
       byCall.delete(callId);
     }
-  };
-
-  /**
-   * Handles `tools/call` `config`: sets the newest configuration and keeps it under its generation `gen`.
-   *
-   * @param args - The call's arguments (a trust boundary: checked here).
-   * @returns The tool result.
-   */
-  const runConfig = (args: Record<string, unknown>): CallToolResult => {
-    const gen = args["gen"];
-    if (gen !== undefined && !Number.isInteger(gen)) return invalid("config", "gen must be a whole number");
-    config = { key: field(args["key"]), base: field(args["base"]), jevUrl: field(args["jevUrl"]), model: field(args["model"]) };
-    if (gen !== undefined) {
-      configs.delete(gen as number);
-      configs.set(gen as number, config);
-      if (configs.size > MAX_CONFIGS) configs.delete(configs.keys().next().value as number);
-    }
-    return toolResult({ configured: true });
   };
 
   /**
@@ -366,11 +323,10 @@ function startServer(): void {
         return reply({ tools: TOOLS, ...(modern ? { _meta: SERVER_INFO_META } : {}) }, true);
       case "tools/call": {
         const name = params?.name;
-        if (name !== "request" && name !== "cancel" && name !== "config") return fail(id, -32602, `unknown tool: ${String(name)}`);
+        if (name !== "request" && name !== "cancel") return fail(id, -32602, `unknown tool: ${String(name)}`);
         const args = params?.arguments ?? {};
         if (typeof args !== "object" || args === null || Array.isArray(args)) return fail(id, -32602, "arguments must be an object");
         if (name === "cancel") return reply(runCancel(args as Record<string, unknown>));
-        if (name === "config") return reply(runConfig(args as Record<string, unknown>));
         const flight: Flight = { controller: new AbortController(), silent: false };
         if (id !== undefined) byRpc.set(id, flight);
         try {
