@@ -3,7 +3,7 @@
 Command-hook plugin (no mods module, no skills/agents, no `userConfig`). Two fixed, always-on parts of one interaction contract, both built from `src/hooks/` to `plugin/hooks/`:
 
 - `session-start.ts`: a matcher-less `SessionStart` hook that answers the `CRITICAL RULE` as a hook JSON object (`hookSpecificOutput.additionalContext`). No matcher on purpose: `/clear` and `/compact` wipe context like a fresh start and must re-inject.
-- `stop.ts`: a `Stop` hook that blocks the end of a main-session turn once (`{ decision: "block", reason }`) when the answer's last non-empty line outside code fences ends in `?`.
+- `stop.ts`: a `Stop` hook that blocks the end of a main-session turn once (`{ decision: "block", reason }`) when the answer's last paragraph holds a question (`?` followed by whitespace or the end, outside code fences, inline code and `>` quotes).
 
 Constraints:
 

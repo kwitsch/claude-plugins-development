@@ -11,7 +11,7 @@ Interaction contract: a `SessionStart` hook injects the critical rule that all u
 ## What it does
 
 - **Session rule.** A `SessionStart` command hook with no matcher (so it fires on startup, resume, `/clear` and `/compact`, each of which wipes context the same way) answers the `CRITICAL RULE` as a hook JSON object (`additionalContext`), which Claude Code adds as session context before Claude acts. The rule mandates: every user interaction goes through `AskUserQuestion`, a turn never ends on a plain-text question mark, a free-text question still uses the tool with an `Abort/Cancel` option, and the free-text answer is captured through the tool's `Other` option.
-- **Interaction gate.** A `Stop` command hook checks the final answer of the main session. When its last non-empty line (outside code fences) ends in `?`, it blocks the stop once with a short reason that points at the session-start rule, and Claude redoes the question through `AskUserQuestion` in the same turn. Subagents are never gated, and a stop that another Stop hook already continued is let through. A rhetorical trailing `?` is an accepted false positive.
+- **Interaction gate.** A `Stop` command hook checks the final answer of the main session. When its last paragraph (outside code, inline code and quotes) holds a question, a `?` followed by whitespace or the end,, it blocks the stop once with a short reason that points at the session-start rule, and Claude redoes the question through `AskUserQuestion` in the same turn. Subagents are never gated, and a stop that another Stop hook already continued is let through. A question in an earlier paragraph passes; a rhetorical `?` in the last paragraph is an accepted false positive.
 
 ## Notes
 

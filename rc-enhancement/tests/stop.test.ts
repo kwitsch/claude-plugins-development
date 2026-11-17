@@ -19,18 +19,33 @@ const run = (payload: unknown): { decision?: string; reason?: string } | undefin
   return r.stdout === "" ? undefined : JSON.parse(r.stdout) as { decision?: string; reason?: string };
 };
 
-test("a main-session answer ending in a bare question is blocked with a reason that points at the session rule", () => {
+test("a main-session answer whose closing paragraph asks a question is blocked with a reason that points at the session rule", () => {
   const out = run({ last_assistant_message: "Done.\n```\nwhy?\n```\nWant me to X or Y?" });
   assert.equal(out?.decision, "block");
   assert.ok(out?.reason?.includes("AskUserQuestion"));
   assert.ok(out?.reason?.includes("CRITICAL RULE"));
 });
 
+const asked = [
+  ["a question followed by more sentences in the same paragraph", "Intro.\n\nWhich file? Then I continue. Afterwards I stop."],
+  ["a question on its own line with text after it in the paragraph", "Which file?\nI will wait."],
+  ["a question in a closing list", "Options:\n- A\n- Which one?"],
+] as const;
+
+for (const [name, message] of asked) {
+  test(`block for ${name}`, () => {
+    assert.equal(run({ last_assistant_message: message })?.decision, "block");
+  });
+}
+
 const quiet = [
   ["a plain answer", { last_assistant_message: "All done. Summary above." }],
   ["an empty answer", { last_assistant_message: "" }],
   ["a question inside a code fence", { last_assistant_message: "Result:\n```\nwhat?\n```" }],
-  ["a question that is not the last line", { last_assistant_message: "Is it?\nYes, it is." }],
+  ["a question in an earlier paragraph", { last_assistant_message: "Is it?\n\nYes, it is." }],
+  ["a question in inline code", { last_assistant_message: "Use `a ? b : c` here." }],
+  ["a quoted question", { last_assistant_message: "He wrote:\n> Which one?\nDone." }],
+  ["a ? inside a URL", { last_assistant_message: "See https://example.com/x?y=1 for details." }],
   ["a missing last message", {}],
   ["a stop a Stop hook already continued (stop_hook_active)", { stop_hook_active: true, last_assistant_message: "Which one?" }],
   ["a subagent (agent_id)", { agent_id: "a1", last_assistant_message: "Which file?" }],

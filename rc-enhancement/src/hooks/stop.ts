@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Stop command hook: blocks the end of a main-session turn whose answer ends in a plain-text question, once. The
+// Stop command hook: blocks the end of a main-session turn whose closing paragraph asks a plain-text question, once. The
 // CRITICAL RULE it points at is injected by session-start.ts. Subagents are never gated: their payload carries
 // `agent_id` (and their stops are SubagentStop events, which are not wired).
 
@@ -18,19 +18,23 @@ type StopInput = {
 };
 
 /**
- * True when the last non-empty line outside fenced code blocks ends in `?`. A rhetorical trailing `?` is an accepted
- * false positive.
+ * True when the last paragraph of the answer holds a question: a `?` followed by whitespace or the end, outside fenced
+ * code, inline code and quoted (`>`) lines. A question in an earlier paragraph passes, a rhetorical `?` in the last
+ * one is an accepted false positive.
  *
  * @param answer - The turn's final visible text.
- * @returns Whether the answer ends in a bare question.
+ * @returns Whether the closing paragraph asks something.
  */
-const isBareQuestion = (answer: string): boolean => {
-  const lines = answer
+const endsInQuestion = (answer: string): boolean => {
+  const text = answer
     .replace(/```[\s\S]*?```/g, "")
+    .replace(/`[^`\n]*`/g, "")
     .split("\n")
-    .map((l) => l.trim())
-    .filter(Boolean);
-  return /\?\s*$/.test(lines[lines.length - 1] ?? "");
+    .filter((l) => !l.trimStart().startsWith(">"))
+    .join("\n")
+    .trim();
+  const last = text.split(/\n\s*\n/).pop() ?? "";
+  return /\?(\s|$)/.test(last);
 };
 
 let raw = "";
@@ -46,5 +50,5 @@ process.stdin.on("end", () => {
     // An unreadable payload never blocks: the hook fails open.
   }
   if (input.stop_hook_active === true || input.agent_id !== undefined || typeof input.last_assistant_message !== "string") return;
-  if (isBareQuestion(input.last_assistant_message)) process.stdout.write(JSON.stringify({ decision: "block", reason: REASON }));
+  if (endsInQuestion(input.last_assistant_message)) process.stdout.write(JSON.stringify({ decision: "block", reason: REASON }));
 });

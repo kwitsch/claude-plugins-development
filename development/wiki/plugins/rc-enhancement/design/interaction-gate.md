@@ -4,7 +4,7 @@ How rc-enhancement makes a turn that ends in a plain-text question redo it throu
 
 ## Behaviour
 
-- Heuristic: strip fenced code blocks, take the last non-empty line, gate when it ends in `?`. Blunt on purpose: a rhetorical trailing `?` is an accepted false positive, traded for simplicity and for matching the rule's own "no exceptions" wording.
+- Heuristic (0.4.0): strip fenced code, inline code and `>` lines, take the last paragraph (after the last blank line), gate when it holds a `?` followed by whitespace or the end (so `a.com/x?y=1` does not match). Catches `question? more. more.`; a question in an earlier paragraph passes. Chosen by the user over last-line-only, last 3 lines and whole answer: more hits than the last line, fewer false blocks than the whole answer, each false block costs a full request. A rhetorical `?` in the last paragraph is an accepted false positive. The 0.3.x gate looked at the last non-empty line only.
 - Main session only: the hook returns silently when the payload carries `agent_id` (a subagent's own stops are `SubagentStop` events, not wired).
 - The questioning answer is not suppressed: the stop is blocked, the answer stays visible and the model continues in the same turn.
 
