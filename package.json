@@ -13,7 +13,7 @@
     "oxc-parser": "^0.157.0",
     "oxc-transform": "^0.158.0",
     "oxlint": "^1.93.0",
-    "oxlint-tsgolint": "^7.0.2006",
+    "oxlint-tsgolint": "^7.0.2007",
     "rolldown": "1.2.16",
     "vitest": "^5.1.0"
   },
