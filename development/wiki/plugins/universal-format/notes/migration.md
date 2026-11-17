@@ -12,12 +12,21 @@ What changed when universal-format moved from kwitsch/claude-plugins (`plugins/u
 - The server is dual-era, hides its tool from the model, answers `initialize` with its own protocol version and honors `notifications/cancelled` (kills a running CLI formatter).
 - `.mcp.json` starts `node` directly; `~/.local/bin` is appended to PATH inside the server at the first formatter lookup; `~/.bun/bin` is no longer appended.
 - No compile cache, no signal handlers, no runtime name in the startup line.
+- Fixed in the code-review round of the migration PR, each reproduced against the build before the fix and covered by a test:
+  - a landed `.prettierignore` write re-reads the ignore state of the file's own directory, not of the writer's base (a session rooted above wrote `pkg/.prettierignore`, a session rooted in `pkg` kept formatting the ignored file);
+  - a CLI formatter is spawned in the nearest existing directory (a Write into a directory it creates made the spawn fail, so the file landed unformatted; seen with rustfmt, which runs in the file's directory);
+  - the JSON/YAML printWidth guard no longer overrides a width prettier itself resolved (an `.editorconfig` section such as `[**/*.json]`, which the own resolver does not match);
+  - the cwd is normalised with `path.resolve` (with a trailing separator the config walks bounded by the base ran to the filesystem root);
+  - the dprint gate counts an enabled `dprint@<marketplace>` although another marketplace's copy is disabled in the same settings file;
+  - the skill driver exits 2 for an unreadable list file instead of crashing with exit 1;
+  - the README no longer claims `end_of_line` is mapped for ruff and black;
+  - the notice of the no-op Edit says what the Edit tool answers ([hook-design.md](../design/hook-design.md), "Edit").
 - Everything else is the handler logic of the base, ported with its types made explicit.
 
-## Tests: 221 before, 205 after
+## Tests: 221 before, 210 after
 
 - Before: 107 bats cases and 101 `node:test` cases on the base branch (100 `test()` call sites, one inside a loop over two signals), plus the 13 cases of `dprint-gate.test.mjs` on `main`.
-- After: 205 vitest cases in 12 files, all against the built `plugin/`: `languages` 63, `prettier` 34, `registry` 23, `manifest` 17, `dprint-gate` 15, `editorconfig` 12, `handlers` 9, `mcp-server` 9, `skill` 8, `bundled-plugins` 7, `build` 5, `cli-stdin` 3.
+- After: 210 vitest cases in 12 files, all against the built `plugin/`: `languages` 66, `prettier` 35, `registry` 23, `manifest` 17, `dprint-gate` 16, `editorconfig` 12, `handlers` 9, `mcp-server` 9, `skill` 8, `bundled-plugins` 7, `build` 5, `cli-stdin` 3. 205 came with the port, 5 with the fixes of the code-review round.
 - Carried over one to one: the `node:test` files `prettier`, `registry`, `editorconfig`, `handlers`, `cli-stdin`, `bundled-plugins` (88 cases), and the 13 gate cases (the two that used `format_post` now go through `format_pre`).
 - The 59 cases of the 16 language bats files and `core.bats` are 60 cases in `languages.test.ts` (55 table rows, 5 own tests; the two-step `.prettierignore` case became two rows). Every formatted row now also checks the event name, the absent `permissionDecision`, the returned `file_path` and that the hook wrote nothing.
 - New (13): PATH append for `~/.local/bin` (2), `replace_all` as a string (1), the description rule (1), both protocol eras, error answers, notifications and cancellation (7), the config-name comparison with dprint and `CLAUDE_CONFIG_DIR` (2).
@@ -34,4 +43,5 @@ What changed when universal-format moved from kwitsch/claude-plugins (`plugins/u
 - Run 1, a plain repository: a Write of `const a={b:1}` to `a.ts` landed as `const a = { b: 1 };`, a Write of `{"x":1,"y":[1,2]}` to `main.json` as `{ "x": 1, "y": [1, 2] }`, an Edit of `a.ts` (`b: 1` to `b:   2,c:3`) as `const a = { b: 2, c: 3 };`. After `EnterWorktree` a Write of `let  z=1` to `wt.ts` inside the worktree landed as `let z = 1;`; both probes logged the worktree path as `cwd` for that call, and no `CwdChanged` event was logged.
 - Run 2, the dprint gate: see [dprint-gate.md](../design/dprint-gate.md), last bullet.
 - The debug log showed the server connected in the 2026-07-28 era, `format_pre` kept from the model, and the hook's `updatedInput` and `additionalContext` applied on each call.
+- Run 3 and 4, the Edit edge cases: the no-op Edit and an LF file under `endOfLine: "crlf"`, see [hook-design.md](../design/hook-design.md), "Edit".
 - Not exercised live: the CLI languages with real tools (stubs only in the tests; the real tools were last run on 2026-10-19 in the former repository), the skill, an interactive session, subagents, Windows.
