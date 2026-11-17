@@ -1,12 +1,11 @@
 {
-  "description": "SessionStart (no matcher: startup, resume, /clear and /compact alike, since /clear and /compact wipe context the same way) runs bin/session-start.mjs, which answers the CRITICAL AskUserQuestion interaction rule as a hook JSON object (additionalContext). Stop runs bin/stop.mjs, which blocks a main-session turn that ends in a plain-text question once and points back at that rule; subagents are never gated.",
   "hooks": {
     "SessionStart": [
       {
         "hooks": [
           {
             "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/session-start.mjs\"",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/session-start.mjs\"",
             "timeout": 5
           }
         ]
@@ -17,7 +16,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/stop.mjs\"",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/stop.mjs\"",
             "timeout": 5
           }
         ]

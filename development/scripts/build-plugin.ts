@@ -297,6 +297,8 @@ if ((pkg["pluginBuild"] as { bundleHooksLib?: unknown } | undefined)?.bundleHook
   compiled.set(libPath(), lib.code);
 }
 
+const compressScripts = (pkg["pluginBuild"] as { compressHookScripts?: unknown } | undefined)?.compressHookScripts === true;
+
 /** Minified output per file; nothing under plugin/ is touched until every step has succeeded. */
 const minified = new Map<string, string>();
 for (const [out, code] of compiled) {
@@ -307,7 +309,9 @@ for (const [out, code] of compiled) {
   // string literal into a template literal, and the static check reads only string literals (e.g. a
   // `$.command.register({ name })` its own command hook answers). The bundled lib is compressed and stripped of
   // whitespace, but not mangled: it still spells `$` and the engine calls the way the sources do.
-  const hooksModule = path.relative(PLUGIN, out).startsWith("hooks" + path.sep);
+  // `pluginBuild.compressHookScripts: true`: a hooks/*.mjs with a shebang is a command-hook script, not a mods module, and
+  // is minified like bin/ (compressed, mangled, no whitespace).
+  const hooksModule = path.relative(PLUGIN, out).startsWith("hooks" + path.sep) && !(compressScripts && code.startsWith("#!"));
   const isLib = out === libPath();
   const m = minifySync(out, code, {
     module: true,

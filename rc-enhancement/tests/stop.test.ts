@@ -1,11 +1,11 @@
-// Tests for the built plugin/bin/stop.mjs of rc-enhancement: the Stop hook that gates a bare plain-text question.
+// Tests for the built plugin/hooks/stop.mjs of rc-enhancement: the Stop hook that gates a bare plain-text question.
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { test } from "vitest";
 
-const script = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../plugin/bin/stop.mjs");
+const script = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../plugin/hooks/stop.mjs");
 
 /**
  * Runs the hook on a Stop payload.

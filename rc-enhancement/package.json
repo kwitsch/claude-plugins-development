@@ -17,5 +17,8 @@
     "build": "node ../development/scripts/build-plugin.ts",
     "test": "vitest run --config \"$(git rev-parse --show-toplevel)/vitest.config.mts\""
   },
-  "claudePlugin": {}
+  "claudePlugin": {},
+  "pluginBuild": {
+    "compressHookScripts": true
+  }
 }
