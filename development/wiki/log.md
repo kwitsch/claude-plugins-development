@@ -72,9 +72,10 @@ Source: user request (migration PR).
 - **Section:** `plugins/rc-enhancement/` (index, design page `design/interaction-gate.md`: mechanism, loop guard, origin and the live check of the former plugin), linked from `plugins/index.md`.
 - **Plugin:** `rc-enhancement/` 0.3.0 (sources in `src/hooks/`, tests through the built entries); the `SessionStart` rule text is a constant in `session-start.ts` because `plugin/` may hold no markdown beyond the README.
 
-## [2026-11-17] ingest | rc-enhancement 0.4.0: gate split, rule stays a hook
+## [2026-11-17] ingest | rc-enhancement 0.4.0: Stop command hook replaces the mods gate
 
-Source: user request (refactor), live probes with a throwaway mod on Claude Code 2.1.326.
+Source: user request (refactor), live probes on Claude Code 2.1.326.
 
-- **Facts:** `classic.SessionStart` and `classic.UserPromptSubmit` are bypassed by `cc-plugin-sec-default`; only a `prompt.submit` rewrite reaches the model (`plugins/rc-enhancement/design/interaction-gate.md`, "Rule delivery"; the bypass lists in `mods-engine-lifecycle.md` and `claude-code-hook-facts.md`).
-- **Plugin:** `rc-enhancement/` 0.4.0: `register.mjs` plus compressed `lib.mjs`; the `SessionStart` hook stays a command hook and answers JSON.
+- **Facts:** `classic.SessionStart` and `classic.UserPromptSubmit` are bypassed by `cc-plugin-sec-default` (bypass lists in `mods-engine-lifecycle.md` and `claude-code-hook-facts.md`); only a `prompt.submit` rewrite reaches a model from a mod. A `Stop` command hook is not touched by it: payload keys, block continues the turn in place, `stop_hook_active` on the next stop (`plugins/rc-enhancement/design/interaction-gate.md`).
+- **Decision (user, 2026-11-17):** the gate becomes a `Stop` command hook, main session only; the SessionStart rule stays and answers JSON.
+- **Plugin:** `rc-enhancement/` 0.4.0: two command hooks, no mods module.

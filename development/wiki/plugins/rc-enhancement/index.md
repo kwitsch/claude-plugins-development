@@ -5,4 +5,4 @@ What the wiki holds for rc-enhancement: no task list; pages for agent sessions (
 ## Pages
 
 - [CLAUDE.md](../../../../rc-enhancement/CLAUDE.md): the plugin's overview and rule list (loads with the plugin's files).
-- [interaction-gate.md](design/interaction-gate.md): how the gate works, why it re-prompts instead of blocking, the loop guard and where the plugin came from.
+- [interaction-gate.md](design/interaction-gate.md): how the Stop-hook gate works (main session only), why it is a command hook and not a mod, why the rule stays at session start, the mod channels that were probed and rejected, and where the plugin came from.
