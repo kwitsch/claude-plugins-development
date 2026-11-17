@@ -6,7 +6,7 @@
  * @remarks
  * Usage: `format-files.mjs <listfile>`; the list file holds one path per line, resolved against the cwd. Each file is
  * read, passed to `formatPre` as a Write would be, and the returned content written back. Fails open per file and
- * always exits 0 on a real run: the printed summary is the signal.
+ * always exits 0 on a real run (2 without a readable list file): the printed summary is the signal.
  *
  * @packageDocumentation
  */
@@ -23,7 +23,14 @@ if (!listFile) {
 }
 
 const cwd = process.cwd();
-const paths = readFileSync(listFile, "utf8").split("\n").map((line) => line.trim()).filter((line) => line.length > 0);
+let list = "";
+try {
+  list = readFileSync(listFile, "utf8");
+} catch (err) {
+  console.error(`cannot read the list file ${listFile}: ${err instanceof Error ? err.message : String(err)}`);
+  process.exit(2);
+}
+const paths = list.split("\n").map((line) => line.trim()).filter((line) => line.length > 0);
 
 /** Files per outcome. */
 const count = { formatted: 0, unchanged: 0, skipped: 0 };

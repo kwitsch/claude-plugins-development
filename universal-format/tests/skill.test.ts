@@ -80,6 +80,8 @@ test("format-files.mjs skips an unsupported extension, reports an already format
   assert.equal(lines[3], "universal-format: 0 formatted, 1 unchanged, 2 skipped (3 total)");
 });
 
-test("format-files.mjs exits 2 with no listfile argument", () => {
-  assert.equal(drive(sandbox(), []).status, 2);
+test("format-files.mjs exits 2 with no listfile argument and with an unreadable one", () => {
+  const s = sandbox();
+  assert.equal(drive(s, []).status, 2);
+  assert.equal(spawnSync(path.join(s.bin, "node"), [DRIVER, path.join(s.root, "no-such-list")], { cwd: s.proj, env: { PATH: s.bin, HOME: s.home } }).status, 2);
 });
