@@ -79,3 +79,9 @@ Source: user request (refactor), live probes on Claude Code 2.1.326.
 - **Facts:** `classic.SessionStart` and `classic.UserPromptSubmit` are bypassed by `cc-plugin-sec-default` (bypass lists in `mods-engine-lifecycle.md` and `claude-code-hook-facts.md`); only a `prompt.submit` rewrite reaches a model from a mod. A `Stop` command hook is not touched by it: payload keys, block continues the turn in place, `stop_hook_active` on the next stop (`plugins/rc-enhancement/design/interaction-gate.md`).
 - **Decision (user, 2026-11-17):** the gate becomes a `Stop` command hook, main session only; the SessionStart rule stays and answers JSON.
 - **Plugin:** `rc-enhancement/` 0.4.0: two command hooks, no mods module.
+
+## [2026-11-17] ingest | Rule for the package.json description
+
+Source: user decision (rc-enhancement 0.4.0).
+
+- **Rule:** `.claude/rules/plugin-description.md` (loads with `*/package.json`): the description is one short end-user sentence on what the plugin gives, without implementation, configuration or requirements; applies to every plugin from its next change, no mass rewrite.
