@@ -8,4 +8,5 @@ One section per plugin, each with its own `index.md` that links to everything th
 - [jev-api](jev-api/index.md): the System One question tools; the API's limits, latency and error bodies are in its rules [oversized-state.md](../../../jev-api/.claude/rules/oversized-state.md), [hooks-source.md](../../../jev-api/.claude/rules/hooks-source.md) and [http-mcp-server.md](../../../jev-api/.claude/rules/http-mcp-server.md). Task list, evaluations, Haiku calibration.
 - [jev-solver](jev-solver/index.md): the task-solving skill and its phases.
 - [jevfort](jevfort/index.md): effort estimation, taking steps, cache countdown and compaction; standing user decisions are in its `CLAUDE.md`. Task list, evaluations.
+- [rc-enhancement](rc-enhancement/index.md): the AskUserQuestion interaction contract (session rule hook plus the turn-end gate); design page with the gate's mechanism and origin.
 - [universal-lint](universal-lint/index.md): lint hooks. Its rule [lint-file.md](../../../universal-lint/.claude/rules/lint-file.md) holds the constraints; the reasons are in the design pages. Task list, evaluations, design pages.

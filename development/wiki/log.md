@@ -64,3 +64,10 @@ Source: user request.
 ## [2026-11-16] lint | Skills that use the wiki follow the new layout
 
 Checked every skill that reads or writes the wiki. Updated: `perf-worklist` (open tasks = section Remaining, TASKS.md entry format, evaluation sections and name, plugin `index.md` Pages, how-to-work-a-task, wiki-check in jobs and analysis), `live-verify` (evaluation path and sections), `bughunt` (where plugin-specific findings go, docs audit scope), `wiki` (plugin index updates, extended lint description), `scaffold-plugin` (section and template, earlier). No change needed: `convert-plugin-ts`, `split-hooks-lib`, `refactor-plugin`.
+
+## [2026-11-17] ingest | rc-enhancement migrated into this repository
+
+Source: user request (migration PR).
+
+- **Section:** `plugins/rc-enhancement/` (index, design page `design/interaction-gate.md`: mechanism, loop guard, origin and the live check of the former plugin), linked from `plugins/index.md`.
+- **Plugin:** `rc-enhancement/` 0.3.0 (sources in `src/hooks/`, tests through the built entries); the `SessionStart` rule text is a constant in `session-start.ts` because `plugin/` may hold no markdown beyond the README.
