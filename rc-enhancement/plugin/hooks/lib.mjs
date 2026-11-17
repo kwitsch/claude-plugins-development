@@ -1,0 +1,2 @@
+const GATE_REASON=`Interaction rule violation: the final response ends with a plain-text question to the user. Follow the CRITICAL RULE from the session start (how to interact with the user): route the question through the AskUserQuestion tool instead — no exceptions, not even a casual yes/no offer.`,isBareQuestion=answer=>{let lines=answer.replace(/```[\s\S]*?```/g,``).split(`
+`).map(l=>l.trim()).filter(Boolean);return/\?\s*$/.test(lines[lines.length-1]??``)};export{};export{GATE_REASON,isBareQuestion};

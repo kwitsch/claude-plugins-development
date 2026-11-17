@@ -1,9 +1,5 @@
 #!/usr/bin/env node
-// SessionStart command hook: prints the CRITICAL interaction rule, which Claude Code adds to the session as context
-// (plain stdout reaches the model on SessionStart). The interaction gate in register.ts points back at this text.
-
-/** The rule as the session sees it. */
-const RULE = `# CRITICAL RULE — how to interact with the user
+process.stdout.write(JSON.stringify({hookSpecificOutput:{hookEventName:`SessionStart`,additionalContext:`# CRITICAL RULE — how to interact with the user
 
 **ALL user interaction ALWAYS goes through the \`AskUserQuestion\` tool. A turn must NEVER end with output text that ends in a question mark. Ask every question through \`AskUserQuestion\`, never as plain text.**
 
@@ -32,6 +28,4 @@ This rule exists so the session can be driven remotely: the user must always be 
 **Use \`AskUserQuestion\` for every question. Never end a turn on a plain-text
 question mark. For free-text, offer an Abort/Cancel option and route the
 answer through the tool's Other option.**
-`;
-
-process.stdout.write(RULE);
+`}}));

@@ -1,78 +1,19 @@
 /**
- * Claude Code function-hooks module of rc-enhancement: the interaction gate. A main-loop turn whose answer ends in a
- * plain-text question gets one plugin prompt telling Claude to redo it through `AskUserQuestion`, pointing back at the
- * CRITICAL RULE that `session-start.ts` injects.
+ * Claude Code function-hooks module of rc-enhancement: the interaction gate. A main-loop turn whose answer ends
+ * in a plain-text question gets one plugin prompt telling Claude to redo it through `AskUserQuestion`, pointing back at
+ * the CRITICAL RULE that the SessionStart hook (`bin/session-start.ts`) injects.
  *
  * @remarks
- * EARLY ACCESS API. No engine type import: the used `$` members and events are typed structurally below. Only this
- * file is listed in `hooks.json` and nothing is bundled, so the build keeps it unmangled with its whitespace, as the
- * engine's static check wants `$`/`on` spelled as such and every hook a named function literal.
+ * EARLY ACCESS API. No engine type import: the used `$` members and events are typed structurally in `types.ts`. Only
+ * this file is listed in `hooks.json`; `pluginBuild.bundleHooksLib` keeps it unmangled and with its whitespace, as the
+ * engine's static check wants `$`/`on` spelled as such and every hook a named function literal, and bundles its
+ * siblings (`types`, `gate`) into one compressed `./lib.mjs`.
  *
  * @packageDocumentation
  */
 
-/** The prompt the gate submits. It points at the session-start rule, and the turn it starts is recognized by this text. */
-const GATE_REASON = "Interaction rule violation: the final response ends with a plain-text question to the user. "
-  + "Follow the CRITICAL RULE from the session start (how to interact with the user): "
-  + "route the question through the AskUserQuestion tool instead — no exceptions, not even a casual yes/no offer.";
-
-/** The part of the engine interface `$` this module uses. */
-type Engine = {
-  /** Prompts a plugin sends on its own. */
-  prompt: {
-    /** Queues a framed plugin prompt that starts a new turn once the session is idle; resolves when that turn starts. */
-    submit(input: { text: string }): Promise<unknown>;
-  };
-};
-
-/** `turn.start` input. */
-type TurnStart = {
-  /** The prompt that starts the turn. */
-  text: string;
-  /** The turn's id. */
-  turnId: string;
-  /** Set for a subagent's turn. */
-  agentId?: string;
-};
-
-/** `turn.complete` input. */
-type TurnComplete = {
-  /** The turn's final visible text. */
-  answer: string;
-  /** The turn's id. */
-  turnId: string;
-  /** How the turn ended. */
-  reason: "answer" | "aborted" | "error";
-  /** Set for a subagent's turn. */
-  agentId?: string;
-};
-
-/** The hook chain's continuation. */
-type Next<E> = (e: E) => Promise<unknown>;
-
-/** The `on` the engine passes to `register`. */
-type On = {
-  /** Hooks `turn.start`. */
-  (event: "turn.start", hook: ($: Engine, e: TurnStart, next: Next<TurnStart>) => Promise<unknown>): void;
-  /** Hooks `turn.complete`. */
-  (event: "turn.complete", hook: ($: Engine, e: TurnComplete, next: Next<TurnComplete>) => Promise<unknown>): void;
-};
-
-/**
- * True when the last non-empty line outside fenced code blocks ends in `?`. A rhetorical trailing `?` is an accepted
- * false positive.
- *
- * @param answer - The turn's final visible text.
- * @returns Whether the answer ends in a bare question.
- */
-const isBareQuestion = (answer: string): boolean => {
-  const lines = answer
-    .replace(/```[\s\S]*?```/g, "")
-    .split("\n")
-    .map((l) => l.trim())
-    .filter(Boolean);
-  return /\?\s*$/.test(lines[lines.length - 1] ?? "");
-};
+import { GATE_REASON, isBareQuestion } from "./gate.js";
+import type { On } from "./types.js";
 
 /**
  * Module entry point called by the engine.

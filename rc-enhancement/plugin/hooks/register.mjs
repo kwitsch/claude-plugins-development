@@ -1,8 +1,4 @@
-const GATE_REASON = "Interaction rule violation: the final response ends with a plain-text question to the user. " + "Follow the CRITICAL RULE from the session start (how to interact with the user): " + "route the question through the AskUserQuestion tool instead — no exceptions, not even a casual yes/no offer.";
-const isBareQuestion = (answer) => {
-	const lines = answer.replace(/```[\s\S]*?```/g, "").split("\n").map((l) => l.trim()).filter(Boolean);
-	return /\?\s*$/.test(lines[lines.length - 1] ?? "");
-};
+import { GATE_REASON, isBareQuestion } from "./lib.mjs";
 export const register = (on) => {
 	let gateTurnId;
 	let gatePending = false;

@@ -6,13 +6,17 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { test } from "vitest";
 
-const hooksDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../plugin/hooks");
+const pluginDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../plugin");
+const hooksDir = path.join(pluginDir, "hooks");
+const script = path.join(pluginDir, "bin/session-start.mjs");
 
-test("prints the CRITICAL RULE with every required token and exits 0", () => {
-  const r = spawnSync("node", [path.join(hooksDir, "session-start.mjs")], { input: "{}", encoding: "utf8" });
+test("answers a SessionStart JSON object whose additionalContext is the CRITICAL RULE with every required token, exit 0", () => {
+  const r = spawnSync("node", [script], { input: "{}", encoding: "utf8" });
   assert.equal(r.status, 0, r.stderr);
+  const out = JSON.parse(r.stdout) as { hookSpecificOutput: { hookEventName: string; additionalContext: string } };
+  assert.equal(out.hookSpecificOutput.hookEventName, "SessionStart");
   for (const token of ["# CRITICAL RULE", "AskUserQuestion", "question mark", "Other", "Abort/Cancel"]) {
-    assert.ok(r.stdout.includes(token), `missing: ${token}`);
+    assert.ok(out.hookSpecificOutput.additionalContext.includes(token), `missing: ${token}`);
   }
 });
 
@@ -28,6 +32,6 @@ test("hooks.json: one matcher-less SessionStart command hook on the built script
   assert.equal(group?.matcher, undefined);
   assert.equal(group?.hooks.length, 1);
   assert.equal(group?.hooks[0]?.type, "command");
-  assert.equal(group?.hooks[0]?.command, "\"${CLAUDE_PLUGIN_ROOT}/hooks/session-start.mjs\"");
-  assert.ok((statSync(path.join(hooksDir, "session-start.mjs")).mode & 0o111) !== 0, "session-start.mjs is not executable");
+  assert.equal(group?.hooks[0]?.command, "\"${CLAUDE_PLUGIN_ROOT}/bin/session-start.mjs\"");
+  assert.ok((statSync(script).mode & 0o111) !== 0, "session-start.mjs is not executable");
 });
