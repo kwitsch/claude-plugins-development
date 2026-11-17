@@ -98,3 +98,12 @@ Source: live probe plugin on Claude Code 2.1.326 (throwaway, scratchpad), user d
 Source: audit of the server and `hooks.json`, live check on Claude Code 2.1.326 (user request).
 
 - **Page:** `development/wiki/plugins/dprint/notes/hook-only-tools-audit.md`: all nine tools are used by hooks only and carry `ui.visibility: ["app"]`; hooks still call them, the model finds and calls none. No code change.
+
+## [2026-11-17] ingest | universal-format 0.19.0: migrated into this repository
+
+Source: migration PR (user decisions of 2026-11-17), the 27 KB `src/universal-format-mcp/CLAUDE.md` and the plugin `CLAUDE.md` of kwitsch/claude-plugins, live probes on Claude Code 2.1.326.
+
+- **Decision:** `development/wiki/decisions/repo-tooling.md`, "Vendored third-party bundles": `plugin/**/vendor/*.mjs` and `pluginBuild.assets`, rolldown, what was rejected. Constraint in `.claude/rules/plugin-build-output.md` and the root `CLAUDE.md`.
+- **Section:** `plugins/universal-format/` (index, eight design pages, `notes/migration.md` with the test counts and the live check), linked from `plugins/index.md`. The constraints are in `universal-format/CLAUDE.md` and `universal-format/.claude/rules/` (`hooks-and-server.md`, `vendor-build.md`, `skill-driver.md`, `tests.md`).
+- **Facts (live 2.1.326):** the hook payload `cwd` and the `${cwd}` placeholder of an `mcp_tool` hook are the worktree after `EnterWorktree`, without a `CwdChanged` event (`design/scope-and-base.md`); an `mcp_tool` `input` template substitutes text, an absent field becomes `""` and a boolean its string form (`design/hook-design.md`).
+- **Measured:** start and format times of the code-split bundle against the former single file (`design/vendor-build.md`).

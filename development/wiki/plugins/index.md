@@ -9,4 +9,5 @@ One section per plugin, each with its own `index.md` that links to everything th
 - [jev-solver](jev-solver/index.md): the task-solving skill and its phases.
 - [jevfort](jevfort/index.md): effort estimation, taking steps, cache countdown and compaction; standing user decisions are in its `CLAUDE.md`. Task list, evaluations.
 - [rc-enhancement](rc-enhancement/index.md): the AskUserQuestion interaction contract (SessionStart rule hook plus a Stop-hook gate, both command hooks); design page with the gate's mechanism, costs and origin.
+- [universal-format](universal-format/index.md): formatting before every Write and Edit through an MCP server with a vendored prettier. Its rules hold the constraints ([hooks-and-server.md](../../../universal-format/.claude/rules/hooks-and-server.md), [vendor-build.md](../../../universal-format/.claude/rules/vendor-build.md)); design pages, the migration note with the live check.
 - [universal-lint](universal-lint/index.md): lint hooks. Its rule [lint-file.md](../../../universal-lint/.claude/rules/lint-file.md) holds the constraints; the reasons are in the design pages. Task list, evaluations, design pages.
