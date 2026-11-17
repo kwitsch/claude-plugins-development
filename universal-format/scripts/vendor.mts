@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 // Usage: node scripts/vendor.mts  (from universal-format/, after build-plugin.ts: its stale-.mjs cleanup removes the chunks)
 // Bundles the third-party runtime code (prettier and its java, php and shell plugins) into plugin/mcp/vendor/*.mjs
-// with rolldown and copies the three wasm files the plugins load at runtime. Everything is written to a temp
-// directory first: a failed bundle leaves the previous output in place.
+// with rolldown and copies the three wasm files the plugins load at runtime. The bundle is written to a temp directory
+// first, so plugin/mcp/vendor/ never holds half a bundle; after a failed bundle the chunks are missing all the same
+// (build-plugin.ts removed them): restore them from git or fix the build and run it again.
 import { chmodSync, copyFileSync, mkdirSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
