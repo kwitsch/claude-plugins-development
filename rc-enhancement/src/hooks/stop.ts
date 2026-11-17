@@ -4,8 +4,9 @@
 // `agent_id` (and their stops are SubagentStop events, which are not wired).
 
 /** The `reason` Claude Code hands back to the model; short, it names the rule instead of repeating it. */
-const REASON = "Interaction rule violation: the final response ends with a plain-text question to the user. "
-  + "Redo it through the AskUserQuestion tool (the CRITICAL RULE from the session start), no exceptions, not even a casual yes/no offer.";
+const REASON = "Interaction rule violation: the final response closes with a question mark. "
+  + "A question to the user goes through the AskUserQuestion tool; a question you answer yourself becomes a heading line "
+  + "ending in a colon plus a bullet list (the CRITICAL RULE from the session start, Output format). Redo the answer, no exceptions.";
 
 /** The part of the Stop payload this hook reads. */
 type StopInput = {

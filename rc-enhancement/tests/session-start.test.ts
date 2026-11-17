@@ -15,7 +15,7 @@ test("answers a SessionStart JSON object whose additionalContext is the CRITICAL
   assert.equal(r.status, 0, r.stderr);
   const out = JSON.parse(r.stdout) as { hookSpecificOutput: { hookEventName: string; additionalContext: string } };
   assert.equal(out.hookSpecificOutput.hookEventName, "SessionStart");
-  for (const token of ["# CRITICAL RULE", "AskUserQuestion", "question mark", "Other", "Abort/Cancel"]) {
+  for (const token of ["# CRITICAL RULE", "AskUserQuestion", "question mark", "Other", "Abort/Cancel", "Output format", "bullet list"]) {
     assert.ok(out.hookSpecificOutput.additionalContext.includes(token), `missing: ${token}`);
   }
 });

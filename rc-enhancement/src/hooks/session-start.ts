@@ -27,6 +27,22 @@ This rule exists so the session can be driven remotely: the user must always be 
    tool's **Other** option — never by asking the user to type into a
    plain-text reply.
 
+## Output format
+
+Never state a question in your answer and then answer it yourself ("Why is
+that? Because ..."). Write a short heading line ending in a colon, followed by
+a bullet list, instead:
+
+\`\`\`
+Reasons for the change:
+
+* reason 1
+* reason 2
+\`\`\`
+
+A real question to the user is never part of an answer: it goes through
+\`AskUserQuestion\` (rule above).
+
 ## Restated
 
 **Use \`AskUserQuestion\` for every question. Never end a turn on a plain-text

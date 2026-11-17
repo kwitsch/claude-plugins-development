@@ -24,6 +24,7 @@ test("a main-session answer whose closing paragraph asks a question is blocked w
   assert.equal(out?.decision, "block");
   assert.ok(out?.reason?.includes("AskUserQuestion"));
   assert.ok(out?.reason?.includes("CRITICAL RULE"));
+  assert.ok(out?.reason?.includes("bullet list"));
 });
 
 const asked = [
