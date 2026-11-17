@@ -92,3 +92,9 @@ Source: live probe plugin on Claude Code 2.1.326 (throwaway, scratchpad), user d
 
 - **Facts:** `development/wiki/facts/mods-engine-io.md` (`## $.mcp`): a killed stdio server is respawned by the next `$.mcp.call`; a server exiting at start is cached as failed for 15 min across sessions; a settings `env` written mid-session reaches neither `$.env.get` nor a respawned server.
 - **Decision:** `development/wiki/plugins/jev-api/tasks/F22-http-through-mcp-server.md` (Constraints, superseded 2026-11-17).
+
+## [2026-11-17] ingest | dprint MCP tools audit: hook-only and hidden
+
+Source: audit of the server and `hooks.json`, live check on Claude Code 2.1.326 (user request).
+
+- **Page:** `development/wiki/plugins/dprint/notes/hook-only-tools-audit.md`: all nine tools are used by hooks only and carry `ui.visibility: ["app"]`; hooks still call them, the model finds and calls none. No code change.
