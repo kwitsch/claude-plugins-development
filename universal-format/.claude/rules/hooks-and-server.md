@@ -30,7 +30,7 @@ Design: [hook-design.md](../../../development/wiki/plugins/universal-format/desi
 ## Scope: `cwd` is a hint, `resolveBase` is the anchor
 
 - No outside-cwd guard and no project-membership gate: a file anywhere is formatted, against the base `resolveBase` picks (the cwd when it contains the file, else the file's git root below `$HOME`, else its own directory).
-- The payload's `cwd` is used as it is; no cwd tracking, no per-agent override.
+- The payload's `cwd` is used as it is, only normalised with `path.resolve`; no cwd tracking, no per-agent override.
 - `relativeIfContains` stays `path.relative`-based, never a `startsWith` prefix test. `.git` is existence-checked (it is a file in a worktree).
 - `isExcludedPath` gets the base-relative path, never the absolute one; the absolute check for `.claude/worktrees` and `.claude/agent-memory` applies only when the base is not the cwd. No blanket `.claude/` exclusion.
 
@@ -57,7 +57,7 @@ Design: [bundled-prettier.md](../../../development/wiki/plugins/universal-format
 
 ## Caches
 
-- prettier's config cache is never cleared per format. A Write/Edit of a config-like file leaves a pending refresh with the file's stamp; the first later format that finds the stamp changed clears the config caches and, for a `.prettierignore`, re-reads the ignore state of its base.
+- prettier's config cache is never cleared per format. A Write/Edit of a config-like file leaves a pending refresh with the file's stamp; the first later format that finds the stamp changed clears the config caches and, for a `.prettierignore`, re-reads the ignore state of the file's own directory (the only base it governs).
 - The pending note is taken before the language guard.
 - A config or ignore file changed outside Write/Edit is not picked up until the server restarts (accepted, tested).
 
@@ -69,5 +69,6 @@ Design: [caches.md](../../../development/wiki/plugins/universal-format/design/ca
 - Spawned asynchronously, never `spawnSync`; the inner timeout stays below the hook's `timeout`.
 - `~/.local/bin` is appended to the server's PATH at the first lookup (appended: the inherited PATH wins); the PATH answer per tool is cached for the life of the process.
 - An Edit formats the whole merged file and hands the Edit tool only the changed run of whole lines (`shrinkSwap`); a CRLF file is handled in LF throughout.
+- A tool is spawned in the nearest existing directory: a Write may create the file's directory only when it lands.
 
 Design: [cli-formatters.md](../../../development/wiki/plugins/universal-format/design/cli-formatters.md), [hook-design.md](../../../development/wiki/plugins/universal-format/design/hook-design.md).

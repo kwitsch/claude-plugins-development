@@ -27,7 +27,7 @@ Which files `format_pre` formats, which directory each project-scoped lookup anc
 ## The payload `cwd` follows the session
 
 - Claude Code reports the worktree as `cwd` on every hook call after `EnterWorktree`, in the command-hook payload and in the `${cwd}` placeholder of an `mcp_tool` hook alike; no `CwdChanged` event fires for it (live 2.1.326: a headless session with this plugin and a throwaway probe plugin logging both; a Write inside the worktree was formatted and its notice named the relative path; first seen on 2.1.303 with an instrumented server).
-- So `cwd` is used as it is. Do not add cwd tracking or a per-agent override.
+- So `cwd` is used as it is, only passed through `path.resolve`: a trailing separator would never equal a walked directory, and the walks bounded by the base would run to the filesystem root. Do not add cwd tracking or a per-agent override.
 
 ## History
 

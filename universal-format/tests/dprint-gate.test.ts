@@ -108,6 +108,12 @@ test("dprint gate: no dprint@ entry in enabledPlugins at any scope -> still form
   assertFormatted(await preWrite(server, s.proj), "no dprint@ key anywhere means dprint is not active");
 });
 
+test("dprint gate: an enabled dprint of one marketplace counts although another marketplace's is disabled in the same file", async () => {
+  const { s, server } = start({ enabledPlugins: { "dprint@dev": false, "dprint@kwitsch-plugins": true } });
+  writeDprintConfig(s.proj);
+  assert.deepEqual(await preWrite(server, s.proj), {});
+});
+
 test("dprint gate: the most specific settings file wins (local > project > user)", async () => {
   const { s, server } = start(ENABLED);
   writeDprintConfig(s.proj);

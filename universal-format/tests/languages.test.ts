@@ -188,6 +188,14 @@ for (const c of CASES) {
   });
 }
 
+// the table creates the file's directory; a Write creates it only when it lands, after the hook
+test("rust: a file in a directory that does not exist yet is formatted, rustfmt runs in the nearest existing one", async () => {
+  const s = sandbox();
+  s.stub("rustfmt", ["printf '%s\\n' \"$PWD\" >> \"$RECORD\"", "cat >/dev/null", "printf 'reformatted\\n'"]);
+  assert.equal((await s.server().write(path.join(s.proj, "new", "deep", "a.rs"), "fn main(){}")).hookSpecificOutput.updatedInput.content, "reformatted\n");
+  assert.equal(s.recorded(), `${s.proj}\n`);
+});
+
 test("go: gofmt runs when only gofmt is on PATH; goimports wins when both are and gets the file via -srcdir", async () => {
   const s = sandbox();
   const file = path.join(s.proj, "a.go");
@@ -238,6 +246,14 @@ test("Edit with replace_all as the string \"true\" (the hooks.json template subs
   }
   // without replace_all the old_string is not unique: the original Edit proceeds and reports it
   for (const all of ["false", false, ""]) assert.deepEqual(await server.call(args(all)), {});
+});
+
+test("a cwd with a trailing separator still bounds the config walks: an .editorconfig above the project is not mapped", async () => {
+  const s = sandbox();
+  writeFileSync(path.join(s.root, ".editorconfig"), "[*]\nindent_style = tab\n");
+  s.recStub("rustfmt");
+  assert.equal((await s.server().write(path.join(s.proj, "a.rs"), "fn main(){}", s.proj + path.sep)).hookSpecificOutput.updatedInput.content, "reformatted-by-rustfmt\n");
+  assert.equal(s.recorded(), "rustfmt \n");
 });
 
 test("a path outside the cwd is formatted against its own project (CLI language), named absolutely in the notice", async () => {

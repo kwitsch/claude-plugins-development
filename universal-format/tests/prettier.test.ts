@@ -251,7 +251,7 @@ test("format_pre Edit: an edit prettier formats straight back becomes a no-op sw
   writeFileSync(fp, "{ \"a\": 1 }\n");
   const res = await formatPre({ cwd, tool_name: "Edit", tool_input: { file_path: fp, old_string: "\"a\": 1", new_string: "\"a\":1" } });
   assert.deepEqual(res.hookSpecificOutput.updatedInput, { file_path: fp, old_string: "\"a\": 1", new_string: "\"a\": 1", replace_all: false });
-  assert.match(res.hookSpecificOutput.additionalContext, /nothing to change/);
+  assert.match(res.hookSpecificOutput.additionalContext, /nothing to change.*Edit tool will refuse it.*Do not retry/);
   assert.ok(!("permissionDecision" in res.hookSpecificOutput));
 });
 
@@ -384,6 +384,20 @@ test("ignore cache: a .prettierignore written through the hook takes effect once
   writeFileSync(ign, "late.json\n"); // the Write tool lands it
   const after = await formatPre({ cwd, tool_name: "Write", tool_input: { file_path: fp, content: "{\"a\":1}" } });
   assert.deepEqual(after, {}, "the landed .prettierignore must be re-read before the next format");
+});
+
+// An ignore file governs its own directory, whatever the base of the write that created it: a session
+// rooted above writes `pkg/.prettierignore`, a session rooted in `pkg` must see it.
+test("ignore cache: a .prettierignore written from a parent cwd refreshes the base it lies in", async () => {
+  const cwd = tmp("uf-ign-nested-");
+  const pkg = path.join(cwd, "pkg");
+  mkdirSync(pkg);
+  const fp = path.join(pkg, "late.json");
+  assert.equal(preContent(await formatPre({ cwd: pkg, tool_name: "Write", tool_input: { file_path: fp, content: "{\"a\":1}" } })), "{ \"a\": 1 }\n");
+  const ign = path.join(pkg, ".prettierignore");
+  await formatPre({ cwd, tool_name: "Write", tool_input: { file_path: ign, content: "late.json\n" } });
+  writeFileSync(ign, "late.json\n"); // the Write tool lands it
+  assert.deepEqual(await formatPre({ cwd: pkg, tool_name: "Write", tool_input: { file_path: fp, content: "{\"a\":1}" } }), {});
 });
 
 // cwd is a HINT, not a gate: a file written outside the session cwd is formatted against its OWN

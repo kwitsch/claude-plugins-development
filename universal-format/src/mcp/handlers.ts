@@ -152,8 +152,9 @@ function isDprintPluginEnabled(cwd: string): boolean {
     try {
       const enabled = (JSON.parse(readFileSync(file, "utf8")) as { enabledPlugins?: unknown } | null)?.enabledPlugins;
       if (typeof enabled !== "object" || enabled === null) continue;
-      const entry = Object.entries(enabled).find(([k]) => k.startsWith("dprint@"));
-      if (entry !== undefined) return entry[1] === true;
+      // every marketplace's dprint counts: a disabled copy from one must not hide the enabled one from another
+      const entries = Object.entries(enabled).filter(([k]) => k.startsWith("dprint@"));
+      if (entries.length > 0) return entries.some(([, v]) => v === true);
     } catch {
       // missing or malformed: next scope
     }
@@ -229,7 +230,8 @@ type Target = {
  * @returns The target, or null when there is no usable path or the path is excluded.
  */
 function resolveTarget(args: FormatPreInput): Target | null {
-  const cwd = typeof args.cwd === "string" ? args.cwd : "";
+  // resolved: a trailing separator would never equal a walked directory, so no bounded walk would end at the base
+  const cwd = typeof args.cwd === "string" && args.cwd ? path.resolve(args.cwd) : "";
   const fp = args.tool_input?.file_path;
   if (typeof fp !== "string" || !fp) return null;
   if (!cwd && !path.isAbsolute(fp)) return null; // nothing to resolve a relative path against
@@ -336,18 +338,18 @@ function fileStamp(file: string): string {
  * Config files a Write/Edit is about to land on, by path, with the stamp they had when the hook ran. The hook runs
  * before the write: clearing the caches then would cache the old content again.
  */
-const pendingRefreshes = new Map<string, { base: string; stamp: string }>();
+const pendingRefreshes = new Map<string, string>();
 
 /**
  * Clears the config caches for every pending config write that has landed (its stamp changed) and re-reads the ignore
- * state of an ignore file's base. A write that never lands keeps its entry, at one `stat` per format.
+ * state of an ignore file's directory (the only base it governs). A write that never lands keeps its entry, at one `stat` per format.
  */
 function refreshLandedConfigWrites(): void {
-  for (const [file, pending] of pendingRefreshes) {
-    if (fileStamp(file) === pending.stamp) continue;
+  for (const [file, stamp] of pendingRefreshes) {
+    if (fileStamp(file) === stamp) continue;
     pendingRefreshes.delete(file);
     clearPrettierConfigCaches();
-    if (PRETTIER_IGNORE_BASENAMES.has(path.basename(file))) primePrettierIgnoreCache(pending.base);
+    if (PRETTIER_IGNORE_BASENAMES.has(path.basename(file))) primePrettierIgnoreCache(path.dirname(file));
   }
 }
 
@@ -404,7 +406,13 @@ async function formatContent(src: string, resolved: string, base: string, lang: 
   if (!Object.hasOwn(REGISTRY, lang)) return null;
   const selection = selectFormatter(REGISTRY[lang].chain, resolved, base);
   if (!selection) return null;
-  const cwd = selection.tool.spawnCwd === "fileDir" ? path.dirname(resolved) : base;
+  // a Write may create the file's directory: spawn in the nearest existing one (a missing cwd fails the spawn)
+  let cwd = base;
+  walkToRoot(selection.tool.spawnCwd === "fileDir" ? path.dirname(resolved) : base, (dir) => {
+    if (!existsSync(dir)) return false;
+    cwd = dir;
+    return true;
+  });
   const formatted = await runStdinFormatter(selection.tool, selection.argv, cwd, src, signal);
   return formatted === null ? null : { formatted, tool: selection.tool.name };
 }
@@ -427,7 +435,7 @@ export async function formatPre(args: FormatPreInput, signal?: AbortSignal): Pro
 
     // before the language guard (most of these names have no extension) and before the dprint gate (a config written
     // while dprint formats the project counts once dprint is disabled)
-    if (CACHE_INVALIDATING_BASENAMES.has(path.basename(resolved))) pendingRefreshes.set(resolved, { base, stamp: fileStamp(resolved) });
+    if (CACHE_INVALIDATING_BASENAMES.has(path.basename(resolved))) pendingRefreshes.set(resolved, fileStamp(resolved));
     if (target.dprint) return {};
 
     const ext = path.extname(resolved).toLowerCase();
@@ -470,12 +478,13 @@ export async function formatPre(args: FormatPreInput, signal?: AbortSignal): Pro
       if (formatted === merged) return {};
       const swap = shrinkSwap(current, formatted);
       if (swap === null) {
-        // the formatter turns the edit back into the file on disk: a no-op Edit keeps the file formatted, the raw edit would not
+        // the formatter turns the edit back into the file on disk: a no-op Edit (which the Edit tool refuses) keeps the
+        // file formatted, the raw edit would not
         return {
           hookSpecificOutput: {
             hookEventName: "PreToolUse",
             updatedInput: { file_path: fp, old_string: oldStr, new_string: oldStr, replace_all: replaceAll },
-            additionalContext: `universal-format: ${result.tool} formats this edit straight back to the current content of ${display}, so there is nothing to change; the Edit was turned into a no-op and the file is unchanged.`,
+            additionalContext: `universal-format: ${result.tool} formats this edit straight back to the current content of ${display}, so there is nothing to change. The Edit tool will refuse it with "No changes to make: old_string and new_string are exactly the same" - that is expected, not a fault: the file is unchanged and already formatted. Do not retry this edit.`,
           },
         };
       }
