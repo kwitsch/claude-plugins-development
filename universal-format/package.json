@@ -1,0 +1,35 @@
+{
+  "name": "universal-format",
+  "version": "0.19.0",
+  "private": true,
+  "description": "Formats files in 17 languages (JS/TS, JSON, YAML, Markdown, CSS, HTML, Shell, Java, PHP, Kotlin, Python, Go, Rust and more) before every Write and Edit lands.",
+  "keywords": [
+    "formatter",
+    "prettier",
+    "hooks"
+  ],
+  "author": {
+    "name": "Kwitsch"
+  },
+  "type": "module",
+  "scripts": {
+    "build": "node ../development/scripts/build-plugin.ts && node scripts/vendor.mts",
+    "test": "vitest run --config \"$(git rev-parse --show-toplevel)/vitest.config.mts\""
+  },
+  "devDependencies": {
+    "@modelcontextprotocol/server": "2.4.0",
+    "@prettier/plugin-php": "0.25.0",
+    "prettier": "3.9.10",
+    "prettier-plugin-java": "2.11.0",
+    "prettier-plugin-sh": "0.16.1",
+    "sh-syntax": "0.4.2"
+  },
+  "claudePlugin": {},
+  "pluginBuild": {
+    "assets": [
+      "mcp/main.wasm",
+      "mcp/vendor/tree-sitter-java_orchard.wasm",
+      "mcp/vendor/web-tree-sitter.wasm"
+    ]
+  }
+}

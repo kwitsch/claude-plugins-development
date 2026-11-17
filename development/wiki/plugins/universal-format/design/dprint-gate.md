@@ -1,0 +1,14 @@
+# dprint priority gate
+
+When universal-format formats nothing because the dprint plugin formats the project, how that is detected, and what the detection cannot see.
+
+- `resolveTarget` marks a write `dprint` when its base is the cwd and `dprintGoverns(cwd)` holds; `formatPre` then answers `{}`. The skip is for every language, CLI ones included: the request was "no formatting at all where dprint owns the repository" (user, 2026-11-05, PR 282 of kwitsch/claude-plugins, 0.18.0). Coverage per extension would need the `plugins` list of the dprint config parsed; a follow-up only if asked.
+- Base equal to cwd only: dprint's own hook formats only files under its scope root, the session cwd, so a write outside it stays with universal-format.
+- `hasDprintConfig` mirrors dprint's `findConfig(cwd)`: from the session cwd (not the file's directory) upward, the six `DPRINT_CONFIG_NAMES`, ending after the first directory that holds a `.git` entry. No `$HOME` stop: dprint has none.
+- `DPRINT_CONFIG_NAMES` is a copy of `CONFIG_NAMES` in `dprint/src/skills/dprint/config-names.ts` (a shipped plugin cannot import another plugin). `tests/dprint-gate.test.ts` compares the two built lists; a name missing here only means double formatting, the state before the gate.
+- "Enabled" follows the settings precedence and fails toward formatting: `<cwd>/.claude/settings.local.json`, `<cwd>/.claude/settings.json`, the same two under the cwd's git root (a session started in a subdirectory of a repository), then `$CLAUDE_CONFIG_DIR/settings.json` (default `~/.claude`). The first file whose `enabledPlugins` has a key starting with `dprint@` decides (enabled when any of its `dprint@` keys is a literal `true`: dprint may be installed from two marketplaces). Missing or malformed files and no entry anywhere mean not enabled.
+- Not visible to the server process, so double formatting remains there: managed settings, `--settings <file>`, `--add-dir` and `--plugin-dir`.
+- The settings are read on every gated call: `/plugin enable` and `disable` never pass through Write/Edit, so there is no event to refresh on. Cost: at most five small file reads, and only in a dprint-configured project (the config walk comes first).
+- The config walk is not cached either (a former `dprintConfigCache` was removed in PR 282): a cache stayed positive when a config was deleted through Bash, `git rm` or a branch switch, and silenced universal-format for the rest of the session.
+- A config-like file written while gated is still noted for the cache refresh, before the gate returns: a `.prettierrc` written then is in force once dprint is disabled (tested).
+- Live check (live 2.1.326, headless): in a project with a plugin-less `dprint.json` and `dprint@kwitsch-plugins: true` in `.claude/settings.json`, a Write of `const a={b:1}` to `a.ts` landed unchanged while a Write outside the cwd was formatted; with the setting `false` the same Write was formatted.

@@ -3,13 +3,27 @@
 // Fails when <plugin>/plugin/ holds a file the shipped plugin may not contain (.claude/rules/plugin-build-output.md).
 // An allowlist: sources, tests, CLAUDE.md or tooling files belong outside plugin/. Called by every plugin's
 // build (step 0) and by check-plugin-fresh.sh in CI.
-import { existsSync, lstatSync, readdirSync } from "node:fs";
+// Opt-in per plugin: `pluginBuild.assets` in <plugin dir>/package.json lists further files by exact path relative to
+// plugin/ (binary files a vendored bundle loads at runtime, e.g. universal-format's wasm files).
+import { existsSync, lstatSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 
 // no tests/ dir, *.test.* or CLAUDE.md anywhere; then the allowlist itself
 const ALLOWED = /^(?!(.*\/)?tests\/)(?!.*\.test\.)(?!(.*\/)?CLAUDE\.md$)(\.claude-plugin\/plugin\.json|\.mcp\.json|README\.md|hooks\/hooks\.json|agents\/[^/]+\.md|skills\/.+\/(SKILL|[^/]+\.reference)\.md|skills\/.+\.json|.+\.mjs)$/;
 
-const root = path.join(process.argv[2] ?? ".", "plugin");
+const dir = process.argv[2] ?? ".";
+const root = path.join(dir, "plugin");
+/** The plugin's `pluginBuild.assets`: exact paths (relative to plugin/, `/`-separated) allowed beside the allowlist. */
+const assets = new Set<string>();
+const manifest = path.join(dir, "package.json");
+if (existsSync(manifest)) {
+  const listed = (JSON.parse(readFileSync(manifest, "utf8")) as { pluginBuild?: { assets?: unknown } }).pluginBuild?.assets ?? [];
+  if (!Array.isArray(listed) || listed.some((a) => typeof a !== "string")) {
+    console.error(`${manifest}: pluginBuild.assets must be an array of paths relative to plugin/`);
+    process.exit(1);
+  }
+  for (const a of listed as string[]) assets.add(a);
+}
 // readdirSync follows a symlinked root: the build would delete .mjs files in its target
 if (existsSync(root) && lstatSync(root).isSymbolicLink()) {
   console.error(`${root} is a symlink: the build must not touch what it points at`);
@@ -25,7 +39,7 @@ const list = (dir: string): string[] => readdirSync(dir, { withFileTypes: true }
 // a symlink is stray whatever its name: the build must not touch what it points at
 const stray = (existsSync(root) ? list(root) : [])
   .map((f) => path.relative(root, f).split(path.sep).join("/"))
-  .filter((f) => !ALLOWED.test(f) || lstatSync(path.join(root, f)).isSymbolicLink());
+  .filter((f) => !(ALLOWED.test(f) || assets.has(f)) || lstatSync(path.join(root, f)).isSymbolicLink());
 if (stray.length) {
   console.error(`${root} holds files the shipped plugin may not contain (sources and tests belong in src/ and tests/):`);
   for (const f of stray) console.error(`  ${f}`);
