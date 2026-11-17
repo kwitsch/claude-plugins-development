@@ -1,5 +1,4 @@
 // Tests of the MCP transport of the jev-api mod: the hooks driven directly with a hand-made `$` (the kit cannot abandon a dispatch).
-import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 const TOOL = (type: string) => `mcp__jev-api__${type}`;
@@ -23,7 +22,7 @@ type Rig = Awaited<ReturnType<typeof rig>>;
  *
  * @param opts - `connect` answers `$.mcp.connect` (default: connected); `onCall` answers `$.mcp.call` (default: an ok outcome for `request`, `{cancelled:true}` for `cancel`); `noMcp` leaves `$.mcp` out like the older tests' world; `options` is the plugin's userConfig; `env` the env values.
  */
-async function rig(opts: { connect?: () => Promise<unknown>; onCall?: (c: Call) => unknown; noMcp?: boolean; onConfig?: (c: Call) => unknown; complete?: (r: Args) => unknown; store?: () => Promise<unknown>; register?: () => Promise<unknown>; options?: Record<string, unknown>; env?: Record<string, string> } = {}) {
+async function rig(opts: { connect?: () => Promise<unknown>; onCall?: (c: Call) => unknown; noMcp?: boolean; complete?: (r: Args) => unknown; store?: () => Promise<unknown>; register?: () => Promise<unknown>; options?: Record<string, unknown>; env?: Record<string, string> } = {}) {
   const { register } = await import("../plugin/hooks/register.mjs");
   const hooks = new Map<string, (...a: unknown[]) => Promise<unknown>>();
   register((event: string, hook: (...a: unknown[]) => Promise<unknown>) => void hooks.set(event, hook), opts.options);
@@ -56,7 +55,6 @@ async function rig(opts: { connect?: () => Promise<unknown>; onCall?: (c: Call) 
         call: (server: string, tool: string, args: Args) => {
           const c = { server, tool, args };
           mcpCalls.push(c);
-          if (tool === "config") return Promise.resolve(opts.onConfig ? opts.onConfig(c) : { isError: false, content: [{ type: "text", text: "{\"configured\":true}" }], structuredContent: { configured: true } });
           if (opts.onCall) return Promise.resolve(opts.onCall(c));
           return Promise.resolve(tool === "cancel" ? { isError: false, content: [{ type: "text", text: "{\"cancelled\":true}" }], structuredContent: { cancelled: true } } : okOutcome);
         },
@@ -71,13 +69,12 @@ async function rig(opts: { connect?: () => Promise<unknown>; onCall?: (c: Call) 
   /** Runs every live timer of this length. */
   const fire = (ms: number) => timers.filter((t) => t.ms === ms && !t.cancelled).forEach((t) => t.fn());
   const requests = () => mcpCalls.filter((c) => c.tool === "request");
-  const configs = () => mcpCalls.filter((c) => c.tool === "config");
   const cancels = () => mcpCalls.filter((c) => c.tool === "cancel");
   /** Waits until n calls of a tool were made. */
   const until = async (tool: string, n: number) => {
     for (let i = 0; i < 200 && mcpCalls.filter((c) => c.tool === tool).length < n; i++) await new Promise((r) => setImmediate(r));
   };
-  return { hooks, $, run, mcpCalls, fetched, logs, timers, clock, connects, fire, requests, cancels, configs, completed, env, until };
+  return { hooks, $, run, mcpCalls, fetched, logs, timers, clock, connects, fire, requests, cancels, completed, env, until };
 }
 
 const NEVER = () => new Promise<never>(() => {});
@@ -97,12 +94,14 @@ describe("the request goes through the server", () => {
     expect(call.server).toBe(SERVER);
     expect(call.args).toMatchObject({ state: BASE.state, timeoutMs: 20000, questions: { answer: { type: "noul", instructions: BASE.instructions } } });
     expect(call.args["callId"]).toMatch(/^[a-z0-9]+-\d+$/);
-    expect(Object.keys(call.args).sort((a, b) => a.localeCompare(b))).toEqual(["callId", "configGen", "questions", "state", "timeoutMs"]);
+    expect(Object.keys(call.args).sort((a, b) => a.localeCompare(b))).toEqual(["callId", "questions", "state", "timeoutMs"]);
+    // the server reads its own environment: no config call precedes the request
+    expect(t.mcpCalls.map((c) => c.tool)).toEqual(["request"]);
   });
 
-  it("the request gets only the time the connect and the config call left, and none left is a timeout", async () => {
+  it("the request gets only the time the connect left, and none left is a timeout", async () => {
     for (const [used, expected] of [[2900, 1100], [4000, undefined]] as [number, number | undefined][]) {
-      const t = await rig({ connect: async () => (t.clock.now += used / 2, { isConnected: true, server: SERVER }), onConfig: () => (t.clock.now += used / 2, outcome({ configured: true })) });
+      const t = await rig({ connect: async () => (t.clock.now += used, { isConnected: true, server: SERVER }) });
       const r = await t.run("noul", { timeout: 4 });
       if (expected === undefined) {
         expect(t.requests()).toHaveLength(0);
@@ -111,30 +110,13 @@ describe("the request goes through the server", () => {
     }
   });
 
-  it("a hung connect or config call does not hold the call past a shorter timeout", async () => {
-    for (const hang of ["connect", "config"]) {
-      const t = await rig(hang === "connect" ? { connect: NEVER } : { onConfig: NEVER });
-      const pending = t.run("noul", { timeout: 1 });
-      for (let i = 0; i < 50; i++) await new Promise((r) => setImmediate(r));
-      t.clock.now += 1000;
-      t.fire(1000);
-      expect((await pending).deny).toContain("timeout after 1000ms");
-    }
-  });
-
-  it("a config call cut by a short call timeout does not mark the server down", async () => {
-    let release: (v: unknown) => void = () => {};
-    let first = true;
-    const t = await rig({ onConfig: () => (first ? (first = false, new Promise((r) => (release = r))) : outcome({ configured: true })) });
+  it("a hung connect does not hold the call past a shorter timeout", async () => {
+    const t = await rig({ connect: NEVER });
     const pending = t.run("noul", { timeout: 1 });
     for (let i = 0; i < 50; i++) await new Promise((r) => setImmediate(r));
     t.clock.now += 1000;
     t.fire(1000);
     expect((await pending).deny).toContain("timeout after 1000ms");
-    release(outcome({ configured: true })); // the slow config answer arrives; the next call shares it
-    await t.run("noul");
-    expect(t.fetched).toHaveLength(0);
-    expect(t.requests()).toHaveLength(1);
   });
 
   it("connects once and keeps the server for later calls", async () => {
@@ -264,8 +246,8 @@ describe("timeout guard and abandonment", () => {
     const t = await rig();
     await t.run(); // connects
     const ctl = new AbortController();
-    let reads = 0; // 1 start time, 2 config sync, 3 call id, 4 time left
-    (t.$.clock as { now: () => Promise<number> }).now = async () => (++reads === 4 && ctl.abort(), 1_000_000);
+    let reads = 0; // 1 start time, 2 call id, 3 time left
+    (t.$.clock as { now: () => Promise<number> }).now = async () => (++reads === 3 && ctl.abort(), 1_000_000);
     expect(await t.run("noul", {}, ctl.signal)).toEqual({ deny: "noul: the call was abandoned" });
     expect(reads).toBeGreaterThanOrEqual(3);
     expect(t.requests()).toHaveLength(1);
@@ -450,11 +432,11 @@ describe("fallback to $.http.fetch", () => {
     expect(outage(t)[0]).toContain("transport closed");
   });
 
-  it.each(["config", "request"])("a synchronous throw of the %s call falls back, marks the link down and logs once", async (tool) => {
+  it("a synchronous throw of the request call falls back, marks the link down and logs once", async () => {
     const boom = (): never => {
       throw new Error("server process exited");
     };
-    const t = await rig(tool === "config" ? { onConfig: boom } : { onCall: boom });
+    const t = await rig({ onCall: boom });
     expect(JSON.parse((await t.run()).result ?? "null")).toEqual(NOUL_ANSWER);
     expect(t.fetched).toHaveLength(1);
     expect(outage(t)).toHaveLength(1);
@@ -529,95 +511,28 @@ describe("tool.check keeps the model off the transport", () => {
   });
 });
 
-describe("the configuration of the server", () => {
-  it("is sent before the first request, once, and not again while it stays the same", async () => {
-    const t = await rig({ env: { TYPESAFE_API_KEY: "k", JEV_URL: "https://jev.example/v1/systemone", TYPESAFE_DEFAULT_MODEL: " m " } });
+describe("the server needs no configuration call", () => {
+  it.each([
+    ["http", { kind: "http", status: 503 }],
+    ["error", { kind: "error", code: "network", message: "fetch failed" }],
+  ])("a failed request (%s) causes no extra call: the next request goes out alone", async (_name, failed) => {
+    let n = 0;
+    const t = await rig({ onCall: () => (++n === 1 ? outcome(failed) : okOutcome) });
     await t.run();
     await t.run();
-    expect(t.configs().map((c) => c.args)).toEqual([{ key: "k", jevUrl: "https://jev.example/v1/systemone", model: "m", gen: 1 }]);
-    expect(t.mcpCalls.map((c) => c.tool)).toEqual(["config", "request", "request"]);
+    expect(t.mcpCalls.map((c) => c.tool)).toEqual(["request", "request"]);
   });
-  it("is sent again when a value changed", async () => {
+  it("a changed env value sends nothing to the server", async () => {
     const t = await rig();
     await t.run();
     t.env["TYPESAFE_API_KEY"] = "k2";
     await t.run();
-    expect(t.configs().map((c) => c.args)).toEqual([{ key: "k", gen: 1 }, { key: "k2", gen: 2 }]);
+    expect(t.mcpCalls.map((c) => c.tool)).toEqual(["request", "request"]);
   });
-  it.each([
-    ["http", { kind: "http", status: 503 }],
-    ["error", { kind: "error", code: "network", message: "fetch failed" }],
-  ])("is sent again after a failed request (%s), read fresh, before the next one", async (_name, failed) => {
-    let n = 0;
-    const t = await rig({ onCall: () => (++n === 1 ? outcome(failed) : okOutcome) });
-    await t.run();
-    expect(t.configs()).toHaveLength(1);
-    await t.run();
-    expect(t.configs()).toHaveLength(2);
-    await t.run();
-    expect(t.configs()).toHaveLength(2);
-    expect(t.mcpCalls.map((c) => c.tool)).toEqual(["config", "request", "config", "request", "request"]);
-  });
-  it("is not resent after an aborted request", async () => {
-    let n = 0;
-    const t = await rig({ onCall: () => (++n === 1 ? outcome({ kind: "error", code: "aborted", message: "the call was abandoned" }) : okOutcome) });
-    await t.run();
-    await t.run();
-    expect(t.configs()).toHaveLength(1);
-  });
-  it("is not resent after an abandoned request", async () => {
-    let first = true;
-    const t = await rig({ onCall: () => (first ? ((first = false), NEVER()) : okOutcome) });
-    const ac = new AbortController();
-    const p = t.run("noul", {}, ac.signal);
-    await t.until("request", 1);
-    ac.abort();
-    await p;
-    await t.run();
-    expect(t.configs()).toHaveLength(1);
-  });
-  it("is sent again, and the request once more, when the server says it has none (a restarted server)", async () => {
-    let n = 0;
-    const t = await rig({ onCall: () => (++n === 1 ? outcome({ kind: "error", code: "unconfigured", message: "the server has no configuration yet" }) : okOutcome) });
-    expect(JSON.parse((await t.run()).result ?? "null")).toEqual(NOUL_ANSWER);
-    expect(t.mcpCalls.map((c) => c.tool)).toEqual(["config", "request", "config", "request"]);
-    expect(t.fetched).toHaveLength(0);
-  });
-  it("a server that refuses or never answers its configuration is an outage: the fetch path answers", async () => {
-    const refused = await rig({ onConfig: () => ({ isError: true, content: [{ type: "text", text: "config: nope" }] }) });
-    expect(JSON.parse((await refused.run()).result ?? "null")).toEqual(NOUL_ANSWER);
-    expect(refused.fetched).toHaveLength(1);
-    expect(outage(refused)[0]).toContain("refused its configuration");
-    const silent = await rig({ onConfig: NEVER });
-    const p = silent.run();
-    await silent.until("config", 1);
-    silent.fire(3000);
-    expect(JSON.parse((await p).result ?? "null")).toEqual(NOUL_ANSWER);
-    expect(silent.fetched).toHaveLength(1);
-  });
-  it("a hung config call is not shared with the next run: it sends its own config call and the request", async () => {
-    let n = 0;
-    const t = await rig({ onConfig: () => (++n === 1 ? NEVER() : { isError: false, content: [{ type: "text", text: "{\"configured\":true}" }], structuredContent: { configured: true } }) });
-    const p = t.run();
-    await t.until("config", 1);
-    t.fire(3000);
-    await p;
-    expect(t.fetched).toHaveLength(1);
-    t.clock.now += 120_000;
-    await t.run();
-    expect(t.configs()).toHaveLength(2);
-    expect(t.requests()).toHaveLength(1);
-    expect(t.fetched).toHaveLength(1);
-  });
-  it("session.start sends it ahead of the first request, only with System One access", async () => {
+  it("session.start sends nothing to the server", async () => {
     const t = await rig();
     await t.hooks.get("session.start")?.(t.$, { cwd: "/p" }, async () => ({}));
-    expect(t.configs().map((c) => c.args)).toEqual([{ key: "k", gen: 1 }]);
-    await t.run();
-    expect(t.configs()).toHaveLength(1);
-    const none = await rig({ env: {} });
-    await none.hooks.get("session.start")?.(none.$, { cwd: "/p" }, async () => ({}));
-    expect(none.mcpCalls).toHaveLength(0);
+    expect(t.mcpCalls).toHaveLength(0);
   });
 });
 
@@ -730,97 +645,5 @@ describe("Haiku takes over after an HTTP error status", () => {
     const t = await rig({ complete: () => HAIKU_OK, onCall: () => refusal });
     expect((await t.run("noul", { overflow: "error" })).deny).toMatch(/^noul: state too large/);
     expect(t.completed).toHaveLength(0);
-  });
-});
-
-describe("concurrent calls with different env", () => {
-  it("each request is served with the config of its own call, whatever order the config answers come in", async () => {
-    for (const order of [[0, 1], [1, 0]]) {
-      let held: { key: unknown; gen: unknown } | undefined; // the server's one global config, replaced by every config call
-      const served: [unknown, unknown][] = [];
-      const release: (() => void)[] = [];
-      const t = await rig({
-        onConfig: (c) => new Promise((resolve) => release.push(() => ((held = { key: c.args["key"], gen: c.args["gen"] }), resolve(outcome({ configured: true }))))),
-        onCall: (c) => {
-          if (held === undefined || c.args["configGen"] !== held.gen) return outcome({ kind: "error", code: "unconfigured", message: "x" });
-          served.push([c.args["state"], held.key]);
-          return okOutcome;
-        },
-      });
-      t.env["TYPESAFE_API_KEY"] = "kA";
-      const a = t.run("noul", { state: "A" });
-      await t.until("config", 1);
-      t.env["TYPESAFE_API_KEY"] = "kB";
-      const b = t.run("noul", { state: "B" });
-      await t.until("config", 2);
-      for (const i of order) release[i]();
-      // a refused request makes its call send its config again
-      for (let i = 0; i < 20; i++) {
-        await new Promise((r) => setImmediate(r));
-        release.splice(0).forEach((f) => f());
-      }
-      await Promise.all([a, b]);
-      for (const [state, key] of served) expect(key).toBe(state === "A" ? "kA" : "kB");
-      expect(served).toHaveLength(2);
-    }
-  });
-});
-
-describe("concurrent calls with the same env", () => {
-  it("share one config call, so no request is refused for another call's generation", async () => {
-    let held: unknown;
-    const t = await rig({
-      onConfig: (c) => ((held = c.args["gen"]), outcome({ configured: true })),
-      onCall: (c) => (c.args["configGen"] === held ? okOutcome : outcome({ kind: "error", code: "unconfigured", message: "x" })),
-    });
-    const rs = await Promise.all([t.run(), t.run(), t.run()]);
-    expect(rs.every((r) => r.deny === undefined)).toBe(true);
-    expect(t.requests()).toHaveLength(3);
-  });
-});
-
-describe("concurrent calls after a server restart", () => {
-  it("a config another call already sent again serves this call's retry, so neither retried request is refused", async () => {
-    let held: unknown;
-    let hold = false;
-    const answers: (() => void)[] = [];
-    const t = await rig({
-      onConfig: (c) => ((held = c.args["gen"]), outcome({ configured: true })),
-      onCall: (c) => {
-        const r = c.args["configGen"] === held ? okOutcome : outcome({ kind: "error", code: "unconfigured", message: "x" });
-        return hold ? new Promise((resolve) => answers.push(() => resolve(r))) : r;
-      },
-    });
-    expect((await t.run()).deny).toBeUndefined();
-    held = undefined; // the server restarted
-    hold = true;
-    // the clock stops once the second config was sent, between a retry's config and its request
-    let open: () => void = () => {};
-    const gate = new Promise<void>((r) => (open = r));
-    const now = t.$.clock.now;
-    t.$.clock.now = async () => (t.configs().length >= 2 ? (await gate, now()) : now());
-    const tick = async () => {
-      for (let i = 0; i < 20; i++) await new Promise((r) => setImmediate(r));
-    };
-    const a = t.run();
-    const b = t.run();
-    await t.until("request", 3);
-    hold = false;
-    answers[0](); // A: unconfigured, sends the config again and waits at the clock
-    await t.until("config", 2);
-    await tick();
-    answers[1](); // B: unconfigured, while A's request is not sent yet
-    await tick();
-    open();
-    const rs = await Promise.all([a, b]);
-    expect(rs.map((r) => r.deny)).toEqual([undefined, undefined]);
-    expect(t.configs()).toHaveLength(2);
-  });
-});
-
-describe("sendOutcome doc", () => {
-  it("does not claim the server reads its own environment (it is given the env)", () => {
-    const src = readFileSync(new URL("../src/hooks/transport.ts", import.meta.url), "utf8");
-    expect(src).not.toMatch(/server reads its own environment/);
   });
 });

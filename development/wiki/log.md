@@ -85,3 +85,10 @@ Source: user request (refactor), live probes on Claude Code 2.1.326.
 Source: user decision (rc-enhancement 0.4.0).
 
 - **Rule:** `.claude/rules/plugin-description.md` (loads with `*/package.json`): the description is one short end-user sentence on what the plugin gives, without implementation, configuration or requirements; applies to every plugin from its next change, no mass rewrite.
+
+## [2026-11-17] ingest | $.mcp respawn, failed-start cache, env after launch (jev-api 0.6.0)
+
+Source: live probe plugin on Claude Code 2.1.326 (throwaway, scratchpad), user decision to drop the `config` tool.
+
+- **Facts:** `development/wiki/facts/mods-engine-io.md` (`## $.mcp`): a killed stdio server is respawned by the next `$.mcp.call`; a server exiting at start is cached as failed for 15 min across sessions; a settings `env` written mid-session reaches neither `$.env.get` nor a respawned server.
+- **Decision:** `development/wiki/plugins/jev-api/tasks/F22-http-through-mcp-server.md` (Constraints, superseded 2026-11-17).
