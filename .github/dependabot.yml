@@ -5,6 +5,15 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    # bundled into universal-format/plugin (vendored prettier): a bump changes the shipped build and needs a plugin
+    # release, so it is done by hand (universal-format/.claude/rules/vendor-build.md)
+    ignore:
+      - dependency-name: prettier
+      - dependency-name: prettier-plugin-java
+      - dependency-name: "@prettier/plugin-php"
+      - dependency-name: prettier-plugin-sh
+      - dependency-name: sh-syntax
+      - dependency-name: rolldown
   - package-ecosystem: github-actions
     directory: /
     schedule:
