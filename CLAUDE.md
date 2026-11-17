@@ -26,7 +26,7 @@ Development repository for Claude Code plugins. One top-level directory per plug
 One config for all packages, at the repo root; no per-plugin lint or vitest config. Formatting stays with dprint (`dprint.json`); everything else is oxc.
 
 - Lint + type check: root `.oxlintrc.json` (oxlint, type-aware) with the solution `tsconfig.json` (`tsconfig.src.json` strict, `tsconfig.tests.json` relaxed for plugin `*/tests/`); `pnpm lint` is the type check. Details: `.claude/rules/lint-config.md`.
-- Build: the shared `development/scripts/build-plugin.ts` builds the plugin in the cwd (layout check, oxc-transform type stripping, oxc-minify, `plugin.json` generated from `package.json` by `plugin-manifest.ts`); a plugin's `build` script may run its own steps first; `pluginBuild.bundleHooksLib: true` in `package.json` bundles the hooks helper modules (everything `hooks.json` does not list) into one compressed `hooks/lib.mjs` (jev-api).
+- Build: the shared `development/scripts/build-plugin.ts` builds the plugin in the cwd (layout check, oxc-transform type stripping, oxc-minify, `plugin.json` generated from `package.json` by `plugin-manifest.ts`); a plugin's `build` script may run its own steps first; `pluginBuild.bundleHooksLib: true` in `package.json` bundles the hooks helper modules (everything `hooks.json` does not list) into one compressed `hooks/lib.mjs` (jev-api). `pluginBuild.assets` lists files the layout check allows in `plugin/` beside its allowlist, by exact path (universal-format's wasm files).
 - `vitest.config.mts` at the root is the one vitest config. Tooling is root devDependencies only. Details: `.claude/rules/lint-config.md`.
 
 ## Commands
@@ -46,7 +46,7 @@ claude plugin validate <name>/plugin
 - Never edit `*/plugin/**/*.mjs` or `*/plugin/.claude-plugin/plugin.json` — change `src/` or `<name>/package.json` and run `pnpm build`. `.claude/settings.json` denies these writes.
 - Version bump = edit `version` in `<name>/package.json`, then `pnpm build`. A change of `<name>/package.json`, `<name>/src/` or `<name>/plugin/` merged to `main` needs a bump to a version higher than on `main` that is not yet tagged `<name>-<version>` here or in kwitsch/claude-plugins; a change of anything else under `<name>/` (tests, scripts, `CLAUDE.md`, `.claude/`) needs no bump and is not released (`.github/scripts/ships.sh`).
 - New plugin: use the `scaffold-plugin` skill (`.claude/skills/scaffold-plugin/`). Never hand-copy the layout.
-- Runtime code in `plugin/` must be zero-dependency Node (`node:` builtins only); `node_modules` is not shipped.
+- Runtime code in `plugin/` must be zero-dependency Node (`node:` builtins only); `node_modules` is not shipped. One exception: a vendored third-party bundle `plugin/**/vendor/*.mjs` built by the plugin's own build step (universal-format's prettier), see `.claude/rules/plugin-build-output.md`.
 - MCP servers are dual-era (2025-11-25 `initialize` and 2026-07-28 `server/discover`, tasks only when asked): follow `.claude/rules/mcp-dual-era.md`, model `dprint/src/mcp/server.ts`.
 - Commit messages: no `Co-Authored-By:` trailer, no "Generated with" footer.
 

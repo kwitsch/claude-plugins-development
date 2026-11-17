@@ -27,6 +27,13 @@ The rules state what to do; this page states why and what was rejected. All deci
 - Function-hooks plugins ship a readable `register.mjs` plus one compressed `lib.mjs`, to keep the shipped size small ([hooks-lib-bundle.md](../../../.claude/rules/hooks-lib-bundle.md), 2026-11-14).
 - Plugins are developed here and reach users through the marketplace repository `kwitsch/claude-plugins`, where `plugins/<name>` is build output written by the Sync workflow: never edit it there, and it has no tests there.
 
+## Vendored third-party bundles (2026-11-17)
+
+- `plugin/` may hold a vendored third-party bundle `**/vendor/*.mjs` and the binary files it loads, listed by exact path under `pluginBuild.assets` ([plugin-build-output.md](../../../.claude/rules/plugin-build-output.md)). User decision with the migration of universal-format, the only plugin that uses it: its prettier and the java, php and shell plugins cannot be zero-dependency sources, and a plugin runs from a cache copy without `node_modules` and without an install step.
+- The bundler is rolldown (root devDependency, exact pin), run by the plugin's own `scripts/vendor.mts` after the standard build; the plugin's own code still goes through `build-plugin.ts` file by file. The output is code-split and minified without comments, so it is the same on every machine and CI's freshness check covers it.
+- Rejected: bun as the bundler (as a devDependency it did not install cleanly, and CI could not rebuild the bundle: the old repository checked freshness by a fingerprint banner instead), one bundle holding own and third-party code (own code would leave the standard build and its type-stripped one-file-per-source layout), a general `plugin/**` allowlist for binary files (an exact list per plugin keeps the layout check an allowlist), installing dependencies at runtime.
+- The bundled packages are ignored by Dependabot: a bump changes `plugin/` and needs a version bump of the plugin, so it is done by hand.
+
 ## Language (2026-11-14)
 
 - Everything written into the repository is English: documents, task files, messages a plugin prints, comments, commit text. The chat language does not carry over.

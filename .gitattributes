@@ -9,3 +9,7 @@ pnpm-lock.yaml                    linguist-generated
 
 # LF everywhere so a Windows/WSL checkout does not make the freshness check (git status on plugin/) fail
 * text=auto eol=lf
+
+# Binary files a vendored bundle loads at runtime (universal-format: copied from node_modules by its build).
+# After `* text=auto`: a later line wins, and these must never be EOL-translated or diffed as text.
+*.wasm                            binary linguist-generated
