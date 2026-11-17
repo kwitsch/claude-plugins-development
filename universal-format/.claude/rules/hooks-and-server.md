@@ -51,7 +51,7 @@ Design: [dprint-gate.md](../../../development/wiki/plugins/universal-format/desi
 - The java, php and shell plugins load on first use, never at import: java/php/shell their own, Markdown all three, a Markdown host (JS/TS, HTML, Vue) all three only when its source names `md` or `markdown`. Keep the `unhandledRejection` guard in `prettier.ts`.
 - No plugin option is ever set from this code (never `experimentalWasm`).
 - An unresolvable entry of a project's `plugins` leaves the file unformatted; never format without it.
-- JSON and YAML only: `printWidth` is lifted to 99999 when neither a prettier project config nor an `.editorconfig` `max_line_length` governs the file; both walks are unbounded.
+- JSON and YAML only: `printWidth` is lifted to 99999 when neither a prettier project config nor an `.editorconfig` `max_line_length` governs the file and prettier itself resolved no width; both walks are unbounded.
 
 Design: [bundled-prettier.md](../../../development/wiki/plugins/universal-format/design/bundled-prettier.md), [printwidth-guard.md](../../../development/wiki/plugins/universal-format/design/printwidth-guard.md).
 

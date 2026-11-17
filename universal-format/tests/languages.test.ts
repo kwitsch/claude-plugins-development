@@ -59,6 +59,7 @@ const CASES: Case[] = [
   { name: "json: formatted by the bundled prettier", file: "a.json", content: "{\"a\":1}", expect: "{ \"a\": 1 }\n" },
   { name: "json: no project prettier config -> the long array is not wrapped", file: "a.json", content: LONG_JSON, expect: oneLine },
   { name: "json: a top-level prettier key in package.json -> prettier's default wraps the long array", file: "a.json", content: LONG_JSON, project: { "package.json": "{\"prettier\": {}}" }, expect: wrapped },
+  { name: "json: an .editorconfig path-glob section sets max_line_length -> prettier's width stays, the array wraps", file: "a.json", content: LONG_JSON, project: { ".editorconfig": "root = true\n[**/*.json]\nmax_line_length = 40\n" }, expect: wrapped },
   { name: "jsts: a .ts file, no prettier and no npx anywhere on PATH", file: "a.ts", content: "let x=1", expect: "let x = 1;\n" },
   { name: "jsts: prettier and npx stubs on PATH are never run", file: "a.js", content: "let x=1", stubs: ["prettier", "npx"], expect: "let x = 1;\n", record: "" },
   { name: "markdown: formatted by the bundled prettier", file: "a.md", content: "#  hi\n", expect: "# hi\n" },

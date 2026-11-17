@@ -181,7 +181,8 @@ export async function formatInProcess(src: string, filePath: string, cwd: string
     if (resolved === null) return src;
     projectPlugins = resolved as NonNullable<prettier.Options["plugins"]>;
   }
-  if ((lang === "json" || lang === "yaml") && shouldOverridePrintWidth(filePath, cwd)) config.printWidth = 99999; // prettier rejects Infinity
+  // a finite width prettier resolved itself is the project's (an `.editorconfig` section glob the own resolver cannot match)
+  if ((lang === "json" || lang === "yaml") && !Number.isFinite(config.printWidth ?? NaN) && shouldOverridePrintWidth(filePath, cwd)) config.printWidth = 99999; // prettier rejects Infinity
   // bundled plugins last: a project config naming the same plugin cannot leave prettier without a parser
   const bundled = await Promise.all(bundledPluginsFor(lang, src).map((name) => BUNDLED_PLUGIN_LOADERS[name]()));
   return await prettier.format(src, { ...config, plugins: [...projectPlugins, ...bundled], filepath: filePath });
