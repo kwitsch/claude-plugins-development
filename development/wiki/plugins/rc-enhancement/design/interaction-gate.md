@@ -1,25 +1,35 @@
 # Interaction gate
 
-How rc-enhancement's gate re-prompts a turn that ends in a plain-text question, and where the plugin came from.
+How rc-enhancement makes a turn that ends in a plain-text question redo it through `AskUserQuestion`, why that is a `Stop` command hook and not a mod, and where the plugin came from.
 
 ## Behaviour
 
-- Heuristic: strip fenced code blocks, take the last non-empty line, gate when it ends in `?`. Blunt on purpose: a rhetorical trailing `?` is an accepted false positive, traded for simplicity and for matching the rule's own "no exceptions" wording.
-- Only `reason === "answer"` main-loop turns (`e.agentId === undefined`); subagent, aborted and errored turns are never gated.
-- The questioning answer is not suppressed: the turn ends, its answer stays visible, and the correction arrives as a separate turn (in `claude -p` that second turn runs before the process exits).
+- Heuristic (0.4.0): strip fenced code, inline code and `>` lines, take the last paragraph (after the last blank line), gate when it holds a `?` followed by whitespace or the end (so `a.com/x?y=1` does not match). Catches `question? more. more.`; a question in an earlier paragraph passes. Chosen by the user over last-line-only, last 3 lines and whole answer: more hits than the last line, fewer false blocks than the whole answer, each false block costs a full request. A rhetorical `?` in the last paragraph is an accepted false positive. The 0.3.x gate looked at the last non-empty line only.
+- Main session only: the hook returns silently when the payload carries `agent_id` (a subagent's own stops are `SubagentStop` events, not wired).
+- The questioning answer is not suppressed: the stop is blocked, the answer stays visible and the model continues in the same turn.
 
 ## Mechanism
 
-- A user-tier mod has no native `Stop` block (`classic.Stop` is bypassed by `cc-plugin-sec-default`, [claude-code-hook-facts.md](../../../../../.claude/rules/claude-code-hook-facts.md)). `turn.complete` therefore calls `$.prompt.submit({ text })` unawaited: the engine queues a framed plugin prompt ("The rc-enhancement plugin sent a message: …") that starts a new turn once the session is idle. Awaiting it would wait for that turn to start, which waits for this turn to end.
-- The text names the `CRITICAL RULE` that `session-start.mjs` injected, so the model is pointed at the full rule instead of a one-line paraphrase.
+- `src/hooks/stop.ts` reads the Stop payload (`last_assistant_message`, `stop_hook_active`, `agent_id`) and answers `{ decision: "block", reason }` with a short reason that names the `CRITICAL RULE` of the session-start text.
+- Loop guard is the platform's: `stop_hook_active` is true on the stop that follows a block (also when another plugin's hook caused the continuation), and the hook lets it through. Claude Code also ends the turn after 8 consecutive blocks.
+- Live check (`claude -p --plugin-dir`, Claude Code 2.1.326, 2026-11-17): the payload keys are `session_id, transcript_path, cwd, prompt_id, permission_mode, effort, hook_event_name, stop_hook_active, last_assistant_message, background_tasks, session_crons`; a block continued the turn, the model called `AskUserQuestion` (headless: looked it up through ToolSearch), and the second stop arrived with `stop_hook_active: true`. `cc-plugin-sec-default` does not touch command hooks.
 
-## Loop guard
+## Why a command hook and not a mod
 
-- Replaces the platform's `stop_hook_active` and 8-consecutive-block cap. `turn.start` records the main-loop turn whose prompt contains the gate text; `turn.complete` never gates that turn, so there is at most one re-prompt per user turn.
-- Backstop for a framing change the text match would miss: a submit also marks the next main-loop turn as the gate's (`gatePending`), so the gate can never loop. A user prompt that happens to start first takes that exemption instead (at worst one missed gate). A rejected submit clears the flag.
-- State sits inside `register()`; a hot reload forgets both values, which at worst lets one more re-prompt through.
+- A user-tier mod cannot block `Stop`: `classic.Stop` is bypassed by `cc-plugin-sec-default` ([claude-code-hook-facts.md](../../../../../.claude/rules/claude-code-hook-facts.md)). The 0.3.x gate worked around it with `turn.complete` plus an unawaited `$.prompt.submit`, a loop guard of its own (`gateTurnId`, `gatePending`) and a framed plugin prompt that starts a new turn. A `Stop` command hook needs none of that: no mods module, no engine dependency, two plain scripts.
+- Cost: one blocked stop costs one more request with the whole context (about 58k cache-read tokens in the live check), the same as the old re-prompt turn.
+
+## Why the rule is still injected at session start
+
+- The rule text is about 450 tokens, cached after the first request, so it costs the cache-read price per request. A retry costs a full request. Without the rule up front the model ends in a question far more often (its default), so the rule is cheaper than the retries it prevents. This is an estimate; the violation rate was not measured.
+- The Stop reason stays short: it names the missing element and points at the rule instead of repeating it.
+
+## Rule delivery (mod channels tried and rejected, 2026-11-17)
+
+- Moving the rule into a mod was tried and rolled back by the user. Live probes (throwaway mod, Claude Code 2.1.326): a mod has no channel for session context. `classic.SessionStart` and `classic.UserPromptSubmit` are bypassed by `cc-plugin-sec-default` (notice `its classic.<Event> hook was skipped`), so `additionalContext` of a wrapped hook never arrives. A `turn.start` rewrite and a `turn.step` rewrite (`system`, `systemPrompt`, `additionalContext`, `context`, `appendSystemPrompt` fields) do not reach the model. Only a `prompt.submit` rewrite (`next({ ...e, text })`) does, which puts the text into the user's prompt row, visible in the transcript. `turn.step` carries `{ turnId, index, model, effort, messageCount }`, `session.start` `{ cwd, surface, isInteractive }` (not raised on `/clear`).
+- The `SessionStart` command hook answers a hook JSON object (`hookSpecificOutput.additionalContext`), not plain stdout; both reach the model.
 
 ## Origin
 
-- 2026-11-17, decided by the user: the gate moved out of `coding-toolbox` (0.26.0, kwitsch/claude-plugins PR #298) into `rc-enhancement` 0.2.0, which was then migrated into this repository as 0.3.0 with the repository's layout and the sync to kwitsch/claude-plugins. The `SessionStart` rule hook stays and the gate points back at it. Rejected: leaving the gate in coding-toolbox (the rule and its enforcement belong together).
-- Live check before the move (`claude -p --plugin-dir`, 2026-11-17, Claude Code 2.1.326): the rule text arrived as SessionStart context, a turn ending in `?` got exactly one gate prompt, and that second turn was not re-gated. `SessionStart.md` of the former plugin was a `cat`-ed file; `plugin/` here may hold no markdown beyond the README, so the text is a constant in `session-start.ts`.
+- 2026-11-17, decided by the user: the gate moved out of `coding-toolbox` (0.26.0, kwitsch/claude-plugins PR #298) into `rc-enhancement` 0.2.0, which was then migrated into this repository as 0.3.0 with the repository's layout and the sync to kwitsch/claude-plugins. Rejected: leaving the gate in coding-toolbox (the rule and its enforcement belong together).
+- Same day, 0.4.0: the mods gate became the `Stop` command hook above, main session only. `plugin/` may hold no markdown beyond the README, so the rule text is a constant in `src/hooks/session-start.ts`.

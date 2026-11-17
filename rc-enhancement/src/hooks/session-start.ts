@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-// SessionStart command hook: prints the CRITICAL interaction rule, which Claude Code adds to the session as context
-// (plain stdout reaches the model on SessionStart). The interaction gate in register.ts points back at this text.
+// SessionStart command hook: answers the CRITICAL interaction rule as a hook JSON object (`additionalContext`), which
+// Claude Code adds to the session as context. The interaction gate in hooks/register.ts points back at this text.
 
 /** The rule as the session sees it. */
 const RULE = `# CRITICAL RULE — how to interact with the user
@@ -27,6 +27,22 @@ This rule exists so the session can be driven remotely: the user must always be 
    tool's **Other** option — never by asking the user to type into a
    plain-text reply.
 
+## Output format
+
+Never state a question in your answer and then answer it yourself ("Why is
+that? Because ..."). Write a short heading line ending in a colon, followed by
+a bullet list, instead:
+
+\`\`\`
+Reasons for the change:
+
+* reason 1
+* reason 2
+\`\`\`
+
+A real question to the user is never part of an answer: it goes through
+\`AskUserQuestion\` (rule above).
+
 ## Restated
 
 **Use \`AskUserQuestion\` for every question. Never end a turn on a plain-text
@@ -34,4 +50,4 @@ question mark. For free-text, offer an Abort/Cancel option and route the
 answer through the tool's Other option.**
 `;
 
-process.stdout.write(RULE);
+process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: "SessionStart", additionalContext: RULE } }));

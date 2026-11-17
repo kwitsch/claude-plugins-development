@@ -74,11 +74,7 @@ importers:
         specifier: workspace:*
         version: link:../development/vitest/claude-engine
 
-  rc-enhancement:
-    devDependencies:
-      claude-engine-vitest:
-        specifier: workspace:*
-        version: link:../development/vitest/claude-engine
+  rc-enhancement: {}
 
   universal-lint: {}
 
