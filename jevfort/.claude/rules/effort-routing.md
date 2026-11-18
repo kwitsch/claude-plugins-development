@@ -9,8 +9,8 @@ paths:
 
 # Effort estimate
 
-- `estimateEffort` (`policy.ts`) is shared by step 0 and the `estimate_effort` tool; its two questions go out with the
-  other step-0 questions in the same batch call. Upstream's difficulty->effort mapping and its difficulty question are
+- `estimateEffort` (`policy.ts`) is the single effort rule of step 0 and step effort; its two questions go out with the
+  other step-0 questions in the same request call. Upstream's difficulty->effort mapping and its difficulty question are
   gone.
 - Rule, calibrated on `tests/fixtures/effort-scores.json` (numbers in the `MECHANICAL_FROM`/`EFFORT_CUTS` comments,
   history in `development/wiki/plugins/jevfort/evaluations/EVALUATION-2026-11-15-live-notes.md`): p >= `MECHANICAL_FROM` gives `minEffort`; a missing or
