@@ -1,6 +1,6 @@
 {
   "name": "jevfort",
-  "version": "0.13.0",
+  "version": "0.13.1",
   "private": true,
   "description": "Lets TypeSafe Jev take routine steps and route effort (port of nim-f/jev-pilot; asks Jev through the jev-api plugin's tools).",
   "keywords": [
@@ -20,9 +20,6 @@
   },
   "devDependencies": {
     "claude-engine-vitest": "workspace:*"
-  },
-  "pluginBuild": {
-    "bundleHooksLib": true
   },
   "claudePlugin": {
     "dependencies": [
@@ -140,5 +137,8 @@
         "default": "xhigh"
       }
     }
+  },
+  "pluginBuild": {
+    "bundleHooksLib": true
   }
 }
