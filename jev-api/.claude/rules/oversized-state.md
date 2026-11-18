@@ -33,7 +33,7 @@ Per call: input `overflow` > `userConfig` option `overflow` (invalid: `haiku`) >
 - `error`: deny with the numbers and a size to aim for in hundreds of characters.
 - `truncate`: cut the middle (`cutState`: 60 % head, 40 % tail, marker, UTF-16 units, no split surrogate pair) to the budget (limit and timeout) at the learned density and, after a 400, at the exact density its count gave (a dense text such as hex would otherwise still run into the timeout); send once more; a second 400 is answered with the numbers (never a third request).
   - A cut that would keep no state at all (the questions fill the budget) sends nothing and answers `preflightError` (no refusal yet) or `tooBigError`.
-  - The answer, `batch` array included, does not say it was cut.
+  - The answer array does not say it was cut.
 - `haiku`: hand the state (cut over 150000 characters) to `askHaiku`.
 - jevfort passes no `overflow`, so an oversized call of it would be answered by Haiku within its short budget; follow-up: jevfort may want `overflow: "error"`.
 

@@ -14,14 +14,14 @@ History and calibration measurements: `development/wiki/plugins/jev-api/notes/ha
 - A configured Jev that answers an HTTP error status (4xx or 5xx, not the 400 context refusal, which follows the overflow mode) is taken over by Haiku: `answerJev`'s `takeOver` gives it the call's timeout less the time since the call started (`$.clock.now`).
   - No time left: the HTTP error with `no time left for the Haiku fallback`.
   - An abandoned call is not handed over.
-  - Haiku fails too: `<tool>: HTTP <status>: <reason>; fallback: <reason>`.
+  - Haiku fails too: `request: HTTP <status>: <reason>; fallback: <reason>`.
 - A timeout, a network error or an invalid endpoint stays an error.
 - Not a `claude -p` spawn (decided: effortless and jevfort use the engine call). jevfort raises its budget to 15 s in that case.
 - The output budget (`haikuTokens`) grows with the options and levels the answers list (cap 16384).
 
 ## Answer checking
 
-- `checkAnswer` rebuilds each answer in the System One shape (noul 0..1; choice must be an option with all option probabilities; score 0..levels-1 with all level probabilities; confidence 0..1), else `<tool>: fallback: ...`. Never a made-up answer.
+- `checkAnswer` rebuilds each answer in the System One shape (noul 0..1; choice must be an option with all option probabilities; score 0..levels-1 with all level probabilities; confidence 0..1), else `request: fallback: ...` for `questions[<i>]`. Never a made-up answer.
 
 ## Calibration toward Jev (keep all three)
 
