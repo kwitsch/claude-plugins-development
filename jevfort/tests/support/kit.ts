@@ -1,7 +1,9 @@
-// Shared test kit of jevfort: the fake environment, Jev's batch tool and the stubs beneath the mod, bound to the built
+// Shared test kit of jevfort: the fake environment, Jev's request tool and the stubs beneath the mod, bound to the built
 // plugin/hooks/register.mjs. Tests import only register.mjs through this module (the standard of jev-api).
 import { createKit } from "claude-engine-vitest";
 import type { On } from "claude-engine-vitest";
+// jev-api's request tool, the name jevfort asks Jev through (the entry takes it, so lib.mjs exports it).
+import { JEV_REQUEST, JEV_TOOL_PREFIX } from "../../plugin/hooks/lib.mjs";
 
 export const DEFAULTS = {
   routing: true,
@@ -32,12 +34,9 @@ export function makeKit(options: Record<string, unknown> = DEFAULTS) {
 
 export const CWD = "/proj";
 export const SID = "sid-1";
-/** jev-api's batch tool, the name jevfort asks Jev through. */
-const JEV_BATCH = "mcp__jev-api__batch";
-const JEV_TOOL_PREFIX = "mcp__jev-api__";
 
 /**
- * The id of a batch question by its instructions (the start of each question jevfort asks).
+ * The id of a request question by its instructions (the start of each question jevfort asks).
  *
  * @param instructions - The question's instructions text.
  * @returns The id, or undefined for a question this kit does not know.
@@ -54,8 +53,8 @@ export function questionId(instructions: string): string | undefined {
   return starts.find(([start]) => instructions.startsWith(start))?.[1];
 }
 
-export const JEV_TOOLS = [{ name: JEV_BATCH, description: "Ask Jev several questions", mcp: true }];
-/** jev-api 0.1's tools, which lack the batch tool. */
+export const JEV_TOOLS = [{ name: JEV_REQUEST, description: "Ask Jev several questions", mcp: true }];
+/** The removed jev-api single-question tools, which lack the request tool. */
 export const SINGLE_TOOLS = ["noul", "choice", "score"].map((t) => ({ name: JEV_TOOL_PREFIX + t, description: `Ask Jev a ${t} question`, mcp: true }));
 /** What the fake answers a question the test's `jev` leaves open, by type: not true, leave it to Claude, an unconfident score. */
 export const NEUTRAL: Record<string, Record<string, unknown>> = {
@@ -64,9 +63,9 @@ export const NEUTRAL: Record<string, Record<string, unknown>> = {
   score: { type: "score", score: 0, probabilities: {}, confidence: 0 },
 };
 
-/** One question of a batch call as the fake saw it: its id (its instructions when unknown), its input, the call's `state` (JSON text) and the call's index (0 for the first batch call). */
+/** One question of a request call as the fake saw it: its id (its instructions when unknown), its input, the call's `state` (JSON text) and the call's index (0 for the first request call). */
 export type Asked = { id: string; type: string; instructions: string; state: string; criteria?: unknown; timeout?: unknown; call: number };
-/** The fake Jev, called once per batch question: the answer object, a raw result string (the whole batch result), a number (an HTTP error status: the batch denies), `undefined` (a neutral answer), or a Promise that never settles (no answer). */
+/** The fake Jev, called once per request question: the answer object, a raw result string (the whole request result), a number (an HTTP error status: the request denies), `undefined` (a neutral answer), or a Promise that never settles (no answer). */
 export type Jev = (q: Asked) => Record<string, unknown> | string | number | undefined | Promise<never>;
 export type Msg = { role: "user" | "assistant"; text: string; toolUses: Record<string, unknown>[]; toolResults?: Record<string, unknown>[] };
 export type Chunk = { kind: string; [k: string]: unknown };
@@ -75,12 +74,12 @@ export type Runner = Parameters<Parameters<ReturnType<typeof makeKit>["test"]>[2
 /** The options of `setup`: the messages, Jev's answers and what the environment holds. */
 export type SetupOpts = { messages: Msg[]; jev: Jev; cwd?: () => string; files?: string[]; links?: string[]; packageJson?: object | string; makefile?: string; env?: Record<string, string>; store?: Record<string, unknown>; existsDenied?: boolean; statHangs?: boolean; locks?: string[]; sizes?: Record<string, number>; tools?: { name: string; description: string; mcp: boolean }[] | null };
 
-// Answers every call the mod makes on `$`. The batch tool is listed and answered from `jev`; a mod's `$.tool.call`
+// Answers every call the mod makes on `$`. The request tool is listed and answered from `jev`; a mod's `$.tool.call`
 // resolves to the stub's `value`: the tool result `{ result }`, or `{ deny }` as the real engine resolves a deny (a bare
 // `{ deny }` stub answer would make the kit reject instead). Other tools go on to the test's own `tool.call` stub.
 export function setupWith(mock: MockKit, on: On, opts: SetupOpts) {
   const sent: Asked[] = [];
-  let batchCalls = 0;
+  let requestCalls = 0;
   let reads = 0;
   const statted: string[] = [];
   mock.env(on, opts.env ?? {});
@@ -108,22 +107,23 @@ export function setupWith(mock: MockKit, on: On, opts: SetupOpts) {
   // `tools: null` makes the listing fail.
   on("tool.list", () => (opts.tools === null ? { deny: "tool.list failed" } : { value: opts.tools ?? JEV_TOOLS }));
   on("tool.call", async (_$, e, next) => {
-    if (e.tool !== JEV_BATCH) return next(e);
+    if (e.tool !== JEV_REQUEST) return next(e);
+    // Counted before the deny: a call at an unlisted tool records no question in `sent`, so `calls()` is the only trace that the mod asked.
+    const call = requestCalls++;
     // As the engine: a tool that is not listed is unknown, so the mod's call rejects (a bare `{ deny }`).
-    if (opts.tools === null || (opts.tools !== undefined && !opts.tools.some((t) => t.name === JEV_BATCH))) return { deny: `unknown tool ${JEV_BATCH}` };
-    const call = batchCalls++;
+    if (opts.tools === null || (opts.tools !== undefined && !opts.tools.some((t) => t.name === JEV_REQUEST))) return { deny: `unknown tool ${JEV_REQUEST}` };
     const asked = (e.questions as { type: string; instructions: string; criteria?: unknown }[]).map((b): Asked => ({ ...b, id: questionId(b.instructions) ?? b.instructions, state: String(e.state), timeout: e.timeout, call }));
     sent.push(...asked);
     const answers = await Promise.all(asked.map(async (q) => opts.jev(q)));
-    // `{ __deny: text }` makes the batch deny with that text (an error body of any size).
+    // `{ __deny: text }` makes the request deny with that text (an error body of any size).
     const denied = answers.find((a) => typeof a === "object" && a !== null && "__deny" in a) as { __deny: string } | undefined;
     if (denied) return { value: { deny: denied.__deny } };
     const status = answers.find((a) => typeof a === "number");
-    if (status !== undefined) return { value: { deny: `batch: HTTP ${status}` } };
+    if (status !== undefined) return { value: { deny: `request: HTTP ${status}` } };
     const raw = answers.find((a) => typeof a === "string");
     return { value: { result: raw ?? JSON.stringify(answers.map((a, i) => a ?? NEUTRAL[asked[i].type])) } };
   });
-  return { sent, clock, statted, calls: () => batchCalls, reads: () => reads };
+  return { sent, clock, statted, calls: () => requestCalls, reads: () => reads };
 }
 
 // Stubs beneath the mod: the turn's end, and the prompts submitted through it (their texts).
@@ -172,7 +172,7 @@ export const ids = (sent: Asked[]) => sent.map((q) => q.id);
  */
 export const stateOf = (sent: Asked[], i: number) => JSON.parse(sent[i].state) as { request: string; previous_reply?: string; effort?: string; delta?: Record<string, unknown>[] };
 /**
- * A fake Jev answering by question id, one answer set per batch call (one `askJev`) in call order.
+ * A fake Jev answering by question id, one answer set per request call (one `askJev`) in call order.
  *
  * @param rounds - One answer set per call, by question id; the last repeats, and a number is an HTTP error status for
  * that whole call.
@@ -201,6 +201,30 @@ export function claudeBeneath(on: On, seen: unknown[]) {
   });
 }
 
+/**
+ * Captures the debug effort line and returns a runner of one step 0 (a fresh turn id each call, Claude beneath) that
+ * reports the chosen effort and its source (`jev`, `mechanical`, `fallback`; `jev` also for "jev unavailable").
+ *
+ * @param on - The test's `on`; call before the test's first `$` call.
+ * @returns The runner: `over` changes the step (`model`, session `effort`); `effort` is the chosen level, or
+ * `"unchanged"` when Jev gave none. Opus/Sonnet estimate every turn; Haiku/Fable hold the first turn's estimate until
+ * the next `session.start`.
+ */
+export function effortOf(on: On) {
+  const logged: string[] = [];
+  on("ui.log", (_$, e) => (logged.push(String(e.text)), { value: undefined }));
+  claudeBeneath(on, []);
+  let n = 0;
+  return async ($: Runner, over: Partial<typeof step> = {}) => {
+    const before = logged.length;
+    await drain($.turn.step({ ...step, turnId: `e${n++}`, ...over }));
+    // Only what this step logged: an earlier step's line must not answer for a step that logged none.
+    let m: RegExpExecArray | null = null;
+    for (const line of logged.slice(before)) m = /→ (\S+) · (\w+)/.exec(line) ?? m;
+    return { effort: m?.[1], source: m?.[2] };
+  };
+}
+
 export const toolId = (chunks: Chunk[]) => (chunks.find((c) => c.kind === "tool")?.id as string | undefined) ?? "";
 
 export const decision = async ($: Runner, input: Record<string, unknown>) => ((await $.tool.check(input)) as { decision?: string }).decision;
@@ -209,19 +233,12 @@ export const decision = async ($: Runner, input: Record<string, unknown>) => ((a
 export const START = { cwd: CWD, surface: "terminal", isInteractive: true };
 
 /**
- * The stubs `session.start` needs beneath jevfort: `estimate_effort` registration, the event's end.
+ * The stub `session.start` needs beneath jevfort: the event's end.
  *
  * @param on - The test's `on`.
- * @returns The names passed to `$.tool.register`, in call order.
  */
-export function sessionStubs(on: On) {
-  const registered: unknown[] = [];
-  on("tool.register", async (_$, e) => {
-    registered.push(e.name);
-    return { value: { tool: "mcp__jevfort__estimate_effort" } };
-  });
+export function sessionStubs(on: On): void {
   on("session.start", async () => ({}));
-  return registered;
 }
 
 /** The band above the prompt as the terminal raises it (`ui.render`, component `AbovePrompt`). */

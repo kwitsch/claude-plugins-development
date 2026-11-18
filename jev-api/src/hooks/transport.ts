@@ -7,7 +7,7 @@
  * Measured live (Claude Code 2.1.325): `$.mcp.call` is not cancelled when the dispatch is abandoned and has no timeout,
  * so the mod guards the call itself and tells the server to abort with a second call, `cancel`. A hidden tool
  * (`_meta.ui.visibility` without `model`) is not callable by `$.mcp.call`, so the server's tools are visible and the
- * model is refused by the `tool.check` hook of `register.mts`.
+ * model is refused by the `tool.check` hook of `register.ts`.
  *
  * @packageDocumentation
  */
@@ -233,7 +233,7 @@ async function ensureServer($: Engine, link: Link): Promise<string | undefined> 
  * Reads the outcome out of an MCP tool result of the server.
  *
  * @param r - The `$.mcp.call` result (anything the engine resolves: a missing or odd one is no outcome).
- * @returns The outcome (the structured content, or an error outcome for the plain error text of an invalid input), or undefined when the result is neither.
+ * @returns The outcome (the structured content, or an error outcome for the plain error text of an invalid input, without the server's own `request: ` prefix: `fail` adds the model-visible one), or undefined when the result is neither.
  */
 function readOutcome(r: McpResult | null | undefined): Outcome | undefined {
   if (!isRecord(r)) return undefined;
@@ -245,7 +245,8 @@ function readOutcome(r: McpResult | null | undefined): Outcome | undefined {
     if (sc["kind"] === "http" && typeof sc["status"] === "number") return sc as unknown as Outcome;
     if (sc["kind"] === "error" && typeof sc["code"] === "string" && typeof sc["message"] === "string") return sc as unknown as Outcome;
   }
-  return r.isError === true && text !== undefined ? { kind: "error", code: "network", message: text } : undefined;
+  // The server names its own tool in an input error (`request: <why>`): the model-visible tool has the same name now, so the prefix is not repeated.
+  return r.isError === true && text !== undefined ? { kind: "error", code: "network", message: text.replace(/^request: /, "") } : undefined;
 }
 
 /**

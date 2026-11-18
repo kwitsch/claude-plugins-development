@@ -27,11 +27,11 @@ Each wait is paid once per outage (the connect and the `config` failure mark the
 
 Proven (harness, built `plugin/hooks/register.mjs` with a fake `$`, `timeout` 1 s, fallback `$.http.fetch` answering at once):
 
-| Case                                                                   | Result                                                                               |
-| ---------------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
-| `$.mcp.connect` never answers, first call (measured before b4cd930; now `timeout after 1000ms` after 3 s, nothing fetched) | 3003 ms, answered through `$.http.fetch`; the next call 0 ms                         |
-| registration, `store.get` and `$.mcp.connect` never answer, first call | 5003 ms; the next call 0 ms                                                          |
-| a network error, then the `config` call never answers                  | the next call 3001 ms, then 0 ms                                                     |
+| Case                                                                                                                                                               | Result                                                                               |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------ |
+| `$.mcp.connect` never answers, first call (measured before b4cd930; now `timeout after 1000ms` after 3 s, nothing fetched)                                         | 3003 ms, answered through `$.http.fetch`; the next call 0 ms                         |
+| registration, `store.get` and `$.mcp.connect` never answer, first call                                                                                             | 5003 ms; the next call 0 ms                                                          |
+| a network error, then the `config` call never answers                                                                                                              | the next call 3001 ms, then 0 ms                                                     |
 | the built server stopped with `SIGSTOP` after a success, 3 calls (measured before b4cd930/ea54af3; the 3008 ms row now is `timeout after 1000ms`, nothing fetched) | 2502 ms (`timeout after 1000ms`), 3008 ms (through `$.http.fetch`), 4 ms; 1 log line |
 
 The last row also shows that F22's constraint "the next call waits for the guard again until the server answers" is out of date: the guard timeout sets `dirty`, the next call's `config` call waits 3 s, marks the server down and falls back.
@@ -63,7 +63,7 @@ A decision between the two needs the user (or a decision agent, per the docs rul
 
 ## Constraints
 
-- Every owned call is answered (a `deny` on failure); jevfort's `batch` input and answer shape stay.
+- Every owned call is answered (a `deny` on failure); jevfort's `request` input and answer shape stay.
 - `$.mcp.call` has no timeout and no cancel of its own (F22); the mod's own races are the only bound.
 - The engine's static check: no `$.<noun>` passed as a value, also in `lib.mjs`; run `claude plugin validate jev-api/plugin` after the change.
 

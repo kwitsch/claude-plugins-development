@@ -17,7 +17,7 @@ See [how-to-work-a-task.md](../how-to-work-a-task.md).
 ## Task conventions
 
 - Read `jev-api/.claude/rules/hooks-source.md` first: the code is in `src/hooks/register.ts` and its modules (for a task with area `jevfort/...`, the jevfort sources); the test goes into `tests/register.test.ts`.
-- jevfort calls `batch`: do not change its name, input or answer shape.
+- jevfort calls `request`: do not change its name, input or answer shape.
 
 ## Conventions
 

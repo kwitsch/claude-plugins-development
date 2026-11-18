@@ -47,11 +47,11 @@ Splitting the batch into parallel requests does not help: 10 single-question req
 
 ## Verification
 
-jevfort test: a stub `batch` answering after 4.5 s still ranks a 30-item compaction (option 1), or the questions are clipped (option 2). Re-measure with the real endpoint (`realscale.mjs`-style script, see the evaluation) and record the figures in a new evaluation.
+jevfort test: a stub `request` answering after 4.5 s still ranks a 30-item compaction (option 1), or the questions are clipped (option 2). Re-measure with the real endpoint (`realscale.mjs`-style script, see the evaluation) and record the figures in a new evaluation.
 
 ## Constraints
 
-jevfort and jev-api ship standalone; `batch`'s name and shape stay. The interactive budget (prompt classification, turn steps) should stay short; only the compaction path is off the critical path.
+jevfort and jev-api ship standalone; `request`'s name and shape stay. The interactive budget (prompt classification, turn steps) should stay short; only the compaction path is off the critical path.
 
 ## Related
 

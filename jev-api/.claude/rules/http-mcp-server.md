@@ -41,6 +41,7 @@ Live evidence and measurements: `development/wiki/plugins/jev-api/tasks/F22-http
 
 - A tool with `_meta.ui.visibility` without `model` is NOT callable by `$.mcp.call`, so both tools are visible (deferred behind ToolSearch).
 - The `tool.check` hook allows origin `jev-api` and denies every other origin for `mcp__plugin_jev-api_http__*` (also when allowed by `--allowedTools`). A notice that `cc-plugin-sec-default` skipped the hook appears, but the deny applies.
+- The server's tool `request` has the same bare name as the model-visible `mcp__jev-api__request`: `readOutcome` strips the server's own `request:` prefix from its input errors (`fail` adds the model-visible one), and `registerOne` accepts any `mcp__*__request` from a `tool.register` answer, so a forged answer naming the server's tool would be claimed (the real engine answers `mcp__jev-api__request`, live 2.1.327). Keep new server tool names distinct from `request`.
 
 ## Fallback
 

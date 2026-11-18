@@ -51,7 +51,7 @@ Planned verification:
 
 ## Constraints
 
-Every Jev failure falls back to Claude Code's own behaviour; jev-api's `batch` shape stays. `onAgentOffer` must keep honouring `isOffered: false` (a withheld type is never a switch target).
+Every Jev failure falls back to Claude Code's own behaviour; jev-api's `request` shape stays. `onAgentOffer` must keep honouring `isOffered: false` (a withheld type is never a switch target).
 
 ## Related
 

@@ -75,7 +75,7 @@ Planned:
 
 ## Constraints
 
-jev-api's `batch` shape stays; the hint wording and thresholds (`SKILL_HINT`, `PLAN_HINT`) only change with the user. Every `$` use stays in `register.mts`, pure filtering in `candidates.mts`/`prompt.mts`.
+jev-api's `request` shape stays; the hint wording and thresholds (`SKILL_HINT`, `PLAN_HINT`) only change with the user. Every `$` use stays in `register.mts`, pure filtering in `candidates.mts`/`prompt.mts`.
 
 ## Related
 

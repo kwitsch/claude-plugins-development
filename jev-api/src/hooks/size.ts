@@ -4,7 +4,7 @@
  * @packageDocumentation
  */
 
-import type { Engine, ToolName, ToolResult } from "./types.js";
+import type { Engine, ToolResult } from "./types.js";
 import { fail, isRecord, MAX_TIMEOUT_S } from "./util.js";
 
 /** The context window of System One in tokens (`n_ctx`, measured live 2026-11-14: a prompt of this many tokens is refused, one less passes). The server's own `n_ctx` replaces it once a rejection reports it. */
@@ -262,20 +262,18 @@ export function aimHundreds(chars: number): number {
 /**
  * The refusal a tool answers when the prompt is over the server's context window and nothing else is done about it.
  *
- * @param tool - The tool called.
  * @param refused - The server's refusal with the prompt's size.
  * @param budget - The tokens the call's timeout allows (with the limit known before the refusal); the aim fits it and the refused limit.
  * @returns The error answer: the exact numbers and the state size to aim for (in hundreds of characters).
  */
-export function tooBigError(tool: ToolName, refused: TooBig["tooBig"], budget: number): ToolResult {
+export function tooBigError(refused: TooBig["tooBig"], budget: number): ToolResult {
   const aim = aimHundreds(stateForBudget(Math.min(budget, refused.limit), refusedDensity(refused), refused.questionsChars));
-  return fail(tool, `state too large for System One: the request has ${refused.tokens} tokens, the limit is ${refused.limit}; shorten the state to about ${aim} characters`);
+  return fail(`state too large for System One: the request has ${refused.tokens} tokens, the limit is ${refused.limit}; shorten the state to about ${aim} characters`);
 }
 
 /**
  * The refusal a tool answers when the preflight finds the prompt too large and the overflow mode is `error`: nothing was sent.
  *
- * @param tool - The tool called.
  * @param estimate - The optimistic token estimate of the prompt (a lower bound).
  * @param budget - The tokens the prompt may have: the smaller of the server's limit and what the timeout allows.
  * @param limit - The server's limit in tokens (its `n_ctx` minus one).
@@ -283,9 +281,9 @@ export function tooBigError(tool: ToolName, refused: TooBig["tooBig"], budget: n
  * @param aim - The state size to aim for, in characters.
  * @returns The error answer; it names the timeout when the timeout, not the server's limit, set the budget, and names no state size when the budget is the floor {@link MIN_BUDGET_TOKENS}.
  */
-export function preflightError(tool: ToolName, estimate: number, budget: number, limit: number, timeoutMs: number, aim: number): ToolResult {
-  if (budget >= limit) return fail(tool, `state too large for System One: at least ${estimate} tokens, the limit is ${limit}; shorten the state to about ${aimHundreds(aim)} characters`);
+export function preflightError(estimate: number, budget: number, limit: number, timeoutMs: number, aim: number): ToolResult {
+  if (budget >= limit) return fail(`state too large for System One: at least ${estimate} tokens, the limit is ${limit}; shorten the state to about ${aimHundreds(aim)} characters`);
   // At the floor the timeout allows fewer tokens than the budget, so neither the budget nor a size taken from it fits: only a longer timeout helps.
-  if (budget <= MIN_BUDGET_TOKENS) return fail(tool, `state too large for the timeout of ${timeoutMs / 1000} s: at least ${estimate} tokens; raise the timeout (at most ${MAX_TIMEOUT_S} s)`);
-  return fail(tool, `state too large for the timeout of ${timeoutMs / 1000} s: at least ${estimate} tokens, about ${budget} fit; shorten the state to about ${aimHundreds(aim)} characters or raise the timeout (at most ${MAX_TIMEOUT_S} s)`);
+  if (budget <= MIN_BUDGET_TOKENS) return fail(`state too large for the timeout of ${timeoutMs / 1000} s: at least ${estimate} tokens; raise the timeout (at most ${MAX_TIMEOUT_S} s)`);
+  return fail(`state too large for the timeout of ${timeoutMs / 1000} s: at least ${estimate} tokens, about ${budget} fit; shorten the state to about ${aimHundreds(aim)} characters or raise the timeout (at most ${MAX_TIMEOUT_S} s)`);
 }

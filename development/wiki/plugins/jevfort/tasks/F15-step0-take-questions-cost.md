@@ -46,7 +46,7 @@ Recommendation: 1 now (no decision needed), 3 as a decision; 2 only if the featu
 
 ## Constraints
 
-Every Jev failure falls back to Claude Code's own behaviour; jev-api's `batch` name, input and answer shape stay. The effort estimate stays in the same step-0 batch (one System One request per step 0, F10). `buildCandidates` keeps its per-turn cache semantics (F04, F05, F07) and the `MAX_STATS` budget.
+Every Jev failure falls back to Claude Code's own behaviour; jev-api's `request` name, input and answer shape stay. The effort estimate stays in the same step-0 batch (one System One request per step 0, F10). `buildCandidates` keeps its per-turn cache semantics (F04, F05, F07) and the `MAX_STATS` budget.
 
 ## Related
 

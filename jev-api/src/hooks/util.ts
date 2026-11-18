@@ -4,8 +4,8 @@
  * @packageDocumentation
  */
 
-import { OVERFLOWS, TYPES } from "./types.js";
-import type { Overflow, Question, QuestionType, ToolName, ToolResult } from "./types.js";
+import { OVERFLOWS, TOOL, TYPES } from "./types.js";
+import type { Overflow, Question, QuestionType, ToolResult } from "./types.js";
 
 /** How long one request may take, in seconds, when neither the call's `timeout` nor the `timeout` option is valid. */
 export const DEFAULT_TIMEOUT_S = 20;
@@ -25,9 +25,6 @@ export const MAX_TIMEOUT_S = 30;
 export function isOverflow(v: unknown): v is Overflow {
   return (OVERFLOWS as readonly unknown[]).includes(v);
 }
-
-/** The key of a single-question tool's question in `questions` and of its answer in `answers` (`batch` keys them `q0`, `q1`, ... by index). */
-export const QUESTION_ID = "answer";
 
 /**
  * Whether a value is a plain object (not an array, not null).
@@ -67,12 +64,11 @@ export function json(text: string, reviver?: (key: string, value: unknown, conte
 /**
  * Builds a tool error: a `deny`, which the model reads as an error result (core drops a hook's own `isError`).
  *
- * @param tool - The tool called, prefixed to the message.
  * @param reason - What went wrong.
  * @returns The error answer for the model.
  */
-export function fail(tool: ToolName, reason: string): ToolResult {
-  return { deny: `${tool}: ${reason}` };
+export function fail(reason: string): ToolResult {
+  return { deny: `${TOOL}: ${reason}` };
 }
 
 /**
@@ -121,25 +117,23 @@ export function isText(v: unknown): v is string {
 }
 
 /**
- * The questions as the request body carries them: keyed `q0`, `q1`, ... for `batch`, by {@link QUESTION_ID} for a single tool.
+ * The questions as the request body carries them: keyed `q0`, `q1`, ... by index.
  *
- * @param tool - The tool called.
  * @param questions - The questions, in input order.
  * @returns The `questions` object of the request body (the answers come back under the same keys).
  */
-export function questionsBody(tool: ToolName, questions: Question[]): Record<string, Question> {
-  return Object.fromEntries(questions.map((q, i) => [questionId(tool, i), q]));
+export function questionsBody(questions: Question[]): Record<string, Question> {
+  return Object.fromEntries(questions.map((q, i) => [questionId(i), q]));
 }
 
 /**
  * The key of question `i` in the request and of its answer in the response.
  *
- * @param tool - The tool called.
  * @param i - The question's index.
- * @returns `q<i>` for `batch`, {@link QUESTION_ID} otherwise.
+ * @returns `q<i>`.
  */
-export function questionId(tool: ToolName, i: number): string {
-  return tool === "batch" ? `q${i}` : QUESTION_ID;
+export function questionId(i: number): string {
+  return `q${i}`;
 }
 
 /**

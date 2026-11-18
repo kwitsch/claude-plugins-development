@@ -1,6 +1,6 @@
 /**
  * TypeSafe System One question and answer shapes, answer readers and the name of the jev-api tool jevfort needs. All
- * questions of one decision go to jev-api's `batch` tool in one call (one System One request). Pure: the call itself
+ * questions of one decision go to jev-api's `request` tool in one call (one System One request). Pure: the call itself
  * (`askJev`) lives in `register.ts`, the only module that may use the engine API.
  *
  * @packageDocumentation
@@ -15,10 +15,10 @@ export const MAX_PAUSE_MS = 600_000;
 /** The longest error text `askJev` returns (and so the answer holds), in characters: an error body of megabytes must not be stored whole. */
 export const MAX_ERROR = 1000;
 
-/** The local budget of one `askJev` (its one batch call) before Claude Code's own behaviour wins, in ms. */
+/** The local budget of one `askJev` (its one request call) before Claude Code's own behaviour wins, in ms. */
 export const TIMEOUT_MS = 4000;
 
-/** A question Jev answers about a `state`, in the shape of one entry of jev-api's `batch` input: a yes/no probability, a choice among options, or a score along levels. */
+/** A question Jev answers about a `state`, in the shape of one entry of jev-api's `request` input: a yes/no probability, a choice among options, or a score along levels. */
 export type Question =
   | { type: "noul"; instructions: string; criteria?: { true?: string; false?: string } }
   | { type: "choice"; instructions: string; criteria: Record<string, string> }
@@ -41,7 +41,7 @@ export const MAX_CHOICE_OPTIONS = 255;
 /** The HTTP timeout jevfort gives an interactive jev-api call, in seconds (jev-api's `timeout` input): the {@link TIMEOUT_MS} budget, so the request ends with it and not a second after. */
 export const JEV_API_TIMEOUT_S = 4;
 /**
- * The `askJev` budget of a compaction ranking in milliseconds. System One answers a batch question by question
+ * The `askJev` budget of a compaction ranking in milliseconds. System One answers a request question by question
  * (about 140 ms each, 30 compaction-sized questions took 4.1 to 5.1 s), and a compaction is off the interactive path. Kept below the engine's 10 s limit per hook (not the 15 s Haiku budget, which applies whenever Haiku answers: an in-flight `$` call stops that clock, live on 2.1.325).
  */
 export const COMPACT_TIMEOUT_MS = 9000;
@@ -53,10 +53,10 @@ export const HAIKU_TIMEOUT_MS = 15_000;
 export const HAIKU_API_TIMEOUT_S = 14;
 /** Prefix of the jev-api plugin's tools. */
 export const JEV_TOOL_PREFIX = "mcp__jev-api__";
-/** jev-api's tool for several questions about one `state` in one request; its result is the answers in question order. */
-export const JEV_BATCH = JEV_TOOL_PREFIX + "batch";
+/** jev-api's `request` tool: several questions about one `state` in one request; its result is the answers in question order. */
+export const JEV_REQUEST = JEV_TOOL_PREFIX + "request";
 /** The jev-api tools jevfort needs, by full name. */
-export const JEV_TOOLS = [JEV_BATCH];
+export const JEV_TOOLS = [JEV_REQUEST];
 
 /**
  * The needed jev-api tools missing from a tool listing.
@@ -77,7 +77,7 @@ export function missingJevTools(names: readonly string[]): string[] {
 const finite = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);
 
 /**
- * Whether a batch answer has the asked type and the fields jevfort reads from it.
+ * Whether a request answer has the asked type and the fields jevfort reads from it.
  *
  * @param a - One entry of jev-api's answer array.
  * @param type - The asked question type.

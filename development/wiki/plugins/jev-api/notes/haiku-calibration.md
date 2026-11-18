@@ -8,6 +8,7 @@ The rules that came out of this are in `../.claude/rules/haiku-fallback.md`.
 - 0.3.1: calibration toward Jev (below).
 - 0.3.2: `choice` probabilities normalized to sum 1, like a score's.
 - 0.5.0: a configured Jev that answers an HTTP error status is taken over by Haiku (`takeOver` in `answerJev`).
+- 0.7.0: one tool `request`; the single-question tools `noul`, `choice` and `score` are removed (they stay question types).
 
 ## Calibration measurement (2026-11-13, 0.3.1)
 

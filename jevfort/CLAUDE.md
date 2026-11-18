@@ -1,8 +1,7 @@
 # CLAUDE.md — jevfort
 
-Mods-API plugin: one TypeScript function-hooks module and its pure helper modules, one engine-registered tool
-(`estimate_effort`, seen by the model as `mcp__jevfort__estimate_effort`, deferred: Skills and subagents load it via
-ToolSearch), no skills, agents, command hooks or MCP servers. A port of nim-f/jev-pilot
+Mods-API plugin: one TypeScript function-hooks module and its pure helper modules; it registers no tool
+(`estimate_effort` was removed in 0.14.0) and has no skills, agents, command hooks or MCP servers. A port of nim-f/jev-pilot
 (<https://github.com/nim-f/jev-pilot>, version 0.5.0, commit 90cc1f1, directory `hooks/`). Upstream has no LICENSE
 file; it is credited in `plugin/README.md`.
 
@@ -16,8 +15,8 @@ Part rules (load with their files): `.claude/rules/register-hooks.md` (hooks, `$
 - No permission gate (risk and in-scope questions, `gate` option, thresholds): `tool.check` only approves Jev's own
   vetted calls and writes into the session scratchpad.
 - Store keys `mode`, `log` and `stats` left in `$.store` by older versions are never read.
-- Jev is asked only through jev-api's tool `mcp__jev-api__batch` (upstream sends its own HTTP request): `askJev` raises
-  one `$.tool.call` with all questions of the decision (one System One request, needs jev-api >= 0.2.0), all or
+- Jev is asked only through jev-api's tool `mcp__jev-api__request` (upstream sends its own HTTP request): `askJev` raises
+  one `$.tool.call` with all questions of the decision (one System One request, needs jev-api >= 0.7.0), all or
   nothing. Each call passes its budget as jev-api's `timeout` (values: `register-hooks.md`), so jev-api stops waiting
   when jevfort does, not after its default 20 s (jev-api's timeout and cancel: `jev-api/CLAUDE.md`).
 - jevfort makes no network request and reads no endpoint or key: those are jev-api's environment (`TYPESAFE_API_KEY`,
@@ -26,11 +25,11 @@ Part rules (load with their files): `.claude/rules/register-hooks.md` (hooks, `$
   for any of it.
 - jev-api is a declared plugin dependency (`claudePlugin.dependencies: ["jev-api"]` in `package.json`, bare name, no
   version range): Claude Code keeps jevfort disabled while jev-api is missing or disabled. At runtime `jevMissing($)`
-  looks the batch tool up once per turn (lifecycle: `register-hooks.md`). While it is missing (also with jev-api 0.1,
-  which has only `noul`/`choice`/`score`) jevfort is inactive: every hook passes through untouched (also the
-  scratchpad-write allow) except the render hooks, the `estimate_effort` handling and the Jev-free cache countdown,
-  Haiku compaction and auto-compact.
-- Coupling: jevfort relies on jev-api's `batch` name, input and answer shape (defined in `jev-api/CLAUDE.md`); no
+  looks the request tool up once per turn (lifecycle: `register-hooks.md`). While it is missing (also with jev-api 0.6
+  and older, which list `batch` or only `noul`/`choice`/`score`) jevfort is inactive: every hook passes through
+  untouched (also the scratchpad-write allow) except the render hooks and the Jev-free cache countdown, Haiku
+  compaction and auto-compact.
+- Coupling: jevfort relies on jev-api's `request` name, input and answer shape (defined in `jev-api/CLAUDE.md`); no
   code is imported. The runtime check catches a renamed tool; changed shapes surface as `askJev`
   errors and the fallback to Claude Code's own behaviour.
 - Every `$` use and every `on(...)` call lives in `src/hooks/register.ts` (engine rule), including upstream's `askJev`,
@@ -39,8 +38,8 @@ Part rules (load with their files): `.claude/rules/register-hooks.md` (hooks, `$
 - Effort: the turn's effort comes from Jev's effort estimate (`effort-routing.md`), not from upstream's
   difficulty->effort mapping. `routing` is a boolean (`options.routing !== false`; Claude Code type-checks `userConfig`
   before loading, so a non-boolean value keeps the module from loading, live 2.1.325; the fallback only covers an
-  absent value): `false` turns off the step-0 effort estimate and the band's effort row, not the cache countdown,
-  `estimate_effort` or take-steps.
+  absent value): `false` turns off the step-0 effort estimate and the band's effort row, not the cache countdown
+  or take-steps.
   `stepEffort` (`=== true`, default off): per-step estimates, see `effort-routing.md`.
 - Effort band: a `ui.render` hook on `AbovePrompt` shows the session and the chosen effort and a `Jevfort ✔️/✖️`
   Button (details: `register-hooks.md`).

@@ -33,7 +33,7 @@ In `<plugin>/package.json` add `"pluginBuild": { "bundleHooksLib": true }` (top 
 ## 4. Verify, including a live session (required)
 
 - `pnpm lint && pnpm --filter <plugin> build && pnpm --filter <plugin> test` and `claude plugin validate <plugin>/plugin`.
-- A real Claude Code session with the built plugin: `claude -p "<prompt that makes the plugin do its job>" --plugin-dir <plugin>/plugin --setting-sources project --allowedTools "<narrow list>"`, once per main path of the plugin (for jev-api: a real tool call, a batch call, an input error, and the Haiku-only path with the endpoint variables unset via `env -u`). The unit tests do not load the bundle through the real engine; only this does.
+- A real Claude Code session with the built plugin: `claude -p "<prompt that makes the plugin do its job>" --plugin-dir <plugin>/plugin --setting-sources project --allowedTools "<narrow list>"`, once per main path of the plugin (for jev-api: a real tool call, a multi-question request, an input error, and the Haiku-only path with the endpoint variables unset via `env -u`). The unit tests do not load the bundle through the real engine; only this does.
 - Record the sizes again and report before/after.
 
 ## 5. Docs and release

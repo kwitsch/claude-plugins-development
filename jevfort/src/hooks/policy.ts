@@ -119,14 +119,9 @@ export function effortLevel(score: number, cuts: readonly number[] = EFFORT_CUTS
   const i = Math.max(1, x.findIndex((v) => s <= v));
   return y[i - 1] + ((s - x[i - 1]) / (x[i] - x[i - 1])) * (y[i] - y[i - 1]);
 }
-/** The tool's registered name; the model sees it as {@link ESTIMATE_TOOL}. */
-export const ESTIMATE_NAME = "estimate_effort";
-/** The name calls to the tool arrive under at `tool.call`. */
-export const ESTIMATE_TOOL = `mcp__jevfort__${ESTIMATE_NAME}`;
-
 /** What the estimate needs besides the prompt. */
 export type EstimateBounds = {
-  /** The model family that will run the prompt; it does not change the estimate (the model bias was removed in 0.9.0), the tool keeps it for callers. */
+  /** The model family that will run the prompt; it does not change the estimate (the model bias was removed in 0.9.0). */
   model: EstimateModel;
   /** Returned unchanged when Jev is unreachable or gives no effort score. */
   defaultEffort: Effort;
@@ -135,11 +130,6 @@ export type EstimateBounds = {
   /** Highest effort Jev's estimate may give. */
   maxEffort: Effort;
 };
-/** A validated tool call. */
-export type EstimateInput = EstimateBounds & {
-  /** The prompt to estimate. */
-  prompt: string;
-};
 /** The estimate and why: Jev's score, the mechanical shortcut, or the fallback to the default. */
 export type Estimate = {
   /** The effort to use. */
@@ -147,14 +137,6 @@ export type Estimate = {
   /** Where it came from. */
   source: "jev" | "mechanical" | "fallback";
 };
-
-/**
- * Whether a value is exactly one of the model family names (no model id).
- *
- * @param v - The value.
- * @returns Whether it is an {@link EstimateModel}.
- */
-const isModel = (v: unknown): v is EstimateModel => (ESTIMATE_MODELS as readonly unknown[]).includes(v);
 
 /**
  * The model family of a model id or bare family name: haiku, sonnet, opus, fable tested in that order, first match wins.
@@ -191,25 +173,7 @@ export function bounds(min: unknown, max: unknown): { minEffort: Effort; maxEffo
 }
 
 /**
- * Validates an `estimate_effort` call (trust boundary). A `defaultEffort` outside the bounds is valid.
- *
- * @param raw - The `tool.call` event with the tool's input fields on it.
- * @returns The five input fields (extra event fields dropped), or the first error as text.
- */
-export function parseEstimateInput(raw: Record<string, unknown>): EstimateInput | string {
-  const { model, defaultEffort, minEffort, maxEffort, prompt } = raw;
-  const effortError = (name: string): string => `${name} must be one of ${EFFORT_ORDER.join(", ")}`;
-  if (!isModel(model)) return `model must be one of ${ESTIMATE_MODELS.join(", ")}`;
-  if (!isEffort(defaultEffort)) return effortError("defaultEffort");
-  if (!isEffort(minEffort)) return effortError("minEffort");
-  if (!isEffort(maxEffort)) return effortError("maxEffort");
-  if (!bounds(minEffort, maxEffort)) return "minEffort must not be above maxEffort";
-  if (typeof prompt !== "string" || prompt.trim() === "") return "prompt must be a non-empty string";
-  return { model, defaultEffort, minEffort, maxEffort, prompt };
-}
-
-/**
- * The single effort rule of the tool and of turn-start routing, in this order: a mechanical prompt (Jev p ≥
+ * The single effort rule of turn-start routing and step effort, in this order: a mechanical prompt (Jev p ≥
  * {@link MECHANICAL_FROM}) gets `minEffort`; without a finite score (missing or malformed) `defaultEffort` is
  * returned unclamped (the score's confidence is not checked: the discarded scores were as accurate as the kept ones);
  * otherwise Jev's 0–4 score mapped by {@link effortLevel}, rounded and clamped to
@@ -263,23 +227,6 @@ export const mechanicalQuestion: Question = {
   criteria: {
     true: "Yes: renaming, reformatting, moving or copying, running a named command, or applying an edit spelled out exactly",
     false: "No: it needs understanding, choices, debugging, explanation or design",
-  },
-};
-
-/** The `estimate_effort` tool spec `session.start` registers through `$.tool.register`. */
-export const ESTIMATE_SPEC = {
-  name: ESTIMATE_NAME,
-  description: "Estimate the reasoning effort a prompt most likely needs, decided by TypeSafe Jev. Returns JSON {\"effort\": level, \"source\": \"jev\"|\"mechanical\"|\"fallback\"}: a purely mechanical prompt gets minEffort; Jev's estimate (the same for every model) is kept within minEffort..maxEffort; when Jev is unreachable or gives no effort score, defaultEffort.",
-  inputSchema: {
-    type: "object",
-    properties: {
-      model: { type: "string", enum: [...ESTIMATE_MODELS], description: "The model that will run the prompt" },
-      defaultEffort: { type: "string", enum: [...EFFORT_ORDER], description: "Returned when Jev is unreachable or gives no effort score" },
-      minEffort: { type: "string", enum: [...EFFORT_ORDER], description: "Lowest effort to return; also the answer for a mechanical prompt" },
-      maxEffort: { type: "string", enum: [...EFFORT_ORDER], description: "Highest effort to return" },
-      prompt: { type: "string", description: "The prompt to estimate" },
-    },
-    required: ["model", "defaultEffort", "minEffort", "maxEffort", "prompt"],
   },
 };
 

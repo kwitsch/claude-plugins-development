@@ -1,23 +1,19 @@
 // Kit tests for F21 of jev-api: the oversized-state handling (preflight bounds, the 400 oracle, the overflow modes, the
 // learned characters per token), run against the built plugin/hooks/register.mjs.
-import { createKit } from "claude-engine-vitest";
 import type { On } from "claude-engine-vitest";
 import { expect } from "vitest";
-
-const { test, mock } = createKit({ module: new URL("../plugin/hooks/register.mjs", import.meta.url), plugin: "jev-api" });
+import { call, mock, one, QUESTION, test, TOOL } from "./support/questions.js";
 
 type Reply = { value: { status: number; ok: boolean; headers: Record<string, string>; text: string } } | { deny: string };
 type Fetched = { url: string; body: { model: string; state: string; questions: Record<string, Record<string, unknown>> } };
-type Runner = Parameters<Parameters<typeof test>[2]>[0];
 type Result = { result?: string; deny?: string };
 
-const TOOL = (type: string) => `mcp__jev-api__${type}`;
 const JEV = { JEV_URL: "https://jev.example/v1/systemone", TYPESAFE_API_KEY: "sk-test-key-123456" };
 
 const httpReply = (status: number, text: string): Reply => ({ value: { status, ok: status < 300, headers: {}, text } });
 
 /** A System One answer for one noul question; `tokens` is the usage the server reports. */
-const okReply = (tokens?: number): Reply => httpReply(200, JSON.stringify({ model: "d1-3b", answers: { answer: { type: "noul", noul: 0.9 } }, usage: tokens === undefined ? {} : { input_tokens: tokens, output_tokens: 0 } }));
+const okReply = (tokens?: number): Reply => httpReply(200, JSON.stringify({ model: "d1-3b", answers: { q0: { type: "noul", noul: 0.9 } }, usage: tokens === undefined ? {} : { input_tokens: tokens, output_tokens: 0 } }));
 
 /** The server's rejection of a prompt over its context window, as measured live on 2026-11-14. */
 const tooBig = (tokens: number, nctx = 32768): Reply => httpReply(400, JSON.stringify({ error: { code: 400, message: `request (${tokens} tokens) exceeds the available context size (${nctx} tokens), try increasing it`, type: "exceed_context_size_error", n_prompt_tokens: tokens, n_ctx: nctx } }));
@@ -61,50 +57,34 @@ function setup(on: On, opts: { env?: Record<string, string>; replies?: Reply[]; 
   return { fetched, specs, store, clock };
 }
 
-const BASE: Record<string, Record<string, unknown>> = {
-  noul: { instructions: "Is this text about animals?", state: "Hello there!" },
-  choice: { instructions: "What is this text?", state: "Hello there!", criteria: { greeting: "says hello", question: "asks something" } },
-  score: { instructions: "Rate the sentiment", state: "Hello there!", criteria: ["negative", "neutral", "positive"] },
-  batch: { state: "Hello there!", questions: [{ type: "noul", instructions: "Is this text about animals?" }] },
-};
-
-// An HTTP error status is taken over by Haiku; these tests have no Haiku, so its failure text is cut off to compare the HTTP error alone.
-const call = async ($: Runner, type: string, input: Record<string, unknown> = {}) => {
-  const r = (await $.tool.call({ tool: TOOL(type), ...BASE[type], ...input })) as Result;
-  return r.deny === undefined ? r : { ...r, deny: r.deny.replace(/; fallback: [\s\S]*$/, "") };
-};
-
 // --- Phase 2: the overflow input and option -------------------------------------------------------------------------
 
-test("every tool's input schema offers the overflow modes, and none requires them", async ($, on) => {
+test("the request input schema offers the overflow modes and does not require them", async ($, on) => {
   const { specs } = setup(on);
   await $.session.start({ cwd: "/proj", surface: "terminal", isInteractive: true });
-  expect(specs).toHaveLength(4);
-  for (const spec of specs) {
-    const schema = spec["inputSchema"] as { properties: Record<string, { enum?: string[] }>; required: string[] };
-    expect(schema.properties["overflow"]?.enum).toEqual(["error", "truncate", "haiku"]);
-    expect(schema.required).not.toContain("overflow");
-  }
+  expect(specs).toHaveLength(1);
+  const schema = specs[0]["inputSchema"] as { properties: Record<string, { enum?: string[] }>; required: string[] };
+  expect(schema.properties["overflow"]?.enum).toEqual(["error", "truncate", "haiku"]);
+  expect(schema.required).not.toContain("overflow");
 });
 
-for (const type of ["noul", "choice", "score", "batch"]) {
-  for (const bad of ["fail", "", 1, null, ["error"]]) {
-    test(`${type} with overflow ${JSON.stringify(bad)} is refused before any request`, async ($, on) => {
-      const { fetched } = setup(on);
-      const r = await call($, type, { overflow: bad });
-      expect(r.deny).toBe(`${type}: overflow must be one of error, truncate, haiku`);
-      expect(fetched).toHaveLength(0);
-    });
-  }
-  test(`${type} accepts each valid overflow value and answers normally for a small state`, async ($, on) => {
-    const { fetched } = setup(on, { replies: [httpReply(200, JSON.stringify({ answers: { answer: { type: "noul", noul: 0.5 }, q0: { type: "noul", noul: 0.5 }, ...(type === "choice" ? { answer: { type: "choice", choice: "greeting", confidence: 0.9, probabilities: { greeting: 0.9, question: 0.1 } } } : {}), ...(type === "score" ? { answer: { type: "score", score: 1, confidence: 0.5, legend: {}, probabilities: { 0: 0.2, 1: 0.6, 2: 0.2 } } } : {}) } }))] });
-    for (const overflow of ["error", "truncate", "haiku"]) {
-      const r = await call($, type, { overflow });
-      expect(r.deny).toBeUndefined();
-    }
-    expect(fetched).toHaveLength(3);
+for (const bad of ["fail", "", 1, null, ["error"]]) {
+  test(`a request with overflow ${JSON.stringify(bad)} is refused before any request`, async ($, on) => {
+    const { fetched } = setup(on);
+    const r = await call($, "noul", { overflow: bad });
+    expect(r.deny).toBe("request: overflow must be one of error, truncate, haiku");
+    expect(fetched).toHaveLength(0);
   });
 }
+
+test("a request accepts each valid overflow value and answers normally for a small state", async ($, on) => {
+  const { fetched } = setup(on, { replies: [httpReply(200, JSON.stringify({ answers: { q0: { type: "noul", noul: 0.5 } } }))] });
+  for (const overflow of ["error", "truncate", "haiku"]) {
+    const r = await call($, "noul", { overflow });
+    expect(r.deny).toBeUndefined();
+  }
+  expect(fetched).toHaveLength(3);
+});
 
 // --- Phase 3: what ask() learns and reports ----------------------------------------------------------------------------
 
@@ -127,7 +107,7 @@ test("a successful answer teaches the density, and a large move is stored as { v
 });
 
 test("a move of 10 % or less is not stored", async ($, on) => {
-  // 20070 chars / 4974 tokens = 4.03: 3.0 -> 3.21 (+6.9 %): stays in memory only.
+  // 20066 chars / 4974 tokens = 4.03: 3.0 -> 3.21 (+6.9 %): stays in memory only.
   const { store } = setup(on, { replies: [okReply(5000)] });
   await call($, "noul", SMALL);
   expect(store.sets).toHaveLength(0);
@@ -162,7 +142,7 @@ test("a tiny sample counts as 1 character per token (3.0 -> 2.6)", async ($, on)
 
 for (const [name, usage] of [["no usage", undefined], ["a text token count", "5000"], ["a negative token count", -5000], ["a zero token count", 0], ["a null token count", null]] as const) {
   test(`${name} in the answer teaches nothing and does not fail the call`, async ($, on) => {
-    const reply = httpReply(200, JSON.stringify({ answers: { answer: { type: "noul", noul: 0.9 } }, usage: usage === undefined ? undefined : { input_tokens: usage } }));
+    const reply = httpReply(200, JSON.stringify({ answers: { q0: { type: "noul", noul: 0.9 } }, usage: usage === undefined ? undefined : { input_tokens: usage } }));
     const { store } = setup(on, { replies: [reply] });
     expect((await call($, "noul", SMALL)).deny).toBeUndefined();
     expect(store.sets).toHaveLength(0);
@@ -211,7 +191,7 @@ test("a store read that fails is never overwritten by a density learned from one
 });
 
 test("a failed store read is read again by the next call, which then stores a large move", async ($, on) => {
-  // sample 20070 / 1974 is about 10, clamped to 8: the stored 3.0 (10 samples) moves to 4.0
+  // sample 20066 / 1974 is about 10, clamped to 8: the stored 3.0 (10 samples) moves to 4.0
   const { store } = setup(on, { replies: [okReply(2000)], store: { density: { v: 3, n: 10 } } });
   store.failGet = true;
   await call($, "noul", SMALL);
@@ -267,12 +247,12 @@ test("a failing store read or write never fails the call", async ($, on) => {
   store.failSet = true;
   const r = await call($, "noul", SMALL);
   expect(r.deny).toBeUndefined();
-  expect(JSON.parse(r.result ?? "null")).toMatchObject({ type: "noul" });
+  expect(JSON.parse(r.result ?? "null")).toMatchObject([{ type: "noul" }]);
 });
 
 test("a call with no System One access (Haiku) never touches the store", async ($, on) => {
   const { store } = setup(on, { env: {} });
-  on("model.complete", () => ({ value: { isAnswered: true, text: JSON.stringify({ answers: { answer: { type: "noul", noul: 0.5 } } }), usage: {} } }));
+  on("model.complete", () => ({ value: { isAnswered: true, text: JSON.stringify({ answers: { q0: { type: "noul", noul: 0.5 } } }), usage: {} } }));
   await call($, "noul", SMALL);
   expect(store.gets).toHaveLength(0);
   expect(store.sets).toHaveLength(0);
@@ -291,7 +271,7 @@ test("the server's context rejection becomes a clear refusal with the numbers an
   const r = await call($, "noul", BIG);
   // The 30 s timeout allows fewer tokens than the limit, so the aim is sized to the timeout.
   const aim = allowedState(fetched[0], 40025, Math.min(budgetTokens(30), 32767));
-  expect(r.deny).toBe(`noul: state too large for System One: the request has 40025 tokens, the limit is 32767; shorten the state to about ${aim} characters`);
+  expect(r.deny).toBe(`request: state too large for System One: the request has 40025 tokens, the limit is 32767; shorten the state to about ${aim} characters`);
   expect(fetched).toHaveLength(1);
 });
 
@@ -334,8 +314,8 @@ const budgetTokens = (seconds: number) => {
   return Math.floor((-a + Math.sqrt(a * a + 4 * b * seconds * 1000)) / (2 * b));
 };
 
-/** The characters of the one noul question in the request body (`{"answer":{...}}`). */
-const NOUL_QUESTION_CHARS = JSON.stringify({ answer: { type: "noul", instructions: BASE["noul"]["instructions"] } }).length;
+/** The characters of the one noul question in the request body (`{"q0":{...}}`). */
+const NOUL_QUESTION_CHARS = JSON.stringify({ q0: QUESTION["noul"] }).length;
 
 /** The longest state whose optimistic estimate (state + question) still fits `tokens` at `density` characters per token. */
 const edgeState = (tokens: number, density: number) => (tokens - 26) * density - NOUL_QUESTION_CHARS;
@@ -352,7 +332,7 @@ for (const seconds of [4, 20, 30]) {
     const { fetched } = setup(on);
     const r = await call($, "noul", { state: "a".repeat(edge + 1), timeout: seconds, overflow: "error" });
     expect(fetched).toHaveLength(0);
-    expect(r.deny).toMatch(new RegExp(`^noul: state too large for the timeout of ${seconds} s: at least ${budgetTokens(seconds) + 1} tokens, about ${budgetTokens(seconds)} fit; shorten the state to about \\d+ characters or raise the timeout`));
+    expect(r.deny).toMatch(new RegExp(`^request: state too large for the timeout of ${seconds} s: at least ${budgetTokens(seconds) + 1} tokens, about ${budgetTokens(seconds)} fit; shorten the state to about \\d+ characters or raise the timeout`));
   });
 }
 
@@ -360,7 +340,7 @@ test("a timeout below the smallest budget refuses a large state without naming a
   const { fetched } = setup(on);
   const r = await call($, "noul", { state: "word ".repeat(4000), timeout: 0.1, overflow: "error" });
   expect(fetched).toHaveLength(0);
-  expect(r.deny).toMatch(/^noul: state too large for the timeout of 0\.1 s: at least \d+ tokens; raise the timeout \(at most 30 s\)$/);
+  expect(r.deny).toMatch(/^request: state too large for the timeout of 0\.1 s: at least \d+ tokens; raise the timeout \(at most 30 s\)$/);
 });
 
 test("a timeout below the smallest budget never refuses a small state (the call just times out like before)", async ($, on) => {
@@ -376,7 +356,7 @@ test("below the smallest budget a state at the 1000-token floor is sent and one 
   const { fetched } = setup(on);
   expect((await call($, "noul", { state: "a".repeat(edge), timeout: 0.05, overflow: "error" })).deny).toBeUndefined();
   expect(fetched).toHaveLength(1);
-  expect((await call($, "noul", { state: "a".repeat(edge + 1), timeout: 0.05, overflow: "error" })).deny).toMatch(/^noul: state too large for the timeout of 0\.05 s/);
+  expect((await call($, "noul", { state: "a".repeat(edge + 1), timeout: 0.05, overflow: "error" })).deny).toMatch(/^request: state too large for the timeout of 0\.05 s/);
   expect(fetched).toHaveLength(1);
 });
 
@@ -388,7 +368,7 @@ test("the questions count towards the preflight", async ($, on) => {
   const alone = await call($, "noul", { state, timeout: 4, overflow: "error" });
   expect(alone.deny).toBeUndefined();
   const withQuestions = await call($, "choice", { state, criteria, timeout: 4, overflow: "error" });
-  expect(withQuestions.deny).toMatch(/^choice: state too large for the timeout of 4 s/);
+  expect(withQuestions.deny).toMatch(/^request: state too large for the timeout of 4 s/);
   expect(fetched).toHaveLength(1);
 });
 
@@ -400,7 +380,7 @@ test("a learned dense density does not tighten the edge below the default's opti
   const edge = Math.floor(edgeState(budgetTokens(20), 6));
   expect((await call($, "noul", { state: "a".repeat(edge), timeout: 20, overflow: "error" })).deny).toBeUndefined();
   expect(fetched).toHaveLength(2);
-  expect((await call($, "noul", { state: "a".repeat(edge + 1), timeout: 20, overflow: "error" })).deny).toMatch(/^noul: state too large for the timeout of 20 s/);
+  expect((await call($, "noul", { state: "a".repeat(edge + 1), timeout: 20, overflow: "error" })).deny).toMatch(/^request: state too large for the timeout of 20 s/);
   expect(fetched).toHaveLength(2);
 });
 
@@ -410,7 +390,7 @@ test("a learned sparse density widens the edge up to 8 characters per token", as
   expect((await call($, "noul", { state: "a".repeat(edge), timeout: 20, overflow: "error" })).deny).toBeUndefined();
   expect(fetched).toHaveLength(1);
   const over = await call($, "noul", { state: "a".repeat(edge + 1), timeout: 20, overflow: "error" });
-  expect(over.deny).toMatch(/^noul: state too large/);
+  expect(over.deny).toMatch(/^request: state too large/);
   expect(fetched).toHaveLength(1);
 });
 
@@ -424,14 +404,14 @@ test("the context window the server reported replaces 32768 in the next prefligh
   const inside = await call($, "noul", { state: "a".repeat(edge), timeout: 30, overflow: "error" });
   expect(inside.deny).toBeUndefined();
   const outside = await call($, "noul", { state: "a".repeat(edge + 1), timeout: 30, overflow: "error" });
-  expect(outside.deny).toMatch(/^noul: state too large for System One: at least 4096 tokens, the limit is 4095; shorten the state to about \d+ characters$/);
+  expect(outside.deny).toMatch(/^request: state too large for System One: at least 4096 tokens, the limit is 4095; shorten the state to about \d+ characters$/);
   expect(fetched).toHaveLength(2);
 });
 
 const HUGE = "a".repeat(100_000);
 
 test("without an option or an input the overflow mode is haiku", async ($, on) => {
-  const answers = { answers: { answer: { type: "noul", noul: 0.5 } } };
+  const answers = { answers: { q0: { type: "noul", noul: 0.5 } } };
   const t = setup(on);
   const asked: Record<string, unknown>[] = [];
   on("model.complete", (_$, e) => (asked.push(e), { value: { isAnswered: true, text: JSON.stringify(answers), usage: {} } }));
@@ -443,7 +423,7 @@ test("without an option or an input the overflow mode is haiku", async ($, on) =
 test("the overflow option is used when the call names none, and the call's own value wins", { options: { overflow: "error" } }, async ($, on) => {
   const { fetched } = setup(on);
   const withOption = await call($, "noul", { state: HUGE, timeout: 20 });
-  expect(withOption.deny).toMatch(/^noul: state too large for the timeout/);
+  expect(withOption.deny).toMatch(/^request: state too large for the timeout/);
   const own = await call($, "noul", { state: HUGE, timeout: 20, overflow: "truncate" });
   expect(own.deny).toBeUndefined();
   expect(fetched).toHaveLength(1);
@@ -453,7 +433,7 @@ for (const bad of ["fail", 5, null]) {
   test(`an invalid overflow option ${JSON.stringify(bad)} counts as haiku`, { options: { overflow: bad } }, async ($, on) => {
     const t = setup(on);
     const asked: unknown[] = [];
-    on("model.complete", (_$, e) => (asked.push(e), { value: { isAnswered: true, text: JSON.stringify({ answers: { answer: { type: "noul", noul: 0.5 } } }), usage: {} } }));
+    on("model.complete", (_$, e) => (asked.push(e), { value: { isAnswered: true, text: JSON.stringify({ answers: { q0: { type: "noul", noul: 0.5 } } }), usage: {} } }));
     await call($, "noul", { state: HUGE, timeout: 20 });
     expect(asked).toHaveLength(1);
     expect(t.fetched).toHaveLength(0);
@@ -463,9 +443,9 @@ for (const bad of ["fail", 5, null]) {
 test("haiku mode answers an oversized call through the model with the whole state and sends no request", async ($, on) => {
   const { fetched } = setup(on);
   const asked: Record<string, unknown>[] = [];
-  on("model.complete", (_$, e) => (asked.push(e), { value: { isAnswered: true, text: JSON.stringify({ answers: { answer: { type: "noul", noul: 0.9 } } }), usage: {} } }));
+  on("model.complete", (_$, e) => (asked.push(e), { value: { isAnswered: true, text: JSON.stringify({ answers: { q0: { type: "noul", noul: 0.9 } } }), usage: {} } }));
   const r = await call($, "noul", { state: HUGE, timeout: 20, overflow: "haiku" });
-  expect(JSON.parse(r.result ?? "null")).toMatchObject({ type: "noul" });
+  expect(JSON.parse(r.result ?? "null")).toMatchObject([{ type: "noul" }]);
   expect(fetched).toHaveLength(0);
   expect(asked).toHaveLength(1);
   expect(String(asked[0]["prompt"])).toContain(HUGE);
@@ -474,7 +454,7 @@ test("haiku mode answers an oversized call through the model with the whole stat
 test("haiku mode cuts a state over 150000 characters, a state of exactly 150000 is passed whole", async ($, on) => {
   setup(on);
   const asked: Record<string, unknown>[] = [];
-  on("model.complete", (_$, e) => (asked.push(e), { value: { isAnswered: true, text: JSON.stringify({ answers: { answer: { type: "noul", noul: 0.9 } } }), usage: {} } }));
+  on("model.complete", (_$, e) => (asked.push(e), { value: { isAnswered: true, text: JSON.stringify({ answers: { q0: { type: "noul", noul: 0.9 } } }), usage: {} } }));
   await call($, "noul", { state: "b".repeat(150_000), timeout: 20, overflow: "haiku" });
   expect(String(asked[0]["prompt"])).toContain("b".repeat(150_000));
   expect(String(asked[0]["prompt"])).not.toContain("omitted");
@@ -487,7 +467,7 @@ test("haiku mode passes Haiku's own failure on", async ($, on) => {
   setup(on);
   on("model.complete", () => ({ value: { isAnswered: false, reason: "overloaded" } }));
   const r = await call($, "noul", { state: HUGE, timeout: 20, overflow: "haiku" });
-  expect(r.deny).toBe("noul: fallback: overloaded");
+  expect(r.deny).toBe("request: fallback: overloaded");
 });
 
 /** The cut a state of `total` characters gets when `keep` of them stay: 60 % head, 40 % tail and the marker between. */
@@ -554,7 +534,7 @@ test("after the server's refusal truncate retries once with the exact cut and an
 });
 
 test("after a refusal the cut also respects the timeout, sized with the exact density the refusal gave", async ($, on) => {
-  // 80070 prompt characters over 47000 - 26 tokens: 1.70 characters per token, far denser than the learned 3.0.
+  // 80066 prompt characters over 47000 - 26 tokens: 1.70 characters per token, far denser than the learned 3.0.
   const state = "a".repeat(80_000);
   const { fetched } = setup(on, { replies: [tooBig(47_000), okReply()] });
   const r = await call($, "noul", { state, timeout: 20, overflow: "truncate" });
@@ -568,37 +548,37 @@ test("a second refusal after the retry is answered with the numbers and nothing 
   const { fetched } = setup(on, { replies: [tooBig(40025, 8192), tooBig(9000, 8192)] });
   const r = await call($, "noul", { state: "a".repeat(100_000), timeout: 30, overflow: "truncate" });
   expect(fetched).toHaveLength(2);
-  expect(r.deny).toMatch(/^noul: state too large for System One: the request has 9000 tokens, the limit is 8191; shorten the state to about \d+ characters$/);
+  expect(r.deny).toMatch(/^request: state too large for System One: the request has 9000 tokens, the limit is 8191; shorten the state to about \d+ characters$/);
 });
 
 test("an HTTP error on the cut request after a refusal is taken over by Haiku", async ($, on) => {
   setup(on, { replies: [tooBig(40025, 8192), httpReply(500, "boom")] });
   on("model.complete", () => ({ value: { isAnswered: false, reason: "overloaded" } }));
-  const r = await $.tool.call({ tool: TOOL("noul"), ...BASE["noul"], state: "a".repeat(100_000), timeout: 30, overflow: "truncate" }) as Result;
+  const r = await $.tool.call(one("noul", { state: "a".repeat(100_000), timeout: 30, overflow: "truncate" })) as Result;
   expect(r.result).toBeUndefined();
-  expect(r.deny).toMatch(/^noul: .*500.*; fallback: overloaded$/);
+  expect(r.deny).toMatch(/^request: .*500.*; fallback: overloaded$/);
 });
 
 test("an HTTP error on the cut request of the preflight path is taken over by Haiku", async ($, on) => {
   setup(on, { replies: [httpReply(500, "boom")] });
   on("model.complete", () => ({ value: { isAnswered: false, reason: "overloaded" } }));
-  const r = await $.tool.call({ tool: TOOL("noul"), ...BASE["noul"], state: HUGE, timeout: 20, overflow: "truncate" }) as Result;
+  const r = await $.tool.call(one("noul", { state: HUGE, timeout: 20, overflow: "truncate" })) as Result;
   expect(r.result).toBeUndefined();
-  expect(r.deny).toMatch(/^noul: .*500.*; fallback: overloaded$/);
+  expect(r.deny).toMatch(/^request: .*500.*; fallback: overloaded$/);
 });
 
 test("after the server's refusal haiku answers through the model", async ($, on) => {
   const { fetched } = setup(on, { replies: [tooBig(40025)] });
-  on("model.complete", () => ({ value: { isAnswered: true, text: JSON.stringify({ answers: { answer: { type: "noul", noul: 0.9 } } }), usage: {} } }));
+  on("model.complete", () => ({ value: { isAnswered: true, text: JSON.stringify({ answers: { q0: { type: "noul", noul: 0.9 } } }), usage: {} } }));
   const r = await call($, "noul", { state: "a".repeat(100_000), timeout: 30, overflow: "haiku" });
-  expect(JSON.parse(r.result ?? "null")).toMatchObject({ type: "noul" });
+  expect(JSON.parse(r.result ?? "null")).toMatchObject([{ type: "noul" }]);
   expect(fetched).toHaveLength(1);
 });
 
-test("a batch call is cut and answered like a single tool, with its answer shape unchanged", async ($, on) => {
+test("a request with several questions is cut and answered like one question, with its answer shape unchanged", async ($, on) => {
   const replies = [httpReply(200, JSON.stringify({ answers: { q0: { type: "noul", noul: 0.9 }, q1: { type: "noul", noul: 0.1 } }, usage: {} }))];
   const { fetched } = setup(on, { replies });
-  const r = await call($, "batch", { state: HUGE, timeout: 20, overflow: "truncate", questions: [{ type: "noul", instructions: "a?" }, { type: "noul", instructions: "b?" }] });
+  const r = await call($, "noul", { state: HUGE, timeout: 20, overflow: "truncate", questions: [{ type: "noul", instructions: "a?" }, { type: "noul", instructions: "b?" }] });
   expect(JSON.parse(r.result ?? "null")).toEqual([{ type: "noul", noul: 0.9 }, { type: "noul", noul: 0.1 }]);
   expect(fetched[0].body.state).toContain("characters omitted");
 });
@@ -607,7 +587,7 @@ for (const [name, text] of [["another error type", JSON.stringify({ error: { cod
   test(`a 400 with ${name} keeps the generic HTTP error text`, async ($, on) => {
     setup(on, { replies: [httpReply(400, text)] });
     const r = await call($, "noul", BIG);
-    expect(r.deny).toMatch(/^noul: HTTP 400/);
+    expect(r.deny).toMatch(/^request: HTTP 400/);
   });
 }
 
@@ -623,7 +603,7 @@ test("a cut sent after the preflight said no, then refused, is cut once more at 
 test("a state over 150000 characters is cut for the Haiku stand-in when no Jev access is configured", async ($, on) => {
   setup(on, { env: {} });
   const asked: Record<string, unknown>[] = [];
-  on("model.complete", (_$, e) => (asked.push(e), { value: { isAnswered: true, text: JSON.stringify({ answers: { answer: { type: "noul", noul: 0.9 } } }), usage: {} } }));
+  on("model.complete", (_$, e) => (asked.push(e), { value: { isAnswered: true, text: JSON.stringify({ answers: { q0: { type: "noul", noul: 0.9 } } }), usage: {} } }));
   await call($, "noul", { state: "b".repeat(1_000_000), timeout: 20 });
   expect(String(asked[0]["prompt"])).toContain("characters omitted");
   expect(String(asked[0]["prompt"]).length).toBeLessThan(150_000 + 1000);
