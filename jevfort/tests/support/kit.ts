@@ -201,6 +201,27 @@ export function claudeBeneath(on: On, seen: unknown[]) {
   });
 }
 
+/**
+ * Captures the debug effort line and returns a runner of one step 0 (a fresh turn id each call, Claude beneath) that
+ * reports the chosen effort and its source (`jev`, `mechanical`, `fallback`; `jev` also for "jev unavailable").
+ *
+ * @param on - The test's `on`; call before the test's first `$` call.
+ * @returns The runner: `over` changes the step (`model`, session `effort`); `effort` is the chosen level, or
+ * `"unchanged"` when Jev gave none. Opus/Sonnet estimate every turn; Haiku/Fable hold the first turn's estimate until
+ * the next `session.start`.
+ */
+export function effortOf(on: On) {
+  const logged: string[] = [];
+  on("ui.log", (_$, e) => (logged.push(String(e.text)), { value: undefined }));
+  claudeBeneath(on, []);
+  let n = 0;
+  return async ($: Runner, over: Partial<typeof step> = {}) => {
+    await drain($.turn.step({ ...step, turnId: `e${n++}`, ...over }));
+    const m = /→ (\S+) · (\w+)/.exec(logged.at(-1) ?? "");
+    return { effort: m?.[1], source: m?.[2] };
+  };
+}
+
 export const toolId = (chunks: Chunk[]) => (chunks.find((c) => c.kind === "tool")?.id as string | undefined) ?? "";
 
 export const decision = async ($: Runner, input: Record<string, unknown>) => ((await $.tool.check(input)) as { decision?: string }).decision;

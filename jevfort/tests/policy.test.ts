@@ -1,39 +1,28 @@
-// The policy rules of jevfort (effort estimate, its input check, the next-action question), through the built
-// plugin/hooks/register.mjs: `estimate_effort` is called as the model calls it, and the questions Jev gets are read back.
+// The policy rules of jevfort (the effort estimate, the next-action question), through the built
+// plugin/hooks/register.mjs: step 0 runs as Claude Code runs it, its debug effort line and the questions Jev gets are read back.
 import { expect } from "vitest";
-import { byId, claudeBeneath, CWD, DEFAULTS, drain, makeKit, mech, type Runner, scored, step, user } from "./support/kit.ts";
+import { byId, claudeBeneath, CWD, DEFAULTS, drain, effortOf, makeKit, mech, scored, sessionStubs, START, step, user } from "./support/kit.ts";
 
 const { test, setup } = makeKit(DEFAULTS);
 
-const ESTIMATE = { tool: "mcp__jevfort__estimate_effort", model: "opus", defaultEffort: "high", minEffort: "low", maxEffort: "xhigh", prompt: "add a retry to the HTTP client" };
+/** The messages of every estimate: step 0 asks nothing without a user message. */
+const PROMPT = [user("add a retry to the HTTP client")];
 /** The criteria of a question as a map from option to description (empty when it has none). */
 const criteriaOf = (q: { criteria?: unknown } | undefined): Record<string, string> => (q?.criteria ?? {}) as Record<string, string>;
-/**
- * Calls the estimate tool with the given input, over the defaults above.
- *
- * @param $ - The test's `$`.
- * @param input - The fields to change.
- * @returns The tool's result or deny.
- */
-const estimate = async ($: Runner, input: Record<string, unknown> = {}) => (await $.tool.call({ ...ESTIMATE, ...input })) as { result?: string; deny?: string };
-/**
- * The estimate's result as the tool returns it.
- *
- * @param r - The tool's result.
- * @returns The effort and its source.
- */
-const verdict = (r: { result?: string }) => JSON.parse(r.result ?? "null") as { effort: string; source: string };
 
-test("estimateEffort falls back to the default without a usable score, unclamped", async ($, on) => {
-  setup(on, { messages: [], jev: () => 401 });
-  expect(verdict(await estimate($))).toEqual({ effort: "high", source: "fallback" });
-  expect(verdict(await estimate($, { defaultEffort: "max" }))).toEqual({ effort: "max", source: "fallback" });
+// Step 0 cannot reach the "fallback" source: a NaN score fails the request's answer check (jev unavailable), which keeps the session effort.
+test("without a usable score the session effort stays, unclamped", async ($, on) => {
+  setup(on, { messages: PROMPT, jev: byId({ effort: scored(Number.NaN), mechanical: mech(0.1) }) });
+  const run = effortOf(on);
+  expect((await run($)).effort).toBe("unchanged");
+  // Above maxEffort (xhigh): the session effort is kept, not clamped.
+  expect((await run($, { effort: "max" })).effort).toBe("unchanged");
 });
 
-test("estimateEffort ignores a low confidence score, but not a NaN one", async ($, on) => {
+test("a low confidence score still counts, a NaN score does not", async ($, on) => {
   let answer: Record<string, unknown> = scored(0.2, 0.4);
   setup(on, {
-    messages: [],
+    messages: PROMPT,
     jev: byId({
       get effort() {
         return answer;
@@ -41,21 +30,26 @@ test("estimateEffort ignores a low confidence score, but not a NaN one", async (
       mechanical: mech(0.1),
     }),
   });
-  expect(verdict(await estimate($))).toEqual({ effort: "low", source: "jev" });
+  const run = effortOf(on);
+  expect(await run($)).toEqual({ effort: "low", source: "jev" });
   answer = scored(Number.NaN);
-  expect(verdict(await estimate($))).toEqual({ effort: "high", source: "fallback" });
+  expect((await run($)).effort).toBe("unchanged");
 });
 
 test("estimateEffort gives a mechanical prompt minEffort, whatever the score", async ($, on) => {
-  setup(on, { messages: [], jev: byId({ mechanical: mech(0.95) }) });
-  expect(verdict(await estimate($))).toEqual({ effort: "low", source: "mechanical" });
-  expect(verdict(await estimate($, { minEffort: "medium" }))).toEqual({ effort: "medium", source: "mechanical" });
+  setup(on, { messages: PROMPT, jev: byId({ mechanical: mech(0.95) }) });
+  expect(await effortOf(on)($)).toEqual({ effort: "low", source: "mechanical" });
+});
+
+test("estimateEffort gives a mechanical prompt a raised minEffort", { options: { minEffort: "medium" } }, async ($, on) => {
+  setup(on, { messages: PROMPT, jev: byId({ mechanical: mech(0.95) }) });
+  expect(await effortOf(on)($)).toEqual({ effort: "medium", source: "mechanical" });
 });
 
 test("below MECHANICAL_FROM (0.95) the score decides: 0.9 and 0.5 do not count as mechanical", async ($, on) => {
   let mechanical = 0.9;
   setup(on, {
-    messages: [],
+    messages: PROMPT,
     jev: byId({
       effort: scored(2),
       get mechanical() {
@@ -63,15 +57,16 @@ test("below MECHANICAL_FROM (0.95) the score decides: 0.9 and 0.5 do not count a
       },
     }),
   });
-  expect(verdict(await estimate($))).toEqual({ effort: "high", source: "jev" });
+  const run = effortOf(on);
+  expect(await run($)).toEqual({ effort: "high", source: "jev" });
   mechanical = 0.5;
-  expect(verdict(await estimate($))).toEqual({ effort: "high", source: "jev" });
+  expect(await run($)).toEqual({ effort: "high", source: "jev" });
 });
 
-test("the score's cut points map to the rounded levels, clamped to 0..4", async ($, on) => {
+test("the score's cut points map to the rounded levels, clamped to 0..4", { options: { maxEffort: "max" } }, async ($, on) => {
   let score = 0;
   setup(on, {
-    messages: [],
+    messages: PROMPT,
     jev: byId({
       get effort() {
         return scored(score);
@@ -79,6 +74,7 @@ test("the score's cut points map to the rounded levels, clamped to 0..4", async 
       mechanical: mech(0.1),
     }),
   });
+  const run = effortOf(on);
   const levels: [number, string][] = [
     [-1, "low"],
     [0, "low"],
@@ -90,14 +86,14 @@ test("the score's cut points map to the rounded levels, clamped to 0..4", async 
   ];
   for (const [s, effort] of levels) {
     score = s;
-    expect(verdict(await estimate($, { maxEffort: "max" })), `score ${s}`).toEqual({ effort, source: "jev" });
+    expect(await run($), `score ${s}`).toEqual({ effort, source: "jev" });
   }
 });
 
 test("the same score gives every model the same level", async ($, on) => {
   let score = 1.6;
   setup(on, {
-    messages: [],
+    messages: PROMPT,
     jev: byId({
       get effort() {
         return scored(score);
@@ -105,44 +101,31 @@ test("the same score gives every model the same level", async ($, on) => {
       mechanical: mech(0.1),
     }),
   });
-  for (const model of ["haiku", "sonnet", "opus", "fable"] as const) {
+  sessionStubs(on);
+  const run = effortOf(on);
+  for (const model of ["claude-haiku-5-5", "claude-sonnet-5-5", "claude-opus-5-5", "claude-fable-5"]) {
+    // A new session clears the first-turn hold, so Haiku/Fable estimate again.
+    await $.session.start(START);
     score = 1.6;
-    expect(verdict(await estimate($, { model })).effort, model).toBe("medium");
+    expect((await run($, { model })).effort, model).toBe("medium");
+    await $.session.start(START);
     score = 2.2;
-    expect(verdict(await estimate($, { model })).effort, model).toBe("high");
+    expect((await run($, { model })).effort, model).toBe("high");
   }
 });
 
-test("Jev's estimate stays within minEffort..maxEffort", async ($, on) => {
-  let score = 4;
-  setup(on, {
-    messages: [],
-    jev: byId({
-      get effort() {
-        return scored(score);
-      },
-      mechanical: mech(0.1),
-    }),
-  });
-  expect(verdict(await estimate($, { model: "haiku" }))).toEqual({ effort: "xhigh", source: "jev" });
-  score = 0;
-  expect(verdict(await estimate($, { model: "fable", minEffort: "medium" }))).toEqual({ effort: "medium", source: "jev" });
+test("Jev's estimate stays within maxEffort", async ($, on) => {
+  setup(on, { messages: PROMPT, jev: byId({ effort: scored(4), mechanical: mech(0.1) }) });
+  expect(await effortOf(on)($, { model: "claude-haiku-5-5" })).toEqual({ effort: "xhigh", source: "jev" });
 });
 
-test("the estimate tool keeps a valid call and names the first invalid field", async ($, on) => {
-  setup(on, { messages: [], jev: byId({ effort: scored(1.6), mechanical: mech(0.1) }) });
-  expect((await estimate($, { defaultEffort: "max" })).result).toBeDefined();
-  const denied = async (input: Record<string, unknown>) => (await estimate($, input)).deny;
-  expect(await denied({ model: "gpt" })).toBe("estimate_effort: model must be one of haiku, sonnet, opus, fable");
-  expect(await denied({ model: "claude-opus-5-5" })).toBe("estimate_effort: model must be one of haiku, sonnet, opus, fable");
-  expect(await denied({ defaultEffort: "huge" })).toBe("estimate_effort: defaultEffort must be one of low, medium, high, xhigh, max");
-  expect(await denied({ minEffort: undefined })).toBe("estimate_effort: minEffort must be one of low, medium, high, xhigh, max");
-  expect(await denied({ maxEffort: 3 })).toBe("estimate_effort: maxEffort must be one of low, medium, high, xhigh, max");
-  expect(await denied({ minEffort: "high", maxEffort: "low" })).toBe("estimate_effort: minEffort must not be above maxEffort");
-  expect(await denied({ prompt: "" })).toBe("estimate_effort: prompt must be a non-empty string");
-  expect(await denied({ prompt: "  \n " })).toBe("estimate_effort: prompt must be a non-empty string");
-  expect(await denied({ prompt: 42 })).toBe("estimate_effort: prompt must be a non-empty string");
+test("Jev's estimate stays within a raised minEffort", { options: { minEffort: "medium" } }, async ($, on) => {
+  setup(on, { messages: PROMPT, jev: byId({ effort: scored(0), mechanical: mech(0.1) }) });
+  expect(await effortOf(on)($, { model: "claude-fable-5" })).toEqual({ effort: "medium", source: "jev" });
 });
+
+// The estimate tool's input check ("keeps a valid call and names the first invalid field") is gone with the tool: step 0's
+// bounds come from the plugin options and the engine's step, which no model input can make invalid.
 
 test("a turn's next-action question has string instructions and one string criterion per option", { options: { takeOnlyForBypass: false } }, async ($, on) => {
   const { sent } = setup(on, { messages: [user("what does src/app.ts export?")], files: [`${CWD}/src/app.ts`], jev: () => undefined });
