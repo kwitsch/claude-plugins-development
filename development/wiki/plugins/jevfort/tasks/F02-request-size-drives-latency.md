@@ -60,7 +60,7 @@ A decision on accuracy vs latency needs the user (or a decision agent, reasoning
 
 ## Constraints
 
-The effort rule's calibration (`EFFORT_CUTS`, `MECHANICAL_FROM`) was measured on today's states: a state change that moves scores needs a recalibration. jev-api's `batch` shape stays.
+The effort rule's calibration (`EFFORT_CUTS`, `MECHANICAL_FROM`) was measured on today's states: a state change that moves scores needs a recalibration. jev-api's `request` shape stays.
 
 ## Related
 

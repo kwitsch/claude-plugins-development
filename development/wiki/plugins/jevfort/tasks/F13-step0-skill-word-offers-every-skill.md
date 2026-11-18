@@ -64,7 +64,7 @@ Planned before the fix:
 
 ## Constraints
 
-Every Jev failure falls back to Claude Code's own behaviour; jev-api's `batch` name, input and answer shape stay. `takeOnlyForBypass: false` users can take a skill at step 0: approach 1 keeps that (related skills stay offered).
+Every Jev failure falls back to Claude Code's own behaviour; jev-api's `request` name, input and answer shape stay. `takeOnlyForBypass: false` users can take a skill at step 0: approach 1 keeps that (related skills stay offered).
 
 ## Related
 

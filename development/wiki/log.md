@@ -131,3 +131,9 @@ Source: `scripts/step-calibrate.mts` run (32 deltas x 5) and a user decision.
 Source: user request.
 
 - **Removed:** the `jev-solver` plugin (`jev-solver/`, its wiki section, the lockfile entry, the index line); the F21 task no longer names it as a sender. Historic mentions in `EVALUATION-2026-11-14-f01.md` stay. The synced copy in kwitsch/claude-plugins is removed in its own PR.
+
+## [2026-11-18] ingest | jev-api 0.7.0 request only, jevfort 0.14.0 without estimate_effort
+
+Source: user request.
+
+- **Changed:** jev-api registers one tool, `mcp__jev-api__request` (the former `batch`, error prefix `request:`); the single-question tools `noul`, `choice` and `score` are removed (they stay question types). jevfort 0.14.0 registers no tool (`estimate_effort` removed) and asks Jev through `request`; its effort rule is tested through step 0 (`effortOf` in `jevfort/tests/support/kit.ts`). Current-facing pages (`plugins/index.md`, both plugin indexes, open tasks, `design/step-effort.md`, `notes/haiku-calibration.md`) name `request`; historic mentions of `batch` and `estimate_effort` stay.

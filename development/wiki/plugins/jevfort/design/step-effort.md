@@ -32,16 +32,16 @@ With `stepEffort: true` (default `false`) every Opus/Sonnet step `k > 0` that is
 
 Live smoke of 0.13.0 (`claude -p`, Sonnet 5.5, session medium, 4 runs, 2026-11-18): a delta that holds a task's requirements, a failing test or a design question scored 0.49-1.04, under the `EFFORT_CUTS` low cut of 1.05, so every later step ran at `low` although step 0 was `mechanical` or `medium`.
 
-Measured with `mcp__jev-api__score` and fixed deltas (one sample each; the cuts are unchanged, only the question text differs):
+Measured with a `score` question of `mcp__jev-api__request` and fixed deltas (one sample each; the cuts are unchanged, only the question text differs):
 
-| Delta | Old text | New text |
-| :-- | :-- | :-- |
-| Read of a TODO with 4 requirements | 0.91 | 1.15 |
-| Failing test output (deep-equal diff) | 0.98 | 1.16 |
-| The model's own text weighing an LRU/TTL conflict | 1.58 | 1.81 |
-| `node test.mjs` prints `all pass` | 0.09 | 0.07 |
-| Read of a one-line file | 0.33 | 0.60 |
-| Edit that renames a function | 0.89 | 0.78 |
+| Delta                                             | Old text | New text |
+| :------------------------------------------------ | :------- | :------- |
+| Read of a TODO with 4 requirements                | 0.91     | 1.15     |
+| Failing test output (deep-equal diff)             | 0.98     | 1.16     |
+| The model's own text weighing an LRU/TTL conflict | 1.58     | 1.81     |
+| `node test.mjs` prints `all pass`                 | 0.09     | 0.07     |
+| Read of a one-line file                           | 0.33     | 0.60     |
+| Edit that renames a function                      | 0.89     | 0.78     |
 
 The new text asks for the difficulty of the work that follows the delta, not of the last tool call. Hard deltas now clear 1.05, trivial ones stay under it; the margin is small (1.15 against 1.05) and measured once, so the cuts for steps may still need their own calibration (`tests/fixtures/effort-scores.json` holds step 0 only). Open: no live run after the change, and no case with a delta between the two groups (a small edit with a clear instruction).
 
@@ -49,12 +49,12 @@ The new text asks for the difficulty of the work that follows the delta, not of 
 
 `scripts/step-calibrate.mts` scores the 32 labelled deltas of `tests/fixtures/step-deltas.json` (labels 0 low to 3 xhigh, hand-written by one author: 10 / 10 / 8 / 4 deltas) five times each against the real Jev endpoint and writes `tests/fixtures/step-effort-scores.json` (measured 2026-11-18, d1-3b through jev-api). Same question text as in 0.13.1.
 
-| Label | Scores (n) | Mean | sd | Range |
-| :-- | :-- | :-- | :-- | :-- |
-| 0 low | 50 | 0.32 | 0.26 | 0.08-0.82 |
-| 1 medium | 50 | 0.99 | 0.16 | 0.65-1.20 |
-| 2 high | 40 | 1.37 | 0.27 | 1.09-1.94 |
-| 3 xhigh | 20 | 1.75 | 0.31 | 1.28-2.12 |
+| Label    | Scores (n) | Mean | sd   | Range     |
+| :------- | :--------- | :--- | :--- | :-------- |
+| 0 low    | 50         | 0.32 | 0.26 | 0.08-0.82 |
+| 1 medium | 50         | 0.99 | 0.16 | 0.65-1.20 |
+| 2 high   | 40         | 1.37 | 0.27 | 1.09-1.94 |
+| 3 xhigh  | 20         | 1.75 | 0.31 | 1.28-2.12 |
 
 - The five runs of one delta differ by at most sd 0.02: repeating does not add information, more deltas would.
 - Best cut between neighbouring labels: 0.45 (90%), 1.2 (89%), 1.95 (82%). `STEP_EFFORT_CUTS = [0.45, 1.2, 1.95, 3.1]` (the last is provisional: no max delta). Level accuracy 81% with these, 50% with the request question's `EFFORT_CUTS`.
