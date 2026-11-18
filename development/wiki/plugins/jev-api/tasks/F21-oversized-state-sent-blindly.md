@@ -3,7 +3,7 @@ id: F21
 title: "A state too large for System One is sent anyway: it fails with a 400, or runs into the timeout and keeps burning server time"
 status: done
 priority: medium
-area: jev-api/src/hooks (jev.mts answerJev and ask, size.mts, input.mts, register.mts), jev-solver/plugin/skills/solve/SKILL.md (state = the whole task text)
+area: jev-api/src/hooks (jev.mts answerJev and ask, size.mts, input.mts, register.mts)
 ---
 
 ## Status
@@ -43,7 +43,7 @@ Earlier state: Open, nothing implemented; this document held the measurements an
 
 Neither failure is cheap, so "send it and see" is not an acceptable detection method (see Evidence, "Failing requests are not free").
 
-Who can send such a state: jevfort clips every field (at most ~4 KB per field, about 4k tokens in total) and stays below both limits. `jev-solver:solve` sends the user's whole task text as `state`, and the model can call `mcp__jev-api__*` directly with any text.
+Who can send such a state: jevfort clips every field (at most ~4 KB per field, about 4k tokens in total) and stays below both limits. The model can call `mcp__jev-api__*` directly with any text.
 
 ## Evidence
 

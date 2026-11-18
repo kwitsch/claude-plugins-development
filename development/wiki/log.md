@@ -125,3 +125,9 @@ Source: live smoke of 0.13.0 and fixed-delta scoring through jev-api.
 Source: `scripts/step-calibrate.mts` run (32 deltas x 5) and a user decision.
 
 - **Page:** `development/wiki/plugins/jevfort/design/step-effort.md`: "Step cuts (0.13.1)" (calibration table, limits) and the fallback order (a failed Jev request turns the step scoring off for the turn, session effort).
+
+## [2026-11-18] ingest | jev-solver removed
+
+Source: user request.
+
+- **Removed:** the `jev-solver` plugin (`jev-solver/`, its wiki section, the lockfile entry, the index line); the F21 task no longer names it as a sender. Historic mentions in `EVALUATION-2026-11-14-f01.md` stay. The synced copy in kwitsch/claude-plugins is removed in its own PR.
