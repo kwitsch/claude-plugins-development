@@ -2,7 +2,7 @@
   "name": "jev-api",
   "version": "0.7.0",
   "private": true,
-  "description": "Registers the TypeSafe Jev System One tool request: noul, choice and score questions about one text in one request; configured by TYPESAFE_API_KEY, TYPESAFE_BASE_URL or JEV_URL.",
+  "description": "Lets Claude put yes/no, choice and score questions about a text to TypeSafe's Jev System One in one request.",
   "keywords": [
     "mods",
     "hooks",

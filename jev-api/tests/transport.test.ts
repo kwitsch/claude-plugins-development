@@ -1,7 +1,7 @@
 // Tests of the MCP transport of the jev-api mod: the hooks driven directly with a hand-made `$` (the kit cannot abandon a dispatch).
 import { describe, expect, it } from "vitest";
+import { TOOL } from "./support/questions.js";
 
-const TOOL = (type: string) => `mcp__jev-api__${type}`;
 const SERVER = "plugin:jev-api:http";
 const NOUL_ANSWER = { type: "noul", noul: 0.9 };
 const OK_TEXT = JSON.stringify({ answers: { q0: NOUL_ANSWER }, usage: {} });
@@ -451,7 +451,8 @@ describe("fallback to $.http.fetch", () => {
     expect(JSON.parse((await odd.run()).result ?? "null")).toEqual([NOUL_ANSWER]);
     expect(odd.fetched).toHaveLength(1);
     const text = await rig({ onCall: () => ({ isError: true, content: [{ type: "text", text: "request: state must be a non-empty string" }] }) });
-    expect(await text.run()).toEqual({ deny: "request: request: state must be a non-empty string" });
+    // the server names its own tool in the text (`request: <why>`): the model-visible `request:` prefix is not repeated
+    expect(await text.run()).toEqual({ deny: "request: state must be a non-empty string" });
     expect(text.fetched).toHaveLength(0);
   });
 
@@ -505,7 +506,7 @@ describe("tool.check keeps the model off the transport", () => {
   });
   it("leaves every other tool, also of a similar name, to the chain", async () => {
     const t = await rig();
-    for (const tool of ["Bash", "mcp__jev-api__noul", "mcp__plugin_jev-api_http", "mcp__plugin_jev-api_httpx__request", "mcp__plugin_other_http__request"]) {
+    for (const tool of ["Bash", TOOL("request"), "mcp__plugin_jev-api_http", "mcp__plugin_jev-api_httpx__request", "mcp__plugin_other_http__request"]) {
       expect(await check(t, tool, { plugin: "engine" })).toBe("passed");
     }
   });

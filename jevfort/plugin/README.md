@@ -7,17 +7,17 @@ pick subagent types and guide compaction.
 jevfort has no off switch of its own: disable the plugin (`/plugin`, or `claude plugin disable`) to turn it off.
 
 A port of [nim-f/jev-pilot](https://github.com/nim-f/jev-pilot) 0.5.0 by Code and Bird into this repository's plugin
-layout. jevfort makes no network request of its own: it asks Jev through the tools of the jev-api plugin.
+layout. jevfort makes no network request of its own: it asks Jev through the request tool of the jev-api plugin.
 
 ## Requires
 
 The **jev-api** plugin, installed and enabled together with jevfort. jevfort declares it as a plugin dependency, so Claude Code keeps jevfort disabled while jev-api is missing or disabled. jevfort asks Jev only through jev-api's tool `mcp__jev-api__request` (jev-api 0.7.0 or later): one call, and one request, per decision.
 
-Coming from 0.13: the `estimate_effort` tool is removed; jevfort registers no tool. It needs jev-api 0.7.0 (`request`).
+Coming from 0.13: the `estimate_effort` tool is removed; jevfort registers no tool. It needs jev-api 0.7.0 (`request`). Restart Claude Code after updating: the engine cannot unregister a tool, so a session that keeps running can still list `estimate_effort`, and a call to it fails.
 
 Coming from 0.11: the `/jev` command (status, report, candidates, export, clear) is removed together with the decision log and every status-line message jevfort showed. The options `doneCheck`, `doneThreshold`, `classify` and `measureSteps` are gone, and so are the features behind them: the done check (the follow-up message after an answer that looks unfinished), the prompt classifier (skill and plan hints) and the parallel step measurement. `routing` is a boolean (default on): the `model` mode, which also switched to a cheaper model by difficulty, is removed, and any value other than `false` counts as on. A value that is no boolean, such as a saved `"off"` or `"model"` from 0.11, is rejected by Claude Code before jevfort loads ("Effort routing must be a boolean"), so jevfort stays disabled until you set `routing` to `true` or `false` or remove the setting. A task-end judgement for the context-fill compaction is now its own request.
 
-Coming from 0.9.0: with `takeOnlyForBypass` (the default) Jev takes only a Read or Bash step; `estimate_effort` reports invalid input as an error result; a turn started by a slash command is judged by that command, not by the prompt before it.
+Coming from 0.9.0: with `takeOnlyForBypass` (the default) Jev takes only a Read or Bash step; a turn started by a slash command is judged by that command, not by the prompt before it.
 
 The endpoint and the key are configured for jev-api, not for jevfort: its environment variables `TYPESAFE_API_KEY`, `TYPESAFE_BASE_URL`, `JEV_URL` and `TYPESAFE_DEFAULT_MODEL` are described in the jev-api README. Coming from jevfort 0.4, which sent its own request: jev-api sends the key only to an `https://` endpoint (an `http://` `JEV_URL` now gets no `Authorization` header), and it also reads `TYPESAFE_BASE_URL` and `TYPESAFE_DEFAULT_MODEL`, which jevfort 0.4 ignored.
 
@@ -25,7 +25,7 @@ Without jev-api's request tool in a session (for example denied by a permission 
 
 ## Debug log
 
-With `claude --debug` (or `--debug-file`) jevfort writes one line per effort decision, for example `[jevfort] $.ui.log (to debug): effort claude-opus-5-5: session medium → low · mechanical (score 0.15)`: the model, the session effort, the effort jevfort chose, and where it came from (`jev` with its score, `mechanical`, `fallback`, `held` on Haiku/Fable, or why Jev gave none). With `stepEffort` a later Opus/Sonnet step adds its own line with a `step <n> ·` prefix before the source, for example `effort claude-opus-5-5: session high → low · step 1 · jev (score 0.20)`. It is the only line jevfort logs; nothing goes to the status line.
+With `claude --debug` (or `--debug-file`) jevfort writes one line per effort decision, for example `[jevfort] $.ui.log (to debug): effort claude-opus-5-5: session medium → low · mechanical (score 0.15)`: the model, the session effort, the effort jevfort chose, and where it came from (`jev` with its score, `mechanical`, `held` on Haiku/Fable, or why Jev gave none). With `stepEffort` a later Opus/Sonnet step adds its own line with a `step <n> ·` prefix before the source, for example `effort claude-opus-5-5: session high → low · step 1 · jev (score 0.20)`. It is the only line jevfort logs; nothing goes to the status line.
 
 ## Effort band
 

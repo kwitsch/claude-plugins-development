@@ -3,7 +3,7 @@
 import { createKit } from "claude-engine-vitest";
 import type { On } from "claude-engine-vitest";
 // jev-api's request tool, the name jevfort asks Jev through (the entry takes it, so lib.mjs exports it).
-import { JEV_REQUEST } from "../../plugin/hooks/lib.mjs";
+import { JEV_REQUEST, JEV_TOOL_PREFIX } from "../../plugin/hooks/lib.mjs";
 
 export const DEFAULTS = {
   routing: true,
@@ -34,7 +34,6 @@ export function makeKit(options: Record<string, unknown> = DEFAULTS) {
 
 export const CWD = "/proj";
 export const SID = "sid-1";
-const JEV_TOOL_PREFIX = "mcp__jev-api__";
 
 /**
  * The id of a request question by its instructions (the start of each question jevfort asks).
@@ -109,9 +108,10 @@ export function setupWith(mock: MockKit, on: On, opts: SetupOpts) {
   on("tool.list", () => (opts.tools === null ? { deny: "tool.list failed" } : { value: opts.tools ?? JEV_TOOLS }));
   on("tool.call", async (_$, e, next) => {
     if (e.tool !== JEV_REQUEST) return next(e);
+    // Counted before the deny: a call at an unlisted tool records no question in `sent`, so `calls()` is the only trace that the mod asked.
+    const call = requestCalls++;
     // As the engine: a tool that is not listed is unknown, so the mod's call rejects (a bare `{ deny }`).
     if (opts.tools === null || (opts.tools !== undefined && !opts.tools.some((t) => t.name === JEV_REQUEST))) return { deny: `unknown tool ${JEV_REQUEST}` };
-    const call = requestCalls++;
     const asked = (e.questions as { type: string; instructions: string; criteria?: unknown }[]).map((b): Asked => ({ ...b, id: questionId(b.instructions) ?? b.instructions, state: String(e.state), timeout: e.timeout, call }));
     sent.push(...asked);
     const answers = await Promise.all(asked.map(async (q) => opts.jev(q)));

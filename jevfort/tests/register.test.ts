@@ -232,6 +232,7 @@ test("After a timeout Jev is not asked again for 30 s, then once more", async ($
   expect(calls()).toBe(2);
 });
 
+/** The turn ids of the probes so far: each probe is a fresh turn. */
 let probes = 0;
 /**
  * One step 0 of a fresh turn: the probe of the Jev-pause tests (an Opus step 0 asks Jev at every turn).
@@ -1065,11 +1066,13 @@ test("With takeOnlyForBypass a confident skill pick is not taken by Jev (the ski
 
 test("A refused clock read does not fail a turn step", async ($, on) => {
   on("clock.now", () => ({ deny: "clock refused" }));
-  const seen: unknown[] = [];
+  const seen: { effort?: string }[] = [];
   setup(on, { messages: [user("what does this project do?")], jev: byId({ effort: scored(1.6), mechanical: mech(0.1) }) });
   claudeBeneath(on, seen);
   await drain($.turn.step(step));
   expect(seen).toHaveLength(1);
+  // Jev is still asked and its estimate applies: a throw out of askJev would reach Claude too (the engine skips the hook), at the session effort.
+  expect(seen[0]?.effort).toBe("medium");
 });
 
 test("A turn's mentioned paths are statted at most 16 per step and each once per turn", async ($, on) => {
@@ -1680,31 +1683,40 @@ test("Without a jev-api tool jevfort is inactive: every hook passes through", as
 
 test("A tool listing that fails counts as all jev-api tools missing", async ($, on) => {
   const seen: unknown[] = [];
-  const { sent } = setup(on, { messages: [user("what does this project do?")], tools: null, jev: () => undefined });
+  const { calls } = setup(on, { messages: [user("what does this project do?")], tools: null, jev: () => undefined });
   claudeBeneath(on, seen);
 
   await drain($.turn.step(step));
   expect(seen).toEqual([step]);
-  expect(sent).toHaveLength(0);
+  expect(calls()).toBe(0);
 });
 
 test("jev-api registering request inside session.start's next(e) makes jevfort active, also after a lookup in between", async ($, on) => {
   const tools: typeof JEV_TOOLS = [];
-  const { sent } = setup(on, { messages: [user("what does this project do?")], tools, jev: byId({ effort: easy }) });
+  const { sent, clock } = setup(on, { messages: [user("what does this project do?")], tools, jev: byId({ effort: easy }) });
   claudeBeneath(on, []);
+  let redraws = 0, before = 0, beneath = 0;
+  on("ui.invalidate", () => (redraws++, { value: undefined }));
   on("tool.call", (_$, e, next) => (e.tool === "Read" ? { deny: "not here" } : next(e)));
   // Beneath jevfort, as in the engine's dependency order: another plugin's session.start makes a tool call, which
   // jevfort's tool.call hook sees while request is not listed yet; then jev-api registers request.
   on("session.start", async ($2) => {
+    await clock.settle(); // lands the redraw session.start itself raised before next(e)
+    before = redraws;
     await $2.tool.call({ tool: "Read", file_path: `${CWD}/README.md` }).catch(() => undefined);
+    await clock.settle();
+    beneath = redraws - before;
     tools.push(...JEV_TOOLS);
     return {};
   });
 
   await $.session.start({ cwd: CWD, surface: "terminal", isInteractive: true });
+  await clock.settle();
+  // The listing raised beneath next(e) (before jev-api registered) applied nothing, so it redrew no band; the session's baseline did.
+  expect(beneath).toBe(0);
+  expect(redraws).toBeGreaterThan(before);
   await drain($.turn.step(step));
   expect(ids(sent)).toEqual(["effort", "mechanical"]);
-  // The listing raised beneath next(e) (before jev-api registered) applied nothing: no inactive error was logged.
 });
 
 test("The jev-api lookup is repeated after each turn", async ($, on) => {
@@ -1727,13 +1739,37 @@ test("The jev-api lookup is repeated after each turn", async ($, on) => {
   await drain($.turn.step({ ...step, turnId: "t2" }));
   expect(ids(sent)).toEqual(["effort", "mechanical"]);
 
-  // jev-api goes away: from the next turn jevfort is inactive again and logs it once more.
+  // jev-api goes away: from the next turn jevfort is inactive again.
   tools.length = 0;
   await $.turn.complete(answered("t2", "It is a todo app."));
   await drain($.turn.step({ ...step, turnId: "t3" }));
   expect(sent).toHaveLength(2);
   expect(seen.map((s) => s.effort)).toEqual(["high", "high", "low", "high"]);
-  // Two inactive errors: one at session start, one at the change.
+});
+
+// The band follows the listing: jevMissing applies a change after the baseline (jevState), also when jev-api goes away again.
+test("The band draws the effort row from the turn after jev-api appears and passes again after it goes away", async ($, on) => {
+  const tools: typeof JEV_TOOLS = [];
+  const { clock } = setup(on, { messages: [user("what does this project do?")], tools, jev: byId({ effort: easy }) });
+  claudeBeneath(on, []);
+  followUps(on);
+  sessionStubs(on);
+  on("ui.render", () => BENEATH);
+  const ui = await $.ui.mount(BAND);
+  await $.session.start(START);
+  await clock.settle();
+  expect(await autoLabel(ui)).toBeUndefined(); // jev-api is not there: the band passes
+  tools.push(...JEV_TOOLS);
+  await $.turn.complete(answered("t1", "It is a todo app."));
+  await drain($.turn.step({ ...step, turnId: "t2" }));
+  await clock.settle();
+  expect(await autoLabel(ui)).toBe("Jevfort ✔️");
+  tools.length = 0;
+  await $.turn.complete(answered("t2", "It is a todo app."));
+  await drain($.turn.step({ ...step, turnId: "t3" }));
+  await clock.settle();
+  expect(await autoLabel(ui)).toBeUndefined();
+  await ui.unmount();
 });
 
 test("/jev between turns does not carry its listing into the next turn", async ($, on) => {
@@ -2071,6 +2107,23 @@ test("a settings env change between turns counts from the next turn, also after 
   env.JEV_URL = "https://jev.example/x";
   // The next turn's step 0, not another turn end: every main-loop turn end re-reads the env itself.
   await drain($.turn.step({ ...step, turnId: "t2" }));
+  expect(sent.at(-1)?.timeout).toBe(4);
+});
+
+// A background subagent's step is an out-of-turn reader too: its env read is dropped at the next main-loop step (`readBetweenTurns`).
+test("a background subagent's step between session.start and the first main step does not carry its env read into that step", async ($, on) => {
+  const env: Record<string, string> = {};
+  const { sent } = setup(on, { messages: [user("what does this project do?")], jev: () => undefined, env });
+  claudeBeneath(on, []);
+  sessionStubs(on);
+  await $.session.start(START);
+  // no Jev variable: the Haiku path (14 s)
+  await drain($.turn.step({ ...step, turnId: "bg1", agentId: "bg" }));
+  expect(sent.at(-1)?.timeout).toBe(14);
+  env.JEV_URL = "https://jev.example/x";
+  const before = sent.length;
+  await drain($.turn.step({ ...step, turnId: "t1" }));
+  expect(sent.length).toBeGreaterThan(before);
   expect(sent.at(-1)?.timeout).toBe(4);
 });
 

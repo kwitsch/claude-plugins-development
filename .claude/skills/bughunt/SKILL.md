@@ -153,7 +153,7 @@ const lenses = args.lenses ?? LENSES.map((lens) => ({ lens, model: 'sonnet', eff
 // No human reads the agents' text: no narration between tool calls, only the structured result.
 const QUIET = '\n\nNo narration: no text between tool calls, no plans, no progress notes, no recap. Call tools silently and end with the structured result only.'
 // Classifications and yes/no go to the jev-api tool first; facts (repro, tests, code) are measured, never asked.
-const JEV = '\n\nFor decisions that fit options, a rating or yes/no (severity, effort, same defect as another finding, documented limit or style, test failure unrelated to your change) call the jev-api tool mcp__jev-api__request first (one or more noul, choice or score questions about one text; load it via ToolSearch if deferred) and use your own reasoning only on low confidence or a failed call. Never use them instead of a repro, a test run or reading the code.'
+const JEV = '\n\nFor decisions that fit options, a rating or yes/no (severity, effort, same defect as another finding, documented limit or style, test failure unrelated to your change) call the jev-api tool mcp__jev-api__request first (one or more noul, choice or score questions about one text; load it via ToolSearch if deferred) and use your own reasoning only on low confidence or a failed call. Never use it instead of a repro, a test run or reading the code.'
 const run = (prompt, opts) => agent(prompt + JEV + QUIET, opts)
 
 const huntPrompt = (a, lens) => `Bug hunt on plugin "${plugin}", area "${a.name}" (files: ${a.files}), in the git worktree ${worktree}. READ-ONLY on the repository; scratch files go under the session scratchpad. Stay in the worktree.

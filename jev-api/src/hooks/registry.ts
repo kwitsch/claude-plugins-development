@@ -28,7 +28,7 @@ export type RegState = {
   pending: { p: Promise<void>; gen: number } | undefined;
   /** Bumped by session.start: an attempt begun under an older generation (before the bind) is stale, its failure is not recorded. */
   gen: number;
-  /** When a failed registration may be tried again (ms since epoch; 0: at once). */
+  /** When a failed registration may be tried again (ms since epoch; 0: at once). A time more than {@link MAX_RETRY_MS} ahead of the clock means the wall clock stepped back: it counts as 0. */
   retryAt: number;
   /** Failed attempts. */
   failures: number;
@@ -77,7 +77,10 @@ export async function registerOne($: Engine, st: RegState): Promise<void> {
  * @param ms - The longest wait.
  */
 export async function ensureTools($: Engine, st: RegState, ms: number): Promise<void> {
-  if (!st.registered && st.pending?.gen !== st.gen && st.retryAt <= Date.now()) {
+  const now = Date.now();
+  // No back-off is longer than MAX_RETRY_MS: a retry time further ahead means the wall clock stepped back, and the tool is tried again at once.
+  if (st.retryAt - now > MAX_RETRY_MS) st.retryAt = 0;
+  if (!st.registered && st.pending?.gen !== st.gen && st.retryAt <= now) {
     const p = registerOne($, st);
     const entry = { p, gen: st.gen };
     st.pending = entry;
@@ -97,7 +100,8 @@ export async function ensureTools($: Engine, st: RegState, ms: number): Promise<
         timer = $.clock.after(ms, () => resolve(true));
       }),
     ]);
-    if (late && st.pending !== undefined) st.stuck = true;
+    // Only the attempt this wait was for: one that settled meanwhile (its entry is cleared) or a fresh one that session.start started is not marked.
+    if (late && st.pending === waiting) st.stuck = true;
   } finally {
     timer?.cancel();
   }

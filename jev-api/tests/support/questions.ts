@@ -2,6 +2,7 @@
 // one valid question per type. Tests import only register.mjs through this module.
 import { createKit } from "claude-engine-vitest";
 
+/** The kit bound to the built plugin: `test` runs a test against a fake engine, `mock` stubs the engine calls most tests share. */
 export const { test, mock } = createKit({ module: new URL("../../plugin/hooks/register.mjs", import.meta.url), plugin: "jev-api" });
 
 /** The test's `$` (the kit does not export its type). */

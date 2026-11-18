@@ -1,6 +1,6 @@
 /**
  * The System One call: the answer handling of one request (`ask`) and the overflow reactions of one call (`answerJev`).
- * The request itself is the shared HTTP core's `sendRequest`, sent through the transport of `transport.mts`.
+ * The request itself is the shared HTTP core's `sendRequest`, sent through the transport of `transport.ts`.
  *
  * @packageDocumentation
  */

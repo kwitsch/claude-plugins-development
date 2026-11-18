@@ -17,9 +17,9 @@ paths:
   non-finite score gives the unclamped `defaultEffort`; otherwise `effortLevel(score)`, rounded and clamped.
 - The score's confidence is NOT checked: the discarded scores were as accurate as the kept ones, and a threshold
   dropped every `high`/`xhigh` prompt.
-- No model bias (never validated, it shifted the calibrated cuts per model); the tool's `model` input stays for callers
-  and is ignored. The cuts are for `d1-3b` and were not re-measured for jev-api's Haiku fallback, which jev-api
-  calibrates toward Jev on its side (`jev-api/.claude/rules/haiku-fallback.md`).
+- No model bias (never validated, it shifted the calibrated cuts per model): the same score gives every model the same
+  level, and `estimateEffort` never reads `EstimateBounds.model`. The cuts are for `d1-3b` and were not re-measured for
+  jev-api's Haiku fallback, which jev-api calibrates toward Jev on its side (`jev-api/.claude/rules/haiku-fallback.md`).
 - `tests/effort-fixture.test.ts` pins the acceptance numbers (A1 to A5).
 - Opus/Sonnet sessions are estimated every turn; Haiku/Fable sessions only on each loop's first turn, whose estimate is
   then held while the session effort is unchanged. A model switch starts a new first turn.

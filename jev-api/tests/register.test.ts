@@ -608,15 +608,15 @@ for (const [label, state, timeout] of [["a refused full state", "word ".repeat(2
   });
 }
 
-// F02: a tool whose registration failed is registered again by the next hook, the others are not registered twice.
-it("a failed registration is retried by the next call, only for the tools still missing", async () => {
+// F02: a registration that failed is registered again by the next hook; one that succeeded is not registered twice.
+it("a failed registration is retried by the next call, a successful one is not registered twice", async () => {
   const tries: string[] = [];
   let failRequest = true;
   const { run } = await direct({
     tool: {
       register: async (spec: { name: string }) => {
         tries.push(spec.name);
-        if (spec.name === "request" && failRequest) throw new Error("boom");
+        if (failRequest) throw new Error("boom");
         return { tool: TOOL(spec.name) };
       },
     },
@@ -652,16 +652,15 @@ it("session.start retries tools refused before the session was bound", async () 
   expect(tries.filter(Boolean)).toHaveLength(1);
 });
 
-// A pre-bind refusal must not use up the once-per-tool log: a real failure after the bind is logged.
+// A pre-bind refusal must not use up the once-only log: a real failure after the bind is logged.
 it("session.start logs a real failure after a pre-bind refusal", async () => {
   let bound = false;
   const logs: string[] = [];
   const { run, hooks, $ } = await direct({
     tool: {
-      register: async (spec: { name: string }) => {
+      register: async () => {
         if (!bound) throw new Error("session not bound");
-        if (spec.name === "request") throw new Error("invalid input schema (real failure)");
-        return { tool: TOOL(spec.name) };
+        throw new Error("invalid input schema (real failure)");
       },
     },
     ui: { log: async (t: string) => void logs.push(t) },
@@ -713,7 +712,7 @@ it("session.start retries a pre-bind attempt that was the tool's second refusal"
     },
     ui: { log: async () => undefined },
   });
-  await run("noul"); // first refusal of every tool, fast
+  await run("noul"); // the first refusal, fast
   slow = true;
   const call = run("noul"); // second attempt, in flight at the bind
   await new Promise((r) => setTimeout(r, 10));
@@ -748,7 +747,7 @@ it("session.start retries tools whose pre-bind attempt outlasts the call's wait"
   await run("noul");
   bound = true;
   await hooks.get("session.start")?.($, { cwd: "/p" }, Object.assign(async (e: unknown) => e, { signal: new AbortController().signal }));
-  // session.start must wait for the fresh registrations (needs st.stuck.clear()).
+  // session.start must wait for the fresh registration (needs `st.stuck = false`).
   expect(done).toBe(1);
 });
 
@@ -771,7 +770,7 @@ it("a registration that never answers does not hold the call", async () => {
 it("a hanging registration is waited for once, not by every call", async () => {
   const waits: number[] = [];
   const { run } = await direct({
-    tool: { register: (spec: { name: string }) => (spec.name === "request" ? new Promise(() => {}) : Promise.resolve({ tool: TOOL(spec.name) })) },
+    tool: { register: () => new Promise(() => {}) },
     clock: {
       after: (ms: number, fn: () => void) => {
         waits.push(ms);
@@ -793,8 +792,7 @@ it("a permanently failing registration is retried with back-off and logged once"
     tool: {
       register: async (spec: { name: string }) => {
         tries.push(spec.name);
-        if (spec.name === "request") throw new Error("refused");
-        return { tool: TOOL(spec.name) };
+        throw new Error("refused");
       },
     },
     ui: { log: async (text: string) => void logs.push(text) },
@@ -802,12 +800,12 @@ it("a permanently failing registration is retried with back-off and logged once"
   vi.useFakeTimers({ toFake: ["Date"] });
   try {
     for (let i = 0; i < 20; i++) await run("noul");
-    expect(tries.filter((n) => n === "request")).toHaveLength(2); // the first try and the immediate retry
+    expect(tries).toHaveLength(2); // the first try and the immediate retry
     vi.setSystemTime(Date.now() + 6000);
     await run("noul");
-    expect(tries.filter((n) => n === "request")).toHaveLength(3); // after 5 s the next try
+    expect(tries).toHaveLength(3); // after 5 s the next try
     for (let i = 0; i < 5; i++) await run("noul");
-    expect(tries.filter((n) => n === "request")).toHaveLength(3); // the next delay is 10 s
+    expect(tries).toHaveLength(3); // the next delay is 10 s
   } finally {
     vi.useRealTimers();
   }
@@ -1032,7 +1030,7 @@ test("the Haiku output budget grows with the levels of a score", async ($, on) =
 it("a hanging registration is not started again by later calls", async () => {
   const tries: string[] = [];
   const { run } = await direct({
-    tool: { register: (spec: { name: string }) => (tries.push(spec.name), spec.name === "request" ? new Promise(() => {}) : Promise.resolve({ tool: TOOL(spec.name) })) },
+    tool: { register: (spec: { name: string }) => (tries.push(spec.name), new Promise(() => {})) },
     clock: {
       after: (ms: number, fn: () => void) => {
         const t = ms === 1000 ? setTimeout(fn, 0) : undefined;
@@ -1041,7 +1039,7 @@ it("a hanging registration is not started again by later calls", async () => {
     },
   });
   for (let i = 0; i < 3; i++) await run("noul");
-  expect(tries.filter((n) => n === "request")).toHaveLength(1);
+  expect(tries).toHaveLength(1);
 });
 
 it("a key inside JEV_URL: the whole URL still becomes <JEV_URL>", async () => {
@@ -1115,8 +1113,7 @@ it("the registration back-off stops growing at 5 minutes", async () => {
     tool: {
       register: async (spec: { name: string }) => {
         tries.push(spec.name);
-        if (spec.name === "request") throw new Error("refused");
-        return { tool: TOOL(spec.name) };
+        throw new Error("refused");
       },
     },
     ui: { log: async () => undefined },
@@ -1128,10 +1125,37 @@ it("the registration back-off stops growing at 5 minutes", async () => {
       vi.setSystemTime(t0 + 300_001 * i);
       await run("noul");
     }
-    expect(tries.filter((n) => n === "request")).toHaveLength(12); // the delay stops growing
+    expect(tries).toHaveLength(12); // the delay stops growing
     vi.setSystemTime(t0 + 300_001 * 11 + 200_000);
     await run("noul");
-    expect(tries.filter((n) => n === "request")).toHaveLength(12); // and it is 5 minutes, not less
+    expect(tries).toHaveLength(12); // and it is 5 minutes, not less
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+// The edge of the clock-step guard: a retry time exactly the longest back-off ahead is a back-off, not a clock that stepped back.
+it("a refusal at the longest back-off is not taken for a clock that stepped back", async () => {
+  const tries: string[] = [];
+  const { run } = await direct({
+    tool: {
+      register: async (spec: { name: string }) => {
+        tries.push(spec.name);
+        throw new Error("refused");
+      },
+    },
+    ui: { log: async () => undefined },
+  });
+  vi.useFakeTimers({ toFake: ["Date"] });
+  try {
+    const t0 = Date.now();
+    for (let i = 0; i < 12; i++) {
+      vi.setSystemTime(t0 + 300_001 * i);
+      await run("noul");
+    }
+    expect(tries).toHaveLength(12); // the back-off is at its longest, 5 minutes ahead of this very millisecond
+    await run("noul"); // the clock stands still
+    expect(tries).toHaveLength(12);
   } finally {
     vi.useRealTimers();
   }
@@ -1143,8 +1167,7 @@ it("the first delayed retry waits 5 s, not less", async () => {
     tool: {
       register: async (spec: { name: string }) => {
         tries.push(spec.name);
-        if (spec.name === "request") throw new Error("refused");
-        return { tool: TOOL(spec.name) };
+        throw new Error("refused");
       },
     },
     ui: { log: async () => undefined },
@@ -1158,7 +1181,31 @@ it("the first delayed retry waits 5 s, not less", async () => {
   } finally {
     vi.useRealTimers();
   }
-  expect(tries.filter((n) => n === "request")).toHaveLength(2);
+  expect(tries).toHaveLength(2);
+});
+
+// The retry time is wall-clock time: a clock that steps back must not pin a refused registration (no back-off is longer than 5 minutes).
+it("a wall clock that steps back does not pin a refused registration past its retry time", async () => {
+  const tries: string[] = [];
+  const { run } = await direct({
+    tool: {
+      register: async (spec: { name: string }) => {
+        tries.push(spec.name);
+        throw new Error("refused");
+      },
+    },
+    ui: { log: async () => undefined },
+  });
+  vi.useFakeTimers({ toFake: ["Date"] });
+  try {
+    await run("noul");
+    await run("noul"); // the immediate retry: its refusal sets the 5 s back-off
+    vi.setSystemTime(Date.now() - 3_600_000); // the clock steps back by an hour
+    await run("noul");
+  } finally {
+    vi.useRealTimers();
+  }
+  expect(tries).toHaveLength(3);
 });
 
 it("session.start waits up to 5 s for a registration", async () => {
@@ -1229,13 +1276,13 @@ it("a hanging ui.log does not keep a failed registration pending", async () => {
   const tries: string[] = [];
   let fail = true;
   const { run } = await direct({
-    tool: { register: async (s: { name: string }) => (tries.push(s.name), s.name === "request" && fail ? Promise.reject(new Error("refused")) : { tool: TOOL(s.name) }) },
+    tool: { register: async (s: { name: string }) => (tries.push(s.name), fail ? Promise.reject(new Error("refused")) : { tool: TOOL(s.name) }) },
     ui: { log: () => new Promise(() => {}) },
   });
   await run("noul");
   fail = false;
   await run("noul");
-  expect(tries.filter((n) => n === "request")).toHaveLength(2);
+  expect(tries).toHaveLength(2);
 });
 
 // A tool that hangs, is marked stuck and later fails is waited for again when it is retried (once per retry, not per call).
@@ -1245,8 +1292,7 @@ it("a tool that hung once is waited for again at its next retry", async () => {
   let tries = 0;
   const { run } = await direct({
     tool: {
-      register: (spec: { name: string }) => {
-        if (spec.name !== "request") return Promise.resolve({ tool: TOOL(spec.name) });
+      register: () => {
         tries++;
         return tries === 1 ? new Promise((_, rej) => (rejectFirst = () => rej(new Error("late")))) : new Promise(() => {});
       },
@@ -1260,7 +1306,7 @@ it("a tool that hung once is waited for again at its next retry", async () => {
       },
     },
   });
-  await run("noul"); // the first wait: score hangs, is marked stuck
+  await run("noul"); // the first wait: the registration hangs, is marked stuck
   rejectFirst?.();
   await new Promise((r) => setTimeout(r, 5));
   await run("noul"); // the retry is waited for again
@@ -1268,7 +1314,51 @@ it("a tool that hung once is waited for again at its next retry", async () => {
   expect(waits.filter((ms) => ms === 1000)).toHaveLength(3);
 });
 
-// Lost with the single tool: "a tool that failed during the wait is not marked stuck" needed a second tool hanging through the same wait; registry.ts keeps that path unchanged.
+// A registration refused in the turn in which its wait ends has settled (its pending entry is cleared) before the wait reads "late": it did not hang, so it is not marked stuck and its retry is waited for again.
+it("a registration that fails as its wait ends is not marked stuck", async () => {
+  const waits: number[] = [];
+  let refuse: () => void = () => undefined;
+  let tries = 0;
+  const { run } = await direct({
+    tool: { register: () => (++tries === 1 ? new Promise((_, rej) => (refuse = () => rej(new Error("late")))) : new Promise(() => {})) },
+    ui: { log: async () => undefined },
+    clock: {
+      after: (ms: number, fn: () => void) => {
+        waits.push(ms);
+        const t = ms === 1000 ? setTimeout(() => (refuse(), fn()), 0) : undefined; // the refusal first, then the wait ends
+        return { cancel: () => clearTimeout(t) };
+      },
+    },
+  });
+  await run("noul"); // refused as the wait ends
+  await run("noul"); // its retry hangs: waited for again
+  // two registration waits, plus the store read's own 1 s bound (read once per instance)
+  expect(waits.filter((ms) => ms === 1000)).toHaveLength(3);
+});
+
+// A wait that ends after session.start belongs to the old attempt: it must not mark the fresh attempt stuck.
+it("a late wait of a stale attempt does not mark the fresh registration stuck", async () => {
+  const timers: { ms: number; fn: () => void }[] = [];
+  const { hooks, $ } = await direct({
+    tool: { register: () => new Promise(() => {}) }, // never answers
+    clock: { after: (ms: number, fn: () => void) => (timers.push({ ms, fn }), { cancel() {} }) },
+  });
+  const next = () => Object.assign(async (e: unknown) => e, { signal: new AbortController().signal });
+  const call = () => hooks.get("tool.call")?.($, one("noul"), next());
+  const tick = () => new Promise((r) => setImmediate(r));
+  const a = call(); // an attempt of generation 0, waited for 1 s
+  await tick();
+  const started = hooks.get("session.start")?.($, { cwd: "/p" }, next()); // generation 1: a fresh attempt, waited for 5 s
+  await tick();
+  timers.find((x) => x.ms === 1000)?.fn(); // the old wait ends now
+  await tick();
+  const before = timers.length;
+  const b = call();
+  await tick();
+  expect(timers.slice(before).map((x) => x.ms)).toEqual([1000]); // the next call still waits for the fresh attempt
+  for (const x of timers) x.fn();
+  await Promise.race([Promise.all([a, started, b]), new Promise((r) => setTimeout(r, 200))]);
+});
 
 // A hook above refusing $.clock must not stop the session.start chain.
 it("session.start goes on when waiting for the registration throws", async () => {
@@ -1489,8 +1579,7 @@ it("session.start registers after the bind although a pre-bind attempt fails aft
           throw new Error("session not bound");
         }
         tries.push(spec.name);
-        if (spec.name === "request") throw new Error("real failure");
-        return { tool: TOOL(spec.name) };
+        throw new Error("real failure");
       },
     },
     ui: { log: async (text: string) => void logs.push(text) },
@@ -1508,6 +1597,9 @@ it("session.start registers after the bind although a pre-bind attempt fails aft
   release();
   await new Promise((r) => setTimeout(r, 20));
   expect(logs).toEqual(["registering request failed: real failure"]);
+  // the stale failure was not counted as a second refusal: the real failure's immediate retry is still due
+  await run("noul");
+  expect(tries).toEqual(["request", "request"]);
 });
 
 // A stale pre-bind attempt settling after session.start must not drop the fresh attempt's pending entry (else the next call registers the hanging tool twice).
@@ -1524,8 +1616,7 @@ it("a stale attempt settling does not start a duplicate registration of a hangin
           throw new Error("session not bound");
         }
         post.push(spec.name);
-        if (spec.name === "request") return new Promise(() => {});
-        return { tool: TOOL(spec.name) };
+        return new Promise(() => {});
       },
     },
     clock: {
@@ -1542,5 +1633,5 @@ it("a stale attempt settling does not start a duplicate registration of a hangin
   await new Promise((r) => setTimeout(r, 20));
   await run("noul");
   await run("noul");
-  expect(post.filter((n) => n === "request")).toEqual(["request"]);
+  expect(post).toEqual(["request"]);
 });

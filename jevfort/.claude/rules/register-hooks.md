@@ -83,4 +83,4 @@ request tool) and `$.fs`; every `askJev` is awaited in-frame.
 kit resolves a mod's `$.tool.call` to the stub's `value` and rejects with a bare `{ deny }`, while the real engine
 resolves `{ deny }` (typings), so the fake answers a request call with `{ value: { result: "<JSON array of answers>" } }`
 or `{ value: { deny: "request: <reason>" } }` and passes every other tool on with `next(e)`. It records each request question on its own (with its `type`), so assertions read per
-question. Request questions carry no id.
+question. Request questions carry no id: the fake finds it by the `instructions` text (`questionId` in the kit).

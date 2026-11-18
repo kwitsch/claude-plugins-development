@@ -2,7 +2,7 @@
 // the next-action question's criteria are the offered candidates, the state of any question is the request and recent steps.
 import type { On } from "claude-engine-vitest";
 import { expect } from "vitest";
-import { claudeBeneath, CWD, DEFAULTS, drain, makeKit, type Msg, type Runner, type SetupOpts, step, user } from "./support/kit.ts";
+import { claudeBeneath, CWD, DEFAULTS, drain, JEV_TOOLS, makeKit, type Msg, type Runner, type SetupOpts, step, user } from "./support/kit.ts";
 
 // Candidates are offered from the first step of a turn; takeOnlyForBypass off so a Read is offered, not taken.
 const { test: kitTest, setup } = makeKit({ ...DEFAULTS, takeOnlyForBypass: false });
@@ -362,7 +362,7 @@ for (const builtin of ["login", "diff", "help", "compact"]) {
 // MCP sign-in tools (authenticate, complete_authentication) are never offered; the related tool beside them is.
 kitTest("MCP sign-in tools are never offered, a related tool of the same server is", async ($, on) => {
   const tools = [
-    { name: "mcp__jev-api__request", description: "Ask Jev", mcp: true },
+    ...JEV_TOOLS,
     { name: "mcp__claude_ai_Slack__authenticate", description: "Send Slack messages", mcp: true },
     { name: "mcp__claude_ai_Slack__complete_authentication", description: "Send Slack messages", mcp: true },
     { name: "mcp__claude_ai_Slack__send_message", description: "Send Slack messages", mcp: true },
@@ -471,14 +471,14 @@ kitTest("an image-only prompt is no request", async ($, on) => {
 });
 
 kitTest("a tool search just made is not offered again, a different one is", async ($, on) => {
-  const tools = [{ name: "mcp__jev-api__request", description: "Ask Jev", mcp: true }, { name: "slack-tools", description: "Slack messages", mcp: true }];
+  const tools = [...JEV_TOOLS, { name: "slack-tools", description: "Slack messages", mcp: true }];
   const search = (query: string): Msg => ({ role: "assistant", text: "", toolUses: [{ tool_use_id: "t1", tool: "ToolSearch", input: { query, max_results: 1 }, text: "ok" }] });
   const again = await ask($, on, [user("send a slack message"), search("select:slack-tools")], { tools });
   expect(again.keys.filter((k) => k.startsWith("load "))).toEqual([]);
 });
 
 kitTest("a tool search for another tool does not hide the related one", async ($, on) => {
-  const tools = [{ name: "mcp__jev-api__request", description: "Ask Jev", mcp: true }, { name: "slack-tools", description: "Slack messages", mcp: true }];
+  const tools = [...JEV_TOOLS, { name: "slack-tools", description: "Slack messages", mcp: true }];
   const other: Msg = { role: "assistant", text: "", toolUses: [{ tool_use_id: "t2", tool: "ToolSearch", input: { query: "select:gmail-tools", max_results: 1 }, text: "ok" }] };
   const { keys } = await ask($, on, [user("send a slack message"), other], { tools });
   expect(keys.filter((k) => k.startsWith("load "))).toEqual(["load slack-tools"]);

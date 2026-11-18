@@ -1,10 +1,10 @@
 // The jev-api tool jevfort needs (`mcp__jev-api__request`), through the built plugin/hooks/register.mjs: a listing that
 // has it lets step 0 ask Jev for the effort, a listing that lacks it leaves the session effort without asking.
 import { expect } from "vitest";
-import { byId, claudeBeneath, DEFAULTS, drain, ids, makeKit, mech, type Runner, scored, step, user } from "./support/kit.ts";
+import { JEV_REQUEST } from "../plugin/hooks/lib.mjs";
+import { byId, claudeBeneath, DEFAULTS, drain, ids, makeKit, mech, type Runner, scored, SINGLE_TOOLS, step, user } from "./support/kit.ts";
 
 const { test, setup } = makeKit(DEFAULTS);
-const REQUEST = "mcp__jev-api__request";
 const jev = (name: string) => ({ name, description: name, mcp: true });
 
 /**
@@ -13,37 +13,37 @@ const jev = (name: string) => ({ name, description: name, mcp: true });
  * @param $ - The test's `$`.
  * @param on - The test's `on`.
  * @param tools - The full tool names the listing holds.
- * @returns The questions Jev got and the effort the step reached Claude with.
+ * @returns The questions Jev got, how many request calls jevfort made (the fake denies a call at an unlisted tool and records no question) and the effort the step reached Claude with.
  */
 async function stepWith($: Runner, on: Parameters<typeof setup>[0], tools: readonly string[]) {
-  const { sent } = setup(on, { messages: [user("add a retry")], jev: byId({ effort: scored(1.6), mechanical: mech(0.1) }), tools: tools.map(jev) });
+  const { sent, calls } = setup(on, { messages: [user("add a retry")], jev: byId({ effort: scored(1.6), mechanical: mech(0.1) }), tools: tools.map(jev) });
   const seen: { effort?: string }[] = [];
   claudeBeneath(on, seen);
   await drain($.turn.step(step));
-  return { sent, effort: seen[0]?.effort };
+  return { sent, calls, effort: seen[0]?.effort };
 }
 
 test("the needed tool is jev-api's request: a listing with it lets step 0 ask Jev", async ($, on) => {
-  const { sent, effort } = await stepWith($, on, [REQUEST]);
+  const { sent, effort } = await stepWith($, on, [JEV_REQUEST]);
   expect(ids(sent)).toEqual(["effort", "mechanical"]);
   expect(effort).toBe("medium");
 });
 
 test("nothing is missing when request is listed among other tools", async ($, on) => {
-  expect((await stepWith($, on, ["Bash", REQUEST])).effort).toBe("medium");
+  expect((await stepWith($, on, ["Bash", JEV_REQUEST])).effort).toBe("medium");
 });
 
 for (
   const [name, tools] of [
-    ["the removed single-question tools alone are not enough: Jev is missing", ["noul", "choice", "score"].map((t) => `mcp__jev-api__${t}`)],
+    ["the removed single-question tools alone are not enough: Jev is missing", SINGLE_TOOLS.map((t) => t.name)],
     ["jev-api 0.6's batch alone is not enough: Jev is missing", ["mcp__jev-api__batch"]],
     ["an empty listing misses request", []],
     ["a similar name misses request", ["mcp__other__request", "request", "mcp__jev-api__requests"]],
   ] as const
 ) {
   test(name, async ($, on) => {
-    const { sent, effort } = await stepWith($, on, tools);
-    expect(sent).toHaveLength(0);
+    const { calls, effort } = await stepWith($, on, tools);
+    expect(calls()).toBe(0);
     expect(effort).toBe("high");
   });
 }
@@ -57,10 +57,10 @@ async function writeDecision($: Runner, on: Parameters<typeof setup>[0], tools: 
 }
 
 test("jevMissing: with request listed the scratchpad write is allowed", async ($, on) => {
-  expect(await writeDecision($, on, [REQUEST])).toBe("allow");
+  expect(await writeDecision($, on, [JEV_REQUEST])).toBe("allow");
 });
 
-for (const tools of [[], ["noul", "choice", "score"].map((t) => `mcp__jev-api__${t}`), ["mcp__jev-api__batch"], ["mcp__other__request", "request", "mcp__jev-api__requests"]]) {
+for (const tools of [[], SINGLE_TOOLS.map((t) => t.name), ["mcp__jev-api__batch"], ["mcp__other__request", "request", "mcp__jev-api__requests"]]) {
   test(`jevMissing: the scratchpad write stays ask with [${tools.join(", ")}]`, async ($, on) => {
     expect(await writeDecision($, on, tools)).toBe("ask");
   });

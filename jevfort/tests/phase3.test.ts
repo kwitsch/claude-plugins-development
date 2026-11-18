@@ -5,6 +5,7 @@ import type { On } from "claude-engine-vitest";
 import { expect } from "vitest";
 // jev-api's request tool, the name jevfort asks Jev through (the entry takes it, so lib.mjs exports it).
 import { JEV_REQUEST } from "../plugin/hooks/lib.mjs";
+import { JEV_TOOLS } from "./support/kit.ts";
 
 // The manifest defaults (jevfort/package.json claudePlugin.userConfig): the kit does not fill userConfig defaults.
 const DEFAULTS = {
@@ -21,9 +22,6 @@ const DEFAULTS = {
 const { test, mock } = createKit({ module: new URL("../plugin/hooks/register.mjs", import.meta.url), plugin: "jevfort", options: DEFAULTS });
 
 const CWD = "/proj";
-
-/** The jev-api tool jevfort needs, as `$.tool.list()` lists it. */
-const JEV_TOOLS = [{ name: JEV_REQUEST, description: "Ask Jev several questions", mcp: true }];
 
 type Msg = { role: "user" | "assistant"; text: string; toolUses: Record<string, unknown>[] };
 /** One question of a request call as the fake saw it; `state` is the call's JSON text. */

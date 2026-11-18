@@ -2,7 +2,7 @@
 
 Gives Claude one tool, `request`, that asks TypeSafe's **Jev System One** API one or more questions about a piece of text in a single request: `noul` (yes/no probability), `choice` (pick among named options) and `score` (rate along ordered levels). The tool takes text only and uses the same endpoint and auth conventions as the Typesafe JS SDK.
 
-Coming from 0.6: `batch` is now `request`; the single-question tools `noul`, `choice` and `score` are removed: send one question in `request`, its answer is the array's only element.
+Coming from 0.6: `batch` is now `request`; the single-question tools `noul`, `choice` and `score` are removed: send one question in `request`, its answer is the array's only element. Plugins, agents and skills that name `mcp__jev-api__batch`, `__noul`, `__choice` or `__score` must name `mcp__jev-api__request` instead (they find no tool otherwise). Restart Claude Code after updating: the engine cannot unregister a tool, so a session that keeps running can still list the removed tools, and a call to them fails.
 
 ## Environment
 

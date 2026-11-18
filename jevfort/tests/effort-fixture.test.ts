@@ -61,7 +61,11 @@ test("the fixture has 120 records: 60 prompts in both languages, 24 per label", 
 kitTest("A1: no record falls back, whatever its confidence", async ($, on) => {
   const fed = feed(on);
   let fallbacks = 0;
-  for (const r of ROWS) if ((await estimate($, fed, r)).source === "fallback") fallbacks++;
+  for (const r of ROWS) {
+    const { level, source } = await estimate($, fed, r);
+    // Level -1: step 0 chose no effort (Jev's answer was rejected: it logs `unchanged · jev unavailable`, read as source `jev`).
+    if (source === "fallback" || level < 0) fallbacks++;
+  }
   assert.equal(fallbacks, 0);
 });
 

@@ -1,9 +1,10 @@
-import { DEFAULT_CONTEXT_TOKENS, DEFAULT_DENSITY, DEFAULT_OVERFLOW, DEFAULT_TIMEOUT_S, HAIKU_MAX_CHARS, PLUGIN, REGISTER_WAIT_MS, SERVER_TOOL_PREFIX, TOOL, TOOL_PREFIX, answerJev, askHaiku, cutState, ensureTools, fail, isOverflow, loadKnowledge, message, newLink, parseInput, seconds, untilAbort } from "./lib.mjs";
+import { DEFAULT_CONTEXT_TOKENS, DEFAULT_DENSITY, DEFAULT_OVERFLOW, DEFAULT_TIMEOUT_S, HAIKU_MAX_CHARS, PLUGIN, REGISTER_WAIT_MS, SERVER_TOOL_PREFIX, TOOL, answerJev, askHaiku, cutState, ensureTools, fail, isOverflow, loadKnowledge, message, newLink, parseInput, seconds, untilAbort } from "./lib.mjs";
+const REQUEST_TOOL = `mcp__${PLUGIN}__${TOOL}`;
 export function register(on, options) {
 	const fallbackS = seconds(options?.["timeout"]) ?? DEFAULT_TIMEOUT_S;
 	const optionOverflow = options?.["overflow"];
 	const defaultOverflow = isOverflow(optionOverflow) ? optionOverflow : DEFAULT_OVERFLOW;
-	const names = new Set([TOOL_PREFIX + TOOL]);
+	const names = new Set([REQUEST_TOOL]);
 	const st = {
 		names,
 		registered: false,
@@ -70,7 +71,7 @@ export function register(on, options) {
 		};
 		return {
 			decision: "deny",
-			reason: `this tool is the internal HTTP transport of the ${PLUGIN} plugin; use ${TOOL_PREFIX + TOOL}`
+			reason: `this tool is the internal HTTP transport of the ${PLUGIN} plugin; use ${REQUEST_TOOL}`
 		};
 	});
 }
