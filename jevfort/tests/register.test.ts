@@ -232,11 +232,21 @@ test("After a timeout Jev is not asked again for 30 s, then once more", async ($
   expect(calls()).toBe(2);
 });
 
+let probes = 0;
+/**
+ * One step 0 of a fresh turn: the probe of the Jev-pause tests (an Opus step 0 asks Jev at every turn).
+ *
+ * @param $ - The test's `$`.
+ * @returns The drained step.
+ */
+const probe = ($: Runner) => drain($.turn.step({ ...step, turnId: `p${probes++}` }));
+
 test("A second timeout doubles the pause to 60 s and a success resets it", async ($, on) => {
   let hang = true;
-  const { clock, calls } = setup(on, { messages: [], jev: () => (hang ? new Promise<never>(() => {}) : undefined), env: { JEV_URL: "https://jev.example/x" } });
+  const { clock, calls } = setup(on, { messages: [user("what does this project do?")], jev: () => (hang ? new Promise<never>(() => {}) : undefined), env: { JEV_URL: "https://jev.example/x" } });
+  claudeBeneath(on, []);
   const timeoutAt = async (n: number) => {
-    const p = $.tool.call({ ...ESTIMATE });
+    const p = probe($);
     while (calls() < n) await clock.advance(0);
     await clock.advance(4000);
     await p;
@@ -244,7 +254,7 @@ test("A second timeout doubles the pause to 60 s and a success resets it", async
   const sentAfter = async (wait: number) => {
     const before = calls();
     await clock.advance(wait);
-    const p = $.tool.call({ ...ESTIMATE });
+    const p = probe($);
     for (let i = 0; i < 20; i++) await clock.advance(0);
     const sent = calls() > before;
     if (sent && hang) await clock.advance(4000);
@@ -263,9 +273,10 @@ test("A second timeout doubles the pause to 60 s and a success resets it", async
 });
 
 test("Further timeouts double the pause up to 10 min and no further", async ($, on) => {
-  const { clock, calls } = setup(on, { messages: [], jev: () => new Promise<never>(() => {}), env: { JEV_URL: "https://jev.example/x" } });
+  const { clock, calls } = setup(on, { messages: [user("what does this project do?")], jev: () => new Promise<never>(() => {}), env: { JEV_URL: "https://jev.example/x" } });
+  claudeBeneath(on, []);
   const timeoutAt = async (n: number) => {
-    const p = $.tool.call({ ...ESTIMATE });
+    const p = probe($);
     // The first call waits out the module's dynamic import (file I/O), which no settle count bounds.
     for (let i = 0; n === 1 ? calls() < n : i < 1000 && calls() < n; i++) await clock.advance(0);
     expect(calls()).toBe(n);
@@ -276,13 +287,13 @@ test("Further timeouts double the pause up to 10 min and no further", async ($, 
   await timeoutAt(1);
   for (const [n, pause] of [[2, 30_000], [3, 60_000], [4, 120_000], [5, 240_000], [6, 480_000], [7, 600_000]] as const) {
     await clock.advance(pause - 1000);
-    await $.tool.call({ ...ESTIMATE });
+    await probe($);
     expect(calls()).toBe(n - 1); // still paused 1 s before the end
     await clock.advance(1000);
     await timeoutAt(n);
   }
   await clock.advance(599_000);
-  await $.tool.call({ ...ESTIMATE });
+  await probe($);
   expect(calls()).toBe(7);
   await clock.advance(1000);
   await timeoutAt(8);
@@ -290,14 +301,15 @@ test("Further timeouts double the pause up to 10 min and no further", async ($, 
 });
 
 test("Parallel calls that time out in one outage lengthen the pause once", async ($, on) => {
-  const { clock, calls } = setup(on, { messages: [], jev: () => new Promise<never>(() => {}), env: { JEV_URL: "https://jev.example/x" } });
-  const estimates = [$.tool.call({ ...ESTIMATE }), $.tool.call({ ...ESTIMATE })];
+  const { clock, calls } = setup(on, { messages: [user("what does this project do?")], jev: () => new Promise<never>(() => {}), env: { JEV_URL: "https://jev.example/x" } });
+  claudeBeneath(on, []);
+  const estimates = [probe($), probe($)];
   while (calls() < 2) await clock.advance(0);
   await clock.advance(4000);
   await Promise.all(estimates);
   // One 30 s pause, not 30 s doubled by the second timeout: 31 s later a call goes out again.
   await clock.advance(31_000);
-  const again = $.tool.call({ ...ESTIMATE });
+  const again = probe($);
   while (calls() < 3) await clock.advance(0);
   await clock.advance(4000);
   await again;
@@ -308,16 +320,17 @@ test("A clock that reads earlier than the last timeout ends the pause (a new ses
   const back = { at: -1 };
   on("clock.now", (_$, e, next) => (back.at < 0 ? next(e) : { value: back.at }));
   let hang = true;
-  const { clock, calls } = setup(on, { messages: [], jev: () => (hang ? new Promise<never>(() => {}) : undefined), env: { JEV_URL: "https://jev.example/x" } });
+  const { clock, calls } = setup(on, { messages: [user("what does this project do?")], jev: () => (hang ? new Promise<never>(() => {}) : undefined), env: { JEV_URL: "https://jev.example/x" } });
+  claudeBeneath(on, []);
   await clock.advance(100_000);
-  const p = $.tool.call({ ...ESTIMATE });
+  const p = probe($);
   while (calls() < 1) await clock.advance(0);
   await clock.advance(4000);
   await p;
   // The 30 s pause would still hold; the clock now reads 5 s, before the timeout at 100 s.
   back.at = 5000;
   hang = false;
-  await $.tool.call({ ...ESTIMATE });
+  await probe($);
   expect(calls()).toBe(2);
 });
 
@@ -907,21 +920,14 @@ test("There is no mode: a stored legacy mode is ignored", async ($, on) => {
   expect(seen).toHaveLength(1);
 });
 
-// The estimate_effort tool: registered at session.start, answered by the unmatched tool.call hook on every call.
-test("session.start registers estimate_effort", async ($, on) => {
+// jevfort registers no tool of its own (estimate_effort was removed in 0.14.0).
+test("session.start registers no tool", async ($, on) => {
   setup(on, { messages: [], jev: () => undefined });
-  const registered: Record<string, unknown>[] = [];
-  on("tool.register", async (_$, e) => {
-    registered.push(e);
-    return { value: { tool: "mcp__jevfort__estimate_effort" } };
-  });
+  const registered: unknown[] = [];
+  on("tool.register", async (_$, e) => (registered.push(e), { value: { tool: `mcp__jevfort__${String(e.name)}` } }));
   on("session.start", async () => ({}));
-  await $.session.start({ cwd: CWD, surface: "terminal", isInteractive: true });
-  expect(registered).toHaveLength(1);
-  expect(registered[0]).toMatchObject({
-    name: "estimate_effort",
-    inputSchema: { properties: { model: { enum: ["haiku", "sonnet", "opus", "fable"] } }, required: ["model", "defaultEffort", "minEffort", "maxEffort", "prompt"] },
-  });
+  await $.session.start(START);
+  expect(registered).toEqual([]);
 });
 
 test("Effort routing does not ask Jev the difficulty question", async ($, on) => {
@@ -929,6 +935,7 @@ test("Effort routing does not ask Jev the difficulty question", async ($, on) =>
   claudeBeneath(on, []);
   await drain($.turn.step(step));
   expect(ids(sent)).toEqual(["effort", "mechanical"]);
+  expect(sent.map((q) => [q.id, q.type])).toEqual([["effort", "score"], ["mechanical", "noul"]]);
 });
 
 // The debug log (`$.ui.log`) names the effort chosen for a turn: the only line jevfort logs.
@@ -997,30 +1004,6 @@ test("routing: false writes no 'jev unavailable' line when a take ask fails", { 
   expect(logged).toEqual([]);
 });
 
-const ESTIMATE = { tool: "mcp__jevfort__estimate_effort", model: "opus", defaultEffort: "high", minEffort: "low", maxEffort: "xhigh", prompt: "add a retry to the HTTP client" };
-const estimateCall = async ($: Runner, input: Record<string, unknown> = {}) => (await $.tool.call({ ...ESTIMATE, ...input })) as { result?: string; isError?: boolean; deny?: string };
-
-test("estimate_effort returns Jev's estimate", async ($, on) => {
-  const { sent } = setup(on, { messages: [], jev: byId({ effort: scored(1.6), mechanical: mech(0.1) }) });
-  expect(await estimateCall($)).toEqual({ result: JSON.stringify({ effort: "medium", source: "jev" }) });
-  expect(sent.map((q) => [q.id, q.type])).toEqual([["effort", "score"], ["mechanical", "noul"]]);
-  expect(stateOf(sent, 0).request).toBe(ESTIMATE.prompt);
-});
-
-// Rewording a settings allow makes cc-plugin-sec-default warn the user.
-test("estimate_effort keeps a settings allow verdict untouched", async ($, on) => {
-  setup(on, { messages: [], jev: () => undefined });
-  const base = { decision: "allow", rule: "mcp__jevfort__estimate_effort", reason: "settings rule" };
-  on("tool.check", () => base);
-  expect(await $.tool.check({ tool: ESTIMATE.tool, input: {}, tool_use_id: "toolu_1" })).toEqual(base);
-});
-
-test("A settings ask rule beats the estimate_effort allow", async ($, on) => {
-  setup(on, { messages: [], jev: () => undefined });
-  on("tool.check", () => ({ decision: "ask", rule: "mcp__jevfort__estimate_effort" }));
-  expect(await decision($, { tool: ESTIMATE.tool, input: {}, tool_use_id: "toolu_1" })).toBe("ask");
-});
-
 test("A refused fs.exists probe does not stop the turn's routing", async ($, on) => {
   const seen: unknown[] = [];
   setup(on, { messages: [user("run the tests please")], packageJson: { scripts: { test: "node --test" } }, existsDenied: true, jev: byId({ effort: easy }) });
@@ -1028,11 +1011,6 @@ test("A refused fs.exists probe does not stop the turn's routing", async ($, on)
 
   await drain($.turn.step(step));
   expect(seen[0]).toMatchObject({ effort: "low" });
-});
-
-test("estimate_effort falls back to defaultEffort when Jev is unreachable", async ($, on) => {
-  setup(on, { messages: [], jev: () => 401 });
-  expect(await estimateCall($)).toEqual({ result: JSON.stringify({ effort: "high", source: "fallback" }) });
 });
 
 test("A null script in the project's package.json does not stop the turn's routing", async ($, on) => {
@@ -1061,12 +1039,11 @@ for (const [lock, command] of [["pnpm-lock.yaml", "pnpm test"], ["yarn.lock", "y
   });
 }
 
-test("A failing store does not fail estimate_effort or a turn step", async ($, on) => {
+test("A failing store does not fail a turn step", async ($, on) => {
   on("store.set", () => ({ deny: "store over 4 MiB of JSON text" }));
   const seen: unknown[] = [];
   setup(on, { messages: [user("what does this project do?")], jev: byId({ effort: scored(1.6), mechanical: mech(0.1) }) });
   claudeBeneath(on, seen);
-  expect(await estimateCall($)).toEqual({ result: JSON.stringify({ effort: "medium", source: "jev" }) });
   await drain($.turn.step(step));
   expect(seen).toHaveLength(1);
 });
@@ -1086,12 +1063,11 @@ test("With takeOnlyForBypass a confident skill pick is not taken by Jev (the ski
   expect(seen).toHaveLength(1);
 });
 
-test("A refused clock read fails neither estimate_effort nor a turn step", async ($, on) => {
+test("A refused clock read does not fail a turn step", async ($, on) => {
   on("clock.now", () => ({ deny: "clock refused" }));
   const seen: unknown[] = [];
   setup(on, { messages: [user("what does this project do?")], jev: byId({ effort: scored(1.6), mechanical: mech(0.1) }) });
   claudeBeneath(on, seen);
-  expect(await estimateCall($)).toEqual({ result: JSON.stringify({ effort: "medium", source: "jev" }) });
   await drain($.turn.step(step));
   expect(seen).toHaveLength(1);
 });
@@ -1246,20 +1222,6 @@ test("A file the turn already read is not offered again under another spelling",
   await drain($.turn.step({ ...step, index: 2, messageCount: 5 }));
   const last = sent.filter((q) => q.id === "next_action").at(-1);
   expect(Object.keys(last?.criteria ?? {}).filter((k) => k.startsWith("read "))).toEqual([]);
-});
-
-test("estimate_effort rejects invalid input without asking Jev", async ($, on) => {
-  const { sent } = setup(on, { messages: [], jev: byId({ effort: scored(1.6) }) });
-  expect(await estimateCall($, { model: "gpt" })).toEqual({ deny: "estimate_effort: model must be one of haiku, sonnet, opus, fable" });
-  expect(await estimateCall($, { minEffort: "high", maxEffort: "low" })).toEqual({ deny: "estimate_effort: minEffort must not be above maxEffort" });
-  expect(sent).toHaveLength(0);
-});
-
-test("estimate_effort estimates on every call, also for haiku", async ($, on) => {
-  const { sent } = setup(on, { messages: [], jev: inOrder({ effort: scored(1.6) }, { effort: scored(3), mechanical: mech(0.97) }) });
-  expect(await estimateCall($, { model: "haiku" })).toEqual({ result: JSON.stringify({ effort: "medium", source: "jev" }) });
-  expect(await estimateCall($, { model: "haiku" })).toEqual({ result: JSON.stringify({ effort: "low", source: "mechanical" }) });
-  expect(ids(sent)).toEqual(["effort", "mechanical", "effort", "mechanical"]);
 });
 
 // Turn-start effort estimate: Jev's effort score within minEffort..maxEffort.
@@ -1691,30 +1653,22 @@ test("Without a jev-api tool jevfort is inactive: every hook passes through", as
   });
   claudeBeneath(on, seen);
   const submitted = followUps(on);
-  const registered: unknown[] = [];
-  on("tool.register", async (_$, e) => {
-    registered.push(e);
-    return { value: { tool: "mcp__jevfort__estimate_effort" } };
-  });
   on("session.start", async () => ({}));
   on("tool.check", () => ({ decision: "ask" }));
   on("tool.call", () => ({ result: "beneath" }));
   on("agent.offer", () => ({ isOffered: true }));
   on("session.compact", () => ({ skip: "test" }));
 
-  // session.start registers no estimate_effort and logs why.
+  // session.start applies the listing: Jev is missing.
   await $.session.start({ cwd: CWD, surface: "terminal", isInteractive: true });
-  expect(registered).toHaveLength(0);
 
   // The step goes to Claude unchanged, the scratchpad write keeps Claude Code's verdict, the turn's end is not checked
-  // and a prompt is not classified. An estimate_effort call is still answered (its defaultEffort: Jev is unreachable) and approved.
+  // and a prompt is not classified.
   await drain($.turn.step(step));
   expect(seen).toEqual([step]);
   expect(await decision($, { tool: "Write", input: { file_path: `${SP}/notes.md` }, tool_use_id: "toolu_sp" })).toBe("ask");
   await $.turn.complete(answered("t1", "I renamed it in one file. Want me to do the rest?"));
   await userSubmit($, "rewrite the storage layer to use IndexedDB");
-  expect(await estimateCall($)).toEqual({ result: JSON.stringify({ effort: "high", source: "fallback" }) });
-  expect(await decision($, { tool: "mcp__jevfort__estimate_effort", tool_use_id: "toolu_est" })).toBe("allow");
   expect(submitted).toEqual(["rewrite the storage layer to use IndexedDB"]);
   // Offered agent types are not collected, an Agent call is not routed and a compaction gets no ranking.
   await $.agent.offer({ agent: "general-purpose", description: "General tasks", source: "built-in" });
@@ -1738,11 +1692,6 @@ test("jev-api registering request inside session.start's next(e) makes jevfort a
   const tools: typeof JEV_TOOLS = [];
   const { sent } = setup(on, { messages: [user("what does this project do?")], tools, jev: byId({ effort: easy }) });
   claudeBeneath(on, []);
-  const registered: unknown[] = [];
-  on("tool.register", async (_$, e) => {
-    registered.push(e.name);
-    return { value: { tool: "mcp__jevfort__estimate_effort" } };
-  });
   on("tool.call", (_$, e, next) => (e.tool === "Read" ? { deny: "not here" } : next(e)));
   // Beneath jevfort, as in the engine's dependency order: another plugin's session.start makes a tool call, which
   // jevfort's tool.call hook sees while request is not listed yet; then jev-api registers request.
@@ -1753,7 +1702,6 @@ test("jev-api registering request inside session.start's next(e) makes jevfort a
   });
 
   await $.session.start({ cwd: CWD, surface: "terminal", isInteractive: true });
-  expect(registered).toEqual(["estimate_effort"]);
   await drain($.turn.step(step));
   expect(ids(sent)).toEqual(["effort", "mechanical"]);
   // The listing raised beneath next(e) (before jev-api registered) applied nothing: no inactive error was logged.
@@ -1765,7 +1713,7 @@ test("The jev-api lookup is repeated after each turn", async ($, on) => {
   const { sent } = setup(on, { messages: [user("what does this project do?")], tools, jev: byId({ effort: easy }) });
   claudeBeneath(on, seen);
   followUps(on);
-  const registered = sessionStubs(on);
+  sessionStubs(on);
 
   await $.session.start(START);
   await drain($.turn.step(step));
@@ -1773,40 +1721,19 @@ test("The jev-api lookup is repeated after each turn", async ($, on) => {
   tools.push(...JEV_TOOLS);
   await drain($.turn.step({ ...step, index: 1 }));
   expect(sent).toHaveLength(0);
-  expect(registered).toHaveLength(0);
 
-  // From the next turn on jevfort is active and estimate_effort is registered, once.
+  // From the next turn on jevfort is active.
   await $.turn.complete(answered("t1", "It is a todo app."));
   await drain($.turn.step({ ...step, turnId: "t2" }));
   expect(ids(sent)).toEqual(["effort", "mechanical"]);
-  expect(registered).toEqual(["estimate_effort"]);
 
   // jev-api goes away: from the next turn jevfort is inactive again and logs it once more.
   tools.length = 0;
   await $.turn.complete(answered("t2", "It is a todo app."));
   await drain($.turn.step({ ...step, turnId: "t3" }));
   expect(sent).toHaveLength(2);
-  expect(registered).toEqual(["estimate_effort"]);
   expect(seen.map((s) => s.effort)).toEqual(["high", "high", "low", "high"]);
   // Two inactive errors: one at session start, one at the change.
-});
-
-test("estimate_effort is not registered again when jev-api goes away and comes back", async ($, on) => {
-  const tools: typeof JEV_TOOLS = [...JEV_TOOLS];
-  setup(on, { messages: [user("what does this project do?")], tools, jev: byId({ effort: easy }) });
-  claudeBeneath(on, []);
-  followUps(on);
-  const registered = sessionStubs(on);
-  await $.session.start(START);
-  expect(registered).toEqual(["estimate_effort"]);
-  tools.length = 0;
-  await $.turn.complete(answered("t1", "It is a todo app."));
-  await drain($.turn.step({ ...step, turnId: "t2" }));
-  // There is no unregister: back to ready keeps the one registration.
-  tools.push(...JEV_TOOLS);
-  await $.turn.complete(answered("t2", "It is a todo app."));
-  await drain($.turn.step({ ...step, turnId: "t3" }));
-  expect(registered).toEqual(["estimate_effort"]);
 });
 
 test("/jev between turns does not carry its listing into the next turn", async ($, on) => {
@@ -1814,7 +1741,7 @@ test("/jev between turns does not carry its listing into the next turn", async (
   const { sent } = setup(on, { messages: [user("what does this project do?")], tools, jev: byId({ effort: easy }) });
   claudeBeneath(on, []);
   followUps(on);
-  const registered = sessionStubs(on);
+  sessionStubs(on);
 
   await $.session.start(START);
   await drain($.turn.step(step));
@@ -1823,29 +1750,6 @@ test("/jev between turns does not carry its listing into the next turn", async (
   tools.push(...JEV_TOOLS);
   await drain($.turn.step({ ...step, turnId: "t2" }));
   expect(ids(sent)).toEqual(["effort", "mechanical"]);
-  expect(registered).toEqual(["estimate_effort"]);
-});
-
-test("A failed estimate_effort registration is retried by the next turn's listing, then not repeated", async ($, on) => {
-  setup(on, { messages: [user("what does this project do?")], jev: byId({ effort: easy }) });
-  claudeBeneath(on, []);
-  followUps(on);
-  const attempts: unknown[] = [];
-  on("tool.register", async (_$, e) => {
-    attempts.push(e.name);
-    if (attempts.length === 1) throw new Error("transient");
-    return { value: { tool: "mcp__jevfort__estimate_effort" } };
-  });
-  on("session.start", async () => ({}));
-
-  await $.session.start(START);
-  expect(attempts).toHaveLength(1);
-  await $.turn.complete(answered("t1", "It is a todo app."));
-  await drain($.turn.step({ ...step, turnId: "t2" }));
-  expect(attempts).toHaveLength(2);
-  await $.turn.complete(answered("t2", "It is a todo app."));
-  await drain($.turn.step({ ...step, turnId: "t3" }));
-  expect(attempts).toHaveLength(2);
 });
 
 test("A subagent's turn.complete does not drop the jev-api listing", async ($, on) => {
@@ -2136,13 +2040,6 @@ for (const value of ["model", "off", "effort", "false", "", 0, null]) {
   });
 }
 
-test("routing: false still answers estimate_effort", { options: { routing: false } }, async ($, on) => {
-  setup(on, { messages: [], jev: byId({ effort: scored(2.9), mechanical: mech(0.1) }) });
-  sessionStubs(on);
-  await $.session.start(START);
-  expect(await estimateCall($)).toEqual({ result: JSON.stringify({ effort: "xhigh", source: "jev" }) });
-});
-
 test("There is no done check: an unfinished-looking answer asks Jev nothing and submits no follow-up", async ($, on) => {
   const { sent, calls } = setup(on, { messages: [user("rename foo to bar in all files")], jev: byId({ done: { type: "noul", noul: 0.01 } }) });
   const submitted = followUps(on);
@@ -2160,21 +2057,6 @@ test("a blank Jev variable counts as unset, as in jev-api: Haiku budget and time
   await drain($.turn.step(step));
   expect(sent.length).toBeGreaterThan(0);
   expect(sent.every((q) => q.timeout === 14)).toBe(true);
-});
-
-test("an estimate_effort call between session.start and the first turn: its env read is dropped, the first turn counts the new JEV_URL", async ($, on) => {
-  const env: Record<string, string> = {};
-  const { sent } = setup(on, { messages: [user("what does this project do?")], jev: byId({ effort: scored(1.6), mechanical: mech(0.1) }), env });
-  claudeBeneath(on, []);
-  sessionStubs(on);
-  await $.session.start(START);
-  await estimateCall($);
-  expect(sent.at(-1)?.timeout).toBe(14);
-  env.JEV_URL = "https://jev.example/x";
-  const before = sent.length;
-  await drain($.turn.step(step));
-  expect(ids(sent.slice(before))).toEqual(["effort", "mechanical"]);
-  expect(sent.slice(before).every((q) => q.timeout === 4)).toBe(true);
 });
 
 test("a settings env change between turns counts from the next turn, also after the task-end check read the env", async ($, on) => {

@@ -230,19 +230,12 @@ export const decision = async ($: Runner, input: Record<string, unknown>) => ((a
 export const START = { cwd: CWD, surface: "terminal", isInteractive: true };
 
 /**
- * The stubs `session.start` needs beneath jevfort: `estimate_effort` registration, the event's end.
+ * The stub `session.start` needs beneath jevfort: the event's end.
  *
  * @param on - The test's `on`.
- * @returns The names passed to `$.tool.register`, in call order.
  */
-export function sessionStubs(on: On) {
-  const registered: unknown[] = [];
-  on("tool.register", async (_$, e) => {
-    registered.push(e.name);
-    return { value: { tool: "mcp__jevfort__estimate_effort" } };
-  });
+export function sessionStubs(on: On): void {
   on("session.start", async () => ({}));
-  return registered;
 }
 
 /** The band above the prompt as the terminal raises it (`ui.render`, component `AbovePrompt`). */
