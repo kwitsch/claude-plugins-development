@@ -1,7 +1,6 @@
 /**
- * Claude Code function-hooks module of jev-api: registers the TypeSafe Jev System One question types `noul`,
- * `choice` and `score` as tools, plus `batch` for several questions about one text, and answers each call with one
- * System One request.
+ * Claude Code function-hooks module of jev-api: registers the TypeSafe Jev System One tool `request` (one or more
+ * noul, choice and score questions about one text) and answers each call with one System One request.
  *
  * @remarks
  * EARLY ACCESS API. No engine type import (the engine typings are not in the repo): the used `$` members and

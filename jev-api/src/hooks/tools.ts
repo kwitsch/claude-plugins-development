@@ -1,5 +1,5 @@
 /**
- * The tool registrations: names, descriptions and input schemas of `noul`, `choice`, `score` and `batch`.
+ * The tool registration: name, description and input schema of `request`.
  *
  * @packageDocumentation
  */
@@ -8,13 +8,13 @@ import { DEFAULT_OVERFLOW, OVERFLOWS, TYPES } from "./types.js";
 import type { ToolName, ToolSpec } from "./types.js";
 import { DEFAULT_TIMEOUT_S, MAX_TIMEOUT_S } from "./util.js";
 
-/** The `state` input property shared by the tools. */
+/** The `state` input property of the tool. */
 export const STATE = { type: "string", description: "The text the question is about." };
 
-/** The optional `timeout` input property shared by the tools. */
+/** The optional `timeout` input property of the tool. */
 export const TIMEOUT = { type: "number", exclusiveMinimum: 0, description: `Optional: the HTTP timeout of the request in seconds, at most ${MAX_TIMEOUT_S}. Default: the plugin's timeout option, else ${DEFAULT_TIMEOUT_S}.` };
 
-/** The optional `overflow` input property shared by the tools. */
+/** The optional `overflow` input property of the tool. */
 export const OVERFLOW = { type: "string", enum: [...OVERFLOWS], description: `Optional: what happens when the state and questions are too large for System One (or for the timeout): error refuses with the numbers, truncate cuts the middle of the state, haiku answers with Claude Haiku. Default: the plugin's overflow option, else ${DEFAULT_OVERFLOW}.` };
 
 /** The most options a `choice` question may have. */
@@ -31,70 +31,8 @@ export const TOOL_PREFIX = "mcp__jev-api__";
 
 /** The tool registrations without their name, keyed by tool name. */
 export const SPECS: Record<ToolName, Omit<ToolSpec, "name">> = {
-  noul: {
-    description: "Ask TypeSafe Jev a yes/no question about a text; returns the probability (0..1) that the answer is true.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        instructions: { type: "string", description: "The yes/no question to answer about the text." },
-        state: STATE,
-        timeout: TIMEOUT,
-        overflow: OVERFLOW,
-        criteria: {
-          type: "object",
-          description: "Optional: what counts as true and what counts as false.",
-          properties: {
-            true: { type: "string", description: "What counts as true." },
-            false: { type: "string", description: "What counts as false." },
-          },
-          additionalProperties: false,
-        },
-      },
-      required: ["instructions", "state"],
-    },
-  },
-  choice: {
-    description: "Ask TypeSafe Jev to pick one of named options for a text; returns the choice, its confidence and every option's probability.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        instructions: { type: "string", description: "What to choose." },
-        state: STATE,
-        timeout: TIMEOUT,
-        overflow: OVERFLOW,
-        criteria: {
-          type: "object",
-          description: "The options: option name -> description of when to pick it.",
-          additionalProperties: { type: "string" },
-          minProperties: 1,
-          maxProperties: MAX_OPTIONS,
-        },
-      },
-      required: ["instructions", "state", "criteria"],
-    },
-  },
-  score: {
-    description: "Ask TypeSafe Jev to rate a text along ordered levels; returns the score (the expected level: 0 is the first, values between levels are fractional), its confidence, each level's probability and the legend.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        instructions: { type: "string", description: "What to rate." },
-        state: STATE,
-        timeout: TIMEOUT,
-        overflow: OVERFLOW,
-        criteria: {
-          type: "array",
-          description: "The levels, lowest first; scores start at 0.",
-          items: { type: "string" },
-          minItems: MIN_LEVELS,
-          maxItems: MAX_LEVELS,
-        },
-      },
-      required: ["instructions", "state", "criteria"],
-    },
-  },
-  batch: {
-    description: "Ask TypeSafe Jev several noul, choice and score questions about one text in a single request; returns a JSON array of the answers in question order, each as the noul, choice or score tool returns it. One invalid or unanswered question fails the whole call.",
+  request: {
+    description: "Ask TypeSafe Jev one or more noul (yes/no probability), choice (pick one of named options) and score (rate along ordered levels) questions about one text in a single request; returns a JSON array of the answers in question order. One invalid or unanswered question fails the whole call.",
     inputSchema: {
       type: "object",
       properties: {
@@ -103,7 +41,7 @@ export const SPECS: Record<ToolName, Omit<ToolSpec, "name">> = {
         overflow: OVERFLOW,
         questions: {
           type: "array",
-          description: "The questions, each { type, instructions, criteria } with the noul, choice or score tool's instructions and criteria rules; timeout and overflow apply to the whole batch.",
+          description: "The questions, each { type, instructions, criteria }; timeout and overflow apply to the whole request.",
           minItems: 1,
           items: {
             type: "object",

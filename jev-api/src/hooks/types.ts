@@ -4,14 +4,14 @@
  * @packageDocumentation
  */
 
-/** The System One question types, which are also the names of the single-question tools. */
+/** The System One question types a `request` question may have. */
 export const TYPES = ["noul", "choice", "score"] as const;
 
 /** One of {@link TYPES}. */
 export type QuestionType = (typeof TYPES)[number];
 
-/** Every tool name: the question types plus `batch`, which asks several questions in one request. */
-export const TOOLS = [...TYPES, "batch"] as const;
+/** The tool names: `request` asks one or more questions about one text in one System One request. */
+export const TOOLS = ["request"] as const;
 
 /** One of {@link TOOLS}. */
 export type ToolName = (typeof TOOLS)[number];
