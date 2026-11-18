@@ -237,6 +237,13 @@ export const effortQuestion: Question = {
   criteria: EFFORT_LEVELS,
 };
 
+/** How much reasoning effort the next model call needs, judged only by the steps in `delta` since Jev's last effort answer. */
+export const stepEffortQuestion: Question = {
+  type: "score",
+  instructions: "An AI coding model works on the user request in `request` and ran its last step at reasoning effort `effort`. Judge only the new steps in `delta` (its latest text, tool calls and tool results): how much reasoning effort does a mid-tier AI coding model need for its next step?",
+  criteria: EFFORT_LEVELS,
+};
+
 /** Whether the request is a purely mechanical task. */
 export const mechanicalQuestion: Question = {
   type: "noul",

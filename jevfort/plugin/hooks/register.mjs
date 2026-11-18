@@ -1,4 +1,4 @@
-import { AUTH_TOOL, BUILTIN_COMMANDS, CACHE_TTL, COMPACT_API_TIMEOUT_S, COMPACT_MAX_TOKENS, COMPACT_MODEL, COMPACT_SYSTEM, COMPACT_TIMEOUT_MS, EFFORT_ORDER, ESTIMATE_SPEC, ESTIMATE_TOOL, EVERY_TURN_MODELS, GENERAL, HAIKU_API_TIMEOUT_S, HAIKU_TIMEOUT_MS, JEV_API_TIMEOUT_S, JEV_BATCH, JEV_TOOLS, JEV_TOOL_PREFIX, MAX_CHOICE_OPTIONS, MAX_ERROR, MAX_PAUSE_MS, MAX_READS, MAX_STATS, PAUSE_MS, RELEVANCE, SAFE_MAKE, SKILL_BLOCKLIST_KEY, SUMMARY_MODEL, SWITCH_AT, SYSTEM, TIMEOUT_MS, absolute, bash, bounds, cacheColor, cacheLabel, choice, clip, clipScript, compactInstructions, compactItems, dedupeSkills, effortQuestion, estimateEffort, haikuTranscript, inBandRange, inScratchpad, isAnswer, isEffort, isSafeScript, isSafeToOffer, mechanicalQuestion, mentionedPaths, minutesLeft, missingJevTools, modelFamily, nextActionQuestion, nextTtl, noul, parseEstimateInput, pickCandidate, quotedTerms, relevant, sameCall, score, singleActionQuestion, splitTurn, summarize, taskEndQuestion, toolCalls } from "./lib.mjs";
+import { AUTH_TOOL, BUILTIN_COMMANDS, CACHE_TTL, COMPACT_API_TIMEOUT_S, COMPACT_MAX_TOKENS, COMPACT_MODEL, COMPACT_SYSTEM, COMPACT_TIMEOUT_MS, EFFORT_ORDER, ESTIMATE_SPEC, ESTIMATE_TOOL, EVERY_TURN_MODELS, GENERAL, HAIKU_API_TIMEOUT_S, HAIKU_TIMEOUT_MS, JEV_API_TIMEOUT_S, JEV_BATCH, JEV_TOOLS, JEV_TOOL_PREFIX, MAX_CHOICE_OPTIONS, MAX_ERROR, MAX_PAUSE_MS, MAX_READS, MAX_STATS, PAUSE_MS, RELEVANCE, SAFE_MAKE, SKILL_BLOCKLIST_KEY, SUMMARY_MODEL, SWITCH_AT, SYSTEM, TIMEOUT_MS, absolute, bash, bounds, cacheColor, cacheLabel, choice, clip, clipScript, compactInstructions, compactItems, dedupeSkills, effortQuestion, estimateEffort, haikuTranscript, inBandRange, inScratchpad, isAnswer, isEffort, isSafeScript, isSafeToOffer, mechanicalQuestion, mentionedPaths, minutesLeft, missingJevTools, modelFamily, nextActionQuestion, nextTtl, noul, parseEstimateInput, pickCandidate, quotedTerms, relevant, sameCall, score, singleActionQuestion, splitTurn, stepEffortQuestion, summarize, taskEndQuestion, toolCalls } from "./lib.mjs";
 const newScan = () => ({
 	steps: 0,
 	calls: new Set(),
@@ -463,6 +463,7 @@ async function fillPercent($) {
 }
 export const register = (on, options) => {
 	const routing = options.routing !== false;
+	const stepEffort = options.stepEffort === true;
 	const takeSteps = options.takeSteps !== false;
 	const takeThreshold = typeof options.takeThreshold === "number" ? options.takeThreshold : .85;
 	const subagents = options.subagents !== false;
@@ -711,6 +712,33 @@ export const register = (on, options) => {
 			if (routing && e.index === 0 && !autoOff) hold();
 			return yield* next(routed(e));
 		}
+		const stepRouted = async () => {
+			const family = modelFamily(e.model);
+			const fallback = turn.initial ?? (isEffort(e.effort) ? e.effort : undefined);
+			if (!routing || !stepEffort || e.index === 0 || autoOff || !family || !fallback || !EVERY_TURN_MODELS.includes(family)) return routed(e);
+			const from = turn.seen !== undefined && turn.seen <= ctx.steps.length ? turn.seen : 0;
+			const state = {
+				request: clip(ctx.request, 4e3),
+				effort: turn.effort ?? e.effort,
+				delta: summarize(ctx.steps.slice(from))
+			};
+			const r = await askJev($, state, { step_effort: stepEffortQuestion });
+			if (r.ok) turn.seen = ctx.steps.length;
+			const answer = r.ok ? score(r.answers, "step_effort") : undefined;
+			const est = estimateEffort(answer, undefined, {
+				model: family,
+				defaultEffort: fallback,
+				...effortRange
+			});
+			const source = r.ok ? `${est.source}${answer ? ` (score ${answer.score.toFixed(2)})` : ""}` : `jev unavailable (${r.error})`;
+			debugEffort($, e, `step ${e.index} · ${source}${autoOff ? " · auto off" : ""}`, autoOff ? undefined : est.effort);
+			turn.effort = autoOff || est.effort === e.effort ? undefined : est.effort;
+			if (!e.agentId) {
+				band.chosen = autoOff ? undefined : est.effort;
+				redraw($);
+			}
+			return routed(e);
+		};
 		const calls = toolCalls(ctx.steps);
 		const last = calls.at(-1);
 		if (turn.bypassId && e.index > 0) {
@@ -791,7 +819,7 @@ export const register = (on, options) => {
 			}
 		}
 		if (bypass && e.index === 0 && questions.next_action && !e.agentId) questions.single_action = singleActionQuestion;
-		if (!Object.keys(questions).length) return yield* next(routed(e));
+		if (!Object.keys(questions).length) return yield* next(await stepRouted());
 		const previous = e.index === 0 && !e.agentId ? previousReply(messages) : undefined;
 		const state = {
 			request: clip(ctx.request, 4e3),
@@ -809,7 +837,8 @@ export const register = (on, options) => {
 		}
 		if (!r.ok) {
 			if (estimate) debugEffort($, e, `jev unavailable (${r.error})`, undefined);
-			return yield* next(routed(e));
+			if (stepEffort && estimate && EVERY_TURN_MODELS.includes(estimate.model)) turn.initial = estimate.defaultEffort;
+			return yield* next(await stepRouted());
 		}
 		if (estimate) {
 			const mechanical = noul(r.answers, "mechanical");
@@ -819,6 +848,10 @@ export const register = (on, options) => {
 			debugEffort($, e, `${est.source}${effortAnswer ? ` (score ${effortAnswer.score.toFixed(2)})` : ""}${autoOff ? " · auto off" : ""}`, autoOff ? undefined : est.effort);
 			if (!autoOff) {
 				turn.effort = est.effort !== e.effort ? est.effort : undefined;
+				if (stepEffort && EVERY_TURN_MODELS.includes(estimate.model)) {
+					turn.initial = est.effort;
+					turn.seen = ctx.steps.length;
+				}
 				if (!e.agentId) {
 					band.chosen = est.effort;
 					redraw($);
@@ -865,7 +898,7 @@ export const register = (on, options) => {
 				usage: null
 			};
 		}
-		return yield* next(routed(e));
+		return yield* next(await stepRouted());
 	});
 	on("tool.check", async function onToolCheck($, e, next) {
 		if (e.tool === ESTIMATE_TOOL) {

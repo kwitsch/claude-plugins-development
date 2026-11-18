@@ -44,6 +44,7 @@ const JEV_TOOL_PREFIX = "mcp__jev-api__";
  */
 export function questionId(instructions: string): string | undefined {
   const starts: [string, string][] = [
+    ["An AI coding model works on the user request in `request` and ran its last step", "step_effort"],
     ["An AI coding assistant is working on the user request in `request`", "next_action"],
     ["Can the user request in `request` be fully answered", "single_action"],
     ["How much reasoning effort does a mid-tier AI coding model", "effort"],
@@ -169,7 +170,7 @@ export const ids = (sent: Asked[]) => sent.map((q) => q.id);
  * @param i - The question's index in `sent`.
  * @returns The state object.
  */
-export const stateOf = (sent: Asked[], i: number) => JSON.parse(sent[i].state) as { request: string; previous_reply?: string };
+export const stateOf = (sent: Asked[], i: number) => JSON.parse(sent[i].state) as { request: string; previous_reply?: string; effort?: string; delta?: Record<string, unknown>[] };
 /**
  * A fake Jev answering by question id, one answer set per batch call (one `askJev`) in call order.
  *
