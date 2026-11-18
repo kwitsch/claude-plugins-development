@@ -1443,7 +1443,7 @@ test("stepEffort: each delta starts after Jev's last effort answer, so a failed 
   ]);
 });
 
-test("stepEffort asks nothing at a step Jev takes, and the next model step's delta holds the taken call", { options: { stepEffort: true, takeOnlyForBypass: false } }, async ($, on) => {
+test("stepEffort rides the take batch at a step Jev takes (answer unused), and the next model step's delta holds the taken call", { options: { stepEffort: true, takeOnlyForBypass: false } }, async ($, on) => {
   const seen: { effort?: string }[] = [];
   const messages: Msg[] = [user("compare src/app.ts and src/lib.ts")];
   const take = { type: "choice", choice: "read src/app.ts", probabilities: { "read src/app.ts": 0.95, claude: 0.05 }, confidence: 0.9 };
@@ -1460,15 +1460,16 @@ test("stepEffort asks nothing at a step Jev takes, and the next model step's del
   const taken = await drain($.turn.step(stepAt(1)));
   const id = toolId(taken.chunks);
   expect(id).not.toBe("");
-  expect(ids(sent.slice(before1))).toEqual(["next_action"]);
+  // The step question rides in the take batch; the taken step never goes to the model, so its answer is unused and `seen` stays.
+  expect(ids(sent.slice(before1))).toEqual(["next_action", "step_effort"]);
   messages.push({ role: "assistant", text: "", toolUses: [{ tool_use_id: id, tool: "Read", input: { file_path: `${CWD}/src/app.ts` }, text: "export const app = 1;" }] });
   messages.push({ role: "user", text: "", toolUses: [], toolResults: [{ tool_use_id: id, text: "export const app = 1;", isError: false }] });
   const before2 = sent.length;
   await drain($.turn.step(stepAt(2)));
-  // The step question follows the take batch Jev declined, as its own call.
+  // One Jev round trip: the step question shares the take batch's call.
   expect(ids(sent.slice(before2))).toEqual(["next_action", "step_effort"]);
   const stepAsk = sent.findIndex((q, i) => i >= before2 && q.id === "step_effort");
-  expect(sent[stepAsk].call).toBeGreaterThan(sent[before2].call);
+  expect(sent[stepAsk].call).toBe(sent[before2].call);
   expect(stateOf(sent, stepAsk).delta).toEqual([
     { assistant: "let me look" },
     { tool: "Read", input: JSON.stringify({ file_path: `${CWD}/src/app.ts` }), result: "export const app = 1;" },

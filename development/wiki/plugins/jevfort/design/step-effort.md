@@ -19,11 +19,11 @@ With `stepEffort: true` (default `false`) every Opus/Sonnet step `k > 0` that is
 
 - **A. Re-ask the full step-0 questions at every step:** judges the whole request again, not the increment; two questions per step.
 - **B. Asynchronous estimate (ask after step k, apply at step k+1):** no critical-path latency, but the delta is one step stale, it needs a pending promise with cancellation at turn end and interacts with the Jev pause.
-- **C. `step_effort` in the step's take batch next to `next_action`:** one round trip less on steps with take candidates, but a taken step makes no model call, so the question would be asked for nothing (forbidden by "no call, no Jev"), and it changes the batch's `state`.
+- **C. A separate `step_effort` call next to the take batch (the first implementation):** two sequential Jev round trips (up to 8 s) at a step with take candidates; replaced on user decision (review escalation) by the merged batch below.
 
 ## Latency and residuals
 
-- Every gated step waits for one Jev round trip (up to 4 s, then the Jev pause). With `takeOnlyForBypass: false` a step with take candidates waits for two sequential calls (up to 8 s). This is why the option is off by default. It works against the latency goals of the performance tasks F15/F16 (`../TASKS.md`); not measured yet (follow-up).
+- Every gated step waits for one Jev round trip (up to 4 s, then the Jev pause). The step question joins the step's existing batch call (one round trip, one timeout); a step Jev takes still carries it, and its answer is then unused and `turn.seen` stays, so the next model step's delta covers the taken call. This is why the option is off by default. It works against the latency goals of the performance tasks F15/F16 (`../TASKS.md`); not measured yet (follow-up).
 - More debug-log lines (one per gated step) and more Jev tokens (one score question with up to 8 step summaries per gated step).
 - A mid-turn model switch Opus -> Haiku fails the gate; the last step effort holds for the rest of the turn. Not a Claude Code flow; accepted.
 - An abandoned dispatch (`next.signal`) is not checked, as at step 0; `turn` is per-turn state that dies with the turn.

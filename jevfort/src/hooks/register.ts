@@ -1198,14 +1198,15 @@ export const register = (on: On, options: Options): void => {
      *
      * @returns The step with the turn's (possibly updated) effort applied.
      */
-    const stepRouted = async (): Promise<Step> => {
-      const family = modelFamily(e.model);
-      const fallback = turn.initial ?? (isEffort(e.effort) ? e.effort : undefined);
-      if (!routing || !stepEffort || e.index === 0 || autoOff || !family || !fallback || !EVERY_TURN_MODELS.includes(family)) return routed(e);
-      // A transcript that shrank mid-turn (compaction, a delivered message) restarts the delta.
-      const from = turn.seen && turn.seen <= ctx.steps.length && JSON.stringify(ctx.steps[turn.seen - 1]) === turn.seenKey ? turn.seen : 0;
-      const state = { request: clip(ctx.request, 4000), effort: turn.effort ?? e.effort, delta: summarize(ctx.steps.slice(from)) };
-      const r = await askJev($, state, { step_effort: stepEffortQuestion });
+    const stepFamily = routing && stepEffort && e.index > 0 && !autoOff ? modelFamily(e.model) : undefined;
+    const stepFallback = turn.initial ?? (isEffort(e.effort) ? e.effort : undefined);
+    const stepModel = stepFamily && stepFallback && EVERY_TURN_MODELS.includes(stepFamily) ? { family: stepFamily, fallback: stepFallback } : undefined;
+    // A transcript that shrank mid-turn (compaction, a delivered message) restarts the delta.
+    const stepFrom = turn.seen && turn.seen <= ctx.steps.length && JSON.stringify(ctx.steps[turn.seen - 1]) === turn.seenKey ? turn.seen : 0;
+    const stepRouted = (r?: JevResult): Step => {
+      if (!stepModel || !r) return routed(e);
+      const family = stepModel.family;
+      const fallback = stepModel.fallback;
       if (r.ok) {
         turn.seen = ctx.steps.length;
         turn.seenKey = JSON.stringify(ctx.steps.at(-1));
@@ -1280,7 +1281,9 @@ export const register = (on: On, options: Options): void => {
     }
     if (bypass && e.index === 0 && questions.next_action && !e.agentId) questions.single_action = singleActionQuestion;
 
-    if (!Object.keys(questions).length) return yield* next(await stepRouted());
+    // The step-effort question rides in the same batch as the step's other questions: one Jev round trip per step.
+    if (stepModel) questions.step_effort = stepEffortQuestion;
+    if (!Object.keys(questions).length) return yield* next(stepRouted());
 
     // A short follow-up ("yes", "do it") is only rated with confidence when Jev sees what it answers: 0.0–0.2
     // without, 0.5–0.8 with.
@@ -1290,6 +1293,7 @@ export const register = (on: On, options: Options): void => {
       ...(previous ? { previous_reply: previous } : {}),
       recent: summarize(ctx.steps),
       cwd: turn.cache.cwd ??= await $.session.cwd(),
+      ...(stepModel ? { effort: turn.effort ?? e.effort, delta: summarize(ctx.steps.slice(stepFrom)) } : {}),
     };
     const r = await askJev($, state, questions);
     // Auto pressed off while Jev answered: a hold applied before the wait is undone, the turn runs at the session effort.
@@ -1304,7 +1308,7 @@ export const register = (on: On, options: Options): void => {
       if (estimate) debugEffort($, e, `jev unavailable (${r.error})`, undefined);
       // With stepEffort the session effort is the turn's fallback; `seen` stays unset (Jev did not judge the turn).
       if (stepEffort && estimate && EVERY_TURN_MODELS.includes(estimate.model)) turn.initial = estimate.defaultEffort;
-      return yield* next(await stepRouted());
+      return yield* next(stepRouted(r));
     }
 
     if (estimate) {
@@ -1342,7 +1346,7 @@ export const register = (on: On, options: Options): void => {
       return { turnId: e.turnId, index: e.index, answer: "", toolUses: [{ name: pick.tool, input: pick.input }], stopReason: "tool_use", usage: null };
     }
 
-    return yield* next(await stepRouted());
+    return yield* next(stepRouted(r));
   });
 
   // Permission check: approves Jev's own vetted calls and writes into this session's scratchpad; every other verdict stays Claude Code's.

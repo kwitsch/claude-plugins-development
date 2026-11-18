@@ -720,17 +720,17 @@ export const register = (on, options) => {
 			if (routing && e.index === 0 && !autoOff) hold();
 			return yield* next(routed(e));
 		}
-		const stepRouted = async () => {
-			const family = modelFamily(e.model);
-			const fallback = turn.initial ?? (isEffort(e.effort) ? e.effort : undefined);
-			if (!routing || !stepEffort || e.index === 0 || autoOff || !family || !fallback || !EVERY_TURN_MODELS.includes(family)) return routed(e);
-			const from = turn.seen && turn.seen <= ctx.steps.length && JSON.stringify(ctx.steps[turn.seen - 1]) === turn.seenKey ? turn.seen : 0;
-			const state = {
-				request: clip(ctx.request, 4e3),
-				effort: turn.effort ?? e.effort,
-				delta: summarize(ctx.steps.slice(from))
-			};
-			const r = await askJev($, state, { step_effort: stepEffortQuestion });
+		const stepFamily = routing && stepEffort && e.index > 0 && !autoOff ? modelFamily(e.model) : undefined;
+		const stepFallback = turn.initial ?? (isEffort(e.effort) ? e.effort : undefined);
+		const stepModel = stepFamily && stepFallback && EVERY_TURN_MODELS.includes(stepFamily) ? {
+			family: stepFamily,
+			fallback: stepFallback
+		} : undefined;
+		const stepFrom = turn.seen && turn.seen <= ctx.steps.length && JSON.stringify(ctx.steps[turn.seen - 1]) === turn.seenKey ? turn.seen : 0;
+		const stepRouted = (r) => {
+			if (!stepModel || !r) return routed(e);
+			const family = stepModel.family;
+			const fallback = stepModel.fallback;
 			if (r.ok) {
 				turn.seen = ctx.steps.length;
 				turn.seenKey = JSON.stringify(ctx.steps.at(-1));
@@ -825,13 +825,18 @@ export const register = (on, options) => {
 			}
 		}
 		if (bypass && e.index === 0 && questions.next_action && !e.agentId) questions.single_action = singleActionQuestion;
-		if (!Object.keys(questions).length) return yield* next(await stepRouted());
+		if (stepModel) questions.step_effort = stepEffortQuestion;
+		if (!Object.keys(questions).length) return yield* next(stepRouted());
 		const previous = e.index === 0 && !e.agentId ? previousReply(messages) : undefined;
 		const state = {
 			request: clip(ctx.request, 4e3),
 			...previous ? { previous_reply: previous } : {},
 			recent: summarize(ctx.steps),
-			cwd: turn.cache.cwd ??= await $.session.cwd()
+			cwd: turn.cache.cwd ??= await $.session.cwd(),
+			...stepModel ? {
+				effort: turn.effort ?? e.effort,
+				delta: summarize(ctx.steps.slice(stepFrom))
+			} : {}
 		};
 		const r = await askJev($, state, questions);
 		if (autoOff && heldApplied) {
@@ -844,7 +849,7 @@ export const register = (on, options) => {
 		if (!r.ok) {
 			if (estimate) debugEffort($, e, `jev unavailable (${r.error})`, undefined);
 			if (stepEffort && estimate && EVERY_TURN_MODELS.includes(estimate.model)) turn.initial = estimate.defaultEffort;
-			return yield* next(await stepRouted());
+			return yield* next(stepRouted(r));
 		}
 		if (estimate) {
 			const mechanical = noul(r.answers, "mechanical");
@@ -898,7 +903,7 @@ export const register = (on, options) => {
 				usage: null
 			};
 		}
-		return yield* next(await stepRouted());
+		return yield* next(stepRouted(r));
 	});
 	on("tool.check", async function onToolCheck($, e, next) {
 		if (e.tool === ESTIMATE_TOOL) {
