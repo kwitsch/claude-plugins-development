@@ -61,7 +61,7 @@ the shapes below: `development/wiki/plugins/inline-headroom/notes/claude-code-ve
   rule still wins).
 - Effort band: the `ui.render` hook with matcher `{ component: "AbovePrompt" }` draws `Box`/`Text`/`Button` from
   `$.ui.resolve(e)` (detached factories) out of the closure state `band` (written at main-loop step 0 in `turn.step`:
-  `configured` = step-0 `e.effort`, `chosen` = the estimate of any source or the held Haiku/Fable effort; with `stepEffort` also at main-loop steps k > 0 by `stepRouted`, which `autoOff` skips too) and `autoOff`
+  `configured` = step-0 `e.effort`, `chosen` = the estimate of any source or the held Haiku/Fable effort; `stepRouted` also writes it at k > 0) and `autoOff`
   (flipped by the Button `key: "auto"`, reset at `session.start`, `session.end` and by a reload, never stored). Drawn
   in terminal and desktop only: one row of the efforts from `minEffort` to `maxEffort` (plus the session or chosen
   effort when outside that range), session effort bold, chosen blue, the rest dim, then the `Jev auto: on/off` Button.

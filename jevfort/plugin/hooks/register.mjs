@@ -708,6 +708,14 @@ export const register = (on, options) => {
 			}
 			return true;
 		};
+		const applyEstimate = (effort, source) => {
+			debugEffort($, e, `${source}${autoOff ? " · auto off" : ""}`, autoOff ? undefined : effort);
+			turn.effort = autoOff || effort === e.effort ? undefined : effort;
+			if (!e.agentId) {
+				band.chosen = autoOff ? undefined : effort;
+				redraw($);
+			}
+		};
 		if (!ctx) {
 			if (routing && e.index === 0 && !autoOff) hold();
 			return yield* next(routed(e));
@@ -716,14 +724,17 @@ export const register = (on, options) => {
 			const family = modelFamily(e.model);
 			const fallback = turn.initial ?? (isEffort(e.effort) ? e.effort : undefined);
 			if (!routing || !stepEffort || e.index === 0 || autoOff || !family || !fallback || !EVERY_TURN_MODELS.includes(family)) return routed(e);
-			const from = turn.seen !== undefined && turn.seen <= ctx.steps.length ? turn.seen : 0;
+			const from = turn.seen && turn.seen <= ctx.steps.length && JSON.stringify(ctx.steps[turn.seen - 1]) === turn.seenKey ? turn.seen : 0;
 			const state = {
 				request: clip(ctx.request, 4e3),
 				effort: turn.effort ?? e.effort,
 				delta: summarize(ctx.steps.slice(from))
 			};
 			const r = await askJev($, state, { step_effort: stepEffortQuestion });
-			if (r.ok) turn.seen = ctx.steps.length;
+			if (r.ok) {
+				turn.seen = ctx.steps.length;
+				turn.seenKey = JSON.stringify(ctx.steps.at(-1));
+			}
 			const answer = r.ok ? score(r.answers, "step_effort") : undefined;
 			const est = estimateEffort(answer, undefined, {
 				model: family,
@@ -731,12 +742,7 @@ export const register = (on, options) => {
 				...effortRange
 			});
 			const source = r.ok ? `${est.source}${answer ? ` (score ${answer.score.toFixed(2)})` : ""}` : `jev unavailable (${r.error})`;
-			debugEffort($, e, `step ${e.index} · ${source}${autoOff ? " · auto off" : ""}`, autoOff ? undefined : est.effort);
-			turn.effort = autoOff || est.effort === e.effort ? undefined : est.effort;
-			if (!e.agentId) {
-				band.chosen = autoOff ? undefined : est.effort;
-				redraw($);
-			}
+			applyEstimate(est.effort, `step ${e.index} · ${source}`);
 			return routed(e);
 		};
 		const calls = toolCalls(ctx.steps);
@@ -845,17 +851,11 @@ export const register = (on, options) => {
 			const effortAnswer = score(r.answers, "effort");
 			const est = estimateEffort(effortAnswer, mechanical, estimate);
 			if (firstTurn) firstTurn.effort = est.effort;
-			debugEffort($, e, `${est.source}${effortAnswer ? ` (score ${effortAnswer.score.toFixed(2)})` : ""}${autoOff ? " · auto off" : ""}`, autoOff ? undefined : est.effort);
-			if (!autoOff) {
-				turn.effort = est.effort !== e.effort ? est.effort : undefined;
-				if (stepEffort && EVERY_TURN_MODELS.includes(estimate.model)) {
-					turn.initial = est.effort;
-					turn.seen = ctx.steps.length;
-				}
-				if (!e.agentId) {
-					band.chosen = est.effort;
-					redraw($);
-				}
+			applyEstimate(est.effort, `${est.source}${effortAnswer ? ` (score ${effortAnswer.score.toFixed(2)})` : ""}`);
+			if (!autoOff && stepEffort && EVERY_TURN_MODELS.includes(estimate.model)) {
+				turn.initial = est.effort;
+				turn.seen = ctx.steps.length;
+				turn.seenKey = JSON.stringify(ctx.steps.at(-1));
 			}
 		}
 		const answer = choice(r.answers, "next_action");

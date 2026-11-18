@@ -1037,6 +1037,8 @@ export const register = (on: On, options: Options): void => {
     initial?: Effort;
     /** With `stepEffort`: `ctx.steps.length` at the turn's last effort question Jev answered; the start of the next step delta (unset: 0). */
     seen?: number;
+    /** With `stepEffort`: the JSON of the step at `seen - 1`; a mismatch means the transcript was rewritten (compaction) and the delta restarts at 0. */
+    seenKey?: string;
   }>();
   // What each loop's first turn (key `agentId`, `""` for the main loop) saw and estimated: the session model's family,
   // the session effort (`from`) and the estimate (unset when none was made or Jev failed). Drives the Haiku/Fable hold.
@@ -1175,15 +1177,24 @@ export const register = (on: On, options: Options): void => {
       }
       return true;
     };
+    // Applies an estimate to the turn: debug line, the turn's effort and the band; Auto off keeps the session effort.
+    const applyEstimate = (effort: Effort, source: string): void => {
+      debugEffort($, e, `${source}${autoOff ? " · auto off" : ""}`, autoOff ? undefined : effort);
+      turn.effort = autoOff || effort === e.effort ? undefined : effort;
+      if (!e.agentId) {
+        band.chosen = autoOff ? undefined : effort;
+        redraw($);
+      }
+    };
     // A turn without a request (image-only prompt, interrupt marker) asks Jev nothing but still keeps the hold, so the prompt cache stays.
     if (!ctx) {
       if (routing && e.index === 0 && !autoOff) hold();
       return yield* next(routed(e));
     }
-    // Per step (Opus/Sonnet only: an effort change keeps their prompt cache), and only right before a model call:
-    // Jev judges the steps since its last effort answer in this turn. Fallback: the turn's step-0 effort, else the session effort.
     /**
-     * The step to hand to the model, its effort re-estimated with `stepEffort` at an Opus/Sonnet step k > 0.
+     * The step to hand to the model, its effort re-estimated with `stepEffort` at an Opus/Sonnet step k > 0 (Opus/Sonnet
+     * only: an effort change keeps their prompt cache). Jev judges the steps since its last effort answer in this turn;
+     * fallback: the turn's step-0 effort, else the session effort.
      *
      * @returns The step with the turn's (possibly updated) effort applied.
      */
@@ -1192,20 +1203,18 @@ export const register = (on: On, options: Options): void => {
       const fallback = turn.initial ?? (isEffort(e.effort) ? e.effort : undefined);
       if (!routing || !stepEffort || e.index === 0 || autoOff || !family || !fallback || !EVERY_TURN_MODELS.includes(family)) return routed(e);
       // A transcript that shrank mid-turn (compaction, a delivered message) restarts the delta.
-      const from = turn.seen !== undefined && turn.seen <= ctx.steps.length ? turn.seen : 0;
+      const from = turn.seen && turn.seen <= ctx.steps.length && JSON.stringify(ctx.steps[turn.seen - 1]) === turn.seenKey ? turn.seen : 0;
       const state = { request: clip(ctx.request, 4000), effort: turn.effort ?? e.effort, delta: summarize(ctx.steps.slice(from)) };
       const r = await askJev($, state, { step_effort: stepEffortQuestion });
-      if (r.ok) turn.seen = ctx.steps.length;
+      if (r.ok) {
+        turn.seen = ctx.steps.length;
+        turn.seenKey = JSON.stringify(ctx.steps.at(-1));
+      }
       const answer = r.ok ? score(r.answers, "step_effort") : undefined;
       const est = estimateEffort(answer, undefined, { model: family, defaultEffort: fallback, ...effortRange });
-      // Re-read after the await: Auto pressed off while Jev answered runs the step at the session effort.
+      // applyEstimate re-reads autoOff after the await: Auto pressed off while Jev answered runs the step at the session effort.
       const source = r.ok ? `${est.source}${answer ? ` (score ${answer.score.toFixed(2)})` : ""}` : `jev unavailable (${r.error})`;
-      debugEffort($, e, `step ${e.index} · ${source}${autoOff ? " · auto off" : ""}`, autoOff ? undefined : est.effort);
-      turn.effort = autoOff || est.effort === e.effort ? undefined : est.effort;
-      if (!e.agentId) {
-        band.chosen = autoOff ? undefined : est.effort;
-        redraw($);
-      }
+      applyEstimate(est.effort, `step ${e.index} · ${source}`);
       return routed(e);
     };
     const calls = toolCalls(ctx.steps);
@@ -1304,18 +1313,12 @@ export const register = (on: On, options: Options): void => {
       const est = estimateEffort(effortAnswer, mechanical, estimate);
       if (firstTurn) firstTurn.effort = est.effort;
       // Re-read after the await: Auto pressed off while Jev answered keeps this turn at the session effort.
-      debugEffort($, e, `${est.source}${effortAnswer ? ` (score ${effortAnswer.score.toFixed(2)})` : ""}${autoOff ? " · auto off" : ""}`, autoOff ? undefined : est.effort);
-      if (!autoOff) {
-        turn.effort = est.effort !== e.effort ? est.effort : undefined;
-        // With stepEffort: the fallback of later steps, and Jev has judged the turn up to here.
-        if (stepEffort && EVERY_TURN_MODELS.includes(estimate.model)) {
-          turn.initial = est.effort;
-          turn.seen = ctx.steps.length;
-        }
-        if (!e.agentId) {
-          band.chosen = est.effort;
-          redraw($);
-        }
+      applyEstimate(est.effort, `${est.source}${effortAnswer ? ` (score ${effortAnswer.score.toFixed(2)})` : ""}`);
+      // With stepEffort: the fallback of later steps, and Jev has judged the turn up to here.
+      if (!autoOff && stepEffort && EVERY_TURN_MODELS.includes(estimate.model)) {
+        turn.initial = est.effort;
+        turn.seen = ctx.steps.length;
+        turn.seenKey = JSON.stringify(ctx.steps.at(-1));
       }
     }
 
