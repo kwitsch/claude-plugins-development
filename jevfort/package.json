@@ -2,7 +2,7 @@
   "name": "jevfort",
   "version": "0.13.2",
   "private": true,
-  "description": "Lets Jev take routine steps and pick each turn's effort for you.",
+  "description": "Lets Jev take routine steps and pick each turn's effort for you (needs the jev-api plugin).",
   "keywords": [
     "mods",
     "hooks",

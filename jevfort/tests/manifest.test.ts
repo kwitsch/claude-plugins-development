@@ -20,6 +20,7 @@ test("the manifest declares the jev-api plugin as its only dependency, and packa
   const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
   assert.deepEqual(pkg.claudePlugin.dependencies, ["jev-api"]);
   assert.equal(pkg.dependencies, undefined);
+  assert.match(manifest.description, /jev-api/);
 });
 
 test("userConfig declares exactly 15 options: no mode selector, no gate", () => {
