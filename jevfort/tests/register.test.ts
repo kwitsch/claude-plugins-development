@@ -1,11 +1,11 @@
 // Hook-wiring tests for the built plugin/hooks/register.mjs: a port of upstream jev-pilot's tests/pilot.test.ts onto
 // claude-engine-vitest (types dropped, `expect` from vitest, `test`/`mock` from createKit). Upstream's "shadow mode
 // logs a take but lets Claude act" is gone with the mode; its shadow compare test runs on the measure path instead.
-// Jev is the jev-api plugin's batch tool: a fake `tool.call` answers `mcp__jev-api__batch` question by question.
+// Jev is the jev-api plugin's request tool: a fake `tool.call` answers `mcp__jev-api__request` question by question.
 import type { On } from "claude-engine-vitest";
 import { expect } from "vitest";
-/** jev-api's batch tool, the name jevfort asks Jev through. */
-const JEV_BATCH = "mcp__jev-api__batch";
+/** jev-api's request tool, the name jevfort asks Jev through. */
+const JEV_BATCH = "mcp__jev-api__request";
 import { answered, type Asked, autoLabel, BAND, BENEATH, byId, claudeBeneath, CWD, decision, DEFAULTS, drain, easy, followUps, ids, inOrder, JEV_TOOLS, levelProps, makeKit, mech, Msg, Runner, scored, sessionStubs, SetupOpts, setupWith, SID, SINGLE_TOOLS, START, stateOf, step, toolId, user } from "./support/kit.ts";
 
 const { test, mock } = makeKit(DEFAULTS);
@@ -81,8 +81,8 @@ test("When Jev is unreachable the step goes to Claude unchanged", async ($, on) 
   expect(chunks).toContainEqual({ kind: "text", index: 0, text: "from claude" });
 });
 
-// askJev: all questions of a decision go out in one jev-api batch call; `state` travels as JSON text.
-test("A turn-start decision sends its questions in one jev-api batch call", async ($, on) => {
+// askJev: all questions of a decision go out in one jev-api request call; `state` travels as JSON text.
+test("A turn-start decision sends its questions in one jev-api request call", async ($, on) => {
   const { sent, calls } = setup(on, { messages: [user("what does src/app.ts export?")], files: [`${CWD}/src/app.ts`], jev: () => undefined, env: { TYPESAFE_API_KEY: "k" } });
   claudeBeneath(on, []);
 
@@ -155,10 +155,10 @@ for (
   });
 }
 
-test("Core's error result for the batch call fails the decision with a batch: prefix", async ($, on) => {
+test("Core's error result for the request call fails the decision with a request: prefix", async ($, on) => {
   const seen: unknown[] = [];
   // Ahead of setup's fake: what core answers when jev-api's hook was skipped and no hook answered its tool.
-  const error = "Error: jev-api registered the tool batch but no tool.call hook answered this call";
+  const error = "Error: jev-api registered the tool request but no tool.call hook answered this call";
   on("tool.call", (_$, e, next) => (e.tool === JEV_BATCH ? { value: { isError: true, result: error, text: error } } : next(e)));
   setup(on, { messages: [user("what does this project do?")], jev: () => undefined });
   claudeBeneath(on, seen);
@@ -167,7 +167,7 @@ test("Core's error result for the batch call fails the decision with a batch: pr
   expect(seen[0]).toMatchObject({ effort: "high" });
 });
 
-for (const [name, answer, _error] of [["of another type", mech(0.5), "batch: no valid score answer for questions[0]"], ["that is not JSON", "<html>", "batch: result is not JSON"], ["with too few answers", "[]", "batch: expected 2 answers"]] as const) {
+for (const [name, answer, _error] of [["of another type", mech(0.5), "request: no valid score answer for questions[0]"], ["that is not JSON", "<html>", "request: result is not JSON"], ["with too few answers", "[]", "request: expected 2 answers"]] as const) {
   test(`A jev-api result ${name} fails the decision`, async ($, on) => {
     const seen: unknown[] = [];
     setup(on, { messages: [user("what does this project do?")], jev: (q) => (q.id === "effort" ? answer : undefined) });
@@ -321,7 +321,7 @@ test("A clock that reads earlier than the last timeout ends the pause (a new ses
   expect(calls()).toBe(2);
 });
 
-for (const [name, deny, env] of [["a jev-api timeout answered before jevfort's own", "batch: timeout after 4000ms", { JEV_URL: "https://jev.example/x" }], ["a Haiku timeout (14 s, before the 15 s budget)", "batch: fallback: timeout after 14000ms", {}]] as const) {
+for (const [name, deny, env] of [["a jev-api timeout answered before jevfort's own", "request: timeout after 4000ms", { JEV_URL: "https://jev.example/x" }], ["a Haiku timeout (14 s, before the 15 s budget)", "request: fallback: timeout after 14000ms", {}]] as const) {
   test(`${name} pauses Jev like the local timeout`, async ($, on) => {
     const seen: unknown[] = [];
     const { calls } = setup(on, { messages: [user("what does this project do?")], jev: () => ({ __deny: deny }), env });
@@ -336,7 +336,7 @@ for (const [name, deny, env] of [["a jev-api timeout answered before jevfort's o
 
 test("a fast failure that is no timeout pauses nothing", async ($, on) => {
   const seen: unknown[] = [];
-  const { calls } = setup(on, { messages: [user("what does this project do?")], jev: () => ({ __deny: "batch: HTTP 503" }), env: { JEV_URL: "https://jev.example/x" } });
+  const { calls } = setup(on, { messages: [user("what does this project do?")], jev: () => ({ __deny: "request: HTTP 503" }), env: { JEV_URL: "https://jev.example/x" } });
   claudeBeneath(on, seen);
   await drain($.turn.step(step));
   await drain($.turn.step(step));
@@ -959,7 +959,7 @@ test("The debug log says when Jev gave no effort", async ($, on) => {
   setup(on, { messages: [user("what does this project do?")], jev: () => 503 });
   claudeBeneath(on, []);
   await drain($.turn.step(step));
-  expect(logged).toEqual(["effort claude-opus-5-5: session high → unchanged · jev unavailable (batch: HTTP 503)"]);
+  expect(logged).toEqual(["effort claude-opus-5-5: session high → unchanged · jev unavailable (request: HTTP 503)"]);
 });
 
 test("The debug log names a held Haiku effort and a subagent's step", async ($, on) => {
@@ -1650,7 +1650,7 @@ test("stepEffort writes a step line to the debug log", { options: { stepEffort: 
   expect(logged).toEqual([
     "effort claude-opus-5-5: session high → xhigh · jev (score 2.90)",
     "effort claude-opus-5-5: session high → low · step 1 · jev (score 0.20)",
-    "effort claude-opus-5-5: session high → high · step 2 · jev unavailable (batch: HTTP 503) · scoring off for this turn",
+    "effort claude-opus-5-5: session high → high · step 2 · jev unavailable (request: HTTP 503) · scoring off for this turn",
   ]);
 });
 
@@ -1680,7 +1680,7 @@ test("stepEffort draws a main-loop step's effort blue and leaves the band alone 
   await ui.unmount();
 });
 
-// Self-disable: without jev-api's batch tool in the listing (here jev-api 0.1's three tools), every hook but /jev passes through untouched.
+// Self-disable: without jev-api's request tool in the listing (here jev-api 0.1's three tools), every hook but /jev passes through untouched.
 test("Without a jev-api tool jevfort is inactive: every hook passes through", async ($, on) => {
   const seen: unknown[] = [];
   const { sent } = setup(on, {
@@ -1734,7 +1734,7 @@ test("A tool listing that fails counts as all jev-api tools missing", async ($, 
   expect(sent).toHaveLength(0);
 });
 
-test("jev-api registering batch inside session.start's next(e) makes jevfort active, also after a lookup in between", async ($, on) => {
+test("jev-api registering request inside session.start's next(e) makes jevfort active, also after a lookup in between", async ($, on) => {
   const tools: typeof JEV_TOOLS = [];
   const { sent } = setup(on, { messages: [user("what does this project do?")], tools, jev: byId({ effort: easy }) });
   claudeBeneath(on, []);
@@ -1745,7 +1745,7 @@ test("jev-api registering batch inside session.start's next(e) makes jevfort act
   });
   on("tool.call", (_$, e, next) => (e.tool === "Read" ? { deny: "not here" } : next(e)));
   // Beneath jevfort, as in the engine's dependency order: another plugin's session.start makes a tool call, which
-  // jevfort's tool.call hook sees while batch is not listed yet; then jev-api registers batch.
+  // jevfort's tool.call hook sees while request is not listed yet; then jev-api registers request.
   on("session.start", async ($2) => {
     await $2.tool.call({ tool: "Read", file_path: `${CWD}/README.md` }).catch(() => undefined);
     tools.push(...JEV_TOOLS);
@@ -2317,7 +2317,7 @@ for (const [percent, ids] of [[85, ["end"]], [30, []]] as const) {
 }
 
 test("A failed task-end call at 85% fill sends no second request and queues no compaction", async ($, on) => {
-  const { calls } = setup(on, { messages: [user("rename foo to bar")], jev: () => ({ __deny: "batch: HTTP 503" }) });
+  const { calls } = setup(on, { messages: [user("rename foo to bar")], jev: () => ({ __deny: "request: HTTP 503" }) });
   followUps(on);
   const state = compactStubs(on, 85);
   await $.turn.complete(answered("t1", "Done."));

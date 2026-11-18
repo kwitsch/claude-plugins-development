@@ -4,8 +4,8 @@ import { createKit } from "claude-engine-vitest";
 import type { On } from "claude-engine-vitest";
 import { expect } from "vitest";
 
-/** jev-api's batch tool, the name jevfort asks Jev through. */
-const JEV_BATCH = "mcp__jev-api__batch";
+/** jev-api's request tool, the name jevfort asks Jev through. */
+const JEV_BATCH = "mcp__jev-api__request";
 
 // The manifest defaults (jevfort/package.json claudePlugin.userConfig): the kit does not fill userConfig defaults.
 const DEFAULTS = {
@@ -30,7 +30,7 @@ type Msg = { role: "user" | "assistant"; text: string; toolUses: Record<string, 
 /** One question of a batch call as the fake saw it; `state` is the call's JSON text. */
 type Asked = { type: string; instructions: string; state: string; criteria?: unknown };
 
-/** Lists the batch tool, answers each batch question with `jev`'s answer and stubs the session reads the hooks make; returns the questions. */
+/** Lists the request tool, answers each batch question with `jev`'s answer and stubs the session reads the hooks make; returns the questions. */
 function base(on: On, jev: (q: Asked) => Record<string, unknown>, messages: Msg[] = []) {
   const sent: Asked[] = [];
   mock.store(on, {});
