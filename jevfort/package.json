@@ -1,8 +1,8 @@
 {
   "name": "jevfort",
-  "version": "0.13.1",
+  "version": "0.13.2",
   "private": true,
-  "description": "Lets TypeSafe Jev take routine steps and route effort (port of nim-f/jev-pilot; asks Jev through the jev-api plugin's tools).",
+  "description": "Lets Jev take routine steps and pick each turn's effort for you (needs the jev-api plugin).",
   "keywords": [
     "mods",
     "hooks",

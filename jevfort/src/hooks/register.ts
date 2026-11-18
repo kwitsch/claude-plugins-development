@@ -892,7 +892,7 @@ export const register = (on: On, options: Options): void => {
   let autoOff = false;
 
   // The effort band above the prompt: the levels between the configured minimum and maximum (plus the session effort when outside), the session effort bold, Jev's choice for the turn blue, and the
-  // Auto button, then the cache countdown. Without the effort row (jevfort inactive, also before the session
+  // Jevfort button, then the cache countdown. Without the effort row (jevfort inactive, also before the session
   // baseline, or `routing: false`) only the countdown shows, above whatever another plugin draws in the band beneath
   // (the effort row takes the whole band); a survey holds the band.
   on("ui.render", { component: "AbovePrompt" }, async function onRenderBand($: Engine, e: BandEvent, next: (e: BandEvent) => unknown): Promise<unknown> {
@@ -916,7 +916,7 @@ export const register = (on: On, options: Options): void => {
         ),
         Button({
           key: "auto",
-          label: `Jev auto: ${autoOff ? "off" : "on"}`,
+          label: `Jevfort ${autoOff ? "✖️" : "✔️"}`,
           onPress: () => {
             autoOff = !autoOff;
             // Raised after the hook frame ended: if the engine refuses, the next applied listing redraws.
@@ -1247,7 +1247,7 @@ export const register = (on: On, options: Options): void => {
     const questions: Record<string, Question> = {};
     let candidates: Candidate[] = [];
     // Not on a slash-command turn: its skill text is not in the transcript, so Jev (and the Haiku summary) would answer the bare command and the skill never runs.
-    if (takeSteps && !ctx.command && turn.taken < MAX_TAKES_PER_TURN && (!takeOnlyForBypass || (bypass && e.index === 0 && !e.agentId))) {
+    if (takeSteps && !autoOff && !ctx.command && turn.taken < MAX_TAKES_PER_TURN && (!takeOnlyForBypass || (bypass && e.index === 0 && !e.agentId))) {
       // A hung engine read (a stalled file system) must not hold the step: past TIMEOUT_MS it goes on without candidates.
       const build = buildCandidates($, ctx.request, ctx.steps, calls, e.index, turn.cache);
       build.catch(() => undefined);
@@ -1341,7 +1341,7 @@ export const register = (on: On, options: Options): void => {
     const singleAction = noul(r.answers, "single_action") ?? 0;
     const picked = pickCandidate(answer, candidates, takeThreshold);
     // takeOnlyForBypass: only a read-only Read or Bash that is the whole prompt; a skill or tool load run by Jev would end the turn on a summary of "Launching skill".
-    const pick = takeOnlyForBypass && (singleAction < SINGLE_ACTION || (picked?.tool !== "Read" && picked?.tool !== "Bash")) ? undefined : picked;
+    const pick = autoOff ? undefined : takeOnlyForBypass && (singleAction < SINGLE_ACTION || (picked?.tool !== "Read" && picked?.tool !== "Bash")) ? undefined : picked;
 
     if (pick) {
       turn.taken += 1;
