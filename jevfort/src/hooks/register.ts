@@ -1304,10 +1304,12 @@ export const register = (on: On, options: Options): void => {
         redraw($);
       }
     }
+    // The step-0 estimate of an Opus/Sonnet turn with stepEffort: it sets the turn's fallback for later steps.
+    const stepEstimate = stepEffort && estimate && EVERY_TURN_MODELS.includes(estimate.model) ? estimate : undefined;
     if (!r.ok) {
       if (estimate) debugEffort($, e, `jev unavailable (${r.error})`, undefined);
-      // With stepEffort the session effort is the turn's fallback; `seen` stays unset (Jev did not judge the turn).
-      if (stepEffort && estimate && EVERY_TURN_MODELS.includes(estimate.model)) turn.initial = estimate.defaultEffort;
+      // The session effort is the turn's fallback; `seen` stays unset (Jev did not judge the turn).
+      if (stepEstimate) turn.initial = stepEstimate.defaultEffort;
       return yield* next(stepRouted(r));
     }
 
@@ -1319,7 +1321,7 @@ export const register = (on: On, options: Options): void => {
       // Re-read after the await: Auto pressed off while Jev answered keeps this turn at the session effort.
       applyEstimate(est.effort, `${est.source}${effortAnswer ? ` (score ${effortAnswer.score.toFixed(2)})` : ""}`);
       // With stepEffort: the fallback of later steps, and Jev has judged the turn up to here.
-      if (!autoOff && stepEffort && EVERY_TURN_MODELS.includes(estimate.model)) {
+      if (!autoOff && stepEstimate) {
         turn.initial = est.effort;
         turn.seen = ctx.steps.length;
         turn.seenKey = JSON.stringify(ctx.steps.at(-1));

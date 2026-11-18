@@ -846,9 +846,10 @@ export const register = (on, options) => {
 				redraw($);
 			}
 		}
+		const stepEstimate = stepEffort && estimate && EVERY_TURN_MODELS.includes(estimate.model) ? estimate : undefined;
 		if (!r.ok) {
 			if (estimate) debugEffort($, e, `jev unavailable (${r.error})`, undefined);
-			if (stepEffort && estimate && EVERY_TURN_MODELS.includes(estimate.model)) turn.initial = estimate.defaultEffort;
+			if (stepEstimate) turn.initial = stepEstimate.defaultEffort;
 			return yield* next(stepRouted(r));
 		}
 		if (estimate) {
@@ -857,7 +858,7 @@ export const register = (on, options) => {
 			const est = estimateEffort(effortAnswer, mechanical, estimate);
 			if (firstTurn) firstTurn.effort = est.effort;
 			applyEstimate(est.effort, `${est.source}${effortAnswer ? ` (score ${effortAnswer.score.toFixed(2)})` : ""}`);
-			if (!autoOff && stepEffort && EVERY_TURN_MODELS.includes(estimate.model)) {
+			if (!autoOff && stepEstimate) {
 				turn.initial = est.effort;
 				turn.seen = ctx.steps.length;
 				turn.seenKey = JSON.stringify(ctx.steps.at(-1));
