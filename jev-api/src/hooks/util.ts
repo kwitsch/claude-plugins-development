@@ -4,8 +4,8 @@
  * @packageDocumentation
  */
 
-import { OVERFLOWS, TYPES } from "./types.js";
-import type { Overflow, Question, QuestionType, ToolName, ToolResult } from "./types.js";
+import { OVERFLOWS, TOOL, TYPES } from "./types.js";
+import type { Overflow, Question, QuestionType, ToolResult } from "./types.js";
 
 /** How long one request may take, in seconds, when neither the call's `timeout` nor the `timeout` option is valid. */
 export const DEFAULT_TIMEOUT_S = 20;
@@ -64,12 +64,11 @@ export function json(text: string, reviver?: (key: string, value: unknown, conte
 /**
  * Builds a tool error: a `deny`, which the model reads as an error result (core drops a hook's own `isError`).
  *
- * @param tool - The tool called, prefixed to the message.
  * @param reason - What went wrong.
  * @returns The error answer for the model.
  */
-export function fail(tool: ToolName, reason: string): ToolResult {
-  return { deny: `${tool}: ${reason}` };
+export function fail(reason: string): ToolResult {
+  return { deny: `${TOOL}: ${reason}` };
 }
 
 /**

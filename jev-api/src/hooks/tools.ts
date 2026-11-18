@@ -4,8 +4,8 @@
  * @packageDocumentation
  */
 
-import { DEFAULT_OVERFLOW, OVERFLOWS, TYPES } from "./types.js";
-import type { ToolName, ToolSpec } from "./types.js";
+import { DEFAULT_OVERFLOW, OVERFLOWS, TOOL, TYPES } from "./types.js";
+import type { ToolSpec } from "./types.js";
 import { DEFAULT_TIMEOUT_S, MAX_TIMEOUT_S } from "./util.js";
 
 /** The `state` input property of the tool. */
@@ -29,32 +29,31 @@ export const MAX_LEVELS = 10;
 /** The engine names a registered tool `mcp__<plugin>__<name>`. */
 export const TOOL_PREFIX = "mcp__jev-api__";
 
-/** The tool registrations without their name, keyed by tool name. */
-export const SPECS: Record<ToolName, Omit<ToolSpec, "name">> = {
-  request: {
-    description: "Ask TypeSafe Jev one or more noul (yes/no probability), choice (pick one of named options) and score (rate along ordered levels) questions about one text in a single request; returns a JSON array of the answers in question order. One invalid or unanswered question fails the whole call.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        state: STATE,
-        timeout: TIMEOUT,
-        overflow: OVERFLOW,
-        questions: {
-          type: "array",
-          description: "The questions, each { type, instructions, criteria }; timeout and overflow apply to the whole request.",
-          minItems: 1,
-          items: {
-            type: "object",
-            properties: {
-              type: { type: "string", enum: [...TYPES], description: "The question type." },
-              instructions: { type: "string", description: "The question." },
-              criteria: { description: `noul: optional { true, false } strings; choice: 1 to ${MAX_OPTIONS} option names -> descriptions; score: ${MIN_LEVELS} to ${MAX_LEVELS} levels, lowest first.` },
-            },
-            required: ["type", "instructions"],
+/** The tool registration. */
+export const SPEC: ToolSpec = {
+  name: TOOL,
+  description: "Ask TypeSafe Jev one or more noul (yes/no probability), choice (pick one of named options) and score (rate along ordered levels) questions about one text in a single request; returns a JSON array of the answers in question order. One invalid or unanswered question fails the whole call.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      state: STATE,
+      timeout: TIMEOUT,
+      overflow: OVERFLOW,
+      questions: {
+        type: "array",
+        description: "The questions, each { type, instructions, criteria }; timeout and overflow apply to the whole request.",
+        minItems: 1,
+        items: {
+          type: "object",
+          properties: {
+            type: { type: "string", enum: [...TYPES], description: "The question type." },
+            instructions: { type: "string", description: "The question." },
+            criteria: { description: `noul: optional { true, false } strings; choice: 1 to ${MAX_OPTIONS} option names -> descriptions; score: ${MIN_LEVELS} to ${MAX_LEVELS} levels, lowest first.` },
           },
+          required: ["type", "instructions"],
         },
       },
-      required: ["state", "questions"],
     },
+    required: ["state", "questions"],
   },
 };

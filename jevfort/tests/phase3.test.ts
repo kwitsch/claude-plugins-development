@@ -3,9 +3,8 @@
 import { createKit } from "claude-engine-vitest";
 import type { On } from "claude-engine-vitest";
 import { expect } from "vitest";
-
-/** jev-api's request tool, the name jevfort asks Jev through. */
-const JEV_BATCH = "mcp__jev-api__request";
+// jev-api's request tool, the name jevfort asks Jev through (the entry takes it, so lib.mjs exports it).
+import { JEV_REQUEST } from "../plugin/hooks/lib.mjs";
 
 // The manifest defaults (jevfort/package.json claudePlugin.userConfig): the kit does not fill userConfig defaults.
 const DEFAULTS = {
@@ -24,13 +23,13 @@ const { test, mock } = createKit({ module: new URL("../plugin/hooks/register.mjs
 const CWD = "/proj";
 
 /** The jev-api tool jevfort needs, as `$.tool.list()` lists it. */
-const JEV_TOOLS = [{ name: JEV_BATCH, description: "Ask Jev several questions", mcp: true }];
+const JEV_TOOLS = [{ name: JEV_REQUEST, description: "Ask Jev several questions", mcp: true }];
 
 type Msg = { role: "user" | "assistant"; text: string; toolUses: Record<string, unknown>[] };
-/** One question of a batch call as the fake saw it; `state` is the call's JSON text. */
+/** One question of a request call as the fake saw it; `state` is the call's JSON text. */
 type Asked = { type: string; instructions: string; state: string; criteria?: unknown };
 
-/** Lists the request tool, answers each batch question with `jev`'s answer and stubs the session reads the hooks make; returns the questions. */
+/** Lists the request tool, answers each request question with `jev`'s answer and stubs the session reads the hooks make; returns the questions. */
 function base(on: On, jev: (q: Asked) => Record<string, unknown>, messages: Msg[] = []) {
   const sent: Asked[] = [];
   mock.store(on, {});
@@ -40,7 +39,7 @@ function base(on: On, jev: (q: Asked) => Record<string, unknown>, messages: Msg[
   on("ui.status", () => ({ value: undefined }));
   on("tool.list", () => ({ value: JEV_TOOLS }));
   on("tool.call", (_$, e, next) => {
-    if (e.tool !== JEV_BATCH) return next(e);
+    if (e.tool !== JEV_REQUEST) return next(e);
     const asked = (e.questions as { type: string; instructions: string; criteria?: unknown }[]).map((b): Asked => ({ ...b, state: String(e.state) }));
     sent.push(...asked);
     // A mod's `$.tool.call` resolves to the stub's `value`: the tool result `{ result }`, the answers in question order.
@@ -249,7 +248,7 @@ test("session.compact waits longer for Jev than an interactive call, and tells j
   on("tool.list", () => ({ value: JEV_TOOLS }));
   let apiTimeout: unknown;
   on("tool.call", async (_$, e, next) => {
-    if (e.tool !== JEV_BATCH) return next(e);
+    if (e.tool !== JEV_REQUEST) return next(e);
     apiTimeout = e.timeout;
     await _$.clock.sleep(4500); // longer than the interactive 4 s budget
     const asked = e.questions as { instructions: string }[];
@@ -261,7 +260,7 @@ test("session.compact waits longer for Jev than an interactive call, and tells j
     return { skip: "test" };
   });
   const done = $.session.compact({ trigger: "manual", messages });
-  while (apiTimeout === undefined) await clock.advance(0); // until the batch call is under way
+  while (apiTimeout === undefined) await clock.advance(0); // until the request call is under way
   await clock.advance(4600);
   await done;
   expect(apiTimeout).toBe(9);
@@ -284,7 +283,7 @@ for (const [label, env, ms, s] of [["Jev", { TYPESAFE_API_KEY: "k" }, 9000, 9], 
     on("tool.list", () => ({ value: JEV_TOOLS }));
     let apiTimeout: unknown;
     on("tool.call", (_$, e, next) => {
-      if (e.tool !== JEV_BATCH) return next(e);
+      if (e.tool !== JEV_REQUEST) return next(e);
       apiTimeout = e.timeout;
       return new Promise<never>(() => {});
     });

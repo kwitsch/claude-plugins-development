@@ -24,9 +24,9 @@ Each module's header comment says what it holds; module history is in `developme
 
 - The tool is registered whatever the Jev variables say (user decision 2026-11-11; it replaced a registration only with a variable set). Who answers without one: `.claude/rules/haiku-fallback.md`.
 - `register(on)` has no `$`, so the tools cannot register at module load: `ensureTools($, st, ms)` runs in `session.start` and, best effort, at the start of `tool.call` (a call before `session.start` still registers). Tools stay deferred (MCP-style, ToolSearch).
-- A tool whose `$.tool.register` failed stays in `missing`; the next hook (`session.start` or an owned call) registers only those again.
-- Registration is a state per tool (`RegState`, `ensureTools`): a tool refused again is retried once at once, then after 5 s, 10 s, ... (max 5 min), and logged once.
-- The wait for a registration is bounded (1 s in an owned call, 5 s in `session.start`) and paid once per hanging tool: it is then `stuck`, and other tools and later calls do not wait for it. A registration that never answers does not hold a call.
+- A tool whose `$.tool.register` failed stays unregistered (`registered: false`); the next hook (`session.start` or an owned call) registers it again.
+- Registration is one state (`RegState`, `ensureTools`): a tool refused again is retried once at once, then after 5 s, 10 s, ... (max 5 min), and logged once.
+- The wait for a registration is bounded (1 s in an owned call, 5 s in `session.start`) and paid once per hanging registration: it is then `stuck`, and later calls do not wait for it. A registration that never answers does not hold a call.
 
 ## System One questions and answers (`input.ts`, `tools.ts`, `util.ts`)
 

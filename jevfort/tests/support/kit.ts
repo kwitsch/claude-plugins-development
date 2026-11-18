@@ -2,6 +2,8 @@
 // plugin/hooks/register.mjs. Tests import only register.mjs through this module (the standard of jev-api).
 import { createKit } from "claude-engine-vitest";
 import type { On } from "claude-engine-vitest";
+// jev-api's request tool, the name jevfort asks Jev through (the entry takes it, so lib.mjs exports it).
+import { JEV_REQUEST } from "../../plugin/hooks/lib.mjs";
 
 export const DEFAULTS = {
   routing: true,
@@ -32,8 +34,6 @@ export function makeKit(options: Record<string, unknown> = DEFAULTS) {
 
 export const CWD = "/proj";
 export const SID = "sid-1";
-/** jev-api's request tool, the name jevfort asks Jev through. */
-const JEV_BATCH = "mcp__jev-api__request";
 const JEV_TOOL_PREFIX = "mcp__jev-api__";
 
 /**
@@ -54,7 +54,7 @@ export function questionId(instructions: string): string | undefined {
   return starts.find(([start]) => instructions.startsWith(start))?.[1];
 }
 
-export const JEV_TOOLS = [{ name: JEV_BATCH, description: "Ask Jev several questions", mcp: true }];
+export const JEV_TOOLS = [{ name: JEV_REQUEST, description: "Ask Jev several questions", mcp: true }];
 /** The removed jev-api single-question tools, which lack the request tool. */
 export const SINGLE_TOOLS = ["noul", "choice", "score"].map((t) => ({ name: JEV_TOOL_PREFIX + t, description: `Ask Jev a ${t} question`, mcp: true }));
 /** What the fake answers a question the test's `jev` leaves open, by type: not true, leave it to Claude, an unconfident score. */
@@ -80,7 +80,7 @@ export type SetupOpts = { messages: Msg[]; jev: Jev; cwd?: () => string; files?:
 // `{ deny }` stub answer would make the kit reject instead). Other tools go on to the test's own `tool.call` stub.
 export function setupWith(mock: MockKit, on: On, opts: SetupOpts) {
   const sent: Asked[] = [];
-  let batchCalls = 0;
+  let requestCalls = 0;
   let reads = 0;
   const statted: string[] = [];
   mock.env(on, opts.env ?? {});
@@ -108,10 +108,10 @@ export function setupWith(mock: MockKit, on: On, opts: SetupOpts) {
   // `tools: null` makes the listing fail.
   on("tool.list", () => (opts.tools === null ? { deny: "tool.list failed" } : { value: opts.tools ?? JEV_TOOLS }));
   on("tool.call", async (_$, e, next) => {
-    if (e.tool !== JEV_BATCH) return next(e);
+    if (e.tool !== JEV_REQUEST) return next(e);
     // As the engine: a tool that is not listed is unknown, so the mod's call rejects (a bare `{ deny }`).
-    if (opts.tools === null || (opts.tools !== undefined && !opts.tools.some((t) => t.name === JEV_BATCH))) return { deny: `unknown tool ${JEV_BATCH}` };
-    const call = batchCalls++;
+    if (opts.tools === null || (opts.tools !== undefined && !opts.tools.some((t) => t.name === JEV_REQUEST))) return { deny: `unknown tool ${JEV_REQUEST}` };
+    const call = requestCalls++;
     const asked = (e.questions as { type: string; instructions: string; criteria?: unknown }[]).map((b): Asked => ({ ...b, id: questionId(b.instructions) ?? b.instructions, state: String(e.state), timeout: e.timeout, call }));
     sent.push(...asked);
     const answers = await Promise.all(asked.map(async (q) => opts.jev(q)));
@@ -123,7 +123,7 @@ export function setupWith(mock: MockKit, on: On, opts: SetupOpts) {
     const raw = answers.find((a) => typeof a === "string");
     return { value: { result: raw ?? JSON.stringify(answers.map((a, i) => a ?? NEUTRAL[asked[i].type])) } };
   });
-  return { sent, clock, statted, calls: () => batchCalls, reads: () => reads };
+  return { sent, clock, statted, calls: () => requestCalls, reads: () => reads };
 }
 
 // Stubs beneath the mod: the turn's end, and the prompts submitted through it (their texts).
@@ -216,8 +216,11 @@ export function effortOf(on: On) {
   claudeBeneath(on, []);
   let n = 0;
   return async ($: Runner, over: Partial<typeof step> = {}) => {
+    const before = logged.length;
     await drain($.turn.step({ ...step, turnId: `e${n++}`, ...over }));
-    const m = /→ (\S+) · (\w+)/.exec(logged.at(-1) ?? "");
+    // Only what this step logged: an earlier step's line must not answer for a step that logged none.
+    let m: RegExpExecArray | null = null;
+    for (const line of logged.slice(before)) m = /→ (\S+) · (\w+)/.exec(line) ?? m;
     return { effort: m?.[1], source: m?.[2] };
   };
 }

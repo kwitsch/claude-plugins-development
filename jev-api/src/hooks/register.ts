@@ -25,8 +25,8 @@ import { cutState, DEFAULT_CONTEXT_TOKENS, DEFAULT_DENSITY, loadKnowledge } from
 import type { Knowledge } from "./size.js";
 import { TOOL_PREFIX } from "./tools.js";
 import { newLink, PLUGIN, SERVER_TOOL_PREFIX } from "./transport.js";
-import { DEFAULT_OVERFLOW, TOOLS } from "./types.js";
-import type { On, Options, ToolName } from "./types.js";
+import { DEFAULT_OVERFLOW, TOOL } from "./types.js";
+import type { On, Options } from "./types.js";
 import { DEFAULT_TIMEOUT_S, fail, isOverflow, message, seconds, untilAbort } from "./util.js";
 
 /**
@@ -42,12 +42,12 @@ export function register(on: On, options?: Options): void {
   // A call's own `overflow` wins; an invalid option falls back to the default like an invalid timeout does.
   const optionOverflow = options?.["overflow"];
   const defaultOverflow = isOverflow(optionOverflow) ? optionOverflow : DEFAULT_OVERFLOW;
-  // Full tool name -> tool: the default names (a call can reach an instance that saw no session.start), plus what the engine returned.
-  const names = new Map<string, ToolName>(TOOLS.map((t) => [TOOL_PREFIX + t, t]));
-  // `$` reaches a module only inside its hooks, so the tools register in the first hook that runs (session.start, or an earlier tool call).
+  // The full tool names answered: the default name (a call can reach an instance that saw no session.start), plus what the engine returned.
+  const names = new Set<string>([TOOL_PREFIX + TOOL]);
+  // `$` reaches a module only inside its hooks, so the tool registers in the first hook that runs (session.start, or an earlier tool call).
   // The engine accepts `$` only as an argument to a top-level function, hence `ensureTools` and the state object.
-  // A tool whose registration failed stays in `missing`: the next hook tries it again (after a growing delay), no timers.
-  const st: RegState = { names, missing: new Set<ToolName>(TOOLS), pending: new Map(), gen: 0, retryAt: new Map(), failures: new Map(), stuck: new Set() };
+  // A tool whose registration failed stays unregistered: the next hook tries it again (after a growing delay), no timers.
+  const st: RegState = { names, registered: false, pending: undefined, gen: 0, retryAt: 0, failures: 0, stuck: false };
   // What this instance learned about System One's size limits; the density comes back from the store in the first call that needs it.
   const know: Knowledge = { density: DEFAULT_DENSITY, persisted: DEFAULT_DENSITY, samples: 0, nctx: DEFAULT_CONTEXT_TOKENS, loaded: undefined };
   // The HTTP transport: the plugin's MCP server while it is available, `$.http.fetch` while it is not (see transport.mts).
@@ -56,24 +56,23 @@ export function register(on: On, options?: Options): void {
     try {
       // Binding the session is what earlier refusals were about: a new generation makes every attempt begun before it stale
       // (it settles without a failure count, back-off or log, and ensureTools starts a fresh one), and the back-off, failure
-      // count (the once-per-tool log stays for the first real failure after the bind) and stuck marks go.
+      // count (the once-only log stays for the first real failure after the bind) and stuck mark go.
       st.gen++;
-      st.retryAt.clear();
-      st.failures.clear();
-      st.stuck.clear();
-      if (st.missing.size > 0) await ensureTools($, st, 5 * REGISTER_WAIT_MS);
+      st.retryAt = 0;
+      st.failures = 0;
+      st.stuck = false;
+      if (!st.registered) await ensureTools($, st, 5 * REGISTER_WAIT_MS);
     } catch {
       // best effort (a hook above refusing $.clock): the session.start chain goes on
     }
     return next(e);
   });
   on("tool.call", async function onToolCall($, e, next) {
-    const type = names.get(e.tool);
-    if (type === undefined) return next(e);
+    if (!names.has(e.tool)) return next(e);
     // Answered on every path, a throw too (a hook above refusing $.env.get): a registered tool that no hook answers fails.
     try {
       // best effort and bounded: a failed or hanging registration must not hold the answer
-      if (st.missing.size > 0) {
+      if (!st.registered) {
         try {
           await untilAbort(ensureTools($, st, REGISTER_WAIT_MS), next.signal);
         } catch {
@@ -81,21 +80,21 @@ export function register(on: On, options?: Options): void {
         }
       }
       // Validation needs no env: an invalid call answers before any env read.
-      const input = parseInput(type, e);
-      if (typeof input === "string") return fail(type, input);
+      const input = parseInput(e);
+      if (typeof input === "string") return fail(input);
       // Literal names: the engine's static check only accepts a literal first argument to $.env.get.
       const [key, base, jevUrl, model] = (await Promise.all([$.env.get("TYPESAFE_API_KEY"), $.env.get("TYPESAFE_BASE_URL"), $.env.get("JEV_URL"), $.env.get("TYPESAFE_DEFAULT_MODEL")])).map((v) => v?.trim() || undefined);
       // F05: an abandoned call sends nothing
-      if (next.signal.aborted) return fail(type, "the call was abandoned");
+      if (next.signal.aborted) return fail("the call was abandoned");
       // No Jev access configured: Haiku stands in, and for a configured Jev that answers with an HTTP error (4xx, 5xx) too, with the time left of the timeout (jev.mts).
       // A whole number of milliseconds, at least 1: $.model.complete refuses anything else (2.01 s * 1000 is 2009.9999999999998).
       const timeoutMs = Math.max(1, Math.round((seconds(e["timeout"]) ?? fallbackS) * 1000));
-      if (!key && !base && !jevUrl) return await askHaiku($, type, cutState(input.state, HAIKU_MAX_CHARS), input.questions, timeoutMs, next.signal);
+      if (!key && !base && !jevUrl) return await askHaiku($, cutState(input.state, HAIKU_MAX_CHARS), input.questions, timeoutMs, next.signal);
       await untilAbort(loadKnowledge($, know), next.signal);
-      if (next.signal.aborted) return fail(type, "the call was abandoned");
-      return await answerJev($, type, input, input.overflow ?? defaultOverflow, { key, base, jevUrl, model }, timeoutMs, next.signal, know, link);
+      if (next.signal.aborted) return fail("the call was abandoned");
+      return await answerJev($, input, input.overflow ?? defaultOverflow, { key, base, jevUrl, model }, timeoutMs, next.signal, know, link);
     } catch (err) {
-      return fail(type, message(err));
+      return fail(message(err));
     }
   });
   // The model must not use the transport server's tools (a tool the mod can call cannot be hidden from the model: `$.mcp.call`
@@ -103,6 +102,6 @@ export function register(on: On, options?: Options): void {
   on("tool.check", async function onToolCheck(_$, e, next) {
     if (!e.tool.startsWith(SERVER_TOOL_PREFIX)) return next(e);
     if (next.origin?.plugin === PLUGIN) return { decision: "allow", reason: `${PLUGIN}'s own HTTP transport` };
-    return { decision: "deny", reason: `this tool is the internal HTTP transport of the ${PLUGIN} plugin; use ${TOOLS.map((t) => TOOL_PREFIX + t).join(", ")}` };
+    return { decision: "deny", reason: `this tool is the internal HTTP transport of the ${PLUGIN} plugin; use ${TOOL_PREFIX + TOOL}` };
   });
 }

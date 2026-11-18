@@ -4,8 +4,8 @@
 // Jev is the jev-api plugin's request tool: a fake `tool.call` answers `mcp__jev-api__request` question by question.
 import type { On } from "claude-engine-vitest";
 import { expect } from "vitest";
-/** jev-api's request tool, the name jevfort asks Jev through. */
-const JEV_BATCH = "mcp__jev-api__request";
+// jev-api's request tool, the name jevfort asks Jev through (the entry takes it, so lib.mjs exports it).
+import { JEV_REQUEST } from "../plugin/hooks/lib.mjs";
 import { answered, type Asked, autoLabel, BAND, BENEATH, byId, claudeBeneath, CWD, decision, DEFAULTS, drain, easy, followUps, ids, inOrder, JEV_TOOLS, levelProps, makeKit, mech, Msg, Runner, scored, sessionStubs, SetupOpts, setupWith, SID, SINGLE_TOOLS, START, stateOf, step, toolId, user } from "./support/kit.ts";
 
 const { test, mock } = makeKit(DEFAULTS);
@@ -159,7 +159,7 @@ test("Core's error result for the request call fails the decision with a request
   const seen: unknown[] = [];
   // Ahead of setup's fake: what core answers when jev-api's hook was skipped and no hook answered its tool.
   const error = "Error: jev-api registered the tool request but no tool.call hook answered this call";
-  on("tool.call", (_$, e, next) => (e.tool === JEV_BATCH ? { value: { isError: true, result: error, text: error } } : next(e)));
+  on("tool.call", (_$, e, next) => (e.tool === JEV_REQUEST ? { value: { isError: true, result: error, text: error } } : next(e)));
   setup(on, { messages: [user("what does this project do?")], jev: () => undefined });
   claudeBeneath(on, seen);
 
@@ -1440,14 +1440,14 @@ test("stepEffort: a failed Jev request turns the scoring off for the rest of the
   expect(seen.map((s) => s.effort)).toEqual(["high", "low", "medium", "medium", "medium"]);
 });
 
-test("stepEffort rides the take batch at a step Jev takes (answer unused), and the next model step's delta holds the taken call", { options: { stepEffort: true, takeOnlyForBypass: false } }, async ($, on) => {
+test("stepEffort rides the take request at a step Jev takes (answer unused), and the next model step's delta holds the taken call", { options: { stepEffort: true, takeOnlyForBypass: false } }, async ($, on) => {
   const seen: { effort?: string }[] = [];
   const messages: Msg[] = [user("compare src/app.ts and src/lib.ts")];
   const take = { type: "choice", choice: "read src/app.ts", probabilities: { "read src/app.ts": 0.95, claude: 0.05 }, confidence: 0.9 };
   const { sent } = setup(on, {
     messages,
     files: [`${CWD}/src/app.ts`, `${CWD}/src/lib.ts`],
-    // Step 0 (call 0) leaves the step to Claude; step 1's take batch (call 1) takes the Read; later calls leave it to Claude.
+    // Step 0 (call 0) leaves the step to Claude; step 1's take request (call 1) takes the Read; later calls leave it to Claude.
     jev: (q: Asked) => (q.id === "effort" ? scored(2.2) : q.id === "step_effort" ? scored(0.2) : q.id === "next_action" && q.call === 1 ? take : undefined),
   });
   claudeBeneath(on, seen);
@@ -1457,13 +1457,13 @@ test("stepEffort rides the take batch at a step Jev takes (answer unused), and t
   const taken = await drain($.turn.step(stepAt(1)));
   const id = toolId(taken.chunks);
   expect(id).not.toBe("");
-  // The step question rides in the take batch; the taken step never goes to the model, so its answer is unused and `seen` stays.
+  // The step question rides in the take request; the taken step never goes to the model, so its answer is unused and `seen` stays.
   expect(ids(sent.slice(before1))).toEqual(["next_action", "step_effort"]);
   messages.push({ role: "assistant", text: "", toolUses: [{ tool_use_id: id, tool: "Read", input: { file_path: `${CWD}/src/app.ts` }, text: "export const app = 1;" }] });
   messages.push({ role: "user", text: "", toolUses: [], toolResults: [{ tool_use_id: id, text: "export const app = 1;", isError: false }] });
   const before2 = sent.length;
   await drain($.turn.step(stepAt(2)));
-  // One Jev round trip: the step question shares the take batch's call.
+  // One Jev round trip: the step question shares the take request's call.
   expect(ids(sent.slice(before2))).toEqual(["next_action", "step_effort"]);
   const stepAsk = sent.findIndex((q, i) => i >= before2 && q.id === "step_effort");
   expect(sent[stepAsk].call).toBe(sent[before2].call);
@@ -1510,7 +1510,7 @@ test("stepEffort: a step score that is no number fails the request like an outag
     if (k) messages.push(assistantSays(`step ${k}`));
     await drain($.turn.step(stepAt(k, "claude-opus-5-5", "medium")));
   }
-  // Step 0 high (2.2), step 1 xhigh, then the score that is no number (isAnswer fails the whole batch) runs the session effort.
+  // Step 0 high (2.2), step 1 xhigh, then the score that is no number (isAnswer fails the whole request) runs the session effort.
   expect(seen.map((s) => s.effort)).toEqual(["high", "xhigh", "medium"]);
 });
 
@@ -2187,7 +2187,7 @@ for (
 
 // The task-end judgement is its own request with one transcript read, and only from the task-end fill.
 for (const [percent, ids] of [[85, ["end"]], [30, []]] as const) {
-  test(`Turn end at ${percent}% fill: ${ids.length} batch call(s), ${ids.length} transcript read(s)`, async ($, on) => {
+  test(`Turn end at ${percent}% fill: ${ids.length} request call(s), ${ids.length} transcript read(s)`, async ($, on) => {
     const { sent, calls, reads } = setup(on, { messages: [user("rename foo to bar")], jev: finished });
     followUps(on);
     compactStubs(on, percent);

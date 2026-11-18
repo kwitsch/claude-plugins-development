@@ -1,17 +1,13 @@
 // Kit tests for F21 of jev-api: the oversized-state handling (preflight bounds, the 400 oracle, the overflow modes, the
 // learned characters per token), run against the built plugin/hooks/register.mjs.
-import { createKit } from "claude-engine-vitest";
 import type { On } from "claude-engine-vitest";
 import { expect } from "vitest";
-
-const { test, mock } = createKit({ module: new URL("../plugin/hooks/register.mjs", import.meta.url), plugin: "jev-api" });
+import { call, mock, one, QUESTION, test, TOOL } from "./support/questions.js";
 
 type Reply = { value: { status: number; ok: boolean; headers: Record<string, string>; text: string } } | { deny: string };
 type Fetched = { url: string; body: { model: string; state: string; questions: Record<string, Record<string, unknown>> } };
-type Runner = Parameters<Parameters<typeof test>[2]>[0];
 type Result = { result?: string; deny?: string };
 
-const TOOL = (type: string) => `mcp__jev-api__${type}`;
 const JEV = { JEV_URL: "https://jev.example/v1/systemone", TYPESAFE_API_KEY: "sk-test-key-123456" };
 
 const httpReply = (status: number, text: string): Reply => ({ value: { status, ok: status < 300, headers: {}, text } });
@@ -61,35 +57,6 @@ function setup(on: On, opts: { env?: Record<string, string>; replies?: Reply[]; 
   return { fetched, specs, store, clock };
 }
 
-/** The state every default call asks about. */
-const STATE = "Hello there!";
-
-/** One valid question per type, as the request carries it. */
-const QUESTION: Record<string, Record<string, unknown>> = {
-  noul: { type: "noul", instructions: "Is this text about animals?" },
-  choice: { type: "choice", instructions: "What is this text?", criteria: { greeting: "says hello", question: "asks something" } },
-  score: { type: "score", instructions: "Rate the sentiment", criteria: ["negative", "neutral", "positive"] },
-};
-
-/**
- * The `request` call that asks one question of a type.
- *
- * @param type - The question type.
- * @param over - `instructions` and `criteria` replace the question's; every other field is the call's (`state`, `timeout`, `overflow`, or a whole `questions` array).
- * @returns The `tool.call` input.
- */
-const one = (type: string, over: Record<string, unknown> = {}) => {
-  const { instructions, criteria, ...input } = over;
-  const question = { ...QUESTION[type], ...("instructions" in over ? { instructions } : {}), ...("criteria" in over ? { criteria } : {}) };
-  return { tool: TOOL("request"), state: STATE, questions: [question], ...input };
-};
-
-// An HTTP error status is taken over by Haiku; these tests have no Haiku, so its failure text is cut off to compare the HTTP error alone.
-const call = async ($: Runner, type: string, input: Record<string, unknown> = {}) => {
-  const r = (await $.tool.call(one(type, input))) as Result;
-  return r.deny === undefined ? r : { ...r, deny: r.deny.replace(/; fallback: [\s\S]*$/, "") };
-};
-
 // --- Phase 2: the overflow input and option -------------------------------------------------------------------------
 
 test("the request input schema offers the overflow modes and does not require them", async ($, on) => {
@@ -118,7 +85,6 @@ test("a request accepts each valid overflow value and answers normally for a sma
   }
   expect(fetched).toHaveLength(3);
 });
-
 
 // --- Phase 3: what ask() learns and reports ----------------------------------------------------------------------------
 

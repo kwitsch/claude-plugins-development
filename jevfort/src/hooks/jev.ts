@@ -53,10 +53,10 @@ export const HAIKU_TIMEOUT_MS = 15_000;
 export const HAIKU_API_TIMEOUT_S = 14;
 /** Prefix of the jev-api plugin's tools. */
 export const JEV_TOOL_PREFIX = "mcp__jev-api__";
-/** jev-api's tool for several questions about one `state` in one request; its result is the answers in question order. */
-export const JEV_BATCH = JEV_TOOL_PREFIX + "request";
+/** jev-api's `request` tool: several questions about one `state` in one request; its result is the answers in question order. */
+export const JEV_REQUEST = JEV_TOOL_PREFIX + "request";
 /** The jev-api tools jevfort needs, by full name. */
-export const JEV_TOOLS = [JEV_BATCH];
+export const JEV_TOOLS = [JEV_REQUEST];
 
 /**
  * The needed jev-api tools missing from a tool listing.

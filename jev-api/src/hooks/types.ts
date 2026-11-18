@@ -1,5 +1,5 @@
 /**
- * The types of the engine interface `$` this plugin uses, of the System One questions and of the hook chain, plus the tool and overflow name lists.
+ * The types of the engine interface `$` this plugin uses, of the System One questions and of the hook chain, plus the tool name and the overflow name list.
  *
  * @packageDocumentation
  */
@@ -10,11 +10,8 @@ export const TYPES = ["noul", "choice", "score"] as const;
 /** One of {@link TYPES}. */
 export type QuestionType = (typeof TYPES)[number];
 
-/** The tool names: `request` asks one or more questions about one text in one System One request. */
-export const TOOLS = ["request"] as const;
-
-/** One of {@link TOOLS}. */
-export type ToolName = (typeof TOOLS)[number];
+/** The tool name: `request` asks one or more questions about one text in one System One request. */
+export const TOOL = "request";
 
 /** One System One question as sent in the request body. */
 export type Question =
@@ -56,7 +53,7 @@ export type FetchResponse = {
 /** A tool registration passed to `$.tool.register`. */
 export type ToolSpec = {
   /** The bare tool name (the engine prefixes it with `mcp__jev-api__`). */
-  name: ToolName;
+  name: typeof TOOL;
   /** What the model reads to decide when to use the tool. */
   description: string;
   /** JSON Schema of the tool input. */

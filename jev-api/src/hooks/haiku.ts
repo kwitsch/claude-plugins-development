@@ -4,7 +4,7 @@
  * @packageDocumentation
  */
 
-import type { Engine, Question, ToolName, ToolResult } from "./types.js";
+import type { Engine, Question, ToolResult } from "./types.js";
 import { fail, isRecord, json, message, questionId, questionsBody } from "./util.js";
 
 /** The model that stands in for Jev when none of the System One variables is set. */
@@ -170,14 +170,13 @@ export function haikuTokens(questions: Question[]): number {
  * reply must be JSON in the System One response format; anything else is an error, never a made-up answer.
  *
  * @param $ - The engine.
- * @param tool - The tool called.
  * @param state - The text the questions are about.
  * @param questions - The questions, in input order.
  * @param timeoutMs - How long Haiku may take.
  * @param signal - Aborts when the call is abandoned.
  * @returns The answers as {@link ask} returns them, or an error answer.
  */
-export async function askHaiku($: Engine, tool: ToolName, state: string, questions: Question[], timeoutMs: number, signal: AbortSignal): Promise<ToolResult> {
+export async function askHaiku($: Engine, state: string, questions: Question[], timeoutMs: number, signal: AbortSignal): Promise<ToolResult> {
   const ids = questions.map((_, i) => questionId(i));
   const prompt = `Text:\n${state}\n\nQuestions (JSON):\n${JSON.stringify(questionsBody(questions))}`;
   let onAbort: (() => void) | undefined;
@@ -192,23 +191,23 @@ export async function askHaiku($: Engine, tool: ToolName, state: string, questio
       }
     });
     const r = await Promise.race([reply, aborted]);
-    if (r === "aborted") return fail(tool, "the call was abandoned");
+    if (r === "aborted") return fail("the call was abandoned");
     if (!r.isAnswered) {
-      if (r.reason !== "aborted") return fail(tool, `fallback: ${r.reason}`);
+      if (r.reason !== "aborted") return fail(`fallback: ${r.reason}`);
       // `aborted` is also how the engine reports its own timeout; the signal tells the two apart (whichever abort path won the race)
-      return fail(tool, signal.aborted ? "the call was abandoned" : `fallback: timeout after ${timeoutMs}ms`);
+      return fail(signal.aborted ? "the call was abandoned" : `fallback: timeout after ${timeoutMs}ms`);
     }
     const body = json(r.text.trim().replace(/^```(?:json)?\s*/i, "").replace(/```$/, ""));
     const answers = isRecord(body) ? body["answers"] : undefined;
     const list: Record<string, unknown>[] = [];
     for (const [i, q] of questions.entries()) {
       const answer = checkAnswer(q, isRecord(answers) ? answers[ids[i]] : undefined);
-      if (answer === undefined) return fail(tool, `fallback: Haiku's reply had no valid ${q.type} answer for questions[${i}]`);
+      if (answer === undefined) return fail(`fallback: Haiku's reply had no valid ${q.type} answer for questions[${i}]`);
       list.push(answer);
     }
     return { result: JSON.stringify(list) };
   } catch (err) {
-    return fail(tool, `fallback: ${message(err)}`);
+    return fail(`fallback: ${message(err)}`);
   } finally {
     if (onAbort) signal.removeEventListener("abort", onAbort); // a signal shared by many calls must not collect listeners
   }

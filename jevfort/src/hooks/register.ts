@@ -21,7 +21,7 @@ import type { Candidate } from "./candidates.js";
 import { COMPACT_MAX_TOKENS, COMPACT_MODEL, COMPACT_SYSTEM, compactInstructions, compactItems, haikuTranscript, RELEVANCE } from "./compact.js";
 import { clip, splitTurn, summarize, toolCalls } from "./context.js";
 import type { SessionMessage, ToolUse, TurnContext } from "./context.js";
-import { choice, COMPACT_API_TIMEOUT_S, COMPACT_TIMEOUT_MS, HAIKU_API_TIMEOUT_S, HAIKU_TIMEOUT_MS, isAnswer, JEV_API_TIMEOUT_S, JEV_BATCH, JEV_TOOL_PREFIX, JEV_TOOLS, MAX_CHOICE_OPTIONS, MAX_ERROR, MAX_PAUSE_MS, missingJevTools, noul, PAUSE_MS, score, TIMEOUT_MS } from "./jev.js";
+import { choice, COMPACT_API_TIMEOUT_S, COMPACT_TIMEOUT_MS, HAIKU_API_TIMEOUT_S, HAIKU_TIMEOUT_MS, isAnswer, JEV_API_TIMEOUT_S, JEV_REQUEST, JEV_TOOL_PREFIX, JEV_TOOLS, MAX_CHOICE_OPTIONS, MAX_ERROR, MAX_PAUSE_MS, missingJevTools, noul, PAUSE_MS, score, TIMEOUT_MS } from "./jev.js";
 import type { Answer, JevResult, Question } from "./jev.js";
 import { bounds, EFFORT_ORDER, effortQuestion, estimateEffort, EVERY_TURN_MODELS, inBandRange, inScratchpad, isEffort, mechanicalQuestion, modelFamily, nextActionQuestion, pickCandidate, singleActionQuestion, STEP_EFFORT_CUTS, stepEffortQuestion, taskEndQuestion } from "./policy.js";
 import type { Effort, EstimateBounds, EstimateModel } from "./policy.js";
@@ -261,7 +261,7 @@ async function askJev($: Engine, state: unknown, questions: Record<string, Quest
   const apiTimeoutS = haiku ? HAIKU_API_TIMEOUT_S : slow ? COMPACT_API_TIMEOUT_S : JEV_API_TIMEOUT_S;
   const entries = Object.entries(questions);
   const call = (async (): Promise<Record<string, Answer>> => {
-    const r = await $.tool.call({ tool: JEV_BATCH, state: JSON.stringify(state), questions: entries.map(([, q]) => q), timeout: apiTimeoutS });
+    const r = await $.tool.call({ tool: JEV_REQUEST, state: JSON.stringify(state), questions: entries.map(([, q]) => q), timeout: apiTimeoutS });
     // jev-api's deny text already starts with `request:`.
     if (r.deny !== undefined) throw new Error(asText(r.deny));
     // Core's error result (no hook answered) has no `request:` prefix; a structured one is serialized, not printed as `[object Object]`.
@@ -1264,7 +1264,7 @@ export const register = (on: On, options: Options): void => {
     }
     if (bypass && e.index === 0 && questions.next_action && !e.agentId) questions.single_action = singleActionQuestion;
 
-    // The step-effort question rides in the same batch as the step's other questions: one Jev round trip per step.
+    // The step-effort question rides in the same request as the step's other questions: one Jev round trip per step.
     if (stepModel) questions.step_effort = stepEffortQuestion;
     if (!Object.keys(questions).length) return yield* next(stepRouted());
 

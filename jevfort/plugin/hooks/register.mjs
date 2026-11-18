@@ -1,4 +1,4 @@
-import { AUTH_TOOL, BUILTIN_COMMANDS, CACHE_TTL, COMPACT_API_TIMEOUT_S, COMPACT_MAX_TOKENS, COMPACT_MODEL, COMPACT_SYSTEM, COMPACT_TIMEOUT_MS, EFFORT_ORDER, EVERY_TURN_MODELS, GENERAL, HAIKU_API_TIMEOUT_S, HAIKU_TIMEOUT_MS, JEV_API_TIMEOUT_S, JEV_BATCH, JEV_TOOLS, JEV_TOOL_PREFIX, MAX_CHOICE_OPTIONS, MAX_ERROR, MAX_PAUSE_MS, MAX_READS, MAX_STATS, PAUSE_MS, RELEVANCE, SAFE_MAKE, SKILL_BLOCKLIST_KEY, STEP_EFFORT_CUTS, SUMMARY_MODEL, SWITCH_AT, SYSTEM, TIMEOUT_MS, absolute, bash, bounds, cacheColor, cacheLabel, choice, clip, clipScript, compactInstructions, compactItems, dedupeSkills, effortQuestion, estimateEffort, haikuTranscript, inBandRange, inScratchpad, isAnswer, isEffort, isSafeScript, isSafeToOffer, mechanicalQuestion, mentionedPaths, minutesLeft, missingJevTools, modelFamily, nextActionQuestion, nextTtl, noul, pickCandidate, quotedTerms, relevant, sameCall, score, singleActionQuestion, splitTurn, stepEffortQuestion, summarize, taskEndQuestion, toolCalls } from "./lib.mjs";
+import { AUTH_TOOL, BUILTIN_COMMANDS, CACHE_TTL, COMPACT_API_TIMEOUT_S, COMPACT_MAX_TOKENS, COMPACT_MODEL, COMPACT_SYSTEM, COMPACT_TIMEOUT_MS, EFFORT_ORDER, EVERY_TURN_MODELS, GENERAL, HAIKU_API_TIMEOUT_S, HAIKU_TIMEOUT_MS, JEV_API_TIMEOUT_S, JEV_REQUEST, JEV_TOOLS, JEV_TOOL_PREFIX, MAX_CHOICE_OPTIONS, MAX_ERROR, MAX_PAUSE_MS, MAX_READS, MAX_STATS, PAUSE_MS, RELEVANCE, SAFE_MAKE, SKILL_BLOCKLIST_KEY, STEP_EFFORT_CUTS, SUMMARY_MODEL, SWITCH_AT, SYSTEM, TIMEOUT_MS, absolute, bash, bounds, cacheColor, cacheLabel, choice, clip, clipScript, compactInstructions, compactItems, dedupeSkills, effortQuestion, estimateEffort, haikuTranscript, inBandRange, inScratchpad, isAnswer, isEffort, isSafeScript, isSafeToOffer, mechanicalQuestion, mentionedPaths, minutesLeft, missingJevTools, modelFamily, nextActionQuestion, nextTtl, noul, pickCandidate, quotedTerms, relevant, sameCall, score, singleActionQuestion, splitTurn, stepEffortQuestion, summarize, taskEndQuestion, toolCalls } from "./lib.mjs";
 const newScan = () => ({
 	steps: 0,
 	calls: new Set(),
@@ -62,7 +62,7 @@ async function askJev($, state, questions, slow = false) {
 	const entries = Object.entries(questions);
 	const call = (async () => {
 		const r = await $.tool.call({
-			tool: JEV_BATCH,
+			tool: JEV_REQUEST,
 			state: JSON.stringify(state),
 			questions: entries.map(([, q]) => q),
 			timeout: apiTimeoutS

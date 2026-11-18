@@ -1,14 +1,11 @@
 // Kit tests for the built plugin/hooks/register.mjs of jev-api: the System One tool request (noul, choice and score questions).
-import { createKit } from "claude-engine-vitest";
 import type { On } from "claude-engine-vitest";
 import { describe, expect, it, vi } from "vitest";
-
-const { test, mock } = createKit({ module: new URL("../plugin/hooks/register.mjs", import.meta.url), plugin: "jev-api" });
+import { call, mock, one, QUESTION, test, TOOL } from "./support/questions.js";
+import type { Runner } from "./support/questions.js";
 
 type Reply = { value: { status: number; ok: boolean; headers: Record<string, string>; text: string } } | { deny: string } | Promise<never>;
 type Fetched = { url: string; method: string; headers: Record<string, string>; body: { model: string; state: string; questions: Record<string, Record<string, unknown>> } };
-
-const TOOL = (type: string) => `mcp__jev-api__${type}`;
 
 // The API's answer object per type (shapes as the live server answers: score is the expected level, legend and probabilities are keyed by level index).
 const ANSWERS: Record<string, unknown> = {
@@ -60,38 +57,6 @@ test("session.start registers request without any env var", async ($, on) => {
   const q = (specs[0] as { inputSchema: { properties: { questions: { description: string } } } }).inputSchema.properties.questions.description;
   expect(q).toContain("timeout and overflow apply to the whole request");
 });
-
-/** The test's `$` (the kit does not export its type). */
-type Runner = Parameters<Parameters<typeof test>[2]>[0];
-
-/** The state every default call asks about. */
-const STATE = "Hello there!";
-
-/** One valid question per type, as the request carries it. */
-const QUESTION: Record<string, Record<string, unknown>> = {
-  noul: { type: "noul", instructions: "Is this text a greeting?", criteria: { true: "a greeting", false: "anything else" } },
-  choice: { type: "choice", instructions: "What is this text?", criteria: { greeting: "says hello", question: "asks something" } },
-  score: { type: "score", instructions: "Rate the sentiment", criteria: ["negative", "neutral", "positive"] },
-};
-
-/**
- * The `request` call that asks one question of a type.
- *
- * @param type - The question type.
- * @param over - `instructions` and `criteria` replace the question's (also when `undefined`); every other field is the call's (`state`, `timeout`, `overflow`, or a whole `questions` array).
- * @returns The `tool.call` input.
- */
-const one = (type: string, over: Record<string, unknown> = {}) => {
-  const { instructions, criteria, ...input } = over;
-  const question = { ...QUESTION[type], ...("instructions" in over ? { instructions } : {}), ...("criteria" in over ? { criteria } : {}) };
-  return { tool: TOOL("request"), state: STATE, questions: [question], ...input };
-};
-
-// An HTTP error status is taken over by Haiku; most tests have no Haiku, so its failure text is cut off to compare the HTTP error alone.
-const call = async ($: Runner, type: string, input: Record<string, unknown> = {}) => {
-  const r = (await $.tool.call(one(type, input))) as { result?: string; deny?: string };
-  return r.deny === undefined ? r : { ...r, deny: r.deny.replace(/; fallback: [\s\S]*$/, "") };
-};
 
 // Errors are a `deny`: the model reads it as an error result (core drops a hook's own isError).
 // Without any env var (blank counts as unset) Haiku, through `$.model.complete`, answers instead of System One.
@@ -646,12 +611,12 @@ for (const [label, state, timeout] of [["a refused full state", "word ".repeat(2
 // F02: a tool whose registration failed is registered again by the next hook, the others are not registered twice.
 it("a failed registration is retried by the next call, only for the tools still missing", async () => {
   const tries: string[] = [];
-  let failBatch = true;
+  let failRequest = true;
   const { run } = await direct({
     tool: {
       register: async (spec: { name: string }) => {
         tries.push(spec.name);
-        if (spec.name === "request" && failBatch) throw new Error("boom");
+        if (spec.name === "request" && failRequest) throw new Error("boom");
         return { tool: TOOL(spec.name) };
       },
     },
@@ -659,7 +624,7 @@ it("a failed registration is retried by the next call, only for the tools still 
   });
   await run("noul");
   expect(tries).toEqual(["request"]);
-  failBatch = false;
+  failRequest = false;
   await run("noul");
   expect(tries).toEqual(["request", "request"]);
   await run("noul");

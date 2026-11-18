@@ -6,7 +6,7 @@
 
 import { MAX_LEVELS, MAX_OPTIONS, MIN_LEVELS } from "./tools.js";
 import { OVERFLOWS, TYPES } from "./types.js";
-import type { Overflow, Question, QuestionType, ToolCall, ToolName } from "./types.js";
+import type { Overflow, Question, QuestionType, ToolCall } from "./types.js";
 import { isOptionalString, isOverflow, isRecord, isText, isType } from "./util.js";
 
 /**
@@ -41,13 +41,13 @@ export function parseQuestion(type: QuestionType, instructions: unknown, criteri
 }
 
 /**
- * Validates the state and the `questions` array of the model-supplied `request` input.
+ * Validates the model-supplied tool input and builds the System One questions, plus the call's own overflow mode.
  *
- * @param tool - The tool called (`request`).
  * @param e - The `tool.call` event carrying the input fields.
- * @returns The state and questions, or the error message (no request is sent); a question's error names it, `questions[<i>]: ...`.
+ * @returns The state, the questions and the overflow mode the call named (undefined: the option decides), or the error
+ * message (no request is sent); a question's error names it, `questions[<i>]: ...`.
  */
-export function parseQuestions(tool: ToolName, e: ToolCall): { state: string; questions: Question[] } | string {
+export function parseInput(e: ToolCall): { state: string; questions: Question[]; overflow?: Overflow } | string {
   const { state } = e;
   if (!isText(state)) return "state must be a non-empty string";
   const list = e["questions"];
@@ -59,21 +59,7 @@ export function parseQuestions(tool: ToolName, e: ToolCall): { state: string; qu
     if (typeof question === "string") return `questions[${i}]: ${question}`;
     questions.push(question);
   }
-  return { state, questions };
-}
-
-/**
- * Validates the model-supplied tool input and builds the System One questions, plus the call's own overflow mode.
- *
- * @param tool - The tool called.
- * @param e - The `tool.call` event carrying the input fields.
- * @returns The state, the questions and the overflow mode the call named (undefined: the option decides), or the error
- * message (no request is sent).
- */
-export function parseInput(tool: ToolName, e: ToolCall): { state: string; questions: Question[]; overflow?: Overflow } | string {
-  const parsed = parseQuestions(tool, e);
-  if (typeof parsed === "string") return parsed;
   const overflow = e["overflow"];
-  if (overflow === undefined) return parsed;
-  return isOverflow(overflow) ? { ...parsed, overflow } : `overflow must be one of ${OVERFLOWS.join(", ")}`;
+  if (overflow === undefined) return { state, questions };
+  return isOverflow(overflow) ? { state, questions, overflow } : `overflow must be one of ${OVERFLOWS.join(", ")}`;
 }
