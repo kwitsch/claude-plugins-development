@@ -27,3 +27,20 @@ With `stepEffort: true` (default `false`) every Opus/Sonnet step `k > 0` that is
 - More debug-log lines (one per gated step) and more Jev tokens (one score question with up to 8 step summaries per gated step).
 - A mid-turn model switch Opus -> Haiku fails the gate; the last step effort holds for the rest of the turn. Not a Claude Code flow; accepted.
 - An abandoned dispatch (`next.signal`) is not checked, as at step 0; `turn` is per-turn state that dies with the turn.
+
+## Calibration of the question (0.13.1)
+
+Live smoke of 0.13.0 (`claude -p`, Sonnet 5.5, session medium, 4 runs, 2026-11-18): a delta that holds a task's requirements, a failing test or a design question scored 0.49-1.04, under the `EFFORT_CUTS` low cut of 1.05, so every later step ran at `low` although step 0 was `mechanical` or `medium`.
+
+Measured with `mcp__jev-api__score` and fixed deltas (one sample each; the cuts are unchanged, only the question text differs):
+
+| Delta | Old text | New text |
+| :-- | :-- | :-- |
+| Read of a TODO with 4 requirements | 0.91 | 1.15 |
+| Failing test output (deep-equal diff) | 0.98 | 1.16 |
+| The model's own text weighing an LRU/TTL conflict | 1.58 | 1.81 |
+| `node test.mjs` prints `all pass` | 0.09 | 0.07 |
+| Read of a one-line file | 0.33 | 0.60 |
+| Edit that renames a function | 0.89 | 0.78 |
+
+The new text asks for the difficulty of the work that follows the delta, not of the last tool call. Hard deltas now clear 1.05, trivial ones stay under it; the margin is small (1.15 against 1.05) and measured once, so the cuts for steps may still need their own calibration (`tests/fixtures/effort-scores.json` holds step 0 only). Open: no live run after the change, and no case with a delta between the two groups (a small edit with a clear instruction).

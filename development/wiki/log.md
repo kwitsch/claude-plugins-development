@@ -113,3 +113,9 @@ Source: migration PR (user decisions of 2026-11-17), the 27 KB `src/universal-fo
 Source: the `stepEffort` change (user decisions: no call without Jev, delta since the last effort answer, session-effort fallback).
 
 - **Page:** `development/wiki/plugins/jevfort/design/step-effort.md`: why only Opus/Sonnet, the fallback order, why the question is asked only right before a model call and the delta runs from Jev's last answer, latency, rejected alternatives. Constraint in `jevfort/.claude/rules/effort-routing.md`, pointers in `jevfort/CLAUDE.md` and `jevfort/.claude/rules/register-hooks.md`.
+
+## [2026-11-18] ingest | jevfort 0.13.1: step question calibration
+
+Source: live smoke of 0.13.0 and fixed-delta scoring through jev-api.
+
+- **Page:** `development/wiki/plugins/jevfort/design/step-effort.md`, section "Calibration of the question (0.13.1)": hard deltas scored under the low cut with the 0.13.0 text, above it with the new text.

@@ -237,10 +237,14 @@ export const effortQuestion: Question = {
   criteria: EFFORT_LEVELS,
 };
 
-/** How much reasoning effort the next model call needs, judged only by the steps in `delta` since Jev's last effort answer. */
+/**
+ * How much reasoning effort the next model call needs, judged only by the steps in `delta` since Jev's last effort answer.
+ * The text asks for the difficulty of what follows the delta: without it a tool result that states requirements or a
+ * failing test scored under the {@link EFFORT_CUTS} low cut like a trivial read.
+ */
 export const stepEffortQuestion: Question = {
   type: "score",
-  instructions: "An AI coding model works on the user request in `request` and ran its last step at reasoning effort `effort`. Judge only the new steps in `delta` (its latest text, tool calls and tool results): how much reasoning effort does a mid-tier AI coding model need for its next step?",
+  instructions: "An AI coding model works on the user request in `request` and ran its last step at reasoning effort `effort`. Judge only the new steps in `delta` (its latest text, tool calls and tool results). Rate the difficulty of the work the model must do NEXT because of them, not how simple the last tool call was: a result that states requirements, a failing test or an open design question means real reasoning follows; a passing command, a trivial read or a mechanical edit means little. How much reasoning effort does a mid-tier AI coding model need for its next step?",
   criteria: EFFORT_LEVELS,
 };
 
