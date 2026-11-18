@@ -68,17 +68,17 @@ async function askJev($, state, questions, slow = false) {
 			timeout: apiTimeoutS
 		});
 		if (r.deny !== undefined) throw new Error(asText(r.deny));
-		if (r.isError === true || typeof r.result !== "string") throw new Error(`batch: ${r.result === undefined ? "no result" : typeof r.result === "string" ? r.result : JSON.stringify(r.result)}`);
+		if (r.isError === true || typeof r.result !== "string") throw new Error(`request: ${r.result === undefined ? "no result" : typeof r.result === "string" ? r.result : JSON.stringify(r.result)}`);
 		let list;
 		try {
 			list = JSON.parse(r.result);
 		} catch {
-			throw new Error("batch: result is not JSON");
+			throw new Error("request: result is not JSON");
 		}
-		if (!Array.isArray(list) || list.length !== entries.length) throw new Error(`batch: expected ${entries.length} answers`);
+		if (!Array.isArray(list) || list.length !== entries.length) throw new Error(`request: expected ${entries.length} answers`);
 		return Object.fromEntries(entries.map(([id, q], i) => {
 			const answer = list[i];
-			if (!isAnswer(answer, q.type)) throw new Error(`batch: no valid ${q.type} answer for questions[${i}]`);
+			if (!isAnswer(answer, q.type)) throw new Error(`request: no valid ${q.type} answer for questions[${i}]`);
 			return [id, answer];
 		}));
 	})();

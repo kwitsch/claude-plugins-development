@@ -236,7 +236,7 @@ function pauseAfterTimeout(startedAt: number, budgetMs: number, error: string): 
 }
 
 /**
- * Asks Jev through the jev-api plugin's `batch` tool; never throws. All questions go out in one `$.tool.call` (one
+ * Asks Jev through the jev-api plugin's `request` tool; never throws. All questions go out in one `$.tool.call` (one
  * System One request) inside the calling hook's frame, raced against its budget (`TIMEOUT_MS`, `COMPACT_TIMEOUT_MS` for the compaction ranking, `HAIKU_TIMEOUT_MS` while Haiku answers). All or nothing: a failed call, a
  * timeout or a wrong answer is `{ ok: false }`, so callers fall back to Claude Code's own behaviour. A call still
  * running when the budget ends is ignored.
@@ -263,21 +263,21 @@ async function askJev($: Engine, state: unknown, questions: Record<string, Quest
   const entries = Object.entries(questions);
   const call = (async (): Promise<Record<string, Answer>> => {
     const r = await $.tool.call({ tool: JEV_BATCH, state: JSON.stringify(state), questions: entries.map(([, q]) => q), timeout: apiTimeoutS });
-    // jev-api's deny text already starts with `batch:`.
+    // jev-api's deny text already starts with `request:`.
     if (r.deny !== undefined) throw new Error(asText(r.deny));
-    // Core's error result (no hook answered) has no `batch:` prefix; a structured one is serialized, not printed as `[object Object]`.
-    if (r.isError === true || typeof r.result !== "string") throw new Error(`batch: ${r.result === undefined ? "no result" : typeof r.result === "string" ? r.result : JSON.stringify(r.result)}`);
+    // Core's error result (no hook answered) has no `request:` prefix; a structured one is serialized, not printed as `[object Object]`.
+    if (r.isError === true || typeof r.result !== "string") throw new Error(`request: ${r.result === undefined ? "no result" : typeof r.result === "string" ? r.result : JSON.stringify(r.result)}`);
     let list: unknown;
     try {
       list = JSON.parse(r.result);
     } catch {
-      throw new Error("batch: result is not JSON");
+      throw new Error("request: result is not JSON");
     }
-    if (!Array.isArray(list) || list.length !== entries.length) throw new Error(`batch: expected ${entries.length} answers`);
+    if (!Array.isArray(list) || list.length !== entries.length) throw new Error(`request: expected ${entries.length} answers`);
     // The answers come in question order.
     return Object.fromEntries(entries.map(([id, q], i) => {
       const answer: unknown = list[i];
-      if (!isAnswer(answer, q.type)) throw new Error(`batch: no valid ${q.type} answer for questions[${i}]`);
+      if (!isAnswer(answer, q.type)) throw new Error(`request: no valid ${q.type} answer for questions[${i}]`);
       return [id, answer];
     }));
   })();
@@ -1108,7 +1108,7 @@ export const register = (on: On, options: Options): void => {
       return next(e);
     }
     await contextCompact($, e, true, taskCompactPercent, forceCompactPercent).catch(() => undefined);
-    // The compaction check above may have read the env and, through the batch call's own `tool.call` guard, listed the
+    // The compaction check above may have read the env and, through the request call's own `tool.call` guard, listed the
     // tools again: drop the turn's reads again so the next turn reads the settings `env` and the tool listing afresh.
     if (!turnRunning) dropTurnReads();
     return next(e);
