@@ -94,23 +94,30 @@ export const EVERY_TURN_MODELS: readonly EstimateModel[] = ["sonnet", "opus"];
 export const MECHANICAL_FROM = 0.95;
 /** Score cut points between low|medium|high|xhigh|max, measured on 120 labelled prompts (2026-11-13, d1-3b). The last one is provisional. */
 export const EFFORT_CUTS = [1.05, 1.9, 2.5, 3.1] as const;
-/** The score ends of the {@link effortLevel} segments: 0, the cut points, 4. */
-const CUT_X: readonly number[] = [0, ...EFFORT_CUTS, 4];
-/** The level-scale ends of the segments: 0, then each cut on the middle of a level (0.5, 1.5, ...), then 4. */
-const CUT_Y: readonly number[] = [0, ...EFFORT_CUTS.map((_, i) => i + 0.5), 4];
+/**
+ * Score cut points of the step-effort question (`stepEffortQuestion`), which scores a delta of steps and not a
+ * request: it lands lower than the request question, so the step-0 cuts put 50% of 160 scores on the wrong level. Found
+ * with `scripts/step-calibrate.mts` on 32 hand-labelled deltas (5 runs each, 2026-11-18): 81% on the right level. The last
+ * one (xhigh|max) is provisional, the corpus has no max delta.
+ */
+export const STEP_EFFORT_CUTS = [0.45, 1.2, 1.95, 3.1] as const;
 
 /**
  * Maps Jev's 0–4 effort score onto the level scale piecewise linearly, so that `Math.round` of the result gives the
- * calibrated level: the {@link EFFORT_CUTS} land on 0.5 / 1.5 / 2.5 / 3.5. There is no model bias: the level is the same for every model.
+ * calibrated level: the cuts land on 0.5 / 1.5 / 2.5 / 3.5. There is no model bias: the level is the same for every model.
  *
  * @param score - Jev's effort score; clamped to 0..4.
+ * @param cuts - The score cut points of the question that gave the score; the request question's by default.
  * @returns The position on the level scale, 0..4.
  */
-export function effortLevel(score: number): number {
+export function effortLevel(score: number, cuts: readonly number[] = EFFORT_CUTS): number {
+  const x = [0, ...cuts, 4];
+  // The level-scale ends of the segments: 0, then each cut on the middle of a level (0.5, 1.5, ...), then 4.
+  const y = [0, ...cuts.map((_, i) => i + 0.5), 4];
   const s = Math.min(Math.max(score, 0), 4);
   // The segment's upper end; s <= 4 always finds one, and a score of 0 uses the first segment.
-  const i = Math.max(1, CUT_X.findIndex((x) => s <= x));
-  return CUT_Y[i - 1] + ((s - CUT_X[i - 1]) / (CUT_X[i] - CUT_X[i - 1])) * (CUT_Y[i] - CUT_Y[i - 1]);
+  const i = Math.max(1, x.findIndex((v) => s <= v));
+  return y[i - 1] + ((s - x[i - 1]) / (x[i] - x[i - 1])) * (y[i] - y[i - 1]);
 }
 /** The tool's registered name; the model sees it as {@link ESTIMATE_TOOL}. */
 export const ESTIMATE_NAME = "estimate_effort";
@@ -211,12 +218,13 @@ export function parseEstimateInput(raw: Record<string, unknown>): EstimateInput 
  * @param effort - Jev's effort score answer, `undefined` when missing or Jev was unreachable.
  * @param mechanical - Jev's probability that the prompt is purely mechanical, `undefined` when missing.
  * @param b - The default and the bounds (the model is not used); the bounds must be valid ({@link bounds}).
+ * @param cuts - The score cut points of the question that gave the score; the request question's by default.
  * @returns The effort and its source.
  */
-export function estimateEffort(effort: ScoreAnswer | undefined, mechanical: number | undefined, b: EstimateBounds): Estimate {
+export function estimateEffort(effort: ScoreAnswer | undefined, mechanical: number | undefined, b: EstimateBounds, cuts: readonly number[] = EFFORT_CUTS): Estimate {
   if (mechanical !== undefined && mechanical >= MECHANICAL_FROM) return { effort: b.minEffort, source: "mechanical" };
   if (!effort || !Number.isFinite(effort.score)) return { effort: b.defaultEffort, source: "fallback" };
-  const i = Math.round(effortLevel(effort.score));
+  const i = Math.round(effortLevel(effort.score, cuts));
   const clamped = Math.min(Math.max(i, EFFORT_ORDER.indexOf(b.minEffort)), EFFORT_ORDER.indexOf(b.maxEffort));
   return { effort: EFFORT_ORDER[clamped], source: "jev" };
 }

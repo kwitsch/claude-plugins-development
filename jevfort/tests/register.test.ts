@@ -1422,25 +1422,37 @@ for (const model of ["claude-opus-5-5", "claude-sonnet-5-5"]) {
   });
 }
 
-test("stepEffort: each delta starts after Jev's last effort answer, so a failed step's rows stay in the next delta", { options: { stepEffort: true } }, async ($, on) => {
+test("stepEffort: each delta starts after Jev's last effort answer", { options: { stepEffort: true } }, async ($, on) => {
   const messages: Msg[] = [user("what does this project do?")];
-  const { sent } = setup(on, { messages, jev: inOrder({ effort: scored(2.2) }, { step_effort: scored(0.2) }, { step_effort: scored(0.2) }, 503, { step_effort: scored(0.2) }) });
+  const { sent } = setup(on, { messages, jev: inOrder({ effort: scored(2.2) }, { step_effort: scored(0.2) }, { step_effort: scored(0.2) }, { step_effort: scored(0.2) }) });
   claudeBeneath(on, []);
   await drain($.turn.step(stepAt(0)));
   const deltas: unknown[] = [];
-  for (const [k, text] of [[1, "one"], [2, "two"], [3, "three"], [4, "four"]] as const) {
+  for (const [k, text] of [[1, "one"], [2, "two"], [3, "three"]] as const) {
     messages.push(assistantSays(text));
     const before = sent.length;
     await drain($.turn.step(stepAt(k)));
     expect(ids(sent.slice(before))).toEqual(["step_effort"]);
     deltas.push(stateOf(sent, before).delta);
   }
-  expect(deltas).toEqual([
-    [{ assistant: "one" }],
-    [{ assistant: "two" }],
-    [{ assistant: "three" }],
-    [{ assistant: "three" }, { assistant: "four" }],
-  ]);
+  expect(deltas).toEqual([[{ assistant: "one" }], [{ assistant: "two" }], [{ assistant: "three" }]]);
+});
+
+test("stepEffort: a failed Jev request turns the scoring off for the rest of the turn, the steps run at the session effort", { options: { stepEffort: true } }, async ($, on) => {
+  const seen: { effort?: string }[] = [];
+  const messages: Msg[] = [user("what does this project do?")];
+  const { sent } = setup(on, { messages, jev: inOrder({ effort: scored(2.2) }, { step_effort: scored(0.2) }, 503) });
+  claudeBeneath(on, seen);
+  const asked: string[][] = [];
+  for (const k of [0, 1, 2, 3, 4]) {
+    if (k) messages.push(assistantSays(`step ${k}`));
+    const before = sent.length;
+    await drain($.turn.step(stepAt(k, "claude-opus-5-5", "medium")));
+    asked.push(ids(sent.slice(before)));
+  }
+  // Step 0 high (2.2), step 1 low, step 2 fails: from there on nothing is asked and the session effort (medium) runs.
+  expect(asked).toEqual([["effort", "mechanical"], ["step_effort"], ["step_effort"], [], []]);
+  expect(seen.map((s) => s.effort)).toEqual(["high", "low", "medium", "medium", "medium"]);
 });
 
 test("stepEffort rides the take batch at a step Jev takes (answer unused), and the next model step's delta holds the taken call", { options: { stepEffort: true, takeOnlyForBypass: false } }, async ($, on) => {
@@ -1503,19 +1515,34 @@ test("stepEffort asks nothing at a step the whole-turn bypass answers", { option
   expect(seen).toHaveLength(0);
 });
 
-test("stepEffort: an unusable step estimate runs the step at the turn's step-0 effort", { options: { stepEffort: true } }, async ($, on) => {
+test("stepEffort: a step score that is no number fails the request like an outage: the session effort runs", { options: { stepEffort: true } }, async ($, on) => {
   const seen: { effort?: string }[] = [];
   const messages: Msg[] = [user("what does this project do?")];
   const badScore = { type: "score", score: "x", probabilities: {}, confidence: 0.9 };
-  setup(on, { messages, jev: inOrder({ effort: scored(2.2) }, { step_effort: scored(2.9) }, 503, { step_effort: badScore }) });
+  setup(on, { messages, jev: inOrder({ effort: scored(2.2) }, { step_effort: scored(2.9) }, { step_effort: badScore }) });
   claudeBeneath(on, seen);
-  for (const k of [0, 1, 2, 3]) {
+  for (const k of [0, 1, 2]) {
     if (k) messages.push(assistantSays(`step ${k}`));
     await drain($.turn.step(stepAt(k, "claude-opus-5-5", "medium")));
   }
-  // Step 0 high (2.2), step 1 xhigh, then the failure and the score that is no number both fall back to high, not xhigh.
-  expect(seen.map((s) => s.effort)).toEqual(["high", "xhigh", "high", "high"]);
+  // Step 0 high (2.2), step 1 xhigh, then the score that is no number (isAnswer fails the whole batch) runs the session effort.
+  expect(seen.map((s) => s.effort)).toEqual(["high", "xhigh", "medium"]);
 });
+
+// The step cuts (STEP_EFFORT_CUTS, calibrated with scripts/step-calibrate.mts) sit below the request question's: a delta
+// score of 0.5 is medium, 1.3 high, 2.0 xhigh, and 0.4 stays low; the edges are 0.45, 1.2 and 1.95.
+for (const [score, effort] of [[0.4, "low"], [0.5, "medium"], [1.1, "medium"], [1.3, "high"], [1.9, "high"], [2.0, "xhigh"], [2.9, "xhigh"]] as const) {
+  test(`stepEffort: a step score of ${score} runs at ${effort}`, { options: { stepEffort: true } }, async ($, on) => {
+    const seen: { effort?: string }[] = [];
+    const messages: Msg[] = [user("what does this project do?")];
+    setup(on, { messages, jev: inOrder({ effort: scored(0.1) }, { step_effort: scored(score) }) });
+    claudeBeneath(on, seen);
+    await drain($.turn.step(stepAt(0, "claude-opus-5-5", "medium")));
+    messages.push(assistantSays("one"));
+    await drain($.turn.step(stepAt(1, "claude-opus-5-5", "medium")));
+    expect(seen[1].effort).toBe(effort);
+  });
+}
 
 test("stepEffort without a step-0 estimate falls back to the session effort", { options: { stepEffort: true } }, async ($, on) => {
   const seen: { effort?: string }[] = [];
@@ -1600,7 +1627,7 @@ test("stepEffort writes a step line to the debug log", { options: { stepEffort: 
   expect(logged).toEqual([
     "effort claude-opus-5-5: session high → xhigh · jev (score 2.90)",
     "effort claude-opus-5-5: session high → low · step 1 · jev (score 0.20)",
-    "effort claude-opus-5-5: session high → xhigh · step 2 · jev unavailable (batch: HTTP 503)",
+    "effort claude-opus-5-5: session high → high · step 2 · jev unavailable (batch: HTTP 503) · scoring off for this turn",
   ]);
 });
 

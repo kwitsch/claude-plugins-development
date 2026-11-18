@@ -119,3 +119,9 @@ Source: the `stepEffort` change (user decisions: no call without Jev, delta sinc
 Source: live smoke of 0.13.0 and fixed-delta scoring through jev-api.
 
 - **Page:** `development/wiki/plugins/jevfort/design/step-effort.md`, section "Calibration of the question (0.13.1)": hard deltas scored under the low cut with the 0.13.0 text, above it with the new text.
+
+## [2026-11-18] ingest | jevfort 0.13.1: step cuts and Jev outage
+
+Source: `scripts/step-calibrate.mts` run (32 deltas x 5) and a user decision.
+
+- **Page:** `development/wiki/plugins/jevfort/design/step-effort.md`: "Step cuts (0.13.1)" (calibration table, limits) and the fallback order (a failed Jev request turns the step scoring off for the turn, session effort).
