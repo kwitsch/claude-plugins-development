@@ -6,6 +6,7 @@ Working documents for agent sessions. Not shipped (`plugin/` is the installable 
 
 - [CLAUDE.md](../../../../jevfort/CLAUDE.md): the plugin's overview and rule list (loads with the plugin's files).
 - [TASKS.md](TASKS.md): task list; `tasks/` holds one document per task. Start here for open work.
+- [design/step-effort.md](design/step-effort.md): design: per-step effort (`stepEffort`): why only Opus/Sonnet, the fallback order, why only before a model call and why the delta runs from Jev's last answer, latency, rejected alternatives
 - [evaluations/EVALUATION-2026-11-14-f01.md](evaluations/EVALUATION-2026-11-14-f01.md): evaluation: jevfort evaluation 2026-11-14, F01 (plugin 0.11.0, jev-api 0.3.2)
 - [evaluations/EVALUATION-2026-11-14-f04.md](evaluations/EVALUATION-2026-11-14-f04.md): evaluation: jevfort evaluation 2026-11-14, F04 (plugin 0.11.0)
 - [evaluations/EVALUATION-2026-11-14-option-removal.md](evaluations/EVALUATION-2026-11-14-option-removal.md): evaluation: jevfort evaluation 2026-11-14 (3), after the option removal (plugin 0.12.0, jev-api 0.3.2)

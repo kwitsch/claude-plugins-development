@@ -41,6 +41,7 @@ Part rules (load with their files): `.claude/rules/register-hooks.md` (hooks, `$
   before loading, so a non-boolean value keeps the module from loading, live 2.1.325; the fallback only covers an
   absent value): `false` turns off the step-0 effort estimate and the band's effort row, not the cache countdown,
   `estimate_effort` or take-steps.
+  `stepEffort` (`=== true`, default off): per-step estimates, see `effort-routing.md`.
 - Effort band: a `ui.render` hook on `AbovePrompt` shows the session and the chosen effort and a `Jev auto: on/off`
   Button (details: `register-hooks.md`).
 - Output: nothing on the status line (no `$.ui.status`). The only output is one debug-log line per effort estimate,

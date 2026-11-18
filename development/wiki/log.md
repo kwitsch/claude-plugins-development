@@ -107,3 +107,9 @@ Source: migration PR (user decisions of 2026-11-17), the 27 KB `src/universal-fo
 - **Section:** `plugins/universal-format/` (index, eight design pages, `notes/migration.md` with the test counts and the live check), linked from `plugins/index.md`. The constraints are in `universal-format/CLAUDE.md` and `universal-format/.claude/rules/` (`hooks-and-server.md`, `vendor-build.md`, `skill-driver.md`, `tests.md`).
 - **Facts (live 2.1.326):** the hook payload `cwd` and the `${cwd}` placeholder of an `mcp_tool` hook are the worktree after `EnterWorktree`, without a `CwdChanged` event (`design/scope-and-base.md`); an `mcp_tool` `input` template substitutes text, an absent field becomes `""` and a boolean its string form (`design/hook-design.md`).
 - **Measured:** start and format times of the code-split bundle against the former single file (`design/vendor-build.md`).
+
+## [2026-11-18] ingest | jevfort 0.13.0: per-step effort (`stepEffort`)
+
+Source: the `stepEffort` change (user decisions: no call without Jev, delta since the last effort answer, session-effort fallback).
+
+- **Page:** `development/wiki/plugins/jevfort/design/step-effort.md`: why only Opus/Sonnet, the fallback order, why the question is asked only right before a model call and the delta runs from Jev's last answer, latency, rejected alternatives. Constraint in `jevfort/.claude/rules/effort-routing.md`, pointers in `jevfort/CLAUDE.md` and `jevfort/.claude/rules/register-hooks.md`.

@@ -23,6 +23,9 @@ paths:
 - `tests/effort-fixture.test.ts` pins the acceptance numbers (A1 to A5).
 - Opus/Sonnet sessions are estimated every turn; Haiku/Fable sessions only on each loop's first turn, whose estimate is
   then held while the session effort is unchanged. A model switch starts a new first turn.
+- With `stepEffort` (default off) Opus/Sonnet steps k > 0 add `stepEffortQuestion` to the step's Jev batch (delta since
+  Jev's last effort answer of the turn); fallback is the turn's step-0 effort, else the session effort; never on
+  Haiku/Fable; its answer is unused on a taken or bypassed step. [step effort](../../../development/wiki/plugins/jevfort/design/step-effort.md)
 - Standing user decisions (2026-11-08, PR #53; do not re-flag in reviews): the every-turn / first-turn split above; a
   first Haiku/Fable turn whose estimate failed is not retried (`firstTurns` is written before Jev is asked, later turns
   of that loop run at the session effort); the estimate is clamped to `minEffort`..`maxEffort` also when the session
