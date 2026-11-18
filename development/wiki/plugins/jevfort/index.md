@@ -21,7 +21,7 @@ See [how-to-work-a-task.md](../how-to-work-a-task.md).
 ## Task conventions
 
 - Read `jevfort/.claude/rules/register-hooks.md`: every `$` use lives in `src/hooks/register.ts`, storage calls must run in-frame. Code is in `src/hooks/*.ts`; kit tests are in `tests/register.test.ts` and `tests/phase3.test.ts`, pure ones in `tests/policy.test.ts` and `tests/candidates.test.ts`.
-- jev-api's `batch` name, input and answer shape stay as they are.
+- jev-api's `request` name, input and answer shape stay as they are.
 
 ## Conventions
 

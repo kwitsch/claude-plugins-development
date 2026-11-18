@@ -29,7 +29,7 @@ Proven (harness, built `plugin/mcp/server.mjs` spawned with `--expose-gc` and a 
 - Speed with the flag: 1.678 against 1.665 ms per small request (20k), 2.897 against 2.731 ms per 120 KB request (+6 %, against seconds of System One time for such a state).
 - `MALLOC_ARENA_MAX=2` changed nothing (129.8 MB after 4,000).
 - Without forced GC, the server driven through the mod stood at 277.7 MB after about 11,000 calls.
-- Estimated, not measured: how many requests a real session sends (jevfort asks through `batch`; the count per turn depends on its configuration), and the server's memory under Claude Code's own MCP client.
+- Estimated, not measured: how many requests a real session sends (jevfort asks through `request`; the count per turn depends on its configuration), and the server's memory under Claude Code's own MCP client.
 
 ## Code locations
 

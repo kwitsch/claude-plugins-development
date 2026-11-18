@@ -1,6 +1,6 @@
 // tests/support/kit.ts of __NAME__: the fake environment of the plugin's tests, bound to the built plugin/hooks/register.mjs.
 // A test file calls `makeKit(options)` and imports no source of the plugin (.claude/rules/hook-tests.md).
-// A full example: jevfort/tests/support/kit.ts (a fake jev-api batch tool, session reads, tool list, band helpers).
+// A full example: jevfort/tests/support/kit.ts (a fake jev-api request tool, session reads, tool list, band helpers).
 import { createKit } from "claude-engine-vitest";
 import type { On } from "claude-engine-vitest";
 
