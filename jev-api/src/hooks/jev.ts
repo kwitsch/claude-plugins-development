@@ -33,7 +33,7 @@ function isFailed(answer: ToolResult | TooBig | Failed): answer is Failed {
  * Sends the questions of one tool call in one System One request and maps every outcome to a tool result.
  *
  * @param $ - The engine.
- * @param tool - The tool called: a question type with its one question, or `batch`.
+ * @param tool - The tool called (`request`).
  * @param state - The text the questions are about.
  * @param questions - The questions, in input order.
  * @param env - The env values, trimmed, undefined when unset or blank.
@@ -43,14 +43,13 @@ function isFailed(answer: ToolResult | TooBig | Failed): answer is Failed {
  * @param onSample - Told the characters of the prompt and the tokens the server counted for it (an answer's
  * `usage.input_tokens`, or a context refusal's `n_prompt_tokens`), whatever the outcome of the call.
  * @param link - The transport state: the request goes through the plugin's MCP server while it is available.
- * @returns The answer object as JSON (for `batch` the array of answers in question order), an error answer
- * prefixed with the tool name, the server's refusal of a prompt over its context window ({@link TooBig}), or an HTTP
- * error status ({@link Failed}).
+ * @returns The answers as a JSON array in question order, an error answer prefixed with the tool name, the server's
+ * refusal of a prompt over its context window ({@link TooBig}), or an HTTP error status ({@link Failed}).
  */
 export async function ask($: Engine, tool: ToolName, state: string, questions: Question[], env: Env, timeoutMs: number, signal: AbortSignal, questionsChars: number, onSample: (chars: number, tokens: unknown) => void, link: Link): Promise<ToolResult | TooBig | Failed> {
   // The id of each question in the request and of its answer in the response.
-  const ids = questions.map((_, i) => questionId(tool, i));
-  const questionsObject = questionsBody(tool, questions);
+  const ids = questions.map((_, i) => questionId(i));
+  const questionsObject = questionsBody(questions);
   // The prompt the server tokenizes is the state plus the questions: both count for the density and the limit.
   const chars = state.length + questionsChars;
   const outcome = await sendOutcome($, link, env, state, questionsObject, timeoutMs, signal);
@@ -71,10 +70,10 @@ export async function ask($: Engine, tool: ToolName, state: string, questions: Q
   const list: Record<string, unknown>[] = [];
   for (const [i, q] of questions.entries()) {
     const answer = isRecord(answers) ? answers[ids[i]] : undefined;
-    if (!isRecord(answer) || !hasAnswerShape(q, answer)) return fail(tool, `response had no valid ${q.type} answer${tool === "batch" ? ` for questions[${i}]` : ""}`);
+    if (!isRecord(answer) || !hasAnswerShape(q, answer)) return fail(tool, `response had no valid ${q.type} answer for questions[${i}]`);
     list.push(answer);
   }
-  return { result: JSON.stringify(tool === "batch" ? list : list[0]) };
+  return { result: JSON.stringify(list) };
 }
 
 /**
@@ -93,7 +92,7 @@ export async function ask($: Engine, tool: ToolName, state: string, questions: Q
  * @returns The tool result.
  */
 export async function answerJev($: Engine, tool: ToolName, input: { state: string; questions: Question[] }, mode: Overflow, env: Env, timeoutMs: number, signal: AbortSignal, know: Knowledge, link: Link): Promise<ToolResult> {
-  const questionsChars = JSON.stringify(questionsBody(tool, input.questions)).length;
+  const questionsChars = JSON.stringify(questionsBody(input.questions)).length;
   const started = await now($);
   /** Haiku takes a call over whose request failed with an HTTP error: its timeout is the call's, less the time the request used. */
   const takeOver = async (why: string): Promise<ToolResult> => {

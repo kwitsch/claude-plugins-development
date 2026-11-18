@@ -178,8 +178,8 @@ export function haikuTokens(questions: Question[]): number {
  * @returns The answers as {@link ask} returns them, or an error answer.
  */
 export async function askHaiku($: Engine, tool: ToolName, state: string, questions: Question[], timeoutMs: number, signal: AbortSignal): Promise<ToolResult> {
-  const ids = questions.map((_, i) => questionId(tool, i));
-  const prompt = `Text:\n${state}\n\nQuestions (JSON):\n${JSON.stringify(questionsBody(tool, questions))}`;
+  const ids = questions.map((_, i) => questionId(i));
+  const prompt = `Text:\n${state}\n\nQuestions (JSON):\n${JSON.stringify(questionsBody(questions))}`;
   let onAbort: (() => void) | undefined;
   try {
     const reply = $.model.complete({ model: HAIKU_MODEL, system: HAIKU_SYSTEM, prompt, maxTokens: haikuTokens(questions), timeoutMs }, { signal });
@@ -203,10 +203,10 @@ export async function askHaiku($: Engine, tool: ToolName, state: string, questio
     const list: Record<string, unknown>[] = [];
     for (const [i, q] of questions.entries()) {
       const answer = checkAnswer(q, isRecord(answers) ? answers[ids[i]] : undefined);
-      if (answer === undefined) return fail(tool, `fallback: Haiku's reply had no valid ${q.type} answer${tool === "batch" ? ` for questions[${i}]` : ""}`);
+      if (answer === undefined) return fail(tool, `fallback: Haiku's reply had no valid ${q.type} answer for questions[${i}]`);
       list.push(answer);
     }
-    return { result: JSON.stringify(tool === "batch" ? list : list[0]) };
+    return { result: JSON.stringify(list) };
   } catch (err) {
     return fail(tool, `fallback: ${message(err)}`);
   } finally {

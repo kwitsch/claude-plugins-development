@@ -41,22 +41,15 @@ export function parseQuestion(type: QuestionType, instructions: unknown, criteri
 }
 
 /**
- * Validates the state and questions of the model-supplied tool input: one question for a question-type tool, the
- * `questions` array for `batch`.
+ * Validates the state and the `questions` array of the model-supplied `request` input.
  *
- * @param tool - The tool called.
+ * @param tool - The tool called (`request`).
  * @param e - The `tool.call` event carrying the input fields.
- * @returns The state and questions, or the error message (no request is sent).
+ * @returns The state and questions, or the error message (no request is sent); a question's error names it, `questions[<i>]: ...`.
  */
 export function parseQuestions(tool: ToolName, e: ToolCall): { state: string; questions: Question[] } | string {
-  const { instructions, state } = e;
-  // A question-type tool checks instructions, then state, then criteria.
-  if (tool !== "batch" && !isText(instructions)) return "instructions must be a non-empty string";
+  const { state } = e;
   if (!isText(state)) return "state must be a non-empty string";
-  if (tool !== "batch") {
-    const question = parseQuestion(tool, instructions, e["criteria"]);
-    return typeof question === "string" ? question : { state, questions: [question] };
-  }
   const list = e["questions"];
   if (!Array.isArray(list) || list.length < 1) return "questions must be a non-empty array";
   const questions: Question[] = [];
