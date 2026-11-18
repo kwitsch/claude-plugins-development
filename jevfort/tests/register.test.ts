@@ -1874,7 +1874,7 @@ test("The band shows the session effort bold and Jev's choice blue", async ($, o
   for (const level of ["low", "medium", "high", "xhigh"]) expect(await levelProps(ui, level)).toEqual({ dimColor: true });
   // `max` lies above the default maxEffort (xhigh): not drawn.
   expect(await levelProps(ui, "max")).toBeUndefined();
-  expect(await autoLabel(ui)).toBe("Jev auto: on");
+  expect(await autoLabel(ui)).toBe("Jevfort ✔️");
 
   await drain($.turn.step(step));
   await clock.settle();
@@ -1972,7 +1972,7 @@ test("The Auto button turns the effort choice off until pressed again", async ($
 
   await ui.press({ key: "auto" });
   await clock.settle();
-  expect(await autoLabel(ui)).toBe("Jev auto: off");
+  expect(await autoLabel(ui)).toBe("Jevfort ✖️");
   await drain($.turn.step(turnStep("t1", "claude-opus-5-5", "high")));
   await clock.settle();
   // No estimate: the turn runs at the session effort, shown bold with no blue choice.
@@ -1983,7 +1983,7 @@ test("The Auto button turns the effort choice off until pressed again", async ($
 
   await ui.press({ key: "auto" });
   await clock.settle();
-  expect(await autoLabel(ui)).toBe("Jev auto: on");
+  expect(await autoLabel(ui)).toBe("Jevfort ✔️");
   await drain($.turn.step(turnStep("t2", "claude-opus-5-5", "high")));
   expect(ids(sent)).toEqual(["effort", "mechanical"]);
   expect(seen.map((s) => s.effort)).toEqual(["high", "low"]);
@@ -1991,10 +1991,10 @@ test("The Auto button turns the effort choice off until pressed again", async ($
   // A new session turns Auto back on.
   await ui.press({ key: "auto" });
   await clock.settle();
-  expect(await autoLabel(ui)).toBe("Jev auto: off");
+  expect(await autoLabel(ui)).toBe("Jevfort ✖️");
   await $.session.start(START);
   await clock.settle();
-  expect(await autoLabel(ui)).toBe("Jev auto: on");
+  expect(await autoLabel(ui)).toBe("Jevfort ✔️");
   await ui.unmount();
 });
 
@@ -2020,7 +2020,7 @@ test("Auto pressed off while step 0 waits for Jev keeps the session effort", asy
   expect(seen.map((s) => s.effort)).toEqual(["high"]);
   expect(logged).toEqual(["effort claude-opus-5-5: session high → unchanged · jev (score 0.20) · auto off"]);
   expect(await levelProps(ui, "low")).toEqual({ dimColor: true });
-  expect(await autoLabel(ui)).toBe("Jev auto: off");
+  expect(await autoLabel(ui)).toBe("Jevfort ✖️");
   await ui.unmount();
 });
 
@@ -2077,7 +2077,7 @@ test("The band passes while a survey holds it", async ($, on) => {
   expect(await autoLabel(survey)).toBeUndefined();
   await survey.unmount();
   const ui = await $.ui.mount(BAND);
-  expect(await autoLabel(ui)).toBe("Jev auto: on");
+  expect(await autoLabel(ui)).toBe("Jevfort ✔️");
   await ui.unmount();
 });
 

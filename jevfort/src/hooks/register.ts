@@ -892,7 +892,7 @@ export const register = (on: On, options: Options): void => {
   let autoOff = false;
 
   // The effort band above the prompt: the levels between the configured minimum and maximum (plus the session effort when outside), the session effort bold, Jev's choice for the turn blue, and the
-  // Auto button, then the cache countdown. Without the effort row (jevfort inactive, also before the session
+  // Jevfort button, then the cache countdown. Without the effort row (jevfort inactive, also before the session
   // baseline, or `routing: false`) only the countdown shows, above whatever another plugin draws in the band beneath
   // (the effort row takes the whole band); a survey holds the band.
   on("ui.render", { component: "AbovePrompt" }, async function onRenderBand($: Engine, e: BandEvent, next: (e: BandEvent) => unknown): Promise<unknown> {
@@ -916,7 +916,7 @@ export const register = (on: On, options: Options): void => {
         ),
         Button({
           key: "auto",
-          label: `Jev auto: ${autoOff ? "off" : "on"}`,
+          label: `Jevfort ${autoOff ? "✖️" : "✔️"}`,
           onPress: () => {
             autoOff = !autoOff;
             // Raised after the hook frame ended: if the engine refuses, the next applied listing redraws.

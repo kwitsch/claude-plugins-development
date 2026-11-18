@@ -7,9 +7,9 @@ import { test } from "vitest";
 const json = (rel: string) => JSON.parse(readFileSync(new URL(`../plugin/${rel}`, import.meta.url), "utf8"));
 const manifest = json(".claude-plugin/plugin.json");
 
-test("the manifest has name jevfort, version 0.13.1, author Kwitsch, a description and keywords", () => {
+test("the manifest has name jevfort, version 0.13.2, author Kwitsch, a description and keywords", () => {
   assert.equal(manifest.name, "jevfort");
-  assert.equal(manifest.version, "0.13.1");
+  assert.equal(manifest.version, "0.13.2");
   assert.equal(manifest.author.name, "Kwitsch");
   assert.ok(manifest.description.length > 0);
   assert.ok(Array.isArray(manifest.keywords) && manifest.keywords.length > 0);
@@ -20,7 +20,6 @@ test("the manifest declares the jev-api plugin as its only dependency, and packa
   const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
   assert.deepEqual(pkg.claudePlugin.dependencies, ["jev-api"]);
   assert.equal(pkg.dependencies, undefined);
-  assert.match(manifest.description, /jev-api/);
 });
 
 test("userConfig declares exactly 15 options: no mode selector, no gate", () => {

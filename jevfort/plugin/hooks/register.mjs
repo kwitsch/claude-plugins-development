@@ -512,7 +512,7 @@ export const register = (on, options) => {
 				})),
 				Button({
 					key: "auto",
-					label: `Jev auto: ${autoOff ? "off" : "on"}`,
+					label: `Jevfort ${autoOff ? "✖️" : "✔️"}`,
 					onPress: () => {
 						autoOff = !autoOff;
 						try {
