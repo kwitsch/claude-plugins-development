@@ -7,9 +7,9 @@ import { test } from "vitest";
 const json = (rel: string) => JSON.parse(readFileSync(new URL(`../plugin/${rel}`, import.meta.url), "utf8"));
 const manifest = json(".claude-plugin/plugin.json");
 
-test("the manifest has name jevfort, version 0.12.0, author Kwitsch, a description and keywords", () => {
+test("the manifest has name jevfort, version 0.13.0, author Kwitsch, a description and keywords", () => {
   assert.equal(manifest.name, "jevfort");
-  assert.equal(manifest.version, "0.12.0");
+  assert.equal(manifest.version, "0.13.0");
   assert.equal(manifest.author.name, "Kwitsch");
   assert.ok(manifest.description.length > 0);
   assert.ok(Array.isArray(manifest.keywords) && manifest.keywords.length > 0);
@@ -23,7 +23,7 @@ test("the manifest declares the jev-api plugin as its only dependency, and packa
   assert.match(manifest.description, /jev-api/);
 });
 
-test("userConfig declares exactly 14 options: no mode selector, no gate", () => {
+test("userConfig declares exactly 15 options: no mode selector, no gate", () => {
   assert.deepEqual(Object.keys(manifest.userConfig).sort(), [
     "agentTypes",
     "autoCompactPercent",
@@ -34,6 +34,7 @@ test("userConfig declares exactly 14 options: no mode selector, no gate", () => 
     "maxEffort",
     "minEffort",
     "routing",
+    "stepEffort",
     "subagents",
     "takeOnlyForBypass",
     "takeSteps",
@@ -63,6 +64,7 @@ test("every userConfig key pins type, default, min and max, and the default matc
   const effort = (d: string) => ({ type: "string", default: d });
   const expected: Record<string, Record<string, unknown>> = {
     routing: bool,
+    stepEffort: { type: "boolean", default: false },
     takeSteps: bool,
     subagents: bool,
     bypass: bool,
