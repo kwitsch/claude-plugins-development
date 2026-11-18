@@ -1247,7 +1247,7 @@ export const register = (on: On, options: Options): void => {
     const questions: Record<string, Question> = {};
     let candidates: Candidate[] = [];
     // Not on a slash-command turn: its skill text is not in the transcript, so Jev (and the Haiku summary) would answer the bare command and the skill never runs.
-    if (takeSteps && !ctx.command && turn.taken < MAX_TAKES_PER_TURN && (!takeOnlyForBypass || (bypass && e.index === 0 && !e.agentId))) {
+    if (takeSteps && !autoOff && !ctx.command && turn.taken < MAX_TAKES_PER_TURN && (!takeOnlyForBypass || (bypass && e.index === 0 && !e.agentId))) {
       // A hung engine read (a stalled file system) must not hold the step: past TIMEOUT_MS it goes on without candidates.
       const build = buildCandidates($, ctx.request, ctx.steps, calls, e.index, turn.cache);
       build.catch(() => undefined);
@@ -1341,7 +1341,7 @@ export const register = (on: On, options: Options): void => {
     const singleAction = noul(r.answers, "single_action") ?? 0;
     const picked = pickCandidate(answer, candidates, takeThreshold);
     // takeOnlyForBypass: only a read-only Read or Bash that is the whole prompt; a skill or tool load run by Jev would end the turn on a summary of "Launching skill".
-    const pick = takeOnlyForBypass && (singleAction < SINGLE_ACTION || (picked?.tool !== "Read" && picked?.tool !== "Bash")) ? undefined : picked;
+    const pick = autoOff ? undefined : takeOnlyForBypass && (singleAction < SINGLE_ACTION || (picked?.tool !== "Read" && picked?.tool !== "Bash")) ? undefined : picked;
 
     if (pick) {
       turn.taken += 1;

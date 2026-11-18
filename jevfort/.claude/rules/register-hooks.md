@@ -65,7 +65,7 @@ the shapes below: `development/wiki/plugins/inline-headroom/notes/claude-code-ve
   (flipped by the Button `key: "auto"`, reset at `session.start`, `session.end` and by a reload, never stored). Drawn
   in terminal and desktop only: one row of the efforts from `minEffort` to `maxEffort` (plus the session or chosen
   effort when outside that range), session effort bold, chosen blue, the rest dim, then the `Jevfort ✔️/✖️` Button.
-  Subagent turns do not update it; `autoOff` leaves take-steps, bypass and the `estimate_effort` tool alone. The effort row is hidden with `routing: false` and while
+  Subagent turns do not update it; `autoOff` also stops Jev taking steps and the bypass (no candidates, no `next_action` question; a press during Jev's answer drops its pick) and leaves the `estimate_effort` tool alone. The effort row is hidden with `routing: false` and while
   `jevState !== ""`; then the hook draws only the cache countdown (above `await next(e)`, in a column Box, so another
   plugin's band beneath survives) or, without a countdown, passes; it always passes while `e.props.hasSurvey`. With
   the effort row it does not call `next(e)`: the row takes the whole site and a band of a plugin beneath is not drawn.

@@ -655,6 +655,29 @@ for (const [single, expectBypass] of [[0.95, true], [0.3, false]] as const) {
   });
 }
 
+test("Jevfort off (the band button) takes no step and asks no take question", async ($, on) => {
+  const seen: unknown[] = [];
+  const { sent, clock } = setup(on, {
+    messages: [user("run the tests")],
+    packageJson: { scripts: { test: "node --test" } },
+    jev: byId({
+      next_action: { type: "choice", choice: "run npm test", probabilities: { "run npm test": 0.95, claude: 0.05 }, confidence: 0.9 },
+      single_action: { type: "noul", noul: 0.95 },
+    }),
+  });
+  claudeBeneath(on, seen);
+  sessionStubs(on);
+  await $.session.start(START);
+  const ui = await $.ui.mount(BAND);
+  await ui.press({ key: "auto" });
+  await clock.settle();
+  const { chunks } = await drain($.turn.step(step));
+  expect(toolId(chunks)).toBe("");
+  expect(seen).toHaveLength(1);
+  expect(ids(sent)).not.toContain("next_action");
+  await ui.unmount();
+});
+
 test("bypass: false asks no single_action question and leaves a one-action request to Claude", { options: { bypass: false } }, async ($, on) => {
   const seen: unknown[] = [];
   const { sent } = setup(on, {
