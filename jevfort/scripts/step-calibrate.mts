@@ -12,7 +12,7 @@ type Delta = { id: number; label: number; request: string; delta: unknown[] };
 type Row = { id: number; label: number; scores: number[] };
 
 const argv = process.argv.slice(2);
-const flag = (name: string, fallback: string): string => argv[argv.indexOf(name) + 1] ?? fallback;
+const flag = (name: string, fallback: string): string => (argv.includes(name) ? argv[argv.indexOf(name) + 1] : undefined) ?? fallback;
 const RUNS = Number(flag("--runs", "5"));
 const OUT = new URL(flag("--out", "../tests/fixtures/step-effort-scores.json"), import.meta.url);
 const SESSION_EFFORT = "medium";
