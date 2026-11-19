@@ -483,7 +483,7 @@ export function scopeOf(
     return {
       root,
       realRoot: realish(root),
-      scratch: args.scratchpad_dir ? path.resolve(args.scratchpad_dir) : null,
+      scratch: args.scratchpad_dir && path.isAbsolute(args.scratchpad_dir) ? path.resolve(args.scratchpad_dir) : null,
       realScratch: args.scratchpad_dir ? realish(args.scratchpad_dir) : null,
     };
   } catch {

@@ -1920,7 +1920,7 @@ export function scopedTarget(cwd: string, file: string, scratchpad?: string, roo
     const ext = path.extname(fp).toLowerCase();
     if (!EXT_MAP[ext] && !TYPE_CHECK_EXTS.has(ext)) return null;
     // fast pass: a lexical scratchpad hit skips lstat/realpath; a miss still meets the real-path check below
-    if (scratchpad && !outside(path.relative(path.resolve(scratchpad), fp))) return null;
+    if (scratchpad && path.isAbsolute(scratchpad) && !outside(path.relative(path.resolve(scratchpad), fp))) return null;
     let real: string;
     if (roots?.dirs) {
       // A non-symlink lstat hit proves existence and makes realish(dirname)/basename equal realish(fp).
