@@ -49,4 +49,4 @@ Each plugin keeps its own knowledge: `CLAUDE.md` (overview and part list), `.cla
 
 ## Skills (repeated workflows)
 
-`.claude/skills/`: `wiki` (keep this knowledge base), `live-verify` (check behaviour in a real session), `bughunt`, `perf-worklist`, `refactor-plugin`, `scaffold-plugin`, `convert-plugin-ts`, `split-hooks-lib`.
+`.claude/skills/`: `update-cc-references` (refresh the cc-knowledge reference files from the official docs; its agent `.claude/agents/cc-reference-validator.md` validates the changes) and `dispatch-cc-references-update` (run that refresh in a background session), `wiki` (keep this knowledge base), `live-verify` (check behaviour in a real session), `bughunt`, `perf-worklist`, `refactor-plugin`, `scaffold-plugin`, `convert-plugin-ts`, `split-hooks-lib`.

@@ -122,3 +122,9 @@ test("a hook dispatched after its chain was abandoned passes the abort on", {
 test("the test's $ cannot fire a mods API call", ($) => {
   expect(() => $.ui.close({ id: "p" })).toThrow(/mods API call/);
 });
+
+test("an array leaf in a stub's matcher is any-of", async ($, on) => {
+  on("tool.call", { tool: ["Agent", "Task"] }, () => ({ result: "matched" }));
+  expect(await $.tool.call({ tool: "Task" })).toEqual({ result: "matched" });
+  await expect($.tool.call({ tool: "Bash" })).rejects.toThrow("no implementation for tool.call");
+});

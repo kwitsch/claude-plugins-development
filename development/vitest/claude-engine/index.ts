@@ -286,10 +286,11 @@ const frozen = <T,>(v: T): T => {
   return c;
 };
 
-/** Whether `e` holds every field of `matcher` (nested objects compared field by field). */
+/** Whether `e` holds every field of `matcher` (nested objects compared field by field; an array leaf is any-of). */
 const fits = (matcher: Data | undefined, e: unknown): boolean =>
   matcher === undefined || Object.entries(matcher).every(([k, m]) => {
     const v = isData(e) ? e[k] : undefined;
+    if (Array.isArray(m)) return m.includes(v);
     return isData(m) ? isData(v) && fits(m, v) : v === m;
   });
 
