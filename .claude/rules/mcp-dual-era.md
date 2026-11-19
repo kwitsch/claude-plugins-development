@@ -6,7 +6,7 @@ paths:
 
 # Rule: MCP servers are dual-era from the start
 
-Every plugin MCP server (`<name>/src/mcp/server.ts`, zero-dependency stdio node script) answers **both** protocol eras: 2025-11-25 (`initialize`) and 2026-07-28 (`server/discover`, stateless). Model: `dprint/src/mcp/server.ts` (tools, hooks only, no tasks). What the client sends and expects in each era, the tool `_meta` fields, the tasks protocol and what is still unverified: [mcp-protocol-eras.md](../../development/wiki/facts/mcp-protocol-eras.md) (read it before changing the envelope, adding a task, or debugging a server that does not connect).
+Every plugin MCP server (`<name>/src/mcp/server.ts`, zero-dependency stdio node script) answers **both** protocol eras: 2025-11-25 (`initialize`) and 2026-07-28 (`server/discover`, stateless). A hook-only server (tools, no tasks) is a tool table plus one call of `serveMcp` from `@shared/mcp-core.js` (`development/shared/src/mcp-core.ts`, the one implementation of the envelope, cancel handling and version read; models: `dprint/src/mcp/server.ts`, `universal-format/src/mcp/server.ts`). A change of the protocol handling goes there; every plugin that imports it needs a version bump. jev-api's server (tasks-free, but own timeout and app-level cancel) still carries its own copy. What the client sends and expects in each era, the tool `_meta` fields, the tasks protocol and what is still unverified: [mcp-protocol-eras.md](../../development/wiki/facts/mcp-protocol-eras.md) (read it before changing the envelope, adding a task, or debugging a server that does not connect).
 
 ## Types
 

@@ -15,7 +15,7 @@ Two layers. The path-scoped rules in `.claude/rules/` load with matching files a
 
 Import graph, no cycle at runtime: `util` ← `editorconfig` ← `prettier` ← `registry` ← `handlers` ← `server` (`editorconfig` imports a type from `registry`, erased by the build).
 
-- `server.ts`: the MCP stdio loop, dual-era, one tool.
+- `server.ts`: the one-tool table; the dual-era stdio loop is `@shared/mcp-core.js`.
 - `handlers.ts`: `formatPre`, the base directory (`resolveBase`), path exclusions, the dprint gate, the Edit swap (`applyEdit`, `shrinkSwap`), the pending config refreshes, the stdin run of a CLI formatter.
 - `prettier.ts`: the bundled prettier and its three lazily loaded plugins, the printWidth guard, the project-config and ignore caches.
 - `registry.ts`: extension map and the CLI formatter chains. `editorconfig.ts`: `.editorconfig` resolver and its mapping to CLI flags. `util.ts`: the PATH lookup. The upward walk, the path exclusions and the real-path lookup are `@shared/scope.js` (`development/shared/src/scope.ts`).

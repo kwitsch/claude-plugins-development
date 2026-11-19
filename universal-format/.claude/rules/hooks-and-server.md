@@ -22,7 +22,7 @@ Design: [hook-design.md](../../../development/wiki/plugins/universal-format/desi
 
 ## Server
 
-- Dual-era as the repo rule `.claude/rules/mcp-dual-era.md` says, modelled on `dprint/src/mcp/server.ts`; the tool carries `_meta.ui.visibility: ["app"]`; `.mcp.json` starts it with `command: "node"`, no launcher script, no `env`.
+- Dual-era as the repo rule `.claude/rules/mcp-dual-era.md` says, through `serveMcp` of `@shared/mcp-core.js` (`src/mcp/server.ts` is only the tool table); the tool carries `_meta.ui.visibility: ["app"]`; `.mcp.json` starts it with `command: "node"`, no launcher script, no `env`.
 - The version comes from `../.claude-plugin/plugin.json` at start, never from the build.
 - A cancelled call gets no answer and its CLI formatter is killed (the handler passes the `AbortSignal` to the spawn).
 - Never a single "current cwd" in module state: concurrent calls of subagents carry different cwds; every cache is keyed by the directory it describes.
