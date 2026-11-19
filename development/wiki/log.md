@@ -152,3 +152,7 @@ Source: migration task (decisions listed in the PR body), the plugin `CLAUDE.md`
 ## [2026-11-19] ingest | scratchpad paths: relative scratchpad_dir
 
 - **Decision:** a relative `scratchpad_dir` means "no scratchpad" in all three plugins (dprint and universal-lint now guard with `path.isAbsolute` like universal-format); the lexical test stays, a symlinked spelling is not matched (`plugins/universal-format/design/scope-and-base.md`).
+
+## [2026-11-19] ingest | shared source layer for plugins
+
+- **Decision:** duplicates across plugins analysed; build-time shared source (`development/shared/` compiled into `plugin/shared/`) chosen by the user, plan only, nothing implemented (`decisions/shared-source-layer.md`).
