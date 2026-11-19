@@ -3,7 +3,6 @@ import { chmodSync, mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "vitest";
 import { buildInvocation } from "../plugin/mcp/editorconfig.mjs";
-import { isExcludedPath } from "../plugin/mcp/handlers.mjs";
 import { hasPrettierProjectConfig, shouldOverridePrintWidth } from "../plugin/mcp/prettier.mjs";
 import { cargoEdition, EXT_MAP, PRETTIER_LANGS, REGISTRY, selectFormatter } from "../plugin/mcp/registry.mjs";
 import { tmp } from "./support/plugin.ts";
@@ -163,33 +162,6 @@ test("hasPrettierProjectConfig: top-level \"prettier\" key in package.yaml count
 test("hasPrettierProjectConfig: nothing found -> false", () => {
   const dir = tmp("uf-pc-");
   assert.equal(hasPrettierProjectConfig(dir), false);
-});
-
-test("isExcludedPath: node_modules/vendor/.git segments -> excluded", () => {
-  assert.equal(isExcludedPath(path.join("node_modules", "x", "a.sh")), true);
-  assert.equal(isExcludedPath(path.join("vendor", "a.php")), true);
-  assert.equal(isExcludedPath(path.join(".git", "hooks", "a.sh")), true);
-});
-
-test("isExcludedPath: .claude/worktrees and .claude/agent-memory -> excluded", () => {
-  assert.equal(isExcludedPath(path.join(".claude", "worktrees", "foo", "a.sh")), true);
-  assert.equal(isExcludedPath(path.join(".claude", "agent-memory", "a.md")), true);
-});
-
-test("isExcludedPath: other .claude/ subtrees (e.g. rules/agents/skills) stay covered", () => {
-  assert.equal(isExcludedPath(path.join(".claude", "rules", "a.md")), false);
-  assert.equal(isExcludedPath(path.join(".claude", "settings.json")), false);
-});
-
-test("isExcludedPath: a later .claude segment matching worktrees/agent-memory is still excluded, even after an earlier non-matching .claude segment", () => {
-  assert.equal(isExcludedPath(path.join(".claude", "rules", ".claude", "worktrees", "foo", "a.sh")), true);
-  assert.equal(isExcludedPath(path.join(".claude", "skills", ".claude", "agent-memory", "a.md")), true);
-});
-
-test("isExcludedPath: *.local.* files excluded regardless of location", () => {
-  assert.equal(isExcludedPath(path.join(".claude", "settings.local.json")), true);
-  assert.equal(isExcludedPath("docker-compose.local.yml"), true);
-  assert.equal(isExcludedPath("a.sh"), false);
 });
 
 test("shouldOverridePrintWidth: no config -> true", () => {

@@ -41,6 +41,8 @@ importers:
 
   development/scripts: {}
 
+  development/shared: {}
+
   development/vitest/claude-engine:
     dependencies:
       vitest:

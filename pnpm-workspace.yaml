@@ -2,3 +2,4 @@ packages:
   - "*"
   - "development/vitest/*"
   - "development/scripts"
+  - "development/shared"

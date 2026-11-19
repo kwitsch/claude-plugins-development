@@ -5,12 +5,12 @@
  *
  * @packageDocumentation
  */
+import { walkToRoot } from "@shared/scope.js";
 import { existsSync, readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
 import process from "node:process";
 import { resolveEditorconfig } from "./editorconfig.js";
-import { walkToRoot } from "./util.js";
 import { loadJava, loadPhp, loadShell, prettier } from "./vendor/index.js";
 
 /** Version of the bundled prettier. */

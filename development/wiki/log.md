@@ -157,3 +157,4 @@ Source: migration task (decisions listed in the PR body), the plugin `CLAUDE.md`
 
 - **Decision:** duplicates across plugins analysed; build-time shared source (`development/shared/` compiled into `plugin/shared/`) chosen by the user, plan only, nothing implemented (`decisions/shared-source-layer.md`).
 - **Step 1 built:** `@shared/<name>.js` imports are compiled to `plugin/shared/` by `build-plugin.ts`, with no `pluginBuild.shared` list (imports decide); tests in the new `build-scripts` package; all existing plugins rebuild unchanged.
+- **Step 2 built:** `development/shared/src/scope.ts` (path exclusions, `realish`, `outside`, `walkToRoot`) replaces the copies in dprint 0.14.2 and universal-format 0.19.2; tests in the new `shared-code` package; the build guard for `bundleHooksLib` plugins now covers `hooks/` only (dprint imports from `mcp/`). universal-lint left for later.

@@ -68,7 +68,7 @@ test("a missing shared module, a bad name, a re-export, a source clash and a lib
     ["badname", { "src/x.ts": "import { n } from \"@shared/../a.js\";\nconsole.log(n);\n" }, /not a shared module name/],
     ["reexport", { "src/x.ts": "export { a } from \"@shared/a.js\";\n" }, /static `import` only/],
     ["clash", { "src/shared/a.ts": "export const z = 1;\n", "src/x.ts": "import { a } from \"@shared/a.js\";\nconsole.log(a);\n" }, /would overwrite/],
-    ["bundle", { "src/hooks/register.ts": "import { a } from \"@shared/a.js\";\nexport const r = a;\n", "plugin/hooks/hooks.json": "{\"modules\":[\"./register.mjs\"]}" }, /cannot import @shared/, { pluginBuild: { bundleHooksLib: true } }],
+    ["bundle", { "src/hooks/register.ts": "import { a } from \"@shared/a.js\";\nexport const r = a;\n", "plugin/hooks/hooks.json": "{\"modules\":[\"./register.mjs\"]}" }, /cannot import @shared modules from hooks/, { pluginBuild: { bundleHooksLib: true } }],
   ];
   for (const [name, files, message, pkg] of cases) {
     const plugin = tree(`p3-${name}`, { "package.json": PKG, "plugin/old.mjs": "export {};\n", ...files });
@@ -77,4 +77,17 @@ test("a missing shared module, a bad name, a re-export, a source clash and a lib
     assert.match(r.stderr, message, name);
     assert.ok(existsSync(path.join(plugin, "plugin/old.mjs")), `${name}: a failed build leaves the old output`);
   }
+});
+
+test("a bundleHooksLib plugin may import shared code outside hooks/ (its MCP server)", () => {
+  const shared = tree("s4", { "a.ts": "export const a = 1;\n" });
+  const plugin = tree("p4", {
+    "package.json": PKG,
+    "src/hooks/register.ts": "export const r = 1;\n",
+    "src/mcp/server.ts": "import { a } from \"@shared/a.js\";\nconsole.log(a);\n",
+    "plugin/hooks/hooks.json": "{\"modules\":[\"./register.mjs\"]}",
+  });
+  const r = build(plugin, shared, { pluginBuild: { bundleHooksLib: true } });
+  assert.equal(r.status, 0, r.stderr);
+  assert.ok(existsSync(path.join(plugin, "plugin/shared/a.mjs")));
 });

@@ -28,12 +28,17 @@ Analysis and plan for moving code that several plugins copy into one build-time 
 
 ## Plan
 
-1. Done: the mechanism above, with its tests, the `build-scripts` workspace package (`development/scripts`, so `pnpm -r test` runs them) and the rules `development/CLAUDE.md`, `plugin-src.md`, `lint-config.md`. `plugin/shared/*.mjs` is build output (`**/*.mjs`), so the layout check needed no change; all nine plugins rebuild byte-identical. Not done: a function-hooks plugin with a lib bundle.
-2. `shared/scope`: `isExcludedPath`, `realish`, `outside`, `walkToRoot`, scratchpad test, one test file with every never-format case. Move dprint and universal-format; universal-lint after measuring cold start.
+1. Done: the mechanism above, with its tests, the `build-scripts` workspace package (`development/scripts`, so `pnpm -r test` runs them) and the rules `development/CLAUDE.md`, `plugin-src.md`, `lint-config.md`. `plugin/shared/*.mjs` is build output (`**/*.mjs`), so the layout check needed no change; all nine plugins rebuild byte-identical. Not done: shared code imported from a plugin's `hooks/` in a lib-bundle plugin.
+2. Done for dprint 0.14.2 and universal-format 0.19.2: `development/shared/src/scope.ts` holds `isExcludedPath`, `hasClaudeInternal`, `outside`, `relativeIfContains`, `realish` (the `realpathSync.native` form of dprint) and `walkToRoot`; tests in the workspace package `shared-code` (`development/shared/tests/scope.test.ts`, run against `src/`, 11 tests; the six `isExcludedPath` tests of universal-format moved there, so its count went 213 to 208). The scratchpad test stays in each plugin (dprint checks lexical and real path, universal-format lexical only: different on purpose). Not done: universal-lint (its `realish` uses non-native `realpathSync`, its copies are pinned by its own tests, and the cold-start cost of an import in `lint-file.mjs` is unmeasured).
 3. `shared/mcp-core`: `createServer({ name, tools })` with envelope, cancel handling, `readVersion`. Move dprint and universal-format; jev-api last (per-call timeout and app-level cancel: maybe envelope only). Update `mcp-dual-era.md` to name the shared module as the model.
 4. Shared types (`HookResult`, `RequestId`), type-only.
 5. Manifest-test helpers into `development/vitest/` (no build change, no bump).
 6. Per step: `pnpm lint && pnpm -r build && pnpm -r test`, `claude plugin validate`, `live-verify` of each touched plugin, version bump of every consumer.
+
+Notes from step 2:
+
+- `bundleHooksLib` plugins may import shared code from `mcp/` and `bin/` (dprint does, from `mcp/format.ts`), not from `hooks/`: the build refuses that (`hooksShared` guard, tested both ways).
+- jev-api already has its own `src/shared/` (`plugin/shared/`): a shared module of the same name fails the build with the clash error; pick other names.
 
 Order of value: step 2, then 3; 4 and 5 any time.
 

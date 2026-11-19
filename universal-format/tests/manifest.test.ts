@@ -72,7 +72,7 @@ test("mcp/server.mjs and the skill driver are executable node scripts that parse
 
 test("hooks/ holds only hooks.json; no launcher script ships", () => {
   assert.deepEqual(readdirSync(path.join(PLUGIN, "hooks")), ["hooks.json"]);
-  assert.deepEqual(readdirSync(PLUGIN).sort(), [".claude-plugin", ".mcp.json", "README.md", "hooks", "mcp", "skills"]);
+  assert.deepEqual(readdirSync(PLUGIN).sort(), [".claude-plugin", ".mcp.json", "README.md", "hooks", "mcp", "shared", "skills"]);
 });
 
 test("the build runs the standard build first, then the vendor step (the standard build removes the chunks)", () => {
