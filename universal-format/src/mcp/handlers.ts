@@ -20,6 +20,8 @@ import { walkToRoot } from "./util.js";
 export type FormatPreInput = {
   /** The session's working directory; a hint, never a gate. */
   cwd?: unknown;
+  /** The session's scratchpad directory; files inside it are never formatted. An empty or relative value means none. */
+  scratchpad_dir?: unknown;
   /** `Write` or `Edit`. */
   tool_name?: unknown;
   /** The tool's input; a field the tool call lacks arrives as an empty string. */
@@ -227,7 +229,8 @@ type Target = {
  * Resolves the write target of a hook call.
  *
  * @param args - The hook input.
- * @returns The target, or null when there is no usable path or the path is excluded.
+ * @returns The target, or null when there is no usable path, the path is inside the session scratchpad, or the path is
+ * excluded.
  */
 function resolveTarget(args: FormatPreInput): Target | null {
   // resolved: a trailing separator would never equal a walked directory, so no bounded walk would end at the base
@@ -236,6 +239,10 @@ function resolveTarget(args: FormatPreInput): Target | null {
   if (typeof fp !== "string" || !fp) return null;
   if (!cwd && !path.isAbsolute(fp)) return null; // nothing to resolve a relative path against
   const resolved = path.resolve(cwd, fp);
+  // the harness's own scratchpad, decided before the git-root walk
+  // shortcut: lexical only (payload paths are physical), a symlinked spelling of the scratchpad is kept, compare real paths if one appears
+  const sp = args.scratchpad_dir;
+  if (typeof sp === "string" && path.isAbsolute(sp) && relativeIfContains(path.resolve(sp), resolved) !== null) return null;
   const { base, rel } = resolveBaseAndRel(cwd, resolved);
   if (isExcludedPath(rel)) return null;
   // outside the cwd the base can be another agent's worktree root, which hides `.claude/worktrees` from `rel`

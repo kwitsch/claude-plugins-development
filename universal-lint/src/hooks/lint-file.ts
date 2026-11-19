@@ -1900,9 +1900,10 @@ function outside(rel: string): boolean {
 
 /**
  * The real-path scope rule shared by every event (dprint's `inScope`): `file` resolved against `cwd` must have a
- * lintable extension (checked first, pure string work before any filesystem call), exist, its real path must lie
- * strictly inside realpath(cwd), not be excluded (`isExcludedPath` on the path relative to the real cwd), not lie inside
- * realpath(scratchpad) when given, and not be a dangling link.
+ * lintable extension (checked first, pure string work before any filesystem call), not lie lexically inside
+ * `scratchpad` when given (a pure `path.relative` test before any filesystem call; a miss still meets the real-path
+ * check), exist, its real path must lie strictly inside realpath(cwd), not be excluded (`isExcludedPath` on the path
+ * relative to the real cwd), not lie inside realpath(scratchpad) when given, and not be a dangling link.
  *
  * @param cwd - Payload cwd (the scope root; never `process.cwd()`).
  * @param file - Absolute or cwd-relative path.
@@ -1918,6 +1919,8 @@ export function scopedTarget(cwd: string, file: string, scratchpad?: string, roo
     const fp = path.resolve(cwd, file);
     const ext = path.extname(fp).toLowerCase();
     if (!EXT_MAP[ext] && !TYPE_CHECK_EXTS.has(ext)) return null;
+    // fast pass: a lexical scratchpad hit skips lstat/realpath; a miss still meets the real-path check below
+    if (scratchpad && path.isAbsolute(scratchpad) && !outside(path.relative(path.resolve(scratchpad), fp))) return null;
     let real: string;
     if (roots?.dirs) {
       // A non-symlink lstat hit proves existence and makes realish(dirname)/basename equal realish(fp).

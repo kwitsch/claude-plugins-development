@@ -148,3 +148,7 @@ Source: migration task (decisions listed in the PR body), the plugin `CLAUDE.md`
 - **Skills:** `update-cc-references`, `dispatch-cc-references-update` and the agent `cc-reference-validator` are project-level here now (`design/maintenance-tooling.md`); listed in the index under Skills.
 - **Fact:** the claude-engine-vitest kit did not match an array leaf in a matcher (`{ tool: ["Agent", "Task"] }`), so a hook with such a matcher never ran in a test; the kit now treats it as any-of (`facts/test-kit-vs-engine.md`).
 - **Live (2.1.328):** an Agent call for `claude-code-guide` ran as `cc-knowledge:claude-code-expert` (`design/reroute-hook.md`).
+
+## [2026-11-19] ingest | scratchpad paths: relative scratchpad_dir
+
+- **Decision:** a relative `scratchpad_dir` means "no scratchpad" in all three plugins (dprint and universal-lint now guard with `path.isAbsolute` like universal-format); the lexical test stays, a symlinked spelling is not matched (`plugins/universal-format/design/scope-and-base.md`).

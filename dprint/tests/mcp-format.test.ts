@@ -5,7 +5,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, sy
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test, vi } from "vitest";
-import { applyEdit, bashFinished, bashStarted, disposeLsp, fileChanged, formatPre, lineDiff, trimToEdit } from "../plugin/mcp/format.mjs";
+import { applyEdit, bashFinished, bashStarted, disposeLsp, fileChanged, formatPre, inScope, lineDiff, scopeOf, trimToEdit } from "../plugin/mcp/format.mjs";
 import { applyTextEdits } from "../plugin/mcp/lsp.mjs";
 
 const h = (aStart, aEnd, bStart, bEnd) => ({ aStart, aEnd, bStart, bEnd });
@@ -447,3 +447,44 @@ test("file_changed: a file that grows over the cap while it waits for a slot is 
     rmSync(tmp, { recursive: true, force: true });
   }
 });
+
+test("inScope: a lexical scratchpad hit is out of scope before any real-path call; a sibling prefix and an empty scratchpad_dir are not", () => {
+  const repo = mkdtempSync(path.join(tmpdir(), "dprint-scratch-"));
+  try {
+    mkdirSync(path.join(repo, "scratch"));
+    mkdirSync(path.join(repo, "scratch-x"));
+    writeFileSync(path.join(repo, "a.json"), "{}\n");
+    // real path a.json lies outside the scratchpad: only the lexical test rejects this spelling
+    symlinkSync(path.join(repo, "a.json"), path.join(repo, "scratch", "link.json"));
+    const sc = scopeOf({ cwd: repo, scratchpad_dir: path.join(repo, "scratch") });
+    assert.ok(sc);
+    assert.equal(inScope(sc, path.join(repo, "scratch", "x.json")), null);
+    assert.equal(inScope(sc, "scratch/x.json"), null);
+    assert.equal(inScope(sc, path.join(repo, "scratch")), null);
+    assert.equal(inScope(sc, path.join(repo, "scratch", "link.json")), null);
+    assert.equal(inScope(sc, path.join(repo, "scratch-x", "x.json"))?.fp, path.join(repo, "scratch-x", "x.json"));
+    const none = scopeOf({ cwd: repo, scratchpad_dir: "" });
+    assert.ok(none);
+    assert.equal(inScope(none, path.join(repo, "scratch", "x.json"))?.fp, path.join(repo, "scratch", "x.json"));
+    assert.equal(inScope(none, path.join(repo, "scratch", "link.json"))?.fp, path.join(repo, "scratch", "link.json"));
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test.skipIf(!realDprint)("format_pre: a file inside scratchpad_dir is skipped; a sibling-prefix dir and an empty scratchpad_dir are formatted", async () => {
+  const repo = mkdtempSync(path.join(tmpdir(), "dprint-scratch-fmt-"));
+  mkdirSync(path.join(repo, ".git"));
+  mkdirSync(path.join(repo, "scratch"));
+  mkdirSync(path.join(repo, "scratch-x"));
+  writeFileSync(path.join(repo, "dprint.json"), JSON.stringify({ json: {}, plugins: ["npm:@dprint/json@0.25.2"] }));
+  const call = (file: string, scratchpad_dir: string) => formatPre({ cwd: repo, agent_id: "", session_id: "scratch-fmt", scratchpad_dir, tool_name: "Write", tool_input: { file_path: file, content: "{\n\"a\": 1\n}\n" } });
+  try {
+    assert.deepEqual(await call(path.join(repo, "scratch", "x.json"), path.join(repo, "scratch")), {});
+    assert.ok("hookSpecificOutput" in (await call(path.join(repo, "scratch-x", "x.json"), path.join(repo, "scratch"))), "sibling prefix dir is formatted");
+    assert.ok("hookSpecificOutput" in (await call(path.join(repo, "scratch", "x.json"), "")), "empty scratchpad_dir excludes nothing");
+  } finally {
+    disposeLsp();
+    rmSync(repo, { recursive: true, force: true });
+  }
+}, 60_000);

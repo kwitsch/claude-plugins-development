@@ -472,3 +472,27 @@ test("out-of-cwd absolute write into a sibling agent's worktree is still exclude
   const result = await formatPre({ cwd, tool_name: "Write", tool_input: { file_path: fp, content: "{\"a\":1}" } });
   assert.deepEqual(result, {}, "a sibling agent's worktree must stay excluded even though resolveBase anchors base at its own root");
 });
+
+test("format_pre: a file inside the payload's scratchpad_dir is left alone, also when the scratchpad lies inside the cwd", async () => {
+  const cwd = tmp("uf-scratch-cwd-");
+  const scratch = tmp("uf-scratchpad-");
+  const write = (file: string, scratchpad_dir: string) => formatPre({ cwd, scratchpad_dir, tool_name: "Write", tool_input: { file_path: file, content: "{\"a\":1}" } });
+  assert.deepEqual(await write(path.join(scratch, "a.json"), scratch), {});
+  assert.deepEqual(await write(path.join(scratch, "sub", "a.json"), scratch), {});
+  assert.deepEqual(await write(path.join(scratch, "a.json"), scratch + path.sep), {}, "a trailing separator still matches");
+  mkdirSync(path.join(cwd, "scratch"));
+  assert.deepEqual(await write(path.join(cwd, "scratch", "a.json"), path.join(cwd, "scratch")), {});
+});
+
+test("format_pre: a sibling-prefix dir, an empty, relative or unsubstituted scratchpad_dir exclude nothing", async () => {
+  const cwd = tmp("uf-scratch-keep-");
+  const scratch = tmp("uf-scratchpad-");
+  const sibling = scratch + "-x";
+  mkdirSync(sibling);
+  mkdirSync(path.join(cwd, "rel"));
+  const write = (file: string, scratchpad_dir: string) => formatPre({ cwd, scratchpad_dir, tool_name: "Write", tool_input: { file_path: file, content: "{\"a\":1}" } });
+  assert.equal(preContent(await write(path.join(sibling, "a.json"), scratch)), "{ \"a\": 1 }\n");
+  assert.equal(preContent(await write(path.join(scratch, "a.json"), "")), "{ \"a\": 1 }\n");
+  assert.equal(preContent(await write(path.join(cwd, "rel", "a.json"), "rel")), "{ \"a\": 1 }\n");
+  assert.equal(preContent(await write(path.join(scratch, "a.json"), "${scratchpad_dir}")), "{ \"a\": 1 }\n");
+});

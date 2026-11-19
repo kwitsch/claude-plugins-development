@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import { chmodSync, existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "vitest";
 import { hashPath } from "../plugin/hooks/lint-file.mjs";
@@ -323,4 +323,19 @@ test("probe file: a corrupt store or an unusable data dir fails open", () => {
   writeFileSync(file.data, ""); // CLAUDE_PLUGIN_DATA is a regular file: nothing can be persisted
   file.recStub("shellcheck", 1);
   assert.equal(file.run(file.file("a.sh", "echo $1\n"), { out: SC_OUT }).status, 2);
+});
+
+test("PostToolUse: a file inside the payload's scratchpad_dir -> linter never invoked (also a symlink there to an in-cwd file)", () => {
+  const e = makeEnv();
+  e.recStub("shellcheck", 1);
+  const scratch = path.join(e.cwd, "scratch");
+  const inside = e.file("scratch/a.sh", "echo $1\n");
+  const target = e.file("b.sh", "echo $1\n");
+  const link = path.join(scratch, "link.sh");
+  symlinkSync(target, link);
+  for (const file of [inside, link]) {
+    const r = e.runEvent({ hook_event_name: "PostToolUse", tool_name: "Write", tool_input: { file_path: file, content: "echo $1\n" }, tool_response: { success: true }, cwd: e.cwd, scratchpad_dir: scratch }, { out: "issue" });
+    assert.deepEqual(r.result, {}, file);
+  }
+  assert.deepEqual(e.lines(), []);
 });
