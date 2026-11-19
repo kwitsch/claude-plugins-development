@@ -2,6 +2,7 @@
 
 One section per plugin, each with its own `index.md` that links to everything the wiki holds for that plugin (task list, evaluations, design pages, other pages). This page lists every plugin with a link to its `index.md`. A section's pages are reached from its `index.md` only; `wiki-check.ts` enforces both levels. Format of task lists and evaluations: [plugin-docs-tasks.md](../../../.claude/rules/plugin-docs-tasks.md).
 
+- [cc-knowledge](cc-knowledge/index.md): reference lookup, review, authoring, memory, LSP and repository audits for Claude Code setups, and the `claude-code-guide` reroute hook. Its rules hold the constraints ([references.md](../../../cc-knowledge/.claude/rules/references.md), [skills-and-agents.md](../../../cc-knowledge/.claude/rules/skills-and-agents.md), [hook.md](../../../cc-knowledge/.claude/rules/hook.md)); design pages, the migration note with the test counts and the live check.
 - [dprint](dprint/index.md): formatter hooks through an MCP server, the language-server client, the "no runner" notice. Task list, evaluation.
 - [graphmind-helper](graphmind-helper/index.md): setup hooks and the MCP wrapper for graphmind.
 - [inline-headroom](inline-headroom/index.md): context compression policies; evidence of Claude Code behaviour.
