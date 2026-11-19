@@ -15,7 +15,7 @@ Which files `format_pre` formats, which directory each project-scoped lookup anc
 - The walk is memoised per file directory for the life of the process (`gitRootCache`); a `git init` after the first miss is not seen (accepted, tested).
 - `relativeIfContains` uses `path.relative`. The older `resolved.startsWith(dir + path.sep)` form answered "no" for every file when the directory had a trailing separator or was `/`, which silently disabled the plugin for the session. Do not go back to a prefix test, and do not re-add a project-membership gate.
 - A relative `file_path` with an empty `cwd` is the one unresolvable case and answers `{}`.
-- The only skip reasons are: extension, the path exclusions below, the dprint gate ([dprint-gate.md](dprint-gate.md)) and `<base>/.prettierignore`.
+- The only skip reasons are: extension, the session scratchpad and the path exclusions below, the dprint gate ([dprint-gate.md](dprint-gate.md)) and `<base>/.prettierignore`.
 
 ## Path exclusions
 
@@ -23,6 +23,7 @@ Which files `format_pre` formats, which directory each project-scoped lookup anc
 - Deliberately narrow, not a blanket `.claude/` exclusion: `rules/`, `agents/`, `skills/` and `settings.json` are tracked content and stay formatted.
 - It must be evaluated on the base-relative path. Absolute segments would exclude a session's own worktree for good: its path is `<repo>/.claude/worktrees/<name>/…`, and that worktree is the session's cwd once `EnterWorktree` moved it there.
 - The absolute path is checked for `.claude/worktrees` and `.claude/agent-memory` only when the base is not the cwd. Reason: a file written by absolute path into another agent's worktree would anchor the base at that worktree's root (its `.git` file ends the walk there), which removes `.claude/worktrees` from the relative path, and this agent would reformat state it never entered. When the base is the cwd, the write is inside the session's own root and must stay formatted.
+- Files inside the payload's `scratchpad_dir` (the Claude Code session scratchpad, a harness-owned temp directory such as `/tmp/claude-<uid>/<project>/<session>/scratchpad`) are never formatted: formatting there only gets in the harness's way. `resolveTarget` decides it before `resolveBaseAndRel`, so no git-root walk and no formatter runs. The `format_pre` `input` template passes it as `${scratchpad_dir}`; an empty, relative or non-string value (also an unsubstituted placeholder) means "no scratchpad". The test is lexical only (`relativeIfContains` on `path.resolve`d paths), like the rest of this plugin's scope model: hook payload paths are physical, so a symlinked spelling of the scratchpad is not expected. dprint and universal-lint add a real-path check behind their lexical one; porting `realish` here was rejected (a third copy, extra syscalls for a case payloads do not produce). If a symlinked spelling ever shows up, compare real paths.
 
 ## The payload `cwd` follows the session
 

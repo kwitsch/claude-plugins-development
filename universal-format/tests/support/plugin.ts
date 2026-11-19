@@ -25,6 +25,8 @@ export interface HookOut {
 export interface HookIn {
   /** The session's working directory. */
   cwd: string;
+  /** The session's scratchpad directory, as the hook's `input` template passes it. */
+  scratchpad_dir?: string;
   /** `Write` or `Edit`. */
   tool_name: string;
   /** The tool's input. */
