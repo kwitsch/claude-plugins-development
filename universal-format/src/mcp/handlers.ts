@@ -4,6 +4,7 @@
  *
  * @packageDocumentation
  */
+import { hasClaudeInternal, isExcludedPath, relativeIfContains, walkToRoot } from "@shared/scope.js";
 import { spawn } from "node:child_process";
 import { existsSync, readFileSync, statSync } from "node:fs";
 import os from "node:os";
@@ -11,7 +12,6 @@ import path from "node:path";
 import process from "node:process";
 import { clearPrettierConfigCaches, formatInProcess, isPrettierIgnored, PRETTIER_CONFIG_FILENAMES, primePrettierIgnoreCache } from "./prettier.js";
 import { EXT_MAP, type FormatTool, PRETTIER_LANGS, REGISTRY, selectFormatter } from "./registry.js";
-import { walkToRoot } from "./util.js";
 
 /**
  * Input of `format_pre` as the `input` template of `plugin/hooks/hooks.json` builds it. Trust boundary: every field
@@ -54,41 +54,6 @@ export type HookResult = {
 
 /** How long a CLI formatter may run; the hook's `timeout` in `hooks.json` is the backstop. */
 const SPAWN_TIMEOUT_MS = 30000;
-
-/**
- * Whether one of Claude Code's own subtrees (`.claude/worktrees`, `.claude/agent-memory`) is part of a path.
- *
- * @param segments - The path's segments.
- * @returns True when the path leads into such a subtree.
- */
-const hasClaudeInternal = (segments: string[]): boolean => segments.some((s, i) => s === ".claude" && (segments[i + 1] === "worktrees" || segments[i + 1] === "agent-memory"));
-
-/**
- * Whether a base-relative path is never formatted: dependency and VCS state (`node_modules`, `vendor`, `.git`),
- * Claude Code's worktrees and agent memory, and personal override files (`*.local.*`). Must get the base-relative
- * path: the absolute path of a session inside its own worktree contains `.claude/worktrees`.
- *
- * @param rel - The path relative to the base directory.
- * @returns True when the path is excluded.
- */
-export function isExcludedPath(rel: string): boolean {
-  const segments = rel.split(path.sep);
-  if (segments.some((s) => s === "node_modules" || s === "vendor" || s === ".git")) return true;
-  return hasClaudeInternal(segments) || segments[segments.length - 1].includes(".local.");
-}
-
-/**
- * The path of `resolved` relative to `dir` when `dir` is it or contains it. Uses `path.relative`: a prefix test
- * answered "no" for every file when `dir` had a trailing separator or was `/`.
- *
- * @param dir - The directory.
- * @param resolved - The absolute path.
- * @returns The relative path, or null when `dir` does not contain it.
- */
-function relativeIfContains(dir: string, resolved: string): string | null {
-  const rel = path.relative(dir, resolved);
-  return rel === ".." || rel.startsWith(".." + path.sep) || path.isAbsolute(rel) ? null : rel;
-}
 
 /** {@link findGitRoot} by directory, for the life of the process. */
 const gitRootCache = new Map<string, string>();

@@ -152,3 +152,14 @@ Source: migration task (decisions listed in the PR body), the plugin `CLAUDE.md`
 ## [2026-11-19] ingest | scratchpad paths: relative scratchpad_dir
 
 - **Decision:** a relative `scratchpad_dir` means "no scratchpad" in all three plugins (dprint and universal-lint now guard with `path.isAbsolute` like universal-format); the lexical test stays, a symlinked spelling is not matched (`plugins/universal-format/design/scope-and-base.md`).
+
+## [2026-11-19] ingest | shared source layer for plugins
+
+- **Decision:** duplicates across plugins analysed; build-time shared source (`development/shared/` compiled into `plugin/shared/`) chosen by the user, plan only, nothing implemented (`decisions/shared-source-layer.md`).
+- **Step 1 built:** `@shared/<name>.js` imports are compiled to `plugin/shared/` by `build-plugin.ts`, with no `pluginBuild.shared` list (imports decide); tests in the new `build-scripts` package; all existing plugins rebuild unchanged.
+- **Step 2 built:** `development/shared/src/scope.ts` (path exclusions, `realish`, `outside`, `walkToRoot`) replaces the copies in dprint 0.14.2 and universal-format 0.19.2; tests in the new `shared-code` package; the build guard for `bundleHooksLib` plugins now covers `hooks/` only (dprint imports from `mcp/`). universal-lint left for later.
+- **Scripts to `.ts`:** the five plugin dev scripts (`dprint/scripts/hooks`, `jevfort/scripts/step-calibrate`, `universal-format/scripts/vendor` and `vendor-entry`, `universal-lint/scripts/perf`) are `.ts` now and every reference follows; `vitest.config.mts` stays (renaming it edits the `test` script in every plugin's `package.json`, i.e. a bump for all). Left on purpose: the comment in `jevfort/src/hooks/policy.ts` still says `step-calibrate.mts` (a comment-only change of `src/` would force a jevfort release; fix it with the next source change). `graphmind-helper` and `inline-headroom` still hold `.mts` sources and tests until their first change (rule `src-typescript.md`).
+- **Step 3 built:** `development/shared/src/mcp-core.ts` (`serveMcp`, `readManifestVersion`, `ToolDef`) is the dual-era loop of dprint's and universal-format's MCP servers; jev-api not moved; the loop has its own fixture-server tests, mutation check on scratch copies 25/25 killed (four survivors of the first run got tests).
+- **Step 5 built:** the manifest tests of dprint, jevfort, universal-lint, universal-format and jev-api are one central test in `development/scripts/tests/plugin-manifest.test.ts` (all plugins, no pinned values).
+- **universal-lint 0.17.2:** uses `@shared/scope.js` (walkToRoot, isExcludedPath, realish, outside); import cost measured at +0.3 to 0.6 ms of a 34 to 38 ms start; `realish` is native now (same results, half the time on ext4).
+- **Step 4 dropped:** nothing left to share as types after step 3 (`RequestId`, `ToolDef` live in `mcp-core.ts`); the three `HookResult` types differ on purpose (`decisions/shared-source-layer.md`).

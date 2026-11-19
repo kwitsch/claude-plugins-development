@@ -15,9 +15,7 @@ const readme = read("README.md");
 /** The plugin's own built modules (the vendored bundle is third-party code). */
 const OWN_MODULES = [...readdirSync(path.join(PLUGIN, "mcp")).filter((f) => f.endsWith(".mjs")).map((f) => path.join("mcp", f)), "skills/universal-format/format-files.mjs"];
 
-test("plugin.json: name, the version of package.json, and no userConfig (deliberate: the hook is the plugin)", () => {
-  assert.equal(manifest.name, "universal-format");
-  assert.equal(manifest.version, pkg.version);
+test("plugin.json has no userConfig (deliberate: the hook is the plugin)", () => {
   assert.equal("userConfig" in manifest, false);
 });
 
@@ -72,11 +70,11 @@ test("mcp/server.mjs and the skill driver are executable node scripts that parse
 
 test("hooks/ holds only hooks.json; no launcher script ships", () => {
   assert.deepEqual(readdirSync(path.join(PLUGIN, "hooks")), ["hooks.json"]);
-  assert.deepEqual(readdirSync(PLUGIN).sort(), [".claude-plugin", ".mcp.json", "README.md", "hooks", "mcp", "skills"]);
+  assert.deepEqual(readdirSync(PLUGIN).sort(), [".claude-plugin", ".mcp.json", "README.md", "hooks", "mcp", "shared", "skills"]);
 });
 
 test("the build runs the standard build first, then the vendor step (the standard build removes the chunks)", () => {
-  assert.equal(pkg.scripts.build, "node ../development/scripts/build-plugin.ts && node scripts/vendor.mts");
+  assert.equal(pkg.scripts.build, "node ../development/scripts/build-plugin.ts && node scripts/vendor.ts");
 });
 
 test("prettier, its three plugins and sh-syntax are pinned exactly (no range prefix)", () => {

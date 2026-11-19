@@ -3,7 +3,7 @@
 // TYPESAFE_DEFAULT_MODEL), writes the scores to tests/fixtures/step-effort-scores.json and prints, per label, the
 // spread and the cut points that separate neighbouring labels best. Dev tool: never shipped.
 //
-//   node scripts/step-calibrate.mts [--runs 5] [--out tests/fixtures/step-effort-scores.json]
+//   node scripts/step-calibrate.ts [--runs 5] [--out tests/fixtures/step-effort-scores.json]
 import { readFileSync, writeFileSync } from "node:fs";
 import { sendRequest } from "../../jev-api/src/shared/http.ts";
 import { EFFORT_CUTS, effortLevel, stepEffortQuestion } from "../src/hooks/policy.ts";

@@ -1,5 +1,5 @@
 /**
- * The unbounded directory walk and the lookup of CLI formatters.
+ * The lookup of CLI formatters on PATH.
  *
  * @packageDocumentation
  */
@@ -7,22 +7,6 @@ import { accessSync, constants as fsConstants } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import process from "node:process";
-
-/**
- * Walks from a directory up to the filesystem root (inclusive) until the callback answers true.
- *
- * @param dir - The directory to start at.
- * @param checkDir - Called for each directory; true ends the walk.
- * @returns True when a directory was accepted, false when the root was passed.
- */
-export function walkToRoot(dir: string, checkDir: (dir: string) => boolean): boolean {
-  for (;;) {
-    if (checkDir(dir)) return true;
-    const parent = path.dirname(dir);
-    if (parent === dir) return false;
-    dir = parent;
-  }
-}
 
 /** Whether a tool is on PATH, by tool name, for the life of the process. */
 const probeCache = new Map<string, boolean>();

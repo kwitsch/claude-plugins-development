@@ -39,6 +39,14 @@ importers:
         specifier: workspace:*
         version: link:../development/vitest/claude-engine
 
+  development/scripts: {}
+
+  development/shared:
+    devDependencies:
+      '@modelcontextprotocol/server':
+        specifier: 2.4.0
+        version: 2.4.0
+
   development/vitest/claude-engine:
     dependencies:
       vitest:

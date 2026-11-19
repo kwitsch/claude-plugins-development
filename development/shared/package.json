@@ -1,0 +1,11 @@
+{
+  "name": "shared-code",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "vitest run --config \"$(git rev-parse --show-toplevel)/vitest.config.mts\""
+  },
+  "devDependencies": {
+    "@modelcontextprotocol/server": "2.4.0"
+  }
+}

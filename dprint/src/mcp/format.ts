@@ -8,9 +8,10 @@
  *
  * @packageDocumentation
  */
+import { isExcludedPath, outside, realish } from "@shared/scope.js";
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, lstatSync, readFileSync, realpathSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
@@ -400,52 +401,6 @@ export function disposeLsp(): void {
   clients.clear();
 }
 
-/**
- * Paths never formatted, same as universal-format: dependency and VCS dirs, other agents' worktrees and
- * memory, personal `*.local.*` files.
- *
- * @param rel - Path relative to the working directory.
- * @returns `true` when the path must be left alone.
- */
-const isExcludedPath = (rel: string): boolean => {
-  const segs = rel.split(path.sep);
-  return (
-    segs.some((s) => s === "node_modules" || s === "vendor" || s === ".git")
-    || segs.some(
-      (s, i) =>
-        s === ".claude"
-        && (segs[i + 1] === "worktrees" || segs[i + 1] === "agent-memory"),
-    )
-    || segs[segs.length - 1].includes(".local.")
-  );
-};
-
-/**
- * Real path of `p`, also for a path that does not exist yet (the new file of a Write).
- *
- * @remarks
- * A missing path resolves through its nearest existing ancestor. A dangling symlink, or a link that cannot be
- * resolved (`ELOOP`, `EACCES`), throws: falling back to the lexical path of a dangling link would let a Write
- * follow it out of the cwd.
- *
- * @param p - Path to resolve.
- * @returns The real path of `p`, or of its nearest existing ancestor joined with the missing rest.
- */
-const realish = (p: string): string => {
-  try {
-    return realpathSync.native(p);
-  } catch (e) {
-    if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw e;
-    try {
-      lstatSync(p);
-    } catch {
-      const dir = path.dirname(p);
-      return dir === p ? p : path.join(realish(dir), path.basename(p));
-    }
-    throw e; // p itself exists: a dangling symlink
-  }
-};
-
 /** Effective working directory of one hook call, resolved once for many {@link inScope} checks. */
 type Scope = {
   /** Lexical effective cwd: the `dprint lsp` root and the `findConfig` start. */
@@ -507,7 +462,6 @@ export function inScope(
 ): { fp: string; real: string } | null {
   if (!file) return null;
   const fp = path.resolve(sc.root, file);
-  const outside = (rel: string) => rel === ".." || rel.startsWith(".." + path.sep) || path.isAbsolute(rel);
   if (sc.scratch !== null && !outside(path.relative(sc.scratch, fp))) return null;
   let real: string;
   try {

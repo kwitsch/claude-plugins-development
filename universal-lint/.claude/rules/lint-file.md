@@ -3,7 +3,7 @@ paths:
   - "src/hooks/**"
   - "plugin/hooks/**"
   - "tests/*.test.ts"
-  - "scripts/perf.mts"
+  - "scripts/perf.ts"
 ---
 
 # `lint-file.ts`: what must hold
@@ -21,14 +21,14 @@ The constraints of the lint hook, one section per area. Each section names its d
 - A linter's stdout and stderr are both captured and never ignored. Success is decided by each tool's exit-code contract (`classifyExit`), checkstyle by its output; a new tool needs its contract checked against the live tool, not only its docs.
 - No `userConfig`, no toggle (`CLAUDE.md`).
 
-Design: [hook-design.md](../../../development/wiki/plugins/universal-lint/design/hook-design.md) (hooks, command hooks instead of a server, timeout budget, runtime behaviour, measured cost, `scripts/perf.mts`).
+Design: [hook-design.md](../../../development/wiki/plugins/universal-lint/design/hook-design.md) (hooks, command hooks instead of a server, timeout budget, runtime behaviour, measured cost, `scripts/perf.ts`).
 
 ## Who gets a finding, and when
 
 - Findings go to the agent that made the edit. An edit with `agent_id` in the payload is journaled and not linted; that agent's `SubagentStop` lints its files once and reports to it. The main conversation's findings wait until it has made no Write/Edit for the quiet time; `Stop` sweeps what is still unreported.
 - A lint reports only when it covers the newest state of the file: unchanged during the lint, no newer journal record of that file and owner, unchanged after the hold, and its own record claimed. Otherwise it reports nothing and leaves the records for the next lint or the sweep.
 - Without a journal record (unwritable data dir) a lint reports at once; a stop is blocked at most once; a broken chain of records means the whole file is checked (report more, never less).
-- `UNIVERSAL_LINT_SETTLE_MS` is a seam for tests and `scripts/perf.mts`, not a setting.
+- `UNIVERSAL_LINT_SETTLE_MS` is a seam for tests and `scripts/perf.ts`, not a setting.
 
 Design: [settle-window.md](../../../development/wiki/plugins/universal-lint/design/settle-window.md) (owner, journal, gate over all pending edits, hold, sweep, headless, residuals).
 

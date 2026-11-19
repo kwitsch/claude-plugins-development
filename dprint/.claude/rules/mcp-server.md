@@ -33,7 +33,7 @@ arguments are named constants or comments in the sources; this rule records beha
 
 ## Modules
 
-- `server.ts`: MCP stdio loop, tools `format_pre`, `cwd_changed` (CwdChanged), `worktree_entered`/`worktree_exited`
+- `server.ts`: the tool table (the stdio loop is `serveMcp` of `@shared/mcp-core.js`; stdin closing runs `disposeLsp`), tools `format_pre`, `cwd_changed` (CwdChanged), `worktree_entered`/`worktree_exited`
   (PostToolUse EnterWorktree/ExitWorktree), `file_written` (PostToolUse Write|Edit), `file_changed` (FileChanged),
   `bash_started`/`bash_finished` (PreToolUse, and PostToolUse plus PostToolUseFailure `Bash`: a non-zero exit fires
   the failure event) and `drain_notices` (PreToolUse `Edit|Write|Read|Bash|MultiEdit`, UserPromptSubmit). Typed by

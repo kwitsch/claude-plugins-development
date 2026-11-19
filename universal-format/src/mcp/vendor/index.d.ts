@@ -1,5 +1,5 @@
-// Types of the vendored bundle `plugin/mcp/vendor/index.mjs`, which `scripts/vendor.mts` builds from
-// `scripts/vendor-entry.mts`. Sources import it as `./vendor/index.js`; this file is not built.
+// Types of the vendored bundle `plugin/mcp/vendor/index.mjs`, which `scripts/vendor.ts` builds from
+// `scripts/vendor-entry.ts`. Sources import it as `./vendor/index.js`; this file is not built.
 
 export * as prettier from "prettier";
 

@@ -50,7 +50,7 @@ See [how-to-work-a-task.md](../how-to-work-a-task.md).
 - Before/after numbers of a change: that task's Status or "Measured" section.
 - Current baseline: `tasks/F01-measurement-baseline.md`, "Measured" (0.15.29 medians, machine label); 0.16.0 medians, the 0.15.30 A/B and the settle-window costs (hold, journal, digests, bursts): `EVALUATION-2026-11-14.md`; 0.16.1 medians, the F35/F36 effect, the precheck cost and bursts with an own-line finding per file: `EVALUATION-2026-11-14-v0.16.1.md`.
 - Harness and live-hook recipe: `design/hook-design.md`, "Measured cost".
-- Final verification of 0.15.30: 321 tests pass, `pnpm lint` exit 0, `claude plugin validate` passes (non-blocking ICON_MISSING warning, pre-existing), all 16 `perf.mts` cases ok; the table is the F01 "Measured" section.
+- Final verification of 0.15.30: 321 tests pass, `pnpm lint` exit 0, `claude plugin validate` passes (non-blocking ICON_MISSING warning, pre-existing), all 16 `perf.ts` cases ok; the table is the F01 "Measured" section.
 
 ## Re-check recipes (Claude Code or toolchain upgrades)
 

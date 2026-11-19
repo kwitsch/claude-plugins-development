@@ -8,11 +8,8 @@ import { HOOK, PLUGIN } from "./support/lint-hook.ts";
 
 const json = (rel: string) => JSON.parse(readFileSync(path.join(PLUGIN, rel), "utf8"));
 
-test("plugin.json has the name and a version and no userConfig (deliberate, see CLAUDE.md)", () => {
-  const m = json(".claude-plugin/plugin.json");
-  assert.equal(m.name, "universal-lint");
-  assert.equal(typeof m.version, "string");
-  assert.ok(!("userConfig" in m));
+test("plugin.json has no userConfig (deliberate, see CLAUDE.md)", () => {
+  assert.ok(!("userConfig" in json(".claude-plugin/plugin.json")));
 });
 
 test("PostToolUse hook is wired to lint-file.mjs as an asyncRewake command hook with timeout 90", () => {

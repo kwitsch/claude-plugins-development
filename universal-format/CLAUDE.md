@@ -7,7 +7,7 @@ Formats the content of every `Write` and `Edit` before it lands: one PreToolUse 
 Two layers. The path-scoped rules in `.claude/rules/` load with matching files and hold the constraints only. The design pages in `development/wiki/plugins/universal-format/design/` hold the reasons, measurements, residuals and what was removed on purpose; they are not loaded by themselves. Do not "fix" a behaviour of an area without reading its design page first.
 
 - Hook, server and handler (`plugin/hooks/hooks.json`, `plugin/.mcp.json`, `src/mcp/`): rule `hooks-and-server.md`.
-- Vendored prettier bundle (`scripts/vendor.mts`, `scripts/vendor-entry.mts`, `src/mcp/vendor/index.d.ts`, `plugin/mcp/vendor/`): rule `vendor-build.md`.
+- Vendored prettier bundle (`scripts/vendor.ts`, `scripts/vendor-entry.ts`, `src/mcp/vendor/index.d.ts`, `plugin/mcp/vendor/`): rule `vendor-build.md`.
 - Skill `universal-format` (`plugin/skills/universal-format/`, driver `src/skills/universal-format/format-files.ts`): rule `skill-driver.md`.
 - Tests: rule `tests.md`.
 
@@ -15,10 +15,10 @@ Two layers. The path-scoped rules in `.claude/rules/` load with matching files a
 
 Import graph, no cycle at runtime: `util` ← `editorconfig` ← `prettier` ← `registry` ← `handlers` ← `server` (`editorconfig` imports a type from `registry`, erased by the build).
 
-- `server.ts`: the MCP stdio loop, dual-era, one tool.
+- `server.ts`: the one-tool table; the dual-era stdio loop is `@shared/mcp-core.js`.
 - `handlers.ts`: `formatPre`, the base directory (`resolveBase`), path exclusions, the dprint gate, the Edit swap (`applyEdit`, `shrinkSwap`), the pending config refreshes, the stdin run of a CLI formatter.
 - `prettier.ts`: the bundled prettier and its three lazily loaded plugins, the printWidth guard, the project-config and ignore caches.
-- `registry.ts`: extension map and the CLI formatter chains. `editorconfig.ts`: `.editorconfig` resolver and its mapping to CLI flags. `util.ts`: the upward walk and the PATH lookup.
+- `registry.ts`: extension map and the CLI formatter chains. `editorconfig.ts`: `.editorconfig` resolver and its mapping to CLI flags. `util.ts`: the PATH lookup. The upward walk, the path exclusions and the real-path lookup are `@shared/scope.js` (`development/shared/src/scope.ts`).
 
 ## No `userConfig` (deliberate, permanent)
 
