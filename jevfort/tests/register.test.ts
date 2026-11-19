@@ -1517,7 +1517,7 @@ test("stepEffort: a step score that is no number fails the request like an outag
   expect(seen.map((s) => s.effort)).toEqual(["high", "xhigh", "medium"]);
 });
 
-// The step cuts (STEP_EFFORT_CUTS, calibrated with scripts/step-calibrate.mts) sit below the request question's: a delta
+// The step cuts (STEP_EFFORT_CUTS, calibrated with scripts/step-calibrate.ts) sit below the request question's: a delta
 // score of 0.5 is medium, 1.3 high, 2.0 xhigh, and 0.4 stays low; the edges are 0.45, 1.2 and 1.95.
 for (const [score, effort] of [[0.4, "low"], [0.5, "medium"], [1.1, "medium"], [1.3, "high"], [1.9, "high"], [2.0, "xhigh"], [2.9, "xhigh"]] as const) {
   test(`stepEffort: a step score of ${score} runs at ${effort}`, { options: { stepEffort: true } }, async ($, on) => {

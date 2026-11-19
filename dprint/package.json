@@ -13,9 +13,9 @@
   },
   "type": "module",
   "scripts": {
-    "build": "node scripts/hooks.mts && node ../development/scripts/build-plugin.ts",
+    "build": "node scripts/hooks.ts && node ../development/scripts/build-plugin.ts",
     "test": "vitest run --config \"$(git rev-parse --show-toplevel)/vitest.config.mts\"",
-    "lint": "node scripts/hooks.mts --check"
+    "lint": "node scripts/hooks.ts --check"
   },
   "devDependencies": {
     "@modelcontextprotocol/server": "2.4.0",

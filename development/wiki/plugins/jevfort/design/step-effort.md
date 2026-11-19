@@ -47,7 +47,7 @@ The new text asks for the difficulty of the work that follows the delta, not of 
 
 ### Step cuts (0.13.1)
 
-`scripts/step-calibrate.mts` scores the 32 labelled deltas of `tests/fixtures/step-deltas.json` (labels 0 low to 3 xhigh, hand-written by one author: 10 / 10 / 8 / 4 deltas) five times each against the real Jev endpoint and writes `tests/fixtures/step-effort-scores.json` (measured 2026-11-18, d1-3b through jev-api). Same question text as in 0.13.1.
+`scripts/step-calibrate.ts` scores the 32 labelled deltas of `tests/fixtures/step-deltas.json` (labels 0 low to 3 xhigh, hand-written by one author: 10 / 10 / 8 / 4 deltas) five times each against the real Jev endpoint and writes `tests/fixtures/step-effort-scores.json` (measured 2026-11-18, d1-3b through jev-api). Same question text as in 0.13.1.
 
 | Label    | Scores (n) | Mean | sd   | Range     |
 | :------- | :--------- | :--- | :--- | :-------- |

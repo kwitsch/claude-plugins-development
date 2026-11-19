@@ -4,7 +4,7 @@ Source: performance analysis of the universal-lint hook (0.14.0) on 2026-11-07, 
 
 Finished: all of F01-F34 shipped or closed docs-only in 0.15.1-0.15.29 and 0.16.0 (F34, user-requested settle window); 0.15.30 was the final verification and docs pass (no code change). Current baseline: the F01 doc 'Measured' section (0.15.29); 0.16.0 numbers, the 0.15.30 A/B and the settle-window costs: [EVALUATION-2026-11-14.md](evaluations/EVALUATION-2026-11-14.md). Re-check recipes: development/wiki/plugins/universal-lint/README.md. F35-F37 (found by that evaluation) shipped in 0.16.1; 0.16.1 numbers (F35/F36 effect, precheck cost, corrected bursts): [EVALUATION-2026-11-14-v0.16.1.md](evaluations/EVALUATION-2026-11-14-v0.16.1.md), which opened F38 and F39 (section Remaining).
 
-Measurements: every number in these documents is from one machine on one day, often under load (load average 6-8 while other benchmarks ran, about ±15% noise), and the machine's PATH carries 44 Windows `/mnt/c` dirs that inflate any PATH scan. Re-measure (F01), with `scripts/perf.mts`, before relying on a number, and judge each change against a fresh baseline.
+Measurements: every number in these documents is from one machine on one day, often under load (load average 6-8 while other benchmarks ran, about ±15% noise), and the machine's PATH carries 44 Windows `/mnt/c` dirs that inflate any PATH scan. Re-measure (F01), with `scripts/perf.ts`, before relying on a number, and judge each change against a fresh baseline.
 
 rtk support was removed in 0.15.0. rtk mentions in the open tasks and notes describe the measured 0.14.x behavior.
 
@@ -64,10 +64,10 @@ Entry format and sections: `.claude/rules/plugin-docs-tasks.md`; `wiki-check.ts`
 - F37 before or with F35/F36: all three touch `hook-design.md` "Settle window (F34)"; F35's precheck counts a parse error as droppable, so F36 does not change it.
 - F39 is independent (tests only).
 
-- Before each task: re-run `node universal-lint/scripts/perf.mts` (F01, done) for a fresh baseline; each task's Verification compares against it.
+- Before each task: re-run `node universal-lint/scripts/perf.ts` (F01, done) for a fresh baseline; each task's Verification compares against it.
 - F02 + F03 together remove all false eslint findings seen in this analysis; F02 alone (the safety net) covers projects that have a config but no reachable binary. F04's walk from the file's directory fixes the sub-package case (91 of 128 historical pnpm findings).
 - F04 before F09: both rework the npx-fallback branch of `runLintTool`; F04 covers locally installed tools, F09 the npx-cache-only ones (markdown).
-- F11's savings and F04's are not additive for JS/TS: measured in F11 (0.15.9 -> 0.15.10, `perf.mts` medians, real PATH), `.mts` Write (local oxlint, F04 route) 387 -> 263 ms and `.ts` Write (tsc on PATH) 151 -> 141 ms, against `.sh`/`.py`/`.yml` (one missing PATH tool each) 142/144/146 -> 48/45/47 ms and `.md` 479 -> 292 ms; F28 documents the rest.
+- F11's savings and F04's are not additive for JS/TS: measured in F11 (0.15.9 -> 0.15.10, `perf.ts` medians, real PATH), `.mts` Write (local oxlint, F04 route) 387 -> 263 ms and `.ts` Write (tsc on PATH) 151 -> 141 ms, against `.sh`/`.py`/`.yml` (one missing PATH tool each) 142/144/146 -> 48/45/47 ms and `.md` 479 -> 292 ms; F28 documents the rest.
 - F08 (done) shortened the `watchList` loop; F12 (done) cheapened the per-file check inside it; F19 (closed docs-only in 0.15.16) adds nothing to it (F15 closed docs-only, no re-emission).
 - F10 before F13 (the slot cap bounds the peak; F13 removes redundant work inside it).
 - F03 and F09 before F16. F10/F13/F18 changed the timeout budget (re-derived in hook-design.md with F18); F29 closed in 0.15.26.

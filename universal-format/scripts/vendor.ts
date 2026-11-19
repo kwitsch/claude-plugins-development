@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Usage: node scripts/vendor.mts  (from universal-format/, after build-plugin.ts: its stale-.mjs cleanup removes the chunks)
+// Usage: node scripts/vendor.ts  (from universal-format/, after build-plugin.ts: its stale-.mjs cleanup removes the chunks)
 // Bundles the third-party runtime code (prettier and its java, php and shell plugins) into plugin/mcp/vendor/*.mjs
 // with rolldown and copies the three wasm files the plugins load at runtime. The bundle is written to a temp directory
 // first, so plugin/mcp/vendor/ never holds half a bundle; after a failed bundle the chunks are missing all the same
@@ -27,7 +27,7 @@ const WASM: [string, string][] = [
 
 const tmp = mkdtempSync(path.join(tmpdir(), "uf-vendor-"));
 try {
-  const bundle = await rolldown({ input: { index: "scripts/vendor-entry.mts" }, platform: "node", logLevel: "silent" });
+  const bundle = await rolldown({ input: { index: "scripts/vendor-entry.ts" }, platform: "node", logLevel: "silent" });
   // no comments (they carry machine-specific module paths), content-hashed chunk names: the output is the same on every machine
   await bundle.write({ dir: tmp, format: "esm", minify: true, comments: false, entryFileNames: "[name].mjs", chunkFileNames: "[name]-[hash].mjs" });
   await bundle.close();

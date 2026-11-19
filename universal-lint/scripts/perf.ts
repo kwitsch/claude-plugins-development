@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Usage: node universal-lint/scripts/perf.mts [runs=5]   (from any directory; run `pnpm --filter universal-lint build` first)
+// Usage: node universal-lint/scripts/perf.ts [runs=5]   (from any directory; run `pnpm --filter universal-lint build` first)
 // Per-event cost of the built hook plugin/hooks/lint-file.mjs (dev only, never shipped): spawns it directly through
 // its shebang (as hooks.json does) with a payload file as stdin for 16 cases, once with the real PATH and once with
 // the /mnt/ dirs removed, and prints a Markdown table of median (min-max) ms over `runs` timed rounds after one
@@ -23,7 +23,7 @@ const RUN_TIMEOUT_MS = 120_000;
 /** Linters the cases invoke (`.sh`, `.py`, `.yml`, `.md`, `.css`, `.ts`, `.mts`); the header says which were found on PATH. */
 const TOOLS = ["shellcheck", "ruff", "yamllint", "markdownlint-cli2", "eslint", "oxlint", "stylelint"];
 /** Printed to stderr on a bad argument. */
-const USAGE = "usage: node universal-lint/scripts/perf.mts [runs=5]";
+const USAGE = "usage: node universal-lint/scripts/perf.ts [runs=5]";
 
 /** One measured case (a table row). */
 interface Case {
@@ -110,7 +110,7 @@ function makeFixtures(dir: string): Case[] {
     { name: ".ts Write (no eslint config)", cwd: dir, payload: post("Write", "a.ts"), expect: 0 },
     { name: ".ts Edit (no eslint config)", cwd: dir, payload: post("Edit", "a.ts", edit), expect: 0 },
     // A real repo file through the root .oxlintrc.json and node_modules/.bin/oxlint (F04's local-bin route); the digest lands in CLAUDE_PLUGIN_DATA.
-    { name: ".mts Write (this repo)", cwd: repo, payload: { hook_event_name: "PostToolUse", tool_name: "Write", tool_input: { file_path: join(repo, "universal-lint/scripts/perf.mts") }, tool_response: { success: true }, cwd: repo }, expect: 0 },
+    { name: ".mts Write (this repo)", cwd: repo, payload: { hook_event_name: "PostToolUse", tool_name: "Write", tool_input: { file_path: join(repo, "universal-lint/scripts/perf.ts") }, tool_response: { success: true }, cwd: repo }, expect: 0 },
     { name: "FileChanged tracked unchanged", cwd: dir, payload: changed("change", "t.sh"), expect: 0 },
     { name: "FileChanged ignored", cwd: dir, payload: changed("change", "ign.sh"), expect: 0 },
     { name: "FileChanged unlink", cwd: dir, payload: changed("unlink", "a.sh"), expect: 0 },

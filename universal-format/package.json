@@ -13,7 +13,7 @@
   },
   "type": "module",
   "scripts": {
-    "build": "node ../development/scripts/build-plugin.ts && node scripts/vendor.mts",
+    "build": "node ../development/scripts/build-plugin.ts && node scripts/vendor.ts",
     "test": "vitest run --config \"$(git rev-parse --show-toplevel)/vitest.config.mts\""
   },
   "devDependencies": {

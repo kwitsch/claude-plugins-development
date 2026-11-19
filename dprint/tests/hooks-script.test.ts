@@ -1,4 +1,4 @@
-// Tests for scripts/hooks.mts: hooks.json validation and the generated hook input types.
+// Tests for scripts/hooks.ts: hooks.json validation and the generated hook input types.
 // Each negative case runs the script against a scratch copy of the plugin with one defect.
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
@@ -9,7 +9,7 @@ import { fileURLToPath } from "node:url";
 import { afterAll, test } from "vitest";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const SCRIPT = path.join(ROOT, "scripts/hooks.mts");
+const SCRIPT = path.join(ROOT, "scripts/hooks.ts");
 const HOOKS = JSON.parse(
   readFileSync(path.join(ROOT, "plugin/hooks/hooks.json"), "utf8"),
 );

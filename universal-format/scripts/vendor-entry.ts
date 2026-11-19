@@ -1,4 +1,4 @@
-// Entry of the vendored bundle `plugin/mcp/vendor/index.mjs` (written by `vendor.mts`): the one prettier of the server
+// Entry of the vendored bundle `plugin/mcp/vendor/index.mjs` (written by `vendor.ts`): the one prettier of the server
 // and its three third-party plugins. Types for `src/`: `src/mcp/vendor/index.d.ts`.
 
 export * as prettier from "prettier";

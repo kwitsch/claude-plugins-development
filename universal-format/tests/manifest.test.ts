@@ -76,7 +76,7 @@ test("hooks/ holds only hooks.json; no launcher script ships", () => {
 });
 
 test("the build runs the standard build first, then the vendor step (the standard build removes the chunks)", () => {
-  assert.equal(pkg.scripts.build, "node ../development/scripts/build-plugin.ts && node scripts/vendor.mts");
+  assert.equal(pkg.scripts.build, "node ../development/scripts/build-plugin.ts && node scripts/vendor.ts");
 });
 
 test("prettier, its three plugins and sh-syntax are pinned exactly (no range prefix)", () => {
