@@ -7,7 +7,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSy
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "vitest";
-import { acquireSlot, buildArgv, classifyCheckstyleOutput, classifyExit, coalesceProjectCheck, configExists, editRanges, FILE_CHANGED_SLOTS, gateFinding, hashPath, hasProjectMarkdownlintConfig, hasProjectYamllintConfig, isExcludedPath, isToolAvailable, lintFileHandler, lintFilesHandler, looksLikeSolutionStyleTsconfig, oxlintConfigTypeChecks, recordWritten, REGISTRY, resolveCargoManifest, resolveCheckstyleConfig, resolveLintTarget, resolveOxlintConfig, resolveTsconfig, scopedTarget, slotDeadlineMs, stripTrailingCommas, truncate, tsBuildInfoPathFor, tscOutputHasSourceDiagnostic, WATCH_LIMIT, writtenContent } from "../plugin/hooks/lint-file.mjs";
+import { acquireSlot, buildArgv, classifyCheckstyleOutput, classifyExit, coalesceProjectCheck, configExists, editRanges, FILE_CHANGED_SLOTS, gateFinding, hashPath, hasProjectMarkdownlintConfig, hasProjectYamllintConfig, isToolAvailable, lintFileHandler, lintFilesHandler, looksLikeSolutionStyleTsconfig, oxlintConfigTypeChecks, recordWritten, REGISTRY, resolveCargoManifest, resolveCheckstyleConfig, resolveLintTarget, resolveOxlintConfig, resolveTsconfig, scopedTarget, slotDeadlineMs, stripTrailingCommas, truncate, tsBuildInfoPathFor, tscOutputHasSourceDiagnostic, WATCH_LIMIT, writtenContent } from "../plugin/hooks/lint-file.mjs";
 
 // The handler tests below call lintFileHandler in this process: report findings at once, no settle window (F34).
 process.env.UNIVERSAL_LINT_SETTLE_MS = "0";
@@ -735,39 +735,6 @@ test("classifyExit: psalm is 0-clean/2-issues/else-skip (NOT the shared 0/1/else
   assert.equal(classifyExit("psalm", 1), "skip");
   assert.equal(classifyExit("psalm", 2), "issues");
   assert.equal(classifyExit("psalm", 3), "skip");
-});
-
-test("isExcludedPath: node_modules/vendor/.git segments -> excluded", () => {
-  assert.equal(isExcludedPath(path.join("node_modules", "x", "a.sh")), true);
-  assert.equal(isExcludedPath(path.join("vendor", "a.php")), true);
-  assert.equal(isExcludedPath(path.join(".git", "hooks", "a.sh")), true);
-});
-
-test("isExcludedPath: .claude/worktrees and .claude/agent-memory -> excluded", () => {
-  assert.equal(isExcludedPath(path.join(".claude", "worktrees", "foo", "a.sh")), true);
-  assert.equal(isExcludedPath(path.join(".claude", "agent-memory", "a.md")), true);
-});
-
-test("isExcludedPath: other .claude/ subtrees (e.g. rules/agents/skills) stay covered", () => {
-  assert.equal(isExcludedPath(path.join(".claude", "rules", "a.md")), false);
-  assert.equal(isExcludedPath(path.join(".claude", "settings.json")), false);
-});
-
-test("isExcludedPath: a later .claude segment matching worktrees/agent-memory is still excluded, even after an earlier non-matching .claude segment", () => {
-  assert.equal(isExcludedPath(path.join(".claude", "rules", ".claude", "worktrees", "foo", "a.sh")), true);
-  assert.equal(isExcludedPath(path.join(".claude", "skills", ".claude", "agent-memory", "a.md")), true);
-});
-
-test("isExcludedPath: *.local.* files excluded regardless of location", () => {
-  assert.equal(isExcludedPath(path.join(".claude", "settings.local.json")), true);
-  assert.equal(isExcludedPath("docker-compose.local.yml"), true);
-  assert.equal(isExcludedPath("a.sh"), false);
-});
-
-test("isExcludedPath: worktrees/agent-memory only under .claude, .local. only in the basename", () => {
-  assert.equal(isExcludedPath(path.join("docs", "worktrees", "a.md")), false);
-  assert.equal(isExcludedPath(path.join("src", "agent-memory", "a.ts")), false);
-  assert.equal(isExcludedPath(path.join("conf.local.d", "a.sh")), false);
 });
 
 /** The PostToolUse payload resolveLintTarget reads. */

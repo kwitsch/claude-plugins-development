@@ -27,6 +27,7 @@
  *
  * @packageDocumentation
  */
+import { isExcludedPath, outside, realish, walkToRoot } from "@shared/scope.js";
 import { execFileSync, spawn } from "node:child_process";
 import type { ChildProcess, SpawnSyncOptionsWithStringEncoding, SpawnSyncReturns } from "node:child_process";
 import type { Hash } from "node:crypto";
@@ -1194,29 +1195,6 @@ const MARKDOWNLINT_CONFIG_FILENAMES = [
 ];
 
 /**
- * Walk from `dir` up to the filesystem root (inclusive), calling `checkDir` at
- * each level; true on the first hit. Unbounded, unlike walkUpToCwd above:
- * markdownlint-cli2's own per-file config resolution walks past its base
- * directory up through that directory's own ancestors too (verified against
- * markdownlint-cli2's source, enumerateParents) -- bounding this at `cwd`
- * risks misdetecting "absent" for a real config living above the project
- * root (a workspace/monorepo case). Eslint config detection (`lintResolved`)
- * uses it too: eslint looks up its config past the project root as well.
- *
- * @param dir - Directory to start from.
- * @param checkDir - Probe called per directory.
- * @returns True on the first directory the probe accepts.
- */
-function walkToRoot(dir: string, checkDir: (dir: string) => boolean): boolean {
-  for (;;) {
-    if (checkDir(dir)) return true;
-    const parent = path.dirname(dir);
-    if (parent === dir) return false;
-    dir = parent;
-  }
-}
-
-/**
  * True if a markdownlint-cli2 or markdownlint (classic) project config
  * governs `fileDir` -- existence-only over MARKDOWNLINT_CONFIG_FILENAMES.
  *
@@ -1838,64 +1816,9 @@ async function runTypeCheck(resolved: string, cwd: string, coalesce = false, ses
   };
 }
 
-/**
- * True when `rel` (already resolved inside cwd) is dependency/VCS state
- * (node_modules/vendor/.git, unchanged) or Claude-Code-owned session/worktree
- * machinery that happens to sit inside cwd -- a nested git worktree
- * (.claude/worktrees/…) or an agent's local runtime scratch state
- * (.claude/agent-memory/…, both gitignored in this repo's own .claude/.gitignore)
- * is never real project content, so it's skipped the same way node_modules is.
- * This repo's own tracked .claude/rules|agents|skills stay covered -- only
- * these two specific subtrees are Claude-Code-internal, not `.claude/` as a
- * whole. `*.local.*` (personal local-override files, e.g. settings.local.json)
- * is skipped regardless of location, matching the same naming convention.
- *
- * @param rel - Path relative to cwd.
- * @returns True when the path is excluded from linting.
- */
-export function isExcludedPath(rel: string): boolean {
-  const segments = rel.split(path.sep);
-  if (segments.some((s) => s === "node_modules" || s === "vendor" || s === ".git")) return true;
-  if (segments.some((s, i) => s === ".claude" && (segments[i + 1] === "worktrees" || segments[i + 1] === "agent-memory"))) return true;
-  return segments[segments.length - 1].includes(".local.");
-}
-
-/**
- * realpath of `p`; for a missing path, the nearest existing ancestor's realpath joined with the missing rest (port of
- * dprint's `realish`).
- *
- * @param p - Absolute path.
- * @returns The real path.
- * @throws When `p` itself exists but cannot be resolved (a dangling symlink), or on any non-ENOENT error.
- */
-function realish(p: string): string {
-  try {
-    return realpathSync(p);
-  } catch (e) {
-    if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw e;
-    try {
-      lstatSync(p);
-    } catch {
-      const dir = path.dirname(p);
-      return dir === p ? p : path.join(realish(dir), path.basename(p));
-    }
-    throw e; // p itself exists: a dangling symlink
-  }
-}
-
 /** The payload's `scratchpad_dir` when it is a string, else undefined. */
 function scratchpadOf(args: PostToolUseHookInput): string | undefined {
   return typeof args.scratchpad_dir === "string" ? args.scratchpad_dir : undefined;
-}
-
-/**
- * Whether a `path.relative(root, p)` result leaves `root` (`..`, `../x`, or another root).
- *
- * @param rel - Relative path from the root.
- * @returns True when `p` lies outside the root.
- */
-function outside(rel: string): boolean {
-  return rel === ".." || rel.startsWith(".." + path.sep) || path.isAbsolute(rel);
 }
 
 /**
