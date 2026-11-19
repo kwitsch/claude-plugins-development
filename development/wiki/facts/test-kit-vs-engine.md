@@ -9,7 +9,7 @@ What the kit offers and how it deviates from the official kit: [README.md](../..
 - In the kit a mod's `$.<ns>.<method>` call runs only the hooks of plugins loaded at or above the caller, then the test stubs. A cross-plugin `$.tool.call` therefore cannot reach another plugin loaded inline beneath it: stub the other plugin's tool. The real engine runs `$.tool.call` through every hook but the calling one, whatever the load order (kit source, typings 2.1.322).
 - In the kit a mod's `$.tool.call` resolves to the stub's `value` and rejects with its `deny`; the real engine resolves `{ deny }`. A fake for another plugin's tool answers `{ value: { result } }`, or `{ value: { deny } }` to model production, and passes other tools on with `next(e)`. A stub that returns a bare `{ result }` to a mod call fails the test (kit source, binary 2.1.322).
 - The kit has no core `tool.register`: stub it. An answer of `{ value: undefined }` crashes code that reads `r.value.tool` (`claude plugin test` 2.1.322).
-- Kit matchers compare with `===` and nested objects field by field; arrays (any-of) and `RegExp` leaves, which the engine supports, are not implemented (kit source).
+- Kit matchers compare with `===` and nested objects field by field; an array leaf is any-of (added with the cc-knowledge migration, 2026-11-19); `RegExp` leaves, which the engine supports, are not implemented (kit source).
 - The kit replaces a stub's thrown error message with `no implementation for <event>` (kit source).
 
 ## Timing

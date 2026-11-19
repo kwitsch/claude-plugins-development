@@ -31,7 +31,7 @@ test("name", { options: { flag: false }, plugins: [{ name: "helper", register(on
 - Assertions come from vitest's `expect`, and there is no `tier()` export (pass `tier` to `createKit`). `describe` is vitest's.
 - `options` are not filled from the manifest's `userConfig` defaults. Pass them in `createKit` or per test.
 - Not implemented: `$.state`, `$.classic.*` beyond plain event dispatch, `plugin.register` refusals, `engine.create`, `next.to`, `next.budget`, `on("!x")` patterns, minting `tool_use_id`, and the hook time limits (a held clock wait is never let go). A `.catch` handler's result replaces a failing hook's result. Its exact semantics in the engine are unverified.
-- Matchers compare fields with `===`, and nested objects field by field. A redraw is not scoped to the invalidating hook's matcher: every mounted site redraws.
+- Matchers compare fields with `===`, nested objects field by field, and an array leaf is any-of (`{ tool: ["Agent", "Task"] }`, added with the cc-knowledge migration); `RegExp` leaves are not implemented. A redraw is not scoped to the invalidating hook's matcher: every mounted site redraws.
 - `settle` waits until a full event-loop turn passes with no dispatch, render or clock activity. Work that never yields to the event loop is not awaited.
 
 ## Porting a kit test
