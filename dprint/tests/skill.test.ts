@@ -1,5 +1,4 @@
-// Static checks on the hand-written skill files and the generated manifest.
-import { pluginManifest } from "@scripts/plugin-manifest.ts";
+// Static checks on the hand-written skill files (the generated manifest is checked for every plugin in development/scripts/tests).
 import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
@@ -11,23 +10,6 @@ const SKILL = readFileSync(
   path.join(ROOT, "plugin/skills/dprint/SKILL.md"),
   "utf8",
 );
-
-test("generated manifest equals pluginManifest(package.json)", () => {
-  assert.deepEqual(
-    JSON.parse(
-      readFileSync(
-        path.join(ROOT, "plugin/.claude-plugin/plugin.json"),
-        "utf8",
-      ),
-    ),
-    pluginManifest(JSON.parse(readFileSync(path.join(ROOT, "package.json"), "utf8"))),
-  );
-});
-
-test("pluginManifest requires the claudePlugin marker CI detects plugins by", () => {
-  assert.throws(() => pluginManifest({ name: "x", version: "1.0.0", description: "d" }), /"claudePlugin" must be an object/);
-  assert.equal(pluginManifest({ name: "x", version: "1.0.0", description: "d", claudePlugin: {} }).name, "x");
-});
 
 test("SKILL.md frontmatter: name, model-invocable, allowed-tools without bare Bash", () => {
   assert.match(SKILL, /^name: dprint$/m);

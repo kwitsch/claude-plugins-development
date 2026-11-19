@@ -1,6 +1,5 @@
 // Wiring contract of the built plugin/ (what the scaffold/skill bats checks still mean in this repo; the layout
 // allowlist, manifest generation and freshness are guarded repo-wide by pnpm build and CI).
-import { pluginManifest } from "@scripts/plugin-manifest.ts";
 import assert from "node:assert/strict";
 import { accessSync, constants, readFileSync } from "node:fs";
 import path from "node:path";
@@ -9,11 +8,8 @@ import { HOOK, PLUGIN } from "./support/lint-hook.ts";
 
 const json = (rel: string) => JSON.parse(readFileSync(path.join(PLUGIN, rel), "utf8"));
 
-test("plugin.json is exactly what package.json generates, with no userConfig (deliberate, see CLAUDE.md)", () => {
-  const m = json(".claude-plugin/plugin.json");
-  const pkg = JSON.parse(readFileSync(path.join(PLUGIN, "..", "package.json"), "utf8"));
-  assert.deepEqual(m, JSON.parse(JSON.stringify(pluginManifest(pkg))));
-  assert.ok(!("userConfig" in m));
+test("plugin.json has no userConfig (deliberate, see CLAUDE.md)", () => {
+  assert.ok(!("userConfig" in json(".claude-plugin/plugin.json")));
 });
 
 test("PostToolUse hook is wired to lint-file.mjs as an asyncRewake command hook with timeout 90", () => {

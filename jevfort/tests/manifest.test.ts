@@ -1,5 +1,4 @@
 // Manifest and wiring contract of the built plugin/ (plugin.json is generated from package.json by pnpm build).
-import { pluginManifest } from "@scripts/plugin-manifest.ts";
 import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
 import { test } from "vitest";
@@ -8,12 +7,6 @@ import { test } from "vitest";
 const json = (rel: string) => JSON.parse(readFileSync(new URL(`../plugin/${rel}`, import.meta.url), "utf8"));
 const manifest = json(".claude-plugin/plugin.json");
 const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
-
-test("the manifest is exactly what package.json generates (name, version, author, description, keywords, claudePlugin fields)", () => {
-  assert.deepEqual(manifest, JSON.parse(JSON.stringify(pluginManifest(pkg))));
-  assert.ok(manifest.description.length > 0);
-  assert.ok(Array.isArray(manifest.keywords) && manifest.keywords.length > 0);
-});
 
 test("the manifest declares the jev-api plugin as its only dependency, and package.json has no npm dependencies", () => {
   assert.deepEqual(manifest.dependencies, ["jev-api"]);

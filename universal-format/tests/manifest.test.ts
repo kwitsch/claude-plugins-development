@@ -1,6 +1,5 @@
 // What the shipped plugin's manifests, hook wiring and user-facing texts must hold. The `hooks.json` pins are
 // regression pins: see `.claude/rules/hooks-and-server.md`.
-import { pluginManifest } from "@scripts/plugin-manifest.ts";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { readdirSync, readFileSync, statSync } from "node:fs";
@@ -16,8 +15,7 @@ const readme = read("README.md");
 /** The plugin's own built modules (the vendored bundle is third-party code). */
 const OWN_MODULES = [...readdirSync(path.join(PLUGIN, "mcp")).filter((f) => f.endsWith(".mjs")).map((f) => path.join("mcp", f)), "skills/universal-format/format-files.mjs"];
 
-test("plugin.json is exactly what package.json generates, with no userConfig (deliberate: the hook is the plugin)", () => {
-  assert.deepEqual(manifest, JSON.parse(JSON.stringify(pluginManifest(pkg as unknown as Record<string, unknown>))));
+test("plugin.json has no userConfig (deliberate: the hook is the plugin)", () => {
   assert.equal("userConfig" in manifest, false);
 });
 
