@@ -1,10 +1,10 @@
 // Wiring contract of the built plugin/ (what the scaffold/skill bats checks still mean in this repo; the layout
 // allowlist, manifest generation and freshness are guarded repo-wide by pnpm build and CI).
+import { pluginManifest } from "@scripts/plugin-manifest.ts";
 import assert from "node:assert/strict";
 import { accessSync, constants, readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "vitest";
-import { pluginManifest } from "../../development/scripts/plugin-manifest.ts";
 import { HOOK, PLUGIN } from "./support/lint-hook.ts";
 
 const json = (rel: string) => JSON.parse(readFileSync(path.join(PLUGIN, rel), "utf8"));

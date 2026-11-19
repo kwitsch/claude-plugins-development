@@ -1,10 +1,10 @@
 // Static checks on the hand-written skill files and the generated manifest.
+import { pluginManifest } from "@scripts/plugin-manifest.ts";
 import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { test } from "vitest";
-import { pluginManifest } from "../../development/scripts/plugin-manifest.ts";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const SKILL = readFileSync(

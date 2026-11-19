@@ -1,7 +1,7 @@
 // pluginManifest (development/scripts/plugin-manifest.ts, shared by every plugin): the version must be a semver string.
+import { pluginManifest } from "@scripts/plugin-manifest.ts";
 import assert from "node:assert/strict";
 import { test } from "vitest";
-import { pluginManifest } from "../../development/scripts/plugin-manifest.ts";
 
 const pkg = (version: unknown): Record<string, unknown> => ({ name: "x", version, description: "d", claudePlugin: {} });
 

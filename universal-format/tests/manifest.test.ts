@@ -1,11 +1,11 @@
 // What the shipped plugin's manifests, hook wiring and user-facing texts must hold. The `hooks.json` pins are
 // regression pins: see `.claude/rules/hooks-and-server.md`.
+import { pluginManifest } from "@scripts/plugin-manifest.ts";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import { test } from "vitest";
-import { pluginManifest } from "../../development/scripts/plugin-manifest.ts";
 import { PLUGIN, SERVER } from "./support/mcp.ts";
 
 const read = (...rel: string[]): string => readFileSync(path.join(PLUGIN, ...rel), "utf8");

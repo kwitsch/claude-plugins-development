@@ -1,8 +1,8 @@
 // Manifest and wiring contract of the built plugin/ (plugin.json is generated from package.json by pnpm build).
+import { pluginManifest } from "@scripts/plugin-manifest.ts";
 import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
 import { test } from "vitest";
-import { pluginManifest } from "../../development/scripts/plugin-manifest.ts";
 
 /** Parsed JSON of a file under plugin/. */
 const json = (rel: string) => JSON.parse(readFileSync(new URL(`../plugin/${rel}`, import.meta.url), "utf8"));
