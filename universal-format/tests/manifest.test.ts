@@ -42,9 +42,10 @@ test("hooks.json declares exactly one event, PreToolUse, with exactly one hook (
 
 // Without `input` Claude Code delivers an EMPTY arguments object to the tool, not the hook JSON: the handler would
 // silently format nothing while the hook still reports success.
-test("format_pre's explicit input reconstructs exactly cwd, tool_name and tool_input.file_path/content/old_string/new_string/replace_all", () => {
+test("format_pre's explicit input reconstructs exactly cwd, scratchpad_dir, tool_name and tool_input.file_path/content/old_string/new_string/replace_all", () => {
   assert.deepEqual(hooks.hooks.PreToolUse[0].hooks[0].input, {
     cwd: "${cwd}",
+    scratchpad_dir: "${scratchpad_dir}",
     tool_name: "${tool_name}",
     tool_input: {
       file_path: "${tool_input.file_path}",

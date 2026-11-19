@@ -81,3 +81,14 @@ test("CLI language: an exit code outside the tool's okExit, or an empty stdout, 
     assert.deepEqual(await formatPre({ cwd, tool_name: "Write", tool_input: { file_path: goFile, content: "package main\n" } }), {}, "exit 0 with empty stdout -> {}");
   });
 });
+
+test("CLI language: a file inside the payload's scratchpad_dir is never handed to the formatter", async () => {
+  const cwd = tmp("uf-cli-scratch-");
+  const scratch = tmp("uf-cli-scratchpad-");
+  const argvLog = path.join(cwd, "argv.log");
+  await withGoimportsStub({ argvLog }, async () => {
+    const result = await formatPre({ cwd, scratchpad_dir: scratch, tool_name: "Write", tool_input: { file_path: path.join(scratch, "main.go"), content: "package   main\n" } });
+    assert.deepEqual(result, {});
+    assert.equal(existsSync(argvLog), false, "neither goimports nor gofmt was spawned");
+  });
+});

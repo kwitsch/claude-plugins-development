@@ -12,7 +12,7 @@ Each section names its design page in `development/wiki/plugins/universal-format
 ## Hook contract
 
 - One hook: PreToolUse `Write|Edit`, `mcp_tool`, server `plugin:universal-format:universal-format-hooks` (the namespaced name, never the bare `.mcp.json` key), tool `format_pre`, `timeout: 60`, no `async`, no `if`. Never add a hook that runs after the write, a `CwdChanged` hook or an `EnterWorktree` hook.
-- The hook's `input` template is required and lists exactly the fields the handler reads (`cwd`, `tool_name`, `tool_input.file_path/content/old_string/new_string/replace_all`): without `input` the tool gets `{}`. A new field the handler reads needs its placeholder there.
+- The hook's `input` template is required and lists exactly the fields the handler reads (`cwd`, `scratchpad_dir`, `tool_name`, `tool_input.file_path/content/old_string/new_string/replace_all`): without `input` the tool gets `{}`. A new field the handler reads needs its placeholder there.
 - The template substitutes text: a boolean arrives as `"true"`/`"false"`, a field the tool call lacks as `""`. Keep the comparison of `replace_all` against both `true` and `"true"`.
 - `format_pre` never sets `permissionDecision`; it answers `updatedInput` plus the `additionalContext` notice, or `{}`.
 - Every guard failure and every error answers `{}` (fail open). Whether something is written is decided by the content diff, never by an exit code.
@@ -31,6 +31,7 @@ Design: [hook-design.md](../../../development/wiki/plugins/universal-format/desi
 
 - No outside-cwd guard and no project-membership gate: a file anywhere is formatted, against the base `resolveBase` picks (the cwd when it contains the file, else the file's git root below `$HOME`, else its own directory).
 - The payload's `cwd` is used as it is, only normalised with `path.resolve`; no cwd tracking, no per-agent override.
+- Files inside the payload's `scratchpad_dir` are never formatted; lexical test in `resolveTarget` before `resolveBaseAndRel` (an empty, relative or non-string value means none).
 - `relativeIfContains` stays `path.relative`-based, never a `startsWith` prefix test. `.git` is existence-checked (it is a file in a worktree).
 - `isExcludedPath` gets the base-relative path, never the absolute one; the absolute check for `.claude/worktrees` and `.claude/agent-memory` applies only when the base is not the cwd. No blanket `.claude/` exclusion.
 
