@@ -452,6 +452,8 @@ type Scope = {
   root: string;
   /** Real path of `root`. */
   realRoot: string;
+  /** Lexical `path.resolve` of the session's `scratchpad_dir` (the fast-pass form of `realScratch`), or `null` when the payload has none. */
+  scratch: string | null;
   /** Real path of the session's `scratchpad_dir`, or `null` when the payload has none. */
   realScratch: string | null;
 };
@@ -481,6 +483,7 @@ export function scopeOf(
     return {
       root,
       realRoot: realish(root),
+      scratch: args.scratchpad_dir ? path.resolve(args.scratchpad_dir) : null,
       realScratch: args.scratchpad_dir ? realish(args.scratchpad_dir) : null,
     };
   } catch {
@@ -494,8 +497,9 @@ export function scopeOf(
  * @param sc - Scope from {@link scopeOf}.
  * @param file - File path, absolute or relative to `sc.root`.
  * @returns `fp` (the path as Claude used it, resolved against `sc.root`) and `real` (its real path) when the
- * real path is strictly inside `sc.realRoot`, not an {@link isExcludedPath} path and not inside the scratchpad;
- * else `null` (also for an empty path, the cwd itself, or a dangling/unresolvable link).
+ * real path is strictly inside `sc.realRoot`, not an {@link isExcludedPath} path and not inside the scratchpad
+ * (a lexical prefix test first, so a scratchpad hit makes no fs call; then the real path); else `null` (also for
+ * an empty path, the cwd itself, or a dangling/unresolvable link).
  */
 export function inScope(
   sc: Scope,
@@ -503,13 +507,14 @@ export function inScope(
 ): { fp: string; real: string } | null {
   if (!file) return null;
   const fp = path.resolve(sc.root, file);
+  const outside = (rel: string) => rel === ".." || rel.startsWith(".." + path.sep) || path.isAbsolute(rel);
+  if (sc.scratch !== null && !outside(path.relative(sc.scratch, fp))) return null;
   let real: string;
   try {
     real = realish(fp);
   } catch {
     return null;
   }
-  const outside = (rel: string) => rel === ".." || rel.startsWith(".." + path.sep) || path.isAbsolute(rel);
   const rel = path.relative(sc.realRoot, real);
   if (rel === "" || outside(rel) || isExcludedPath(rel)) return null;
   if (sc.realScratch !== null) {
@@ -810,7 +815,7 @@ async function cachedWatchList(sc: Scope): Promise<Array<{ fp: string; real: str
   entry.list = (async () => {
     const list: Array<{ fp: string; real: string }> = [];
     try {
-      const shared = { ...sc, realScratch: null }; // the list is shared by calls with other scratchpads: each call applies its own
+      const shared = { ...sc, scratch: null, realScratch: null }; // the list is shared by calls with other scratchpads: each call applies its own
       for (const p of await dprintFilePaths(sc.root)) {
         const s = inScope(shared, p);
         if (s) list.push(s);
