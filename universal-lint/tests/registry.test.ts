@@ -1246,6 +1246,23 @@ test("scopedTarget: null for a file inside the scratchpad dir, kept without one"
   assert.equal(scopedTarget(dir, "s/e.sh")?.fp, path.join(dir, "s", "e.sh"));
 });
 
+test("scopedTarget: a lexical scratchpad hit is null before any fs call; a sibling prefix dir and an empty scratchpad are kept", () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "ul-st-"));
+  const s = path.join(dir, "s");
+  mkdirSync(s);
+  mkdirSync(path.join(dir, "s-x"));
+  writeFileSync(path.join(dir, "a.sh"), "echo a\n");
+  writeFileSync(path.join(dir, "s-x", "e.sh"), "echo hi\n");
+  // real path of the link lies outside the scratchpad: only the lexical test rejects this spelling
+  symlinkSync(path.join(dir, "a.sh"), path.join(s, "link.sh"));
+  assert.equal(scopedTarget(dir, "s/missing.sh", s), null);
+  assert.equal(scopedTarget(dir, "s/link.sh", s), null);
+  assert.equal(scopedTarget(dir, "s/link.sh", s, { cwd: realpathSync(dir), scratchpad: realpathSync(s), dirs: new Map() }), null);
+  assert.equal(scopedTarget(dir, "s-x/e.sh", s)?.fp, path.join(dir, "s-x", "e.sh"));
+  assert.equal(scopedTarget(dir, "s/link.sh", "")?.real, path.join(realpathSync(dir), "a.sh"));
+  assert.equal(scopedTarget(dir, "s/link.sh")?.real, path.join(realpathSync(dir), "a.sh"));
+});
+
 test("scopedTarget: null for cwd itself, an excluded path and an unsupported extension", () => {
   const dir = mkdtempSync(path.join(tmpdir(), "ul-st-"));
   mkdirSync(path.join(dir, "node_modules"));
