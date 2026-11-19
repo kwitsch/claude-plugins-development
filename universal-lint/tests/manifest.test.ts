@@ -4,14 +4,15 @@ import assert from "node:assert/strict";
 import { accessSync, constants, readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "vitest";
+import { pluginManifest } from "../../development/scripts/plugin-manifest.ts";
 import { HOOK, PLUGIN } from "./support/lint-hook.ts";
 
 const json = (rel: string) => JSON.parse(readFileSync(path.join(PLUGIN, rel), "utf8"));
 
-test("plugin.json has the name and a version and no userConfig (deliberate, see CLAUDE.md)", () => {
+test("plugin.json is exactly what package.json generates, with no userConfig (deliberate, see CLAUDE.md)", () => {
   const m = json(".claude-plugin/plugin.json");
-  assert.equal(m.name, "universal-lint");
-  assert.equal(typeof m.version, "string");
+  const pkg = JSON.parse(readFileSync(path.join(PLUGIN, "..", "package.json"), "utf8"));
+  assert.deepEqual(m, JSON.parse(JSON.stringify(pluginManifest(pkg))));
   assert.ok(!("userConfig" in m));
 });
 

@@ -5,6 +5,7 @@ import { spawnSync } from "node:child_process";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import { test } from "vitest";
+import { pluginManifest } from "../../development/scripts/plugin-manifest.ts";
 import { PLUGIN, SERVER } from "./support/mcp.ts";
 
 const read = (...rel: string[]): string => readFileSync(path.join(PLUGIN, ...rel), "utf8");
@@ -15,9 +16,8 @@ const readme = read("README.md");
 /** The plugin's own built modules (the vendored bundle is third-party code). */
 const OWN_MODULES = [...readdirSync(path.join(PLUGIN, "mcp")).filter((f) => f.endsWith(".mjs")).map((f) => path.join("mcp", f)), "skills/universal-format/format-files.mjs"];
 
-test("plugin.json: name, the version of package.json, and no userConfig (deliberate: the hook is the plugin)", () => {
-  assert.equal(manifest.name, "universal-format");
-  assert.equal(manifest.version, pkg.version);
+test("plugin.json is exactly what package.json generates, with no userConfig (deliberate: the hook is the plugin)", () => {
+  assert.deepEqual(manifest, JSON.parse(JSON.stringify(pluginManifest(pkg as unknown as Record<string, unknown>))));
   assert.equal("userConfig" in manifest, false);
 });
 
