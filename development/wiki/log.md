@@ -156,3 +156,4 @@ Source: migration task (decisions listed in the PR body), the plugin `CLAUDE.md`
 ## [2026-11-19] ingest | shared source layer for plugins
 
 - **Decision:** duplicates across plugins analysed; build-time shared source (`development/shared/` compiled into `plugin/shared/`) chosen by the user, plan only, nothing implemented (`decisions/shared-source-layer.md`).
+- **Step 1 built:** `@shared/<name>.js` imports are compiled to `plugin/shared/` by `build-plugin.ts`, with no `pluginBuild.shared` list (imports decide); tests in the new `build-scripts` package; all existing plugins rebuild unchanged.

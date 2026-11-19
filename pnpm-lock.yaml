@@ -39,6 +39,8 @@ importers:
         specifier: workspace:*
         version: link:../development/vitest/claude-engine
 
+  development/scripts: {}
+
   development/vitest/claude-engine:
     dependencies:
       vitest:

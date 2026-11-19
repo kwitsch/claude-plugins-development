@@ -1,6 +1,6 @@
 # Shared source layer for plugins
 
-Analysis and plan for moving code that several plugins copy into one build-time shared source (analysis 2026-11-19, direction chosen by the user 2026-11-19; not implemented yet).
+Analysis and plan for moving code that several plugins copy into one build-time shared source (analysis 2026-11-19, direction chosen by the user 2026-11-19; step 1, the build mechanism, is implemented, the shared modules are not).
 
 ## Duplicates found (grep, graphmind, normalized function bodies; not a full clone-detector run)
 
@@ -21,12 +21,14 @@ Analysis and plan for moving code that several plugins copy into one build-time 
 
 ## Decision (user, 2026-11-19): build-time shared source
 
-- `development/shared/src/*.ts`, a workspace-internal folder, not a published package. A plugin opts in with `pluginBuild.shared: ["scope", "mcp-core"]`; `build-plugin.ts` compiles those files to `plugin/shared/*.mjs` and rewrites the imports; a `tsconfig` path keeps `pnpm lint` type-checking them.
+- `development/shared/src/*.ts`, a workspace-internal folder, not a published package. Built (step 1, done): a plugin source imports `@shared/<name>.js`; `build-plugin.ts` compiles that module (and, transitively, the shared modules it imports) to `plugin/shared/<name>.mjs` and rewrites the import to the relative path; `tsconfig.base.json` `paths` keeps `pnpm lint` type-checking it. No `pluginBuild.shared` list (changed from the first plan): a plugin ships exactly the modules its sources import, so list and imports cannot disagree and a dropped import drops the file on the next build.
+- Build failures (tested in `development/scripts/tests/build-shared.test.ts`, old output kept): unknown module, a name outside `[\w-]+(/[\w-]+)*`, a re-export or dynamic import of `@shared/` (only static imports are rewritten), a plugin source that would write the same `plugin/shared/` path, and a `bundleHooksLib` plugin (function-hooks plugins are not supported yet). ESM import cycles between shared modules are allowed (Node resolves them).
+- `PLUGIN_SHARED_SRC` points the build at a fixture folder; test seam only.
 - Rejected: copy plus drift check (duplication stays); published npm package (zero-dependency rule).
 
 ## Plan
 
-1. Record the mechanism in `decisions/repo-tooling.md` (relation to the vendored bundles, `plugin-build-output.md` layout allowlist, `check-plugin-layout.ts`); add a build test for a missing or cyclic shared module and a failing build check in CI before any plugin moves.
+1. Done: the mechanism above, with its tests, the `build-scripts` workspace package (`development/scripts`, so `pnpm -r test` runs them) and the rules `development/CLAUDE.md`, `plugin-src.md`, `lint-config.md`. `plugin/shared/*.mjs` is build output (`**/*.mjs`), so the layout check needed no change; all nine plugins rebuild byte-identical. Not done: a function-hooks plugin with a lib bundle.
 2. `shared/scope`: `isExcludedPath`, `realish`, `outside`, `walkToRoot`, scratchpad test, one test file with every never-format case. Move dprint and universal-format; universal-lint after measuring cold start.
 3. `shared/mcp-core`: `createServer({ name, tools })` with envelope, cancel handling, `readVersion`. Move dprint and universal-format; jev-api last (per-call timeout and app-level cancel: maybe envelope only). Update `mcp-dual-era.md` to name the shared module as the model.
 4. Shared types (`HookResult`, `RequestId`), type-only.

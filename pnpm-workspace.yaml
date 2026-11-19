@@ -1,3 +1,4 @@
 packages:
   - "*"
   - "development/vitest/*"
+  - "development/scripts"

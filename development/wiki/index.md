@@ -20,7 +20,7 @@ Catalog of what earlier sessions wrote down, in this wiki and elsewhere in the r
 ### Decisions
 
 - [repo-tooling.md](decisions/repo-tooling.md): why dprint with a minimal config, one oxlint run, vitest, `.ts` sources, generated manifests, English content, this wiki, and rules that hold constraints only; what was rejected each time.
-- [shared-source-layer.md](decisions/shared-source-layer.md): which code several plugins copy, why a runtime package is out, and the chosen build-time shared source with its plan (not implemented).
+- [shared-source-layer.md](decisions/shared-source-layer.md): which code several plugins copy, why a runtime package is out, and the chosen build-time shared source with its plan (mechanism built, shared modules not yet).
 
 ### Methods
 

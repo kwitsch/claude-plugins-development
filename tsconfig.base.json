@@ -8,6 +8,11 @@
     "noEmit": true,
     "allowImportingTsExtensions": true,
     "skipLibCheck": true,
+    "paths": {
+      "@shared/*": [
+        "./development/shared/src/*"
+      ]
+    },
     "types": [
       "node"
     ],

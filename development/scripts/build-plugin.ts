@@ -18,6 +18,10 @@ const ROOT = path.resolve(process.argv[2] ?? ".");
 const PLUGIN = path.join(ROOT, "plugin");
 /** The TypeScript sources. */
 const SRC = path.join(ROOT, "src");
+/** The shared sources every plugin may import as `@shared/<name>.js`; `PLUGIN_SHARED_SRC` points tests at a fixture folder. */
+const SHARED_SRC = path.resolve(process.env["PLUGIN_SHARED_SRC"] ?? path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "shared", "src"));
+/** Where the shared modules a plugin uses are shipped. */
+const SHARED_OUT = path.join(PLUGIN, "shared");
 
 /**
  * Every file below a directory, recursively.
@@ -274,23 +278,64 @@ const sources = files.filter((f) => !/\.d\.m?ts$/.test(f));
 const pkg = JSON.parse(readFileSync(path.join(ROOT, "package.json"), "utf8")) as Record<string, unknown>;
 /** Type-stripped code per output file. */
 const compiled = new Map<string, string>();
-for (const src of sources) {
-  const out = path.join(PLUGIN, path.relative(SRC, src)).replace(/\.m?ts$/, ".mjs");
-  const t = transformSync(src, readFileSync(src, "utf8"), { sourceType: "module", target: "es2022" });
-  if (t.errors.length) {
-    for (const e of t.errors) console.error(`${path.relative(ROOT, src)}: ${e.message}`);
+/** Shared modules (`@shared/<name>.js` imports, transitively) still to compile, and every one seen. */
+const sharedQueue: string[] = [];
+const sharedSeen = new Set<string>();
+/**
+ * Type-strips one source into `compiled` and points its imports at the shipped files: `./name.js` becomes `./name.mjs`,
+ * `@shared/<name>.js` the relative path of `plugin/shared/<name>.mjs` (and queues that shared module).
+ *
+ * @param src - The source file.
+ * @param out - Its output path under plugin/.
+ */
+const compile = (src: string, out: string): void => {
+  const rel = path.relative(ROOT, src);
+  if (compiled.has(out)) {
+    console.error(`${rel} would overwrite ${path.relative(ROOT, out)}, built from another source`);
     process.exit(1);
   }
-  // sources import their siblings as `./name.js` (the form TypeScript resolves to name.ts); the shipped import is `./name.mjs`
-  const relJs = parseSync(src, t.code, { sourceType: "module" }).module.staticImports
-    .map((i) => i.moduleRequest)
-    .filter((r) => /^\.\.?\/.*\.js$/.test(r.value))
-    .map((r) => ({ start: r.start, end: r.end, text: JSON.stringify(r.value.replace(/\.js$/, ".mjs")) }));
-  compiled.set(out, splice(t.code, relJs));
+  const t = transformSync(src, readFileSync(src, "utf8"), { sourceType: "module", target: "es2022" });
+  if (t.errors.length) {
+    for (const e of t.errors) console.error(`${rel}: ${e.message}`);
+    process.exit(1);
+  }
+  const spans = parseSync(src, t.code, { sourceType: "module" }).module.staticImports.flatMap(({ moduleRequest: r }) => {
+    // sources import their siblings as `./name.js` (the form TypeScript resolves to name.ts); the shipped import is `./name.mjs`
+    if (/^\.\.?\/.*\.js$/.test(r.value)) return [{ start: r.start, end: r.end, text: JSON.stringify(r.value.replace(/\.js$/, ".mjs")) }];
+    const shared = /^@shared\/(.+)\.js$/.exec(r.value)?.[1];
+    if (shared === undefined) return [];
+    if (!/^[\w-]+(\/[\w-]+)*$/.test(shared)) {
+      console.error(`${rel}: ${r.value} is not a shared module name (letters, digits, _ and - in folders and file)`);
+      process.exit(1);
+    }
+    if (!sharedSeen.has(shared)) {
+      sharedSeen.add(shared);
+      sharedQueue.push(shared);
+    }
+    const to = path.relative(path.dirname(out), path.join(SHARED_OUT, `${shared}.mjs`)).split(path.sep).join("/");
+    return [{ start: r.start, end: r.end, text: JSON.stringify(to.startsWith(".") ? to : `./${to}`) }];
+  });
+  compiled.set(out, splice(t.code, spans));
+};
+for (const src of sources) compile(src, path.join(PLUGIN, path.relative(SRC, src)).replace(/\.m?ts$/, ".mjs"));
+// package.json-free opt-in: a plugin ships exactly the shared modules its sources import (development/shared/src, wiki decisions/shared-source-layer.md)
+while (sharedQueue.length) {
+  const name = sharedQueue.pop() as string;
+  const src = path.join(SHARED_SRC, `${name}.ts`);
+  if (!existsSync(src)) {
+    console.error(`@shared/${name}.js has no source (${path.relative(ROOT, src)})`);
+    process.exit(1);
+  }
+  compile(src, path.join(SHARED_OUT, `${name}.mjs`));
 }
 
 // package.json `pluginBuild.bundleHooksLib: true`: the helper modules of plugin/hooks (everything hooks.json does not list) become one lib.mjs.
 if ((pkg["pluginBuild"] as { bundleHooksLib?: unknown } | undefined)?.bundleHooksLib === true) {
+  // shortcut: shared modules are not supported in a function-hooks plugin with a lib bundle (their static check and the bundler's import rules are unverified); lift when one needs it
+  if (sharedSeen.size) {
+    console.error(`bundleHooksLib plugins cannot import @shared modules yet (${[...sharedSeen].join(", ")})`);
+    process.exit(1);
+  }
   const lib = bundleLib(compiled);
   for (const f of lib.members) compiled.delete(f);
   for (const [f, code] of lib.entries) compiled.set(f, code);
@@ -321,6 +366,11 @@ for (const [out, code] of compiled) {
   });
   if (m.errors.length) {
     for (const e of m.errors) console.error(`${path.relative(ROOT, out)}: ${e.message}`);
+    process.exit(1);
+  }
+  // a re-export or dynamic import of `@shared/...` is not rewritten (only static imports are): it would ship unresolvable
+  if (/["'`]@shared\//.test(m.code)) {
+    console.error(`${path.relative(ROOT, out)}: @shared modules are imported with a static \`import\` only`);
     process.exit(1);
   }
   minified.set(out, m.code.endsWith("\n") ? m.code : m.code + "\n");
