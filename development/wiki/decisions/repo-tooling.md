@@ -23,8 +23,8 @@ The rules state what to do; this page states why and what was rejected. All deci
 ## Sources and build output
 
 - `<name>/package.json` is the only manifest source; `plugin.json` is generated. CI recognises a plugin by the `claudePlugin` key, not by committed build output, so a plugin whose `plugin/` was not committed still gets checked ([ci.md](../../../.claude/rules/ci.md)).
-- Hand-written modules are `.ts` because graphmind indexes `.ts` symbols and no `.mts` symbols ([src-typescript.md](../../../.claude/rules/src-typescript.md), 2026-11-15).
-- The standard build is tsdown: every shipped script is one self-contained file and a mod ships as a compressed, unmangled `register.js` ([tsdown-plugin-build.md](tsdown-plugin-build.md), 2026-11-20). Plugins not yet migrated keep the old build's readable `register.mjs` plus one compressed `lib.mjs` ([hooks-lib-bundle.md](../../../.claude/rules/hooks-lib-bundle.md), 2026-11-14).
+- Hand-written modules are `.ts` because graphmind indexes `.ts` symbols and no `.mts` symbols (src-typescript.md, rule removed with the old build, 2026-11-20).
+- The standard build is tsdown: every shipped script is one self-contained file and a mod ships as a compressed, unmangled `register.js` ([tsdown-plugin-build.md](tsdown-plugin-build.md), 2026-11-20). Plugins not yet migrated keep the old build's readable `register.mjs` plus one compressed `lib.mjs` (hooks-lib-bundle.md, rule removed with the old build, 2026-11-20).
 - Plugins are developed here and reach users through the marketplace repository `kwitsch/claude-plugins`, where `plugins/<name>` is build output written by the Sync workflow: never edit it there, and it has no tests there.
 
 ## Vendored third-party bundles (2026-11-17)

@@ -26,7 +26,7 @@ type Kind = "mod" | "script";
 const ENTRY = /^[\w-]+(\/[\w-]+)*$/;
 /** The shared sources every bundled file may import as `@shared/<name>.js`. */
 const SHARED_SRC = fileURLToPath(new URL("../shared/src", import.meta.url));
-/** The layout check of what plugin/ may hold, shared with the old build. */
+/** The layout check of what plugin/ may hold; CI runs the same script (check-plugin-fresh.sh). */
 const LAYOUT_CHECK = fileURLToPath(new URL("../scripts/check-plugin-layout.ts", import.meta.url));
 
 /**
