@@ -12,7 +12,7 @@ paths:
 every hook and every `$` use and imports the pure modules `./jev.js`, `./policy.js`, `./candidates.js`,
 `./context.js`, `./cache.js`, `./agents.js`, `./compact.js`, `./summarize.js` (bundled into `plugin/hooks/lib.mjs`).
 Tested by `tests/register.test.ts`. Evidence for
-the shapes below: [mods-engine-verification.md](../../development/wiki/facts/mods-engine-verification.md).
+the shapes below: [mods-engine-verification.md](../../../development/wiki/facts/mods-engine-verification.md).
 
 ## Engine pitfalls (change how the code must be written)
 
