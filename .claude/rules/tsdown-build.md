@@ -2,8 +2,8 @@
 paths:
   - "*/tsdown.config.ts"
   - "development/tsdown/**"
-  - "graphmind-helper/src/**"
-  - "graphmind-helper/plugin/**"
+  - "*/src/**"
+  - "*/plugin/**"
 ---
 
 # Rule: the tsdown plugin build (the standard)
