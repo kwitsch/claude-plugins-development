@@ -1,9 +1,12 @@
-// Shared test kit of jevfort: the fake environment, Jev's request tool and the stubs beneath the mod, bound to the built
-// plugin/hooks/register.mjs. Tests import only register.mjs through this module (the standard of jev-api).
+// Shared test kit of jevfort: the fake environment, Jev's request tool and the stubs beneath the mod, bound to the source
+// src/hooks/register.ts (unit layer; the built register.js is covered by claude-tests/).
 import { createKit } from "claude-engine-vitest";
 import type { On } from "claude-engine-vitest";
-// jev-api's request tool, the name jevfort asks Jev through (the entry takes it, so lib.mjs exports it).
-import { JEV_REQUEST, JEV_TOOL_PREFIX } from "../../plugin/hooks/lib.mjs";
+// jev-api's request tool, the name jevfort asks Jev through (defined in src/hooks/jev.ts).
+import { NEUTRAL, questionId } from "../../claude-tests/world.js";
+import { JEV_REQUEST, JEV_TOOL_PREFIX } from "../../src/hooks/jev.ts";
+
+export { NEUTRAL, questionId };
 
 export const DEFAULTS = {
   routing: true,
@@ -22,46 +25,22 @@ export const DEFAULTS = {
 export type MockKit = ReturnType<typeof createKit>["mock"];
 
 /**
- * A kit bound to the built register.mjs with the given userConfig options.
+ * A kit bound to src/hooks/register.ts with the given userConfig options.
  *
  * @param options - The manifest defaults of the test.
  * @returns The kit's test and mock, and setup bound to that mock.
  */
 export function makeKit(options: Record<string, unknown> = DEFAULTS) {
-  const kit = createKit({ module: new URL("../../plugin/hooks/register.mjs", import.meta.url), plugin: "jevfort", options });
+  const kit = createKit({ module: new URL("../../src/hooks/register.ts", import.meta.url), plugin: "jevfort", options });
   return { ...kit, setup: (on: On, opts: SetupOpts) => setupWith(kit.mock, on, opts) };
 }
 
 export const CWD = "/proj";
 export const SID = "sid-1";
 
-/**
- * The id of a request question by its instructions (the start of each question jevfort asks).
- *
- * @param instructions - The question's instructions text.
- * @returns The id, or undefined for a question this kit does not know.
- */
-export function questionId(instructions: string): string | undefined {
-  const starts: [string, string][] = [
-    ["An AI coding model works on the user request in `request` and ran its last step", "step_effort"],
-    ["An AI coding assistant is working on the user request in `request`", "next_action"],
-    ["Can the user request in `request` be fully answered", "single_action"],
-    ["How much reasoning effort does a mid-tier AI coding model", "effort"],
-    ["Is the user request in `request` a purely mechanical task", "mechanical"],
-    ["An AI coding assistant just ended a turn.", "end"],
-  ];
-  return starts.find(([start]) => instructions.startsWith(start))?.[1];
-}
-
 export const JEV_TOOLS = [{ name: JEV_REQUEST, description: "Ask Jev several questions", mcp: true }];
 /** The removed jev-api single-question tools, which lack the request tool. */
 export const SINGLE_TOOLS = ["noul", "choice", "score"].map((t) => ({ name: JEV_TOOL_PREFIX + t, description: `Ask Jev a ${t} question`, mcp: true }));
-/** What the fake answers a question the test's `jev` leaves open, by type: not true, leave it to Claude, an unconfident score. */
-export const NEUTRAL: Record<string, Record<string, unknown>> = {
-  noul: { type: "noul", noul: 0 },
-  choice: { type: "choice", choice: "claude", probabilities: { claude: 1 }, confidence: 1 },
-  score: { type: "score", score: 0, probabilities: {}, confidence: 0 },
-};
 
 /** One question of a request call as the fake saw it: its id (its instructions when unknown), its input, the call's `state` (JSON text) and the call's index (0 for the first request call). */
 export type Asked = { id: string; type: string; instructions: string; state: string; criteria?: unknown; timeout?: unknown; call: number };

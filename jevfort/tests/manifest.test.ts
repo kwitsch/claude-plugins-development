@@ -1,6 +1,6 @@
 // Manifest and wiring contract of the built plugin/ (plugin.json is generated from package.json by pnpm build).
 import assert from "node:assert/strict";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { test } from "vitest";
 
 /** Parsed JSON of a file under plugin/. */
@@ -81,16 +81,12 @@ test("every userConfig key pins type, default, min and max, and the default matc
 });
 
 test("hooks.json is exactly the mods module list", () => {
-  assert.deepEqual(json("hooks/hooks.json"), { modules: ["./register.mjs"] });
+  assert.deepEqual(json("hooks/hooks.json"), { modules: ["./register.js"] });
 });
 
-test("the hooks ship as register.mjs plus one bundled lib.mjs; the helper modules are not shipped", () => {
-  for (const f of ["register", "lib"]) {
-    assert.ok(existsSync(new URL(`../plugin/hooks/${f}.mjs`, import.meta.url)), f);
-  }
-  for (const f of ["jev", "policy", "candidates", "context", "agents", "compact", "summarize", "cache"]) {
-    assert.ok(!existsSync(new URL(`../plugin/hooks/${f}.mjs`, import.meta.url)), f);
-  }
+test("the hooks ship as one register.js; no helper module, no lib.mjs", () => {
+  assert.ok(existsSync(new URL("../plugin/hooks/register.js", import.meta.url)));
+  assert.deepEqual(readdirSync(new URL("../plugin/hooks/", import.meta.url)).filter((f) => /\.m?js$/.test(f)), ["register.js"]);
 });
 
 test("the README mentions skill or plan hints only where it says the 0.12.0 removal", () => {

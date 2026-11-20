@@ -1,7 +1,7 @@
-// The jev-api tool jevfort needs (`mcp__jev-api__request`), through the built plugin/hooks/register.mjs: a listing that
+// The jev-api tool jevfort needs (`mcp__jev-api__request`), through src/hooks/register.ts: a listing that
 // has it lets step 0 ask Jev for the effort, a listing that lacks it leaves the session effort without asking.
 import { expect } from "vitest";
-import { JEV_REQUEST } from "../plugin/hooks/lib.mjs";
+import { JEV_REQUEST } from "../src/hooks/jev.ts";
 import { byId, claudeBeneath, DEFAULTS, drain, ids, makeKit, mech, type Runner, scored, SINGLE_TOOLS, step, user } from "./support/kit.ts";
 
 const { test, setup } = makeKit(DEFAULTS);

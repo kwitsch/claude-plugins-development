@@ -1,6 +1,6 @@
 {
   "name": "jevfort",
-  "version": "0.14.0",
+  "version": "0.14.1",
   "private": true,
   "description": "Lets Jev take routine steps and pick each turn's effort for you (needs the jev-api plugin).",
   "keywords": [
@@ -15,8 +15,9 @@
   },
   "type": "module",
   "scripts": {
-    "build": "node ../development/scripts/build-plugin.ts",
-    "test": "vitest run --config \"$(git rev-parse --show-toplevel)/vitest.config.mts\""
+    "build": "tsdown",
+    "test": "vitest run --config \"$(git rev-parse --show-toplevel)/vitest.config.mts\"",
+    "test:plugin": "node ../development/scripts/plugin-test.ts"
   },
   "devDependencies": {
     "claude-engine-vitest": "workspace:*"
@@ -137,8 +138,5 @@
         "default": "xhigh"
       }
     }
-  },
-  "pluginBuild": {
-    "bundleHooksLib": true
   }
 }
