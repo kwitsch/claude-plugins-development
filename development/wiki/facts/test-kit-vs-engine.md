@@ -34,7 +34,7 @@ What the kit offers and how it deviates from the official kit: [README.md](../..
 
 ## What only a real session shows
 
-- The static check of the hooks module (`claude plugin validate <plugin>/plugin`; `claude plugin test` runs it too) and the loading of the built entry (`register.js` with everything inlined; on the old build `register.mjs` plus a bundled `lib.mjs`). Unit tests load `src/`; the built entry loads only under `claude plugin test` (a mod's `claude-tests/`) and in a real session (docs, repo rules; read 2026-11-20).
+- The static check of the hooks module (`claude plugin validate <plugin>/plugin`; `claude plugin test` runs it too) and the loading of the built entry (`register.js` with everything inlined). Unit tests load `src/`; the built entry loads only under `claude plugin test` (a mod's `claude-tests/`) and in a real session (docs, repo rules; read 2026-11-20).
 - Type-checking of `userConfig` values before the module loads.
 - Everything about permissions, hook tiers and `cc-plugin-sec-default`.
 

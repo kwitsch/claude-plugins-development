@@ -54,13 +54,34 @@ Claude Code's static check reads the names `$`, `on`, `next` and `register` in a
 - Entries by convention (every `src/bin/*.ts` a script, mods read from `hooks.json`): needs an exclusion rule for helper modules or a file move; the explicit list is shorter than the rule.
 - Building into a temp directory and swapping it into `plugin/`: extra copy code for a property git already gives.
 
-## Coexistence and the last migration
+## Migration finished (2026-11-20)
 
-- A plugin with `tsdown.config.ts` is on the standard. cc-knowledge, dprint, jev-api, jevfort, rc-enhancement, universal-format and universal-lint still build with `development/scripts/build-plugin.ts`, which is unchanged. One PR per plugin.
-- The PR that migrates the last plugin removes `build-plugin.ts` and its tests, `pluginBuild.bundleHooksLib` and `compressHookScripts`, the root `oxc-transform`, `oxc-minify` and `oxc-parser` devDependencies and the old-build rules; `plugin-manifest.ts` and `check-plugin-layout.ts` move into `development/tsdown/`.
-- Open until then: vendored bundles (`plugin/**/vendor/*.mjs`, universal-format) under tsdown, where the stale-output removal spares only `pluginBuild.assets`; a plugin without source entries (skills only); the root `rolldown` stays pinned at 1.2.16 for the vendor step, so the lockfile holds two rolldown versions.
+- All eight plugins build with `pluginConfig`. The PR that migrated cc-knowledge, dprint, jev-api, jevfort, rc-enhancement, universal-format and universal-lint removed `build-plugin.ts` and its tests, `pluginBuild.bundleHooksLib` and `compressHookScripts`, the root `oxc-transform`, `oxc-minify` and `oxc-parser` devDependencies, the rules `hooks-lib-bundle.md`, `plugin-src.md`, `src-typescript.md` and the skill `convert-plugin-ts`.
+- `plugin-manifest.ts` and `check-plugin-layout.ts` stay in `development/scripts/`: CI calls the layout check by that path (this corrects the earlier plan to move them).
+- The root `rolldown` stays pinned at 1.2.16 for the vendor step.
+
+## The vendor option
+
+- universal-format's prettier bundle (`plugin/mcp/vendor/*.mjs`) is built by the plugin's own step after tsdown. It must stay external to the entries that import it and outside the stale-output removal, so `pluginConfig` takes `vendor: ["mcp/vendor"]`.
+- Mechanism: a rolldown `resolveId` plugin returns a relative import of `src/<dir>/index.js` as `{ id, external: true }`, with the specifier computed from the entry's output directory. A `renderChunk` rewrite is the fallback for a case `resolveId` does not see.
+- Vitest side: `vitest.config.mts` maps `./vendor/index.js` to the built `plugin/mcp/vendor/index.mjs`, so unit tests load the built bundle (the types stay in `src/mcp/vendor/index.d.ts`).
+- Rejected A: a computed runtime `import(new URL(...))`. The module is inlined into two outputs at different depths and imported from `src/` by unit tests; the static import and `BUNDLED_PRETTIER_VERSION` would become asynchronous, and a missing bundle would fail only at runtime.
+- Rejected B: bundling prettier with tsdown. The three plugin loaders must stay dynamic `import()`s, which makes several chunks and fails the one-file check; inlined statically it puts about 6 MB into each of two outputs and loads all of it at every start.
+
+## Command hooks that several events call
+
+- dprint `hooks/watch-paths` (SessionStart, CwdChanged) and universal-lint `hooks/lint-file` (six events) cannot be named after the hook that calls them. Each is one file in `plugin/hooks/` named after what it does: a documented deviation from the rule.
+
+## Pitfall: work at import in an inlined module
+
+- universal-lint's main guard compared `process.argv[1]` with `import.meta.url`. Inlined into `lint-files.mjs`, both name the driver, so the driver would have started the hook's stdin loop.
+- Fixed by the entry/library split (`lint-file.ts` only calls `lint-core.ts`), guarded by the open-stdin test. Rejected D: teaching the guard the output name.
+
+## Skills-only plugins
+
+- A plugin with no source entry (`hook`, `mods` and `mcp` all absent) has no build in the standard. `scaffold-plugin` stops and reports; a follow-up when the first one is wanted.
 
 ## Not checked
 
-- rolldown renames colliding top-level names with a `$1` suffix when it merges modules; whether the engine's static check accepts such identifiers is unknown. graphmind-helper's output passes `claude plugin validate`; other plugins are unchecked.
+- rolldown renames colliding top-level names with a `$1` suffix when it merges modules; whether the engine's static check accepts such identifiers is unknown. Measured 2026-11-20: `grep -c '\$1\b' <plugin>/plugin/hooks/register.js` gives cc-knowledge 0, dprint 0, jevfort 0, jev-api 2; `claude plugin validate <plugin>/plugin` passes for all four, and `pnpm --filter <plugin> test:plugin` passes for the same four mods (cc-knowledge 3, dprint 5, jev-api 5, jevfort 8 tests). The `$1` identifiers of jev-api were not exercised beyond that.
 - A change limited to `development/tsdown/**` gets no `changed-plugins` status (paths-ignore) and is not tested by CI, like `development/scripts/**`.

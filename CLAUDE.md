@@ -13,12 +13,12 @@ Development repository for Claude Code plugins. One top-level directory per plug
 
 ## Layout per plugin (`<name>/`)
 
-`plugin/` (installable plugin; `.mjs`, `hooks/*.js` and `.claude-plugin/plugin.json` are build output), `src/**/*.ts` (built to `plugin/`: the entries `tsdown.config.ts` lists, each one self-contained file; on the old build every file at the same path), `tests/*.test.ts` (vitest, against `src/`; process tests spawn `plugin/`), `claude-tests/*.test.ts` (mods: `claude plugin test` on the built plugin, `pnpm --filter <name> test:plugin`), plus:
+`plugin/` (installable plugin; `**/*.mjs`, `hooks/*.js` and `.claude-plugin/plugin.json` are build output), `src/**/*.ts` (built to `plugin/`: the entries `tsdown.config.ts` lists, each one self-contained file), `tests/*.test.ts` (vitest, against `src/`; process tests spawn `plugin/`), `claude-tests/*.test.ts` (mods: `claude plugin test` on the built plugin, `pnpm --filter <name> test:plugin`), plus:
 
-- `package.json`: the only manifest source (`name`, `version`, `description`, `author`, `keywords`; plugin-only fields such as `userConfig` under `claudePlugin`, which is required, `{}` at least, and marks the package as a plugin) and the pnpm scripts `build` (`tsdown`; `node ../development/scripts/build-plugin.ts` in a plugin not yet migrated), `test`, optional `lint`. Edit here only.
-- `tsdown.config.ts`: the plugin's entries for the standard build, `export default pluginConfig({ mods: [...], scripts: [...] })` (`.claude/rules/tsdown-build.md`).
+- `package.json`: the only manifest source (`name`, `version`, `description`, `author`, `keywords`; plugin-only fields such as `userConfig` under `claudePlugin`, which is required, `{}` at least, and marks the package as a plugin) and the pnpm scripts `build` (`tsdown`), `test`, optional `lint` and, for a mod, `test:plugin`. Edit here only.
+- `tsdown.config.ts`: the plugin's entries, `export default pluginConfig({ mods, scripts, vendor })` (`.claude/rules/tsdown-build.md`).
 - `src/bin/`: scripts used from several places (skills, hooks, MCP), built to `plugin/bin/*.mjs`, which Claude Code puts on the Bash PATH while the plugin is enabled.
-- `scripts/`: optional plugin-specific build steps and dev-only tools (`.mts`, run by Node 24's type stripping, never shipped), e.g. dprint's `hooks.ts` (build) and universal-lint's `perf.ts` (hook cost measurement).
+- `scripts/`: optional plugin-specific build steps and dev-only tools (`.ts`, run by Node 24's type stripping, never shipped), e.g. dprint's `hooks.ts` (build) and universal-lint's `perf.ts` (hook cost measurement).
 - `CLAUDE.md`: developer notes, never inside `plugin/` (a plugin-root CLAUDE.md is not loaded and triggers a validate warning). Notes for single parts go in `<name>/.claude/rules/*.md` with `paths:` relative to `<name>/` (loaded when Claude works on matching files; keep each under 40,000 characters, the on-demand load limit).
 - Hand-written plugin content (`SKILL.md`, `hooks/hooks.json`, `agents/*.md`, `README.md`) lives directly in `plugin/` and is edited there.
 
@@ -27,8 +27,7 @@ Development repository for Claude Code plugins. One top-level directory per plug
 One config for all packages, at the repo root; no per-plugin lint or vitest config. Formatting stays with dprint (`dprint.json`); everything else is oxc.
 
 - Lint + type check: root `.oxlintrc.json` (oxlint, type-aware) with the solution `tsconfig.json` (`tsconfig.src.json` strict, `tsconfig.tests.json` relaxed for plugin `*/tests/` and `*/claude-tests/`); `pnpm lint` is the type check. Details: `.claude/rules/lint-config.md`.
-- Build (the standard, tsdown; reference plugin graphmind-helper): `pluginConfig` in `development/tsdown/index.ts` builds each entry of `tsdown.config.ts` into one self-contained file and generates `plugin.json`. Details: `.claude/rules/tsdown-build.md`.
-- Build (old path, a plugin without `tsdown.config.ts`, until it is migrated): the shared `development/scripts/build-plugin.ts` builds the plugin in the cwd (layout check, oxc-transform type stripping, oxc-minify, `plugin.json` generated from `package.json` by `plugin-manifest.ts`); a plugin's `build` script may run its own steps first; `pluginBuild.bundleHooksLib: true` in `package.json` bundles the hooks helper modules (everything `hooks.json` does not list) into one compressed `hooks/lib.mjs` (jev-api). `pluginBuild.assets` lists files the layout check allows in `plugin/` beside its allowlist, by exact path (universal-format's wasm files).
+- Build: `development/tsdown/index.ts` (`pluginConfig`) builds each listed entry into one self-contained file, runs the layout check and generates `plugin.json` from `package.json` with `development/scripts/plugin-manifest.ts`; a plugin's `build` script may run its own steps around `tsdown`. `pluginBuild.assets` lists files the layout check allows in `plugin/` beside its allowlist, by exact path (universal-format's wasm files). Details: `.claude/rules/tsdown-build.md`.
 - `vitest.config.mts` at the root is the one vitest config. Tooling is root devDependencies only. Details: `.claude/rules/lint-config.md`.
 
 ## Commands
@@ -45,8 +44,8 @@ claude plugin validate <name>/plugin
 
 ## Rules
 
-- `.mjs` (and `.js`) is build output only; every hand-written module is `.ts` (Node 24 and vitest strip the types; `src/` is compiled by `pnpm build`; a plugin not yet migrated still holds `.mts` until its first change, see `.claude/rules/src-typescript.md`).
-- Never edit `*/plugin/**/*.mjs`, `*/plugin/**/*.js` or `*/plugin/.claude-plugin/plugin.json` — change `src/`, `<name>/package.json` or `<name>/tsdown.config.ts` and run `pnpm build`. `.claude/settings.json` denies these writes.
+- `.mjs` and `plugin/hooks/*.js` are build output only; every hand-written module is `.ts` (Node 24 and vitest strip the types; `src/` is built by `pnpm build`).
+- Never edit `*/plugin/**/*.mjs`, `*/plugin/hooks/*.js` or `*/plugin/.claude-plugin/plugin.json` — change `src/`, `<name>/tsdown.config.ts` or `<name>/package.json` and run `pnpm build`. `.claude/settings.json` denies these writes.
 - Version bump = edit `version` in `<name>/package.json`, then `pnpm build`. A change of `<name>/package.json`, `<name>/src/` or `<name>/plugin/` merged to `main` needs a bump to a version higher than on `main` that is not yet tagged `<name>-<version>` here or in kwitsch/claude-plugins; a change of anything else under `<name>/` (tests, scripts, `CLAUDE.md`, `.claude/`) needs no bump and is not released (`.github/scripts/ships.sh`).
 - New plugin: use the `scaffold-plugin` skill (`.claude/skills/scaffold-plugin/`). Never hand-copy the layout.
 - Runtime code in `plugin/` must be zero-dependency Node (`node:` builtins only); `node_modules` is not shipped. One exception: a vendored third-party bundle `plugin/**/vendor/*.mjs` built by the plugin's own build step (universal-format's prettier), see `.claude/rules/plugin-build-output.md`.

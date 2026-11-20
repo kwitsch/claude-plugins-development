@@ -193,3 +193,8 @@ Source: user decision 2026-11-20 (task spec), PR stacked on `feature/tsdown-plug
 - **Facts:** `facts/test-kit-vs-engine.md`, Official kit section: exports of `claude-code/testing`, runs without credentials, skips symlinks, the stubs and events graphmind-helper's `claude-tests/` use, `scripts/plugin-test.ts` as the run and compare recipe.
 - **Rules and docs:** `hook-tests.md` (two layers replace "test only through the entry"), `tsdown-build.md`, `plugin-src.md`, `lint-config.md`, `ci.md`, `hook-caches-and-tests.md` (paths); root and `development/` `CLAUDE.md`, the kit README, skills `convert-plugin-ts` and `scaffold-plugin`.
 - **Reference:** graphmind-helper 0.2.4: unit tests on `src/` 86 -> 87, `claude-tests/` 1 -> 6, no test-only re-export in `src/bin/mcp.ts`.
+
+## [2026-11-20] ingest | all plugins on the tsdown build, old build removed
+
+- Decision pages: `decisions/tsdown-plugin-build.md` (migration finished, vendor option, multi-event command hooks, inlined-module pitfall, skills-only plugins, measured `$1` check and `test:plugin` counts); `decisions/shared-source-layer.md` and `decisions/repo-tooling.md` (old-build mechanics replaced by the tsdown facts).
+- Rules and docs: `tsdown-build.md` (rewritten to the single standard), `plugin-build-output.md`, `hook-tests.md`, `lint-config.md`, `mcp-dual-era.md`, `claude-code-hook-facts.md`; root and `development/` `CLAUDE.md`; skills `scaffold-plugin`, `bughunt`, `perf-worklist`; `facts/test-kit-vs-engine.md`, `plugins/graphmind-helper/design/decisions.md`, `index.md`.

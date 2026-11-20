@@ -66,7 +66,7 @@ const run = (prompt, opts) => agent(prompt + QUIET, opts)
 const jobPrompt = (j) => `Work performance task ${j.id} (${j.title}) of plugin "${plugin}" in the git worktree ${worktree} (stay there; run git and pnpm from its root).
 Read development/wiki/plugins/${plugin}/tasks/${j.file}, development/wiki/plugins/${plugin}/TASKS.md, development/wiki/plugins/how-to-work-a-task.md, the "Task conventions" of development/wiki/plugins/${plugin}/index.md, ${plugin}/CLAUDE.md, .claude/rules/plugin-docs-tasks.md and the rules the task names.
 1. Check the task against the CURRENT code (moved files, renamed symbols, drift). Obsolete or not worth doing: status closed with the reason in the task document, no code.
-2. Otherwise: failing test first (it must fail without the fix), then the smallest root-cause change in ${plugin}/src, never in plugin/**/*.mjs. Measure before and after where the task asks for it.
+2. Otherwise: failing test first (it must fail without the fix), then the smallest root-cause change in ${plugin}/src, never in plugin/**/*.mjs or plugin/hooks/*.js. Measure before and after where the task asks for it.
 3. Run \`pnpm --filter ${plugin} build\`, \`pnpm lint\`, \`pnpm --filter ${plugin} test\`; fix until green. Read the output; never claim green unseen.
 4. Update the task document (status, Verification with the test and numbers, the version that ships it) and its TASKS.md entry (checkbox, section, status tag and priority as in the frontmatter) in the same commit, and run `node development/scripts/wiki-check.ts`. Bump ${plugin}/package.json version (patch, minor for behaviour) only if \`git diff origin/main -- ${plugin}/package.json\` shows no version change yet, then rebuild.
 5. \`git add\` only what this job changed, commit (message "${plugin}: ${j.id} <what>", no Co-Authored-By, no generated-with footer), \`git push -u origin HEAD\`.
@@ -76,7 +76,7 @@ const reviewPrompt = () => `Review the work of this run on the branch in the git
 1. Invoke the Skill "simplify" once on the branch changes and apply its fixes.
 2. Invoke the Skill "code-review" with args "high --fix" (never max) on the branch.
 3. Run \`pnpm --filter ${plugin} build\`, \`pnpm lint\`, \`pnpm --filter ${plugin} test\` and fix until green; read the output.
-4. If anything changed: \`git add\` it, commit ("${plugin}: simplify and review fixes", no Co-Authored-By) and \`git push\`. Never touch plugin/**/*.mjs by hand. Then check that \`git status --short\` is empty and \`git rev-parse HEAD\` equals \`git rev-parse @{u}\`; otherwise commit and push again.
+4. If anything changed: \`git add\` it, commit ("${plugin}: simplify and review fixes", no Co-Authored-By) and \`git push\`. Never touch plugin/**/*.mjs or plugin/hooks/*.js by hand. Then check that \`git status --short\` is empty and \`git rev-parse HEAD\` equals \`git rev-parse @{u}\`; otherwise commit and push again.
 Return status clean (nothing to change), fixed or blocked (not green), the commit sha and one summary sentence.`
 
 const analysisPrompt = () => `Run a fresh performance analysis of plugin "${plugin}" in the git worktree ${worktree}. Follow .claude/rules/plugin-docs-tasks.md and the method of the latest development/wiki/plugins/${plugin}/evaluations/EVALUATION-*.md (and development/wiki/plugins/${plugin}/index.md). Date: ${date}.

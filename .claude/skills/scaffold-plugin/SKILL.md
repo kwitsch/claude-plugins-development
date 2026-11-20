@@ -46,7 +46,7 @@ Per selected component:
 - **agent** → `plugin/agents/<agent-name>.md` with frontmatter `name`, `description`, `tools`.
 - **mcp** → `src/bin/mcp.ts` (zero-dep stdio JSON-RPC, line 1 `#!/usr/bin/env node`), listed under `scripts` as `bin/mcp` and built to `plugin/bin/mcp.mjs`, and `plugin/.mcp.json` pointing at `${CLAUDE_PLUGIN_ROOT}/bin/mcp.mjs`. Dual-era from the start (answer `initialize` and `server/discover`): follow `.claude/rules/mcp-dual-era.md`. Add a test for both eras.
 
-If none of `hook`, `mods` and `mcp` was chosen there is no source entry, and the tsdown standard has not decided that case yet (`development/wiki/decisions/tsdown-plugin-build.md`, "Coexistence and the last migration"): delete `<name>/tsdown.config.ts`, set the `build` script in `<name>/package.json` to `node ../development/scripts/build-plugin.ts` (it then only generates `plugin/.claude-plugin/plugin.json`), keep `src/`, and say so in the report.
+If none of `hook`, `mods` and `mcp` was chosen there is no source entry, and the standard has no build for such a plugin (`development/wiki/decisions/tsdown-plugin-build.md`, "Skills-only plugins"): stop and report that a skills-only plugin is not supported yet.
 
 ## Step 3 — Build and verify
 
@@ -71,4 +71,4 @@ List the created files and the three commands above. Do not commit unless asked.
 - Only the entries listed in `<name>/tsdown.config.ts` are built, each into one self-contained file: mods `src/hooks/register.ts` → `plugin/hooks/register.js`, scripts `src/<entry>.ts` → `plugin/<entry>.mjs`; every other `src/` module is inlined (`.claude/rules/tsdown-build.md`).
 - Scripts used by several components (skills, hooks, MCP) go in `src/bin/<name>.ts`, listed under `scripts` → `plugin/bin/<name>.mjs`.
 - Runtime code: `node:` builtins only.
-- New sources are `.ts`, never `.mts` (`.claude/rules/src-typescript.md`): a relative import reads `./x.js` (the build inlines it). Tests follow `.claude/rules/hook-tests.md`: a function-hooks plugin binds `claude-engine-vitest` to `src/hooks/register.ts` (a shared kit in `tests/support/` once it has several test files) and runs `claude-tests/` on the built plugin with `pnpm --filter <name> test:plugin`; a command hook spawns its built `.mjs`.
+- New sources are `.ts`: a relative import reads `./x.js` (the build inlines it). Tests follow `.claude/rules/hook-tests.md`: a function-hooks plugin binds `claude-engine-vitest` to `src/hooks/register.ts` (a shared kit in `tests/support/` once it has several test files) and runs `claude-tests/` on the built plugin with `pnpm --filter <name> test:plugin`; a command hook spawns its built `.mjs`.

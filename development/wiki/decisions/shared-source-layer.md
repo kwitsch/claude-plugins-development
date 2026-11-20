@@ -15,15 +15,13 @@ Analysis and plan for moving code that several plugins copy into one build-time 
 ## Constraints that shape the mechanism
 
 - A plugin runs from a cache copy without `node_modules`: shared code must be inlined or copied into `plugin/` at build time; a runtime npm package is out.
-- `build-plugin.ts` compiles `src/` file by file; `bundleHooksLib` bundles only sibling helpers of `hooks/`. Function-hooks plugins (`$` engine, static check) stay out of the first step.
+- Function-hooks modules (`$` engine, static check) take the inlined code too: see [tsdown-plugin-build.md](tsdown-plugin-build.md) and `claude-code-hook-facts.md`.
 - Built `plugin/*.mjs` is committed, so a shared change already shows in each consumer's `plugin/` diff: `ships.sh` needs no change, but every consumer needs a version bump per shared change.
 - universal-lint's `lint-file.mjs` is a self-contained command hook started on every edit: measure the cost of an extra module before it imports shared code.
 
 ## Decision (user, 2026-11-19): build-time shared source
 
-- `development/shared/src/*.ts`, a workspace-internal folder, not a published package. Built (step 1, done): a plugin source imports `@shared/<name>.js`; `build-plugin.ts` compiles that module (and, transitively, the shared modules it imports) to `plugin/shared/<name>.mjs` and rewrites the import to the relative path; `tsconfig.base.json` `paths` keeps `pnpm lint` type-checking it. No `pluginBuild.shared` list (changed from the first plan): a plugin ships exactly the modules its sources import, so list and imports cannot disagree and a dropped import drops the file on the next build.
-- Build failures (tested in `development/scripts/tests/build-shared.test.ts`, old output kept): unknown module, a name outside `[\w-]+(/[\w-]+)*`, a re-export or dynamic import of `@shared/` (only static imports are rewritten), a plugin source that would write the same `plugin/shared/` path, and an `@shared` import from a `bundleHooksLib` entry or `hooks/` subfolder module (helpers may: hoisted into `lib.mjs`). ESM import cycles between shared modules are allowed (Node resolves them).
-- `PLUGIN_SHARED_SRC` points the build at a fixture folder; test seam only.
+- `development/shared/src/*.ts`, a workspace-internal folder, not a published package. Built: a plugin source imports `@shared/<name>.js`; the build inlines that module (and, transitively, the shared modules it imports) into every output that imports it, and `tsconfig.base.json` `paths` keeps `pnpm lint` type-checking it. Build: shared modules are inlined into every output that imports them ([tsdown-plugin-build.md](tsdown-plugin-build.md)); nothing ships as `plugin/shared/`. No `pluginBuild.shared` list (changed from the first plan): a plugin ships exactly the modules its sources import.
 - Rejected: copy plus drift check (duplication stays); published npm package (zero-dependency rule).
 
 ## Plan
@@ -35,26 +33,12 @@ Analysis and plan for moving code that several plugins copy into one build-time 
 5. Done, differently from the plan (no helper module, no bump: only tests changed): `development/scripts/tests/plugin-manifest.test.ts` holds what four plugins had copied: the `pluginManifest` unit tests (semver, `claudePlugin` marker; from jev-api's `manifest.test.ts`, removed, and dprint's `skill.test.ts`) and one test per plugin (found by `claudePlugin` in its `package.json`, so a new plugin is covered without a test) that `plugin/.claude-plugin/plugin.json` equals `pluginManifest(package.json)`, run after a build. The per-plugin tests keep only what is theirs (no `userConfig`, wiring, README). Checked by raising a version in `package.json` without a build: exactly that plugin's test fails. jevfort 382 to 381, jev-api 409 to 407, dprint 229 to 227.
 6. Per step: `pnpm lint && pnpm -r build && pnpm -r test`, `claude plugin validate`, `live-verify` of each touched plugin, version bump of every consumer.
 
-Notes from step 2:
-
-- `bundleHooksLib` plugins may import shared code from `mcp/` and `bin/` (dprint does, from `mcp/format.ts`) and, since 2026-11-20, from `hooks/` helpers bundled into `lib.mjs`; the entry and `hooks/` subfolder modules may not (the build refuses them, `hooksShared` guard, tested both ways).
-- jev-api already has its own `src/shared/` (`plugin/shared/`): a shared module of the same name fails the build with the clash error; pick other names.
-
 Live check (live 2.1.328, 2026-11-19, `claude -p --plugin-dir <plugin>/plugin --setting-sources project` in a throwaway git repo, one run per plugin): with the rebuilt dprint 0.14.2 and universal-format 0.19.2 the MCP servers connect through `mcp-core` (stdio, 78 and 107 ms), `format_pre` is called for a Write and an Edit, the Write is formatted (`{"b":[1,2,3],...}` to `{ "b": [1, 2, 3], "a": { "x": 22, "y": [] } }` after the Edit), the hooks answer `additionalContext`, dprint also calls `drain_notices` and `file_written`. Not exercised: cancellation in a session, a scratchpad path, a worktree path, a slow mount.
 
-Superseded for tsdown-built plugins (2026-11-20): there `@shared` is inlined into every output and allowed in any bundled file, the mod entry included, with no `plugin/shared/` copy and no entry ban ([tsdown-plugin-build.md](tsdown-plugin-build.md)). The section below describes the old build and is kept as history.
-
-## Shared code in a lib bundle (2026-11-20, user decision)
-
-The build allows an `@shared` import in a `hooks/` helper of a `bundleHooksLib` plugin and keeps refusing it in the entry (the module `hooks.json` lists, which Claude Code's static check reads; kept free of `@shared` by user decision) and in a `hooks/` subfolder module (neither entry nor helper, not bundled).
-
-- Bundler path (build 2026-11-20): `compile()` already rewrites a helper's `@shared/x.js` to `"../shared/x.mjs"`; `bundleLib` sees a specifier that names no helper and hoists it into `lib.mjs`, which sits in `plugin/hooks/` like the helper, so the relative path holds. Named imports of one source from two helpers merge into one hoisted import; the bundler's name checks still apply. No bundler change was needed; `build-shared.test.ts` builds two helpers importing one shared name and loads the built entry.
-- Engine path: the same shipped shape already loaded live before this change: `jev-api/plugin/hooks/lib.mjs` imports `"../shared/http.mjs"` (its plugin-local `src/shared/http.ts`, imported relatively, which the guard never covered; live since jev-api 0.5.0). An `@shared` module builds to the same `plugin/shared/<name>.mjs`, so the engine sees no difference. (not yet checked live with an @shared module: graphmind-helper 0.2.2 has no live run in this change)
-- Entry access: helpers export declarations only (no re-export), so a name the entry needs from a shared module goes through a helper declaration (graphmind-helper: `binaryPaths` in `terms.ts` wraps `binaryDirs`).
-- Risk: a shared module a bundled helper imports now loads in the engine; one with engine-forbidden code (`import()`, `$`) would fail there. The rule `hooks-lib-bundle.md` points at `claude-code-hook-facts.md`; the build does not check it.
+Shared code in a function-hooks module (2026-11-20): on the tsdown build any bundled file, the mod entry included, may import `@shared`, with no `plugin/shared/` copy and no entry ban; the earlier `lib.mjs` rules were removed with the old build ([tsdown-plugin-build.md](tsdown-plugin-build.md)). Risk that stays: a shared module loaded by the engine must not use engine-forbidden code (`import()`, `$`); the build does not check it.
 
 Order of value: step 2, then 3; 4 and 5 any time.
 
 ## Not checked
 
-The jev-api server body and `build-plugin.ts` were not read in full; the two `realish` copies were not compared for identical behaviour; the load cost of an import in `lint-file.mjs` is unmeasured.
+The jev-api server body and the removed `build-plugin.ts` were not read in full; the two `realish` copies were not compared for identical behaviour; the load cost of an import in `lint-file.mjs` is unmeasured.
