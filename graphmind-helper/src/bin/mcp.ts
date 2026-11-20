@@ -4,7 +4,7 @@ import { spawn, spawnSync } from "node:child_process";
 import { existsSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
 import { delimiter, dirname, join, resolve } from "node:path";
-import { findGraphmind, registered, setupMcpPresent } from "./common.mjs";
+import { findGraphmind, registered, setupMcpPresent } from "./common.js";
 
 /**
  * The real path of `p`, or `p` resolved when it does not exist.

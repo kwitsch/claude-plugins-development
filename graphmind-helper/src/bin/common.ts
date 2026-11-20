@@ -1,9 +1,9 @@
-// Helpers of the MCP wrapper `mcp.mts` (zero-dependency Node). The hooks are a function-hooks module (`src/hooks/register.mts`).
+// Helpers of the MCP wrapper `mcp.ts` (zero-dependency Node). The hooks are a function-hooks module (`src/hooks/register.ts`).
 import { spawnSync } from "node:child_process";
 import { accessSync, constants, readFileSync, realpathSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, delimiter, dirname, join } from "node:path";
-import { binaryDirs } from "../hooks/terms.mjs";
+import { binaryDirs } from "../hooks/terms.js";
 
 /**
  * The graphmind binary: the first executable file on PATH, else in the places the setup scripts add to PATH (`binaryDirs`, shared
