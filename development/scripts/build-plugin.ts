@@ -281,8 +281,8 @@ const compiled = new Map<string, string>();
 /** Shared modules (`@shared/<name>.js` imports, transitively) still to compile, and every one seen. */
 const sharedQueue: string[] = [];
 const sharedSeen = new Set<string>();
-/** The sources under hooks/ that import a shared module. */
-const hooksShared = new Set<string>();
+/** The outputs under hooks/ whose sources import a shared module, with the source path. */
+const hooksShared = new Map<string, string>();
 /**
  * Type-strips one source into `compiled` and points its imports at the shipped files: `./name.js` becomes `./name.mjs`,
  * `@shared/<name>.js` the relative path of `plugin/shared/<name>.mjs` (and queues that shared module).
@@ -310,7 +310,7 @@ const compile = (src: string, out: string): void => {
       console.error(`${rel}: ${r.value} is not a shared module name (letters, digits, _ and - in folders and file)`);
       process.exit(1);
     }
-    if (out.startsWith(path.join(PLUGIN, "hooks") + path.sep)) hooksShared.add(rel);
+    if (out.startsWith(path.join(PLUGIN, "hooks") + path.sep)) hooksShared.set(out, rel);
     if (!sharedSeen.has(shared)) {
       sharedSeen.add(shared);
       sharedQueue.push(shared);
@@ -334,12 +334,14 @@ while (sharedQueue.length) {
 
 // package.json `pluginBuild.bundleHooksLib: true`: the helper modules of plugin/hooks (everything hooks.json does not list) become one lib.mjs.
 if ((pkg["pluginBuild"] as { bundleHooksLib?: unknown } | undefined)?.bundleHooksLib === true) {
-  // shortcut: a module under hooks/ may not import shared code in a plugin with a lib bundle (the engine's static check and the bundler's import rules are unverified there); lift when one needs it. Other folders (mcp/, bin/) may.
-  if (hooksShared.size) {
-    console.error(`bundleHooksLib plugins cannot import @shared modules from hooks/ yet (${[...hooksShared].join(", ")})`);
+  const lib = bundleLib(compiled);
+  // a helper's @shared import is hoisted into lib.mjs beside the helper, so its relative path holds (jev-api's lib.mjs loads ../shared/http.mjs live);
+  // the entries (what Claude Code's static check reads) and hooks/ subfolder modules are not bundled and stay without
+  const unbundled = [...hooksShared].filter(([out]) => !lib.members.includes(out)).map(([, rel]) => rel);
+  if (unbundled.length) {
+    console.error(`bundleHooksLib plugins import @shared modules only from helpers bundled into lib.mjs (${unbundled.join(", ")})`);
     process.exit(1);
   }
-  const lib = bundleLib(compiled);
   for (const f of lib.members) compiled.delete(f);
   for (const [f, code] of lib.entries) compiled.set(f, code);
   compiled.set(libPath(), lib.code);
