@@ -163,3 +163,7 @@ Source: migration task (decisions listed in the PR body), the plugin `CLAUDE.md`
 - **Step 5 built:** the manifest tests of dprint, jevfort, universal-lint, universal-format and jev-api are one central test in `development/scripts/tests/plugin-manifest.test.ts` (all plugins, no pinned values).
 - **universal-lint 0.17.2:** uses `@shared/scope.js` (walkToRoot, isExcludedPath, realish, outside); import cost measured at +0.3 to 0.6 ms of a 34 to 38 ms start; `realish` is native now (same results, half the time on ext4).
 - **Step 4 dropped:** nothing left to share as types after step 3 (`RequestId`, `ToolDef` live in `mcp-core.ts`); the three `HookResult` types differ on purpose (`decisions/shared-source-layer.md`).
+
+## [2026-11-20] ingest | inline-headroom removed
+
+Source: user request. The plugin directory and its wiki section are gone; its Claude Code verification note moved to `facts/mods-engine-verification.md` (jevfort's rules cite it), the linux-token-efficiency concepts note was dropped. References in `convert-plugin-ts`, `repo-tooling.md`, `mods-engine-tools.md`, `plugins/index.md` and `pnpm-lock.yaml` updated.

@@ -19,7 +19,7 @@ Why `.ts`: graphmind indexes `.ts` symbols but not `.mts`. Why the kit: a test o
 
 - `<plugin>/src/**/*.mts` and `<plugin>/tests/**/*.mts` to `.ts` (plain `mv`; `scripts/*.mts` of the plugin stay `.mts`, Node runs them; `.d.mts` becomes `.d.ts`).
 - In `src/` only: a relative import `from "./x.mjs"` becomes `from "./x.js"` (TypeScript resolves `.js` to `x.ts`; the build rewrites it back to `./x.mjs`). Not in `tests/`: they import built `plugin/...mjs` files and spell those names in fixture strings.
-- References by file name: tests that read a source (`new URL("../src/....mts", ...)`), the plugin's `CLAUDE.md`, rules and comments that name `x.mts`. Leave the names of plugins that are still `.mts` (dprint, inline-headroom, graphmind-helper, universal-lint) alone.
+- References by file name: tests that read a source (`new URL("../src/....mts", ...)`), the plugin's `CLAUDE.md`, rules and comments that name `x.mts`. Leave the names of plugins that are still `.mts` (dprint, graphmind-helper, universal-lint) alone.
 - Put long edits in a script in the session scratchpad and run plain commands: a worktree session refuses compound shell commands with quoting, heredocs and `git`.
 
 ## 2. The build proves the rename

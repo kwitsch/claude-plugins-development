@@ -32,7 +32,7 @@ const plugins = readdirSync(REPO, { withFileTypes: true })
   .filter((name) => "claudePlugin" in (JSON.parse(readFileSync(path.join(REPO, name, "package.json"), "utf8")) as object));
 
 test("the repository holds the plugins this test expects to find", () => {
-  assert.ok(plugins.length >= 9, plugins.join(", "));
+  assert.ok(plugins.length >= 8, plugins.join(", "));
   assert.ok(plugins.includes("dprint") && plugins.includes("jevfort"));
 });
 

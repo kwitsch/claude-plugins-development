@@ -14,6 +14,7 @@ Catalog of what earlier sessions wrote down, in this wiki and elsewhere in the r
 - [test-kit-vs-engine.md](facts/test-kit-vs-engine.md): where `claude-engine-vitest` and `claude plugin test` differ from a real session.
 - [npm-npx-and-node.md](facts/npm-npx-and-node.md): npx lookup order, registry re-check and lock, non-blocking stdin after importing `node:process`, timer overflow, lookup cost under WSL.
 - [build-lint-and-format-tools.md](facts/build-lint-and-format-tools.md): oxlint nested configs and tsgolint lookup, the oxc-minify template-literal rewrite, eslint config lookup, dprint CLI behaviour.
+- [mods-engine-verification.md](facts/mods-engine-verification.md): verification log of the engine shapes a hooks module relies on (typings, live runs) and the open live-check list.
 - [mcp-protocol-eras.md](facts/mcp-protocol-eras.md): how Claude Code's MCP client negotiates the 2025-11-25 and 2026-07-28 eras, cancellation, tool `_meta` fields, the tasks extension, what is unverified.
 - [github-and-marketplace.md](facts/github-and-marketplace.md): no CI events for a push of more than three branches, `pr.yml` triggers, display-field fallback in `marketplace.json`.
 
