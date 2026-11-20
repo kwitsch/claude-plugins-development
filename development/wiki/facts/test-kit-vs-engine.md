@@ -27,11 +27,11 @@ What the kit offers and how it deviates from the official kit: [README.md](../..
 - The official kit validates event shapes on both sides, `claude-engine-vitest` does not: a test's `$.session.start` input needs `cwd` (`next() passed an argument with no { cwd }`), a `session.end` stub returns `{ sessionId }`, `$.session.compact` input and stub answer need a non-empty `messages` list of `{ role, text, toolUses: [] }`, a `prompt.submit` stub returns `{ text }` or `{ drop }`, not `{ value }` (live 2.1.329).
 - A test's `on("tool.call")` stub answers a mod's own `$.tool.call` with the event's result (`{ result }` or `{ deny }`); `{ value: { result } }`, which `claude-engine-vitest` needs, is skipped with `returned neither { result } nor { deny }` (live 2.1.329).
 - A hook's own `{ isError: true, result }` answer reaches the caller unchanged in the official kit, while a real session drops the flag before the model sees it (2.1.322).
-- To run a mod's `claude-tests/` or compare stand-in and engine, use `<plugin>/scripts/plugin-test.ts` (graphmind-helper's): it copies `plugin/` to a temp dir and the tests into `<tmp>/test/`, then runs `claude plugin test <tmp>`.
+- To run a mod's `claude-tests/` or compare stand-in and engine, use `<plugin>/scripts/plugin-test.ts` (graphmind-helper's): it copies `plugin/` to a temp dir and the tests into `<tmp>/test/`, then runs `claude plugin test <tmp>` (graphmind-helper `scripts/plugin-test.ts`, read 2026-11-20).
 
 ## What only a real session shows
 
-- The static check of the hooks module (`claude plugin validate <plugin>/plugin`; `claude plugin test` runs it too) and the loading of the built entry (`register.js` with everything inlined; on the old build `register.mjs` plus a bundled `lib.mjs`). Unit tests load `src/`; the built entry loads only under `claude plugin test` (a mod's `claude-tests/`) and in a real session.
+- The static check of the hooks module (`claude plugin validate <plugin>/plugin`; `claude plugin test` runs it too) and the loading of the built entry (`register.js` with everything inlined; on the old build `register.mjs` plus a bundled `lib.mjs`). Unit tests load `src/`; the built entry loads only under `claude plugin test` (a mod's `claude-tests/`) and in a real session (docs, repo rules; read 2026-11-20).
 - Type-checking of `userConfig` values before the module loads.
 - Everything about permissions, hook tiers and `cc-plugin-sec-default`.
 
