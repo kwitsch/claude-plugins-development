@@ -6,7 +6,10 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { afterAll, test } from "vitest";
-import { carryLine, editHunks, editRanges, hashPath, ownerOf, pendingRanges, recordEdit, settleFindings, settleWaitMs } from "../plugin/hooks/lint-file.mjs";
+import { carryLine, editHunks, editRanges, hashPath, ownerOf, pendingRanges, recordEdit, settleFindings, settleWaitMs } from "../src/hooks/lint-core.ts";
+
+/** The hook input type; the tests pass partial payloads on purpose (a Write, a missing patch). */
+type HookInput = Parameters<typeof editHunks>[0];
 
 /** An Edit payload with the given structuredPatch hunks. */
 const edit = (structuredPatch: unknown) => ({ tool_name: "Edit", tool_response: { structuredPatch } });
@@ -74,30 +77,30 @@ test("settleWaitMs: the hold never reaches the 90 s hook backstop", () => {
 });
 
 test("editHunks: a replaced line maps to -1, the context lines to their new index", () => {
-  assert.deepEqual(editHunks(edit(REPLACE_L2)), [{ oldStart: 1, oldLines: 4, newStart: 1, newLines: 4, map: [0, -1, 2, 3] }]);
+  assert.deepEqual(editHunks(edit(REPLACE_L2) as HookInput), [{ oldStart: 1, oldLines: 4, newStart: 1, newLines: 4, map: [0, -1, 2, 3] }]);
 });
 
 test("editHunks: a pure deletion shrinks the new side, an insertion grows it", () => {
-  assert.deepEqual(editHunks(edit(DELETE_L2)), [{ oldStart: 1, oldLines: 5, newStart: 1, newLines: 4, map: [0, -1, 1, 2, 3] }]);
-  assert.deepEqual(editHunks(edit(INSERT_2)), [{ oldStart: 1, oldLines: 3, newStart: 1, newLines: 5, map: [0, 3, 4] }]);
+  assert.deepEqual(editHunks(edit(DELETE_L2) as HookInput), [{ oldStart: 1, oldLines: 5, newStart: 1, newLines: 4, map: [0, -1, 1, 2, 3] }]);
+  assert.deepEqual(editHunks(edit(INSERT_2) as HookInput), [{ oldStart: 1, oldLines: 3, newStart: 1, newLines: 5, map: [0, 3, 4] }]);
 });
 
 test("editHunks: `\\ No newline at end of file` is not a line", () => {
   const patch = [{ oldStart: 1, oldLines: 1, newStart: 1, newLines: 1, lines: ["-a", "\\ No newline at end of file", "+b", "\\ No newline at end of file"] }];
-  assert.deepEqual(editHunks(edit(patch)), [{ oldStart: 1, oldLines: 1, newStart: 1, newLines: 1, map: [-1] }]);
+  assert.deepEqual(editHunks(edit(patch) as HookInput), [{ oldStart: 1, oldLines: 1, newStart: 1, newLines: 1, map: [-1] }]);
 });
 
 test("editHunks: Write, another tool, a missing or malformed patch -> null (whole file)", () => {
-  assert.equal(editHunks({ tool_name: "Write", tool_response: { structuredPatch: REPLACE_L2 } }), null);
-  assert.equal(editHunks({ tool_name: "Edit", tool_response: {} }), null);
-  assert.equal(editHunks(edit("nope")), null);
-  assert.equal(editHunks(edit([{ newStart: 1, lines: [] }])), null);
-  assert.equal(editHunks(edit([{ oldStart: 1, newStart: 1, lines: "x" }])), null);
-  assert.deepEqual(editHunks(edit([])), []);
+  assert.equal(editHunks({ tool_name: "Write", tool_response: { structuredPatch: REPLACE_L2 } } as HookInput), null);
+  assert.equal(editHunks({ tool_name: "Edit", tool_response: {} } as HookInput), null);
+  assert.equal(editHunks(edit("nope") as HookInput), null);
+  assert.equal(editHunks(edit([{ newStart: 1, lines: [] }]) as HookInput), null);
+  assert.equal(editHunks(edit([{ oldStart: 1, newStart: 1, lines: "x" }]) as HookInput), null);
+  assert.deepEqual(editHunks(edit([]) as HookInput), []);
 });
 
 test("carryLine: a replaced line is touched, the others keep or shift their place", () => {
-  const h = editHunks(edit(REPLACE_L2)) ?? [];
+  const h = editHunks(edit(REPLACE_L2) as HookInput) ?? [];
   assert.equal(carryLine(0, h), 0);
   assert.equal(carryLine(1, h), null);
   assert.equal(carryLine(2, h), 2);
@@ -105,11 +108,11 @@ test("carryLine: a replaced line is touched, the others keep or shift their plac
 });
 
 test("carryLine: a deletion shifts the lines after it, an insertion pushes them down", () => {
-  const del = editHunks(edit(DELETE_L2)) ?? [];
+  const del = editHunks(edit(DELETE_L2) as HookInput) ?? [];
   assert.equal(carryLine(1, del), null);
   assert.equal(carryLine(2, del), 1);
   assert.equal(carryLine(10, del), 9);
-  const ins = editHunks(edit(INSERT_2)) ?? [];
+  const ins = editHunks(edit(INSERT_2) as HookInput) ?? [];
   assert.equal(carryLine(0, ins), 0);
   assert.equal(carryLine(1, ins), 3);
   assert.equal(carryLine(20, ins), 22);
@@ -186,7 +189,7 @@ async function journalEdit(w: ReturnType<typeof world>, before: string, content:
   await sleep(3); // same pid, same millisecond would collide on the record name
   writeFileSync(w.file, content);
   const e = hunks === null ? { tool_name: "Write" } : edit(hunks);
-  const rec = recordEdit(w.file, w.real, editHunks(e), hunks === null ? null : digestOf(before), digestOf(content), owner, editRanges(e), w.proj);
+  const rec = recordEdit(w.file, w.real, editHunks(e as HookInput), hunks === null ? null : digestOf(before), digestOf(content), owner, editRanges(e as HookInput), w.proj);
   assert.ok(rec);
   return rec;
 }
@@ -207,7 +210,7 @@ test("ownerOf: the session and the agent name the owner, a payload without them 
 test("recordEdit writes <key>-<ms>-<pid>-<owner>.json with hunks, lines, digests, path and cwd, and the activity stamp", () => {
   const w = world();
   writeFileSync(w.file, SIX);
-  const hunks = editHunks(edit(REPLACE_3));
+  const hunks = editHunks(edit(REPLACE_3) as HookInput);
   const t0 = Date.now();
   const rec = recordEdit(w.file, w.real, hunks, digestOf("before"), undefined, AGENT, [[2, 2]], w.proj);
   assert.ok(rec);

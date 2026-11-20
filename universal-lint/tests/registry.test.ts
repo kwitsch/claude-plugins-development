@@ -1,4 +1,4 @@
-// Unit tests of the exports of the built plugin/hooks/lint-file.mjs (ported from test/universal-lint/registry.test.mjs).
+// Unit tests of the exports of src/hooks/lint-core.ts (ported from test/universal-lint/registry.test.mjs).
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import type { SpawnSyncReturns } from "node:child_process";
@@ -7,7 +7,10 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSy
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "vitest";
-import { acquireSlot, buildArgv, classifyCheckstyleOutput, classifyExit, coalesceProjectCheck, configExists, editRanges, FILE_CHANGED_SLOTS, gateFinding, hashPath, hasProjectMarkdownlintConfig, hasProjectYamllintConfig, isToolAvailable, lintFileHandler, lintFilesHandler, looksLikeSolutionStyleTsconfig, oxlintConfigTypeChecks, recordWritten, REGISTRY, resolveCargoManifest, resolveCheckstyleConfig, resolveLintTarget, resolveOxlintConfig, resolveTsconfig, scopedTarget, slotDeadlineMs, stripTrailingCommas, truncate, tsBuildInfoPathFor, tscOutputHasSourceDiagnostic, WATCH_LIMIT, writtenContent } from "../plugin/hooks/lint-file.mjs";
+import { acquireSlot, buildArgv, classifyCheckstyleOutput, classifyExit, coalesceProjectCheck, configExists, editRanges, FILE_CHANGED_SLOTS, gateFinding, hashPath, hasProjectMarkdownlintConfig, hasProjectYamllintConfig, isToolAvailable, lintFileHandler, lintFilesHandler, looksLikeSolutionStyleTsconfig, oxlintConfigTypeChecks, recordWritten, REGISTRY, resolveCargoManifest, resolveCheckstyleConfig, resolveLintTarget, resolveOxlintConfig, resolveTsconfig, scopedTarget, slotDeadlineMs, stripTrailingCommas, truncate, tsBuildInfoPathFor, tscOutputHasSourceDiagnostic, WATCH_LIMIT, writtenContent } from "../src/hooks/lint-core.ts";
+
+/** The hook input type; the tests pass partial payloads on purpose (a Write, a missing patch). */
+type HookInput = Parameters<typeof writtenContent>[0];
 
 // The handler tests below call lintFileHandler in this process: report findings at once, no settle window (F34).
 process.env.UNIVERSAL_LINT_SETTLE_MS = "0";
@@ -1292,9 +1295,9 @@ test("recordWritten: stores the SHA-256 base64 of the given content at CLAUDE_PL
 });
 
 test("writtenContent: Write content; Edit hunks applied to originalFile (insertion, deletion, `\\ No newline`); null without them", () => {
-  const edit = (originalFile: unknown, structuredPatch: unknown) => writtenContent({ tool_name: "Edit", tool_response: { originalFile, structuredPatch } });
-  assert.equal(writtenContent({ tool_name: "Write", tool_input: { content: "x\n" } }), "x\n");
-  assert.equal(writtenContent({ tool_name: "Write", tool_input: {} }), null);
+  const edit = (originalFile: unknown, structuredPatch: unknown) => writtenContent({ tool_name: "Edit", tool_response: { originalFile, structuredPatch } } as HookInput);
+  assert.equal(writtenContent({ tool_name: "Write", tool_input: { content: "x\n" } } as HookInput), "x\n");
+  assert.equal(writtenContent({ tool_name: "Write", tool_input: {} } as HookInput), null);
   assert.equal(edit("a\nb\nc\nd\n", [{ oldStart: 2, oldLines: 1, lines: ["-b", "+B"] }, { oldStart: 4, oldLines: 0, lines: ["+e"] }]), "a\nB\nc\nd\ne\n");
   assert.equal(edit("a\nb\nc\n", [{ oldStart: 1, oldLines: 2, lines: [" a", "-b"] }]), "a\nc\n");
   assert.equal(edit("a\nb", [{ oldStart: 2, oldLines: 1, lines: ["-b", "\\ No newline at end of file", "+c", "\\ No newline at end of file"] }]), "a\nc");

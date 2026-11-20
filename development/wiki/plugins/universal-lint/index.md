@@ -34,7 +34,7 @@ See [how-to-work-a-task.md](../how-to-work-a-task.md).
 
 - Pick by stage order, then priority, among tasks whose dependencies (`TASKS.md`) are done.
 - Read the rule `universal-lint/.claude/rules/lint-file.md` (the constraints) and the design pages in `design/` for the areas the task touches, at least `design/hook-design.md` (fail-open contract, timeout budget), `design/edit-range-gate.md`, `design/file-detection.md`, `design/npx-and-local-bin.md` and `design/languages.md` with the `lang-*.md` page of the language the task touches. Several tasks touch documented user decisions (the task says so under `Constraints`): ask before changing one.
-- The code is in `src/hooks/lint-file.ts` unless the task says otherwise. Re-measure the baseline numbers the task cites (see F01) before and after the change; they are from one machine and one day.
+- The code is in `src/hooks/lint-core.ts` (the entry `src/hooks/lint-file.ts` only calls its `main()`) unless the task says otherwise. Re-measure the baseline numbers the task cites (see F01) before and after the change; they are from one machine and one day.
 - Update the design page in `design/` that documents the changed behaviour. A new or changed constraint also gets its one line in `universal-lint/.claude/rules/lint-file.md`; reasons, numbers and residuals stay in the design page.
 
 ## Conventions

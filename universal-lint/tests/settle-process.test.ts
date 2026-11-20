@@ -5,7 +5,7 @@ import { existsSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileS
 import path from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { expect, test } from "vitest";
-import { hashPath, ownerOf } from "../plugin/hooks/lint-file.mjs";
+import { hashPath, ownerOf } from "../src/hooks/lint-core.ts";
 import { HOOK, type LintEnv, makeEnv, payload } from "./support/lint-hook.ts";
 
 /** The 4-line script the scenarios edit. */

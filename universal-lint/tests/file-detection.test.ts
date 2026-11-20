@@ -4,7 +4,7 @@ import { spawn, spawnSync } from "node:child_process";
 import { chmodSync, mkdirSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "vitest";
-import { FILE_CHANGED_SLOTS } from "../plugin/hooks/lint-file.mjs";
+import { FILE_CHANGED_SLOTS } from "../src/hooks/lint-core.ts";
 import { HOOK, makeEnv } from "./support/lint-hook.ts";
 import type { LintEnv } from "./support/lint-hook.ts";
 
