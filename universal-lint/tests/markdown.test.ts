@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "vitest";
-import { hashPath } from "../plugin/hooks/lint-file.mjs";
+import { hashPath } from "../src/hooks/lint-core.ts";
 import { makeEnv } from "./support/lint-hook.ts";
 
 const OUT = "a.md:1 MD041/first-line-heading";

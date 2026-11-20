@@ -1,12 +1,12 @@
 # universal-lint
 
-Hook-driven plugin (plus one user-only on-demand skill): six `command` hooks share one entry, `src/hooks/lint-file.ts` (self-contained, zero-dependency, built to `plugin/hooks/lint-file.mjs`), which dispatches on the event. PostToolUse `Write|Edit` runs the just-written file's standard linter (check-only, never `--fix`/`--format`/`--write`) for Shell/Java/Kotlin/JS-TS/Python/Go/YAML/Markdown/CSS/SCSS/PHP/Rust; SessionStart/CwdChanged print the cwd's lintable git files as `watchPaths`; FileChanged lints a watched file changed outside Write/Edit; Stop/SubagentStop lint the files whose edits no report has covered yet (a subagent's edits are linted only there, so its findings reach the subagent and not the main conversation). TypeScript files (`.ts`/`.tsx`/`.mts`/`.cts`) additionally get a whole-project `tsc --noEmit` type-check. JSON is deliberately excluded.
+Hook-driven plugin (plus one user-only on-demand skill): six `command` hooks share one entry, `plugin/hooks/lint-file.mjs` (a 3-line entry `src/hooks/lint-file.ts`; the logic is `src/hooks/lint-core.ts`, inlined by tsdown into the self-contained, zero-dependency build), which dispatches on the event. PostToolUse `Write|Edit` runs the just-written file's standard linter (check-only, never `--fix`/`--format`/`--write`) for Shell/Java/Kotlin/JS-TS/Python/Go/YAML/Markdown/CSS/SCSS/PHP/Rust; SessionStart/CwdChanged print the cwd's lintable git files as `watchPaths`; FileChanged lints a watched file changed outside Write/Edit; Stop/SubagentStop lint the files whose edits no report has covered yet (a subagent's edits are linted only there, so its findings reach the subagent and not the main conversation). TypeScript files (`.ts`/`.tsx`/`.mts`/`.cts`) additionally get a whole-project `tsc --noEmit` type-check. JSON is deliberately excluded.
 
 ## Parts
 
 Two layers. The path-scoped rules in `.claude/rules/` load when you work on matching files and hold the constraints only. The design pages in `development/wiki/plugins/universal-lint/design/` hold the reasons, measurements, accepted residuals and rejected alternatives; they are not loaded by themselves. Do not "fix" any behaviour of an area without reading its design page first:
 
-- Hook `lint-file` (`src/hooks/lint-file.ts`): rule `lint-file.md`, one section per area, each naming its design page:
+- Hook `lint-file` (`src/hooks/lint-core.ts`, entry `src/hooks/lint-file.ts`): rule `lint-file.md`, one section per area, each naming its design page:
   - `development/wiki/plugins/universal-lint/design/hook-design.md`: six command hooks with one entry, command hooks instead of an MCP server, timeout budget, runtime behaviour, measured per-event cost and the `scripts/perf.ts` harness.
   - `development/wiki/plugins/universal-lint/design/settle-window.md`: who gets a finding and when (owner routing, the journal of pending edits, the quiet-time hold, the Stop/SubagentStop sweep; F34, F40).
   - `development/wiki/plugins/universal-lint/design/edit-range-gate.md`: Edit-range gate. `development/wiki/plugins/universal-lint/design/file-detection.md`: scope, watch list, FileChanged gates, slot cap, project-check lock, digest store, path exclusions. `development/wiki/plugins/universal-lint/design/npx-and-local-bin.md`: local `node_modules/.bin`, npx fallback, PATH probe cache.
@@ -25,4 +25,5 @@ Two layers. The path-scoped rules in `.claude/rules/` load when you work on matc
 ## Pitfalls
 
 - Debug against `src/`, not the built output.
-- The hook is registered as `${CLAUDE_PLUGIN_ROOT}/hooks/lint-file.mjs` without a `node` prefix: it runs through its shebang and the exec bit the build sets (0755 on every output starting with `#!`). Never turn it into a file without that bit.
+- The hook is registered as `${CLAUDE_PLUGIN_ROOT}/hooks/lint-file.mjs` without a `node` prefix: it runs through its shebang and the exec bit tsdown sets on a script output (0755). Never turn it into a file without that bit.
+- `lint-core.ts` must not start work at import: the skill driver inlines it, and a top-level `main()` there would start the hook's stdin loop in the driver (`tests/skill.test.ts` guards it). Keep the entry a separate file.

@@ -6,7 +6,7 @@ import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { test } from "vitest";
-import { spawnGroup } from "../plugin/hooks/lint-file.mjs";
+import { spawnGroup } from "../src/hooks/lint-core.ts";
 import { HOOK, makeEnv, payload } from "./support/lint-hook.ts";
 
 /**

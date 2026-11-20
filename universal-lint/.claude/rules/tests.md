@@ -6,7 +6,7 @@ paths:
 # Tests
 
 - `tests/*.test.ts`: one file per language/tool or hook area (`file-detection`: SessionStart/CwdChanged watch list and FileChanged linting in a real git repo, with the local `git`/`gitInit` helpers). Exceptions:
-  - `registry.test.ts`: unit tests of the exported helpers of the built `plugin/hooks/lint-file.mjs`.
+  - `registry.test.ts`: unit tests of the exported helpers of `src/hooks/lint-core.ts`.
   - `spawn-group.test.ts`: the `spawnGroup` process-group spawn, its timeout and kill escalation.
   - `manifest.test.ts`: wiring (no `userConfig`, hooks.json, exec bit, README).
 - Scaffold, marketplace and root-README checks are not per-plugin tests: the repo-wide guards (layout allowlist, manifest generation, CI freshness) cover them.

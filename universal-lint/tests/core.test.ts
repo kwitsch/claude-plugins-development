@@ -5,7 +5,7 @@ import { createHash } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "vitest";
-import { hashPath } from "../plugin/hooks/lint-file.mjs";
+import { hashPath } from "../src/hooks/lint-core.ts";
 import { HOOK, type LintEnv, makeEnv, payload } from "./support/lint-hook.ts";
 
 /** A 4-line shell script; the Edit tests below edit line 2. */
