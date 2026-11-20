@@ -4,7 +4,7 @@
  *
  * @remarks
  * No engine type import (the engine typings are not in the repo): the used `on` member is typed structurally. The
- * pure reroute logic lives in this file (one small module, no helper files, so no `lib.mjs` bundle). Fail-open: the
+ * pure reroute logic lives in this file (one small module, built to `plugin/hooks/register.js`). Fail-open: the
  * hook has no `.catch`, so a throwing hook is skipped and the guide runs un-rerouted.
  *
  * @packageDocumentation

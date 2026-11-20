@@ -1,5 +1,5 @@
 // Shared helpers of the cc-knowledge tests: paths, file reads, frontmatter, throwaway directories, spawning a built
-// script. Tests read the built `plugin/` (what ships) and never import `src/`.
+// script. The scripts export nothing, so their tests spawn the built `plugin/`; the hook's unit tests load `src/`.
 import { spawnSync } from "node:child_process";
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
