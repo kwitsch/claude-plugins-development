@@ -1,9 +1,9 @@
-// In-process access to the built handler for the unit tests, with an isolated HOME: the handler reads user settings
+// In-process access to the handler (src/mcp/handlers.ts) for the unit tests, with an isolated HOME: the handler reads user settings
 // and appends `~/.local/bin` to PATH, neither of which may come from the developer's machine.
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { formatPre as builtFormatPre } from "../../plugin/mcp/handlers.mjs";
+import { formatPre as sourceFormatPre } from "../../src/mcp/handlers.ts";
 
 process.env.HOME = mkdtempSync(path.join(tmpdir(), "uf-home-"));
 delete process.env.CLAUDE_CONFIG_DIR;
@@ -39,7 +39,7 @@ export interface HookIn {
  * @param args - The hook input.
  * @returns The hook result.
  */
-export const formatPre = (args: HookIn): Promise<HookOut> => builtFormatPre(args) as Promise<HookOut>;
+export const formatPre = (args: HookIn): Promise<HookOut> => sourceFormatPre(args) as Promise<HookOut>;
 
 /**
  * `formatPre` for a Write.

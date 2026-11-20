@@ -6,7 +6,7 @@ import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { afterEach, test } from "vitest";
 import { CONFIG_NAMES } from "../../dprint/src/skills/dprint/config-names.ts";
-import { DPRINT_CONFIG_NAMES } from "../plugin/mcp/handlers.mjs";
+import { DPRINT_CONFIG_NAMES } from "../src/mcp/handlers.ts";
 import { cleanup, type Sandbox, sandbox, type Server } from "./support/mcp.ts";
 import type { HookOut } from "./support/plugin.ts";
 

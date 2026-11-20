@@ -3,8 +3,8 @@ import { writeFileSync } from "node:fs";
 import path from "node:path";
 import process from "node:process";
 import { test } from "vitest";
-import { bundledPluginsFor, formatInProcess } from "../plugin/mcp/prettier.mjs";
-import { PRETTIER_LANGS } from "../plugin/mcp/registry.mjs";
+import { bundledPluginsFor, formatInProcess } from "../src/mcp/prettier.ts";
+import { PRETTIER_LANGS } from "../src/mcp/registry.ts";
 import { tmp } from "./support/plugin.ts";
 
 // The three third-party prettier plugins bundled into the artifact (java, php, shell) plus the
@@ -85,7 +85,7 @@ test("bundledPluginsFor: a Markdown-embedding host loads the trio only when its 
 // runs sh-syntax's Go runtime, which `vendors/wasm_exec.cjs` installs on globalThis. sh-syntax's
 // package.json lists only `wasm_exec.js` as side-effectful, so bun tree-shook that import and every
 // wasm format failed with "Go is not defined" until prettier.ts imported the file explicitly. This
-// is also the only test that reaches the committed main.wasm sidecar through build.mjs's __dirname
+// is also the only test that reaches the committed main.wasm sidecar through the vendored bundle (the vitest alias loads plugin/mcp/vendor/index.mjs)
 // rewrite (the default path uses mvdan-sh, pure JS).
 test("shell: a project opting into experimentalWasm is formatted through main.wasm", async () => {
   const cwd = tmp("uf-sh-wasm-");
