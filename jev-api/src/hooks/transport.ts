@@ -212,7 +212,7 @@ async function ensureServer($: Engine, link: Link): Promise<string | undefined> 
     } catch (err) {
       // A TypeError is the call itself failing: an engine without the mcp API (an older one, a test double) has no
       // server to reach, which is the fetch path with nothing to log. (`$.mcp` must not be read as a value: the
-      // engine's static check refuses that, also in lib.mjs.)
+      // engine's static check refuses that, also in code inlined into register.js.)
       if (!started && err instanceof TypeError) {
         link.retryAt = Number.MAX_SAFE_INTEGER;
         return undefined;

@@ -23,9 +23,9 @@ type Rig = Awaited<ReturnType<typeof rig>>;
  * @param opts - `connect` answers `$.mcp.connect` (default: connected); `onCall` answers `$.mcp.call` (default: an ok outcome for `request`, `{cancelled:true}` for `cancel`); `noMcp` leaves `$.mcp` out like the older tests' world; `options` is the plugin's userConfig; `env` the env values.
  */
 async function rig(opts: { connect?: () => Promise<unknown>; onCall?: (c: Call) => unknown; noMcp?: boolean; complete?: (r: Args) => unknown; store?: () => Promise<unknown>; register?: () => Promise<unknown>; options?: Record<string, unknown>; env?: Record<string, string> } = {}) {
-  const { register } = await import("../plugin/hooks/register.mjs");
+  const { register } = await import("../src/hooks/register.ts");
   const hooks = new Map<string, (...a: unknown[]) => Promise<unknown>>();
-  register((event: string, hook: (...a: unknown[]) => Promise<unknown>) => void hooks.set(event, hook), opts.options);
+  register(((event: string, hook: (...a: unknown[]) => Promise<unknown>) => void hooks.set(event, hook)) as unknown as Parameters<typeof register>[0], opts.options);
   const mcpCalls: Call[] = [];
   const fetched: { url: string; init: Args }[] = [];
   const logs: string[] = [];

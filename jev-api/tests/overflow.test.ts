@@ -1,5 +1,5 @@
 // Kit tests for F21 of jev-api: the oversized-state handling (preflight bounds, the 400 oracle, the overflow modes, the
-// learned characters per token), run against the built plugin/hooks/register.mjs.
+// learned characters per token), run against src/hooks/register.ts.
 import type { On } from "claude-engine-vitest";
 import { expect } from "vitest";
 import { call, mock, one, QUESTION, test, TOOL } from "./support/questions.js";
