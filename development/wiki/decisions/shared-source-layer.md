@@ -42,6 +42,8 @@ Notes from step 2:
 
 Live check (live 2.1.328, 2026-11-19, `claude -p --plugin-dir <plugin>/plugin --setting-sources project` in a throwaway git repo, one run per plugin): with the rebuilt dprint 0.14.2 and universal-format 0.19.2 the MCP servers connect through `mcp-core` (stdio, 78 and 107 ms), `format_pre` is called for a Write and an Edit, the Write is formatted (`{"b":[1,2,3],...}` to `{ "b": [1, 2, 3], "a": { "x": 22, "y": [] } }` after the Edit), the hooks answer `additionalContext`, dprint also calls `drain_notices` and `file_written`. Not exercised: cancellation in a session, a scratchpad path, a worktree path, a slow mount.
 
+Superseded for tsdown-built plugins (2026-11-20): there `@shared` is inlined into every output and allowed in any bundled file, the mod entry included, with no `plugin/shared/` copy and no entry ban ([tsdown-plugin-build.md](tsdown-plugin-build.md)). The section below describes the old build and is kept as history.
+
 ## Shared code in a lib bundle (2026-11-20, user decision)
 
 The build allows an `@shared` import in a `hooks/` helper of a `bundleHooksLib` plugin and keeps refusing it in the entry (the module `hooks.json` lists, which Claude Code's static check reads; kept free of `@shared` by user decision) and in a `hooks/` subfolder module (neither entry nor helper, not bundled).
