@@ -8,10 +8,9 @@
  * spawned; with one, the module picks the one dprint `find-dprint.ts` would pick (first `<PATH entry>/dprint` that
  * exists, else `$DPRINT_INSTALL/bin/dprint` (default `~/.dprint/bin/dprint`), else the npx cache), runs `--version` on it via `$.process.run`, and only an
  * unusable pick (cannot start, exits non-zero, prints no version, older than `MIN_VERSION`) toasts, naming the
- * cause. Only this file is listed in `hooks.json`; `development/scripts/build-plugin.ts`
- * (`pluginBuild.bundleHooksLib`) keeps it unmangled, uncompressed and with its whitespace, since the engine's static
- * check wants `$` and `on` spelled as such and every hook a named function literal. Its siblings (`types`, `probe`)
- * are bundled into one `./lib.mjs`. No engine type import (hooks modules run without Node and the engine's
+ * cause. Only this file is listed in `hooks.json` (as `./register.js`); tsdown builds it with its siblings
+ * (`types`, `probe`) inlined, compressed but never mangled, since the engine's static check wants `$` and `on` spelled
+ * as such and every hook a named function literal. No engine type import (hooks modules run without Node and the engine's
  * declaration file is not in the repo): the used members are typed structurally in `types.ts`.
  *
  * @packageDocumentation
@@ -26,7 +25,7 @@ import type { NoticeState, On } from "./types.js";
  * @param on - Registers a hook for an event.
  */
 export const register = (on: On): void => {
-  // State lives here, not at module level: the test kit reloads only this entry, and a bundled helper shares no state.
+  // State lives here, not at module level: the test kit reloads only this entry, and an inlined helper keeps no state.
   const st: NoticeState = { shownAt: undefined, probe: null, dprintRuns: false };
   on("session.start", async function onSessionStart($, e, next) {
     return afterSessionCwd($, st, e, next);

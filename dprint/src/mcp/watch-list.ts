@@ -1,9 +1,9 @@
 /**
- * The files of a working directory that dprint formats, shared by the `watch-paths` command hook and the
+ * The files of a working directory that dprint formats, shared by the `hooks/watch-paths.ts` command hook and the
  * server's `bash_finished` scan.
  *
  * @remarks
- * Imports neither `server.mjs` (it starts the server at import) nor `format.mjs`, so both can use it.
+ * Imports neither `server.ts` (it starts the server at import) nor `format.ts`, so both can use it.
  *
  * @packageDocumentation
  */

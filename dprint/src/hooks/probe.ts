@@ -1,6 +1,6 @@
 /**
  * Probe and toast logic of the function-hooks module: does the directory use dprint, can the dprint the MCP server
- * would pick run, and the toast when it cannot. Bundled into `hooks/lib.mjs` with its siblings; every function takes
+ * would pick run, and the toast when it cannot. Inlined into `hooks/register.js` by the build; every function takes
  * the whole engine `$` and the entry's {@link NoticeState} (no module-level state).
  *
  * @remarks
@@ -14,8 +14,8 @@
 import type { Engine, Next, NoticeState, Probe, Problem, WorktreeResult } from "./types.js";
 
 /**
- * dprint's config file names. A copy of `CONFIG_NAMES` (`skills/dprint/config-names.ts`): a relative import
- * may not resolve in the engine; `tests/notice.test.ts` fails on drift.
+ * dprint's config file names. A copy of `CONFIG_NAMES` (`skills/dprint/config-names.ts`): a hooks module
+ * takes nothing from the skill scripts (they import node: modules); `tests/notice.test.ts` fails on drift.
  */
 export const CONFIG_NAMES = [
   "dprint.json",

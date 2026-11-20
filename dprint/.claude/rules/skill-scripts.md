@@ -15,8 +15,8 @@ Built to `plugin/skills/dprint/`, next to the hand-written `SKILL.md`, the `*.re
 - `scan-plugins.ts`: read-only scan of the project's file types against its dprint config, reads
   `dprint-plugins.json` (contract: `scan-plugins.reference.md`).
 - `run-dprint.ts`: check/fmt dispatcher with the not-set-up gate (contract: `run-dprint.reference.md`).
-- Shared modules (also imported by `src/mcp/`): `config-names.ts` (the six dprint config file names in
-  `CONFIG_NAMES`), `find-config.ts`, `find-dprint.ts`.
+- Shared modules (also imported by `src/mcp/`), inlined into every entry that imports them (no file of their own in
+  `plugin/`): `config-names.ts` (the six dprint config file names in `CONFIG_NAMES`), `find-config.ts`, `find-dprint.ts`.
 
 ## Resolution (single source; the MCP and notice rules refer here)
 
