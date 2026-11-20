@@ -1,13 +1,13 @@
 {
   "name": "graphmind-helper",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "private": true,
-  "description": "Does what `graphmind setup` and `graphmind init` do for Claude Code from the plugin: hooks, MCP server and project indexing, active only while the graphmind binary exists.",
+  "description": "Makes Claude Code use graphmind's code graph and memory: a project briefing, memory recall on each prompt and search hints, with the project indexed on first use.",
   "keywords": [
     "graphmind",
-    "hooks",
-    "mcp",
-    "memory"
+    "memory",
+    "code-search",
+    "indexing"
   ],
   "author": {
     "name": "Kwitsch"
