@@ -1,5 +1,5 @@
-// Tests of the built plugin/hooks/register.mjs of cc-knowledge: the claude-code-guide reroute. The hook runs through the
-// kit; the manifest wiring (hooks.json, claude plugin validate) is checked on the shipped files.
+// Unit tests of the claude-code-guide reroute of cc-knowledge (src/hooks/register.ts, through the kit); the manifest
+// wiring (hooks.json, claude plugin validate) is checked on the shipped files.
 import { createKit } from "claude-engine-vitest";
 import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { expect, test as plain } from "vitest";
 import { PLUGIN, readPluginJson } from "./support/plugin.ts";
 
-const { test } = createKit({ module: new URL("../plugin/hooks/register.mjs", import.meta.url), plugin: "cc-knowledge" });
+const { test } = createKit({ module: new URL("../src/hooks/register.ts", import.meta.url), plugin: "cc-knowledge" });
 
 /** The test's `$` and `on` (the kit does not export their types). */
 type Runner = Parameters<Parameters<typeof test>[2]>[0];
@@ -61,12 +61,12 @@ test("a call of another tool is not touched", async ($, on) => {
 });
 
 plain("hooks.json is exactly the mods module list of the built entry", () => {
-  expect(readPluginJson("hooks/hooks.json")).toEqual({ modules: ["./register.mjs"] });
-  expect(existsSync(join(PLUGIN, "hooks/register.mjs"))).toBe(true);
+  expect(readPluginJson("hooks/hooks.json")).toEqual({ modules: ["./register.js"] });
+  expect(existsSync(join(PLUGIN, "hooks/register.js"))).toBe(true);
 });
 
 plain("no helper module, old command hook, MCP server or launcher ships", () => {
-  for (const gone of ["hooks/lib.mjs", "hooks/reroute.mjs", "hooks/reroute-guide.mjs", "mcp", ".mcp.json", "bin"]) {
+  for (const gone of ["hooks/register.mjs", "hooks/lib.mjs", "hooks/reroute.mjs", "hooks/reroute-guide.mjs", "shared", "mcp", ".mcp.json", "bin"]) {
     expect(existsSync(join(PLUGIN, gone)), gone).toBe(false);
   }
 });
@@ -76,5 +76,5 @@ const hasClaude = spawnSync("claude", ["--version"], { encoding: "utf8" }).statu
 plain.skipIf(!hasClaude)("claude plugin validate passes and lists the tool.call hook", () => {
   const r = spawnSync("claude", ["plugin", "validate", PLUGIN], { encoding: "utf8" });
   expect(r.status, r.stdout + r.stderr).toBe(0);
-  expect(r.stdout + r.stderr).toContain("./register.mjs hooks: tool.call{tool=Agent|Task}");
+  expect(r.stdout + r.stderr).toContain("./register.js hooks: tool.call{tool=Agent|Task}");
 });
