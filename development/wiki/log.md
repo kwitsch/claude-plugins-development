@@ -198,3 +198,7 @@ Source: user decision 2026-11-20 (task spec), PR stacked on `feature/tsdown-plug
 
 - Decision pages: `decisions/tsdown-plugin-build.md` (migration finished, vendor option, multi-event command hooks, inlined-module pitfall, skills-only plugins, measured `$1` check and `test:plugin` counts); `decisions/shared-source-layer.md` and `decisions/repo-tooling.md` (old-build mechanics replaced by the tsdown facts).
 - Rules and docs: `tsdown-build.md` (rewritten to the single standard), `plugin-build-output.md`, `hook-tests.md`, `lint-config.md`, `mcp-dual-era.md`, `claude-code-hook-facts.md`; root and `development/` `CLAUDE.md`; skills `scaffold-plugin`, `bughunt`, `perf-worklist`; `facts/test-kit-vs-engine.md`, `plugins/graphmind-helper/design/decisions.md`, `index.md`.
+
+## [2026-11-20] ingest | $.model.complete: no structured output, classify, system cache
+
+- `facts/mods-engine-io.md` (`$.model.complete`): unknown request fields such as a JSON schema are ignored without an error; `$.model.classify(text, labels)` returns a label only and was not more accurate than `choice` through `complete`; `system` blocks with `cache: true` cache from a length of about 2,400 tokens, not at 320; the debug log redacts token counts.
