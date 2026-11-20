@@ -6,7 +6,7 @@ The constraints that follow load by themselves with [claude-code-hook-facts.md](
 
 ## Registration
 
-- A registered tool reaches the model and the `tool.call` hooks as `mcp__<plugin>__<name>`, hyphens kept (`mcp__inline-headroom__headroom_retrieve`). Its input fields arrive top-level on the `tool.call` event, next to `tool` (live 2.1.322).
+- A registered tool reaches the model and the `tool.call` hooks as `mcp__<plugin>__<name>`, hyphens kept (e.g. `mcp__jev-api__request`). Its input fields arrive top-level on the `tool.call` event, next to `tool` (live 2.1.322).
 - Core's `$.tool.register` polls the session's tool list until the new tool is listed (up to 8 s, then it resolves anyway; under a deny rule it resolves at once), and `$.tool.list()` reads the same list, so a resolved registration is listed (binary 2.1.322).
 - The `inputSchema` check only requires a JSON object; `isDeferred` (boolean) is accepted too (binary 2.1.322).
 - Registrations survive a hot reload of the plugin: the reload loads a fresh module, but the tool registry forgets a plugin's tools only when the plugin unloads. There is no `$.tool.unregister` (binary 2.1.322).

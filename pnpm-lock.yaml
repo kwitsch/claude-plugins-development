@@ -68,12 +68,6 @@ importers:
         specifier: workspace:*
         version: link:../development/vitest/claude-engine
 
-  inline-headroom:
-    devDependencies:
-      claude-engine-vitest:
-        specifier: workspace:*
-        version: link:../development/vitest/claude-engine
-
   jev-api:
     devDependencies:
       '@modelcontextprotocol/server':

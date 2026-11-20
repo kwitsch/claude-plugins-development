@@ -57,14 +57,14 @@ transcript and prompt.
 - Trade-off of the Haiku path (read from the 2.1.322 binary): answering `{ messages }` without `next` skips core's
   compaction step, so classic PreCompact hooks do not run (a blocking one is ignored), PostCompact gets an empty
   summary, recently read files, the plan file and invoked skills are not re-attached, and a lower plugin's
-  `session.compact` hook (inline-headroom's dedup reset) sees nothing when jevfort is the outer plugin.
+  `session.compact` hook (another plugin's reset) sees nothing when jevfort is the outer plugin.
 
 ## Known limit: `session.compact` is bypassed (Claude Code 2.1.325)
 
 The built-in `cc-plugin-sec-default` passes `session.compact` on past every user-tier hook (debug log:
 `jevfort: session.compact bypassed by cc-plugin-sec-default (tier user); beneath runs`, and
 `its session.compact hook was skipped`), as for the events in `register-hooks.md` (for `tool.check` only a
-re-dispatch notice appears, the verdict stays allow: `development/wiki/plugins/inline-headroom/notes/claude-code-verification.md`). So the Jev ranking, the Haiku compaction and the
+re-dispatch notice appears, the verdict stays allow: [mods-engine-verification.md](../../development/wiki/facts/mods-engine-verification.md)). So the Jev ranking, the Haiku compaction and the
 `cacheExpires = 0` reset do not run; core compacts on its own. Seen with a manual `/compact` in `claude -p`; an
 interactive session and an auto-compaction were not tried. Nothing in this plugin can get past a prepend-tier hook; the
 code and its tests stay as they are (the kit runs the hook).

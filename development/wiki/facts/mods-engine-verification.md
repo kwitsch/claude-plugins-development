@@ -1,6 +1,6 @@
-# Claude Code verification log (inline-headroom)
+# Claude Code verification log (mods engine shapes)
 
-Evidence for the engine shapes the mod relies on. Not loaded as memory: the pitfalls that change how code is written are in `.claude/rules/register-hooks.md`; this file is the evidence and the open live-check list.
+Evidence for the engine shapes function-hooks modules rely on, written for the removed inline-headroom plugin. Not loaded as memory; the pitfalls that change how code is written are in `.claude/rules/claude-code-hook-facts.md`. Open live-check list included.
 
 ## Verified engine shapes relied on (2.1.288 typings, live runs on 2.1.296 and 2.1.310)
 
