@@ -1,121 +1,9 @@
-// The built register.mjs on claude-engine-vitest: stubs answer the engine calls (tool list and calls, process.run, fs,
-// env, cwd, toast); prompt.submit and tool.call end in recording stubs, so the tests read the context the mod added.
-import { createKit } from "claude-engine-vitest";
+// The built register.mjs through the shared kit (tests/support/kit.ts): stubs answer the engine calls; prompt.submit and
+// tool.call end in recording stubs, so the tests read the context the mod added.
 import { expect } from "vitest";
+import { BIN, CWD, makeKit, prompt, SETUP, toolCall } from "./support/kit.ts";
 
-const { test, mock } = createKit({ module: new URL("../plugin/hooks/register.mjs", import.meta.url), plugin: "graphmind-helper" });
-
-const CWD = "/proj";
-const BIN = "/home/u/.local/bin/graphmind";
-const SETTINGS = "/home/u/.claude/settings.json";
-const OWN = ["status", "map", "memory_list", "search"].map((t) => ({ name: `mcp__plugin_graphmind-helper_graphmind__gm_${t}`, description: "", mcp: true }));
-const SETUP = ["status", "map", "memory_list", "search"].map((t) => ({ name: `mcp__graphmind__gm_${t}`, description: "", mcp: true }));
-
-/** The test's `$` (the kit does not export its type). */
-type Runner = Parameters<Parameters<typeof test>[2]>[0];
-
-/** What the fake world looks like. */
-type World = {
-  /** Tools `$.tool.list()` reports. */
-  tools?: { name: string; description: string; mcp: boolean }[];
-  /** Paths `fs.exists` reports (`fs.stat`: as files). */
-  files?: string[];
-  /** Paths `fs.stat` reports as directories. */
-  dirs?: string[];
-  /** Contents of settings.json when it exists. */
-  settings?: string;
-  /** Path of that settings.json (default: `~/.claude/settings.json`). */
-  settingsPath?: string;
-  /** Value of `CLAUDE_CONFIG_DIR` (default: unset). */
-  configDir?: string;
-  /** `gm_status` fails (project not registered). */
-  unregistered?: boolean;
-  /** `gm_status` answers a result without any text part. */
-  emptyStatus?: boolean;
-  /** Output of `graphmind memory search`. */
-  search?: string;
-  /** Text of `gm_memory_list`. */
-  recent?: string;
-  /** Output of `graphmind memory list --priority`. */
-  priority?: string;
-  /** Text of `gm_map`. */
-  map?: string;
-  /** `session.compact` answers a skip instead of messages. */
-  compactSkip?: boolean;
-};
-
-/**
- * Stubs every engine call of the module.
- *
- * @param on - The test's `on`.
- * @param w - The fake world.
- * @returns What the module did: prompts it passed on, toasts, MCP calls, CLI runs.
- */
-function setup(on: Parameters<typeof mock.clock>[0], w: World = {}) {
-  const prompts: { context?: readonly string[] }[] = [];
-  const toasts: string[] = [];
-  const calls: { tool: string; [k: string]: unknown }[] = [];
-  const runs: string[][] = [];
-  const clock = mock.clock(on);
-  const files = w.files ?? [BIN];
-  const settings = w.settingsPath ?? SETTINGS;
-  on("env.get", (_$, e) => ({ value: e.name === "HOME" ? "/home/u" : e.name === "PATH" ? "/usr/bin" : e.name === "CLAUDE_CONFIG_DIR" ? w.configDir : undefined }));
-  on("session.cwd", () => ({ value: CWD }));
-  on("fs.exists", (_$, e) => ({ value: files.includes(String(e.path)) || w.dirs?.includes(String(e.path)) || (w.settings !== undefined && e.path === settings) }));
-  on("fs.stat", (_$, e) => (files.includes(String(e.path)) ? { value: { kind: "file", size: 1, mtimeMs: 0 } } : w.dirs?.includes(String(e.path)) ? { value: { kind: "dir", size: 0, mtimeMs: 0 } } : { deny: "ENOENT" }));
-  on("fs.read", (_$, e) => (e.path === settings && w.settings !== undefined ? { value: w.settings } : { deny: "ENOENT" }));
-  on("tool.list", () => ({ value: w.tools ?? OWN }));
-  on("process.run", (_$, e) => {
-    const argv = [...(e.argv as string[])];
-    runs.push(argv);
-    const out = argv[1] === "memory" && argv[2] === "list" ? (w.priority ?? ">> p\n★ aaaaaaaa [decision] always use X\n") : argv[2] === "search" ? (w.search ?? "bbbbbbbb [pattern] about foo_bar\n") : "";
-    return { value: { exitCode: 0, stdout: out, stderr: "" } };
-  });
-  on("ui.toast", (_$, e) => {
-    toasts.push(String(e.text));
-    return { value: undefined };
-  });
-  on("session.start", async () => ({}));
-  on("session.end", async () => ({}));
-  on("session.compact", async () => (w.compactSkip ? { skip: "not now" } : { messages: [] }));
-  on("prompt.submit", (_$, e) => {
-    prompts.push({ context: e.context as readonly string[] | undefined });
-    return { value: {} };
-  });
-  on("tool.call", (_$, e, next) => {
-    const tool = String(e.tool);
-    if (!tool.startsWith("mcp__")) return { result: "tool output" };
-    calls.push({ ...e, tool });
-    if (tool.endsWith("__gm_status") && w.unregistered) return { value: { deny: "Project is not registered" } };
-    if (tool.endsWith("__gm_status") && w.emptyStatus) return { value: { result: [], text: "" } };
-    const text = tool.endsWith("__gm_status") ? "Project: p\nGraph: 1 symbols" : tool.endsWith("__gm_map") ? (w.map ?? ">> map\n  top file") : tool.endsWith("__gm_memory_list") ? (w.recent ?? ">> 1\n  [decision] recent one (id: x)") : "  foo [Function] a.ts:1";
-    // The shape of a real MCP tool result (live, Claude Code 2.1.325): text parts under `result` and the joined text.
-    return tool.includes("graphmind") ? { value: { result: [{ type: "text", text }], text } } : next(e);
-  });
-  return { prompts, toasts, calls, runs, clock };
-}
-
-/**
- * Fires a tool call through the module.
- *
- * @param $ - The test's `$`.
- * @param input - The tool call event.
- * @returns The result with the context the module added.
- */
-async function toolCall($: Runner, input: Record<string, unknown>) {
-  return (await $.tool.call(input)) as { context?: string[] };
-}
-
-/**
- * Sends a composer prompt through the module.
- *
- * @param $ - The test's `$`.
- * @param text - The prompt.
- * @param extra - Event fields to override.
- */
-async function prompt($: Runner, text: string, extra: Record<string, unknown> = {}) {
-  await $.prompt.submit({ text, origin: { kind: "composer" }, ...extra });
-}
+const { test, setup } = makeKit();
 
 test("the first prompt gets the briefing and the recall, a later one only recall and new priority entries", async ($, on) => {
   const { prompts, calls, runs } = setup(on);
@@ -429,3 +317,21 @@ test("session start stays quiet with the binary in place", async ($, on) => {
   await clock.settle();
   expect(toasts).toHaveLength(0);
 });
+
+/** Where the binary is in each row, and which path the module must run. */
+const binRows = [
+  { name: "a PATH entry", path: "/opt/gm/bin", home: "/home/v", files: ["/opt/gm/bin/graphmind"], bin: "/opt/gm/bin/graphmind" },
+  { name: "~/.graphmind/bin", path: "/usr/bin", home: "/home/v", files: ["/home/v/.graphmind/bin/graphmind"], bin: "/home/v/.graphmind/bin/graphmind" },
+  { name: "~/.local/bin", path: "/usr/bin", home: "/home/v", files: ["/home/v/.local/bin/graphmind"], bin: "/home/v/.local/bin/graphmind" },
+  { name: "/usr/local/bin", path: "/usr/bin", home: "/home/v", files: ["/usr/local/bin/graphmind"], bin: "/usr/local/bin/graphmind" },
+  { name: "PATH wins over ~/.local/bin", path: "/opt/gm/bin", home: "/home/v", files: ["/home/v/.local/bin/graphmind", "/opt/gm/bin/graphmind"], bin: "/opt/gm/bin/graphmind" },
+];
+
+for (const c of binRows) {
+  test(`the graphmind binary is looked for in PATH entries, then ~/.graphmind/bin, ~/.local/bin, /usr/local/bin (${c.name})`, async ($, on) => {
+    const { runs } = setup(on, { path: c.path, home: c.home, files: c.files });
+    await $.session.start({ source: "startup" });
+    await prompt($, "where is foo_bar defined in the code");
+    expect(runs[0]?.[0]).toBe(c.bin);
+  });
+}
