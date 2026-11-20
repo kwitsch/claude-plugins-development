@@ -1,7 +1,7 @@
 // pluginConfig() of the tsdown build standard, run through tsdown's build() on fixture plugins in a temp directory.
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { build } from "tsdown";
@@ -147,10 +147,13 @@ const invalid: { name: string; entries: PluginEntries; error: RegExp }[] = [
   { name: "an entry with an extension", entries: { scripts: ["hooks/register.ts"] }, error: /invalid script entry "hooks\/register\.ts"/ },
   { name: "an entry leaving src/", entries: { mods: ["../x"] }, error: /invalid mod entry/ },
   { name: "an entry listed twice", entries: { mods: ["hooks/register", "hooks/register"] }, error: /listed twice/ },
+  { name: "a vendor directory without index.d.ts", entries: { mods: ["hooks/register"], vendor: ["mcp/vendor"] }, error: /src\/mcp\/vendor\/index\.d\.ts: listed as a vendor directory/ },
+  { name: "a vendor directory leaving src/", entries: { mods: ["hooks/register"], vendor: ["../vendor"] }, error: /invalid vendor directory/ },
+  { name: "a vendor directory listed twice", entries: { mods: ["hooks/register"], vendor: ["hooks", "hooks"] }, error: /vendor directory "hooks" is listed twice/ },
 ];
 for (const c of invalid) {
   test(`pluginConfig refuses ${c.name}`, () => {
-    const root = tree("invalid", { "src/hooks/register.ts": "export const register = (): void => {};\n" });
+    const root = tree("invalid", { "src/hooks/register.ts": "export const register = (): void => {};\n", "src/hooks/index.d.ts": "export {};\n" });
     assert.throws(() => pluginConfig(c.entries, root), c.error);
   });
 }
@@ -162,4 +165,82 @@ test("every config builds one entry into plugin/ and only the first carries the 
   assert.deepEqual(configs.map((c) => c.minify), [{ mangle: false, compress: true }, true]);
   assert.deepEqual(configs.map((c) => (c.plugins as { name: string }[]).map((p) => p.name)), [["plugin-build:check", "plugin-build:manifest"], ["plugin-build:check"]]);
   assert.ok(configs.every((c) => c.outDir === path.join(root, "plugin") && c.clean === false));
+});
+
+/** The declaration of a fixture's vendored bundle. */
+const VENDOR_DTS = "export declare const answer: number;\n";
+/** The vendored bundle a plugin's own build step would have written. */
+const VENDOR_FILES = { "src/mcp/vendor/index.d.ts": VENDOR_DTS, "plugin/mcp/vendor/index.mjs": "export { answer } from \"./chunk-abc.mjs\";\n", "plugin/mcp/vendor/chunk-abc.mjs": "export const answer = 42;\n" };
+
+test("a script beside the vendor directory keeps ./vendor/index.mjs external, the bundle survives the stale removal and the script runs", async () => {
+  const root = tree("vendor-near", {
+    ...VENDOR_FILES,
+    "src/mcp/server.ts": "#!/usr/bin/env node\nimport { answer } from \"./vendor/index.js\";\nconsole.log(answer);\n",
+    "plugin/mcp/old.mjs": "export {};\n",
+  });
+  await run(root, { scripts: ["mcp/server"], vendor: ["mcp/vendor"] });
+  const file = path.join(root, "plugin/mcp/server.mjs");
+  assert.deepEqual(specifiers(readFileSync(file, "utf8")), ["./vendor/index.mjs"]);
+  assert.ok(!existsSync(path.join(root, "plugin/mcp/old.mjs")), "stale output outside the vendor directory is removed");
+  for (const kept of ["index.mjs", "chunk-abc.mjs"]) assert.ok(existsSync(path.join(root, "plugin/mcp/vendor", kept)), `${kept} stays`);
+  assert.equal(spawnSync(file, { encoding: "utf8" }).stdout, "42\n");
+});
+
+test("a script in another directory that reaches the vendor bundle through a helper gets the path from its own output", async () => {
+  const root = tree("vendor-far", {
+    ...VENDOR_FILES,
+    "src/mcp/helper.ts": "import { answer } from \"./vendor/index.js\";\nexport const twice = (): number => answer * 2;\n",
+    "src/skills/s/run.ts": "#!/usr/bin/env node\nimport { twice } from \"../../mcp/helper.js\";\nconsole.log(twice());\n",
+  });
+  await run(root, { scripts: ["skills/s/run"], vendor: ["mcp/vendor"] });
+  const file = path.join(root, "plugin/skills/s/run.mjs");
+  assert.deepEqual(specifiers(readFileSync(file, "utf8")), ["../../mcp/vendor/index.mjs"]);
+  assert.equal(spawnSync(file, { encoding: "utf8" }).stdout, "84\n");
+});
+
+test("the build fails on a relative import of an undeclared vendor directory", async () => {
+  const root = tree("vendor-undeclared", { "src/mcp/vendor/index.d.ts": VENDOR_DTS, "src/mcp/server.ts": "#!/usr/bin/env node\nimport { answer } from \"./vendor/index.js\";\nconsole.log(answer);\n" });
+  await assert.rejects(run(root, { scripts: ["mcp/server"] }));
+  assert.ok(!existsSync(path.join(root, "plugin/mcp/server.mjs")), "nothing is written");
+});
+
+test("vitest resolves a source's ./vendor/index.js to the plugin's built vendor bundle", async () => {
+  const { BUNDLED_PRETTIER_VERSION } = await import("../../../universal-format/src/mcp/prettier.ts");
+  assert.match(BUNDLED_PRETTIER_VERSION, /^\d+\.\d+\.\d+/);
+});
+
+/** A mod entry without imports. */
+const PLAIN_MOD = "export const register = (): void => {};\n";
+
+test("a symlinked directory entry below plugin/ fails the build and its target is unchanged", async () => {
+  const root = tree("symlink-entry", { "src/hooks/register.ts": PLAIN_MOD, "plugin/skills/data.json": "{}\n" });
+  const outside = path.join(tmp, "symlink-entry-outside");
+  mkdirSync(outside);
+  writeFileSync(path.join(outside, "precious.mjs"), "keep me");
+  symlinkSync(outside, path.join(root, "plugin/skills/shared.json"));
+  await assert.rejects(run(root, { mods: ["hooks/register"] }), /may not contain/);
+  assert.equal(readFileSync(path.join(outside, "precious.mjs"), "utf8"), "keep me");
+});
+
+test("a symlinked plugin/ fails the build and its target is unchanged", async () => {
+  const root = tree("symlink-root", { "src/hooks/register.ts": PLAIN_MOD });
+  const outside = path.join(tmp, "symlink-root-outside");
+  mkdirSync(path.join(outside, "sub"), { recursive: true });
+  writeFileSync(path.join(outside, "precious.mjs"), "keep me");
+  writeFileSync(path.join(outside, "sub/other.mjs"), "keep me too");
+  symlinkSync(outside, path.join(root, "plugin"));
+  await assert.rejects(run(root, { mods: ["hooks/register"] }), /may not contain/);
+  assert.equal(readFileSync(path.join(outside, "precious.mjs"), "utf8"), "keep me");
+  assert.equal(readFileSync(path.join(outside, "sub/other.mjs"), "utf8"), "keep me too");
+});
+
+test("a symlinked plugin.json fails the build and its target is unchanged", async () => {
+  const root = tree("symlink-manifest", { "src/hooks/register.ts": PLAIN_MOD, "plugin/README.md": "# fixture\n" });
+  const outside = path.join(tmp, "symlink-manifest-outside");
+  mkdirSync(outside);
+  writeFileSync(path.join(outside, "victim.txt"), "PRECIOUS");
+  mkdirSync(path.join(root, "plugin/.claude-plugin"));
+  symlinkSync(path.join(outside, "victim.txt"), path.join(root, "plugin/.claude-plugin/plugin.json"));
+  await assert.rejects(run(root, { mods: ["hooks/register"] }), /may not contain/);
+  assert.equal(readFileSync(path.join(outside, "victim.txt"), "utf8"), "PRECIOUS");
 });
