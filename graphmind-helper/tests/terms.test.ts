@@ -1,7 +1,7 @@
-// Pure helpers of the graphmind-helper module (built plugin/hooks/terms.mjs).
+// Pure helpers of the graphmind-helper module (bundled into plugin/hooks/lib.mjs).
 import assert from "node:assert/strict";
 import { test } from "vitest";
-import { binaryDirs, entryId, fit, isCodePrompt, isRecallable, resolveTools, searchTerms, shouldNudge } from "../plugin/hooks/terms.mjs";
+import { entryId, fit, isCodePrompt, isRecallable, resolveTools, searchTerms, shouldNudge } from "../plugin/hooks/lib.mjs";
 
 test("entryId reads only the leading id, not 8 hex in the text", () => {
   assert.equal(entryId("★ aaaaaaaa [decision] x"), "aaaaaaaa");
@@ -97,12 +97,6 @@ test("fit never splits an astral character at the cut", () => {
 
 test("fit puts a title-less block in as plain text", () => {
   assert.equal(fit("H\n", [{ title: "", lines: ["footer line"] }]).text, "H\nfooter line\n\n");
-});
-
-test("binaryDirs: absolute PATH entries first, then the places the setup scripts add", () => {
-  assert.deepEqual(binaryDirs("/a/:rel:/b", "/home/u"), ["/a", "/b", "/home/u/.graphmind/bin", "/home/u/.local/bin", "/usr/local/bin"]);
-  assert.deepEqual(binaryDirs(undefined, undefined), ["/usr/local/bin"]);
-  assert.deepEqual(binaryDirs("//:/usr/bin", undefined), ["/", "/usr/bin", "/usr/local/bin"]);
 });
 
 test("resolveTools finds the plugin's own server and a setup server, and needs all four tools", () => {

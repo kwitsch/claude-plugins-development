@@ -1,10 +1,11 @@
 /**
  * Pure helpers of the graphmind-helper module: prompt term extraction, the search nudge rule, tool-name resolution
  * and the output budget. Ports of the logic in the scripts `graphmind setup` installs (`graphmind-prompt.sh`,
- * `graphmind-search.sh`). Nothing here touches `$`.
+ * `graphmind-search.sh`). Nothing here touches `$`; bundled into `plugin/hooks/lib.mjs`.
  *
  * @packageDocumentation
  */
+import { binaryDirs } from "@shared/graphmind-paths.js";
 
 /** Where the hook output limit of Claude Code cuts a message, in characters (the setup scripts use the same). */
 const MAX_CHARS = 9000;
@@ -208,17 +209,12 @@ export function resolveTools(tools: readonly { name: string }[]): GmTools | unde
 }
 
 /**
- * The directories to look for the graphmind binary in, as the setup scripts do: absolute PATH entries, then
- * `~/.graphmind/bin`, `~/.local/bin` and `/usr/local/bin`. Shared by the module and the MCP wrapper.
+ * The paths where the graphmind binary may be, in lookup order.
  *
- * @param pathVar - The PATH value.
+ * @param pathVar - The PATH value, `undefined` when unset.
  * @param home - The home directory, `undefined` when unknown.
- * @param delimiter - The PATH delimiter.
- * @returns The directories without a trailing slash.
+ * @returns `<dir>/graphmind` for each directory of `binaryDirs`.
  */
-export function binaryDirs(pathVar: string | undefined, home: string | undefined, delimiter = ":"): string[] {
-  const dirs = (pathVar ?? "").split(delimiter).filter((d) => d.startsWith("/"));
-  if (home) dirs.push(`${home}/.graphmind/bin`, `${home}/.local/bin`);
-  dirs.push("/usr/local/bin");
-  return dirs.map((d) => d.replace(/(.)\/+$/, "$1")); // keep "/" itself: "" would make the binary path relative
+export function binaryPaths(pathVar: string | undefined, home: string | undefined): string[] {
+  return binaryDirs(pathVar, home).map((d) => `${d}/graphmind`);
 }

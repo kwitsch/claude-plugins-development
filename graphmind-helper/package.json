@@ -20,5 +20,8 @@
   "devDependencies": {
     "claude-engine-vitest": "workspace:*"
   },
-  "claudePlugin": {}
+  "claudePlugin": {},
+  "pluginBuild": {
+    "bundleHooksLib": true
+  }
 }

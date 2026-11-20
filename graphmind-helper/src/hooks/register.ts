@@ -5,14 +5,14 @@
  *
  * @remarks
  * EARLY ACCESS API. No engine type import: the used `$` members and events are typed structurally below. Every `$`
- * use lives here (the engine rejects `$` in helper files); the pure logic is in `terms.ts`. Two things the MCP tools
+ * use lives here (the engine rejects `$` in helper files); the pure logic is in `terms.ts`, bundled into `plugin/hooks/lib.mjs`. Two things the MCP tools
  * cannot do stay on the CLI through `$.process.run` (no shell, no Node start): the priority memory list and
  * `memory search --no-recall` (recall counting would promote automatically searched entries to priority, graphmind
  * issue #112). The server starts concurrently with `session.start`, so the briefing waits for the first prompt.
  *
  * @packageDocumentation
  */
-import { binaryDirs, entryId, fit, isCodePrompt, isRecallable, listing, NUDGE, resolveTools, searchTerms, SETUP_SCRIPTS, shouldNudge } from "./terms.js";
+import { binaryPaths, entryId, fit, isCodePrompt, isRecallable, listing, NUDGE, resolveTools, searchTerms, SETUP_SCRIPTS, shouldNudge } from "./terms.js";
 import type { Block, GmTools, SearchCall } from "./terms.js";
 
 /** One entry of `$.tool.list()`. */
@@ -176,7 +176,7 @@ async function callText($: Engine, tool: string, cwd: string, input: Record<stri
 }
 
 /**
- * The graphmind binary (the directories of `binaryDirs`, as the MCP wrapper looks; a directory named `graphmind` is skipped), cached
+ * The graphmind binary (`binaryPaths`, as the MCP wrapper looks; a directory named `graphmind` is skipped), cached
  * once found and a miss for {@link NEGATIVE_TTL_MS}.
  *
  * @param $ - Engine interface.
@@ -187,7 +187,7 @@ async function graphmindBin($: Engine, now: number): Promise<string | undefined>
   if (state.bin) return state.bin;
   if (state.binMissAt !== undefined && now - state.binMissAt < NEGATIVE_TTL_MS) return undefined;
   const [home, pathVar] = await Promise.all([$.env.get("HOME"), $.env.get("PATH")]);
-  const candidates = binaryDirs(pathVar, home).map((d) => `${d}/graphmind`);
+  const candidates = binaryPaths(pathVar, home);
   // shortcut: the engine's stat has no mode bits, so a non-executable file still counts here; the wrapper checks X_OK.
   const found = await Promise.all(candidates.map((p) => $.fs.stat(p).then((s) => s.kind !== "dir", () => false)));
   state.bin = candidates.find((_, i) => found[i]);
