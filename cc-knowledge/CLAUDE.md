@@ -23,4 +23,4 @@ Two layers. The path-scoped rules in `.claude/rules/` load with matching files a
 - Reference files and the other markdown the layout check allows in `plugin/` are named `*.reference.md` (`SKILL.md` aside): `claude-code-hooks.reference.md`, `analysis-workflow.reference.md`. Renaming one means updating the `cc-reference` section index, `sources.json`, the README, the agents and the tests.
 - Versioning is the root rule: `version` only in `package.json`, no description date stamp, no manual tags.
 - No `userConfig`: `claudePlugin` is `{}`.
-- The skill and agent names of the shipped plugin are `cc-knowledge:<name>` (renamed from `claude-code-knowledge` in 2.0.0, Claude Code reserves third-party plugin names starting with `claude-`).
+- The skill and agent names of the shipped plugin are `cc-knowledge:<name>`; a plugin name must not start with `claude-` (Claude Code reserves those for its own plugins).
