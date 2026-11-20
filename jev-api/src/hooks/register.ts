@@ -4,12 +4,10 @@
  *
  * @remarks
  * EARLY ACCESS API. No engine type import (the engine typings are not in the repo): the used `$` members and
- * events are typed structurally in `types.ts`. Only this file is listed in `hooks.json`, and
- * `development/scripts/build-plugin.ts` (`pluginBuild.bundleHooksLib`) keeps only `register.mjs` unmangled,
- * uncompressed and with its whitespace, since the engine's static check wants `$`/`on` spelled as such and no
- * `$.<noun>` passed as a bare value; every hook is a named function literal. Its siblings (`types`, `util`, `tools`,
- * `input`, `haiku`, `size`, `jev`, `transport`, `registry`) are bundled into one `./lib.mjs` (compressed and stripped of
- * whitespace, not mangled) that `register.mjs` imports everything from. The System One request goes through the
+ * events are typed structurally in `types.ts`. Only this file is listed in `hooks.json` (as `./register.js`); tsdown
+ * builds it with its siblings (`types`, `util`, `tools`, `input`, `haiku`, `size`, `jev`, `transport`, `registry`) and
+ * `../shared/http.ts` inlined, compressed but never mangled, since the engine's static check wants `$`/`on` spelled as
+ * such and no `$.<noun>` passed as a bare value; every hook is a named function literal. The System One request goes through the
  * plugin's own MCP server (`transport.ts`), which enforces the timeout and cancels; `$.http.fetch` is the fallback.
  * The third hook, `tool.check`, keeps the model off that server's tools.
  *

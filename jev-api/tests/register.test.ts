@@ -1,4 +1,4 @@
-// Kit tests for the built plugin/hooks/register.mjs of jev-api: the System One tool request (noul, choice and score questions).
+// Kit tests for src/hooks/register.ts of jev-api: the System One tool request (noul, choice and score questions).
 import type { On } from "claude-engine-vitest";
 import { describe, expect, it, vi } from "vitest";
 import { call, mock, one, QUESTION, test, TOOL } from "./support/questions.js";
@@ -553,9 +553,9 @@ test("a refused env read still answers the tool", async ($, on) => {
 
 // The kit cannot abandon a dispatch, so this drives the hook directly: an abort answers at once although the request hangs.
 it("an abandoned call answers at once instead of waiting for the request", async () => {
-  const { register } = await import("../plugin/hooks/register.mjs");
+  const { register } = await import("../src/hooks/register.ts");
   const hooks = new Map<string, (...args: unknown[]) => Promise<unknown>>();
-  register((event: string, hook: (...args: unknown[]) => Promise<unknown>) => void hooks.set(event, hook));
+  register(((event: string, hook: (...args: unknown[]) => Promise<unknown>) => void hooks.set(event, hook)) as unknown as Parameters<typeof register>[0]);
   let sent = false;
   const $ = {
     env: { get: async (name: string) => (name === "JEV_URL" ? "https://jev.example/x" : undefined) },
@@ -571,9 +571,9 @@ it("an abandoned call answers at once instead of waiting for the request", async
 
 /** The module's hooks driven directly (the kit cannot abandon a dispatch, count listeners or leave a registration pending). */
 async function direct(overrides: Record<string, unknown>) {
-  const { register } = await import("../plugin/hooks/register.mjs");
+  const { register } = await import("../src/hooks/register.ts");
   const hooks = new Map<string, (...args: unknown[]) => Promise<unknown>>();
-  register((event: string, hook: (...args: unknown[]) => Promise<unknown>) => void hooks.set(event, hook));
+  register(((event: string, hook: (...args: unknown[]) => Promise<unknown>) => void hooks.set(event, hook)) as unknown as Parameters<typeof register>[0]);
   const fetched: unknown[] = [];
   const $ = {
     env: { get: async (name: string) => (name === "TYPESAFE_API_KEY" ? "k" : undefined) },

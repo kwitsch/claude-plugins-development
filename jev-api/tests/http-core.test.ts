@@ -1,6 +1,6 @@
-// Tests of the shared HTTP core of jev-api (plugin/shared/http.mjs): the pure helpers and sendRequest with a fake doFetch.
+// Tests of the shared HTTP core of jev-api (src/shared/http.ts): the pure helpers and sendRequest with a fake doFetch.
 import { describe, expect, it } from "vitest";
-import { contextRefusal, detail, endpoint, hide, hideHost, sendRequest } from "../plugin/shared/http.mjs";
+import { contextRefusal, detail, endpoint, hide, hideHost, sendRequest } from "../src/shared/http.ts";
 
 const KEY = "sk-test-key-123456";
 const STATE = "A cat sat on the mat.";

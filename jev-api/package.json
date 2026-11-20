@@ -1,6 +1,6 @@
 {
   "name": "jev-api",
-  "version": "0.7.0",
+  "version": "0.7.1",
   "private": true,
   "description": "Lets Claude put yes/no, choice and score questions about a text to TypeSafe's Jev System One in one request.",
   "keywords": [
@@ -15,8 +15,9 @@
   },
   "type": "module",
   "scripts": {
-    "build": "node ../development/scripts/build-plugin.ts",
-    "test": "vitest run --config \"$(git rev-parse --show-toplevel)/vitest.config.mts\""
+    "build": "tsdown",
+    "test": "vitest run --config \"$(git rev-parse --show-toplevel)/vitest.config.mts\"",
+    "test:plugin": "node ../development/scripts/plugin-test.ts"
   },
   "devDependencies": {
     "@modelcontextprotocol/server": "2.4.0",
@@ -37,8 +38,5 @@
         "default": "haiku"
       }
     }
-  },
-  "pluginBuild": {
-    "bundleHooksLib": true
   }
 }
