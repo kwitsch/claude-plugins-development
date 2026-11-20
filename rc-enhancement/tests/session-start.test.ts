@@ -37,3 +37,14 @@ test("hooks.json: one matcher-less SessionStart and one matcher-less Stop comman
     assert.ok(existsSync(path.join(hooksDir, `${name}.mjs`)), `${name}.mjs is not built`);
   }
 });
+
+test("both hook scripts are built by tsdown as self-contained minified scripts with a shebang", () => {
+  const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as { scripts: Record<string, string>; pluginBuild?: unknown };
+  assert.equal(pkg.scripts.build, "tsdown");
+  assert.equal(pkg.pluginBuild, undefined);
+  for (const name of ["session-start", "stop"]) {
+    const code = readFileSync(path.join(hooksDir, `${name}.mjs`), "utf8");
+    assert.ok(code.startsWith("#!/usr/bin/env node\n"), name);
+    assert.doesNotMatch(code, /\bfrom\s*["'`](?!node:)/, `${name} imports only node: modules`);
+  }
+});
