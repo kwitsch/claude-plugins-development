@@ -8,7 +8,7 @@ A vitest stand-in for Claude Code's mod test kit `claude-code/testing`. The offi
 import { expect } from "vitest";
 import { createKit } from "claude-engine-vitest";
 
-const { test, mock } = createKit({ module: new URL("../plugin/hooks/register.mjs", import.meta.url), plugin: "my-mod", options: {} });
+const { test, mock } = createKit({ module: new URL("../plugin/hooks/register.js", import.meta.url), plugin: "my-mod", options: {} });
 
 test("name", { options: { flag: false }, plugins: [{ name: "helper", register(on) {} }], timeoutMs: 5000 }, async ($, on) => {
   on("tool.call", () => ({ result: "ok" })); // a stub: register every one before the first call on $

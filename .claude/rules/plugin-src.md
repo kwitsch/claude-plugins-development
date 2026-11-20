@@ -8,6 +8,8 @@ paths:
 
 # Rule: src / scripts / tests
 
+Old build only (plugins without `tsdown.config.ts`); tsdown-built plugins: `tsdown-build.md`.
+
 - `scripts/*.mts` run as-is: erasable syntax only, no `enum`/`namespace`/parameter properties; imports name the `.mts` file. `development/scripts/build-plugin.ts` strips the types of `src/` file by file (`isolatedModules`) and minifies (`hooks/*.mjs` neither compressed, mangled nor stripped of whitespace, except `hooks/lib.mjs`: see `.claude/rules/hooks-lib-bundle.md`; and shebang scripts in `hooks/` of a plugin with `pluginBuild.compressHookScripts: true`, which are minified like `bin/`). No type check in the build, no `declaration` output.
 - Hand-written modules are `.ts`, never a new `.mts`. The first change in a plugin that still holds `.mts` under `src/` or `tests/` converts that plugin in the same change (skill `convert-plugin-ts`; `src-typescript.md` loads with any `.mts` file).
 - Import specifiers in `.ts` sources: relative siblings as `./name.js` (TypeScript NodeNext resolves it to `name.ts`; the build rewrites it to `./name.mjs`). Scripts that Node runs directly (`development/scripts/*.ts`) import their siblings with the real extension (`./plugin-manifest.ts`).

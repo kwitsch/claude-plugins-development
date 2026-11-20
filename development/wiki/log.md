@@ -175,3 +175,12 @@ Source: user request. The plugin directory and its wiki section are gone; its Cl
 - **Build guard relaxed:** in a `bundleHooksLib` plugin a helper bundled into `lib.mjs` may import `@shared/<name>.js`; the entry and `hooks/` subfolder modules stay refused (`decisions/shared-source-layer.md`). `binaryDirs` moved to `development/shared/src/graphmind-paths.ts`, the first shared module a function-hooks plugin imports.
 - **Tests:** through `plugin/hooks/register.mjs` via `tests/support/kit.ts`; graphmind-helper 57 -> 86 tests; wall-clock assertions and the custom-budget `fit` edge dropped (`plugins/graphmind-helper/design/decisions.md`).
 - **Live:** not run in this change (needs the user's credentials; the command is in the PR body). The docs say "not checked live".
+
+## [2026-11-20] ingest | tsdown plugin build standard, graphmind-helper 0.2.3
+
+Source: user decision 2026-11-20 (the five requirements are in `decisions/tsdown-plugin-build.md`).
+
+- **Standard:** `development/tsdown/index.ts` (`pluginConfig`, workspace package `plugin-build`, tsdown pinned at 0.23.7); rule `.claude/rules/tsdown-build.md`; decision page with the minify matrix. The old `build-plugin.ts` path is unchanged for the seven other plugins; only the layout allowlist gained `hooks/*.js`.
+- **Reference:** graphmind-helper 0.2.3 ships `plugin/hooks/register.js` (11201 B, compressed, unmangled) and `plugin/bin/mcp.mjs` (2201 B), without `lib.mjs` and `plugin/shared/`; tests 86 -> 86.
+- **Docs and skills:** the old-build rules carry a scope line; skill `split-hooks-lib` deleted, `scaffold-plugin` generates the tsdown layout.
+- **Live:** the `.js` module and the MCP wrapper loaded (live 2.1.329); the module's own output was not observable because the setup-hooks dedupe applies on this machine. Details in `plugins/graphmind-helper/evaluations/EVALUATION-2026-11-20-tsdown.md`; the load of a `.js` hooks module is filed in `facts/mods-engine-verification.md`.

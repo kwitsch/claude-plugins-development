@@ -1,5 +1,5 @@
-// The rules of the hooks helper (bundled into plugin/hooks/lib.mjs), tested through what they cause in the built
-// plugin/hooks/register.mjs: search terms, recall gating, the code pre-fetch, the nudge rule, the output budget, tool names.
+// The rules of the hooks helper (inlined into plugin/hooks/register.js), tested through what they cause in the built
+// module: search terms, recall gating, the code pre-fetch, the nudge rule, the output budget, tool names.
 import { expect } from "vitest";
 import { makeKit, OWN, prompt, SETUP, toolCall } from "./support/kit.ts";
 

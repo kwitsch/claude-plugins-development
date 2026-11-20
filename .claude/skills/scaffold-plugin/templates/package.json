@@ -9,7 +9,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "node ../development/scripts/build-plugin.ts",
+    "build": "tsdown",
     "test": "vitest run --config \"$(git rev-parse --show-toplevel)/vitest.config.mts\""
   }
 }

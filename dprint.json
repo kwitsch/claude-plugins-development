@@ -17,7 +17,8 @@
     ".claude/worktrees",
     ".claude/skills/scaffold-plugin/templates",
     "*/src/mcp/hook-inputs.d.mts",
-    "**/*.mjs"
+    "**/*.mjs",
+    "*/plugin/**/*.js"
   ],
   "plugins": [
     "npm:@dprint/typescript@0.96.1",

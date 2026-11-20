@@ -6,6 +6,8 @@ paths:
 
 # Rule: TypeScript sources are `.ts`
 
+Old build only (plugins without `tsdown.config.ts`); tsdown-built plugins: `tsdown-build.md`.
+
 graphmind indexes `.ts` symbols (signatures and types) but no `.mts` symbols (checked 2026-11-15: `graphmind outline` of a `.mts` source is empty, of the same code as `.ts` it lists every function and type). New sources must therefore be `.ts`.
 
 - No new `.mts` file in any `src/` directory, and no new `.mts` under `development/`. Hand-written sources under `<name>/src/` are `.ts`.

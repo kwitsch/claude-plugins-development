@@ -25,7 +25,7 @@ What the kit offers and how it deviates from the official kit: [README.md](../..
 
 ## What only a real session shows
 
-- The static check of the hooks module (`claude plugin validate <plugin>/plugin`) and the loading of a bundled `lib.mjs`.
+- The static check of the hooks module (`claude plugin validate <plugin>/plugin`) and the loading of the built entry (`register.js` with everything inlined; on the old build `register.mjs` plus a bundled `lib.mjs`).
 - Type-checking of `userConfig` values before the module loads.
 - Everything about permissions, hook tiers and `cc-plugin-sec-default`.
 

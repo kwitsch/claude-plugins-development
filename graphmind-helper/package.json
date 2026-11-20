@@ -1,6 +1,6 @@
 {
   "name": "graphmind-helper",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "private": true,
   "description": "Makes Claude Code use graphmind's code graph and memory: a project briefing, memory recall on each prompt and search hints, with the project indexed on first use.",
   "keywords": [
@@ -14,14 +14,11 @@
   },
   "type": "module",
   "scripts": {
-    "build": "node ../development/scripts/build-plugin.ts",
+    "build": "tsdown",
     "test": "vitest run --config \"$(git rev-parse --show-toplevel)/vitest.config.mts\""
   },
   "devDependencies": {
     "claude-engine-vitest": "workspace:*"
   },
-  "claudePlugin": {},
-  "pluginBuild": {
-    "bundleHooksLib": true
-  }
+  "claudePlugin": {}
 }

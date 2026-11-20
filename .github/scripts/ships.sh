@@ -3,6 +3,7 @@
 # Exit 0 when the diff changes what a plugin ships or is built from: <plugin dir>/package.json, <plugin dir>/src/**
 # or <plugin dir>/plugin/**. Only such a change needs a version bump and a release (pr.yml, release.yml); tests,
 # scripts and Claude memory (CLAUDE.md, .claude/) do not. Exit 1 otherwise.
+# <plugin dir>/tsdown.config.ts is not listed: a config change that alters what ships changes the committed plugin/.
 set -euo pipefail
 p=$1
 shift

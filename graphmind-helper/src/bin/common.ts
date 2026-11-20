@@ -1,4 +1,4 @@
-// Helpers of the MCP wrapper `mcp.ts` (zero-dependency Node). The hooks are a function-hooks module (`src/hooks/register.ts`).
+// Helpers of the MCP wrapper `mcp.ts` (zero-dependency Node), inlined into `plugin/bin/mcp.mjs` by the build (no entry of its own). The hooks are a function-hooks module (`src/hooks/register.ts`).
 import { spawnSync } from "node:child_process";
 import { accessSync, constants, readFileSync, realpathSync, statSync } from "node:fs";
 import { homedir } from "node:os";
