@@ -13,7 +13,7 @@ Development repository for Claude Code plugins. One top-level directory per plug
 
 ## Layout per plugin (`<name>/`)
 
-`plugin/` (installable plugin; `.mjs`, `hooks/*.js` and `.claude-plugin/plugin.json` are build output), `src/**/*.ts` (built to `plugin/`: the entries `tsdown.config.ts` lists, each one self-contained file; on the old build every file at the same path), `tests/*.test.ts` (vitest, against `plugin/`), plus:
+`plugin/` (installable plugin; `.mjs`, `hooks/*.js` and `.claude-plugin/plugin.json` are build output), `src/**/*.ts` (built to `plugin/`: the entries `tsdown.config.ts` lists, each one self-contained file; on the old build every file at the same path), `tests/*.test.ts` (vitest, against `src/`; process tests spawn `plugin/`), `claude-tests/*.test.ts` (mods: `claude plugin test` on the built plugin, `pnpm --filter <name> test:plugin`), plus:
 
 - `package.json`: the only manifest source (`name`, `version`, `description`, `author`, `keywords`; plugin-only fields such as `userConfig` under `claudePlugin`, which is required, `{}` at least, and marks the package as a plugin) and the pnpm scripts `build` (`tsdown`; `node ../development/scripts/build-plugin.ts` in a plugin not yet migrated), `test`, optional `lint`. Edit here only.
 - `tsdown.config.ts`: the plugin's entries for the standard build, `export default pluginConfig({ mods: [...], scripts: [...] })` (`.claude/rules/tsdown-build.md`).
@@ -26,7 +26,7 @@ Development repository for Claude Code plugins. One top-level directory per plug
 
 One config for all packages, at the repo root; no per-plugin lint or vitest config. Formatting stays with dprint (`dprint.json`); everything else is oxc.
 
-- Lint + type check: root `.oxlintrc.json` (oxlint, type-aware) with the solution `tsconfig.json` (`tsconfig.src.json` strict, `tsconfig.tests.json` relaxed for plugin `*/tests/`); `pnpm lint` is the type check. Details: `.claude/rules/lint-config.md`.
+- Lint + type check: root `.oxlintrc.json` (oxlint, type-aware) with the solution `tsconfig.json` (`tsconfig.src.json` strict, `tsconfig.tests.json` relaxed for plugin `*/tests/` and `*/claude-tests/`); `pnpm lint` is the type check. Details: `.claude/rules/lint-config.md`.
 - Build (the standard, tsdown; reference plugin graphmind-helper): `pluginConfig` in `development/tsdown/index.ts` builds each entry of `tsdown.config.ts` into one self-contained file and generates `plugin.json`. Details: `.claude/rules/tsdown-build.md`.
 - Build (old path, a plugin without `tsdown.config.ts`, until it is migrated): the shared `development/scripts/build-plugin.ts` builds the plugin in the cwd (layout check, oxc-transform type stripping, oxc-minify, `plugin.json` generated from `package.json` by `plugin-manifest.ts`); a plugin's `build` script may run its own steps first; `pluginBuild.bundleHooksLib: true` in `package.json` bundles the hooks helper modules (everything `hooks.json` does not list) into one compressed `hooks/lib.mjs` (jev-api). `pluginBuild.assets` lists files the layout check allows in `plugin/` beside its allowlist, by exact path (universal-format's wasm files).
 - `vitest.config.mts` at the root is the one vitest config. Tooling is root devDependencies only. Details: `.claude/rules/lint-config.md`.
@@ -39,6 +39,7 @@ pnpm -r build                # build every plugin
 pnpm -r test                 # run every plugin's tests
 pnpm lint                    # oxlint (lint + type check) over the workspace, then plugin-specific lint scripts
 pnpm --filter <name> build   # one plugin
+pnpm --filter <name> test:plugin   # a mod's integration tests (needs claude)
 claude plugin validate <name>/plugin
 ```
 

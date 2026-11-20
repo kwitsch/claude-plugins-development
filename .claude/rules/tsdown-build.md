@@ -17,5 +17,5 @@ A plugin with a `tsdown.config.ts` is built by `tsdown` through `pluginConfig` (
 - `@shared/<name>.js` (`development/shared/src/`) may be imported by any bundled file, the mod entry included; it is inlined. Code inlined into a mod loads in the engine, so [claude-code-hook-facts.md](claude-code-hook-facts.md) applies to it.
 - Build output in `plugin/` is `**/*.mjs`, `hooks/*.js` and `.claude-plugin/plugin.json`: never edit it. The build deletes every other `.mjs`/`.js` there except `pluginBuild.assets`.
 - After a change of `src/`, `package.json` or `tsdown.config.ts`: `pnpm lint && pnpm --filter <name> build && pnpm --filter <name> test`, then commit the regenerated `plugin/` with the source.
-- Tests import built output only: `plugin/hooks/register.js` through the kit and built `plugin/**/*.mjs`; a name a test needs from an inlined module is re-exported by the entry. The rest: [hook-tests.md](hook-tests.md).
+- Unit tests import `src/`, process tests spawn built `plugin/**/*.mjs`, a mod's `claude-tests/` run on the built `plugin/`; no re-exports for tests: [hook-tests.md](hook-tests.md).
 - A change of `development/tsdown/**` or `development/shared/src/**` rebuilds every tsdown-built plugin; each one whose `plugin/` changes needs a version bump.

@@ -4,6 +4,7 @@ paths:
   - "tests/register.test.ts"
   - "tests/terms.test.ts"
   - "tests/support/**"
+  - "claude-tests/**"
 ---
 
 # Rule: the hooks module (`src/hooks/register.ts`, `terms.ts`)
