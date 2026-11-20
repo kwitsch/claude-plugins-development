@@ -24,4 +24,4 @@ paths:
 ## Live harness
 
 - Keep setup's hooks out with a temp `HOME`, a `CLAUDE_CONFIG_DIR` without them and `--setting-sources project` (see Dedupe above). Copying the credentials into a scratch config dir was refused by the auto-mode classifier, so a live re-run needs the user.
-- The last live run predates the parallel-recall refactor, the `CLAUDE_CONFIG_DIR` dedupe fix and the `lib.mjs` bundle; the 0.2.2 run was not done (needs the user's credentials). Not exercised live yet: a `graphmind setup` server (`mcp__graphmind__*`, kit test only), the setup-hooks dedupe, an unregistered project and init, the 10th-prompt checkpoint, the `lib.mjs` load with `../shared/graphmind-paths.mjs`.
+- Live run of 0.2.3 (tsdown build, `plugin/hooks/register.js`), 2026-11-20: results and what was not exercised in [EVALUATION-2026-11-20-tsdown](../../../development/wiki/plugins/graphmind-helper/evaluations/EVALUATION-2026-11-20-tsdown.md).

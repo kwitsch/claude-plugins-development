@@ -155,6 +155,12 @@ Evidence for the engine shapes function-hooks modules rely on, written for the r
   - Every model tool call, in subagents too, carries `next.origin`
     `{ plugin: "engine", tier: "core" }`.
 
+## A `.js` hooks module (live 2.1.329, 2026-11-20)
+
+- A function-hooks module listed in `hooks.json` as `./register.js` loads: graphmind-helper 0.2.3's `plugin/hooks/register.js`, from a copy of the plugin directory outside any repository, so with no `package.json` (`"type": "module"`) above it. The engine evaluates the module itself; Node's CommonJS default for `.js` does not apply.
+- The module is one bundled, compressed, unmangled file (tsdown); which minify levels the static check accepts: [tsdown-plugin-build.md](../decisions/tsdown-plugin-build.md).
+- Run details: `plugins/graphmind-helper/evaluations/EVALUATION-2026-11-20-tsdown.md`.
+
 ## Not yet live-verified (unit tests only)
 
 Shipped on unit-test and typings evidence only. The user-run live check in the PR
