@@ -1,12 +1,12 @@
-// Unit tests for the pure helpers of the built plugin/mcp/format.mjs (no dprint, no spawn).
+// Unit tests for the pure helpers of src/mcp/format.ts (no dprint, no spawn).
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test, vi } from "vitest";
-import { applyEdit, bashFinished, bashStarted, disposeLsp, fileChanged, formatPre, inScope, lineDiff, scopeOf, trimToEdit } from "../plugin/mcp/format.mjs";
-import { applyTextEdits } from "../plugin/mcp/lsp.mjs";
+import { applyEdit, bashFinished, bashStarted, disposeLsp, fileChanged, formatPre, inScope, lineDiff, scopeOf, trimToEdit } from "../src/mcp/format.ts";
+import { applyTextEdits } from "../src/mcp/lsp.ts";
 
 const h = (aStart, aEnd, bStart, bEnd) => ({ aStart, aEnd, bStart, bEnd });
 

@@ -50,10 +50,10 @@ test("README documents the format_pre hook and its dprint lsp requirement", () =
 
 test("README documents the config gate, the 15 s toast module and all six config names; line 3 mirrors package.json", async () => {
   const readme = readFileSync(path.join(ROOT, "plugin/README.md"), "utf8");
-  const { CONFIG_NAMES } = await import(
-    "../plugin/skills/dprint/config-names.mjs"
-  );
-  assert.match(readme, /hooks\/register\.mjs/);
+  const { CONFIG_NAMES } = await import("../src/skills/dprint/config-names.ts");
+  assert.match(readme, /hooks\/register\.js/);
+  // helpers are inlined into the entries that import them and get no file of their own
+  for (const helper of ["config-names", "find-config", "find-dprint"]) assert.ok(!existsSync(path.join(ROOT, "plugin/skills/dprint", `${helper}.mjs`)), helper);
   assert.match(readme, /15 s toast/);
   assert.match(readme, /only when the working directory or an ancestor has a dprint config/);
   for (const n of CONFIG_NAMES) assert.ok(readme.includes(`\`${n}\``), n);
@@ -104,7 +104,7 @@ test("README documents the cwd scope, FileChanged formatting and the watch-list 
     const s of [
       "file_written",
       "file_changed",
-      "mcp/watch-paths.mjs",
+      "hooks/watch-paths.mjs",
       "dprint file-paths",
       "scratchpad_dir",
       "git status --porcelain",

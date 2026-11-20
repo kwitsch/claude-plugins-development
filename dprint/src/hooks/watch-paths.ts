@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 /**
  * Command hook for SessionStart and CwdChanged: prints the FileChanged watch list
  * (`hookSpecificOutput.watchPaths`) for the working directory.
@@ -6,14 +7,14 @@
  * A `command` hook, not an `mcp_tool` hook: Claude Code skips SessionStart `mcp_tool` hooks while the MCP server
  * is still connecting. With `DPRINT_WATCH_DIRECTORIES=1` the list is collapsed to directories, see {@link watchDirectories}. The list is what `dprint file-paths`
  * (dprint 0.50-0.54: `output-file-paths`) reports in the cwd, filtered by `inScope`. On CwdChanged the list replaces the previous one, so empty output in a config-less
- * cwd stops watching. Must not import `server.mjs` (it starts the server at import). Sync calls are fine: this is
+ * cwd stops watching. Must not import `../mcp/server.ts` (it starts the server at import, and the build would inline it). Sync calls are fine: this is
  * its own short-lived process. Always exits 0; stdout carries exactly one JSON object or nothing.
  *
  * @packageDocumentation
  */
 import { readFileSync } from "node:fs";
-import { inScope, scopeOf } from "./format.js";
-import { dprintFilePaths, watchDirectories } from "./watch-list.js";
+import { inScope, scopeOf } from "../mcp/format.js";
+import { dprintFilePaths, watchDirectories } from "../mcp/watch-list.js";
 
 /**
  * Files of the cwd that dprint formats and that are in scope.

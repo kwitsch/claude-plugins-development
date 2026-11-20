@@ -1,7 +1,9 @@
 ---
 paths:
   - "src/mcp/**"
+  - "src/hooks/watch-paths.ts"
   - "plugin/mcp/**"
+  - "plugin/hooks/watch-paths.mjs"
   - "plugin/.mcp.json"
   - "tests/mcp-*.test.ts"
 ---
@@ -16,7 +18,7 @@ arguments are named constants or comments in the sources; this rule records beha
 ## Constraints
 
 - Every failure returns `{}` (fail open), including a diff above the size guard.
-- `watch-paths.ts` and `watch-list.ts` must not import `server.ts` (`watch-list.ts` not `format.ts` either):
+- `hooks/watch-paths.ts` and `watch-list.ts` must not import `server.ts` (`watch-list.ts` not `format.ts` either):
   `watch-paths` runs as its own `command` hook.
 - Scope never uses `process.cwd()`.
 - Needs dprint >= 0.50.
@@ -43,7 +45,7 @@ arguments are named constants or comments in the sources; this rule records beha
   formats fail instead of spawning; after dprint was not found, `findDprint` is retried only after a pause.
 - `watch-list.ts`: `dprintFilePaths` (`dprint file-paths`, capped at `WATCH_LIMIT`), shared by `watch-paths.ts` and
   `bashFinished`.
-- `watch-paths.ts`: `command` hook for SessionStart and CwdChanged (SessionStart `mcp_tool` hooks are skipped while
+- `../hooks/watch-paths.ts` (built to `plugin/hooks/watch-paths.mjs`): `command` hook for SessionStart and CwdChanged (SessionStart `mcp_tool` hooks are skipped while
   the server connects). Lists the cwd's files, filters through `inScope`, prints `hookSpecificOutput.watchPaths`;
   above `WATCH_LIMIT` nothing is watched. Opt-in `DPRINT_WATCH_DIRECTORIES=1` watches directories instead
   (`watchDirectories`: no lost watches, new files seen, but every event below them).

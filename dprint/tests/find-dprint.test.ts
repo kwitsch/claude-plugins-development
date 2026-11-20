@@ -1,11 +1,11 @@
-// Tests for the built plugin/skills/dprint/find-dprint.mjs: a failed npx probe is cached for NPX_RETRY_MS, and a wall
+// Tests for src/skills/dprint/find-dprint.ts: a failed npx probe is cached for NPX_RETRY_MS, and a wall
 // clock stepped back must not keep it cached. Date.now is mocked; the npx stub counts its runs in a file.
 import assert from "node:assert/strict";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, test, vi } from "vitest";
-import { findDprint } from "../plugin/skills/dprint/find-dprint.mjs";
+import { findDprint } from "../src/skills/dprint/find-dprint.ts";
 
 const T0 = 1_000_000_000_000;
 const RETRY_MS = 30_000;
