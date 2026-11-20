@@ -9,7 +9,7 @@
 ## Source layout
 
 - Entry `src/hooks/register.ts` ships unminified as `plugin/hooks/register.mjs` and holds every `$` use; the helper `src/hooks/terms.ts` is bundled into the compressed `plugin/hooks/lib.mjs` (`pluginBuild.bundleHooksLib`, rule `.claude/rules/hooks-lib-bundle.md`).
-- `binaryDirs` comes from `@shared/graphmind-paths.js` (`development/shared/src/graphmind-paths.ts`, shipped as `plugin/shared/graphmind-paths.mjs`), imported by `terms.ts` and `src/bin/common.ts`; the entry never imports `@shared` and takes `binaryPaths` from `terms.ts`.
+- The entry `register.ts` never imports `@shared`; bundled helpers may ([design/decisions.md](../development/wiki/plugins/graphmind-helper/design/decisions.md)).
 
 ## Decisions
 
