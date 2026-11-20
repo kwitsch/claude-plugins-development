@@ -8,10 +8,10 @@ paths:
 
 # `register.ts`: hooks, `$` use and engine pitfalls
 
-`plugin/hooks/hooks.json` (hand-written) is exactly `{"modules": ["./register.mjs"]}`. `src/hooks/register.ts` holds
+`plugin/hooks/hooks.json` (hand-written) is exactly `{"modules": ["./register.js"]}`. `src/hooks/register.ts` holds
 every hook and every `$` use and imports the pure modules `./jev.js`, `./policy.js`, `./candidates.js`,
-`./context.js`, `./cache.js`, `./agents.js`, `./compact.js`, `./summarize.js` (bundled into `plugin/hooks/lib.mjs`).
-Tested by `tests/register.test.ts`. Evidence for
+`./context.js`, `./cache.js`, `./agents.js`, `./compact.js`, `./summarize.js` (inlined into `plugin/hooks/register.js` by the build).
+Tested by `tests/register.test.ts` (unit, on `src/`) and `claude-tests/register.test.ts` (the built `register.js`, `pnpm --filter jevfort test:plugin`). Evidence for
 the shapes below: [mods-engine-verification.md](../../../development/wiki/facts/mods-engine-verification.md).
 
 ## Engine pitfalls (change how the code must be written)

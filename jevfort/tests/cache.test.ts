@@ -1,12 +1,12 @@
-// Cache countdown, auto-compact and Haiku compaction (ported from HeyCubit/effortless) of the built plugin/hooks/*.mjs.
+// Cache countdown, auto-compact and Haiku compaction (ported from HeyCubit/effortless) of src/hooks/.
 // None of it needs jev-api: the kit tests list no tools.
 import { createKit } from "claude-engine-vitest";
 import { expect } from "vitest";
 
 /** Options passed to the kit: effort routing, compaction and Haiku compaction on, auto-compact at 60%. */
 const DEFAULTS = { routing: true, compaction: true, haikuCompact: true, autoCompactPercent: 60 };
-/** Test kit bound to the built `plugin/hooks/register.mjs`. */
-const { test, mock } = createKit({ module: new URL("../plugin/hooks/register.mjs", import.meta.url), plugin: "jevfort", options: DEFAULTS });
+/** Test kit bound to the source `src/hooks/register.ts`. */
+const { test, mock } = createKit({ module: new URL("../src/hooks/register.ts", import.meta.url), plugin: "jevfort", options: DEFAULTS });
 
 /** The cache lifetimes the countdown assumes (ms): 5 minutes and 1 hour. */
 const CACHE_TTL = { "5m": 5 * 60_000, "1h": 60 * 60_000 } as const;
@@ -32,7 +32,7 @@ const warmRead = { input_tokens: 10, output_tokens: 5, cache_read_input_tokens: 
 const cold = { input_tokens: 5, output_tokens: 5, cache_read_input_tokens: 0, cache_creation_input_tokens: 90_000, model: "claude-opus-5-5" };
 
 test("the band words: 1 minute left reads <1m, 2 read 1m, 59 read 58m, none is cold", async () => {
-  const { cacheLabel } = await import("../plugin/hooks/lib.mjs");
+  const { cacheLabel } = await import("../src/hooks/cache.ts");
   expect(cacheLabel(1)).toBe("cache <1m");
   expect(cacheLabel(2)).toBe("cache 1m");
   expect(cacheLabel(59)).toBe("cache 58m");

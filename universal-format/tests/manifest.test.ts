@@ -2,7 +2,7 @@
 // regression pins: see `.claude/rules/hooks-and-server.md`.
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import { test } from "vitest";
 import { PLUGIN, SERVER } from "./support/mcp.ts";
@@ -13,7 +13,7 @@ const manifest = JSON.parse(read(".claude-plugin", "plugin.json")) as Record<str
 const hooks = JSON.parse(read("hooks", "hooks.json")) as { description: string; hooks: Record<string, { matcher: string; hooks: Record<string, unknown>[] }[]> };
 const readme = read("README.md");
 /** The plugin's own built modules (the vendored bundle is third-party code). */
-const OWN_MODULES = [...readdirSync(path.join(PLUGIN, "mcp")).filter((f) => f.endsWith(".mjs")).map((f) => path.join("mcp", f)), "skills/universal-format/format-files.mjs"];
+const OWN_MODULES = ["mcp/server.mjs", "skills/universal-format/format-files.mjs"];
 
 test("plugin.json has no userConfig (deliberate: the hook is the plugin)", () => {
   assert.equal("userConfig" in manifest, false);
@@ -70,11 +70,11 @@ test("mcp/server.mjs and the skill driver are executable node scripts that parse
 
 test("hooks/ holds only hooks.json; no launcher script ships", () => {
   assert.deepEqual(readdirSync(path.join(PLUGIN, "hooks")), ["hooks.json"]);
-  assert.deepEqual(readdirSync(PLUGIN).sort(), [".claude-plugin", ".mcp.json", "README.md", "hooks", "mcp", "shared", "skills"]);
+  assert.deepEqual(readdirSync(PLUGIN).sort(), [".claude-plugin", ".mcp.json", "README.md", "hooks", "mcp", "skills"]);
 });
 
 test("the build runs the standard build first, then the vendor step (the standard build removes the chunks)", () => {
-  assert.equal(pkg.scripts.build, "node ../development/scripts/build-plugin.ts && node scripts/vendor.ts");
+  assert.equal(pkg.scripts.build, "tsdown && node scripts/vendor.ts");
 });
 
 test("prettier, its three plugins and sh-syntax are pinned exactly (no range prefix)", () => {
@@ -124,4 +124,13 @@ test("README describes the base directory and the one ignore source, and promise
   assert.ok(readme.includes("this plugin only ever reads the `.prettierignore` at the file's"));
   assert.ok(readme.includes("no Git root either — the file's own directory"));
   assert.ok(readme.includes("Defers to dprint"));
+});
+
+test("own code ships as exactly two self-contained outputs that import only node: modules and the vendored bundle", () => {
+  assert.deepEqual(readdirSync(path.join(PLUGIN, "mcp")).filter((f) => f.endsWith(".mjs")), ["server.mjs"]);
+  assert.equal(existsSync(path.join(PLUGIN, "shared")), false);
+  // the outputs are minified (`from"x"`, `import("x")`): no space before the quote, so the handler's notice text `from "surgical/minimal-diff"` is no match
+  const imports = (rel: string): string[] => [...new Set([...read(rel).matchAll(/\b(?:from|import\(?)["'`]([^"'`]+)["'`]/g)].map((m) => m[1]).filter((s) => !s.startsWith("node:")))];
+  assert.deepEqual(imports("mcp/server.mjs"), ["./vendor/index.mjs"]);
+  assert.deepEqual(imports("skills/universal-format/format-files.mjs"), ["../../mcp/vendor/index.mjs"]);
 });

@@ -2,8 +2,8 @@ import assert from "node:assert/strict";
 import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "vitest";
-import { applyEdit, shrinkSwap } from "../plugin/mcp/handlers.mjs";
-import { formatInProcess, resolveConfigPlugins } from "../plugin/mcp/prettier.mjs";
+import { applyEdit, shrinkSwap } from "../src/mcp/handlers.ts";
+import { formatInProcess, resolveConfigPlugins } from "../src/mcp/prettier.ts";
 import { formatPre, type HookOut, tmp } from "./support/plugin.ts";
 
 // No `maybe`/tier gating any more: prettier is bundled into the artifact, so every test here is

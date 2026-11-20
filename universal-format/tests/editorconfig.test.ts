@@ -2,8 +2,8 @@ import assert from "node:assert/strict";
 import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "vitest";
-import { buildInvocation, matchGlob, parseEditorconfig, resolveEditorconfig } from "../plugin/mcp/editorconfig.mjs";
-import { REGISTRY } from "../plugin/mcp/registry.mjs";
+import { buildInvocation, matchGlob, parseEditorconfig, resolveEditorconfig } from "../src/mcp/editorconfig.ts";
+import { REGISTRY } from "../src/mcp/registry.ts";
 import { tmp } from "./support/plugin.ts";
 
 test("matchGlob supports *, *.ext, *.{a,b}, **.ext; rejects unsupported forms", () => {

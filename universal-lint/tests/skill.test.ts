@@ -1,6 +1,6 @@
 // The /universal-lint:universal-lint skill (SKILL.md + lint-files.mjs); ported from test/universal-lint/skill.bats.
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { chmodSync, existsSync, readdirSync, readFileSync, realpathSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "vitest";
@@ -289,4 +289,27 @@ test("lint-files.mjs keeps a leading space in a listed name (git prints ' lead.s
   assert.equal(r.status, 0);
   assert.match(r.stdout, /SC2086/, r.stdout);
   assert.equal(e.lines().filter((l) => l.startsWith("shellcheck ")).length, 1);
+});
+
+// The driver inlines the hook's library; if it also inlined the hook's entry it would start the hook's stdin loop and hang.
+test("lint-files.mjs exits on its own with the report while its stdin stays open", async () => {
+  const e = makeEnv();
+  e.recStub("shellcheck", 0);
+  const list = path.join(path.dirname(e.cwd), "list");
+  writeFileSync(list, e.file("a.sh", "echo hi\n") + "\n");
+  const child = spawn(process.execPath, [DRIVER, list], { cwd: e.cwd, env: e.childEnv({ out: "no problems" }), stdio: ["pipe", "pipe", "pipe"] });
+  let stdout = "";
+  child.stdout.on("data", (d) => (stdout += String(d)));
+  const status = await new Promise<number | null | "timeout">((resolve) => {
+    const timer = setTimeout(() => {
+      child.kill("SIGKILL");
+      resolve("timeout");
+    }, 15_000);
+    child.on("close", (code) => {
+      clearTimeout(timer);
+      resolve(code);
+    });
+  });
+  assert.equal(status, 0);
+  assert.match(stdout, /universal-lint: no findings\./);
 });

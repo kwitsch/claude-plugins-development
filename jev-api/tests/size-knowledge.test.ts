@@ -1,6 +1,6 @@
-// Unit tests for loadKnowledge of jev-api (the stored density read), run against the built plugin/hooks/lib.mjs with a fake `$`.
+// Unit tests for loadKnowledge of jev-api (the stored density read), run against src/hooks/size.ts with a fake `$`.
 import { describe, expect, it } from "vitest";
-import { loadKnowledge } from "../plugin/hooks/lib.mjs";
+import { loadKnowledge } from "../src/hooks/size.ts";
 
 type Knowledge = Parameters<typeof loadKnowledge>[1];
 
@@ -25,7 +25,7 @@ function fakeEngine(mode: "throw" | "reject", stored: unknown) {
     },
     clock: { after: () => ({ cancel: () => undefined }) },
   };
-  return { $, gets };
+  return { $: $ as unknown as Parameters<typeof loadKnowledge>[0], gets };
 }
 
 describe("loadKnowledge", () => {

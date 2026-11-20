@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "vitest";
-import { resolveBase } from "../plugin/mcp/handlers.mjs";
+import { resolveBase } from "../src/mcp/handlers.ts";
 import { tmp } from "./support/plugin.ts";
 
 // resolveBase replaced the old relativeInCwd gate: cwd is a HINT (preferred when it really

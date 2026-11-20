@@ -11,7 +11,7 @@ What a hooks edit must respect. Each line is a constraint; how it is known, the 
 ## Module load and static check (fail validate, test or the load)
 
 - No `any`, no `import()` (a module holding `import()` does not load).
-- Only the module listed in `hooks.json` may use `$`: the engine rejects passing the mods API into functions imported from another file. It also rejects `$.<noun>` as a bare value (bound, passed or read; `typeof $.mcp?.connect` fails with `$.mcp is used as a value`), and the check covers every module bundled into the hooks entry (`register.js`, or `lib.mjs` on the old build). Same-file helpers take the whole `$`.
+- Only the module listed in `hooks.json` may use `$`: the engine rejects passing the mods API into functions imported from another file. It also rejects `$.<noun>` as a bare value (bound, passed or read; `typeof $.mcp?.connect` fails with `$.mcp is used as a value`), and the check covers every module bundled into the hooks entry (`register.js`). Same-file helpers take the whole `$`.
 - One hook per event without a matcher (`registered twice without a matcher` fails validate and test).
 - `claude plugin validate <plugin>/plugin` runs this check, the vitest kit does not: run it after every hooks change.
 - Mod-side permission-checked calls (`$.tool.call`, `$.process.run`, storage through `$.mcp.call`) must be awaited inside a running hook of the module (in-frame). A call from an unawaited chain or a `$.clock.every` callback skips the plugin's own hooks: a permission dialog per call in `default` mode, denied headless.

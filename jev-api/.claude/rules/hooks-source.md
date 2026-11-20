@@ -2,17 +2,16 @@
 paths:
   - "src/hooks/**/*.ts"
   - "tests/register.test.ts"
-  - "tests/build-lib.test.ts"
 ---
 
 # jev-api hooks sources
 
 Each module's header comment says what it holds; module history is in `development/wiki/plugins/jev-api/tasks/` (F02, F16, F17 registration; F21 module split).
 
-## Build and bundle
+## Build
 
-- `register.mjs` entry plus `lib.mjs` bundle (`pluginBuild.bundleHooksLib`): root `.claude/rules/hooks-lib-bundle.md` (constraints) and `src-typescript.md` (`./x.js` imports).
-- A hooks module may import from outside `hooks/` (`src/shared/http.ts`, pure, also imported by the MCP server), also through `lib.mjs`.
+- Built with tsdown (`tsdown.config.ts`: mod `hooks/register`, script `mcp/server`): root `.claude/rules/tsdown-build.md`; sibling imports as `./x.js`.
+- A hooks module may import from outside `hooks/` (`src/shared/http.ts`, pure, also imported by the MCP server); it is inlined into both outputs.
 
 ## Hooks
 

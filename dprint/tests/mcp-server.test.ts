@@ -9,9 +9,9 @@ import path from "node:path";
 import { createInterface } from "node:readline";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { afterEach, beforeEach, test } from "vitest";
-import { DprintLsp } from "../plugin/mcp/lsp.mjs";
-import { findConfig } from "../plugin/skills/dprint/find-config.mjs";
 import type { HookResult } from "../src/mcp/format.ts";
+import { DprintLsp } from "../src/mcp/lsp.ts";
+import { findConfig } from "../src/skills/dprint/find-config.ts";
 
 const PLUGIN = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -965,14 +965,14 @@ test(".mcp.json key matches every hooks.json server id and each hook tool is lis
   assert.ok(entries.length > 0);
   for (const e of entries) {
     if (e.type === "command") {
-      assert.match(e.command, /mcp\/watch-paths\.mjs/);
+      assert.match(e.command, /hooks\/watch-paths\.mjs/);
       continue;
     }
     assert.equal(e.type, "mcp_tool");
     assert.equal(e.server, `plugin:dprint:${keys[0]}`);
     assert.ok(tools.includes(e.tool), e.tool);
   }
-  assert.ok(existsSync(path.join(PLUGIN, "mcp/watch-paths.mjs")));
+  assert.ok(existsSync(path.join(PLUGIN, "hooks/watch-paths.mjs")));
   assert.equal(hooks.hooks.SessionStart[0].hooks[0].type, "command");
   assert.equal(hooks.hooks.CwdChanged[0].hooks[1].type, "command");
 });
@@ -1264,7 +1264,7 @@ test("file_changed leaves a file alone that is unchanged against the git index",
   assert.equal(readFileSync(un, "utf8"), "u\n");
 });
 
-const WATCH = path.join(PLUGIN, "mcp/watch-paths.mjs");
+const WATCH = path.join(PLUGIN, "hooks/watch-paths.mjs");
 /** Run watch-paths.mjs like Claude Code's command hook: event JSON on stdin, stub PATH. */
 const watch = (input) =>
   spawnSync(process.execPath, [WATCH], {
@@ -1317,7 +1317,7 @@ test("DPRINT_WATCH_DIRECTORIES=1: watch-paths.mjs prints the directories of the 
   });
   assert.equal(r.status, 0, r.stderr);
   assert.deepEqual(JSON.parse(r.stdout).hookSpecificOutput.watchPaths, [repo]);
-  const { watchDirectories } = await import("../plugin/mcp/watch-list.mjs");
+  const { watchDirectories } = await import("../src/mcp/watch-list.ts");
   assert.deepEqual(
     watchDirectories(["/r/a.ts", "/r/sub/b.ts", "/r/sub/deep/c.ts", "/r2/x.ts", "/r/z/d.ts", "/rx/e.ts"]),
     ["/r", "/r2", "/rx"],
@@ -1577,7 +1577,7 @@ test("Edit property (seeded fuzz): whatever format_pre returns, applying it like
     t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
   };
-  const pick = <T,>(xs: T[]): T => xs[Math.floor(rnd() * xs.length)];
+  const pick = <T>(xs: T[]): T => xs[Math.floor(rnd() * xs.length)];
   const fmt = (t: string) => t.split("\n").map((l) => l.replace(/[ \t]+$/, "")).join("\n").replace(/\n*$/, "\n"); // the stub's formatter
   // Claude Code's Edit: an empty new_string also removes the line break after old_string; a non-unique match needs replace_all
   const apply = (o: string, old: string, neu: string, all: boolean): string | null => {

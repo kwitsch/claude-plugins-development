@@ -1,5 +1,5 @@
-// The policy rules of jevfort (the effort estimate, the next-action question), through the built
-// plugin/hooks/register.mjs: step 0 runs as Claude Code runs it, its debug effort line and the questions Jev gets are read back.
+// The policy rules of jevfort (the effort estimate, the next-action question), through
+// src/hooks/register.ts: step 0 runs as Claude Code runs it, its debug effort line and the questions Jev gets are read back.
 import { expect } from "vitest";
 import { byId, claudeBeneath, CWD, DEFAULTS, drain, effortOf, makeKit, mech, scored, sessionStubs, START, step, user } from "./support/kit.ts";
 
@@ -139,7 +139,7 @@ test("a turn's next-action question has string instructions and one string crite
 });
 
 test("pickCandidate takes at exactly the threshold, not below it, and not without a probability", async () => {
-  const { pickCandidate } = await import("../plugin/hooks/lib.mjs");
+  const { pickCandidate } = await import("../src/hooks/policy.ts");
   const cands = [{ key: "read a", label: "a" }] as never;
   const ans = (probabilities: Record<string, number>) => ({ type: "choice", choice: "read a", probabilities, confidence: 0.9 }) as never;
   expect(pickCandidate(ans({ "read a": 0.85 }), cands, 0.85)).toBeDefined();
@@ -149,7 +149,7 @@ test("pickCandidate takes at exactly the threshold, not below it, and not withou
 });
 
 test("compactInstructions keeps at 2.2 and drops below 0.8, with an unanswered item neither", async () => {
-  const { compactInstructions } = await import("../plugin/hooks/lib.mjs");
+  const { compactInstructions } = await import("../src/hooks/compact.ts");
   const items = ["a", "b", "c", "d", "e", "f"].map((label) => ({ id: label, label, result: "" })) as never;
   const text = compactInstructions(items, [2.2, 2.19, 0.8, 0.79, undefined, 0]) as string;
   expect(text).toContain("from: a.");
@@ -158,6 +158,6 @@ test("compactInstructions keeps at 2.2 and drops below 0.8, with an unanswered i
 });
 
 test("SWITCH_AT is 0.85", async () => {
-  const { SWITCH_AT } = await import("../plugin/hooks/lib.mjs");
+  const { SWITCH_AT } = await import("../src/hooks/agents.ts");
   expect(SWITCH_AT).toBe(0.85);
 });

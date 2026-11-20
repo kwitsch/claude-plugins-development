@@ -1,11 +1,11 @@
-// Hook-wiring tests for the built plugin/hooks/register.mjs: a port of upstream jev-pilot's tests/pilot.test.ts onto
+// Hook-wiring tests for src/hooks/register.ts: a port of upstream jev-pilot's tests/pilot.test.ts onto
 // claude-engine-vitest (types dropped, `expect` from vitest, `test`/`mock` from createKit). Upstream's "shadow mode
 // logs a take but lets Claude act" is gone with the mode; its shadow compare test runs on the measure path instead.
 // Jev is the jev-api plugin's request tool: a fake `tool.call` answers `mcp__jev-api__request` question by question.
 import type { On } from "claude-engine-vitest";
 import { expect } from "vitest";
-// jev-api's request tool, the name jevfort asks Jev through (the entry takes it, so lib.mjs exports it).
-import { JEV_REQUEST } from "../plugin/hooks/lib.mjs";
+// jev-api's request tool, the name jevfort asks Jev through (defined in src/hooks/jev.ts).
+import { JEV_REQUEST } from "../src/hooks/jev.ts";
 import { answered, type Asked, autoLabel, BAND, BENEATH, byId, claudeBeneath, CWD, decision, DEFAULTS, drain, easy, followUps, ids, inOrder, JEV_TOOLS, levelProps, makeKit, mech, Msg, Runner, scored, sessionStubs, SetupOpts, setupWith, SID, SINGLE_TOOLS, START, stateOf, step, toolId, user } from "./support/kit.ts";
 
 const { test, mock } = makeKit(DEFAULTS);

@@ -174,7 +174,7 @@ If at least one lens is valid, also rate the fix: fixModel sonnet for a local ch
 const fixPrompt = (job, first) => `Fix this verified defect of plugin "${plugin}" in the git worktree ${worktree} (stay there; run git and pnpm from its root).
 Finding ${job.f.key}: ${job.f.title}. Repro: ${job.f.repro}. Suggested fix: ${job.f.fix ?? 'none'}. Verified for lenses: ${job.f.validLenses.join('; ')}.
 ${job.notes ? `A previous fix (commit ${job.prevCommit}) was REJECTED in review. Review notes: ${job.notes}\nBuild on or replace that commit as the notes demand.\n` : ''}1. Re-run the repro. If it does not reproduce after all (and there is no review note saying otherwise): verdict refuted, change nothing.
-2. Fix the root cause once in ${plugin}/src (shared code, after grepping every caller), never in plugin/**/*.mjs. Add a test that fails without the fix (revert the line to check).
+2. Fix the root cause once in ${plugin}/src (shared code, after grepping every caller), never in plugin/**/*.mjs or plugin/hooks/*.js. Add a test that fails without the fix (revert the line to check).
 3. \`pnpm --filter ${plugin} build\`, \`pnpm lint\`, \`pnpm --filter ${plugin} test\` until green; read the output.
 ${first ? `4. First fix of the branch: bump ${plugin}/package.json version once (only if \`git diff origin/main -- ${plugin}/package.json\` shows none), then rebuild.\n` : ''}5. \`git add\` what you changed, commit ("${plugin}: fix ${job.f.key}", no Co-Authored-By), \`git push -u origin HEAD\`.
 Return verdict fixed|refuted|blocked (blocked: cannot be made green; commit nothing broken), the commit sha, files (the repo-relative paths of the files the commit changed, from \`git show --name-only\`) and one sentence.`

@@ -3,7 +3,7 @@ paths:
   - "src/skills/dprint/**"
   - "plugin/skills/dprint/**"
   - "tests/{check-dprint,scan-plugins,run-dprint,skill}.test.ts"
-  - "README.md"
+  - "plugin/README.md"
 ---
 
 # dprint skill scripts
@@ -15,8 +15,8 @@ Built to `plugin/skills/dprint/`, next to the hand-written `SKILL.md`, the `*.re
 - `scan-plugins.ts`: read-only scan of the project's file types against its dprint config, reads
   `dprint-plugins.json` (contract: `scan-plugins.reference.md`).
 - `run-dprint.ts`: check/fmt dispatcher with the not-set-up gate (contract: `run-dprint.reference.md`).
-- Shared modules (also imported by `src/mcp/`): `config-names.ts` (the six dprint config file names in
-  `CONFIG_NAMES`), `find-config.ts`, `find-dprint.ts`.
+- Shared modules (also imported by `src/mcp/`), inlined into every entry that imports them (no file of their own in
+  `plugin/`): `config-names.ts` (the six dprint config file names in `CONFIG_NAMES`), `find-config.ts`, `find-dprint.ts`.
 
 ## Resolution (single source; the MCP and notice rules refer here)
 
@@ -27,7 +27,7 @@ Built to `plugin/skills/dprint/`, next to the hand-written `SKILL.md`, the `*.re
 
 ## Changing `MIN_VERSION`
 
-Defined only in `check-dprint.ts`. Edit it there, update the "Minimum dprint version" line in `README.md`, rebuild,
+Defined only in `check-dprint.ts`. Edit it there, update the "Minimum dprint version" line in `plugin/README.md`, rebuild,
 and change the inlined copy in `src/hooks/probe.ts` too (`tests/notice.test.ts` fails while the two differ). Tests
 read the value from the `.ts` source (the built script is minified).
 

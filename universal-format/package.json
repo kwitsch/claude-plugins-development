@@ -1,6 +1,6 @@
 {
   "name": "universal-format",
-  "version": "0.19.2",
+  "version": "0.19.3",
   "private": true,
   "description": "Formats files in 17 languages (JS/TS, JSON, YAML, Markdown, CSS, HTML, Shell, Java, PHP, Kotlin, Python, Go, Rust and more) before every Write and Edit lands.",
   "keywords": [
@@ -13,7 +13,7 @@
   },
   "type": "module",
   "scripts": {
-    "build": "node ../development/scripts/build-plugin.ts && node scripts/vendor.ts",
+    "build": "tsdown && node scripts/vendor.ts",
     "test": "vitest run --config \"$(git rev-parse --show-toplevel)/vitest.config.mts\""
   },
   "devDependencies": {

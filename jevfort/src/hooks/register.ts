@@ -7,9 +7,9 @@
  *
  * @remarks
  * EARLY ACCESS API. No engine type import (the engine typings are not in the repo): the used `$` members and
- * events are typed structurally below. `development/scripts/build-plugin.ts` keeps `hooks/*.mjs` unmangled and
- * uncompressed, since the engine's static check wants `$`/`on` spelled as such and no `$.<noun>` passed as a bare
- * value; every hook is a named function literal.
+ * events are typed structurally below. Built by tsdown to `plugin/hooks/register.js` with the sibling modules
+ * inlined (compressed, never mangled): the engine's static check wants `$`/`on` spelled as such and no `$.<noun>`
+ * passed as a bare value; every hook is a named function literal.
  *
  * @packageDocumentation
  */

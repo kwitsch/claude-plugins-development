@@ -2,9 +2,9 @@ import assert from "node:assert/strict";
 import { chmodSync, mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "vitest";
-import { buildInvocation } from "../plugin/mcp/editorconfig.mjs";
-import { hasPrettierProjectConfig, shouldOverridePrintWidth } from "../plugin/mcp/prettier.mjs";
-import { cargoEdition, EXT_MAP, PRETTIER_LANGS, REGISTRY, selectFormatter } from "../plugin/mcp/registry.mjs";
+import { buildInvocation } from "../src/mcp/editorconfig.ts";
+import { hasPrettierProjectConfig, shouldOverridePrintWidth } from "../src/mcp/prettier.ts";
+import { cargoEdition, EXT_MAP, PRETTIER_LANGS, REGISTRY, selectFormatter } from "../src/mcp/registry.ts";
 import { tmp } from "./support/plugin.ts";
 
 const gofmt = REGISTRY.go.chain[1];

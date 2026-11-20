@@ -3,18 +3,20 @@ paths:
   - "src/hooks/**"
   - "plugin/hooks/**"
   - "tests/notice.test.ts"
+  - "claude-tests/**"
 ---
 
 # notice (function-hooks toast)
 
-`plugin/hooks/hooks.json` lists `"modules": ["./register.mjs"]` (Claude Code function hooks, early-access API): a toast
+`plugin/hooks/hooks.json` lists `"modules": ["./register.js"]` (Claude Code function hooks, early-access API): a toast
 when the working directory has a dprint config but dprint cannot run.
 
 ## Constraints
 
 - Layout: `src/hooks/register.ts` (entry: the four `on(...)` calls with inline named hook functions, the state object
-  `NoticeState`), `probe.ts` (constants, probe, toast, cwd logic; every function takes `$` and the state), `types.ts`.
-  Build: `bundleHooksLib` ships `register.mjs` plus one compressed `lib.mjs` (root `hooks-lib-bundle.md`). State
+  `NoticeState`), `probe.ts` (constants, probe, toast, cwd logic; every function takes `$` and the state), `types.ts`
+  (`watch-paths.ts` beside them is the MCP server's command hook, `mcp-server.md`).
+  Build: tsdown inlines `types` and `probe` into one `plugin/hooks/register.js` (root `tsdown-build.md`). State
   belongs in `register()`, never at module level.
 - The hooks module imports nothing from the skill scripts. `probe.ts` inlines copies of `CONFIG_NAMES`
   (`config-names.ts`), `MIN_VERSION` and check-dprint's `dprint X.Y.Z` regex (`check-dprint.ts`);
@@ -62,6 +64,6 @@ with `$.process.run`:
 
 ## Tests
 
-`tests/notice.test.ts` drives the built module through `createKit` from `claude-engine-vitest` (stubs for
+`tests/notice.test.ts` drives `src/hooks/register.ts` through `createKit` from `claude-engine-vitest` (stubs for
 `fs.exists`, `session.cwd`, `env.get`, `process.run`, `ui.toast`; `mock.clock(on).settle()` waits for the detached
-check).
+check). `claude-tests/register.test.ts` fires all four registrations on the built `register.js` under `claude plugin test`.

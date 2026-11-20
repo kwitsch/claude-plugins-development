@@ -52,11 +52,11 @@ Part rules (load with their files): `.claude/rules/register-hooks.md` (hooks, `$
 
 ## Standing user decisions (do not re-open in reviews)
 
-- No mode switch and no Bash or permission gate again (2026-11-08, 0.3.0): on/off is enabling or disabling the plugin.
+- No mode switch and no Bash or permission gate (2026-11-08, 0.3.0): on/off is enabling or disabling the plugin.
 - `tool.check` never turns a verdict into `ask` or `deny` (2026-11-08, 0.2.0): a hook's `ask` brought prompts and
   classifier refusals back in auto mode. It returns Claude Code's verdict or turns a mode's bare `ask` into `allow`
   (`settled` names what is never loosened).
-- Jev's own vetted calls are approved over a mode's bare `ask`, as upstream does (2026-11-08, PR #46). An `ask` on a
+- Jev's own vetted calls are approved over a mode's bare `ask`, as upstream does (2026-11-08). An `ask` on a
   `Read` stays.
 - The scratchpad allow covers `Edit`/`Write`/`NotebookEdit` only, in every permission mode; a Bash write into the
   scratchpad keeps Claude Code's verdict (2026-11-08).
@@ -73,3 +73,4 @@ after the pause is the probe, any success resets it. The pause ends when the clo
 ## Layout
 
 - Tests share the kit `tests/support/kit.ts` (standard: root `.claude/rules/hook-tests.md`).
+- Built with tsdown (`tsdown.config.ts`, one mod entry `hooks/register`); `claude-tests/world.ts` holds the fake Jev answers shared by the unit kit and the integration tests.

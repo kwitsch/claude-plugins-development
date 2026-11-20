@@ -5,11 +5,12 @@ paths:
   - "src/mcp/prettier.ts"
   - "plugin/mcp/vendor/**"
   - "package.json"
+  - "tsdown.config.ts"
 ---
 
 # Vendored bundle: what must hold
 
-- The build is `node ../development/scripts/build-plugin.ts && node scripts/vendor.ts`, in that order: the standard build removes every `.mjs` it did not write, the chunks included.
+- The build is `tsdown && node scripts/vendor.ts`, in that order. `tsdown.config.ts` lists `vendor: ["mcp/vendor"]`: imports of `./vendor/index.js` stay external (`./vendor/index.mjs` in `server.mjs`, `../../mcp/vendor/index.mjs` in the skill driver) and the stale-output removal leaves `plugin/mcp/vendor/` to `vendor.ts`.
 - Own code never goes into the bundle: `scripts/vendor-entry.ts` exports only prettier and the three plugin loaders. Sources import it as `./vendor/index.js`, typed by `src/mcp/vendor/index.d.ts`; a new export needs both files changed.
 - The plugin loaders stay dynamic `import()`s (a static import evaluates the plugin at every server start; `tests/build.test.ts` checks it).
 - `prettier`, `prettier-plugin-java`, `@prettier/plugin-php`, `prettier-plugin-sh` and `sh-syntax` are pinned exactly in `package.json`; `sh-syntax` equals the version `prettier-plugin-sh` resolves. Do not bump `prettier-plugin-sh` past 0.16.1 without checking the bundle. Dependabot ignores all five (`.github/dependabot.yml`): a bump changes `plugin/` and needs a plugin release.

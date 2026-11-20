@@ -13,7 +13,7 @@ Two layers. The path-scoped rules in `.claude/rules/` load with matching files a
 
 ## Source layout (`src/mcp/`)
 
-Import graph, no cycle at runtime: `util` ← `editorconfig` ← `prettier` ← `registry` ← `handlers` ← `server` (`editorconfig` imports a type from `registry`, erased by the build).
+Import graph, no cycle at runtime: `util` ← `editorconfig` ← `prettier` ← `registry` ← `handlers` ← `server` (`editorconfig` imports a type from `registry`, erased by the build). tsdown inlines all of them and `@shared` into `plugin/mcp/server.mjs` and into the skill driver.
 
 - `server.ts`: the one-tool table; the dual-era stdio loop is `@shared/mcp-core.js`.
 - `handlers.ts`: `formatPre`, the base directory (`resolveBase`), path exclusions, the dprint gate, the Edit swap (`applyEdit`, `shrinkSwap`), the pending config refreshes, the stdin run of a CLI formatter.

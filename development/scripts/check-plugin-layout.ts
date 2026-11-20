@@ -2,7 +2,7 @@
 // Usage: check-plugin-layout.ts <plugin dir>
 // Fails when <plugin>/plugin/ holds a file the shipped plugin may not contain (.claude/rules/plugin-build-output.md).
 // An allowlist: sources, tests, CLAUDE.md or tooling files belong outside plugin/. Called by every plugin's
-// build (step 0 of build-plugin.ts and of the tsdown build, development/tsdown/index.ts) and by check-plugin-fresh.sh in CI.
+// build (the tsdown build, development/tsdown/index.ts) and by check-plugin-fresh.sh in CI.
 // Opt-in per plugin: `pluginBuild.assets` in <plugin dir>/package.json lists further files by exact path relative to
 // plugin/ (binary files a vendored bundle loads at runtime, e.g. universal-format's wasm files).
 import { existsSync, lstatSync, readdirSync, readFileSync } from "node:fs";

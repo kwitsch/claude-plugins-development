@@ -1,9 +1,9 @@
-// Shared test kit of jev-api: the kit bound to the built plugin/hooks/register.mjs, and the default `request` call with
-// one valid question per type. Tests import only register.mjs through this module.
+// Shared test kit of jev-api: the kit bound to the source src/hooks/register.ts, and the default `request` call with
+// one valid question per type (unit layer; the built register.js is covered by claude-tests/).
 import { createKit } from "claude-engine-vitest";
 
 /** The kit bound to the built plugin: `test` runs a test against a fake engine, `mock` stubs the engine calls most tests share. */
-export const { test, mock } = createKit({ module: new URL("../../plugin/hooks/register.mjs", import.meta.url), plugin: "jev-api" });
+export const { test, mock } = createKit({ module: new URL("../../src/hooks/register.ts", import.meta.url), plugin: "jev-api" });
 
 /** The test's `$` (the kit does not export its type). */
 export type Runner = Parameters<Parameters<typeof test>[2]>[0];
