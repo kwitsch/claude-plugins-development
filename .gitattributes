@@ -3,6 +3,7 @@
 # -diff: minified one-liners; `git diff`/`git log -p` print "Binary files differ" instead of one huge line.
 # -merge: a conflict keeps our version and marks the file conflicted; resolve by rebuilding (`pnpm build`).
 */plugin/**/*.mjs                 linguist-generated -diff -merge
+*/plugin/**/*.js                  linguist-generated -diff -merge
 */plugin/.claude-plugin/plugin.json linguist-generated
 dprint/src/mcp/hook-inputs.d.mts  linguist-generated
 pnpm-lock.yaml                    linguist-generated

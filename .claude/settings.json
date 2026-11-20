@@ -17,6 +17,7 @@
     ],
     "deny": [
       "Edit(./*/plugin/**/*.mjs)",
+      "Edit(./*/plugin/**/*.js)",
       "Edit(./*/plugin/.claude-plugin/plugin.json)",
       "Edit(./*/plugin/**/*.ts)",
       "Edit(./*/plugin/**/*.mts)",

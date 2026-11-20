@@ -2,14 +2,14 @@
 // Usage: check-plugin-layout.ts <plugin dir>
 // Fails when <plugin>/plugin/ holds a file the shipped plugin may not contain (.claude/rules/plugin-build-output.md).
 // An allowlist: sources, tests, CLAUDE.md or tooling files belong outside plugin/. Called by every plugin's
-// build (step 0) and by check-plugin-fresh.sh in CI.
+// build (step 0 of build-plugin.ts and of the tsdown build, development/tsdown/index.ts) and by check-plugin-fresh.sh in CI.
 // Opt-in per plugin: `pluginBuild.assets` in <plugin dir>/package.json lists further files by exact path relative to
 // plugin/ (binary files a vendored bundle loads at runtime, e.g. universal-format's wasm files).
 import { existsSync, lstatSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 
 // no tests/ dir, *.test.* or CLAUDE.md anywhere; then the allowlist itself
-const ALLOWED = /^(?!(.*\/)?tests\/)(?!.*\.test\.)(?!(.*\/)?CLAUDE\.md$)(\.claude-plugin\/plugin\.json|\.mcp\.json|README\.md|hooks\/hooks\.json|agents\/[^/]+\.md|skills\/.+\/(SKILL|[^/]+\.reference)\.md|skills\/.+\.json|.+\.mjs)$/;
+const ALLOWED = /^(?!(.*\/)?tests\/)(?!.*\.test\.)(?!(.*\/)?CLAUDE\.md$)(\.claude-plugin\/plugin\.json|\.mcp\.json|README\.md|hooks\/hooks\.json|agents\/[^/]+\.md|skills\/.+\/(SKILL|[^/]+\.reference)\.md|skills\/.+\.json|.+\.mjs|hooks\/[^/]+\.js)$/;
 
 const dir = process.argv[2] ?? ".";
 const root = path.join(dir, "plugin");
