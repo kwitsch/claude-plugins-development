@@ -7,7 +7,9 @@ paths:
 
 # Rule: function-hooks plugins ship register.mjs plus one compressed lib.mjs
 
-Preferred for every function-hooks plugin of this repository, to keep the shipped size small (decided with jev-api 0.4.0). Use the skill `split-hooks-lib` to move a plugin over.
+Old build only (plugins without `tsdown.config.ts`); tsdown-built plugins: `tsdown-build.md`.
+
+Preferred for every function-hooks plugin of this repository, to keep the shipped size small (decided with jev-api 0.4.0).
 
 - `src/hooks/register.ts` (the module `plugin/hooks/hooks.json` lists) is the entry: built unminified and unmangled, because Claude Code's static check reads it (`$`/`on` spelled as such, named hook functions, literal first arguments such as `$.env.get("NAME")`). Keep those calls in the entry.
 - Every other `src/hooks/*.ts` is a helper. With `"pluginBuild": { "bundleHooksLib": true }` in the plugin's `package.json` (top level, not inside `claudePlugin`) `development/scripts/build-plugin.ts` bundles all helpers into one `plugin/hooks/lib.mjs` (compressed, whitespace removed, deliberately not mangled so `$` and engine calls stay spelled) and points the entry's imports at it. Without the flag every `hooks/*.mjs` ships as before.
