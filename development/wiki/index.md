@@ -23,6 +23,7 @@ Catalog of what earlier sessions wrote down, in this wiki and elsewhere in the r
 - [repo-tooling.md](decisions/repo-tooling.md): why dprint with a minimal config, one oxlint run, vitest, `.ts` sources, generated manifests, English content, this wiki, and rules that hold constraints only; what was rejected each time.
 - [shared-source-layer.md](decisions/shared-source-layer.md): which code several plugins copy, why a runtime package is out, and the chosen build-time shared source with its plan (mechanism built, shared modules not yet).
 - [tsdown-plugin-build.md](decisions/tsdown-plugin-build.md): the tsdown build standard: self-contained outputs, the minify matrix for mods (what Claude Code's static check accepts), what the build checks, coexistence with the old build, what was rejected.
+- [test-layers.md](decisions/test-layers.md): the two test layers (vitest unit tests on `src/`, `claude plugin test` integration tests on a temp copy of the built `plugin/`), the `@shared` alias, typed `claude-tests/`, the local-only integration run, and what was rejected.
 
 ### Methods
 
@@ -41,7 +42,7 @@ Catalog of what earlier sessions wrote down, in this wiki and elsewhere in the r
 
 - Claude Code behaviour: [claude-code-hook-facts.md](../../.claude/rules/claude-code-hook-facts.md) (constraints for a function-hooks module), [claude-code-tool-hook-facts.md](../../.claude/rules/claude-code-tool-hook-facts.md) (tool hooks, subagents, Stop, FileChanged), [claude-code-skill-facts.md](../../.claude/rules/claude-code-skill-facts.md) (tools a skill uses), [mcp-dual-era.md](../../.claude/rules/mcp-dual-era.md) (constraints for a plugin's MCP server).
 - Writing hook code: [hook-file-safety.md](../../.claude/rules/hook-file-safety.md) (scope, git, file content, concurrent hook processes, slow file systems), [hook-caches-and-tests.md](../../.claude/rules/hook-caches-and-tests.md) (caches, buffers, regression tests).
-- Sources, build, tests: [tsdown-build.md](../../.claude/rules/tsdown-build.md) (the standard build), [plugin-src.md](../../.claude/rules/plugin-src.md), [src-typescript.md](../../.claude/rules/src-typescript.md), [plugin-build-output.md](../../.claude/rules/plugin-build-output.md), [hooks-lib-bundle.md](../../.claude/rules/hooks-lib-bundle.md), [hook-tests.md](../../.claude/rules/hook-tests.md), [tsdoc.md](../../.claude/rules/tsdoc.md), [plugin-description.md](../../.claude/rules/plugin-description.md), [lint-config.md](../../.claude/rules/lint-config.md).
+- Sources, build, tests: [tsdown-build.md](../../.claude/rules/tsdown-build.md) (the standard build), [plugin-src.md](../../.claude/rules/plugin-src.md), [src-typescript.md](../../.claude/rules/src-typescript.md), [plugin-build-output.md](../../.claude/rules/plugin-build-output.md), [hooks-lib-bundle.md](../../.claude/rules/hooks-lib-bundle.md), [hook-tests.md](../../.claude/rules/hook-tests.md) (unit tests on `src/`, integration tests on the built plugin), [tsdoc.md](../../.claude/rules/tsdoc.md), [plugin-description.md](../../.claude/rules/plugin-description.md), [lint-config.md](../../.claude/rules/lint-config.md).
 - Process: [ci.md](../../.claude/rules/ci.md) (PR, release, sync workflows), [plugin-docs-tasks.md](../../.claude/rules/plugin-docs-tasks.md) (task lists and evaluations).
 
 ## Per plugin

@@ -1,5 +1,5 @@
-// The built register.js through the shared kit (tests/support/kit.ts): stubs answer the engine calls; prompt.submit and
-// tool.call end in recording stubs, so the tests read the context the mod added.
+// The mod's source src/hooks/register.ts through the shared kit (tests/support/kit.ts): stubs answer the engine calls;
+// prompt.submit and tool.call end in recording stubs, so the tests read the context the mod added.
 import { expect } from "vitest";
 import { BIN, CWD, makeKit, prompt, SETUP, toolCall } from "./support/kit.ts";
 

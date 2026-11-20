@@ -2,7 +2,7 @@
 
 Where the workspace test kit `claude-engine-vitest` and the official kit behave differently from a real Claude Code session, so a green test is read correctly.
 
-What the kit offers and how it deviates from the official kit: [README.md](../../vitest/claude-engine/README.md) of the package. How plugin tests are built: [hook-tests.md](../../../.claude/rules/hook-tests.md).
+What the kit offers and how it deviates from the official kit: [README.md](../../vitest/claude-engine/README.md) of the package. How plugin tests are built: [hook-tests.md](../../../.claude/rules/hook-tests.md); why unit tests run on `src/` and integration tests on the built plugin: [test-layers.md](../decisions/test-layers.md).
 
 ## Dispatch
 
@@ -19,13 +19,19 @@ What the kit offers and how it deviates from the official kit: [README.md](../..
 
 ## Official kit (`claude plugin test`)
 
+- The module `claude-code/testing` exports `describe`, `expect`, `mock`, `test` and `tier`; `mock` has `clock`, `store`, `env` and `session` (live 2.1.329). The used part is declared for the type check in `development/vitest/claude-engine/claude-code-testing.d.ts`.
+- `claude plugin test` runs with no credentials and no config: an empty `CLAUDE_CONFIG_DIR` and no `ANTHROPIC_API_KEY` (live 2.1.329).
+- `claude plugin test` skips symlinks and finds hardlinks only per file, so tests must be copied next to the plugin files (live 2.1.329).
+- Stubs `on("env.get")`, `on("session.cwd")`, `on("fs.exists")`, `on("fs.stat")`, `on("tool.list")`, `on("process.run")`, `on("ui.toast")`, `on("tool.call")`, `on("prompt.submit")` and `on("session.start"|"session.end"|"session.compact")` work, `mock.clock(on).settle()` exists, and a test fires `$.tool.call`, `$.session.start`, `$.session.end`, `$.session.compact` and `$.prompt.submit` (graphmind-helper `claude-tests/register.test.ts`, live 2.1.329).
 - A `session.start` stub must return `{ cwd }`; `claude-engine-vitest` accepts `{}`, `claude plugin test` refuses it (`returned no { cwd }`) (2.1.322).
+- The official kit validates event shapes on both sides, `claude-engine-vitest` does not: a test's `$.session.start` input needs `cwd` (`next() passed an argument with no { cwd }`), a `session.end` stub returns `{ sessionId }`, `$.session.compact` input and stub answer need a non-empty `messages` list of `{ role, text, toolUses: [] }`, a `prompt.submit` stub returns `{ text }` or `{ drop }`, not `{ value }` (live 2.1.329).
+- A test's `on("tool.call")` stub answers a mod's own `$.tool.call` with the event's result (`{ result }` or `{ deny }`); `{ value: { result } }`, which `claude-engine-vitest` needs, is skipped with `returned neither { result } nor { deny }` (live 2.1.329).
 - A hook's own `{ isError: true, result }` answer reaches the caller unchanged in the official kit, while a real session drops the flag before the model sees it (2.1.322).
-- To compare stand-in and engine, copy `plugin/` to a scratch directory, swap the test's imports to `claude-code/testing` and run `claude plugin test <copy>`.
+- To run a mod's `claude-tests/` or compare stand-in and engine, use `development/scripts/plugin-test.ts` (run from the plugin folder): it copies `plugin/` to a temp dir and the tests into `<tmp>/test/`, then runs `claude plugin test <tmp>` (read 2026-11-20).
 
 ## What only a real session shows
 
-- The static check of the hooks module (`claude plugin validate <plugin>/plugin`) and the loading of the built entry (`register.js` with everything inlined; on the old build `register.mjs` plus a bundled `lib.mjs`).
+- The static check of the hooks module (`claude plugin validate <plugin>/plugin`; `claude plugin test` runs it too) and the loading of the built entry (`register.js` with everything inlined; on the old build `register.mjs` plus a bundled `lib.mjs`). Unit tests load `src/`; the built entry loads only under `claude plugin test` (a mod's `claude-tests/`) and in a real session (docs, repo rules; read 2026-11-20).
 - Type-checking of `userConfig` values before the module loads.
 - Everything about permissions, hook tiers and `cc-plugin-sec-default`.
 

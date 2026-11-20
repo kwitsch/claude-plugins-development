@@ -56,7 +56,8 @@
   "overrides": [
     {
       "files": [
-        "*/tests/**"
+        "*/tests/**",
+        "*/claude-tests/**"
       ],
       "rules": {
         "typescript/no-unsafe-member-access": "off",

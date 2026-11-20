@@ -1,6 +1,6 @@
-// tests/support/kit.ts of __NAME__: the fake environment of the plugin's tests, bound to the built plugin/hooks/register.mjs.
-// A test file calls `makeKit(options)` and imports no source of the plugin (.claude/rules/hook-tests.md).
-// A full example: jevfort/tests/support/kit.ts (a fake jev-api request tool, session reads, tool list, band helpers).
+// tests/support/kit.ts of __NAME__: the fake environment of the plugin's tests, bound to the source src/hooks/register.ts.
+// A test file calls `makeKit(options)` (.claude/rules/hook-tests.md).
+// A full example: graphmind-helper/tests/support/kit.ts (tool list and calls, process.run, fs, env, toast).
 import { createKit } from "claude-engine-vitest";
 import type { On } from "claude-engine-vitest";
 
@@ -17,13 +17,13 @@ export const CWD = "/proj";
 export type SetupOpts = { cwd?: () => string; env?: Record<string, string>; store?: Record<string, unknown> };
 
 /**
- * A kit bound to the built register.mjs with the given userConfig options.
+ * A kit bound to src/hooks/register.ts with the given userConfig options.
  *
  * @param options - The manifest defaults of the test.
  * @returns The kit's `test` and `mock`, and `setup` bound to that mock.
  */
 export function makeKit(options: Record<string, unknown> = DEFAULTS) {
-  const kit = createKit({ module: new URL("../../plugin/hooks/register.mjs", import.meta.url), plugin: "__NAME__", options });
+  const kit = createKit({ module: new URL("../../src/hooks/register.ts", import.meta.url), plugin: "__NAME__", options });
   return { ...kit, setup: (on: On, opts: SetupOpts = {}) => setupWith(kit.mock, on, opts) };
 }
 

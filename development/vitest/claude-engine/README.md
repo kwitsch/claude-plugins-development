@@ -1,6 +1,6 @@
 # claude-engine-vitest
 
-A vitest stand-in for Claude Code's mod test kit `claude-code/testing`. The official kit exists only inside the `claude` binary and runs under `claude plugin test`. This package runs the same kind of test under plain vitest, against a plugin's built hooks module. It mirrors the kit's API and semantics ([Test a mod](https://code.claude.com/docs/en/plugins/mods/test.md), [Mods reference](https://code.claude.com/docs/en/plugins/mods/reference.md)), so you port a kit test by changing its imports. It is a workspace package, not a plugin (it has no `plugin/`). Its only dependency is vitest, as a peer.
+A vitest stand-in for Claude Code's mod test kit `claude-code/testing`. The official kit exists only inside the `claude` binary and runs under `claude plugin test`. This package runs the same kind of test under plain vitest, against a plugin's hooks module (unit tests: its source `src/hooks/register.ts`). It mirrors the kit's API and semantics ([Test a mod](https://code.claude.com/docs/en/plugins/mods/test.md), [Mods reference](https://code.claude.com/docs/en/plugins/mods/reference.md)), so you port a kit test by changing its imports. It is a workspace package, not a plugin (it has no `plugin/`). Its only dependency is vitest, as a peer.
 
 ## API
 
@@ -8,7 +8,7 @@ A vitest stand-in for Claude Code's mod test kit `claude-code/testing`. The offi
 import { expect } from "vitest";
 import { createKit } from "claude-engine-vitest";
 
-const { test, mock } = createKit({ module: new URL("../plugin/hooks/register.js", import.meta.url), plugin: "my-mod", options: {} });
+const { test, mock } = createKit({ module: new URL("../src/hooks/register.ts", import.meta.url), plugin: "my-mod", options: {} });
 
 test("name", { options: { flag: false }, plugins: [{ name: "helper", register(on) {} }], timeoutMs: 5000 }, async ($, on) => {
   on("tool.call", () => ({ result: "ok" })); // a stub: register every one before the first call on $
@@ -26,6 +26,10 @@ test("name", { options: { flag: false }, plugins: [{ name: "helper", register(on
 - `$.ui.mount(e)` draws a render site through the `ui.render` chain. It returns `{ find, findAll, press, input, select, unmount }`, and `find` takes `{ type, text, key }`, where a string `text` matches as a substring. `$.ui.press({ plugin, key, requestId? })` presses a drawn `Button`.
 - `mock.clock(on, { now })` returns `{ now, advance, set, settle, sleep }`. `$.clock.every` and `$.clock.after` dispatch one wait per period, so a timer fires exactly on its period boundary. `mock.store(on, entries)`, `mock.env(on, vars)` and `mock.session(on)` (`appended()`) are also available.
 
+## The official kit
+
+- `claude-code/testing` (Claude Code 2.1.329) exports `describe`, `expect`, `mock`, `test` and `tier`; its `mock` has `clock`, `store`, `env` and `session`. `claude-code-testing.d.ts` in this package declares the part plugins use (`test`, `mock`, `expect`) from this package's types, so a plugin's `claude-tests/` are type-checked (`.claude/rules/hook-tests.md`).
+
 ## Deviations from the official kit
 
 - Assertions come from vitest's `expect`, and there is no `tier()` export (pass `tier` to `createKit`). `describe` is vitest's.
@@ -37,4 +41,4 @@ test("name", { options: { flag: false }, plugins: [{ name: "helper", register(on
 ## Porting a kit test
 
 1. Replace `import { expect, mock, test } from "claude-code/testing"` with `import { expect } from "vitest"`, `import { createKit } from "claude-engine-vitest"` and `const { test, mock } = createKit({ module, plugin })`.
-2. Point relative imports of the mod's own files at the built `plugin/` output, and drop the TypeScript types (`*.test.ts`).
+2. Point relative imports of the mod's own files at `src/*.ts`; types stay.

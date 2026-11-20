@@ -2,6 +2,7 @@
 paths:
   - "*/src/**"
   - "*/tests/**"
+  - "*/claude-tests/**"
 ---
 
 # Rule: caches, buffers and regression tests in hook code

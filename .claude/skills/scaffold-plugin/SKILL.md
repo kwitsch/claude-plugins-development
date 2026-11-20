@@ -42,7 +42,7 @@ Per selected component:
 
 - **skill** → `plugin/skills/<skill-name>/SKILL.md` from `templates/SKILL.md` (frontmatter `name`, `description`; body = instructions).
 - **hook** → `src/hooks/<event-kebab>.ts` from `templates/hook.ts` (line 1 stays `#!/usr/bin/env node`), listed under `scripts` as `hooks/<event-kebab>`, and `plugin/hooks/hooks.json` from `templates/hooks.json` (set the event name and the `.mjs` path). Add `tests/<event-kebab>.test.ts` from `templates/hook.test.ts`.
-- **mods** → `src/hooks/register.ts` exporting `register(on, options)` with structural `$`/`on` types (model: `graphmind-helper/src/hooks/register.ts`), listed under `mods` as `hooks/register` and built to `plugin/hooks/register.js`; `plugin/hooks/hooks.json` is `{"modules": ["./register.js"]}` (merged into the same file when `hook` is also chosen). Tests in `tests/register.test.ts` with `createKit` from `claude-engine-vitest` bound to `plugin/hooks/register.js` (`pnpm --filter <name> add -D claude-engine-vitest@workspace:*`).
+- **mods** → `src/hooks/register.ts` exporting `register(on, options)` with structural `$`/`on` types (model: `graphmind-helper/src/hooks/register.ts`), listed under `mods` as `hooks/register` and built to `plugin/hooks/register.js`; `plugin/hooks/hooks.json` is `{"modules": ["./register.js"]}` (merged into the same file when `hook` is also chosen). Unit tests in `tests/register.test.ts` with `createKit` from `claude-engine-vitest` bound to `src/hooks/register.ts` (`new URL("../src/hooks/register.ts", import.meta.url)`; `pnpm --filter <name> add -D claude-engine-vitest@workspace:*`). Integration tests: `mkdir -p "$name/claude-tests"`, `sed "s/__NAME__/$name/g" "$T/claude-test.ts" > "$name/claude-tests/register.test.ts"`, and add `"test:plugin": "node ../development/scripts/plugin-test.ts"` to the `scripts` of `<name>/package.json` (`.claude/rules/hook-tests.md`).
 - **agent** → `plugin/agents/<agent-name>.md` with frontmatter `name`, `description`, `tools`.
 - **mcp** → `src/bin/mcp.ts` (zero-dep stdio JSON-RPC, line 1 `#!/usr/bin/env node`), listed under `scripts` as `bin/mcp` and built to `plugin/bin/mcp.mjs`, and `plugin/.mcp.json` pointing at `${CLAUDE_PLUGIN_ROOT}/bin/mcp.mjs`. Dual-era from the start (answer `initialize` and `server/discover`): follow `.claude/rules/mcp-dual-era.md`. Add a test for both eras.
 
@@ -55,10 +55,11 @@ pnpm install
 pnpm --filter <name> build
 pnpm exec oxlint
 pnpm --filter <name> test
+pnpm --filter <name> test:plugin   # mods only (needs claude)
 claude plugin validate <name>/plugin
 ```
 
-All four must pass. Fix template substitutions, never hand-edit `plugin/**/*.mjs`, `plugin/hooks/*.js` or `plugin/.claude-plugin/plugin.json`.
+All must pass (`test:plugin` only for mods). Fix template substitutions, never hand-edit `plugin/**/*.mjs`, `plugin/hooks/*.js` or `plugin/.claude-plugin/plugin.json`.
 
 ## Step 4 — Report
 
@@ -70,4 +71,4 @@ List the created files and the three commands above. Do not commit unless asked.
 - Only the entries listed in `<name>/tsdown.config.ts` are built, each into one self-contained file: mods `src/hooks/register.ts` → `plugin/hooks/register.js`, scripts `src/<entry>.ts` → `plugin/<entry>.mjs`; every other `src/` module is inlined (`.claude/rules/tsdown-build.md`).
 - Scripts used by several components (skills, hooks, MCP) go in `src/bin/<name>.ts`, listed under `scripts` → `plugin/bin/<name>.mjs`.
 - Runtime code: `node:` builtins only.
-- New sources are `.ts`, never `.mts` (`.claude/rules/src-typescript.md`): a relative import reads `./x.js` (the build inlines it). Tests follow `.claude/rules/hook-tests.md`: a function-hooks plugin binds `claude-engine-vitest` to `plugin/hooks/register.js` (a shared kit in `tests/support/` once it has several test files), a command hook spawns its built `.mjs`.
+- New sources are `.ts`, never `.mts` (`.claude/rules/src-typescript.md`): a relative import reads `./x.js` (the build inlines it). Tests follow `.claude/rules/hook-tests.md`: a function-hooks plugin binds `claude-engine-vitest` to `src/hooks/register.ts` (a shared kit in `tests/support/` once it has several test files) and runs `claude-tests/` on the built plugin with `pnpm --filter <name> test:plugin`; a command hook spawns its built `.mjs`.

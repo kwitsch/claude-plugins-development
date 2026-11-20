@@ -1,8 +1,11 @@
-// The fake environment of graphmind-helper's tests, bound to the built plugin/hooks/register.js on claude-engine-vitest:
+// The fake environment of graphmind-helper's tests, bound to the source src/hooks/register.ts on claude-engine-vitest:
 // stubs answer the engine calls (tool list and calls, process.run, fs, env, cwd, toast); prompt.submit and tool.call end
-// in recording stubs, so the tests read the context the mod added. Imports no source of the plugin (.claude/rules/hook-tests.md).
+// in recording stubs, so the tests read the context the mod added (.claude/rules/hook-tests.md).
 import { createKit } from "claude-engine-vitest";
 import type { On } from "claude-engine-vitest";
+import { BIN, envValue, mcpText, OWN, processOut } from "../../claude-tests/world.js";
+
+export { BIN, OWN };
 
 /** The manifest defaults (package.json claudePlugin.userConfig): graphmind-helper has none. */
 export const DEFAULTS = {};
@@ -12,23 +15,19 @@ export type MockKit = ReturnType<typeof createKit>["mock"];
 
 /** The session's working directory. */
 export const CWD = "/proj";
-/** The graphmind binary of the default world (`~/.local/bin` of `/home/u`). */
-export const BIN = "/home/u/.local/bin/graphmind";
 /** The default user settings path. */
 export const SETTINGS = "/home/u/.claude/settings.json";
-/** The plugin's own server's tools. */
-export const OWN = ["status", "map", "memory_list", "search"].map((t) => ({ name: `mcp__plugin_graphmind-helper_graphmind__gm_${t}`, description: "", mcp: true }));
 /** A `graphmind setup` server's tools. */
 export const SETUP = ["status", "map", "memory_list", "search"].map((t) => ({ name: `mcp__graphmind__gm_${t}`, description: "", mcp: true }));
 
 /**
- * A kit bound to the built register.js with the given userConfig options.
+ * A kit bound to src/hooks/register.ts with the given userConfig options.
  *
  * @param options - The manifest defaults of the test.
  * @returns The kit's `test` and `mock`, and `setup` bound to that mock.
  */
 export function makeKit(options: Record<string, unknown> = DEFAULTS) {
-  const kit = createKit({ module: new URL("../../plugin/hooks/register.js", import.meta.url), plugin: "graphmind-helper", options });
+  const kit = createKit({ module: new URL("../../src/hooks/register.ts", import.meta.url), plugin: "graphmind-helper", options });
   return { ...kit, setup: (on: On, w?: World) => setupWith(kit.mock, on, w) };
 }
 
@@ -85,7 +84,7 @@ function setupWith(mock: MockKit, on: On, w: World = {}) {
   const clock = mock.clock(on);
   const files = w.files ?? [BIN];
   const settings = w.settingsPath ?? SETTINGS;
-  on("env.get", (_$, e) => ({ value: e.name === "HOME" ? (w.home ?? "/home/u") : e.name === "PATH" ? (w.path ?? "/usr/bin") : e.name === "CLAUDE_CONFIG_DIR" ? w.configDir : undefined }));
+  on("env.get", (_$, e) => ({ value: envValue(String(e.name), w) }));
   on("session.cwd", () => ({ value: CWD }));
   on("fs.exists", (_$, e) => ({ value: files.includes(String(e.path)) || w.dirs?.includes(String(e.path)) || (w.settings !== undefined && e.path === settings) }));
   on("fs.stat", (_$, e) => (files.includes(String(e.path)) ? { value: { kind: "file", size: 1, mtimeMs: 0 } } : w.dirs?.includes(String(e.path)) ? { value: { kind: "dir", size: 0, mtimeMs: 0 } } : { deny: "ENOENT" }));
@@ -94,8 +93,7 @@ function setupWith(mock: MockKit, on: On, w: World = {}) {
   on("process.run", (_$, e) => {
     const argv = [...(e.argv as string[])];
     runs.push(argv);
-    const out = argv[1] === "memory" && argv[2] === "list" ? (w.priority ?? ">> p\n★ aaaaaaaa [decision] always use X\n") : argv[2] === "search" ? (w.search ?? "bbbbbbbb [pattern] about foo_bar\n") : "";
-    return { value: { exitCode: 0, stdout: out, stderr: "" } };
+    return { value: { exitCode: 0, stdout: processOut(argv, w), stderr: "" } };
   });
   on("ui.toast", (_$, e) => {
     toasts.push(String(e.text));
@@ -114,7 +112,7 @@ function setupWith(mock: MockKit, on: On, w: World = {}) {
     calls.push({ ...e, tool });
     if (tool.endsWith("__gm_status") && w.unregistered) return { value: { deny: "Project is not registered" } };
     if (tool.endsWith("__gm_status") && w.emptyStatus) return { value: { result: [], text: "" } };
-    const text = tool.endsWith("__gm_status") ? "Project: p\nGraph: 1 symbols" : tool.endsWith("__gm_map") ? (w.map ?? ">> map\n  top file") : tool.endsWith("__gm_memory_list") ? (w.recent ?? ">> 1\n  [decision] recent one (id: x)") : "  foo [Function] a.ts:1";
+    const text = mcpText(tool, w);
     // The shape of a real MCP tool result (live, Claude Code 2.1.325): text parts under `result` and the joined text.
     return tool.includes("graphmind") ? { value: { result: [{ type: "text", text }], text } } : next(e);
   });
