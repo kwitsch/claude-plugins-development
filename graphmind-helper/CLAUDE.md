@@ -13,8 +13,6 @@
 
 ## Decisions
 
-- Rebuilt from three Node command hooks (0.1.0) to a mod (0.2.0): measured here, a CLI call costs about 9 ms and a Node cold start 28 ms, so the gain is the Node start per hook call (every prompt, every Grep/Glob/Agent/Bash call) and in-memory state instead of state files. The 186 ms code search is the search itself.
-- Approach B (decided headless): MCP tools for status, map, recent memory and code search; `$.process.run` (no shell) only for what the tools cannot do: `memory list --priority` (the MCP list has no priority filter or star, ids are UUIDs) and `memory search --no-recall` (no such tool option; graphmind issue #112).
 - Why the plugin is a mod, why MCP tools plus two CLI calls, and where `binaryDirs` lives: [design/decisions.md](../development/wiki/plugins/graphmind-helper/design/decisions.md).
 
 ## Tests
