@@ -17,8 +17,7 @@
   },
   "ignorePatterns": [
     ".claude/**",
-    "**/plugin/**",
-    "*/claude-tests/**"
+    "**/plugin/**"
   ],
   "rules": {
     "no-case-declarations": "error",
@@ -57,7 +56,8 @@
   "overrides": [
     {
       "files": [
-        "*/tests/**"
+        "*/tests/**",
+        "*/claude-tests/**"
       ],
       "rules": {
         "typescript/no-unsafe-member-access": "off",
