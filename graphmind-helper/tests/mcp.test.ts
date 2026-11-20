@@ -6,8 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, test } from "vitest";
-import { findGraphmind, setupMcpPresent } from "../plugin/bin/common.mjs";
-import { indexable } from "../plugin/bin/mcp.mjs";
+import { findGraphmind, indexable, setupMcpPresent } from "../plugin/bin/mcp.mjs";
 
 const MCP = fileURLToPath(new URL("../plugin/bin/mcp.mjs", import.meta.url));
 let root = "";

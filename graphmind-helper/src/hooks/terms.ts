@@ -1,7 +1,7 @@
 /**
  * Pure helpers of the graphmind-helper module: prompt term extraction, the search nudge rule, tool-name resolution
  * and the output budget. Ports of the logic in the scripts `graphmind setup` installs (`graphmind-prompt.sh`,
- * `graphmind-search.sh`). Nothing here touches `$`; bundled into `plugin/hooks/lib.mjs`.
+ * `graphmind-search.sh`). Nothing here touches `$`; inlined into `plugin/hooks/register.js` by the build.
  *
  * @packageDocumentation
  */

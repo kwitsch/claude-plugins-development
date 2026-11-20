@@ -5,6 +5,8 @@ import { existsSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
 import { delimiter, dirname, join, resolve } from "node:path";
 import { findGraphmind, registered, setupMcpPresent } from "./common.js";
+// Re-exported for the tests: common.ts is inlined, plugin/bin/mcp.mjs is the only built file.
+export { findGraphmind, setupMcpPresent } from "./common.js";
 
 /**
  * The real path of `p`, or `p` resolved when it does not exist.
@@ -65,5 +67,5 @@ function main(): void {
   child.on("error", () => process.exit(1));
 }
 
-// Not run when a test imports `indexable`.
+// Not run when a test imports this module.
 if (process.argv[1]?.endsWith("mcp.mjs")) main();
