@@ -1,11 +1,12 @@
-// Dev-only (never shipped): runs `claude plugin test` on a temporary copy of the built plugin.
+// Dev-only (never shipped): runs `claude plugin test` on a temporary copy of the built plugin in the current folder
+// (a plugin's `test:plugin` script: `node ../development/scripts/plugin-test.ts`).
 // `claude plugin test` does not follow symlinks, so the tests in claude-tests/ are copied next to the plugin files.
 import { spawnSync } from "node:child_process";
 import { cpSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-const root = join(import.meta.dirname, "..");
+const root = process.cwd();
 const tmp = mkdtempSync(join(tmpdir(), "plugin-test-"));
 try {
   cpSync(join(root, "plugin"), tmp, { recursive: true });

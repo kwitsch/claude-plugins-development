@@ -2,14 +2,11 @@
 // this file next to a temp copy of the built plugin/. Imports the engine's own kit, not vitest; why this is not part of
 // `pnpm test`: development/wiki/decisions/test-layers.md. Together the tests fire all 5 events the built register.js registers.
 import { expect, mock, test } from "claude-code/testing";
+import { BIN, envValue, mcpText, OWN, processOut } from "./world.js";
 
 /** The test's `on`, taken from the kit's own types. */
 type On = Parameters<typeof mock.clock>[0];
 
-/** The graphmind binary of the fake world (`~/.local/bin` of `/home/u`). */
-const BIN = "/home/u/.local/bin/graphmind";
-/** The plugin's own server's tools. */
-const OWN = ["status", "map", "memory_list", "search"].map((t) => ({ name: `mcp__plugin_graphmind-helper_graphmind__gm_${t}`, description: "", mcp: true }));
 /** A prompt with code terms: gets the briefing and the recall. */
 const CODE_PROMPT = "where is foo_bar defined in the code";
 
@@ -25,7 +22,7 @@ function world(on: On, opts: { noBinary?: boolean } = {}) {
   const toasts: string[] = [];
   const clock = mock.clock(on);
   const files = opts.noBinary ? [] : [BIN];
-  on("env.get", (_$, e) => ({ value: e.name === "HOME" ? "/home/u" : e.name === "PATH" ? "/usr/bin" : undefined }));
+  on("env.get", (_$, e) => ({ value: envValue(String(e.name)) }));
   on("session.cwd", () => ({ value: "/proj" }));
   on("fs.exists", (_$, e) => ({ value: files.includes(String(e.path)) }));
   on("fs.stat", (_$, e) => (files.includes(String(e.path)) ? { value: { kind: "file", size: 1, mtimeMs: 0 } } : { deny: "ENOENT" }));
@@ -33,8 +30,7 @@ function world(on: On, opts: { noBinary?: boolean } = {}) {
   on("tool.list", () => ({ value: OWN }));
   on("process.run", (_$, e) => {
     const argv = [...(e.argv as string[])];
-    const out = argv[1] === "memory" && argv[2] === "list" ? ">> p\n★ aaaaaaaa [decision] always use X\n" : argv[2] === "search" ? "bbbbbbbb [pattern] about foo_bar\n" : "";
-    return { value: { exitCode: 0, stdout: out, stderr: "" } };
+    return { value: { exitCode: 0, stdout: processOut(argv), stderr: "" } };
   });
   on("ui.toast", (_$, e) => {
     toasts.push(String(e.text));
@@ -51,7 +47,7 @@ function world(on: On, opts: { noBinary?: boolean } = {}) {
   on("tool.call", (_$, e) => {
     const tool = String(e.tool);
     if (!tool.startsWith("mcp__")) return { result: "tool output" };
-    const text = tool.endsWith("__gm_status") ? "Project: p\nGraph: 1 symbols" : tool.endsWith("__gm_map") ? ">> map\n  top file" : tool.endsWith("__gm_memory_list") ? ">> 1\n  [decision] recent one (id: x)" : "  foo [Function] a.ts:1";
+    const text = mcpText(tool);
     // The shape of a real MCP tool result: text parts under `result` and the joined text.
     return { result: [{ type: "text", text }], text };
   });

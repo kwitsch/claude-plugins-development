@@ -1,4 +1,4 @@
-// Runs under `claude plugin test` via scripts/plugin-test.ts (`pnpm --filter __NAME__ test:plugin`), which copies this
+// Runs under `claude plugin test` via development/scripts/plugin-test.ts (`pnpm --filter __NAME__ test:plugin`), which copies this
 // file next to a temp copy of the built plugin/. Imports the engine's own kit, not vitest; why this is not part of
 // `pnpm test`: development/wiki/decisions/test-layers.md. Add one test per event the built register.js registers.
 import { expect, test } from "claude-code/testing";

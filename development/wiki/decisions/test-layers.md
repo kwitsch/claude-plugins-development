@@ -6,7 +6,7 @@ How plugin tests split into a vitest unit layer on the TypeScript sources and a 
 
 1. Unit tests stay vitest (`test` from `vitest`, asserts from `node:assert/strict`, `claude-engine-vitest` for mods) and import `src/**/*.ts`; the kit loads `src/hooks/register.ts`. A name from an inlined module is imported from its own src file; an entry never re-exports for tests.
 2. Process-level tests (MCP servers, command hooks) spawn the built `plugin/**/*.mjs`, because they run as processes.
-3. A mod also has integration tests in `<plugin>/claude-tests/*.test.ts` on the official kit `claude-code/testing`, run by `<plugin>/scripts/plugin-test.ts` (`pnpm --filter <plugin> test:plugin`): it copies `plugin/` to a temp dir and the tests into `<tmp>/test/`, then runs `claude plugin test <tmp>`. They cover what only the built output shows: the bundle loads, every registered event fires, Claude Code's static check runs.
+3. A mod also has integration tests in `<plugin>/claude-tests/*.test.ts` on the official kit `claude-code/testing`, run by `development/scripts/plugin-test.ts` (`pnpm --filter <plugin> test:plugin`): it copies `plugin/` to a temp dir and the tests into `<tmp>/test/`, then runs `claude plugin test <tmp>`. They cover what only the built output shows: the bundle loads, every registered event fires, Claude Code's static check runs.
 4. Other plugins move to this at their next test change (like the `.ts` conversion); no rewrite up front.
 
 - Reason: unit tests on the sources are fast and precise, show a failure without a rebuild and need no re-export just for tests (graphmind-helper's `src/bin/mcp.ts` re-exported two names of the inlined `common.ts` until 0.2.4). Only Claude Code sees the bundle, `hooks.json` and the static check, so that layer runs in the engine's own kit.
@@ -19,7 +19,7 @@ How plugin tests split into a vitest unit layer on the TypeScript sources and a 
 - `claude-tests/` are type-checked: `development/vitest/claude-engine/claude-code-testing.d.ts` declares the module `claude-code/testing` from `claude-engine-vitest`'s own types (`test`, `mock`, `expect`); `.oxlintrc.json` relaxes `*/claude-tests/**` like `*/tests/**`.
 - `claude-engine-vitest` needed no change: `createKit({ module })` loads any URL vitest can import, `.ts` included (its own suite loads `tests/mods/probe.ts`).
 - The kit has no static check (no such code in `development/vitest/claude-engine/`), so it never refuses unbundled `src/`; Claude Code applies the check to `plugin/` only (`claude plugin validate`, `claude plugin test`).
-- `scripts/plugin-test.ts` stays per plugin; hoist it into `development/scripts/` when a second plugin adopts integration tests. The `scaffold-plugin` skill copies it from a template.
+- The runner is one file, `development/scripts/plugin-test.ts`, run from the plugin folder by its `test:plugin` script (hoisted on review of PR #133; first written per plugin).
 
 ## Facts that shaped it
 
