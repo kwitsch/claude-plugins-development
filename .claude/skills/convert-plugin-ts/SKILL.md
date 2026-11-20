@@ -28,7 +28,7 @@ Why `.ts`: graphmind indexes `.ts` symbols but not `.mts`. Why the kit: a test o
 
 ## 3. Bundle the hooks if the plugin has a function-hooks module
 
-Use the skill `split-hooks-lib` (it expects `.ts`). Helpers that tests imported from `plugin/hooks/<helper>.mjs` disappear into `lib.mjs`: step 4 is then required, not optional.
+Follow `.claude/rules/hooks-lib-bundle.md` (old build; the sources must already be `.ts`). Helpers that tests imported from `plugin/hooks/<helper>.mjs` disappear into `lib.mjs`: step 4 is then required, not optional.
 
 ## 4. Move the tests to the standard
 
