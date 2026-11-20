@@ -2,13 +2,13 @@
 paths:
   - "*/tsdown.config.ts"
   - "development/tsdown/**"
-  - "*/src/**"
-  - "*/plugin/**"
+  - "graphmind-helper/src/**"
+  - "graphmind-helper/plugin/**"
 ---
 
 # Rule: the tsdown plugin build (the standard)
 
-A plugin with a `tsdown.config.ts` is built by `tsdown` through `pluginConfig` (`development/tsdown/index.ts`); a plugin without one is on the old build (`development/scripts/build-plugin.ts`, rules [plugin-src.md](plugin-src.md) and [hooks-lib-bundle.md](hooks-lib-bundle.md)) until it is migrated. Reasons, the minify matrix and what was rejected: [tsdown-plugin-build](../../development/wiki/decisions/tsdown-plugin-build.md).
+A plugin with a `tsdown.config.ts` is built by `tsdown` through `pluginConfig` (`development/tsdown/index.ts`); a plugin without one is on the old build (`development/scripts/build-plugin.ts`, rules [plugin-src.md](plugin-src.md) and [hooks-lib-bundle.md](hooks-lib-bundle.md)) until it is migrated; add a plugin's `<name>/src/**` and `<name>/plugin/**` to this rule's `paths:` in the PR that migrates it (graphmind-helper is the only one so far). Reasons, the minify matrix and what was rejected: [tsdown-plugin-build](../../development/wiki/decisions/tsdown-plugin-build.md).
 
 - `tsdown.config.ts` is `export default pluginConfig({ mods: [...], scripts: [...] })`; an entry is a path below `src/` without extension (`"hooks/register"`, `"bin/mcp"`). Only a listed entry produces a file; every other `src/` module is inlined into the entries that import it. The `build` script is `tsdown`.
 - `mods` (function-hooks modules): `src/hooks/register.ts` builds to `plugin/hooks/register.js`, compressed but never mangled (`minify: { mangle: false, compress: true }`), no shebang; `hooks.json` lists `./register.js`.
