@@ -1,5 +1,5 @@
 // Acceptance criteria A1 to A5 of the effort calibration, against 120 recorded Jev answers (60 prompts, German and
-// English; labels 0 low .. 4 max; d1-3b, 2026-11-13), through the built plugin/hooks/register.mjs: each record's score
+// English; labels 0 low .. 4 max; d1-3b, 2026-11-13), through src/hooks/register.ts: each record's score
 // and mechanical answer are Jev's answers to step 0's `effort` and `mechanical` questions, and the level and source step 0 logs are checked.
 import type { On } from "claude-engine-vitest";
 import assert from "node:assert/strict";

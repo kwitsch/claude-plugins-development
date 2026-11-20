@@ -1,10 +1,10 @@
-// Phase 3 (subagent types, compaction) through the built plugin/hooks/register.mjs: upstream jev-pilot
-// tests/phase3.test.ts, as kit tests only (the standard of jev-api: no import of the sources).
+// Phase 3 (subagent types, compaction) through src/hooks/register.ts: upstream jev-pilot
+// tests/phase3.test.ts, as kit tests on the source.
 import { createKit } from "claude-engine-vitest";
 import type { On } from "claude-engine-vitest";
 import { expect } from "vitest";
-// jev-api's request tool, the name jevfort asks Jev through (the entry takes it, so lib.mjs exports it).
-import { JEV_REQUEST } from "../plugin/hooks/lib.mjs";
+// jev-api's request tool, the name jevfort asks Jev through (defined in src/hooks/jev.ts).
+import { JEV_REQUEST } from "../src/hooks/jev.ts";
 import { JEV_TOOLS } from "./support/kit.ts";
 
 // The manifest defaults (jevfort/package.json claudePlugin.userConfig): the kit does not fill userConfig defaults.
@@ -19,7 +19,7 @@ const DEFAULTS = {
   takeOnlyForBypass: true,
 };
 
-const { test, mock } = createKit({ module: new URL("../plugin/hooks/register.mjs", import.meta.url), plugin: "jevfort", options: DEFAULTS });
+const { test, mock } = createKit({ module: new URL("../src/hooks/register.ts", import.meta.url), plugin: "jevfort", options: DEFAULTS });
 
 const CWD = "/proj";
 

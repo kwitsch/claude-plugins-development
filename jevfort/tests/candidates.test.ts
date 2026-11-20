@@ -1,4 +1,4 @@
-// What jevfort offers Jev and what it carries (the request, the recent steps), through the built plugin/hooks/register.mjs:
+// What jevfort offers Jev and what it carries (the request, the recent steps), through src/hooks/register.ts:
 // the next-action question's criteria are the offered candidates, the state of any question is the request and recent steps.
 import type { On } from "claude-engine-vitest";
 import { expect } from "vitest";
@@ -499,7 +499,7 @@ kitTest("a never-settling fs.stat does not hold the step: it goes to Claude afte
 });
 
 kitTest("mentionedPaths scans a 400 KB text full of quotes and paths in bounded time", async () => {
-  const { mentionedPaths } = await import("../plugin/hooks/lib.mjs");
+  const { mentionedPaths } = await import("../src/hooks/candidates.ts");
   const t0 = Date.now();
   expect(mentionedPaths(["\"abc\" a/b.ts ".repeat(30000)])).toEqual(["a/b.ts"]);
   expect(Date.now() - t0).toBeLessThan(500);

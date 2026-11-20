@@ -73,3 +73,4 @@ after the pause is the probe, any success resets it. The pause ends when the clo
 ## Layout
 
 - Tests share the kit `tests/support/kit.ts` (standard: root `.claude/rules/hook-tests.md`).
+- Built with tsdown (`tsdown.config.ts`, one mod entry `hooks/register`); `claude-tests/world.ts` holds the fake Jev answers shared by the unit kit and the integration tests.
