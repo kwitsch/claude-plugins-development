@@ -15,4 +15,5 @@ Preferred for every function-hooks plugin of this repository, to keep the shippe
 - Tests: `.claude/rules/hook-tests.md`; after the split a real session must be checked too (`claude -p --plugin-dir <plugin>/plugin`), since only the real engine loads the bundle.
 - A new function-hooks plugin starts with this layout; a plugin whose hooks module is one small file may stay a single `register.ts`.
 - A helper's import binding or top-level name (`setTimeout`, an object-destructure with default) must not shadow a global another helper uses.
+- Helpers may import `@shared/<name>.js` (hoisted into `lib.mjs` as `../shared/<name>.mjs`); the entry and `hooks/` subfolder modules may not (the build refuses). A name the entry needs from a shared module comes through a helper declaration (helpers export declarations only). A shared module a helper imports loads in the engine: it follows `claude-code-hook-facts.md`.
 - Changing the bundler itself: the import shapes it must be checked against are in `development/CLAUDE.md`.

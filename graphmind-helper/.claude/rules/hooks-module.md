@@ -1,11 +1,12 @@
 ---
 paths:
   - "src/hooks/**"
-  - "tests/register.test.mts"
-  - "tests/terms.test.mts"
+  - "tests/register.test.ts"
+  - "tests/terms.test.ts"
+  - "tests/support/**"
 ---
 
-# Rule: the hooks module (`src/hooks/register.mts`, `terms.mts`)
+# Rule: the hooks module (`src/hooks/register.ts`, `terms.ts`)
 
 - Tool names differ per server: the plugin's own is `mcp__plugin_graphmind-helper_graphmind__gm_*`, a `graphmind setup` server `mcp__graphmind__gm_*`. `resolveTools` matches the `__gm_*` suffix on a server whose name holds `graphmind`, the plugin's own first, so both work.
 - Readiness = `gm_status` with `project: <session cwd>` answers (it errors "not registered" otherwise); positive answers are cached for the conversation, negative ones 30 s (the wrapper may register the project a moment later). Tool listing cached 30 s once found (no engine event reports a changed list).
@@ -23,4 +24,4 @@ paths:
 ## Live harness
 
 - Keep setup's hooks out with a temp `HOME`, a `CLAUDE_CONFIG_DIR` without them and `--setting-sources project` (see Dedupe above). Copying the credentials into a scratch config dir was refused by the auto-mode classifier, so a live re-run needs the user.
-- The last live run predates the parallel-recall refactor and the `CLAUDE_CONFIG_DIR` dedupe fix; since then only the kit tests ran. Not exercised live yet: a `graphmind setup` server (`mcp__graphmind__*`, kit test only), the setup-hooks dedupe, an unregistered project and init, the 10th-prompt checkpoint.
+- The last live run predates the parallel-recall refactor, the `CLAUDE_CONFIG_DIR` dedupe fix and the `lib.mjs` bundle; the 0.2.2 run was not done (needs the user's credentials). Not exercised live yet: a `graphmind setup` server (`mcp__graphmind__*`, kit test only), the setup-hooks dedupe, an unregistered project and init, the 10th-prompt checkpoint, the `lib.mjs` load with `../shared/graphmind-paths.mjs`.

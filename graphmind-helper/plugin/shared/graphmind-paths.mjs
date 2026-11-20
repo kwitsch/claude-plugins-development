@@ -1,0 +1,1 @@
+export function binaryDirs(e,t,n=`:`){let r=(e??``).split(n).filter(e=>e.startsWith(`/`));return t&&r.push(`${t}/.graphmind/bin`,`${t}/.local/bin`),r.push(`/usr/local/bin`),r.map(e=>e.replace(/(.)\/+$/,`$1`))}

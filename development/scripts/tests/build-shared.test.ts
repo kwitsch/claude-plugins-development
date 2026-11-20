@@ -3,6 +3,7 @@ import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 import { afterAll, test } from "vitest";
 
 const BUILD = path.resolve(import.meta.dirname, "..", "build-plugin.ts");
@@ -68,7 +69,8 @@ test("a missing shared module, a bad name, a re-export, a source clash and a lib
     ["badname", { "src/x.ts": "import { n } from \"@shared/../a.js\";\nconsole.log(n);\n" }, /not a shared module name/],
     ["reexport", { "src/x.ts": "export { a } from \"@shared/a.js\";\n" }, /static `import` only/],
     ["clash", { "src/shared/a.ts": "export const z = 1;\n", "src/x.ts": "import { a } from \"@shared/a.js\";\nconsole.log(a);\n" }, /would overwrite/],
-    ["bundle", { "src/hooks/register.ts": "import { a } from \"@shared/a.js\";\nexport const r = a;\n", "plugin/hooks/hooks.json": "{\"modules\":[\"./register.mjs\"]}" }, /cannot import @shared modules from hooks/, { pluginBuild: { bundleHooksLib: true } }],
+    ["bundle", { "src/hooks/register.ts": "import { a } from \"@shared/a.js\";\nexport const r = a;\n", "plugin/hooks/hooks.json": "{\"modules\":[\"./register.mjs\"]}" }, /only from helpers bundled into lib\.mjs/, { pluginBuild: { bundleHooksLib: true } }],
+    ["bundle-subfolder", { "src/hooks/register.ts": "export const r = 1;\n", "src/hooks/sub/x.ts": "import { a } from \"@shared/a.js\";\nexport const x = a;\n", "plugin/hooks/hooks.json": "{\"modules\":[\"./register.mjs\"]}" }, /only from helpers bundled into lib\.mjs/, { pluginBuild: { bundleHooksLib: true } }],
   ];
   for (const [name, files, message, pkg] of cases) {
     const plugin = tree(`p3-${name}`, { "package.json": PKG, "plugin/old.mjs": "export {};\n", ...files });
@@ -90,4 +92,25 @@ test("a bundleHooksLib plugin may import shared code outside hooks/ (its MCP ser
   const r = build(plugin, shared, { pluginBuild: { bundleHooksLib: true } });
   assert.equal(r.status, 0, r.stderr);
   assert.ok(existsSync(path.join(plugin, "plugin/shared/a.mjs")));
+});
+
+test("a bundleHooksLib helper may import shared code; lib.mjs imports it relative and the entry loads", () => {
+  const shared = tree("s5", { "a.ts": "export const a = 1;\n" });
+  const plugin = tree("p5", {
+    "package.json": PKG,
+    "src/hooks/register.ts": "import { b } from \"./help.js\";\nimport { c } from \"./help2.js\";\nexport const r = b() + c();\n",
+    "src/hooks/help.ts": "import { a } from \"@shared/a.js\";\nexport const b = (): number => a + 1;\n",
+    "src/hooks/help2.ts": "import { a } from \"@shared/a.js\";\nexport const c = (): number => a + 2;\n",
+    "plugin/hooks/hooks.json": "{\"modules\":[\"./register.mjs\"]}",
+  });
+  const r = build(plugin, shared, { pluginBuild: { bundleHooksLib: true } });
+  assert.equal(r.status, 0, r.stderr);
+  const lib = readFileSync(path.join(plugin, "plugin/hooks/lib.mjs"), "utf8");
+  // two helpers importing the same shared name share one hoisted import
+  assert.equal(lib.match(/"\.\.\/shared\/a\.mjs"/g)?.length, 1);
+  assert.ok(!existsSync(path.join(plugin, "plugin/hooks/help.mjs")), "a bundled helper does not ship on its own");
+  assert.ok(existsSync(path.join(plugin, "plugin/shared/a.mjs")));
+  // the shipped shape loads: register.mjs -> ./lib.mjs -> ../shared/a.mjs
+  const run = spawnSync(process.execPath, ["--input-type=module", "-e", "const m = await import(process.argv[1]); console.log(m.r);", pathToFileURL(path.join(plugin, "plugin/hooks/register.mjs")).href], { encoding: "utf8" });
+  assert.equal(run.stdout.trim(), "5", run.stderr);
 });

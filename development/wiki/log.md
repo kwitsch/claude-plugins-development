@@ -167,3 +167,11 @@ Source: migration task (decisions listed in the PR body), the plugin `CLAUDE.md`
 ## [2026-11-20] ingest | inline-headroom removed
 
 Source: user request. The plugin directory and its wiki section are gone; its Claude Code verification note moved to `facts/mods-engine-verification.md` (jevfort's rules cite it), the linux-token-efficiency concepts note was dropped. References in `convert-plugin-ts`, `repo-tooling.md`, `mods-engine-tools.md`, `plugins/index.md` and `pnpm-lock.yaml` updated.
+
+## [2026-11-20] ingest | graphmind-helper 0.2.2: .ts, lib bundle with @shared, tests through the entry
+
+- **Conversion:** graphmind-helper's sources and tests are `.ts`; the first build after the rename was byte-identical.
+- **Bundle:** `terms.ts` ships inside a compressed `plugin/hooks/lib.mjs`; hooks output before 13828 B (register.mjs 8578 + terms.mjs 5250) -> after 13055 B (register.mjs 8549 + lib.mjs 4506), plus `plugin/shared/graphmind-paths.mjs` 210 B.
+- **Build guard relaxed:** in a `bundleHooksLib` plugin a helper bundled into `lib.mjs` may import `@shared/<name>.js`; the entry and `hooks/` subfolder modules stay refused (`decisions/shared-source-layer.md`). `binaryDirs` moved to `development/shared/src/graphmind-paths.ts`, the first shared module a function-hooks plugin imports.
+- **Tests:** through `plugin/hooks/register.mjs` via `tests/support/kit.ts`; graphmind-helper 57 -> 86 tests; wall-clock assertions and the custom-budget `fit` edge dropped (`plugins/graphmind-helper/design/decisions.md`).
+- **Live:** not run in this change (needs the user's credentials; the command is in the PR body). The docs say "not checked live".

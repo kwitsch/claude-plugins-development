@@ -1,4 +1,4 @@
-import { binaryDirs, entryId, fit, isCodePrompt, isRecallable, listing, NUDGE, resolveTools, searchTerms, SETUP_SCRIPTS, shouldNudge } from "./terms.mjs";
+import { NUDGE, SETUP_SCRIPTS, binaryPaths, entryId, fit, isCodePrompt, isRecallable, listing, resolveTools, searchTerms, shouldNudge } from "./lib.mjs";
 const TOAST_MS = 15e3;
 const TOOLS_TTL_MS = 3e4;
 const NEGATIVE_TTL_MS = 3e4;
@@ -36,7 +36,7 @@ async function graphmindBin($, now) {
 	if (state.bin) return state.bin;
 	if (state.binMissAt !== undefined && now - state.binMissAt < NEGATIVE_TTL_MS) return undefined;
 	const [home, pathVar] = await Promise.all([$.env.get("HOME"), $.env.get("PATH")]);
-	const candidates = binaryDirs(pathVar, home).map((d) => `${d}/graphmind`);
+	const candidates = binaryPaths(pathVar, home);
 	const found = await Promise.all(candidates.map((p) => $.fs.stat(p).then((s) => s.kind !== "dir", () => false)));
 	state.bin = candidates.find((_, i) => found[i]);
 	state.binMissAt = state.bin ? undefined : now;
