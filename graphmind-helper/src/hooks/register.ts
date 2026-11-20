@@ -5,15 +5,15 @@
  *
  * @remarks
  * EARLY ACCESS API. No engine type import: the used `$` members and events are typed structurally below. Every `$`
- * use lives here (the engine rejects `$` in helper files); the pure logic is in `terms.mts`. Two things the MCP tools
+ * use lives here (the engine rejects `$` in helper files); the pure logic is in `terms.ts`. Two things the MCP tools
  * cannot do stay on the CLI through `$.process.run` (no shell, no Node start): the priority memory list and
  * `memory search --no-recall` (recall counting would promote automatically searched entries to priority, graphmind
  * issue #112). The server starts concurrently with `session.start`, so the briefing waits for the first prompt.
  *
  * @packageDocumentation
  */
-import { binaryDirs, entryId, fit, isCodePrompt, isRecallable, listing, NUDGE, resolveTools, searchTerms, SETUP_SCRIPTS, shouldNudge } from "./terms.mjs";
-import type { Block, GmTools, SearchCall } from "./terms.mjs";
+import { binaryDirs, entryId, fit, isCodePrompt, isRecallable, listing, NUDGE, resolveTools, searchTerms, SETUP_SCRIPTS, shouldNudge } from "./terms.js";
+import type { Block, GmTools, SearchCall } from "./terms.js";
 
 /** One entry of `$.tool.list()`. */
 type ToolInfo = {

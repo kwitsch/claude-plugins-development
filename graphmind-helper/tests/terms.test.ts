@@ -91,7 +91,7 @@ test("fit never splits an astral character at the cut", () => {
   for (const max of [8999, 9000]) {
     const out = fit("", [{ title: "★ Priority context (always active):", lines }], max);
     assert.match(out.text, /cut to fit the hook output limit/);
-    assert.ok(out.text.isWellFormed());
+    assert.ok(!/\p{Cs}/u.test(out.text));
   }
 });
 
