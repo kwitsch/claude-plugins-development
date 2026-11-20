@@ -5,7 +5,7 @@
  *
  * @remarks
  * EARLY ACCESS API. No engine type import: the used `$` members and events are typed structurally below. Every `$`
- * use lives here (the engine rejects `$` in helper files); the pure logic is in `terms.ts`, bundled into `plugin/hooks/lib.mjs`. Two things the MCP tools
+ * use lives here (the engine rejects `$` in helper files); the pure logic is in `terms.ts`, inlined into `plugin/hooks/register.js` by the build. Two things the MCP tools
  * cannot do stay on the CLI through `$.process.run` (no shell, no Node start): the priority memory list and
  * `memory search --no-recall` (recall counting would promote automatically searched entries to priority, graphmind
  * issue #112). The server starts concurrently with `session.start`, so the briefing waits for the first prompt.

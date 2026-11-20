@@ -1,4 +1,4 @@
-// The fake environment of graphmind-helper's tests, bound to the built plugin/hooks/register.mjs on claude-engine-vitest:
+// The fake environment of graphmind-helper's tests, bound to the built plugin/hooks/register.js on claude-engine-vitest:
 // stubs answer the engine calls (tool list and calls, process.run, fs, env, cwd, toast); prompt.submit and tool.call end
 // in recording stubs, so the tests read the context the mod added. Imports no source of the plugin (.claude/rules/hook-tests.md).
 import { createKit } from "claude-engine-vitest";
@@ -22,13 +22,13 @@ export const OWN = ["status", "map", "memory_list", "search"].map((t) => ({ name
 export const SETUP = ["status", "map", "memory_list", "search"].map((t) => ({ name: `mcp__graphmind__gm_${t}`, description: "", mcp: true }));
 
 /**
- * A kit bound to the built register.mjs with the given userConfig options.
+ * A kit bound to the built register.js with the given userConfig options.
  *
  * @param options - The manifest defaults of the test.
  * @returns The kit's `test` and `mock`, and `setup` bound to that mock.
  */
 export function makeKit(options: Record<string, unknown> = DEFAULTS) {
-  const kit = createKit({ module: new URL("../../plugin/hooks/register.mjs", import.meta.url), plugin: "graphmind-helper", options });
+  const kit = createKit({ module: new URL("../../plugin/hooks/register.js", import.meta.url), plugin: "graphmind-helper", options });
   return { ...kit, setup: (on: On, w?: World) => setupWith(kit.mock, on, w) };
 }
 
