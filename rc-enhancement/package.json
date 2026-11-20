@@ -1,6 +1,6 @@
 {
   "name": "rc-enhancement",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "private": true,
   "description": "Makes Claude ask you through the AskUserQuestion tool instead of plain-text questions, and answer in clear lists instead of self-answered questions.",
   "keywords": [
@@ -13,11 +13,8 @@
   },
   "type": "module",
   "scripts": {
-    "build": "node ../development/scripts/build-plugin.ts",
+    "build": "tsdown",
     "test": "vitest run --config \"$(git rev-parse --show-toplevel)/vitest.config.mts\""
   },
-  "claudePlugin": {},
-  "pluginBuild": {
-    "compressHookScripts": true
-  }
+  "claudePlugin": {}
 }
