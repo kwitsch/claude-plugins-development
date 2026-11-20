@@ -12,6 +12,7 @@ try {
   mkdirSync(join(tmp, "test"));
   cpSync(join(root, "claude-tests"), join(tmp, "test"), { recursive: true });
   const r = spawnSync("claude", ["plugin", "test", tmp], { stdio: ["ignore", "inherit", "inherit"] });
+  if (r.error) process.stderr.write(`plugin-test: cannot run claude: ${r.error.message}\n`);
   process.exitCode = r.status ?? 1;
 } finally {
   rmSync(tmp, { recursive: true, force: true });
