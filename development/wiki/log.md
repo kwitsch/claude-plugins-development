@@ -184,3 +184,12 @@ Source: user decision 2026-11-20 (the five requirements are in `decisions/tsdown
 - **Reference:** graphmind-helper 0.2.3 ships `plugin/hooks/register.js` (11201 B, compressed, unmangled) and `plugin/bin/mcp.mjs` (2201 B), without `lib.mjs` and `plugin/shared/`; tests 86 -> 86.
 - **Docs and skills:** the old-build rules carry a scope line; skill `split-hooks-lib` deleted, `scaffold-plugin` generates the tsdown layout.
 - **Live:** the `.js` module and the MCP wrapper loaded (live 2.1.329); the module's own output was not observable because the setup-hooks dedupe applies on this machine. Details in `plugins/graphmind-helper/evaluations/EVALUATION-2026-11-20-tsdown.md`; the load of a `.js` hooks module is filed in `facts/mods-engine-verification.md`.
+
+## [2026-11-20] ingest | test layers: unit tests on src, integration tests on the built plugin
+
+Source: user decision 2026-11-20 (task spec), PR stacked on `feature/tsdown-plugin-build`.
+
+- **Decision page:** `decisions/test-layers.md` (two layers, `@shared` vitest alias, typed `claude-tests/`, local-only `test:plugin`, rejected options A-D, CI follow-up); indexed under Decisions.
+- **Facts:** `facts/test-kit-vs-engine.md`, Official kit section: exports of `claude-code/testing`, runs without credentials, skips symlinks, the stubs and events graphmind-helper's `claude-tests/` use, `scripts/plugin-test.ts` as the run and compare recipe.
+- **Rules and docs:** `hook-tests.md` (two layers replace "test only through the entry"), `tsdown-build.md`, `plugin-src.md`, `lint-config.md`, `ci.md`, `hook-caches-and-tests.md` (paths); root and `development/` `CLAUDE.md`, the kit README, skills `convert-plugin-ts` and `scaffold-plugin`.
+- **Reference:** graphmind-helper 0.2.4: unit tests on `src/` 86 -> 87, `claude-tests/` 1 -> 6, no test-only re-export in `src/bin/mcp.ts`.

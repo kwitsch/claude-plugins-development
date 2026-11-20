@@ -2,7 +2,7 @@
 
 Where the workspace test kit `claude-engine-vitest` and the official kit behave differently from a real Claude Code session, so a green test is read correctly.
 
-What the kit offers and how it deviates from the official kit: [README.md](../../vitest/claude-engine/README.md) of the package. How plugin tests are built: [hook-tests.md](../../../.claude/rules/hook-tests.md).
+What the kit offers and how it deviates from the official kit: [README.md](../../vitest/claude-engine/README.md) of the package. How plugin tests are built: [hook-tests.md](../../../.claude/rules/hook-tests.md); why unit tests run on `src/` and integration tests on the built plugin: [test-layers.md](../decisions/test-layers.md).
 
 ## Dispatch
 
