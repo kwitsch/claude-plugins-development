@@ -1,4 +1,5 @@
-// The built MCP wrapper, run as a process with a fake `graphmind` on PATH and a temp HOME.
+// The MCP wrapper. Pure functions come from src/ (common.ts is inlined into the build, so no built module exports them);
+// the process runs from the built plugin/bin/mcp.mjs with a fake `graphmind` on PATH and a temp HOME.
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
@@ -6,7 +7,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, test } from "vitest";
-import { findGraphmind, indexable, setupMcpPresent } from "../plugin/bin/mcp.mjs";
+import { findGraphmind, setupMcpPresent } from "../src/bin/common.ts";
+import { indexable } from "../src/bin/mcp.ts";
 
 const MCP = fileURLToPath(new URL("../plugin/bin/mcp.mjs", import.meta.url));
 let root = "";
@@ -190,8 +192,11 @@ test("with the binary off PATH (in ~/.local/bin) init writes a project server wh
   assert.ok(existsSync(cmd), cmd);
 });
 
-test("without the binary the wrapper exits 1; home and non-git folders are not indexable", () => {
+test("without the binary the wrapper exits 1", () => {
   assert.equal(runWrapper(true).r.status, 1);
+});
+
+test("home and non-git folders are not indexable", () => {
   assert.equal(indexable(root), undefined);
   assert.equal(indexable(proj), proj);
 });
