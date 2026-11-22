@@ -61,8 +61,8 @@ importers:
   graphmind-helper:
     devDependencies:
       '@kwitsch/tsdown-preset-claude-code':
-        specifier: 0.1.0
-        version: 0.1.0(rolldown@1.3.3)(tsdown@0.23.7)
+        specifier: 0.1.2
+        version: 0.1.2(rolldown@1.3.3)(tsdown@0.23.7)
       claude-engine-vitest:
         specifier: workspace:*
         version: link:../development/vitest/claude-engine
@@ -137,18 +137,18 @@ packages:
   '@jridgewell/trace-mapping@0.3.31':
     resolution: {integrity: sha512-zzNR+SdQSDJzc8joaeP8QQoCQr8NuYx2dIIytl1QeBEZHJ9uW6hebsrYgbz8hJwUQao3TWCMtmfV8Nu1twOLAw==}
 
-  '@kwitsch/claude-code-plugin-core@0.1.0':
-    resolution: {integrity: sha512-e3xJ7QdtIhKzSk/BtKlhQdmqRrgYsoPONr/sZzBf1QElHYn8LZbpbdXT1xokLLBiP+Z6YsX3MrNAQwE59BRcZg==, tarball: https://npm.pkg.github.com/download/@kwitsch/claude-code-plugin-core/0.1.0/0abbc220f52638e49f2bcee6361643abc064fb3f}
+  '@kwitsch/claude-code-plugin-core@0.1.2':
+    resolution: {integrity: sha512-8NWwtGF6/pP7SvQ4qwm9CnBDTJGyi7l3JLpnv6Edzs4vKAxi1WfMdQSwpp4q+lmtM8kiE5Juxxq8WFy4vGdEow==}
     engines: {node: '>=26'}
 
-  '@kwitsch/rolldown-plugin-claude-code@0.1.0':
-    resolution: {integrity: sha512-2AZcrUFFTxMhLSLdXTpqxKXd8lfyqcEWxUgoXUTl1MLeuf/NBJV/gqKcHhB2GQRIB0LvTQfXi8pRTy1/GOOF1w==, tarball: https://npm.pkg.github.com/download/@kwitsch/rolldown-plugin-claude-code/0.1.0/a544a0ca2dcabaaa21082d705f14380442906a6a}
+  '@kwitsch/rolldown-plugin-claude-code@0.1.2':
+    resolution: {integrity: sha512-Me6AludOh9dEc9YY8A+xtor/1/6db5vyj7LmCtJtHzCSSgh4gPp5Ax0rkE6wRnbg5fiiqz21TUG1lSHx/4qp8A==}
     engines: {node: '>=26'}
     peerDependencies:
       rolldown: ^1.3.0
 
-  '@kwitsch/tsdown-preset-claude-code@0.1.0':
-    resolution: {integrity: sha512-Op/4x0PgkW28I+bAosNcndyo3A6S9hgLsvRlPetcacVRDJJa5nFS9Yxh05R0gL8otWoL8TQrt76ZJ1WjpiLOHA==, tarball: https://npm.pkg.github.com/download/@kwitsch/tsdown-preset-claude-code/0.1.0/3c79f4350185d99d1df142f1b4b7a274995f7796}
+  '@kwitsch/tsdown-preset-claude-code@0.1.2':
+    resolution: {integrity: sha512-cege+jdlkzmU9iAFYEvg+smN68IGnIJ6AhVWYLyxHd3LR39oCdAkNFZL/KFKulXTkx8GEt/aryRaol1+2Ga0ZQ==}
     engines: {node: '>=26'}
     peerDependencies:
       tsdown: ~0.23.7
@@ -1077,17 +1077,17 @@ snapshots:
       '@jridgewell/resolve-uri': 3.1.2
       '@jridgewell/sourcemap-codec': 1.6.0
 
-  '@kwitsch/claude-code-plugin-core@0.1.0': {}
+  '@kwitsch/claude-code-plugin-core@0.1.2': {}
 
-  '@kwitsch/rolldown-plugin-claude-code@0.1.0(rolldown@1.3.3)':
+  '@kwitsch/rolldown-plugin-claude-code@0.1.2(rolldown@1.3.3)':
     dependencies:
-      '@kwitsch/claude-code-plugin-core': 0.1.0
+      '@kwitsch/claude-code-plugin-core': 0.1.2
       rolldown: 1.3.3
 
-  '@kwitsch/tsdown-preset-claude-code@0.1.0(rolldown@1.3.3)(tsdown@0.23.7)':
+  '@kwitsch/tsdown-preset-claude-code@0.1.2(rolldown@1.3.3)(tsdown@0.23.7)':
     dependencies:
-      '@kwitsch/claude-code-plugin-core': 0.1.0
-      '@kwitsch/rolldown-plugin-claude-code': 0.1.0(rolldown@1.3.3)
+      '@kwitsch/claude-code-plugin-core': 0.1.2
+      '@kwitsch/rolldown-plugin-claude-code': 0.1.2(rolldown@1.3.3)
       tsdown: 0.23.7
     transitivePeerDependencies:
       - rolldown

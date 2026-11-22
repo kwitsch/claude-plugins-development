@@ -1,16 +1,16 @@
 # graphmind-helper on the published preset
 
-How the pilot moved from `development/tsdown` to `@kwitsch/tsdown-preset-claude-code` 0.1.0 (plugin 0.2.4 to 0.2.5), what the output comparison showed, and what the next plugin migrations can rely on.
+How the pilot moved from `development/tsdown` to `@kwitsch/tsdown-preset-claude-code` (0.1.0, then 0.1.2; plugin 0.2.4 to 0.2.5), what the output comparison showed, and what the next plugin migrations can rely on.
 
 ## Setup
 
 - `tsdown.config.ts` imports only the preset; entries come from `hooks.template.json` (`{ "mod": "./src/hooks/register.ts" }`) and `mcp.template.json` (server `graphmind`, command `./src/bin/mcp.ts`). `assets/README.md` is copied to `plugin/README.md`. The preset empties `plugin/` before each build, so `hooks/hooks.json`, `.mcp.json` and `bin/` are no longer hand-kept.
 - `overrides.alias` maps `@shared` to `development/shared/src`; the helper is inlined as before (measured 2026-11-22).
 - The package keeps its `claudePlugin` key: CI and tests find plugins by it.
-- The preset is installed from GitHub Packages. pnpm 11 ignores credentials in a project `.npmrc` ("environment variables are not expanded in registry credentials from a project .npmrc"), so the root `.npmrc` holds only the scope registry and the token is set with `pnpm config set "//npm.pkg.github.com/:_authToken" <token>`, locally and in the workflows (pr.yml, sync.yml). The token needs `read:packages` (`gh auth refresh -h github.com -s read:packages` for the gh token). Decided 2026-11-22 with the M6 pilot; the spec's `${GITHUB_TOKEN}` line in `.npmrc` does not work.
+- The preset is installed from npmjs without a token or an `.npmrc` (0.1.2, exact). 0.1.0 was published to GitHub Packages only; the pilot first used it from there, which needed `read:packages` and a user-level `pnpm config set` token because pnpm 11 ignores credentials in a project `.npmrc` ("environment variables are not expanded in registry credentials from a project .npmrc"). The packages moved to npmjs with 0.1.1 (npm trusted publishing with provenance from 0.1.2), so those parts are gone again. `minimumReleaseAgeExclude: ["@kwitsch/*"]` stays for fresh releases (decided 2026-11-22).
 - Root `rolldown` went from 1.2.16 to 1.3.3 first, in its own pull request. Rebuilding all eight plugins with the old build changed only `universal-format` (vendor chunk file names), which got a patch bump (measured 2026-11-22).
 
-## Output comparison (measured 2026-11-22, preset 0.1.0, rolldown 1.3.3, 0.2.4 against 0.2.5)
+## Output comparison (measured 2026-11-22, preset 0.1.0, rolldown 1.3.3, 0.2.4 against 0.2.5; rebuilt with 0.1.2 on 2026-11-22: no byte changes)
 
 | File                           | Result                                                                                              |
 | ------------------------------ | --------------------------------------------------------------------------------------------------- |
@@ -29,5 +29,5 @@ How the pilot moved from `development/tsdown` to `@kwitsch/tsdown-preset-claude-
 ## For the next migrations
 
 - A command in a template must be a relative `.ts` path; the preset builds it to `mcp/<name>.mjs` (MCP) or `hooks/<name>.mjs` (command hooks) and rewrites the command to `node ${CLAUDE_PLUGIN_ROOT}/...`.
-- Only `universal-format` needs more: its vendor directory is not supported by the preset 0.1.0.
-- CI installs the preset with the repository's `GITHUB_TOKEN` (`packages: read` plus `pnpm config set` in pr.yml; `changed-plugins` of the pilot pull request passed, measured 2026-11-22). Not handled: Dependabot needs a `registries` entry for `@kwitsch/*` with its own token, or its updates fail to resolve.
+- Only `universal-format` needs more: its vendor directory is not supported by the preset 0.1.x.
+- CI installs the preset with a plain `pnpm install --frozen-lockfile`; Dependabot resolves `@kwitsch/*` on npmjs without a registry entry (CI of the pilot pull request, measured 2026-11-22).

@@ -6,7 +6,6 @@ on:
 
 permissions:
   contents: read
-  packages: read
 
 jobs:
   changed-plugins:
@@ -66,13 +65,8 @@ jobs:
           node-version: 26
           cache: pnpm
 
-      # pnpm 11 ignores registry credentials in a project .npmrc, so the token goes into the user-level config.
       - name: Install
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          pnpm config set "//npm.pkg.github.com/:_authToken" "$GITHUB_TOKEN"
-          pnpm install --frozen-lockfile
+        run: pnpm install --frozen-lockfile
 
       # one workspace-wide oxlint run (root .oxlintrc.json): lint + type check of every hand-written .mts
       - name: Lint

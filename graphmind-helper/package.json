@@ -19,7 +19,7 @@
     "test:plugin": "node ../development/scripts/plugin-test.ts"
   },
   "devDependencies": {
-    "@kwitsch/tsdown-preset-claude-code": "0.1.0",
+    "@kwitsch/tsdown-preset-claude-code": "0.1.2",
     "claude-engine-vitest": "workspace:*",
     "tsdown": "0.23.7"
   },

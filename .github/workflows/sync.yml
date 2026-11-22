@@ -12,7 +12,6 @@ on:
 
 permissions:
   contents: read
-  packages: read
 
 concurrency:
   group: sync-${{ inputs.tag || github.ref_name }}
@@ -65,15 +64,11 @@ jobs:
           node-version: 26
           cache: pnpm
 
-      # pnpm 11 ignores registry credentials in a project .npmrc, so the token goes into the user-level config.
       - name: Install
         if: steps.resolve.outputs.plugin != ''
         env:
           P: ${{ steps.resolve.outputs.plugin }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          pnpm config set "//npm.pkg.github.com/:_authToken" "$GITHUB_TOKEN"
-          pnpm install --frozen-lockfile --filter "$P..."
+        run: pnpm install --frozen-lockfile --filter "$P..."
 
       - name: Build, test, and check committed build is current
         if: steps.resolve.outputs.plugin != ''
