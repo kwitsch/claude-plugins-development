@@ -4,3 +4,7 @@ packages:
   - "development/scripts"
   - "development/shared"
   - "development/tsdown"
+
+# pnpm 11 rejects releases younger than a day; the preset is installed minutes after its release.
+minimumReleaseAgeExclude:
+  - "@kwitsch/*"
