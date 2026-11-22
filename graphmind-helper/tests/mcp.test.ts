@@ -1,5 +1,5 @@
 // The MCP wrapper. Pure functions come from src/ (common.ts is inlined into the build, so no built module exports them);
-// the process runs from the built plugin/bin/mcp.mjs with a fake `graphmind` on PATH and a temp HOME.
+// the process runs from the built plugin/mcp/mcp.mjs with a fake `graphmind` on PATH and a temp HOME.
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
@@ -10,7 +10,7 @@ import { afterEach, beforeEach, test } from "vitest";
 import { findGraphmind, setupMcpPresent } from "../src/bin/common.ts";
 import { indexable } from "../src/bin/mcp.ts";
 
-const MCP = fileURLToPath(new URL("../plugin/bin/mcp.mjs", import.meta.url));
+const MCP = fileURLToPath(new URL("../plugin/mcp/mcp.mjs", import.meta.url));
 let root = "";
 let home = "";
 let proj = "";

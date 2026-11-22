@@ -1,3 +1,10 @@
-import { pluginConfig } from "../development/tsdown/index.ts";
+import { pluginConfig } from "@kwitsch/tsdown-preset-claude-code";
+import { fileURLToPath } from "node:url";
 
-export default pluginConfig({ mods: ["hooks/register"], scripts: ["bin/mcp"] });
+export default await pluginConfig({
+  hooksTemplate: "hooks.template.json",
+  mcpTemplate: "mcp.template.json",
+  overrides: {
+    alias: { "@shared": fileURLToPath(new URL("../development/shared/src", import.meta.url)) },
+  },
+});

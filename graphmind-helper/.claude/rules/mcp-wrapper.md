@@ -1,7 +1,7 @@
 ---
 paths:
   - "src/bin/**"
-  - "plugin/.mcp.json"
+  - "mcp.template.json"
   - "tests/mcp.test.ts"
 ---
 
