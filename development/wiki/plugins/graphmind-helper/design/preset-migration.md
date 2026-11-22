@@ -30,4 +30,4 @@ How the pilot moved from `development/tsdown` to `@kwitsch/tsdown-preset-claude-
 
 - A command in a template must be a relative `.ts` path; the preset builds it to `mcp/<name>.mjs` (MCP) or `hooks/<name>.mjs` (command hooks) and rewrites the command to `node ${CLAUDE_PLUGIN_ROOT}/...`.
 - Only `universal-format` needs more: its vendor directory is not supported by the preset 0.1.0.
-- Not yet known: whether CI can install the preset with the repository's `GITHUB_TOKEN` (pr.yml sets it; the first run that installs the preset is the pilot pull request), and Dependabot needs a `registries` entry for `@kwitsch/*` with its own token or its updates fail to resolve.
+- CI installs the preset with the repository's `GITHUB_TOKEN` (`packages: read` plus `pnpm config set` in pr.yml; `changed-plugins` of the pilot pull request passed, measured 2026-11-22). Not handled: Dependabot needs a `registries` entry for `@kwitsch/*` with its own token, or its updates fail to resolve.
