@@ -10,7 +10,7 @@ paths:
 
 # Rule: the tsdown plugin build (the standard)
 
-Every plugin is built by `tsdown` through `pluginConfig` (`development/tsdown/index.ts`). Reasons, the minify matrix and what was rejected: [tsdown-plugin-build](../../development/wiki/decisions/tsdown-plugin-build.md).
+Every plugin is built by `tsdown` through `pluginConfig` (`development/tsdown/index.ts`); `graphmind-helper` alone uses the published preset `@kwitsch/tsdown-preset-claude-code` (templates, `assets/`, `mcp/<name>.mjs`; [preset-migration](../../development/wiki/plugins/graphmind-helper/design/preset-migration.md)) until the other plugins follow, and `development/tsdown` goes only when all eight have moved. Reasons, the minify matrix and what was rejected: [tsdown-plugin-build](../../development/wiki/decisions/tsdown-plugin-build.md).
 
 - `tsdown.config.ts` is `export default pluginConfig({ mods: [...], scripts: [...], vendor: [...] })`; an entry is a path below `src/` without extension (`"hooks/register"`, `"bin/mcp"`). Only a listed entry produces a file; every other `src/` module is inlined into the entries that import it. The `build` script is `tsdown` (a plugin's own steps may run before or after it: dprint `scripts/hooks.ts`, universal-format `scripts/vendor.ts`).
 - `mods` (function-hooks modules): `src/hooks/register.ts` builds to `plugin/hooks/register.js`, compressed but never mangled (`minify: { mangle: false, compress: true }`), no shebang; `hooks.json` lists `./register.js`. Mods import no engine types (`claude-code`): type the used `$`/`on` members structurally.

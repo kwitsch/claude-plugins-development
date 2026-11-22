@@ -1,6 +1,6 @@
 {
   "name": "graphmind-helper",
-  "version": "0.2.4",
+  "version": "0.2.5",
   "private": true,
   "description": "Makes Claude Code use graphmind's code graph and memory: a project briefing, memory recall on each prompt and search hints, with the project indexed on first use.",
   "keywords": [
@@ -19,7 +19,9 @@
     "test:plugin": "node ../development/scripts/plugin-test.ts"
   },
   "devDependencies": {
-    "claude-engine-vitest": "workspace:*"
+    "@kwitsch/tsdown-preset-claude-code": "0.1.2",
+    "claude-engine-vitest": "workspace:*",
+    "tsdown": "0.23.7"
   },
   "claudePlugin": {}
 }

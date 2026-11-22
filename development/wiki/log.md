@@ -202,3 +202,7 @@ Source: user decision 2026-11-20 (task spec), PR stacked on `feature/tsdown-plug
 ## [2026-11-20] ingest | $.model.complete: no structured output, classify, system cache
 
 - `facts/mods-engine-io.md` (`$.model.complete`): unknown request fields such as a JSON schema are ignored without an error; `$.model.classify(text, labels)` returns a label only and was not more accurate than `choice` through `complete`; `system` blocks with `cache: true` cache from a length of about 2,400 tokens, not at 320; the debug log redacts token counts.
+
+## [2026-11-22] ingest | graphmind-helper builds with the published preset
+
+- New page `plugins/graphmind-helper/design/preset-migration.md` (setup, token handling under pnpm 11, output comparison, what the other plugins can rely on); `design/decisions.md` names the new wrapper path; plugin `CLAUDE.md` and `.claude/rules/mcp-wrapper.md` follow the templates; root rule `tsdown-build.md` notes the two builds.
