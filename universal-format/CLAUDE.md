@@ -6,9 +6,9 @@ Formats the content of every `Write` and `Edit` before it lands: one PreToolUse 
 
 Two layers. The path-scoped rules in `.claude/rules/` load with matching files and hold the constraints only. The design pages in `development/wiki/plugins/universal-format/design/` hold the reasons, measurements, residuals and what was removed on purpose; they are not loaded by themselves. Do not "fix" a behaviour of an area without reading its design page first.
 
-- Hook, server and handler (`plugin/hooks/hooks.json`, `plugin/.mcp.json`, `src/mcp/`): rule `hooks-and-server.md`.
-- Vendored prettier bundle (`scripts/vendor.ts`, `scripts/vendor-entry.ts`, `src/mcp/vendor/index.d.ts`, `plugin/mcp/vendor/`): rule `vendor-build.md`.
-- Skill `universal-format` (`plugin/skills/universal-format/`, driver `src/skills/universal-format/format-files.ts`): rule `skill-driver.md`.
+- Hook, server and handler (`hooks.template.json`, `mcp.template.json`, `src/mcp/`): rule `hooks-and-server.md`.
+- Vendored prettier bundle (`src/mcp/vendor/index.ts`, `bundles`/`files` in `tsdown.config.ts`, `plugin/mcp/vendor/`): rule `vendor-build.md`.
+- Skill `universal-format` (`assets/skills/universal-format/`, driver `src/skills/universal-format/format-files.ts`): rule `skill-driver.md`.
 - Tests: rule `tests.md`.
 
 ## Source layout (`src/mcp/`)
