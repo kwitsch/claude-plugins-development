@@ -3,12 +3,12 @@ paths:
   - "src/hooks/register.ts"
   - "tests/register.test.ts"
   - "tests/phase3.test.ts"
-  - "plugin/hooks/hooks.json"
+  - "hooks.template.json"
 ---
 
 # `register.ts`: hooks, `$` use and engine pitfalls
 
-`plugin/hooks/hooks.json` (hand-written) is exactly `{"modules": ["./register.js"]}`. `src/hooks/register.ts` holds
+`hooks.template.json` is exactly `{ "mod": "./src/hooks/register.ts" }` (generated `plugin/hooks/hooks.json`: `{"modules": ["./register.js"]}`). `src/hooks/register.ts` holds
 every hook and every `$` use and imports the pure modules `./jev.js`, `./policy.js`, `./candidates.js`,
 `./context.js`, `./cache.js`, `./agents.js`, `./compact.js`, `./summarize.js` (inlined into `plugin/hooks/register.js` by the build).
 Tested by `tests/register.test.ts` (unit, on `src/`) and `claude-tests/register.test.ts` (the built `register.js`, `pnpm --filter jevfort test:plugin`). Evidence for
