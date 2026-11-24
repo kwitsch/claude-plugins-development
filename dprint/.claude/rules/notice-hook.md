@@ -1,14 +1,14 @@
 ---
 paths:
   - "src/hooks/**"
-  - "plugin/hooks/**"
+  - "hooks.template.json"
   - "tests/notice.test.ts"
   - "claude-tests/**"
 ---
 
 # notice (function-hooks toast)
 
-`plugin/hooks/hooks.json` lists `"modules": ["./register.js"]` (Claude Code function hooks, early-access API): a toast
+`hooks.template.json` sets `"mod": "./src/hooks/register.ts"` (generated: `"modules": ["./register.js"]`) (Claude Code function hooks, early-access API): a toast
 when the working directory has a dprint config but dprint cannot run.
 
 ## Constraints

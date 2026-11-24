@@ -1,4 +1,4 @@
-// Tests for scripts/hooks.ts: hooks.json validation and the generated hook input types.
+// Tests for scripts/hooks.ts: hooks.template.json validation and the generated hook input types.
 // Each negative case runs the script against a scratch copy of the plugin with one defect.
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
@@ -11,24 +11,23 @@ import { afterAll, test } from "vitest";
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const SCRIPT = path.join(ROOT, "scripts/hooks.ts");
 const HOOKS = JSON.parse(
-  readFileSync(path.join(ROOT, "plugin/hooks/hooks.json"), "utf8"),
+  readFileSync(path.join(ROOT, "hooks.template.json"), "utf8"),
 );
 
 const run = (...args) => spawnSync(process.execPath, [SCRIPT, ...args], { encoding: "utf8" });
 
-/** Scratch plugin root with the real files; `mutate(hooks)` edits a copy of hooks.json first. */
+/** Scratch plugin root with the real files; `mutate(hooks)` edits a copy of hooks.template.json first. */
 const dirs: string[] = [];
 afterAll(() => dirs.forEach((d) => rmSync(d, { recursive: true, force: true })));
 
 function scratch(mutate: (hooks: typeof HOOKS) => unknown = () => {}) {
   const dir = mkdtempSync(path.join(tmpdir(), "dprint-hooks-"));
   dirs.push(dir);
-  mkdirSync(path.join(dir, "plugin/hooks"), { recursive: true });
   mkdirSync(path.join(dir, "src/mcp"), { recursive: true });
   for (
     const f of [
       "package.json",
-      "plugin/.mcp.json",
+      "mcp.template.json",
       "src/mcp/hook-inputs.d.ts",
     ]
   ) {
@@ -37,7 +36,7 @@ function scratch(mutate: (hooks: typeof HOOKS) => unknown = () => {}) {
   const hooks = structuredClone(HOOKS);
   mutate(hooks);
   writeFileSync(
-    path.join(dir, "plugin/hooks/hooks.json"),
+    path.join(dir, "hooks.template.json"),
     JSON.stringify(hooks, null, 2),
   );
   return dir;
@@ -45,7 +44,7 @@ function scratch(mutate: (hooks: typeof HOOKS) => unknown = () => {}) {
 
 const formatPre = (h) => h.hooks.PreToolUse[0].hooks[0];
 
-test("the committed hooks.json is valid and its generated types are current", () => {
+test("the committed hooks.template.json is valid and its generated types are current", () => {
   const r = run("--check");
   assert.equal(r.status, 0, r.stderr);
 });

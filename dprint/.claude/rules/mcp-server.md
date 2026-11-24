@@ -4,14 +4,14 @@ paths:
   - "src/hooks/watch-paths.ts"
   - "plugin/mcp/**"
   - "plugin/hooks/watch-paths.mjs"
-  - "plugin/.mcp.json"
+  - "mcp.template.json"
   - "tests/mcp-*.test.ts"
 ---
 
 # dprint-hooks MCP server
 
-`plugin/hooks/hooks.json` (hand-written) wires PreToolUse `Write|Edit` as an `mcp_tool` hook to tool `format_pre` of
-the MCP server `dprint-hooks` (`plugin/.mcp.json`, hand-written, `command: node`), plus the other tools below.
+`hooks.template.json` (hand-written) wires PreToolUse `Write|Edit` as an `mcp_tool` hook to tool `format_pre` of
+the MCP server `dprint-hooks` (`mcp.template.json`, hand-written, command `./src/mcp/server.ts`; generated `plugin/.mcp.json` starts it with `node`), plus the other tools below.
 `findDprint`/`findConfig` resolution: see the skill-scripts rule. Limits, timeouts, retry delays and git/dprint
 arguments are named constants or comments in the sources; this rule records behaviour and constraints only.
 
