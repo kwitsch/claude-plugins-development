@@ -1,0 +1,74 @@
+{
+  "description": "One entry, lint-file.mjs, for six events: PostToolUse Write|Edit lints the just-written file (check-only) in the background; SessionStart and CwdChanged print the cwd's lintable git files as watchPaths; FileChanged lints a watched file changed outside Write/Edit in the background; Stop and SubagentStop lint the files whose edits no report has covered yet. Findings exit 2: they wake Claude (asyncRewake) or keep the stopping agent going.",
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "./src/hooks/lint-file.ts",
+            "timeout": 90,
+            "asyncRewake": true
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "./src/hooks/lint-file.ts",
+            "timeout": 30
+          }
+        ]
+      }
+    ],
+    "CwdChanged": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "./src/hooks/lint-file.ts",
+            "timeout": 30
+          }
+        ]
+      }
+    ],
+    "FileChanged": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "./src/hooks/lint-file.ts",
+            "timeout": 90,
+            "asyncRewake": true
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "./src/hooks/lint-file.ts",
+            "timeout": 90
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "./src/hooks/lint-file.ts",
+            "timeout": 90
+          }
+        ]
+      }
+    ]
+  }
+}
