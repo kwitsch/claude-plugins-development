@@ -1,7 +1,7 @@
 ---
 paths:
   - "src/hooks/**"
-  - "plugin/hooks/**"
+  - "hooks.template.json"
   - "tests/*.test.ts"
   - "scripts/perf.ts"
 ---
@@ -12,7 +12,7 @@ The constraints of the lint hook, one section per area. Each section names its d
 
 ## Hook contract
 
-- Six `command` hooks share the one entry `lint-file.ts`, which only calls `main()` of `lint-core.ts`; `main()` dispatches on `hook_event_name` (a payload without it is PostToolUse). `hooks.json`: PostToolUse `Write|Edit` (index 0, pinned by `tests/manifest.test.ts`) and FileChanged are `asyncRewake` with `timeout: 90`; SessionStart and CwdChanged `timeout: 30`; Stop and SubagentStop synchronous with `timeout: 90`. No `async` flag, no `statusMessage`, no matcher on the non-tool events, no `if` or FileChanged matcher filter.
+- Six `command` hooks share the one entry `lint-file.ts`, which only calls `main()` of `lint-core.ts`; `main()` dispatches on `hook_event_name` (a payload without it is PostToolUse). `hooks.template.json`: PostToolUse `Write|Edit` (index 0, pinned by `tests/manifest.test.ts`) and FileChanged are `asyncRewake` with `timeout: 90`; SessionStart and CwdChanged `timeout: 30`; Stop and SubagentStop synchronous with `timeout: 90`. No `async` flag, no `statusMessage`, no matcher on the non-tool events, no `if` or FileChanged matcher filter.
 - Findings are the `universal-lint…: …` text on stderr plus exit 2; nothing to report is no output and exit 0. Every guard failure, clean result, skip, crash or missing tool is silent (fail open).
 - Read-only: never pass `--fix`, `--format` or `--write` to a tool, never modify the linted file, never write into the project tree (state goes to `CLAUDE_PLUGIN_DATA`, else the OS temp dir).
 - stdin is read with `await json(process.stdin)`, never `readFileSync(0)`; `main` never calls `process.exit`.
