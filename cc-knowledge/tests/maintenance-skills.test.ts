@@ -53,17 +53,17 @@ test("update-cc-references release does a patch bump of package.json and rebuild
   expect(MAINT).not.toMatch(/marketplace\.json/);
 });
 
-test("update-cc-references commits and opens the PR in this repository's style, staging package.json and plugin/", () => {
-  expect(MAINT).toContain("git add cc-knowledge/package.json cc-knowledge/plugin/");
+test("update-cc-references commits and opens the PR in this repository's style, staging package.json, assets/ and plugin/", () => {
+  expect(MAINT).toContain("git add cc-knowledge/package.json cc-knowledge/assets/ cc-knowledge/plugin/");
   expect(MAINT).toContain("git commit -m \"cc-knowledge <version>: refresh the CC reference files\"");
   expect(MAINT).toMatch(/No `Co-Authored-By:` trailer/);
 });
 
 test("sources.json points at the migrated references and workflow.template.js at the plugin's section index", () => {
-  expect(JSON.parse(SOURCES_TEXT).refsDir).toBe("cc-knowledge/plugin/skills/cc-reference/references");
+  expect(JSON.parse(SOURCES_TEXT).refsDir).toBe("cc-knowledge/assets/skills/cc-reference/references");
   expect(existsSync(join(ROOT, JSON.parse(SOURCES_TEXT).refsDir))).toBe(true);
   expect(existsSync(REFS)).toBe(true);
-  expect(readRepo(".claude/skills/update-cc-references/workflow.template.js")).toContain("cc-knowledge/plugin/skills/cc-reference/SKILL.md");
+  expect(readRepo(".claude/skills/update-cc-references/workflow.template.js")).toContain("cc-knowledge/assets/skills/cc-reference/SKILL.md");
   expect(existsSync(join(PLUGIN, "skills/cc-reference/SKILL.md"))).toBe(true);
 });
 

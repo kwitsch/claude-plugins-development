@@ -1,10 +1,10 @@
 ---
 paths:
-  - "plugin/skills/cc-review/**"
-  - "plugin/skills/cc-author/**"
-  - "plugin/skills/memory-audit/**"
-  - "plugin/skills/cc-compress/**"
-  - "plugin/agents/**"
+  - "assets/skills/cc-review/**"
+  - "assets/skills/cc-author/**"
+  - "assets/skills/memory-audit/**"
+  - "assets/skills/cc-compress/**"
+  - "assets/agents/**"
   - "src/skills/cc-compress/**"
 ---
 

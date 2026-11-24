@@ -1,5 +1,5 @@
 {
-  "refsDir": "cc-knowledge/plugin/skills/cc-reference/references",
+  "refsDir": "cc-knowledge/assets/skills/cc-reference/references",
   "targets": {
     "skills": ["claude-code-skills.reference.md"],
     "agents": ["claude-code-agents.reference.md"],

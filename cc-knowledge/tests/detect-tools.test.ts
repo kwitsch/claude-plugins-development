@@ -6,7 +6,7 @@ import { expect, test } from "vitest";
 import { frontmatter, PLUGIN, put, readPlugin, readPluginJson, run, tmpDir } from "./support/plugin.ts";
 
 const RA = "skills/repository-audit";
-const SCRIPT = join(PLUGIN, RA, "scripts", "detect-tools.mjs");
+const SCRIPT = join(PLUGIN, RA, "detect-tools.mjs");
 const INSTALL_SH = join(PLUGIN, RA, "templates", "init-dev-environment", "install.sh");
 const AUDIT = readPlugin(`${RA}/SKILL.md`);
 const AUDIT_FM = frontmatter(AUDIT);
@@ -128,7 +128,7 @@ test("detect-tools.mjs exists and passes node --check", () => {
 });
 
 test("tool-map.json is valid JSON with the expected catalog shape", () => {
-  const m = readPluginJson(`${RA}/scripts/tool-map.json`);
+  const m = readPluginJson(`${RA}/tool-map.json`);
   const all = Object.values<MapEntry>(m);
   for (const e of all) {
     if (e.rootFiles != null) {
@@ -275,7 +275,7 @@ test("detection: a nested dprint config does not detect dprint", () => {
 // --- init-dev-environment generation (--write, SKILL.md.tmpl) ---
 
 test("detect-tools.reference.md exists and documents the script and its bundled templates", () => {
-  const f = join(PLUGIN, RA, "scripts/detect-tools.reference.md");
+  const f = join(PLUGIN, RA, "detect-tools.reference.md");
   expect(existsSync(f)).toBe(true);
   const t = read(f);
   for (const s of ["detect-tools.mjs", "install.sh", "Bundled templates"]) expect(t).toContain(s);
@@ -477,7 +477,7 @@ test("SKILL.md.tmpl: frontmatter, model-invocable, inline, no bang-backtick or p
 
 test("tool-map.json ids each have an install_<id> recipe in install.sh", () => {
   const sh = read(INSTALL_SH);
-  const missing = Object.keys(readPluginJson(`${RA}/scripts/tool-map.json`)).filter(
+  const missing = Object.keys(readPluginJson(`${RA}/tool-map.json`)).filter(
     (id) => !new RegExp(`^install_${id.replaceAll("-", "_")}\\(\\)`, "m").test(sh),
   );
   expect(missing).toEqual([]);
@@ -501,7 +501,7 @@ test("repository-audit wires the tool-detection phase and the Dev environment re
   const toks = [
     "init-dev-environment",
     "detect-tools.reference.md",
-    "${CLAUDE_SKILL_DIR}/scripts/detect-tools.mjs",
+    "${CLAUDE_SKILL_DIR}/detect-tools.mjs",
     "--write",
     "--add",
     "skillExists",

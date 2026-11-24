@@ -70,7 +70,7 @@ const authorPrompt = (t) =>
     "Apply edits: directives not prose, tables for field references, no marketing, forward slashes. Body under 500 lines (split to a sibling file, one level deep, if it outgrows this). No time-sensitive phrasing: use a Version notes line or a collapsed \"Old patterns\" block. Write in English.",
     "Only introduce an x.y.z version number that appears verbatim in the local doc copies; any other newly added version is reverted automatically.",
     "Do NOT touch the verified date in the file header; the finish step stamps it.",
-    `If you add, rename or remove a "## " heading, update the matching section index in ${PLAN.repoRoot}/cc-knowledge/plugin/skills/cc-reference/SKILL.md.`,
+    `If you add, rename or remove a "## " heading, update the matching section index in ${PLAN.repoRoot}/cc-knowledge/assets/skills/cc-reference/SKILL.md.`,
     "",
     "When done editing, run exactly this command via Bash and read its one-line JSON output:",
     `node ${sq(PLAN.script)} gate ${sq(PLAN.scratch)} ${sq(t.name)}`,
