@@ -206,3 +206,7 @@ Source: user decision 2026-11-20 (task spec), PR stacked on `feature/tsdown-plug
 ## [2026-11-22] ingest | graphmind-helper builds with the published preset
 
 - New page `plugins/graphmind-helper/design/preset-migration.md` (setup, token handling under pnpm 11, output comparison, what the other plugins can rely on); `design/decisions.md` names the new wrapper path; plugin `CLAUDE.md` and `.claude/rules/mcp-wrapper.md` follow the templates; root rule `tsdown-build.md` notes the two builds.
+
+## [2026-11-24] ingest | all plugins build with the published preset
+
+- `decisions/tsdown-plugin-build.md` gains the section on the preset (reasons for 0.2.0, universal-format on 0.3.0 after preset issue #11, assets/ and templates, `manifest: claudePlugin`, flattened cc-knowledge skill scripts, command hooks as `node` + `args`, rejected alternatives); `repo-tooling.md`, `shared-source-layer.md`, universal-format `design/vendor-build.md`, graphmind-helper `design/preset-migration.md` and cc-knowledge `design/maintenance-tooling.md` follow; `facts/claude-code-command-hooks.md` records the live check of the `args` form (2.1.331). `development/tsdown` and `plugin-manifest.ts` are deleted. Source: PR #137, session.
