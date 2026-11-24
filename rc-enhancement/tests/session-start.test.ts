@@ -23,7 +23,7 @@ test("answers a SessionStart JSON object whose additionalContext is the CRITICAL
 test("hooks.json: one matcher-less SessionStart and one matcher-less Stop command hook on the built scripts, no mods module", () => {
   const cfg = JSON.parse(readFileSync(path.join(hooksDir, "hooks.json"), "utf8")) as {
     modules?: string[];
-    hooks: Record<string, { matcher?: string; hooks: { type: string; command: string; timeout: number }[] }[]>;
+    hooks: Record<string, { matcher?: string; hooks: { type: string; command: string; args?: string[]; timeout: number }[] }[]>;
   };
   assert.equal(cfg.modules, undefined);
   assert.deepEqual(Object.keys(cfg.hooks).sort(), ["SessionStart", "Stop"]);
@@ -33,7 +33,9 @@ test("hooks.json: one matcher-less SessionStart and one matcher-less Stop comman
     assert.equal(groups[0]?.matcher, undefined);
     assert.equal(groups[0]?.hooks.length, 1);
     assert.equal(groups[0]?.hooks[0]?.type, "command");
-    assert.equal(groups[0]?.hooks[0]?.command, `node "\${CLAUDE_PLUGIN_ROOT}/hooks/${name}.mjs"`);
+    assert.equal(groups[0]?.hooks[0]?.command, "node");
+    assert.deepEqual(groups[0]?.hooks[0]?.args, [`\${CLAUDE_PLUGIN_ROOT}/hooks/${name}.mjs`]);
+    assert.equal(groups[0]?.hooks[0]?.timeout, 5);
     assert.ok(existsSync(path.join(hooksDir, `${name}.mjs`)), `${name}.mjs is not built`);
   }
 });
