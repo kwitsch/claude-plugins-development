@@ -1,5 +1,5 @@
-// Entry of the vendored bundle `plugin/mcp/vendor/index.mjs` (written by `vendor.ts`): the one prettier of the server
-// and its three third-party plugins. Types for `src/`: `src/mcp/vendor/index.d.ts`.
+// Entry of the vendored bundle `plugin/mcp/vendor/index.mjs` (`bundles` in tsdown.config.ts): the one prettier of the
+// server and its three third-party plugins. Sources import it as `./vendor/index.js`; the build keeps that import external.
 
 export * as prettier from "prettier";
 

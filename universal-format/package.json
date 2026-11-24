@@ -13,11 +13,11 @@
   },
   "type": "module",
   "scripts": {
-    "build": "tsdown && node scripts/vendor.ts",
+    "build": "tsdown",
     "test": "vitest run --config \"$(git rev-parse --show-toplevel)/vitest.config.mts\""
   },
   "devDependencies": {
-    "@kwitsch/tsdown-preset-claude-code": "0.2.0",
+    "@kwitsch/tsdown-preset-claude-code": "0.3.0",
     "@modelcontextprotocol/server": "2.4.0",
     "@prettier/plugin-php": "0.25.0",
     "prettier": "3.9.10",

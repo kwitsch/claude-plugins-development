@@ -1,0 +1,7 @@
+{
+  "mcpServers": {
+    "universal-format-hooks": {
+      "command": "./src/mcp/server.ts"
+    }
+  }
+}
