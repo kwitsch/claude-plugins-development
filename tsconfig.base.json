@@ -9,9 +9,6 @@
     "allowImportingTsExtensions": true,
     "skipLibCheck": true,
     "paths": {
-      "@scripts/*": [
-        "./development/scripts/*"
-      ],
       "@shared/*": [
         "./development/shared/src/*"
       ]
