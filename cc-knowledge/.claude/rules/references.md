@@ -1,9 +1,9 @@
 ---
 paths:
-  - "plugin/skills/cc-reference/**"
+  - "assets/skills/cc-reference/**"
 ---
 
-# Reference files (`plugin/skills/cc-reference/references/*.reference.md`)
+# Reference files (`assets/skills/cc-reference/references/*.reference.md`)
 
 Harness reference files, not prose documentation. Reasons: [reference-files.md](../../../development/wiki/plugins/cc-knowledge/design/reference-files.md).
 
@@ -14,4 +14,4 @@ Harness reference files, not prose documentation. Reasons: [reference-files.md](
 - Navigation is the section index in `SKILL.md`, not an in-file TOC: adding, renaming or removing a `##` heading updates the matching index entry.
 - Two or more bundled reference files live in the `references/` subfolder, not beside `SKILL.md` (`skill-folder-structure.reference.md`).
 - File names end in `.reference.md` (layout check); the refresh tooling in `.claude/skills/update-cc-references/sources.json` lists them by name.
-- The hand-written files here are edited in `plugin/` directly (no `src/` counterpart).
+- The hand-written files here are edited in `assets/skills/cc-reference/` (the build copies them to `plugin/`; no `src/` counterpart).

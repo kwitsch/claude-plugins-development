@@ -1,12 +1,12 @@
 ---
 paths:
-  - "plugin/skills/repository-audit/**"
+  - "assets/skills/repository-audit/**"
   - "src/skills/repository-audit/**"
 ---
 
 # repository-audit
 
-Mechanics are in `SKILL.md` and `plugin/skills/repository-audit/scripts/detect-tools.reference.md` (script contract, output schemas, atomic write), not restated here.
+Mechanics are in `SKILL.md` and `assets/skills/repository-audit/detect-tools.reference.md` (script contract, output schemas, atomic write), not restated here.
 
 ## Boundaries
 

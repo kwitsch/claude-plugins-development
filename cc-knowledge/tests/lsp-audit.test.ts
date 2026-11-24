@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { expect, test } from "vitest";
 import { PLUGIN, readPlugin, readPluginJson, REFS, run, SKILL, tmpDir } from "./support/plugin.ts";
 
-const SCRIPT = join(PLUGIN, "skills", "lsp-audit", "scripts", "audit-lsp.mjs");
+const SCRIPT = join(PLUGIN, "skills", "lsp-audit", "audit-lsp.mjs");
 const audit = (proj: string, ...args: string[]) => run(SCRIPT, [proj, ...args]);
 type Entry = { ext: string; server?: string };
 type Out = { lspJsonExists: boolean; legacyRootLspJson: boolean; pluginManifestMissing: boolean; migratedFromRoot: boolean; wrote: boolean; applied: string[]; mergedIntoServers: string[]; createdServers: string[]; conflictsSkipped: unknown[]; proposals: Entry[]; unknown: Entry[] };
@@ -33,7 +33,7 @@ function proj(lsp?: string): { p: string; d: string; f: string } {
 }
 
 const SKILL_MD = (): string => readPlugin("skills/lsp-audit/SKILL.md");
-const REF_MD = (): string => readPlugin("skills/lsp-audit/scripts/audit-lsp.reference.md");
+const REF_MD = (): string => readPlugin("skills/lsp-audit/audit-lsp.reference.md");
 
 test("audit-lsp.mjs exists and passes node --check", () => {
   expect(existsSync(SCRIPT)).toBe(true);
@@ -52,7 +52,7 @@ test("audit-lsp.reference.md documents the plugin target, legacy migration and n
 });
 
 test("lsp-map.json is valid JSON with the expected catalog shape", () => {
-  const m = readPluginJson("skills/lsp-audit/scripts/lsp-map.json");
+  const m = readPluginJson("skills/lsp-audit/lsp-map.json");
   for (const v of Object.values(m)) expect(typeof v === "string" || (typeof v === "object" && v !== null && "server" in v)).toBe(true);
 });
 
@@ -388,7 +388,7 @@ test("lsp-audit has a Read step for audit-lsp.reference.md", () => {
 });
 
 test("lsp-audit references its bundled script via CLAUDE_SKILL_DIR", () => {
-  expect(SKILL_MD()).toContain("${CLAUDE_SKILL_DIR}/scripts/audit-lsp.mjs");
+  expect(SKILL_MD()).toContain("${CLAUDE_SKILL_DIR}/audit-lsp.mjs");
 });
 
 test("lsp-audit has no load-time !-injection trigger", () => {
