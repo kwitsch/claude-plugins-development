@@ -1,0 +1,38 @@
+{
+  "name": "taskflow",
+  "version": "2.2.1",
+  "private": true,
+  "description": "Spec-driven design & delivery pipeline: /taskflow:build-task runs the design pipeline (explore, design, spec) and the delivery pipeline (plan, wave-parallel implement, combined review, ship); /taskflow:changes-audit reviews a branch standalone.",
+  "author": {
+    "name": "Kwitsch"
+  },
+  "type": "module",
+  "scripts": {
+    "build": "tsdown",
+    "test": "vitest run --config \"$(git rev-parse --show-toplevel)/vitest.config.mts\""
+  },
+  "devDependencies": {
+    "@kwitsch/tsdown-preset-claude-code": "0.3.0",
+    "tsdown": "0.23.7"
+  },
+  "claudePlugin": {},
+  "pluginBuild": {
+    "assets": [
+      "skills/build-task/workflows/design.md",
+      "skills/build-task/workflows/explore.md",
+      "skills/build-task/workflows/implement.md",
+      "skills/build-task/workflows/plan.md",
+      "skills/build-task/workflows/review.md",
+      "skills/build-task/workflows/ship.md",
+      "skills/build-task/workflows/spec.md",
+      "workflows/build-task-design.workflow.js",
+      "workflows/build-task-explore.workflow.js",
+      "workflows/build-task-implement.workflow.js",
+      "workflows/build-task-plan.workflow.js",
+      "workflows/build-task-review.workflow.js",
+      "workflows/build-task-ship.workflow.js",
+      "workflows/build-task-spec.workflow.js",
+      "workflows/changes-review.workflow.js"
+    ]
+  }
+}
