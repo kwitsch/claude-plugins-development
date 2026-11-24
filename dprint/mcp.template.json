@@ -1,0 +1,7 @@
+{
+  "mcpServers": {
+    "dprint-hooks": {
+      "command": "./src/mcp/server.ts"
+    }
+  }
+}

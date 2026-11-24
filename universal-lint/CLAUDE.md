@@ -12,7 +12,7 @@ Two layers. The path-scoped rules in `.claude/rules/` load when you work on matc
   - `development/wiki/plugins/universal-lint/design/edit-range-gate.md`: Edit-range gate. `development/wiki/plugins/universal-lint/design/file-detection.md`: scope, watch list, FileChanged gates, slot cap, project-check lock, digest store, path exclusions. `development/wiki/plugins/universal-lint/design/npx-and-local-bin.md`: local `node_modules/.bin`, npx fallback, PATH probe cache.
   - `development/wiki/plugins/universal-lint/design/typescript-check.md` (the `tsc` pass), `development/wiki/plugins/universal-lint/design/line-length-guard.md` (YAML/Markdown max-line-length guard).
   - `development/wiki/plugins/universal-lint/design/languages.md` (why JSON is not covered) and one page per language: `lang-jsts.md`, `lang-css.md`, `lang-php.md`, `lang-rust.md`, `lang-go.md`.
-- Skill `universal-lint` (`plugin/skills/universal-lint/`, driver `src/skills/universal-lint/lint-files.ts`): rule `skill-driver.md`.
+- Skill `universal-lint` (`assets/skills/universal-lint/`, driver `src/skills/universal-lint/lint-files.ts`): rule `skill-driver.md`.
 - Tests: rule `tests.md`.
 - Comments in `src/` still name the design pages by their old path `.claude/rules/<name>.md`; the file names are unchanged. Correct them with the next source change (a comment-only change of `src/` would force a release).
 
@@ -25,5 +25,5 @@ Two layers. The path-scoped rules in `.claude/rules/` load when you work on matc
 ## Pitfalls
 
 - Debug against `src/`, not the built output.
-- The hook is registered as `${CLAUDE_PLUGIN_ROOT}/hooks/lint-file.mjs` without a `node` prefix: it runs through its shebang and the exec bit tsdown sets on a script output (0755). Never turn it into a file without that bit.
+- The hooks are generated from `hooks.template.json` (`command: "./src/hooks/lint-file.ts"`) as `"command": "node", "args": ["${CLAUDE_PLUGIN_ROOT}/hooks/lint-file.mjs"]`; the built entry keeps its shebang and the exec bit the preset sets on a script output (0755).
 - `lint-core.ts` must not start work at import: the skill driver inlines it, and a top-level `main()` there would start the hook's stdin loop in the driver (`tests/skill.test.ts` guards it). Keep the entry a separate file.

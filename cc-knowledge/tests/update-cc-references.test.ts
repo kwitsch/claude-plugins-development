@@ -17,7 +17,7 @@ const SOURCES = JSON.parse(readFileSync(join(ROOT, ".claude/skills/update-cc-ref
 };
 
 /** The reference file of the fixture target `memory`. */
-const REF_REL = "cc-knowledge/plugin/skills/cc-reference/references/claude-code-memory.reference.md";
+const REF_REL = "cc-knowledge/assets/skills/cc-reference/references/claude-code-memory.reference.md";
 /** The manifest source of the fixture plugin. */
 const PKG_REL = "cc-knowledge/package.json";
 /** The target name `plan` derives for the reference file. */
@@ -105,7 +105,7 @@ function world(opts: { curlBody?: string; curlFail?: boolean; pnpmFail?: boolean
 }
 
 test("sources.json maps every target file to docs and lists only existing reference files", () => {
-  expect(SOURCES.refsDir).toBe("cc-knowledge/plugin/skills/cc-reference/references");
+  expect(SOURCES.refsDir).toBe("cc-knowledge/assets/skills/cc-reference/references");
   for (const f of Object.values(SOURCES.targets).flat()) {
     expect(existsSync(join(REFS, f)), f).toBe(true);
     expect(SOURCES.files[f]?.docs.length, f).toBeGreaterThan(0);
@@ -135,7 +135,7 @@ test("plan memory fetches docs and writes plan.json plus a filled workflow.js", 
   expect(wf).not.toContain("__PLAN__");
   expect(wf).toContain(NAME);
   // the section index the workflow tells the author to keep in sync is the plugin's SKILL.md
-  expect(wf).toContain("cc-knowledge/plugin/skills/cc-reference/SKILL.md");
+  expect(wf).toContain("cc-knowledge/assets/skills/cc-reference/SKILL.md");
   // The Workflow script body must parse as an async function body (top-level await/return).
   const AsyncFunction = Object.getPrototypeOf(async function() {}).constructor as new(...a: string[]) => unknown;
   expect(() => new AsyncFunction("agent", "pipeline", "phase", wf.replace(/^export /m, ""))).not.toThrow();

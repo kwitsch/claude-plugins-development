@@ -1,6 +1,6 @@
 {
   "name": "cc-knowledge",
-  "version": "2.2.1",
+  "version": "2.2.2",
   "private": true,
   "description": "Answers questions about authoring Claude Code skills, agents, hooks, MCP servers, plugins and settings from bundled references, and reviews, creates, compresses and audits them.",
   "keywords": [
@@ -20,7 +20,9 @@
     "test:plugin": "node ../development/scripts/plugin-test.ts"
   },
   "devDependencies": {
-    "claude-engine-vitest": "workspace:*"
+    "@kwitsch/tsdown-preset-claude-code": "0.2.0",
+    "claude-engine-vitest": "workspace:*",
+    "tsdown": "0.23.7"
   },
   "claudePlugin": {},
   "pluginBuild": {

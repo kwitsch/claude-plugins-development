@@ -277,8 +277,8 @@ function skillToolIds(skillDir: string, catalogIds: string[]): string[] | null {
  * @returns `true` when this call created `<root>/.claude/skills`.
  */
 function writeSkill(root: string, ids: string[], manual: { command: string }[], replace: boolean): boolean {
-  const skillTemplate = readFileSync(new URL("../templates/init-dev-environment/SKILL.md.tmpl", import.meta.url), "utf8");
-  const installer = readFileSync(new URL("../templates/init-dev-environment/install.sh", import.meta.url));
+  const skillTemplate = readFileSync(new URL("./templates/init-dev-environment/SKILL.md.tmpl", import.meta.url), "utf8");
+  const installer = readFileSync(new URL("./templates/init-dev-environment/install.sh", import.meta.url));
   const skillsDir = join(root, ".claude", "skills");
   const skillDir = join(skillsDir, "init-dev-environment");
   const skillsDirCreated = !existsSync(skillsDir);

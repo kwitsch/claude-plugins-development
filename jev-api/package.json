@@ -1,6 +1,6 @@
 {
   "name": "jev-api",
-  "version": "0.7.1",
+  "version": "0.7.2",
   "private": true,
   "description": "Lets Claude put yes/no, choice and score questions about a text to TypeSafe's Jev System One in one request.",
   "keywords": [
@@ -20,8 +20,10 @@
     "test:plugin": "node ../development/scripts/plugin-test.ts"
   },
   "devDependencies": {
+    "@kwitsch/tsdown-preset-claude-code": "0.2.0",
     "@modelcontextprotocol/server": "2.4.0",
-    "claude-engine-vitest": "workspace:*"
+    "claude-engine-vitest": "workspace:*",
+    "tsdown": "0.23.7"
   },
   "claudePlugin": {
     "userConfig": {

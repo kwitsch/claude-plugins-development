@@ -3,7 +3,7 @@
 Mods-API plugin: one TypeScript function-hooks module and its pure helper modules; it registers no tool
 (`estimate_effort` was removed in 0.14.0) and has no skills, agents, command hooks or MCP servers. A port of nim-f/jev-pilot
 (<https://github.com/nim-f/jev-pilot>, version 0.5.0, commit 90cc1f1, directory `hooks/`). Upstream has no LICENSE
-file; it is credited in `plugin/README.md`.
+file; it is credited in `assets/README.md`.
 
 Part rules (load with their files): `.claude/rules/register-hooks.md` (hooks, `$` use, engine pitfalls),
 `.claude/rules/cache-compact.md` (cache countdown, auto-compact, compaction, their known limits),
@@ -73,4 +73,4 @@ after the pause is the probe, any success resets it. The pause ends when the clo
 ## Layout
 
 - Tests share the kit `tests/support/kit.ts` (standard: root `.claude/rules/hook-tests.md`).
-- Built with tsdown (`tsdown.config.ts`, one mod entry `hooks/register`); `claude-tests/world.ts` holds the fake Jev answers shared by the unit kit and the integration tests.
+- Built with the preset (`tsdown.config.ts`; `hooks.template.json` `mod` -> `plugin/hooks/register.js`; `claudePlugin` forwarded as `manifest`); `claude-tests/world.ts` holds the fake Jev answers shared by the unit kit and the integration tests.

@@ -10,7 +10,7 @@ Each module's header comment says what it holds; module history is in `developme
 
 ## Build
 
-- Built with tsdown (`tsdown.config.ts`: mod `hooks/register`, script `mcp/server`): root `.claude/rules/tsdown-build.md`; sibling imports as `./x.js`.
+- Built with the preset (`tsdown.config.ts`: `hooks.template.json` mod `./src/hooks/register.ts` -> `plugin/hooks/register.js`, `mcp.template.json` server `http` -> `plugin/mcp/server.mjs`, `claudePlugin` forwarded as `manifest`): root `.claude/rules/tsdown-build.md`; sibling imports as `./x.js`.
 - A hooks module may import from outside `hooks/` (`src/shared/http.ts`, pure, also imported by the MCP server); it is inlined into both outputs.
 
 ## Hooks

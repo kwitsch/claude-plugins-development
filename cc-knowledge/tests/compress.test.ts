@@ -7,7 +7,7 @@ import { basename, join } from "node:path";
 import { expect, test } from "vitest";
 import { makeStub, PLUGIN, put, readPlugin, run, tmpDir } from "./support/plugin.js";
 
-const SCRIPT = join(PLUGIN, "skills/cc-compress/scripts/compress.mjs");
+const SCRIPT = join(PLUGIN, "skills/cc-compress/compress.mjs");
 const SKILL_MD = "skills/cc-compress/SKILL.md";
 const PRESERVED = "# Title\n\nThis is a long enough sentence to compress.\n";
 
@@ -295,7 +295,7 @@ test("cc-compress has no load-time !-injection trigger", () => {
 });
 
 test("cc-compress references its bundled script via CLAUDE_SKILL_DIR", () => {
-  expect(readPlugin(SKILL_MD)).toContain("${CLAUDE_SKILL_DIR}/scripts/compress.mjs");
+  expect(readPlugin(SKILL_MD)).toContain("${CLAUDE_SKILL_DIR}/compress.mjs");
 });
 
 test("cc-compress gates non-recoverable targets through AskUserQuestion", () => {
