@@ -950,7 +950,7 @@ test(".mcp.json key matches every hooks.json server id and each hook tool is lis
   const mcp = JSON.parse(readFileSync(path.join(PLUGIN, ".mcp.json"), "utf8"));
   const hooks = JSON.parse(
     readFileSync(path.join(PLUGIN, "hooks/hooks.json"), "utf8"),
-  ) as { hooks: Record<string, { hooks: { type: string; command: string; server: string; tool: string }[] }[]> };
+  ) as { hooks: Record<string, { hooks: { type: string; command: string; args: string[]; server: string; tool: string }[] }[]> };
   const keys = Object.keys(mcp.mcpServers);
   assert.deepEqual(keys, ["dprint-hooks"]);
   const s = startServer();
@@ -965,7 +965,8 @@ test(".mcp.json key matches every hooks.json server id and each hook tool is lis
   assert.ok(entries.length > 0);
   for (const e of entries) {
     if (e.type === "command") {
-      assert.match(e.command, /hooks\/watch-paths\.mjs/);
+      assert.equal(e.command, "node");
+      assert.match(e.args[0], /hooks\/watch-paths\.mjs/);
       continue;
     }
     assert.equal(e.type, "mcp_tool");
