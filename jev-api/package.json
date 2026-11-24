@@ -1,6 +1,6 @@
 {
   "name": "jev-api",
-  "version": "0.7.1",
+  "version": "0.7.2",
   "private": true,
   "description": "Lets Claude put yes/no, choice and score questions about a text to TypeSafe's Jev System One in one request.",
   "keywords": [

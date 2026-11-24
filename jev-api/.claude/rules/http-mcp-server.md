@@ -5,7 +5,7 @@ paths:
   - "src/hooks/transport.ts"
   - "src/hooks/register.ts"
   - "src/hooks/jev.ts"
-  - "plugin/.mcp.json"
+  - "mcp.template.json"
   - "tests/server.test.ts"
   - "tests/transport.test.ts"
   - "tests/http-core.test.ts"
@@ -18,7 +18,7 @@ Live evidence and measurements: `development/wiki/plugins/jev-api/tasks/F22-http
 ## Why a server
 
 - `$.http.fetch` has no signal and no timeout; `$.mcp.call` is not cancelled when the dispatch is abandoned either (not by `next.signal`, not by the 10 s hook budget; the server gets no `notifications/cancelled`).
-- So `plugin/.mcp.json` starts `mcp/server.mjs` (key `http`, name `plugin:jev-api:http`, tools `request`, `cancel`; dual-era, no tasks) and `transport.ts` calls it with `$.mcp.connect("http")` and `$.mcp.call`. The mod's `$.http.fetch` is used only when the server is not available.
+- So `mcp.template.json` (generated `plugin/.mcp.json`) starts `mcp/server.mjs` (key `http`, name `plugin:jev-api:http`, tools `request`, `cancel`; dual-era, no tasks) and `transport.ts` calls it with `$.mcp.connect("http")` and `$.mcp.call`. The mod's `$.http.fetch` is used only when the server is not available.
 
 ## Protocol
 
