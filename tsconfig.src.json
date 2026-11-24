@@ -6,7 +6,6 @@
     "*/scripts/*.ts",
     "*/tsdown.config.ts",
     "development/scripts/*.ts",
-    "development/tsdown/*.ts",
     "development/shared/src/**/*.ts",
     "development/vitest/claude-engine/**/*.ts",
     "vitest.config.mts"

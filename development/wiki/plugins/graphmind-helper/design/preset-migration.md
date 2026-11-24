@@ -1,6 +1,7 @@
 # graphmind-helper on the published preset
 
-How the pilot moved from `development/tsdown` to `@kwitsch/tsdown-preset-claude-code` (0.1.0, then 0.1.2; plugin 0.2.4 to 0.2.5), what the output comparison showed, and what the next plugin migrations can rely on.
+How the pilot moved from the repo-local build (`pluginConfig`) to `@kwitsch/tsdown-preset-claude-code` (0.1.0, then 0.1.2; plugin 0.2.4 to 0.2.5), what the output comparison showed, and what the next plugin migrations can rely on.
+All plugins moved to the preset on 2026-11-24: [tsdown-plugin-build](../../../decisions/tsdown-plugin-build.md#superseded-by-the-published-preset-2026-11-24).
 
 ## Setup
 

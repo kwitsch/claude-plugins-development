@@ -1,17 +1,18 @@
 ---
 paths:
   - "*/plugin/**"
+  - "*/assets/**"
 ---
 
 # Rule: plugin/ = shipped plugin only
 
 Allowed in `plugin/`, nothing else:
 
-- build output (never edit): `**/*.mjs` (minified, from `../src/**/*.ts`), `hooks/*.js` (the function-hooks module of a tsdown-built plugin, `tsdown-build.md`), `.claude-plugin/plugin.json` (generated from `../package.json`)
-- hand-written: `README.md`, `.mcp.json`, `hooks/hooks.json`, `skills/**/SKILL.md` + `*.reference.md` + data `*.json`, `agents/*.md`
-- vendored third-party bundle (never edit; user decision 2026-11-17, universal-format's prettier): `**/vendor/*.mjs`, written by the plugin's own build step (`scripts/vendor.ts`, after `tsdown`; the directory is listed under `vendor` in `tsdown.config.ts`) from exactly pinned devDependencies, plus the binary files that bundle loads at runtime, each listed by exact path under `pluginBuild.assets` in `../package.json`. Own code never goes there: it stays `src/**/*.ts`. Reasons: [vendored-bundles](../../development/wiki/decisions/repo-tooling.md#vendored-third-party-bundles-2026-11-17).
+- build output (never edit): `**/*.mjs` (minified, from `../src/**/*.ts`), `hooks/*.js` (the function-hooks module, `tsdown-build.md`), `.claude-plugin/plugin.json` (generated from `../package.json`), `hooks/hooks.json` and `.mcp.json` (generated from `../hooks.template.json` and `../mcp.template.json`)
+- hand-written, copied from `../assets/` by the build (edit there): `README.md`, `skills/**/SKILL.md` + `*.reference.md` + data `*.json`, `agents/*.md`
+- vendored third-party bundle (never edit; user decision 2026-11-17, universal-format's prettier): `**/vendor/*.mjs`, built by the preset's `bundles` option from exactly pinned devDependencies, plus the binary files that bundle loads at runtime, copied by the preset's `files` option and each listed by exact path under `pluginBuild.assets` in `../package.json`. Own code never goes there: it stays `src/**/*.ts`. Reasons: [vendored-bundles](../../development/wiki/decisions/repo-tooling.md#vendored-third-party-bundles-2026-11-17).
 
-Everything else is forbidden (`*.ts`/`*.mts`, `tests/`, `*.test.*`, `CLAUDE.md`, engine output, …); the allowlist lives in `development/scripts/check-plugin-layout.ts`. Function-hooks modules too: source in `src/hooks/*.ts`, `hooks.json` lists `./register.js`. Upstream code in another layout gets converted, never copied 1:1. Never edit this rule to fit a change — fix the change. CI fails on violations, and so does `pnpm build` of every plugin (the build runs the layout check first: `development/tsdown/index.ts`).
+Everything else is forbidden (`*.ts`/`*.mts`, `tests/`, `*.test.*`, `CLAUDE.md`, engine output, …); the allowlist lives in `development/scripts/check-plugin-layout.ts`. Function-hooks modules too: source in `src/hooks/*.ts`, the generated `hooks.json` lists `./register.js`. Upstream code in another layout gets converted, never copied 1:1. Never edit this rule to fit a change — fix the change. CI fails on violations (`check-plugin-fresh.sh` runs the layout check after the build).
 
 `.gitattributes` marks build output and the lockfile `linguist-generated` (collapsed in PRs); `*/plugin/**/*.mjs` and `*/plugin/**/*.js` are also `-diff -merge`: resolve conflicts there by rebuilding; `*.wasm` is `binary`.
 

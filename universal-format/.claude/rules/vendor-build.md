@@ -1,6 +1,5 @@
 ---
 paths:
-  - "scripts/**"
   - "src/mcp/vendor/**"
   - "src/mcp/prettier.ts"
   - "plugin/mcp/vendor/**"
@@ -10,12 +9,12 @@ paths:
 
 # Vendored bundle: what must hold
 
-- The build is `tsdown && node scripts/vendor.ts`, in that order. `tsdown.config.ts` lists `vendor: ["mcp/vendor"]`: imports of `./vendor/index.js` stay external (`./vendor/index.mjs` in `server.mjs`, `../../mcp/vendor/index.mjs` in the skill driver) and the stale-output removal leaves `plugin/mcp/vendor/` to `vendor.ts`.
-- Own code never goes into the bundle: `scripts/vendor-entry.ts` exports only prettier and the three plugin loaders. Sources import it as `./vendor/index.js`, typed by `src/mcp/vendor/index.d.ts`; a new export needs both files changed.
+- The build is plain `tsdown`. `tsdown.config.ts` declares `bundles: { "mcp/vendor": "src/mcp/vendor/index.ts" }`: the preset builds `plugin/mcp/vendor/index.mjs` plus content-hashed chunks (minified, no comments) and keeps every import of the bundle source external (`./vendor/index.mjs` in `server.mjs`, the matching relative path in the skill driver).
+- Own code never goes into the bundle: `src/mcp/vendor/index.ts` exports only prettier and the three plugin loaders. Sources import it as `./vendor/index.js`; the types come from that file.
 - The plugin loaders stay dynamic `import()`s (a static import evaluates the plugin at every server start; `tests/build.test.ts` checks it).
 - `prettier`, `prettier-plugin-java`, `@prettier/plugin-php`, `prettier-plugin-sh` and `sh-syntax` are pinned exactly in `package.json`; `sh-syntax` equals the version `prettier-plugin-sh` resolves. Do not bump `prettier-plugin-sh` past 0.16.1 without checking the bundle. Dependabot ignores all five (`.github/dependabot.yml`): a bump changes `plugin/` and needs a plugin release.
-- rolldown is a root devDependency with an exact pin; its output must be the same on every machine (`minify`, `comments: false`, content-hashed chunk names): CI rebuilds and compares.
-- Three wasm files ship, listed under `pluginBuild.assets`: the two of prettier-plugin-java beside its chunk in `mcp/vendor/`, sh-syntax's `main.wasm` in `mcp/`, one directory above the chunks. `vendor.ts` copies them with mode 0644 and removes every other wasm file.
+- The bundle output must be the same on every machine (minified, no comments, content-hashed chunk names): CI rebuilds and compares.
+- Three wasm files ship, copied by `files` in `tsdown.config.ts` from the installed packages and listed under `pluginBuild.assets`: the two of prettier-plugin-java beside its chunk in `mcp/vendor/`, sh-syntax's `main.wasm` in `mcp/`, one directory above the chunks. They must stay mode 0644 (preset 0.3.0 `files` writes a fixed non-executable mode; a mode change is a preset bug to report).
 - Never edit `plugin/mcp/vendor/*` or a wasm file by hand.
 
 Design: [vendor-build.md](../../../development/wiki/plugins/universal-format/design/vendor-build.md).

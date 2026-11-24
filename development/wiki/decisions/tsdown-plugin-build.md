@@ -7,7 +7,7 @@ Why plugins are built with tsdown into self-contained files, how each kind of ou
 1. Every `.mjs`/`.js` in a plugin's `plugin/` is built by tsdown as one self-contained, zero-dependency file: dependencies and the plugin's own helper modules are inlined, `node:` builtins stay external. No separate `lib.mjs`, no `plugin/shared/` copy.
 2. MCP servers and command hooks are fully minified (mangle and compress) and start with a shebang line. Command hooks stay in `plugin/hooks/`, named after the hook that calls them.
 3. A mod (function-hooks entry) ships as `plugin/hooks/register.js`, self-contained, compressed but not mangled.
-4. `plugin.json` is generated from `package.json` by a tsdown plugin in `development/tsdown/`; one shared config helper keeps a plugin's `tsdown.config.ts` at a few lines.
+4. `plugin.json` is generated from `package.json` by a tsdown plugin in the repo's own build (`pluginConfig`, removed 2026-11-24); one shared config helper keeps a plugin's `tsdown.config.ts` at a few lines.
 5. `@shared` imports resolve through an alias in that helper and are allowed in any bundled file.
 
 - Reason: one build standard on the pnpm ecosystem instead of the loose scripts in `development/scripts/`, replaced step by step; a shipped script that is one file has no relative import that can miss its target.
@@ -40,7 +40,7 @@ Claude Code's static check reads the names `$`, `on`, `next` and `register` in a
 - Before anything is written: the entry list (at least one entry, shape `[\w-]+(/[\w-]+)*`, no duplicate within a kind, the source exists), `package.json` through `pluginManifest`, the layout of `plugin/` through `check-plugin-layout.ts` (its allowlist gained `hooks/[^/]+\.js`; it rejects symlinks).
 - Per entry, before its file is written: exactly one chunk (a dynamic `import()` or an emitted asset adds one); only `node:` specifiers among its static and dynamic imports (catches a bare `fs`, a dependency left external, a missed `@shared`); a script starts with `#!`, a mod does not.
 - After the first entry is written: every regular `.mjs`/`.js` below `plugin/` that is neither an entry's output nor listed in `pluginBuild.assets` is deleted (a stale committed file would ship), then `plugin.json` is written, byte-identical to the old build's.
-- Tested in `development/tsdown/tests/plugin-config.test.ts` (build 2026-11-20, 16 tests).
+- Tested in the former `plugin-config.test.ts` of that build (build 2026-11-20, 16 tests).
 
 ## Given up against the old build
 
@@ -84,4 +84,17 @@ Claude Code's static check reads the names `$`, `on`, `next` and `register` in a
 ## Not checked
 
 - rolldown renames colliding top-level names with a `$1` suffix when it merges modules; whether the engine's static check accepts such identifiers is unknown. Measured 2026-11-20: `grep -c '\$1\b' <plugin>/plugin/hooks/register.js` gives cc-knowledge 0, dprint 0, jevfort 0, jev-api 2; `claude plugin validate <plugin>/plugin` passes for all four, and `pnpm --filter <plugin> test:plugin` passes for the same four mods (cc-knowledge 3, dprint 5, jev-api 5, jevfort 8 tests). The `$1` identifiers of jev-api were not exercised beyond that.
-- A change limited to `development/tsdown/**` gets no `changed-plugins` status (paths-ignore) and is not tested by CI, like `development/scripts/**`.
+- A change limited to the former repo-local build gets no `changed-plugins` status (paths-ignore) and is not tested by CI, like `development/scripts/**`.
+
+## Superseded by the published preset (2026-11-24)
+
+All eight plugins build with `@kwitsch/tsdown-preset-claude-code` (exact, beside `tsdown` 0.23.7, devDependencies of each plugin): seven on 0.2.0, universal-format on 0.3.0. The repo-local `pluginConfig` build, its manifest generator `plugin-manifest.ts`, their tests and the root `tsdown`/`rolldown` devDependencies are deleted. The decisions above hold where the preset does the same (self-contained outputs, the minify matrix, `@shared` inlined through `overrides.alias`); "The vendor option" and its vitest alias are gone. The constraints are in [tsdown-build.md](../../../.claude/rules/tsdown-build.md).
+
+- Why 0.2.0: only it has `bundles` and `files`, which build universal-format's vendored prettier bundle and copy its wasm files; on 0.1.2 that plugin would have kept the old build, and two build systems would have coexisted. graphmind-helper went from 0.1.2 to 0.2.0.
+- Why universal-format is on 0.3.0: on 0.2.0 `files` kept the source file mode (two wasm files from the pnpm store came out 0755) and the layout check rejected the bare builtin imports (`fs`, `path`, ...) of prettier's chunks, which only `overrides.nodeProtocol: true` worked around. Reported as preset issue kwitsch/rolldown-plugin-claude-code#11; 0.3.0 writes `files` with a fixed mode 0644 and accepts the bundled builtins, so universal-format needs neither a chmod step nor `nodeProtocol`. The other seven stay on 0.2.0 until a bump is wanted for its own sake.
+- Hand-written shipped files moved to `<name>/assets/`, hooks and MCP servers to `hooks.template.json` / `mcp.template.json`; the preset empties `plugin/` before each build.
+- `claudePlugin` is forwarded as `manifest` in every `tsdown.config.ts`: the preset (0.2.0 and 0.3.0, checked in `dist/`) ignores that key and would drop jev-api's `userConfig` and jevfort's `dependencies`.
+- cc-knowledge's skill scripts moved from `skills/<skill>/scripts/<name>.mjs` to `skills/<skill>/<name>.mjs` with their data and reference files: the preset has no subfolder for skill scripts.
+- Command hooks are generated as `"command": "node", "args": ["${CLAUDE_PLUGIN_ROOT}/hooks/<name>.mjs"]`; Claude Code runs that form ([claude-code-command-hooks.md](../facts/claude-code-command-hooks.md#command-and-args), live 2.1.331, 2026-11-24, rc-enhancement and universal-lint).
+- Not covered any more: the cross-plugin test that `plugin.json` equals the manifest derived from `package.json` went with `plugin-manifest.ts`; the preset's own tests and CI's freshness check remain.
+- Rejected: staying on 0.1.2 with universal-format on the old build (two builds, the old build and its tests kept alive for one plugin); keeping `scripts/vendor.ts` as a post-build step (its external `./vendor/index.js` fails the preset's import check unless bypassed); converting rc-enhancement's and universal-lint's command hooks to mods (behaviour change: exit-2 semantics, `asyncRewake`, per-event timeouts); one pull request per plugin (eight bumps over eight PRs and a ninth, development-only PR that CI ignores and needs an admin merge).

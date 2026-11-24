@@ -1,8 +1,8 @@
 ---
 paths:
   - "src/mcp/**"
-  - "plugin/hooks/**"
-  - "plugin/.mcp.json"
+  - "hooks.template.json"
+  - "mcp.template.json"
 ---
 
 # Hook, server and handler: what must hold

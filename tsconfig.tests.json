@@ -9,8 +9,6 @@
     "*/tests/**/*.mts",
     "*/claude-tests/**/*.ts",
     "development/vitest/claude-engine/claude-code-testing.d.ts",
-    "development/scripts/tests/**/*.ts",
-    "development/tsdown/tests/**/*.ts",
     "development/shared/tests/**/*.ts"
   ]
 }

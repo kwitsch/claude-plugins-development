@@ -11,9 +11,9 @@ How prettier and its plugins get into `plugin/`, why they are bundled at all, an
 ## Layout
 
 - Own code (`src/mcp/*.ts`, the skill driver) is built by tsdown into two self-contained outputs, `plugin/mcp/server.mjs` and `plugin/skills/universal-format/format-files.mjs` (since 0.19.3).
-- Third-party code is `plugin/mcp/vendor/*.mjs`, written by `scripts/vendor.ts` from `scripts/vendor-entry.ts` with rolldown: `platform: "node"`, ESM, code-split, `minify: true`, `comments: false`, `entryFileNames: "[name].mjs"`, `chunkFileNames: "[name]-[hash].mjs"`. 20 `.mjs` files (prettier's parsers are chunks of their own) plus two wasm files (rolldown 1.2.16, prettier 3.9.10).
-- `src/mcp/prettier.ts` imports `./vendor/index.js`; the types are `src/mcp/vendor/index.d.ts` (`export * as prettier from "prettier"` plus the three loaders), which is not built. Precedent for a hand-kept declaration beside sources: dprint's `hook-inputs.d.ts`.
-- The build order is fixed: `tsdown`, then `vendor.ts`. `vendor: ["mcp/vendor"]` in `tsdown.config.ts` keeps tsdown's stale-output removal out of `plugin/mcp/vendor/`, so a failed vendor step leaves the previous bundle only if it fails before its own `rmSync`; otherwise restore the directory from git. `vendor.ts` bundles into a temp directory, so the directory never holds half a bundle. Accepted: such a state fails CI and cannot be released.
+- Third-party code is `plugin/mcp/vendor/*.mjs`, built since 0.19.5 by the preset's `bundles: { "mcp/vendor": "src/mcp/vendor/index.ts" }` (preset 0.3.0; minified, `comments: false`, content-hashed chunks `[name]-[hash].mjs`). Before 0.19.5 `scripts/vendor.ts` bundled `scripts/vendor-entry.ts` with rolldown.
+- `src/mcp/prettier.ts` imports `./vendor/index.js`, which resolves to the bundle source `src/mcp/vendor/index.ts` (types and vitest included); the build keeps the import external.
+- The build is one `tsdown` run; the preset empties `plugin/` first, so no stale chunk or wasm file survives.
 - The output must not depend on the machine: no comments (they would carry module paths of the package store), content-hashed chunk names. CI rebuilds on every PR that touches the plugin and compares with the committed `plugin/` (`check-plugin-fresh.sh`); `tests/build.test.ts` checks that no checkout or store path is embedded.
 
 ## Wasm files
@@ -21,7 +21,7 @@ How prettier and its plugins get into `plugin/`, why they are bundled at all, an
 - Three files, each where its plugin looks at runtime:
   - `mcp/vendor/web-tree-sitter.wasm` and `mcp/vendor/tree-sitter-java_orchard.wasm`: prettier-plugin-java and web-tree-sitter load theirs with `new URL(<name>, import.meta.url)`, that is, beside the chunk;
   - `mcp/main.wasm`: sh-syntax reads `path.resolve(<its module directory>, "../main.wasm")`, one directory above the chunk.
-- A bundler cannot emit them (runtime lookups), so `vendor.ts` copies them from the installed packages, with mode 0644 (the package store can hold them executable, and git records the mode), and removes every other wasm file first: a plugin bump that renames a grammar leaves no orphan.
+- A bundler cannot emit them (runtime lookups), so the preset's `files` option copies them from the installed packages with a fixed mode 0644 (0.3.0; 0.2.0 kept the source mode, and the pnpm store holds two of them executable: preset issue #11); the emptied `plugin/` leaves no orphan when a grammar is renamed.
 - They are listed under `pluginBuild.assets` in `package.json`, the opt-in list of the layout check; `.gitattributes` marks `*.wasm` binary.
 - `main.wasm` is used only when a project sets `experimentalWasm: true`; the default shell parser is mvdan-sh, pure JS.
 - sh-syntax needs Go's `wasm_exec` runtime on `globalThis`. Its own side-effect import of `vendors/wasm_exec.cjs` is tree-shaken, because its `package.json` lists only `vendors/wasm_exec.js` as side-effectful; the vendored entry imports the exported subpath itself. Without it every wasm format failed with "Go is not defined" (seen with the bun bundler, kept for rolldown; the `experimentalWasm` test covers it).

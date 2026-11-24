@@ -73,8 +73,8 @@ test("hooks/ holds only hooks.json; no launcher script ships", () => {
   assert.deepEqual(readdirSync(PLUGIN).sort(), [".claude-plugin", ".mcp.json", "README.md", "hooks", "mcp", "skills"]);
 });
 
-test("the build runs the standard build first, then the vendor step (the standard build removes the chunks)", () => {
-  assert.equal(pkg.scripts.build, "tsdown && node scripts/vendor.ts");
+test("the build is the preset's tsdown run alone (bundles and files build the vendored bundle and copy its wasm files)", () => {
+  assert.equal(pkg.scripts.build, "tsdown");
 });
 
 test("prettier, its three plugins and sh-syntax are pinned exactly (no range prefix)", () => {
