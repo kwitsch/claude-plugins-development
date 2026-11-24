@@ -210,3 +210,8 @@ Source: user decision 2026-11-20 (task spec), PR stacked on `feature/tsdown-plug
 ## [2026-11-24] ingest | all plugins build with the published preset
 
 - `decisions/tsdown-plugin-build.md` gains the section on the preset (reasons for 0.2.0, universal-format on 0.3.0 after preset issue #11, assets/ and templates, `manifest: claudePlugin`, flattened cc-knowledge skill scripts, command hooks as `node` + `args`, rejected alternatives); `repo-tooling.md`, `shared-source-layer.md`, universal-format `design/vendor-build.md`, graphmind-helper `design/preset-migration.md` and cc-knowledge `design/maintenance-tooling.md` follow; `facts/claude-code-command-hooks.md` records the live check of the `args` form (2.1.331). `development/tsdown` and `plugin-manifest.ts` are deleted. Source: PR #137, session.
+
+## [2026-11-24] ingest | taskflow migrated into this repository
+
+- New plugin section `plugins/taskflow/`: `index.md`, `notes/migration.md` (base commit, version 2.2.1, the Node port of the merge script and its kept jq quirk, the layout outcome with the 15 `pluginBuild.assets` entries, test counts 137 -> 138 and the four dropped cases), `design/workflows.md` and `design/dispatch-task.md` (the reasons moved out of the old nested `CLAUDE.md` files); `plugins/index.md` lists the section.
+- Plugin docs: `taskflow/CLAUDE.md` and the rules `taskflow/.claude/rules/workflows.md`, `dispatch-task.md`, `skill-md.md` (constraints only). Root `.oxlintrc.json` ignores `**/*.workflow.js`. Source: kwitsch/claude-plugins `plugins/taskflow` at `1404384`, session.
