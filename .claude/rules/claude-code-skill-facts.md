@@ -1,6 +1,6 @@
 ---
 paths:
-  - "*/plugin/skills/**"
+  - "*/assets/skills/**"
   - "*/src/skills/**"
   - ".claude/skills/**"
 ---

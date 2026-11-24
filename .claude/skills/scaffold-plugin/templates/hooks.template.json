@@ -5,7 +5,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/__EVENT_KEBAB__.mjs\"",
+            "command": "./src/hooks/__EVENT_KEBAB__.ts",
             "timeout": 10
           }
         ]

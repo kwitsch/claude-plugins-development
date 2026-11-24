@@ -1,6 +1,7 @@
 ---
 paths:
   - "*/plugin/hooks/**"
+  - "*/hooks.template.json"
   - "*/src/hooks/**"
   - "*/scripts/**"
 ---

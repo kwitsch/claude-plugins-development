@@ -11,5 +11,9 @@
   "scripts": {
     "build": "tsdown",
     "test": "vitest run --config \"$(git rev-parse --show-toplevel)/vitest.config.mts\""
+  },
+  "devDependencies": {
+    "@kwitsch/tsdown-preset-claude-code": "0.2.0",
+    "tsdown": "0.23.7"
   }
 }

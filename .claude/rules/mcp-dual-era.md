@@ -1,7 +1,7 @@
 ---
 paths:
   - "*/src/mcp/**"
-  - "*/plugin/.mcp.json"
+  - "*/mcp.template.json"
 ---
 
 # Rule: MCP servers are dual-era from the start
