@@ -4,6 +4,10 @@ Behaviour of classic hooks (`hooks.json`) beyond what the rule files state: filt
 
 Tool hooks, subagent payloads, `Stop`/`SubagentStop`, FileChanged and `watchPaths` basics are in [claude-code-tool-hook-facts.md](../../../.claude/rules/claude-code-tool-hook-facts.md).
 
+## Command and args
+
+- A `type: "command"` hook with `"command": "node", "args": ["${CLAUDE_PLUGIN_ROOT}/hooks/<name>.mjs"]` runs: `${CLAUDE_PLUGIN_ROOT}` is expanded inside `args`, the debug log shows `Hooks: SessionStart:startup [node <absolute path>] ... finished with status 0`, and the output reaches the session (`provided additionalContext`, `provided 2 watchPaths`). Seen for SessionStart, PostToolUse and Stop with `--plugin-dir` (live 2.1.331, 2026-11-24, rc-enhancement and universal-lint as built by the tsdown preset).
+
 ## Filters
 
 - A handler's `if` takes exactly one permission rule: `Write(*.ext)` or `Edit(*.ext)` match at any depth and case-insensitively; an `Edit` rule does not cover `Write`; brace globs and `|` alternation never match. Filtering by extension therefore needs one handler per tool and extension. Debug log: `Skipping hook due to if condition ... not matching` (live 2.1.321).

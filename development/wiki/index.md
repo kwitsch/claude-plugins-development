@@ -10,7 +10,7 @@ Catalog of what earlier sessions wrote down, in this wiki and elsewhere in the r
 - [mods-engine-tools.md](facts/mods-engine-tools.md): `$.tool.register` naming and lifetime, serving a tool, permissions of hook-served tools, `$.tool.call` between plugins, what `tool.check` sees and can decide.
 - [mods-engine-io.md](facts/mods-engine-io.md): `$.http.fetch` limits and error texts, `$.model.complete` cut-off replies, `$.clock` overflow and overlap, `$.mcp.connect`/`call`, `$.ui.log` and the band above the prompt.
 - [mods-engine-session.md](facts/mods-engine-session.md): `$.session.messages` row shapes, `prompt.submit` origins, how `$.command.run` queues, what a `session.compact` hook replaces, usage and cache lifetime.
-- [claude-code-command-hooks.md](facts/claude-code-command-hooks.md): `if` and FileChanged matcher filters, physical cwd in payloads, the transcript records a hook's exit 2 leaves.
+- [claude-code-command-hooks.md](facts/claude-code-command-hooks.md): `if` and FileChanged matcher filters, physical cwd in payloads, the transcript records a hook's exit 2 leaves, the `command` + `args` form.
 - [test-kit-vs-engine.md](facts/test-kit-vs-engine.md): where `claude-engine-vitest` and `claude plugin test` differ from a real session.
 - [npm-npx-and-node.md](facts/npm-npx-and-node.md): npx lookup order, registry re-check and lock, non-blocking stdin after importing `node:process`, timer overflow, lookup cost under WSL.
 - [build-lint-and-format-tools.md](facts/build-lint-and-format-tools.md): oxlint nested configs and tsgolint lookup, the oxc-minify template-literal rewrite, eslint config lookup, dprint CLI behaviour.
@@ -22,7 +22,7 @@ Catalog of what earlier sessions wrote down, in this wiki and elsewhere in the r
 
 - [repo-tooling.md](decisions/repo-tooling.md): why dprint with a minimal config, one oxlint run, vitest, `.ts` sources, generated manifests, English content, this wiki, and rules that hold constraints only; what was rejected each time.
 - [shared-source-layer.md](decisions/shared-source-layer.md): which code several plugins copy, why a runtime package is out, and the chosen build-time shared source (`@shared`, inlined by the tsdown build; the plan steps and their measurements).
-- [tsdown-plugin-build.md](decisions/tsdown-plugin-build.md): the tsdown build standard: self-contained outputs, the minify matrix for mods (what Claude Code's static check accepts), what the build checks, the vendor option, the migration that removed the old build, what was rejected.
+- [tsdown-plugin-build.md](decisions/tsdown-plugin-build.md): the tsdown build standard: self-contained outputs, the minify matrix for mods (what Claude Code's static check accepts), what the build checks, the vendor option, the migration that removed the old build, the move of all plugins to the published preset (2026-11-24), what was rejected.
 - [test-layers.md](decisions/test-layers.md): the two test layers (vitest unit tests on `src/`, `claude plugin test` integration tests on a temp copy of the built `plugin/`), the `@shared` alias, typed `claude-tests/`, the local-only integration run, and what was rejected.
 
 ### Methods

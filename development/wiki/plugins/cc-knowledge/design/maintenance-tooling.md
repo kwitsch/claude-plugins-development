@@ -12,7 +12,7 @@ How the reference files are refreshed from the official docs, and what changed w
 
 ## Changes in the migration
 
-- Retargeted: `refsDir` is `cc-knowledge/plugin/skills/cc-reference/references`, file names are the `*.reference.md` ones, the section index is `cc-knowledge/plugin/skills/cc-reference/SKILL.md`. A target name is the file name without `.reference.md` (`claude-code-hooks`).
+- Retargeted: `refsDir` is `cc-knowledge/assets/skills/cc-reference/references`, file names are the `*.reference.md` ones, the section index is `cc-knowledge/assets/skills/cc-reference/SKILL.md`. A target name is the file name without `.reference.md` (`claude-code-hooks`) (moved to `assets/` on 2026-11-24; the build copies them to `plugin/`).
 - `refresh.mjs` became `refresh.ts`, run directly by Node 24 (erasable syntax, no new `.mts`).
 - `release` bumps the patch in `cc-knowledge/package.json` (once per branch against `origin/main`; a version already ahead stays) and runs `pnpm --filter cc-knowledge build`, which regenerates `plugin.json`; the description date stamp is gone. Before the plugin is on `origin/main` the bump cannot read its base and exits 3.
 - Commit and PR subject: `cc-knowledge <version>: refresh the CC reference files`, staging `cc-knowledge/package.json` and `cc-knowledge/plugin/`.
