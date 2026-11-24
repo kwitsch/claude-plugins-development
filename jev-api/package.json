@@ -20,8 +20,10 @@
     "test:plugin": "node ../development/scripts/plugin-test.ts"
   },
   "devDependencies": {
+    "@kwitsch/tsdown-preset-claude-code": "0.2.0",
     "@modelcontextprotocol/server": "2.4.0",
-    "claude-engine-vitest": "workspace:*"
+    "claude-engine-vitest": "workspace:*",
+    "tsdown": "0.23.7"
   },
   "claudePlugin": {
     "userConfig": {

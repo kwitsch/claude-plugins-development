@@ -17,12 +17,14 @@
     "test": "vitest run --config \"$(git rev-parse --show-toplevel)/vitest.config.mts\""
   },
   "devDependencies": {
+    "@kwitsch/tsdown-preset-claude-code": "0.2.0",
     "@modelcontextprotocol/server": "2.4.0",
     "@prettier/plugin-php": "0.25.0",
     "prettier": "3.9.10",
     "prettier-plugin-java": "2.11.0",
     "prettier-plugin-sh": "0.16.1",
-    "sh-syntax": "0.4.2"
+    "sh-syntax": "0.4.2",
+    "tsdown": "0.23.7"
   },
   "claudePlugin": {},
   "pluginBuild": {
