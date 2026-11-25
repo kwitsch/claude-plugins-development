@@ -2,7 +2,6 @@ name: PR
 
 on:
   pull_request:
-    paths-ignore: ["development/**"]
 
 permissions:
   contents: read
@@ -18,8 +17,8 @@ jobs:
       - name: Detect changed plugins
         id: changed
         run: |
-          plugins=$(git diff --name-only "origin/${{ github.base_ref }}...HEAD" | cut -d/ -f1 | sort -u \
-            | while read -r d; do bash .github/scripts/is-plugin.sh "$d" && echo "$d"; done | tr '\n' ' ')
+          # changed plugin dirs, plus every @shared user when development/shared/src/ changed
+          plugins=$(bash .github/scripts/changed-plugins.sh "$(git merge-base "origin/${{ github.base_ref }}" HEAD)" HEAD | tr '\n' ' ')
           echo "plugins=$plugins" >> "$GITHUB_OUTPUT"
           echo "changed: ${plugins:-none}"
 
@@ -35,10 +34,9 @@ jobs:
           for p in $PLUGINS; do
             s=$(bash .github/scripts/ships.sh "$p" "$from" HEAD) # build inputs and version, see ships.sh
             case $s in
-              none) echo "::notice::$p: no build input changed, no version bump required"; continue ;;
-              version) echo "::warning::$p: version bumped but no build input changed, nothing ships"; continue ;;
+              none | version) bash .github/scripts/ships-notice.sh "$p" "$s"; continue ;;
               content)
-                # Dependabot only touches dev tooling and pinned build tools; a changed build ships with the plugin's next release
+                # Dependabot only touches dev tooling and pinned build tools; the change ships with the plugin's next version bump
                 if [ "$AUTHOR" = "dependabot[bot]" ]; then
                   echo "::notice::$p: dependabot update, no version bump required"; continue
                 fi ;;

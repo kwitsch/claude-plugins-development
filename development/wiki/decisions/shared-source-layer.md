@@ -16,7 +16,7 @@ Analysis and plan for moving code that several plugins copy into one build-time 
 
 - A plugin runs from a cache copy without `node_modules`: shared code must be inlined or copied into `plugin/` at build time; a runtime npm package is out.
 - Function-hooks modules (`$` engine, static check) take the inlined code too: see [tsdown-plugin-build.md](tsdown-plugin-build.md) and `claude-code-hook-facts.md`.
-- A shared change is a build-input change of each `@shared` consumer (`ships.sh`), but CI demands no bump for consumers the PR does not touch: bump each consumer that should ship in the same PR (since 2026-11-25, [tsdown-plugin-build.md](tsdown-plugin-build.md)).
+- A shared change is a build-input change of each `@shared` consumer: CI selects every consumer (`changed-plugins.sh`) and demands its version bump (since 2026-11-25, [tsdown-plugin-build.md](tsdown-plugin-build.md)).
 - universal-lint's `lint-file.mjs` is a self-contained command hook started on every edit: measure the cost of an extra module before it imports shared code.
 
 ## Decision (user, 2026-11-19): build-time shared source

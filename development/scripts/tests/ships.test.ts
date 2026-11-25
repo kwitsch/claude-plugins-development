@@ -148,3 +148,41 @@ test("an unknown <to> revision -> non-zero exit", () => {
   git("checkout", "-q", "--detach", base);
   assert.notEqual(ships("p", base, "no-such-revision").status, 0);
 });
+
+test("a version-only bump ships the inputs that changed since the previous release (a change merged without a bump)", () => {
+  git("tag", "-f", "p-1.0.0", base);
+  change({ "p/src/a.ts": "export const a = 3;\n" }); // merged without a bump (Dependabot)
+  const unshipped = git("rev-parse", "HEAD");
+  write("p/package.json", pkg("p", { version: "1.0.1" }));
+  git("add", "-A");
+  git("commit", "-q", "-m", "bump only");
+  expectState("p", "ship", unshipped);
+});
+
+test("a version-only bump with no input change since the previous release stays version", () => {
+  git("tag", "-f", "p-1.0.0", base);
+  change({ "p/package.json": pkg("p", { version: "1.0.1" }) });
+  expectState("p", "version", base);
+});
+
+/** Runs a helper script of .github/scripts in the throwaway repo. */
+function helper(script: string, ...args: string[]): SpawnSyncReturns<string> {
+  return spawnSync("bash", [fileURLToPath(new URL(`../../../.github/scripts/${script}`, import.meta.url)), ...args], { cwd: tmp, env, encoding: "utf8" });
+}
+
+test("changed-plugins.sh lists the changed plugin dirs, not other dirs", () => {
+  change({ "p/src/a.ts": "export const a = 4;\n", "development/other.txt": "x\n" });
+  assert.equal(helper("changed-plugins.sh", base, "HEAD").stdout, "p\n");
+});
+
+test("changed-plugins.sh adds every @shared plugin when development/shared/src/ changed", () => {
+  change({ "development/shared/src/s.ts": "export const s = 5;\n" });
+  assert.equal(helper("changed-plugins.sh", base, "HEAD").stdout, "q\n");
+});
+
+test("ships-notice.sh prints one annotation per state and rejects another one", () => {
+  for (const [state, level] of [["none", "notice"], ["version", "warning"], ["content", "notice"]]) {
+    assert.match(helper("ships-notice.sh", "p", state).stdout, new RegExp(`^::${level}::p: `));
+  }
+  assert.notEqual(helper("ships-notice.sh", "p", "ship").status, 0);
+});

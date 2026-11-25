@@ -3,7 +3,6 @@ name: Release
 on:
   push:
     branches: [main]
-    paths-ignore: ["development/**"]
 
 permissions:
   contents: read
@@ -29,15 +28,10 @@ jobs:
           git cat-file -e "$BEFORE^{commit}" 2>/dev/null \
             || BEFORE=$(git rev-parse -q --verify "$GITHUB_SHA^" || git hash-object -t tree /dev/null)
           tags=""
-          for p in $(git diff --name-only "$BEFORE" "$GITHUB_SHA" | cut -d/ -f1 | sort -u); do
-            bash .github/scripts/is-plugin.sh "$p" || continue
+          for p in $(bash .github/scripts/changed-plugins.sh "$BEFORE" "$GITHUB_SHA"); do
             # ships only when build inputs and version both changed; checked here too, since an admin merge can bypass the PR check
             s=$(bash .github/scripts/ships.sh "$p" "$BEFORE" "$GITHUB_SHA")
-            case $s in
-              none) echo "::notice::$p: no build input and no version changed, no release"; continue ;;
-              content) echo "::notice::$p: build inputs changed without a version bump, no release; bump the version together with the input change"; continue ;;
-              version) echo "::notice::$p: version changed without a build input change, no release"; continue ;;
-            esac
+            if [ "$s" != ship ]; then bash .github/scripts/ships-notice.sh "$p" "$s"; continue; fi
             t="$p-$(jq -r .version "$p/package.json")"
             if git ls-remote --exit-code --tags origin "refs/tags/$t" > /dev/null; then
               echo "::notice::$t already exists, not re-tagging"
