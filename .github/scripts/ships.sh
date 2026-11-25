@@ -2,7 +2,7 @@
 # Usage: ships.sh <plugin dir> <from> <to>   (run in a checkout of <to>)   e.g. ships.sh jevfort "$(git merge-base origin/main HEAD)" HEAD
 # Prints what changed for the plugin between the two commits:
 #   ship     build inputs and version changed: the only case release.yml tags and syncs
-#   content  build inputs changed, version did not: pr.yml fails (Dependabot excepted), release.yml skips it
+#   content  build inputs changed, version did not: pr.yml fails (Dependabot excepted), release.yml skips it (a later bump-only commit is "version", so the change never ships)
 #   version  version changed, build inputs did not: nothing ships
 #   none     neither (tests, scripts/, claude-tests/, CLAUDE.md, .claude/; plugin/ is git-ignored build output)
 # Build inputs: package.json apart from version and the test/lint scripts, src/, assets/, hooks.template.json,

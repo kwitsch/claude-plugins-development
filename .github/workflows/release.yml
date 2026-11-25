@@ -35,7 +35,7 @@ jobs:
             s=$(bash .github/scripts/ships.sh "$p" "$BEFORE" "$GITHUB_SHA")
             case $s in
               none) echo "::notice::$p: no build input and no version changed, no release"; continue ;;
-              content) echo "::notice::$p: build inputs changed without a version bump, no release (ships with the next bump)"; continue ;;
+              content) echo "::notice::$p: build inputs changed without a version bump, no release; bump the version together with the input change"; continue ;;
               version) echo "::notice::$p: version changed without a build input change, no release"; continue ;;
             esac
             t="$p-$(jq -r .version "$p/package.json")"
