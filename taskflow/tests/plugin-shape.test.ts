@@ -845,15 +845,24 @@ describe("build-task delivery scripts", () => {
     expectLacks(F, ["claude-opus-4-8", "spec-driven-delivery", "design-to-spec"]);
   });
 
-  test("implement.workflow.js: plan loader with validation, wave rules, merger role file, heredoc scribe, uniform returns", () => {
+  test("implement.workflow.js: plan loader with validation, wave rules, merger role file, Write scribe with printf retry, uniform returns", () => {
     const F = `${WORKFLOWS}/build-task-implement.workflow.js`;
     expect(nonEmpty(F)).toBe(true);
-    expectHas(F, ["name: \"build-task-implement\"", "decodeArgs([\"PLAN_PATH\", \"IMPLEMENT_PATH\", \"BRANCH_NAME\", \"SCRATCH_DIR\"]", "must be an absolute path", "loader: \"haiku\"", "merger: \"haiku\"", "scribe: \"haiku\"", "const implModel = (t) => (t.complexity === \"complex\" ? \"opus\" : \"haiku\");", "complex: \"sonnet\"", "label: \"load-plan\"", "label: \"load-plan:retry\"", "required: [\"constraints\", \"tasks\", \"taskHeadings\"]", "p.tasks.length === p.taskHeadings", "could not load the plan tasks from PLAN_PATH", "agentType: \"taskflow:worktree-merger\"", "protocol, and toplevel self-report per your role definition.", "testEvidencePath: { type: \"string\" }", "\"testEvidencePath\", \"deviations\"", "tevPathFor", "test-evidence-task-", "named by testEvidencePath", "isolated ? { isolation: \"worktree\" } : {}", "runTask(waveTasks[0], false)", "runTask(t, true)", "if (isolated && approved.length)", "single-task wave: no worktree, no merge step", "async function persist(path, obj)", "TASKFLOW_JSON_EOF", "w.bytes === expectedBytes || w.bytes === expectedBytes + 1", "label: \"persist:retry\"", "NEVER the Write or Edit tool", "could not write IMPLEMENT_PATH — all tasks are committed on ", "return { status: \"complete\", implementPath: IMPLEMENT_PATH, tasks: taskList, waves, minorFindings: minorLedger };", "tasks: [], waves: [], results: [], minorFindings: []"]);
+    expectHas(F, ["name: \"build-task-implement\"", "decodeArgs([\"PLAN_PATH\", \"IMPLEMENT_PATH\", \"BRANCH_NAME\", \"SCRATCH_DIR\"]", "must be an absolute path", "loader: \"haiku\"", "merger: \"haiku\"", "scribe: \"haiku\"", "const implModel = (t) => (t.complexity === \"complex\" ? \"opus\" : \"haiku\");", "complex: \"sonnet\"", "label: \"load-plan\"", "label: \"load-plan:retry\"", "required: [\"constraints\", \"tasks\", \"taskHeadings\"]", "p.tasks.length === p.taskHeadings", "could not load the plan tasks from PLAN_PATH", "agentType: \"taskflow:worktree-merger\"", "protocol, and toplevel self-report per your role definition.", "testEvidencePath: { type: \"string\" }", "\"testEvidencePath\", \"deviations\"", "tevPathFor", "test-evidence-task-", "named by testEvidencePath", "isolated ? { isolation: \"worktree\" } : {}", "runTask(waveTasks[0], false)", "runTask(t, true)", "if (isolated && approved.length)", "single-task wave: no worktree, no merge step", "async function persist(path, obj)", "w.bytes === expectedBytes || w.bytes === expectedBytes + 1", "label: \"persist:retry\"", "with the Write tool", "printf '%s\\\\n'", "agent(retryPrompt, { ...opts, label: \"persist:retry\" })", "could not write IMPLEMENT_PATH — all tasks are committed on ", "return { status: \"complete\", implementPath: IMPLEMENT_PATH, tasks: taskList, waves, minorFindings: minorLedger };", "tasks: [], waves: [], results: [], minorFindings: []"]);
     for (const p of ["implementerPrompt = (t, isolated) =>", "reviewerPrompt = (t, implReport, isolated) =>", "fixerPrompt = (t, findings, worktreePath, branch) =>"]) expect(followedBy(p, "`${NO_NARRATION}", F), p).toBe(true);
     expect(read(F).toLowerCase()).toContain("bash redirection");
-    expectLacks(F, ["classify", "PINNED_OPUS", "difficulty", "agent definition", "stage: \"done\"", "even for wave size 1", "tasks.length > 4", "SPEC_PATH", "BASE_BRANCH", "\"worktreePath\", \"testEvidence\", \"deviations\"", "testEvidence: { type: \"string\" }"]);
+    expectLacks(F, ["TASKFLOW_JSON_EOF", "<<'", "WRITE_VIA_BASH_NOT_WRITE_EDIT", "NEVER the Write or Edit tool", "agent(prompt, { ...opts, label: \"persist:retry\" })", "classify", "PINNED_OPUS", "difficulty", "agent definition", "stage: \"done\"", "even for wave size 1", "tasks.length > 4", "SPEC_PATH", "BASE_BRANCH", "\"worktreePath\", \"testEvidence\", \"deviations\"", "testEvidence: { type: \"string\" }"]);
     // every return after the args check carries tasks, waves and minorFindings
     expect(read(F).split("\n").filter((l) => l.includes("stage: \"Implement\"") && !/tasks: .*waves.*minorFindings/.test(l))).toEqual([]);
+  });
+
+  test("implement and review persist() are identical except the phase label", () => {
+    const body = (n: string): string => {
+      const t = read(`${WORKFLOWS}/build-task-${n}.workflow.js`);
+      const start = t.indexOf("async function persist(path, obj) {");
+      return t.slice(start, t.indexOf("\n}\n", start)).replace(/phase: "[A-Za-z]+"/, "phase: X");
+    };
+    expect(body("implement")).toBe(body("review"));
   });
 
   test("implement.md documents the implement script contract and the wave rules", () => {
@@ -863,12 +872,12 @@ describe("build-task delivery scripts", () => {
     expectLacks(F, ["claude-opus-4-8", "spec-driven-delivery", "even for single-task waves"]);
   });
 
-  test("review.workflow.js: LEVEL arg (never derived), three plugin agents, lean pass, apply, heredoc scribe, returns", () => {
+  test("review.workflow.js: LEVEL arg (never derived), three plugin agents, lean pass, apply, Write scribe with printf retry, returns", () => {
     const F = `${WORKFLOWS}/build-task-review.workflow.js`;
     expect(nonEmpty(F)).toBe(true);
-    expectHas(F, ["name: \"build-task-review\"", "decodeArgs([\"SPEC_PATH\", \"PLAN_PATH\", \"REVIEW_PATH\", \"BRANCH_NAME\"], { BASE_BRANCH: \"main\", LEVEL: \"high\" })", "if (LEVEL !== \"high\" && LEVEL !== \"max\")", "must be an absolute path", "phase(\"Review\")", "phase(\"Apply\")", "const SWEEP_MAX = 8;", "const PONYTAIL_MAX = 8;", "synthesizer: \"opus\"", "finder: \"sonnet\"", "verifier: \"sonnet\"", "applier: \"sonnet\"", "ponytailReviewer: \"sonnet\"", "scribe: \"haiku\"", "r.verdicts || []", "Array.isArray(r.candidates)", "Array.isArray(sweep.candidates)", "PONYTAIL_REVIEW_SCHEMA", "over-engineering ONLY", "USER-APPROVED", "verifyGroups(ponytailCandidates)", "combinedLocs", "findings.filter((f) => !f.reversesDecision)", "async function persist(path, obj)", "TASKFLOW_JSON_EOF", "w.bytes === expectedBytes || w.bytes === expectedBytes + 1", "NEVER the Write or Edit tool", "error: \"could not write REVIEW_PATH\", level: LEVEL, applied: applyReport, escalatedToUser: escalated, ponytailReview", "reviewPath: REVIEW_PATH", "findingCount: findings.length", "escalatedToUser: escalated"]);
+    expectHas(F, ["name: \"build-task-review\"", "decodeArgs([\"SPEC_PATH\", \"PLAN_PATH\", \"REVIEW_PATH\", \"BRANCH_NAME\"], { BASE_BRANCH: \"main\", LEVEL: \"high\" })", "if (LEVEL !== \"high\" && LEVEL !== \"max\")", "must be an absolute path", "phase(\"Review\")", "phase(\"Apply\")", "const SWEEP_MAX = 8;", "const PONYTAIL_MAX = 8;", "synthesizer: \"opus\"", "finder: \"sonnet\"", "verifier: \"sonnet\"", "applier: \"sonnet\"", "ponytailReviewer: \"sonnet\"", "scribe: \"haiku\"", "r.verdicts || []", "Array.isArray(r.candidates)", "Array.isArray(sweep.candidates)", "PONYTAIL_REVIEW_SCHEMA", "over-engineering ONLY", "USER-APPROVED", "verifyGroups(ponytailCandidates)", "combinedLocs", "findings.filter((f) => !f.reversesDecision)", "async function persist(path, obj)", "w.bytes === expectedBytes || w.bytes === expectedBytes + 1", "label: \"persist:retry\"", "with the Write tool", "printf '%s\\\\n'", "agent(retryPrompt, { ...opts, label: \"persist:retry\" })", "error: \"could not write REVIEW_PATH\", level: LEVEL, applied: applyReport, escalatedToUser: escalated, ponytailReview", "reviewPath: REVIEW_PATH", "findingCount: findings.length", "escalatedToUser: escalated"]);
     expect(followedBy("NO_NARRATION", "+ \"\\n\\n", F)).toBe(true);
-    expectLacks(F, ["tasks.length > 4", "classify", "PINNED_OPUS", "difficulty", "stage: \"done\"", "phase(\"Ship\")", "SKILL_DIR.replace", "role definition", "pipelineSummary"]);
+    expectLacks(F, ["TASKFLOW_JSON_EOF", "<<'", "WRITE_VIA_BASH_NOT_WRITE_EDIT", "NEVER the Write or Edit tool", "agent(prompt, { ...opts, label: \"persist:retry\" })", "tasks.length > 4", "classify", "PINNED_OPUS", "difficulty", "stage: \"done\"", "phase(\"Ship\")", "SKILL_DIR.replace", "role definition", "pipelineSummary"]);
     // exactly the three plugin review agents, each backed by an agents/*.md file
     expect([...new Set([...read(F).matchAll(/taskflow:[a-z-]+/g)].map((m) => m[0]))].sort()).toEqual(["taskflow:fix-applier", "taskflow:review-finder", "taskflow:review-verifier"]);
     for (const n of ["review-finder", "review-verifier", "fix-applier"]) expect(existsSync(abs(`${AGENTS}/${n}.md`)), n).toBe(true);
@@ -935,6 +944,8 @@ describe("build-task delivery scripts", () => {
       const f = `${WORKFLOWS}/build-task-${n}.workflow.js`;
       expect(countLines(f, "w.bytes === expectedBytes || w.bytes === expectedBytes + 1")).toBe(1);
       expectLacks(f, ["0.9"]);
+      expectLacks(`${BT_WF}/${n}.md`, ["heredoc"]);
+      expectHas(`${BT_WF}/${n}.md`, ["with the Write tool", "printf fallback's trailing newline"]);
     }
     for (const d of [WF_RULE, `${BT_WF}/explore.md`, `${BT_WF}/implement.md`, `${BT_WF}/review.md`]) expectLacks(d, ["that count plus one", "byte count is verified"]);
   });

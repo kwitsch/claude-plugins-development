@@ -114,12 +114,6 @@ const implModel = (t) => (t.complexity === "complex" ? "opus" : "haiku");
 // Workflow, so any prose between tool calls is wasted tokens no one reads.
 const NO_NARRATION = "No narrative text between tool calls — call tools silently and speak only in your final message (the report or structured output). Write that final message in English, whatever the language of the task or its inputs; commit messages are not covered.";
 
-// Shared tail for every prompt that has an agent write a file verbatim via
-// Bash redirection: the universal-format hook reformats anything written
-// through Write/Edit, so content that must reach disk byte for byte cannot go
-// through them.
-const WRITE_VIA_BASH_NOT_WRITE_EDIT = "NEVER the Write or Edit tool; the universal-format hook reformats those";
-
 // ── Schemas ──────────────────────────────────────────────────────────────────
 const TASK_ITEM = {
   type: "object",
@@ -306,7 +300,7 @@ as ONE commit following the repo's commit conventions (no co-author trailers,
 no generated-with footers). Touch nothing outside the task's scope.
 Write every test/verification command you run and its full output to the
 absolute file ${tevPathFor(t)} via Bash redirection (append with
-\`{ echo "\$ <cmd>"; <cmd>; } 2>&1 | tee -a "<path>"\`, or a heredoc — ${WRITE_VIA_BASH_NOT_WRITE_EDIT}).
+\`{ echo "\$ <cmd>"; <cmd>; } 2>&1 | tee -a "<path>"\`, or create it with the Write tool).
 Before returning, run \`git branch --show-current\`,
 \`git rev-parse --show-toplevel\`, and \`git rev-parse HEAD\` and report their
 exact output, set testEvidencePath to that same absolute path, and report any
@@ -472,17 +466,21 @@ if (implementFailed) {
 }
 
 // ── Persist the result (read later by the pr-author of the ship script) ─────
-// The text reaches disk through a Bash heredoc, then its reported size must
-// equal the expected UTF-8 byte count (or that plus the heredoc's newline):
-// a truncated JSON file would break the pr-author's read, so no tolerance here.
+// The scribe writes with the Write tool (retry: Bash printf, a different
+// method, since the worktree-isolation guard refuses heredocs whose body has
+// lines starting with `{`, `[` or `}`); the reported size must equal the
+// expected UTF-8 byte count or one more (the printf fallback's trailing
+// newline): a truncated JSON file would break the pr-author's read, so no
+// other tolerance.
 async function persist(path, obj) {
   const text = JSON.stringify(obj, null, 2);
   const expectedBytes = encodeURIComponent(text).replace(/%[0-9A-F]{2}/g, "x").length;
-  const prompt = `${NO_NARRATION}\n\nWrite the text between the BEGIN/END markers below to ${path} (create/overwrite), byte for byte — no edits, no summary, markers excluded — with a Bash heredoc: \`cat > "${path}" <<'TASKFLOW_JSON_EOF'\`, then the text, then a line holding only TASKFLOW_JSON_EOF (${WRITE_VIA_BASH_NOT_WRITE_EDIT}). Then run \`wc -c < "${path}"\` and return structured output: status "written" plus bytes (that number), or "blocked" + detail if the write failed.\n<<<BEGIN>>>\n${text}\n<<<END>>>`;
+  const prompt = `${NO_NARRATION}\n\nWrite the text between the BEGIN/END markers below to ${path} (create/overwrite), byte for byte — no edits, no summary, markers excluded — with the Write tool (absolute path; if the file already exists, Read it first, Write refuses to overwrite an unread file). Then run \`wc -c < "${path}"\` as a separate command and return structured output: status "written" plus bytes (that number), or "blocked" + detail if the write failed.\n<<<BEGIN>>>\n${text}\n<<<END>>>`;
+  const retryPrompt = `${NO_NARRATION}\n\nWrite the text between the BEGIN/END markers below to ${path} (create/overwrite), byte for byte — no edits, no summary, markers excluded. The Write tool could not write this file on the first attempt. Do NOT use the Write or Edit tool and do NOT use a heredoc. Write the text with Bash printf: \`printf '%s\\n' '<line 1>' '<line 2>' … > "${path}"\` — every line of the text as its own single-quoted argument on ONE command line (no literal newline inside the command; inside a line write a \`'\` as \`'\\''\`; an empty line is \`''\`). For a long text split it into several such commands: the first with \`>\`, every later one with \`>>\`. Plain separate commands only: no \`$(...)\`, no \`cd\`, no pipes. Then run \`wc -c < "${path}"\` as a separate command and return structured output: status "written" plus bytes (that number), or "blocked" + detail if the write failed.\n<<<BEGIN>>>\n${text}\n<<<END>>>`;
   const isIntact = (w) => w && w.status === "written" && (w.bytes === expectedBytes || w.bytes === expectedBytes + 1);
   const opts = { label: "persist", phase: "Implement", schema: WRITE_RESULT, model: MODELS.scribe };
   let written = await agent(prompt, opts);
-  if (!isIntact(written)) written = await agent(prompt, { ...opts, label: "persist:retry" });
+  if (!isIntact(written)) written = await agent(retryPrompt, { ...opts, label: "persist:retry" });
   return !!isIntact(written);
 }
 
