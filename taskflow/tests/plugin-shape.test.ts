@@ -203,8 +203,8 @@ describe("manifest", () => {
     expect(manifest).not.toHaveProperty("userConfig");
   });
 
-  test("package.json and plugin.json versions agree and are 2.2.1", () => {
-    expect(pkg.version).toBe("2.2.1");
+  test("package.json and plugin.json versions agree and are 2.2.2", () => {
+    expect(pkg.version).toBe("2.2.2");
     expect(manifest.version).toBe(pkg.version);
   });
 
@@ -953,6 +953,14 @@ describe("build-task delivery scripts", () => {
       expectHas(`${BT_WF}/${n}.md`, ["with the Write tool", "printf fallback's trailing newline"]);
     }
     for (const d of [WF_RULE, `${BT_WF}/explore.md`, `${BT_WF}/implement.md`, `${BT_WF}/review.md`]) expectLacks(d, ["that count plus one", "byte count is verified"]);
+  });
+
+  test("rule, developer notes and SKILL.md describe the Write-first, printf-retry write path", () => {
+    expectHas(WF_RULE, ["writes with the Write tool to the absolute scratchpad path", "printf '%s\\n'", "never the identical command", "the printf fallback's trailing newline", "pr-author writes `PR_BODY_PATH` with Write, its retry with printf", "end with `BASH_SHAPE_HINT`"]);
+    expectLacks(WF_RULE, ["TASKFLOW_JSON_EOF", "TASKFLOW_MD_EOF", "never the Write or Edit tool", "the heredoc's newline"]);
+    expectHas(DEV_NOTES, ["Pipeline files live in the session scratchpad and are written with the Write tool", "(../development/wiki/pitfalls/worktree-and-auto-mode-sessions.md)"]);
+    expectHas(`${SKILL}/SKILL.md`, ["Pipeline files are written with the Write tool", "Only when no scratchpad is provided, run `mktemp -d -t build-task-XXXXXX`"]);
+    expectLacks(`${SKILL}/SKILL.md`, ["unsure dispatched workers can read", "!`"]);
   });
 
   test("build-task ships seven usage references and no role-file directory; the plugin keeps eight workflows", () => {
