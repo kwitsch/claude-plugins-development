@@ -101,8 +101,7 @@ result file could not be written, all tasks are committed on `BRANCH_NAME`.
   from the review script, never from the per-task gate. The implementer runs
   on `haiku` (`opus` for `complex` tasks); the per-task fixer reuses the
   implementer's model. Loader, merger and scribe run on `haiku`.
-- The result file is written by a `haiku` scribe with the Write tool (retry:
-  Bash printf, never the same method twice), reported size from a separate
-  `wc -c`; that size must equal the expected byte count (or that plus the
-  printf fallback's trailing newline; one retry) — a truncated JSON file is
+- The result file is written by a `haiku` scribe with the Write tool (one retry,
+  same method), reported size from a separate `wc -c`; that size must equal the
+  expected byte count (or that plus a trailing newline; one retry) — a truncated JSON file is
   never accepted.

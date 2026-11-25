@@ -38,10 +38,10 @@ paths:
 
 ## Result files and the scribe
 
-- `persist()` (implement, review) has a `haiku` scribe that writes with the Write tool to the absolute scratchpad path, then reports `wc -c`; the retry uses Bash `printf '%s\n'`, never the identical command; only the exact byte count or one more (the printf fallback's trailing newline) passes: [why](../../../development/wiki/plugins/taskflow/design/workflows.md).
+- `persist()` (implement, review) has a `haiku` scribe that writes with the Write tool to the absolute scratchpad path, then reports `wc -c`; the one retry is the same Write call (the isolation guard checks Bash command text, not Write); only the exact byte count or one more (a trailing newline) passes: [why](../../../development/wiki/plugins/taskflow/design/workflows.md).
 - A failed write is an explicit `status: "error"` whose return still carries what the skill needs (Implement: `tasks`/`waves`/`results`/`minorFindings`; Review: `applied`/`escalatedToUser`).
-- The explore scribe writes the same way (Write, printf retry) and accepts any reported size of at least `MIN_WRITE_RATIO` (0.9) of the expected UTF-8 byte count.
-- `build-task-ship.workflow.js`'s pr-author writes `PR_BODY_PATH` with Write, its retry with printf.
+- The explore scribe writes the same way (Write, one Write retry) and accepts any reported size of at least `MIN_WRITE_RATIO` (0.9) of the expected UTF-8 byte count.
+- `build-task-ship.workflow.js`'s pr-author writes `PR_BODY_PATH` with Write, its retry too. No Bash-based write path anywhere (no heredoc, no printf).
 - The implementer, reviewer and fixer prompts in `build-task-implement.workflow.js` end with `BASH_SHAPE_HINT`.
 
 ## Conditional graphmind path (build-task explorers, delivery planner)

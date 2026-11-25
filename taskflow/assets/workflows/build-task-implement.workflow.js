@@ -474,21 +474,19 @@ if (implementFailed) {
 }
 
 // ── Persist the result (read later by the pr-author of the ship script) ─────
-// The scribe writes with the Write tool (retry: Bash printf, a different
-// method, since the worktree-isolation guard refuses heredocs whose body has
-// lines starting with `{`, `[` or `}`); the reported size must equal the
-// expected UTF-8 byte count or one more (the printf fallback's trailing
+// The scribe writes with the Write tool (one retry, same method: the
+// worktree-isolation guard checks Bash command text, not Write); the reported
+// size must equal the expected UTF-8 byte count or one more (a trailing
 // newline): a truncated JSON file would break the pr-author's read, so no
 // other tolerance.
 async function persist(path, obj) {
   const text = JSON.stringify(obj, null, 2);
   const expectedBytes = encodeURIComponent(text).replace(/%[0-9A-F]{2}/g, "x").length;
   const prompt = `${NO_NARRATION}\n\nWrite the text between the BEGIN/END markers below to ${path} (create/overwrite), byte for byte — no edits, no summary, markers excluded — with the Write tool (absolute path; if the file already exists, Read it first, Write refuses to overwrite an unread file). Then run \`wc -c < "${path}"\` as a separate command and return structured output: status "written" plus bytes (that number), or "blocked" + detail if the write failed.\n<<<BEGIN>>>\n${text}\n<<<END>>>`;
-  const retryPrompt = `${NO_NARRATION}\n\nWrite the text between the BEGIN/END markers below to ${path} (create/overwrite), byte for byte — no edits, no summary, markers excluded. The Write tool could not write this file on the first attempt. Do NOT use the Write or Edit tool and do NOT use a heredoc. Write the text with Bash printf: \`printf '%s\\n' '<line 1>' '<line 2>' … > "${path}"\` — every line of the text as its own single-quoted argument on ONE command line (no literal newline inside the command; inside a line write a \`'\` as \`'\\''\`; an empty line is \`''\`). For a long text split it into several such commands of at most 40 lines each: the first with \`>\`, every later one with \`>>\`. Plain separate commands only: no \`$(...)\`, no \`cd\`, no pipes. Then run \`wc -c < "${path}"\` as a separate command and return structured output: status "written" plus bytes (that number), or "blocked" + detail if the write failed.\n<<<BEGIN>>>\n${text}\n<<<END>>>`;
   const isIntact = (w) => w && w.status === "written" && (w.bytes === expectedBytes || w.bytes === expectedBytes + 1);
   const opts = { label: "persist", phase: "Implement", schema: WRITE_RESULT, model: MODELS.scribe };
   let written = await agent(prompt, opts);
-  if (!isIntact(written)) written = await agent(retryPrompt, { ...opts, label: "persist:retry" });
+  if (!isIntact(written)) written = await agent(prompt, { ...opts, label: "persist:retry" });
   return !!isIntact(written);
 }
 

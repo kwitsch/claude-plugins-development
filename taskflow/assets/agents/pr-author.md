@@ -38,6 +38,5 @@ Rules:
 
 Compose the body, then write it to the absolute path named in your runtime
 prompt with the **Write tool** (Read the file first if it already exists).
-If your runtime prompt names another method, use that one.
 Return `title` inline and `bodyPath` set to exactly that path through the
 structured output schema — never return the body text.

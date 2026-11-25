@@ -106,10 +106,9 @@ One structured object; `status` is the discriminator. Consume only this return.
   Findings return in `ponytailReview` and are never routed to fix application,
   never escalated, and add no `AskUserQuestion` — run `/simplify` or
   `ponytail-review` afterward to act on them.
-- The result file is written by a `haiku` scribe with the Write tool (retry:
-  Bash printf, never the same method twice), reported size from a separate
-  `wc -c`; that size must equal the expected byte count (or that plus the
-  printf fallback's trailing newline; one retry) — a truncated JSON file is
+- The result file is written by a `haiku` scribe with the Write tool (one retry,
+  same method), reported size from a separate `wc -c`; that size must equal the
+  expected byte count (or that plus a trailing newline; one retry) — a truncated JSON file is
   never accepted.
 - The review engine is duplicated in the plugin's `changes-review` workflow
   (Workflow scripts cannot import each other); that copy has no spec, no apply

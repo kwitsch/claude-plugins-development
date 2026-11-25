@@ -62,9 +62,7 @@ One structured object; `status` is the discriminator. Consume only this return.
   anything — `## Recorded project knowledge (graphmind memory)`.
 - Models: scout, explorers, memory recall and scribe on the `haiku` alias.
 - The scribe copies the text through a model, writing with the Write tool
-  (retry: Bash printf, never the same method twice), and reports the size from
-  a separate `wc -c`; the first attempt
-  fails only when that is below 90% of the expected UTF-8 byte length. The
-  retry (printf, deterministic) must report the exact length or one more (the
-  trailing newline), else `stage: 'Explore'`. Oversize on the first attempt
-  passes; a same-size or slightly shorter alteration is not caught.
+  (one retry, same method), and reports the size from a separate `wc -c`; the
+  script fails only when that is below 90% of the expected UTF-8 byte length
+  (after the retry: `stage: 'Explore'`). Oversize passes; a same-size or
+  slightly shorter alteration is not caught.
