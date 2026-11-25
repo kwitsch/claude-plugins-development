@@ -82,7 +82,7 @@ committed either way.
 - `pr-author` (`haiku` alias) Reads the implement and review result files plus
   the spec and plan and writes a faithful title/body (repo template respected,
   escalated findings listed as open items, lean-review findings report-only);
-  the body goes to `PR_BODY_PATH` through Bash redirection.
+  the body goes to `PR_BODY_PATH` with the Write tool (retry: Bash printf).
 - `shipper` (`haiku`) pushes (NEVER force), creates-or-updates the PR/MR
   idempotently, then runs `bin/ship-ensure-mergeable.mjs` to ensure it is
   mergeable before ci-monitor runs (auto-updates a `behind` branch via the

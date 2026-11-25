@@ -690,11 +690,12 @@ describe("PR/MR body handoff (pr-author → shipper)", () => {
     expectLacks(F, ["-f body="]);
   });
 
-  test("pr-author writes the body to a file via redirection and returns bodyPath", () => {
+  test("pr-author writes the body to a file with the Write tool and returns bodyPath", () => {
     const F = `${AGENTS}/pr-author.md`;
-    expectHas(F, ["bodyPath"]);
-    expect(read(F).toLowerCase()).toContain("bash redirection");
-    expectLacks(F, ["Return the title and body through the structured output schema"]);
+    expectHas(F, ["bodyPath", "**Write tool**", "If your runtime prompt names another method, use that one."]);
+    expectLacks(F, ["Return the title and body through the structured output schema", "heredoc", "NEVER the Write or Edit tool", "universal-format"]);
+    expect(read(F).toLowerCase()).not.toContain("bash redirection");
+    expectHas(`${BT_WF}/ship.md`, ["with the Write tool (retry: Bash printf)"]);
   });
 });
 
@@ -903,8 +904,8 @@ describe("build-task delivery scripts", () => {
   test("ship.workflow.js: result-file paths to pr-author, role files, CI loop bounds, reportable ship states", () => {
     const F = `${WORKFLOWS}/build-task-ship.workflow.js`;
     expect(nonEmpty(F)).toBe(true);
-    expectHas(F, ["name: \"build-task-ship\"", "decodeArgs([\"SPEC_PATH\", \"PLAN_PATH\", \"IMPLEMENT_PATH\", \"REVIEW_PATH\", \"PR_BODY_PATH\", \"BRANCH_NAME\"], { BASE_BRANCH: \"main\", PLUGIN_ROOT: \"\" })", "must be an absolute path", "A.PLUGIN_ROOT.includes(\"${\")", "prAuthor: \"haiku\"", "shipper: \"haiku\"", "ciMonitor: \"haiku\"", "ciFixer: \"sonnet\"", "agentType: \"taskflow:pr-author\"", "agentType: \"taskflow:shipper\"", "agentType: \"taskflow:ci-monitor\"", "agentType: \"taskflow:ci-fixer\"", "Pipeline result files (faithful source of truth — Read both): implement result ", "(tasks, waves, per-task minor findings), review result ", "(level, summary, applied/skipped, escalated open items, fix commits, lean-review findings)", "PR_BODY_PATH", "bodyPath: { type: \"string\" }", "required: [\"title\", \"bodyPath\"]", "mergeState: { enum: [\"clean\", \"rebased\", \"resolved\", \"unknown\"] }", "required: [\"status\"]", "ship-ensure-mergeable.mjs", "created.mergeState", "mergeState?", "rerunId", "rerunTried", "const MAX_CI_MONITOR_ROUNDS = 6;", "const MAX_CI_FIX_ROUNDS = 2;", "NEVER the Write or Edit tool", "return { status: \"complete\", ship };"]);
-    expectLacks(F, ["agent definition", "per your agent", "pipelineSummary", "SCRATCH_DIR", "if (SHIP)", "status: \"skipped\"", "stage: \"done\"", "classify", "PINNED_OPUS", "<<<BODY", "stage: \"Ship\""]);
+    expectHas(F, ["name: \"build-task-ship\"", "decodeArgs([\"SPEC_PATH\", \"PLAN_PATH\", \"IMPLEMENT_PATH\", \"REVIEW_PATH\", \"PR_BODY_PATH\", \"BRANCH_NAME\"], { BASE_BRANCH: \"main\", PLUGIN_ROOT: \"\" })", "must be an absolute path", "A.PLUGIN_ROOT.includes(\"${\")", "prAuthor: \"haiku\"", "shipper: \"haiku\"", "ciMonitor: \"haiku\"", "ciFixer: \"sonnet\"", "agentType: \"taskflow:pr-author\"", "agentType: \"taskflow:shipper\"", "agentType: \"taskflow:ci-monitor\"", "agentType: \"taskflow:ci-fixer\"", "Pipeline result files (faithful source of truth — Read both): implement result ", "(tasks, waves, per-task minor findings), review result ", "(level, summary, applied/skipped, escalated open items, fix commits, lean-review findings)", "PR_BODY_PATH", "bodyPath: { type: \"string\" }", "required: [\"title\", \"bodyPath\"]", "mergeState: { enum: [\"clean\", \"rebased\", \"resolved\", \"unknown\"] }", "required: [\"status\"]", "ship-ensure-mergeable.mjs", "created.mergeState", "mergeState?", "rerunId", "rerunTried", "const MAX_CI_MONITOR_ROUNDS = 6;", "const MAX_CI_FIX_ROUNDS = 2;", "with the Write tool", "printf '%s\\\\n'", "label: \"pr-author:retry\"", "return { status: \"complete\", ship };"]);
+    expectLacks(F, ["agent definition", "per your agent", "pipelineSummary", "SCRATCH_DIR", "if (SHIP)", "status: \"skipped\"", "stage: \"done\"", "classify", "PINNED_OPUS", "<<<BODY", "stage: \"Ship\"", "<<'EOF'", "WRITE_VIA_BASH_NOT_WRITE_EDIT", "NEVER the Write or Edit tool"]);
     // word boundary: a plain "prText.body" would match prText.bodyPath
     expect(read(F)).not.toMatch(/prText\.body\b/);
     // four role agents (pr-author, shipper, ci-monitor, ci-fixer), each dispatched through its agentType
