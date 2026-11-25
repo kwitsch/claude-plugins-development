@@ -940,10 +940,14 @@ describe("build-task delivery scripts", () => {
   test("explore scribe uses a named 90% truncation floor and the Write tool with a printf retry; implement/review persist keep the exact-size check", () => {
     const ex = `${WORKFLOWS}/build-task-explore.workflow.js`;
     expect(countLines(ex, "w.bytes >= minBytes")).toBe(1);
-    expectHas(ex, ["const MIN_WRITE_RATIO = 0.9;", "scribeRetryPrompt", "agent(scribeRetryPrompt, { ...scribeOpts, label: \"scribe:retry\" })", "with the Write tool", "printf '%s\\\\n'"]);
-    expectLacks(ex, ["expectedBytes + 1", "TASKFLOW_MD_EOF", "NEVER the Write or Edit tool", "agent(scribePrompt, { ...scribeOpts, label: \"scribe:retry\" })"]);
+    expectHas(ex, ["const MIN_WRITE_RATIO = 0.9;", "scribeRetryPrompt", "agent(scribeRetryPrompt, { ...scribeOpts, label: \"scribe:retry\" })", "with the Write tool", "printf '%s\\\\n'", "const isIntactRetry", "at most 40 lines each"]);
+    expectLacks(ex, ["TASKFLOW_MD_EOF", "NEVER the Write or Edit tool", "agent(scribePrompt, { ...scribeOpts, label: \"scribe:retry\" })"]);
     expect(followedBy("const scribeRetryPrompt = ", "`${NO_NARRATION}", ex)).toBe(true);
     expectHas(`${BT_WF}/explore.md`, ["with the Write tool", "Bash printf"]);
+    // The three printf retry prompts are deliberate copies (scripts cannot import each other): keep the shared sentences in step.
+    for (const n of ["explore", "implement", "review"]) {
+      expectHas(`${WORKFLOWS}/build-task-${n}.workflow.js`, ["every line of the text as its own single-quoted argument on ONE command line", "split it into several such commands of at most 40 lines each", "Plain separate commands only"]);
+    }
     expectLacks(`${BT_WF}/explore.md`, ["heredoc"]);
     for (const n of ["implement", "review"]) {
       const f = `${WORKFLOWS}/build-task-${n}.workflow.js`;
