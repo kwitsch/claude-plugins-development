@@ -25,6 +25,8 @@ The plugin ships these components:
 
 - A new or renamed file under `assets/workflows/` or `assets/skills/build-task/workflows/` must be added to `pluginBuild.assets` in `package.json`, or the CI layout check (`development/scripts/check-plugin-layout.ts`) fails.
 - The workflow scripts, agents and skill texts are shipped byte for byte from `assets/`; never edit `plugin/`.
+- Pipeline files live in the session scratchpad and are written with the Write tool only, the one retry too; no Bash write path (heredoc, printf): rule `workflows.md`, [why](../development/wiki/pitfalls/worktree-and-auto-mode-sessions.md).
+- The Write scribe logic is a deliberate copy in the explore, implement and review scripts (Workflow scripts cannot import each other); keep them in step.
 
 ## Agent files and no-narration
 
