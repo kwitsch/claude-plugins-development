@@ -923,11 +923,14 @@ describe("build-task delivery scripts", () => {
     expectLacks(F, ["CLAUDE_PLUGIN_ROOT}/workflows"]);
   });
 
-  test("explore scribe uses a named 90% truncation floor and a Bash heredoc; implement/review persist keep the exact-size check", () => {
+  test("explore scribe uses a named 90% truncation floor and the Write tool with a printf retry; implement/review persist keep the exact-size check", () => {
     const ex = `${WORKFLOWS}/build-task-explore.workflow.js`;
     expect(countLines(ex, "w.bytes >= minBytes")).toBe(1);
-    expectHas(ex, ["const MIN_WRITE_RATIO = 0.9;", "TASKFLOW_MD_EOF"]);
-    expectLacks(ex, ["expectedBytes + 1"]);
+    expectHas(ex, ["const MIN_WRITE_RATIO = 0.9;", "scribeRetryPrompt", "agent(scribeRetryPrompt, { ...scribeOpts, label: \"scribe:retry\" })", "with the Write tool", "printf '%s\\\\n'"]);
+    expectLacks(ex, ["expectedBytes + 1", "TASKFLOW_MD_EOF", "NEVER the Write or Edit tool", "agent(scribePrompt, { ...scribeOpts, label: \"scribe:retry\" })"]);
+    expect(followedBy("const scribeRetryPrompt = ", "`${NO_NARRATION}", ex)).toBe(true);
+    expectHas(`${BT_WF}/explore.md`, ["with the Write tool", "Bash printf"]);
+    expectLacks(`${BT_WF}/explore.md`, ["heredoc"]);
     for (const n of ["implement", "review"]) {
       const f = `${WORKFLOWS}/build-task-${n}.workflow.js`;
       expect(countLines(f, "w.bytes === expectedBytes || w.bytes === expectedBytes + 1")).toBe(1);

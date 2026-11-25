@@ -257,7 +257,9 @@ if (USE_GRAPHMIND) {
 const scribeText = `# Exploration reports\n\n${explorationBlock}`;
 // UTF-8 byte length of the text the scribe must write; used to catch a clearly short (truncated or empty) write.
 const expectedBytes = encodeURIComponent(scribeText).replace(/%[0-9A-F]{2}/g, "x").length;
-const scribePrompt = `${NO_NARRATION}\n\nWrite the text between the BEGIN/END markers below to ${EXPLORE_PATH} (create/overwrite), byte for byte — no edits, no summary, markers excluded — with a Bash heredoc: \`cat > "${EXPLORE_PATH}" <<'TASKFLOW_MD_EOF'\`, then the text, then a line holding only TASKFLOW_MD_EOF (NEVER the Write or Edit tool; the universal-format hook reformats those). Then run \`wc -c < "${EXPLORE_PATH}"\` and return structured output: status "written" plus bytes (that number), or "blocked" + detail if the write failed.\n<<<BEGIN>>>\n${scribeText}\n<<<END>>>`;
+const scribePrompt = `${NO_NARRATION}\n\nWrite the text between the BEGIN/END markers below to ${EXPLORE_PATH} (create/overwrite), byte for byte — no edits, no summary, markers excluded — with the Write tool (absolute path; if the file already exists, Read it first, Write refuses to overwrite an unread file). Then run \`wc -c < "${EXPLORE_PATH}"\` as a separate command and return structured output: status "written" plus bytes (that number), or "blocked" + detail if the write failed.\n<<<BEGIN>>>\n${scribeText}\n<<<END>>>`;
+// The retry switches method: a refused command fails the same way when repeated.
+const scribeRetryPrompt = `${NO_NARRATION}\n\nWrite the text between the BEGIN/END markers below to ${EXPLORE_PATH} (create/overwrite), byte for byte — no edits, no summary, markers excluded. The Write tool could not write this file on the first attempt. Do NOT use the Write or Edit tool and do NOT use a heredoc. Write the text with Bash printf: \`printf '%s\\n' '<line 1>' '<line 2>' … > "${EXPLORE_PATH}"\` — every line of the text as its own single-quoted argument on ONE command line (no literal newline inside the command; inside a line write a \`'\` as \`'\\''\`; an empty line is \`''\`). For a long text split it into several such commands: the first with \`>\`, every later one with \`>>\`. Plain separate commands only: no \`$(...)\`, no \`cd\`, no pipes. Then run \`wc -c < "${EXPLORE_PATH}"\` as a separate command and return structured output: status "written" plus bytes (that number), or "blocked" + detail if the write failed.\n<<<BEGIN>>>\n${scribeText}\n<<<END>>>`;
 
 // Only a clearly short write fails: the scribe may add a trailing newline or drift slightly on a complete file.
 const MIN_WRITE_RATIO = 0.9;
@@ -265,7 +267,7 @@ const minBytes = Math.ceil(expectedBytes * MIN_WRITE_RATIO);
 const isIntact = (w) => w && w.status === "written" && w.bytes >= minBytes;
 const scribeOpts = { label: "scribe", phase: "Explore", schema: WRITE_RESULT, model: MODELS.scribe };
 let written = await agent(scribePrompt, scribeOpts);
-if (!isIntact(written)) written = await agent(scribePrompt, { ...scribeOpts, label: "scribe:retry" });
+if (!isIntact(written)) written = await agent(scribeRetryPrompt, { ...scribeOpts, label: "scribe:retry" });
 if (!isIntact(written)) {
   return { status: "error", stage: "Explore", error: "scribe could not write EXPLORE_PATH intact (expected at least " + minBytes + " bytes, got " + (written ? written.bytes : "null") + ")" };
 }
