@@ -1,6 +1,6 @@
 // What the build must have produced: the vendored bundle with exactly the listed wasm files, relocatable, with the
-// installed prettier inside, and no plugin evaluated before its first use. Freshness of the committed output against
-// the sources is CI's job (`.github/scripts/check-plugin-fresh.sh` rebuilds and compares).
+// installed prettier inside, and no plugin evaluated before its first use. `plugin/` is git-ignored; CI and Sync
+// build it fresh and run the layout check.
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";

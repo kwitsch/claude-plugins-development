@@ -1,5 +1,5 @@
 // Wiring contract of the built plugin/ (what the scaffold/skill bats checks still mean in this repo; the layout
-// allowlist, manifest generation and freshness are guarded repo-wide by pnpm build and CI).
+// allowlist, manifest generation and layout are guarded repo-wide by pnpm build and CI).
 import assert from "node:assert/strict";
 import { accessSync, constants, readFileSync } from "node:fs";
 import path from "node:path";

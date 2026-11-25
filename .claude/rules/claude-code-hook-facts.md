@@ -55,4 +55,4 @@ Row shapes, queueing, what a `session.compact` hook replaces, usage: [mods-engin
 
 ## Live checks
 
-- Run `claude -p --plugin-dir <plugin> --setting-sources project`, so the user's own settings and installed plugins stay out of the run. `/reload-plugins` may leave a generated `.claude-plugin/types/` folder and a `tsconfig.json` in `plugin/` (untracked, the layout check refuses them): delete them before building.
+- Run `claude -p --plugin-dir <plugin> --setting-sources project`, so the user's own settings and installed plugins stay out of the run. `/reload-plugins` may leave a generated `.claude-plugin/types/` folder and a `tsconfig.json` in `plugin/` (git-ignored, the layout check refuses them): delete them before building.

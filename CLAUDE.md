@@ -13,7 +13,7 @@ Development repository for Claude Code plugins. One top-level directory per plug
 
 ## Layout per plugin (`<name>/`)
 
-`plugin/` (installable plugin, all build output: the build empties it and regenerates it from `src/`, `assets/`, the templates and `package.json`), `src/**/*.ts` (built to `plugin/`: the entries the templates and `tsdown.config.ts` name, each one self-contained file), `tests/*.test.ts` (vitest, against `src/`; process tests spawn `plugin/`), `claude-tests/*.test.ts` (mods: `claude plugin test` on the built plugin, `pnpm --filter <name> test:plugin`), plus:
+`plugin/` (installable plugin, git-ignored build output, never committed: `pnpm build` empties it and regenerates it from `src/`, `assets/`, the templates and `package.json`), `src/**/*.ts` (built to `plugin/`: the entries the templates and `tsdown.config.ts` name, each one self-contained file), `tests/*.test.ts` (vitest, against `src/`; process tests spawn `plugin/`), `claude-tests/*.test.ts` (mods: `claude plugin test` on the built plugin, `pnpm --filter <name> test:plugin`), plus:
 
 - `package.json`: the only manifest source (`name`, `version`, `description`, `author`, `keywords`; plugin-only fields such as `userConfig` under `claudePlugin`, which is required, `{}` at least, and marks the package as a plugin) and the pnpm scripts `build` (`tsdown`), `test`, optional `lint` and, for a mod, `test:plugin`. Edit here only.
 - `tsdown.config.ts`: `export default await pluginConfig({ ..., manifest: claudePlugin })` from the published preset `@kwitsch/tsdown-preset-claude-code` (`.claude/rules/tsdown-build.md`); `hooks.template.json` / `mcp.template.json`: the hooks and MCP servers, commands as relative `.ts` paths.
@@ -35,7 +35,7 @@ One config for all packages, at the repo root; no per-plugin lint or vitest conf
 ```bash
 pnpm install                 # once, at repo root (workspace)
 pnpm -r build                # build every plugin
-pnpm -r test                 # run every plugin's tests
+pnpm -r test                 # run every plugin's tests; needs a built plugin/ (pnpm -r build) in a fresh clone or worktree
 pnpm lint                    # oxlint (lint + type check) over the workspace, then plugin-specific lint scripts
 pnpm --filter <name> build   # one plugin
 pnpm --filter <name> test:plugin   # a mod's integration tests (needs claude)
@@ -45,8 +45,8 @@ claude plugin validate <name>/plugin
 ## Rules
 
 - `.mjs` and `plugin/hooks/*.js` are build output only; every hand-written module is `.ts` (Node 24 and vitest strip the types; `src/` is built by `pnpm build`).
-- Never edit anything under `*/plugin/` — change `src/`, `assets/`, the templates, `<name>/tsdown.config.ts` or `<name>/package.json` and run `pnpm build` (the build empties `plugin/`). `.claude/settings.json` denies writes to `*/plugin/**/*.mjs`, `*/plugin/hooks/*.js` and `*/plugin/.claude-plugin/plugin.json`.
-- Version bump = edit `version` in `<name>/package.json`, then `pnpm build`. A change of `<name>/package.json`, `<name>/src/` or `<name>/plugin/` merged to `main` needs a bump to a version higher than on `main` that is not yet tagged `<name>-<version>` here or in kwitsch/claude-plugins; a change of anything else under `<name>/` (tests, scripts, `CLAUDE.md`, `.claude/`) needs no bump and is not released (`.github/scripts/ships.sh`).
+- Never edit anything under `*/plugin/` — change `src/`, `assets/`, the templates, `<name>/tsdown.config.ts` or `<name>/package.json` and run `pnpm build` (the build empties `plugin/`); it is git-ignored, never commit it. `.claude/settings.json` denies writes to `*/plugin/**/*.mjs`, `*/plugin/hooks/*.js` and `*/plugin/.claude-plugin/plugin.json`.
+- Version bump = edit `version` in `<name>/package.json`. A PR into `main` that changes a plugin's build inputs (`package.json` apart from `version` and the test/lint scripts, `src/`, `assets/`, `hooks.template.json`, `mcp.template.json`, `tsdown.config.ts`; `development/shared/src/` for `@shared` users) must bump it higher than on `main` and not yet tagged `<name>-<version>` here or in kwitsch/claude-plugins (Dependabot excepted); a plugin is released only when a push changes both its build inputs and its version (`.github/scripts/ships.sh`). Tests, scripts, `CLAUDE.md`, `.claude/` need no bump and are not released.
 - New plugin: use the `scaffold-plugin` skill (`.claude/skills/scaffold-plugin/`). Never hand-copy the layout.
 - Runtime code in `plugin/` must be zero-dependency Node (`node:` builtins only); `node_modules` is not shipped. One exception: a vendored third-party bundle `plugin/**/vendor/*.mjs` built by the preset's `bundles` option (universal-format's prettier), see `.claude/rules/plugin-build-output.md`.
 - MCP servers are dual-era (2025-11-25 `initialize` and 2026-07-28 `server/discover`, tasks only when asked): follow `.claude/rules/mcp-dual-era.md`, model `dprint/src/mcp/server.ts`.
