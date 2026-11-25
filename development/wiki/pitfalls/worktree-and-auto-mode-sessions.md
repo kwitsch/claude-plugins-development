@@ -13,7 +13,7 @@ What a session in this repository runs into that has nothing to do with the task
 
 ## Auto mode
 
-- The dprint plugin formats the content of a `Write` or `Edit` in its `PreToolUse` hook by rewriting the tool input. When several tool calls go out in one response and the hook changes one of them, the auto-mode review of the others no longer applies (`gave no verdict ... another call in this response was changed`). Re-issue the refused call in a response of its own; write markdown that is already formatted (padded tables are what gets changed most) to avoid it. Files in the session scratchpad are skipped by dprint and universal-format, so a Write there is not rewritten.
+- The dprint plugin formats the content of a `Write` or `Edit` in its `PreToolUse` hook by rewriting the tool input. When several tool calls go out in one response and the hook changes one of them, the auto-mode review of the others no longer applies (`gave no verdict ... another call in this response was changed`). Re-issue the refused call in a response of its own; write markdown that is already formatted (padded tables are what gets changed most) to avoid it. Files in the session scratchpad are skipped by dprint and universal-format, so a Write there is not rewritten (docs).
 - The same rewrite once made a delegated implementer's `Edit` of a markdown table fail twice, and the pipeline stopped. Recovery: finish the edit by hand, run `dprint fmt` on the file, continue.
 - Auto mode refuses to start agents that run `claude` with `--dangerously-skip-permissions`. Run a nested `claude -p` directly with a narrow `--allowedTools`.
 - Edits of `.claude/settings.json` can time out in the classifier; the user can run the command through the `!` prefix instead.

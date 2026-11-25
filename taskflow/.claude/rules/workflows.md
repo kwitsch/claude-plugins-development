@@ -38,7 +38,7 @@ paths:
 
 ## Result files and the scribe
 
-- `build-task-implement.workflow.js` and `build-task-review.workflow.js` each end by writing one JSON result file (`IMPLEMENT_PATH`, `REVIEW_PATH`) through an identical `persist()` helper (only its `phase` label differs): a `haiku` scribe writes with the Write tool to the absolute scratchpad path, then reports `wc -c` from a separate command; the one retry uses a different prompt and method (Bash `printf '%s\n'` with one argument per line, `>>` chunks; never a heredoc, never the identical command); the script accepts only the expected UTF-8 byte count or one more (the printf fallback's trailing newline).
+- `persist()` (implement, review) has a `haiku` scribe that writes with the Write tool to the absolute scratchpad path, then reports `wc -c`; the retry uses Bash `printf '%s\n'`, never the identical command; only the exact byte count or one more (the printf fallback's trailing newline) passes: [why](../../../development/wiki/plugins/taskflow/design/workflows.md).
 - A failed write is an explicit `status: "error"` whose return still carries what the skill needs (Implement: `tasks`/`waves`/`results`/`minorFindings`; Review: `applied`/`escalatedToUser`).
 - The explore scribe writes the same way (Write, printf retry) and accepts any reported size of at least `MIN_WRITE_RATIO` (0.9) of the expected UTF-8 byte count.
 - `build-task-ship.workflow.js`'s pr-author writes `PR_BODY_PATH` with Write, its retry with printf.
