@@ -11,6 +11,7 @@ How plugin tests split into a vitest unit layer on the TypeScript sources and a 
 
 - Reason: unit tests on the sources are fast and precise, show a failure without a rebuild and need no re-export just for tests (graphmind-helper's `src/bin/mcp.ts` re-exported two names of the inlined `common.ts` until 0.2.4). Only Claude Code sees the bundle, `hooks.json` and the static check, so that layer runs in the engine's own kit.
 - The constraints are in the rule [hook-tests.md](../../../.claude/rules/hook-tests.md); this page holds the reasons.
+- Process and shape tests read the built `plugin/`, which is git-ignored since 2026-11-25 ([tsdown-plugin-build.md](tsdown-plugin-build.md)): a fresh clone or worktree runs `pnpm -r build` before `pnpm -r test`; CI builds before testing.
 
 ## Tooling
 

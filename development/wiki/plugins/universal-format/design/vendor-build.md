@@ -14,7 +14,7 @@ How prettier and its plugins get into `plugin/`, why they are bundled at all, an
 - Third-party code is `plugin/mcp/vendor/*.mjs`, built since 0.19.5 by the preset's `bundles: { "mcp/vendor": "src/mcp/vendor/index.ts" }` (preset 0.3.0; minified, `comments: false`, content-hashed chunks `[name]-[hash].mjs`). Before 0.19.5 `scripts/vendor.ts` bundled `scripts/vendor-entry.ts` with rolldown.
 - `src/mcp/prettier.ts` imports `./vendor/index.js`, which resolves to the bundle source `src/mcp/vendor/index.ts` (types and vitest included); the build keeps the import external.
 - The build is one `tsdown` run; the preset empties `plugin/` first, so no stale chunk or wasm file survives.
-- The output must not depend on the machine: no comments (they would carry module paths of the package store), content-hashed chunk names. CI rebuilds on every PR that touches the plugin and compares with the committed `plugin/` (`check-plugin-fresh.sh`); `tests/build.test.ts` checks that no checkout or store path is embedded.
+- The output must not depend on the machine: no comments (they would carry module paths of the package store), content-hashed chunk names. CI builds on every PR that touches the plugin and Sync builds what ships, so the output must be reproducible; `tests/build.test.ts` checks that no checkout or store path is embedded.
 
 ## Wasm files
 
@@ -43,11 +43,11 @@ How prettier and its plugins get into `plugin/`, why they are bundled at all, an
 ## What went with the launcher
 
 - Until 0.18.0 `.mcp.json` started `bin/mjs-launch.sh`, which preferred bun over node, appended `~/.local/bin` and `~/.bun/bin` to PATH and, for node, exported `NODE_COMPILE_CACHE` under `CLAUDE_PLUGIN_DATA` (it cut the node start of the 9 MB single file from about 220 ms to about 100 ms). The server turned SIGINT and SIGTERM into `process.exit(0)` so node wrote that cache.
-- User decision 2026-11-17: node only, `command: "node"` like dprint. Gone with it: bun detection and the startup line's runtime name, the compile cache and the signal handlers, the build fingerprint banner and its freshness test (CI's rebuild replaces both), the canonicalisation of bun's path comments, the patch of sh-syntax's `__dirname` (bun baked in the build machine's path; rolldown takes sh-syntax's ESM build, which uses `import.meta.url`).
+- User decision 2026-11-17: node only, `command: "node"` like dprint. Gone with it: bun detection and the startup line's runtime name, the compile cache and the signal handlers, the build fingerprint banner and its test (CI's rebuild replaced both), the canonicalisation of bun's path comments, the patch of sh-syntax's `__dirname` (bun baked in the build machine's path; rolldown takes sh-syntax's ESM build, which uses `import.meta.url`).
 - bun was not faster anyway: warm p50 equal within noise for every language, node about 60 ms slower cold without its compile cache, bun's first start after a rebuild about 500 ms slower (measured 2026-10-19, former repository).
 - The PATH append moved into `onPath` ([cli-formatters.md](cli-formatters.md)).
 
 ## Bumping a bundled package
 
-- Change the exact pin in `package.json`, `pnpm install`, `pnpm --filter universal-format build`, run the tests, bump the plugin version, commit `plugin/` with it. Dependabot ignores the five packages for that reason.
+- Change the exact pin in `package.json`, `pnpm install`, `pnpm --filter universal-format build`, run the tests, bump the plugin version, commit the sources. Dependabot ignores the five packages for that reason.
 - The lockfile here resolves `tslib` 2.9.1 for sh-syntax where the former repository had 2.8.1; nothing else differs (compared 2026-11-17).

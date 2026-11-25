@@ -3,7 +3,6 @@ name: Release
 on:
   push:
     branches: [main]
-    paths-ignore: ["development/**"]
 
 permissions:
   contents: read
@@ -29,12 +28,10 @@ jobs:
           git cat-file -e "$BEFORE^{commit}" 2>/dev/null \
             || BEFORE=$(git rev-parse -q --verify "$GITHUB_SHA^" || git hash-object -t tree /dev/null)
           tags=""
-          for p in $(git diff --name-only "$BEFORE" "$GITHUB_SHA" | cut -d/ -f1 | sort -u); do
-            bash .github/scripts/is-plugin.sh "$p" || continue
-            # package.json, src/ and plugin/ unchanged: nothing new ships, so no tag and no sync
-            if ! bash .github/scripts/ships.sh "$p" "$BEFORE" "$GITHUB_SHA"; then
-              echo "::notice::$p: package.json, src/ and plugin/ unchanged, no release"; continue
-            fi
+          for p in $(bash .github/scripts/changed-plugins.sh "$BEFORE" "$GITHUB_SHA"); do
+            # ships only when build inputs and version both changed; checked here too, since an admin merge can bypass the PR check
+            s=$(bash .github/scripts/ships.sh "$p" "$BEFORE" "$GITHUB_SHA")
+            if [ "$s" != ship ]; then bash .github/scripts/ships-notice.sh "$p" "$s"; continue; fi
             t="$p-$(jq -r .version "$p/package.json")"
             if git ls-remote --exit-code --tags origin "refs/tags/$t" > /dev/null; then
               echo "::notice::$t already exists, not re-tagging"
