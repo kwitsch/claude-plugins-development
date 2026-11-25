@@ -31,10 +31,13 @@ jobs:
           tags=""
           for p in $(git diff --name-only "$BEFORE" "$GITHUB_SHA" | cut -d/ -f1 | sort -u); do
             bash .github/scripts/is-plugin.sh "$p" || continue
-            # package.json, src/ and plugin/ unchanged: nothing new ships, so no tag and no sync
-            if ! bash .github/scripts/ships.sh "$p" "$BEFORE" "$GITHUB_SHA"; then
-              echo "::notice::$p: package.json, src/ and plugin/ unchanged, no release"; continue
-            fi
+            # ships only when build inputs and version both changed; checked here too, since an admin merge can bypass the PR check
+            s=$(bash .github/scripts/ships.sh "$p" "$BEFORE" "$GITHUB_SHA")
+            case $s in
+              none) echo "::notice::$p: no build input and no version changed, no release"; continue ;;
+              content) echo "::notice::$p: build inputs changed without a version bump, no release (ships with the next bump)"; continue ;;
+              version) echo "::notice::$p: version changed without a build input change, no release"; continue ;;
+            esac
             t="$p-$(jq -r .version "$p/package.json")"
             if git ls-remote --exit-code --tags origin "refs/tags/$t" > /dev/null; then
               echo "::notice::$t already exists, not re-tagging"

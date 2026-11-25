@@ -70,14 +70,14 @@ jobs:
           P: ${{ steps.resolve.outputs.plugin }}
         run: pnpm install --frozen-lockfile --filter "$P..."
 
-      - name: Build, test, and check committed build is current
+      - name: Build, test and check layout
         if: steps.resolve.outputs.plugin != ''
         env:
           P: ${{ steps.resolve.outputs.plugin }}
         run: |
           pnpm --filter "$P" build
           pnpm --filter "$P" test
-          bash .github/scripts/check-plugin-fresh.sh "$P"
+          node development/scripts/check-plugin-layout.ts "$P"
 
       - uses: actions/checkout@v7
         if: steps.resolve.outputs.plugin != ''

@@ -31,15 +31,18 @@ jobs:
           AUTHOR: ${{ github.event.pull_request.user.login }}
         run: |
           rc=0
+          from=$(git merge-base "origin/$BASE" HEAD) # same base as the former origin/$BASE...HEAD range
           for p in $PLUGINS; do
-            # only package.json, src/ and plugin/ ship or build what ships; tests, scripts, memory need no bump
-            if ! bash .github/scripts/ships.sh "$p" "origin/$BASE...HEAD"; then
-              echo "::notice::$p: package.json, src/ and plugin/ unchanged, no version bump required"; continue
-            fi
-            # Dependabot only touches dev tooling; the freshness check below still fails if the shipped build changes
-            if [ "$AUTHOR" = "dependabot[bot]" ] && git diff --quiet "origin/$BASE...HEAD" -- "$p/plugin/"; then
-              echo "::notice::$p: dependabot update leaves $p/plugin/ unchanged, no version bump required"; continue
-            fi
+            s=$(bash .github/scripts/ships.sh "$p" "$from" HEAD) # build inputs and version, see ships.sh
+            case $s in
+              none) echo "::notice::$p: no build input changed, no version bump required"; continue ;;
+              version) echo "::warning::$p: version bumped but no build input changed, nothing ships"; continue ;;
+              content)
+                # Dependabot only touches dev tooling and pinned build tools; a changed build ships with the plugin's next release
+                if [ "$AUTHOR" = "dependabot[bot]" ]; then
+                  echo "::notice::$p: dependabot update, no version bump required"; continue
+                fi ;;
+            esac
             v=$(jq -r .version "$p/package.json")
             # sort -V is not semver-aware for pre-release suffixes, so only plain X.Y.Z is allowed
             if ! [[ "$v" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
@@ -94,7 +97,7 @@ jobs:
               pnpm --filter "$p" run --if-present lint
               pnpm --filter "$p" build
               pnpm --filter "$p" test
-              bash .github/scripts/check-plugin-fresh.sh "${d#"$PWD"/}" # the dir (repo-relative), not the package name
+              node development/scripts/check-plugin-layout.ts "${d#"$PWD"/}" # the dir (repo-relative), not the package name
             else
               pnpm --filter "$p" run --if-present test
             fi
