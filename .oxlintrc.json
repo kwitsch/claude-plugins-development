@@ -17,7 +17,8 @@
   },
   "ignorePatterns": [
     ".claude/**",
-    "**/plugin/**"
+    "**/plugin/**",
+    "**/*.workflow.js"
   ],
   "rules": {
     "no-case-declarations": "error",

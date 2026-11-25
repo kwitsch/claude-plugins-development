@@ -1,0 +1,10 @@
+import { pluginConfig, type PresetOptions } from "@kwitsch/tsdown-preset-claude-code";
+import { readFileSync } from "node:fs";
+
+// the preset ignores package.json's claudePlugin key: forward it so plugin-only fields reach plugin.json
+const { claudePlugin } = JSON.parse(readFileSync(new URL("package.json", import.meta.url), "utf8")) as { claudePlugin: PresetOptions["manifest"] };
+
+export default await pluginConfig({
+  scripts: { bin: ["src/bin/ship-ensure-mergeable.ts"] },
+  manifest: claudePlugin,
+});
