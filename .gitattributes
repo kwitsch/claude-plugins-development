@@ -1,16 +1,10 @@
-# Build output and lockfile: only checked for freshness (CI rebuilds and compares), never reviewed.
-# linguist-generated: GitHub collapses these in PR diffs and leaves them out of language stats.
-# -diff: minified one-liners; `git diff`/`git log -p` print "Binary files differ" instead of one huge line.
-# -merge: a conflict keeps our version and marks the file conflicted; resolve by rebuilding (`pnpm build`).
-*/plugin/**/*.mjs                 linguist-generated -diff -merge
-*/plugin/**/*.js                  linguist-generated -diff -merge
-*/plugin/.claude-plugin/plugin.json linguist-generated
+# Generated files: GitHub collapses them in PR diffs and leaves them out of language stats.
 dprint/src/mcp/hook-inputs.d.mts  linguist-generated
 pnpm-lock.yaml                    linguist-generated
 
-# LF everywhere so a Windows/WSL checkout does not make the freshness check (git status on plugin/) fail
+# LF everywhere, so a Windows/WSL checkout produces the same files as CI.
 * text=auto eol=lf
 
-# Binary files a vendored bundle loads at runtime (universal-format: copied from node_modules by its build).
+# Binary files a vendored bundle loads at runtime (universal-format: copied from node_modules by its build into the git-ignored plugin/).
 # After `* text=auto`: a later line wins, and these must never be EOL-translated or diffed as text.
 *.wasm                            binary linguist-generated
