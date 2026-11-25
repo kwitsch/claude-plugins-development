@@ -114,6 +114,10 @@ const implModel = (t) => (t.complexity === "complex" ? "opus" : "haiku");
 // Workflow, so any prose between tool calls is wasted tokens no one reads.
 const NO_NARRATION = "No narrative text between tool calls — call tools silently and speak only in your final message (the report or structured output). Write that final message in English, whatever the language of the task or its inputs; commit messages are not covered.";
 
+// Appended to the implementer, reviewer and fixer prompts: the worktree-isolation
+// guard refuses these Bash shapes, and a refused command fails again on repeat.
+const BASH_SHAPE_HINT = "Bash commands: the worktree-isolation guard refuses $(...), ${!var}, git -C and a cd to a computed path before git, and repeating a refused command fails the same way. Run plain commands with literal absolute paths; put a multi-step script into a file in " + SCRATCH_DIR + " with the Write tool and run it with one plain command.";
+
 // ── Schemas ──────────────────────────────────────────────────────────────────
 const TASK_ITEM = {
   type: "object",
@@ -301,6 +305,7 @@ no generated-with footers). Touch nothing outside the task's scope.
 Write every test/verification command you run and its full output to the
 absolute file ${tevPathFor(t)} via Bash redirection (append with
 \`{ echo "\$ <cmd>"; <cmd>; } 2>&1 | tee -a "<path>"\`, or create it with the Write tool).
+${BASH_SHAPE_HINT}
 Before returning, run \`git branch --show-current\`,
 \`git rev-parse --show-toplevel\`, and \`git rev-parse HEAD\` and report their
 exact output, set testEvidencePath to that same absolute path, and report any
@@ -328,7 +333,9 @@ Check spec/plan compliance against the task text and these
 global constraints, then correctness: ${constraints}
 The test evidence is in the file named by testEvidencePath in the report — use
 the Read tool on it if you need it; do not re-run the tests the implementer
-already ran. Return your verdict through the structured output schema.`;
+already ran.
+${BASH_SHAPE_HINT}
+Return your verdict through the structured output schema.`;
 
 const fixerPrompt = (t, findings, worktreePath, branch) =>
   `${NO_NARRATION}${GM_IMPL("to find the code the findings point at and its callers")}
@@ -343,6 +350,7 @@ after the first silently runs in your default checkout.
 Plan file: ${PLAN_PATH}, task ${t.id} (${t.title}).
 Apply exactly these findings — nothing else — then commit (repo conventions,
 no co-author trailers): ${JSON.stringify(findings)}
+${BASH_SHAPE_HINT}
 Return: STATUS: done|blocked, commit hash, what changed.`;
 
 const mergerPrompt = (approved) =>
