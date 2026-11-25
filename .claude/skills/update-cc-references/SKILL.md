@@ -70,8 +70,8 @@ is limited to what each step names. Reference files stay in English regardless o
    `changed: false`: report "references already current" with the changelog and STOP (no commit, no
    PR). Otherwise the script has bumped the patch version in `cc-knowledge/package.json` (once per
    branch, compared with `origin/main`) and run `pnpm --filter cc-knowledge build`, which regenerates
-   `cc-knowledge/plugin/` (`plugin.json` and the references copied from `assets/`). Never create a tag
-   (CI tags after merge).
+   `cc-knowledge/plugin/` (`plugin.json` and the references copied from `assets/`); `plugin/` is
+   git-ignored and never staged. Never create a tag (CI tags after merge).
 
 8. **Commit, push, open the PR.** Replace `<target>` with the target name and `<version>` with the
    `version` the release printed. The subject follows the repository's style
@@ -79,7 +79,7 @@ is limited to what each step names. Reference files stay in English regardless o
 
    ```bash
    [ "$(git branch --show-current)" = main ] && git checkout -b "fix/refresh-cc-references-<target>-$(date +%Y%m%d-%H%M%S)"
-   git add cc-knowledge/package.json cc-knowledge/assets/ cc-knowledge/plugin/
+   git add cc-knowledge/package.json cc-knowledge/assets/
    git commit -m "cc-knowledge <version>: refresh the CC reference files"
    git push -u origin HEAD
    gh pr create --title "cc-knowledge <version>: refresh the CC reference files" --body-file <scratch>/pr-body.md

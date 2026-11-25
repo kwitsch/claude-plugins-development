@@ -53,8 +53,8 @@ test("update-cc-references release does a patch bump of package.json and rebuild
   expect(MAINT).not.toMatch(/marketplace\.json/);
 });
 
-test("update-cc-references commits and opens the PR in this repository's style, staging package.json, assets/ and plugin/", () => {
-  expect(MAINT).toContain("git add cc-knowledge/package.json cc-knowledge/assets/ cc-knowledge/plugin/");
+test("update-cc-references commits and opens the PR in this repository's style, staging package.json and assets/", () => {
+  expect(MAINT).toContain("git add cc-knowledge/package.json cc-knowledge/assets/\n");
   expect(MAINT).toContain("git commit -m \"cc-knowledge <version>: refresh the CC reference files\"");
   expect(MAINT).toMatch(/No `Co-Authored-By:` trailer/);
 });
