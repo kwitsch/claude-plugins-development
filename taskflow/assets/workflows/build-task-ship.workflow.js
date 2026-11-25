@@ -223,7 +223,7 @@ if (prText === null && filesOk) {
       + CONTEXT_FILES
       + "\nWrite the body to "
       + PR_BODY_PATH
-      + " with Bash printf, not the Write tool and not a heredoc: `printf '%s\\n' '<line>' '<line>' … > \"<path>\"`, one single-quoted argument per line on one command line (`'` as `'\\''`), long bodies in several commands with `>>` after the first; then return bodyPath = that path with the title inline.",
+      + " with Bash printf, not the Write tool and not a heredoc: `printf '%s\\n' '<line>' '<line>' … > \"<path>\"`, one single-quoted argument per line on one command line (`'` as `'\\''`), long bodies in several commands with `>>` after the first; then run `tail -n 3` on that path and check the last body lines are present; then return bodyPath = that path with the title inline.",
     { ...prOpts, label: "pr-author:retry" },
   );
 }

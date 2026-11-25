@@ -304,7 +304,7 @@ as ONE commit following the repo's commit conventions (no co-author trailers,
 no generated-with footers). Touch nothing outside the task's scope.
 Write every test/verification command you run and its full output to the
 absolute file ${tevPathFor(t)} via Bash redirection (append with
-\`{ echo "\$ <cmd>"; <cmd>; } 2>&1 | tee -a "<path>"\`, or create it with the Write tool).
+\`{ echo "\$ <cmd>"; <cmd>; } 2>&1 | tee -a "<path>"\`; never overwrite it with the Write tool).
 ${BASH_SHAPE_HINT}
 Before returning, run \`git branch --show-current\`,
 \`git rev-parse --show-toplevel\`, and \`git rev-parse HEAD\` and report their
