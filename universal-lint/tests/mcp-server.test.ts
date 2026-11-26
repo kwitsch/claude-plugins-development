@@ -5,6 +5,7 @@ import { accessSync, constants, existsSync, readFileSync, writeFileSync } from "
 import path from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { test } from "vitest";
+import { FILE_CHANGED_SLOTS } from "../src/hooks/lint-core.ts";
 import { type LintEnv, makeEnv, PLUGIN, SERVER } from "./support/lint-hook.ts";
 
 /** `_meta` of a 2026-07-28-era request. */
@@ -394,32 +395,32 @@ test("a cancelled file_edited keeps its journal record: the next stop lints the 
   assert.match(String(r["reason"]), /SC2086/);
 });
 
-test("a cancelled sweep also puts back the records of a file that had finished: the next stop reports both files", async () => {
+test("a cancelled sweep also puts back the records of a file that had finished: the next stop reports every file", async () => {
   const e = makeEnv();
   const pidfile = path.join(path.dirname(e.cwd), "sleep.pid");
-  const mark = path.join(path.dirname(e.cwd), "b-first-run");
-  // a.sh is linted at once and reports; the first run on b.sh hangs (the test cancels the sweep then), later runs report
-  e.stub("shellcheck", `printf "shellcheck %s\\n" "$*" >> "$RECORD"`, `case "\${@: -1}" in *b.sh) if [ ! -e "${mark}" ]; then : > "${mark}"; node -e "setTimeout(() => {}, 30000)" & echo $! > "${pidfile}"; wait; fi;; esac`, `printf '%s\\n' "$OUT"`, "exit 1");
-  const a = e.file("a.sh", "echo $1\n");
-  const b = e.file("b.sh", "echo $1\n");
+  const mark = path.join(path.dirname(e.cwd), "h-first-run");
+  // the first run on h.sh hangs (the test cancels the sweep then), every other run reports at once
+  e.stub("shellcheck", `printf "shellcheck %s\\n" "$*" >> "$RECORD"`, `case "\${@: -1}" in *h.sh) if [ ! -e "${mark}" ]; then : > "${mark}"; node -e "setTimeout(() => {}, 30000)" & echo $! > "${pidfile}"; wait; fi;; esac`, `printf '%s\\n' "$OUT"`, "exit 1");
+  // h.sh holds one lane for good, so the other lanes lint the FILE_CHANGED_SLOTS + 1 quick files one after another: the last one starts only after an earlier one has left its sweepFile
+  const quick = Array.from({ length: FILE_CHANGED_SLOTS + 1 }, (_, i) => `q${i}.sh`);
+  const files = ["h.sh", ...quick].map((n) => e.file(n, "echo $1\n"));
   const s = e.server({ out: OUT });
   const k = await s.key("s1");
-  for (const f of [a, b]) assert.deepEqual(await s.call("file_edited", { cwd: e.cwd, session_id: "s1", agent_id: "X", tool_name: "Write", tool_input: { file_path: f, content: "echo $1\n" }, tool_response: {}, key: k }), {});
+  for (const f of files) assert.deepEqual(await s.call("file_edited", { cwd: e.cwd, session_id: "s1", agent_id: "X", tool_name: "Write", tool_input: { file_path: f, content: "echo $1\n" }, tool_response: {}, key: k }), {});
   const stop = { hook_event_name: "SubagentStop", cwd: e.cwd, session_id: "s1", agent_id: "X", scratchpad_dir: "", stop_hook_active: "false" };
   const p = s.call("stop", stop);
   const until = Date.now() + 10_000;
-  while (e.lines().length < 2 || !existsSync(pidfile) || readFileSync(pidfile, "utf8").trim() === "") {
-    assert.ok(Date.now() < until, "both linters should have started");
+  // every quick file linted and h.sh running: a finished file's lane has taken the next file, so its records are claimed and cleared and its finding is not delivered yet
+  while (!existsSync(pidfile) || readFileSync(pidfile, "utf8").trim() === "" || !quick.every((n) => e.lines().some((l) => l.includes(n)))) {
+    assert.ok(Date.now() < until, `every quick file and the hanging h.sh should have run: ${e.lines().join(" | ")}`);
     await sleep(50);
   }
-  await sleep(300); // a.sh's lint has ended: its records are claimed and cleared, its finding is not delivered yet
   void p.catch(() => undefined);
   s.notify("notifications/cancelled", { requestId: p.id });
   assert.ok(await waitGone(Number(readFileSync(pidfile, "utf8")), 5000));
   const r = await s.call("stop", stop);
   assert.equal(r["decision"], "block");
-  assert.match(String(r["reason"]), /a\.sh/);
-  assert.match(String(r["reason"]), /b\.sh/);
+  for (const f of files) assert.ok(String(r["reason"]).includes(path.basename(f)), `${path.basename(f)} is reported: ${String(r["reason"])}`);
 });
 
 test("a cancelled SubagentStop sweep puts its claimed records back and blocks nothing: the next stop reports them", async () => {
