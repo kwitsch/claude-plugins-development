@@ -203,8 +203,8 @@ describe("manifest", () => {
     expect(manifest).not.toHaveProperty("userConfig");
   });
 
-  test("package.json and plugin.json versions agree and are 2.2.2", () => {
-    expect(pkg.version).toBe("2.2.2");
+  test("package.json and plugin.json versions agree and are 2.3.0", () => {
+    expect(pkg.version).toBe("2.3.0");
     expect(manifest.version).toBe(pkg.version);
   });
 
@@ -677,7 +677,7 @@ describe("ship merge-state remediation wiring", () => {
   });
 
   test("CLAUDE.md boundary rule and Opus-pin list cover changes-review and changes-audit", () => {
-    expectHas(DEV_NOTES, ["changes-review.workflow.js", "skills/changes-audit/", "11 static role prompts"]);
+    expectHas(DEV_NOTES, ["changes-review.workflow.js", "skills/changes-audit/", "12 static role prompts"]);
   });
 });
 
@@ -751,8 +751,8 @@ describe("ship merge-state documentation", () => {
     expect(read(`${PLUGIN}/README.md`).toLowerCase()).toContain("merge-state");
   });
 
-  test("CLAUDE.md documents ship-ensure-mergeable.mjs alongside the 11-agent roster", () => {
-    expectHas(DEV_NOTES, ["ship-ensure-mergeable.mjs", "11 static role prompts"]);
+  test("CLAUDE.md documents ship-ensure-mergeable.mjs alongside the 12-agent roster", () => {
+    expectHas(DEV_NOTES, ["ship-ensure-mergeable.mjs", "12 static role prompts"]);
   });
 });
 
@@ -1017,5 +1017,27 @@ describe("build-task delivery scripts", () => {
     for (const n of ["design", "implement", "review", "ship"]) expectHas(`${WORKFLOWS}/build-task-${n}.workflow.js`, ["const gmHint = (purpose, project) =>", "GRAPHMIND_AVAILABLE=true requires a non-empty absolute REPO_PATH"]);
     for (const n of ["plan", "ship"]) expectHas(`${WORKFLOWS}/build-task-${n}.workflow.js`, ["A.JEV_AVAILABLE === true", "mcp__jev-api__request"]);
     expectHas(`${SKILL}/SKILL.md`, ["JEV_AVAILABLE = true"]);
+  });
+});
+
+describe("explore lens check documentation", () => {
+  const WIKI = "development/wiki/plugins/taskflow/design/workflows.md";
+
+  test("explore.md documents the three phases, the explore-scribe agent and the lens pairs, no size floor", () => {
+    const F = `${BT_WF}/explore.md`;
+    expectHas(F, ["`taskflow:explore-scribe`", "`## Lens: <name>`", "`_End of lens: <name>_`", "| `Scout`", "| `Explore`", "| `Scribe`", "only the design script, which reads the same file.", "`graphmind memory`", "with the Write tool"]);
+    expectLacks(F, ["90%", "wc -c", "Recorded project knowledge", "No plugin agent dependency", "(and spec)"]);
+  });
+
+  test("developer notes and the workflow rule describe the explore-scribe agent and the twelve agentType roles", () => {
+    expectHas(DEV_NOTES, ["Nine of the plugin agents are build-task roles", "`explore-scribe`", "the other nine have one", "checks lens header/footer pairs instead of a byte count", "the lens header/footer lines come from the script", "(`SKILL.md` step 6)"]);
+    expectLacks(DEV_NOTES, ["in the explore, implement and review scripts", "(`SKILL.md` step 5)", "Eight of the plugin agents"]);
+    expectHas(WF_RULE, ["Twelve roles are dispatched through a plugin `agentType`", "nine build-task roles", "`taskflow:explore-scribe` (`tools: Read, Write`)", "written as the lens `graphmind memory` (body `none` when empty)"]);
+    expectLacks(WF_RULE, ["MIN_WRITE_RATIO", "Recorded project knowledge", "memory recall, scribe, spec writer", "Eleven roles"]);
+  });
+
+  test("the wiki gives the reasons for the lens check and for the spec after the intent confirmation", () => {
+    expectHas(WIKI, ["`agent()` call has no tools option", "runs the spec once, as step 4, after the \"Yes\""]);
+    expectLacks(WIKI, ["90%"]);
   });
 });
