@@ -15,13 +15,13 @@
  */
 import { readManifestVersion, serveMcp, type ToolDef } from "@shared/mcp-core.js";
 import { bashFinished, bashStarted, cwdChanged, disposeLsp, drainNotices, fileChanged, fileWritten, formatPre, type HookResult, worktreeEntered, worktreeExited } from "./format.js";
-import type { HookInputs } from "./hook-inputs.js";
+import type { HookInput, HookInputs } from "./hook-input-types.js";
 
 /**
  * Every tool `hooks.json` calls, keyed by name and typed by its generated input: a tool missing here, an
  * extra one, or a handler with the wrong input type is a compile error.
  */
-type Tools = { [K in keyof HookInputs]: ToolDef<HookInputs[K], HookResult> };
+type Tools = { [K in keyof HookInputs]: ToolDef<HookInput<K>, HookResult> };
 
 const TOOLS: Tools = {
   format_pre: {

@@ -1,5 +1,5 @@
 # Generated files: GitHub collapses them in PR diffs and leaves them out of language stats.
-dprint/src/mcp/hook-inputs.d.mts  linguist-generated
+dprint/src/mcp/hook-inputs.d.ts   linguist-generated
 pnpm-lock.yaml                    linguist-generated
 
 # LF everywhere, so a Windows/WSL checkout produces the same files as CI.

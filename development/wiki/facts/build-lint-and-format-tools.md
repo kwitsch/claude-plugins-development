@@ -23,3 +23,11 @@ The workspace setup itself: [lint-config.md](../../../.claude/rules/lint-config.
 - `dprint lsp` honours the config's `excludes`: no edits for excluded files (checked 2026-11-15).
 - `DPRINT_INSTALL` names the installer's target directory.
 - The repository's `dprint.json` orders `package.json` keys; a `pnpm add` afterwards appends keys in another order. CI does not run `dprint check`, so run `dprint fmt <name>/package.json` after adding a dependency.
+
+## claude-code-hook-types and the tsdown preset
+
+- `claude-code-hook-types` writes `export interface McpToolHookInputs` keyed by server then tool, with literal types for fixed template values and `string` for every `${…}` placeholder, keys sorted, every key required, and a union when two hooks call one tool with different input shapes (binary 0.1.1).
+- `claude-code-hook-types` does no placeholder or event validation: a `${…}` that does not exist for its event passes (binary 0.1.1).
+- The template's `hookTypes` path must match `/\.m?ts$/` and stay inside the template's directory; `--check` exits 1 with `hook-types-stale` when the file is stale or missing, a malformed `mcp_tool` hook (no `server`/`tool`/`input`) is `hook-input-invalid` and nothing is written (binary 0.1.1).
+- `@kwitsch/tsdown-preset-claude-code` / core 0.2.0 pass unknown top-level hooks-template keys through into the rendered `hooks.json` (binary 0.2.0).
+- Preset 0.4.1 strips `hookTypes` from `hooks.json` and emits the error `hook-types-stale` when the file is missing or differs, CRLF normalized (binary 0.4.1).

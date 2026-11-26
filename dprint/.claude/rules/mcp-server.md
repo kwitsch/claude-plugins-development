@@ -39,7 +39,7 @@ arguments are named constants or comments in the sources; this rule records beha
   (PostToolUse EnterWorktree/ExitWorktree), `file_written` (PostToolUse Write|Edit), `file_changed` (FileChanged),
   `bash_started`/`bash_finished` (PreToolUse, and PostToolUse plus PostToolUseFailure `Bash`: a non-zero exit fires
   the failure event) and `drain_notices` (PreToolUse `Edit|Write|Read|Bash|MultiEdit`, UserPromptSubmit). Typed by
-  `HookInputs` (see the hook-inputs rule).
+  `HookInput<K>` over the generated `McpToolHookInputs` (see the hook-inputs rule).
 - `lsp.ts`: `dprint lsp` client, one lazily spawned child per cwd. A request timeout puts that document in a cooldown
   (fails at once); idle exit (next format respawns); respawn after a crash; `close()` (eviction/shutdown) makes later
   formats fail instead of spawning; after dprint was not found, `findDprint` is retried only after a pause.

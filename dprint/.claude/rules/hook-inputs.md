@@ -1,20 +1,17 @@
 ---
 paths:
-  - "scripts/hooks.ts"
   - "hooks.template.json"
   - "src/mcp/hook-inputs.d.ts"
   - "src/mcp/server.ts"
-  - "tests/hooks-script.test.ts"
+  - "src/mcp/format.ts"
 ---
 
-# Hook-input contract (`scripts/hooks.ts` → `src/mcp/hook-inputs.d.ts`)
+# Hook-input contract (hooks.template.json -> src/mcp/hook-inputs.d.ts)
 
-- `hooks.template.json` is hand-written and is the hook-input contract (the build renders it to `plugin/hooks/hooks.json`). `scripts/hooks.ts` validates it:
-  `mcp_tool` hooks, plus `command` hooks (non-empty `command`, timeout checked, no input, no generated types);
-  `server` = `plugin:dprint:<mcp.template.json key>`; every `${…}` placeholder a real input field of its event and, for
-  `Write`/`Edit` matchers, of those tools; one input shape per tool. It validates only the `hooks` map, not `modules`.
-- It generates `src/mcp/hook-inputs.d.ts` (one interface per tool plus the `HookInputs` map) from the `input`
-  templates. `server.ts` types its tool table by `HookInputs`, so a tool missing on either side is a compile error.
-- Never edit the `.d.ts` by hand: `pnpm build` regenerates it, and `pnpm --filter dprint lint` runs
-  `scripts/hooks.ts --check`, which fails while it is stale.
-- A new hook event needs its input fields in `EVENT_FIELDS` in `scripts/hooks.ts`.
+Reasons, the lost validator checks and the per-event field table: [hook-input-types](../../../development/wiki/plugins/dprint/design/hook-input-types.md).
+
+- `hooks.template.json` is hand-written and is the hook-input contract. `claude-code-hook-types` (devDependency `@kwitsch/claude-code-plugin-cli`) generates `McpToolHookInputs` in `src/mcp/hook-inputs.d.ts` from the `mcp_tool` `input` templates, located by the template's `hookTypes` key.
+- Never edit the `.d.ts`: `pnpm build` regenerates it; `pnpm --filter dprint lint` (`claude-code-hook-types --check`) and the preset build (`hook-types-stale`) fail while it is stale.
+- Handlers take `HookInput<"tool">` from `src/mcp/hook-input-types.ts`; `server.ts` maps `Tools` over `HookInputs`, so a tool missing on either side is a compile error.
+- One input shape per tool.
+- Every `${…}` must be a real input field of its event and matcher tools: review it against the field table on the design page; no build step checks it.
