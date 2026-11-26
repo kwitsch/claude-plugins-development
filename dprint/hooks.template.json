@@ -1,5 +1,6 @@
 {
   "mod": "./src/hooks/register.ts",
+  "hookTypes": "src/mcp/hook-inputs.d.ts",
   "hooks": {
     "PreToolUse": [
       {
