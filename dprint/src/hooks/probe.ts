@@ -100,7 +100,7 @@ export async function judge($: Engine, argv: string[], cwd: string, name: string
  * `find-dprint.ts`'s order: the first `<PATH entry>/dprint` that exists, else `$DPRINT_INSTALL/bin/dprint` (default `$HOME/.dprint/bin/dprint`) if it
  * exists, else the npx cache; only the pick is run (`--version`), so a broken PATH dprint is never masked by a
  * working later one, as `findDprint` would not mask it either. Unlike `find-dprint.ts` (which runs on a format
- * request) this runs unprompted on every session start and cd, so npx gets `--no` (no download) and every probe runs
+ * request) this runs unprompted on every session start, cwd change and worktree switch, so npx gets `--no` (no download) and every probe runs
  * in HOME (else `/`), never in the project, whose `node_modules/.bin` npx would prefer. Concurrent callers share one
  * probe; a success is cached for the life of the module, a failure for {@link PROBE_RETRY_MS}.
  *
@@ -150,15 +150,18 @@ export function dprintProblem($: Engine, st: NoticeState): Promise<string | null
 /**
  * Show the cannot-run toast when `dir` or an ancestor up to the git repository or worktree root (as for the format
  * gate) holds one of {@link CONFIG_NAMES} but the dprint the hooks would use is unusable (the toast names why). No config: nothing is probed and no toast. At most one
- * toast per {@link TOAST_MS}.
+ * toast per {@link TOAST_MS}. Records every non-empty `dir` as `st.lastDir` first, also one skipped because dprint
+ * runs or a toast was just shown.
  *
  * @param $ - Engine interface.
- * @param st - The entry's state (toast time, probe cache, success flag).
- * @param dir - Absolute directory to check; empty means unknown (no toast).
+ * @param st - The entry's state (toast time, probe cache, success flag, last checked dir).
+ * @param dir - Absolute directory to check; empty means unknown (no toast, `st.lastDir` kept).
  * @returns Resolves once the check (and any toast) is done.
  */
 export async function warnIfNoDprint($: Engine, st: NoticeState, dir: string): Promise<void> {
   const recentlyShown = () => st.shownAt !== undefined && withinMs(st.shownAt, TOAST_MS);
+  // handled even when skipped below: a Bash call in this dir does not ask again
+  if (dir) st.lastDir = dir;
   // before the config walk: these events cost no filesystem work
   if (!dir || st.dprintRuns || recentlyShown()) return;
   const sep = dir.includes("\\") && !dir.includes("/") ? "\\" : "/";
@@ -204,7 +207,8 @@ export async function resultingCwd($: Engine, e: unknown, r: unknown): Promise<s
 }
 
 /**
- * `session.start` and `EnterWorktree`/`ExitWorktree` hook body: run the event, then check the resulting cwd detached.
+ * `session.start` and `EnterWorktree`/`ExitWorktree` hook body: run the event, then check the resulting cwd detached
+ * (always, also when it equals the last checked dir).
  *
  * @param $ - Engine interface.
  * @param st - The entry's state.
@@ -220,16 +224,18 @@ export async function afterSessionCwd($: Engine, st: NoticeState, e: unknown, ne
 }
 
 /**
- * `classic.CwdChanged` hook body: run the event, then check the event's `new_cwd` detached.
+ * `tool.call` hook body for `Bash`: run the call, then, unless dprint is known to run, check the session cwd detached
+ * when it differs from the last checked dir (a `cd` in the call moved it).
  *
  * @param $ - Engine interface.
  * @param st - The entry's state.
- * @param e - CwdChanged event (`new_cwd`), passed on unchanged.
+ * @param e - Bash tool-call event, passed on unchanged.
  * @param next - Continues the hook chain.
  * @returns `next`'s result, unchanged.
  */
-export async function afterCwdChanged($: Engine, st: NoticeState, e: unknown, next: Next): Promise<unknown> {
+export async function afterBash($: Engine, st: NoticeState, e: unknown, next: Next): Promise<unknown> {
   const r = await next(e);
-  void warnIfNoDprint($, st, (e as { new_cwd?: string } | null | undefined)?.new_cwd ?? "").catch(() => {});
+  // after a successful probe no check can toast: skip even the session.cwd call on every Bash call
+  if (!st.dprintRuns) void resultingCwd($, e, r).then((dir) => (dir === st.lastDir ? undefined : warnIfNoDprint($, st, dir))).catch(() => {});
   return r;
 }

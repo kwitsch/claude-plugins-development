@@ -29,6 +29,11 @@ export type NoticeState = {
   probe: Probe | null;
   /** Set once a probe succeeded: from then on no event walks the filesystem, as no toast can follow. */
   dprintRuns: boolean;
+  /**
+   * The last directory handed to a check (any hook); a Bash call re-checks only when the session cwd differs from it.
+   * Never dropped: a config created later in the same dir waits for the next cwd change, worktree switch or session.
+   */
+  lastDir: string | undefined;
 };
 
 /** The part of the engine interface `$` this module uses. */

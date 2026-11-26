@@ -64,7 +64,7 @@ const toastText = (dir, problem = NOT_INSTALLED_TEXT) => `dprint: ${dir} (or a p
 
 /** What `setup` stubs; see its comment. */
 interface SetupOptions {
-  /** session.cwd's answer: a string or a `{ deny }`. */
+  /** session.cwd's initial answer: a string or a `{ deny }`; `bashIn` changes it. */
   cwd?: unknown;
   /** fs.exists' stub result for a path. */
   exists?: (p: string) => unknown;
@@ -84,17 +84,27 @@ interface SetupOptions {
 
 /**
  * Registers every stub (before the test's first `$` call, as the kit requires) and returns what the module did.
- * `cwd`: session.cwd's answer, a string or a `{ deny }`; `exists(path)` and `run(argv)` return a stub result;
- * `home: null` leaves HOME unset, `home: { deny }` rejects env.get; `path` is the env PATH (`null` = unset);
- * `bins` are the fake executables fs.exists reports (every other path is answered by node:fs).
+ * `cwd`: session.cwd's initial answer, a string or a `{ deny }` (read at call time, so `bashIn` can move it);
+ * `exists(path)` and `run(argv)` return a stub result; `home: null` leaves HOME unset, `home: { deny }` rejects
+ * env.get; `path` is the env PATH (`null` = unset); `bins` are the fake executables fs.exists reports (every other
+ * path is answered by node:fs). `cwdReads()` and `existsCalls()` count the session.cwd and fs.exists calls so far.
  */
 function setup($, on, { cwd = "", exists, run = () => OK, home = HOME, path: pathVar = PATH_DIRS, bins = [PATH_DPRINT], toolResult = () => NEXT, install }: SetupOptions = {}) {
   const exist = exists ?? ((p) => ({ value: p === HOME || bins.includes(p) || existsSync(p) }));
   const toasts: { text: string; timeoutMs?: number }[] = [];
   const runs: { argv: string[]; init: Record<string, unknown> }[] = [];
   const envGets: string[] = [];
-  on("fs.exists", (_$, e) => exist(e.path));
-  on("session.cwd", () => (typeof cwd === "string" ? { value: cwd } : cwd));
+  let current: unknown = cwd;
+  let cwdCount = 0;
+  let existsCount = 0;
+  on("fs.exists", (_$, e) => {
+    existsCount++;
+    return exist(e.path);
+  });
+  on("session.cwd", () => {
+    cwdCount++;
+    return typeof current === "string" ? { value: current } : current;
+  });
   on("env.get", (_$, e) => {
     envGets.push(e.name);
     if (typeof home === "object" && home) return home;
@@ -110,7 +120,6 @@ function setup($, on, { cwd = "", exists, run = () => OK, home = HOME, path: pat
     return { value: undefined };
   });
   on("session.start", () => NEXT);
-  on("classic.CwdChanged", () => NEXT);
   on("tool.call", (_$, e) => ({ result: toolResult(e) }));
   const clock = mock.clock(on);
   /** Fires `event` as Claude Code, waits until the detached check has settled, resolves to the event's result. */
@@ -120,10 +129,15 @@ function setup($, on, { cwd = "", exists, run = () => OK, home = HOME, path: pat
     await clock.settle();
     return r;
   };
-  return { fire, clock, toasts, runs, envGets };
+  /** A Bash call that leaves the session in `dir` (session.cwd answers it from now on); resolves to the call's result. */
+  const bashIn = (dir: unknown) => {
+    current = dir;
+    return fire("tool.call", { tool: "Bash", command: "cd somewhere" });
+  };
+  return { fire, bashIn, clock, toasts, runs, envGets, cwdReads: () => cwdCount, existsCalls: () => existsCount };
 }
 
-plainTest("registers exactly session.start, classic.CwdChanged and tool.call for EnterWorktree/ExitWorktree", () => {
+plainTest("registers exactly session.start and tool.call for Bash, EnterWorktree and ExitWorktree", () => {
   const out: { event: string; matcher: unknown; hook: unknown }[] = [];
   register((event: string, a: unknown, b?: unknown) => {
     out.push(b === undefined ? { event, matcher: undefined, hook: a } : { event, matcher: a, hook: b });
@@ -132,7 +146,7 @@ plainTest("registers exactly session.start, classic.CwdChanged and tool.call for
     out.map(({ event, matcher }) => ({ event, matcher })),
     [
       { event: "session.start", matcher: undefined },
-      { event: "classic.CwdChanged", matcher: undefined },
+      { event: "tool.call", matcher: { tool: "Bash" } },
       { event: "tool.call", matcher: { tool: "EnterWorktree" } },
       { event: "tool.call", matcher: { tool: "ExitWorktree" } },
     ],
@@ -142,9 +156,9 @@ plainTest("registers exactly session.start, classic.CwdChanged and tool.call for
 
 test("no config in the cwd or above (up to .git) -> no process.run and no toast on every hook path", async ($, on) => {
   const dir = repo();
-  const { fire, runs, toasts } = setup($, on, { cwd: dir, run: () => DENY });
+  const { fire, bashIn, runs, toasts } = setup($, on, { cwd: dir, run: () => DENY });
   assert.equal(await fire("session.start"), NEXT);
-  assert.equal(await fire("classic.CwdChanged", { new_cwd: dir }), NEXT);
+  assert.deepEqual(await bashIn(dir), { result: NEXT });
   assert.deepEqual(await fire("tool.call", { tool: "EnterWorktree" }), { result: NEXT });
   assert.deepEqual(await fire("tool.call", { tool: "ExitWorktree" }), { result: NEXT });
   assert.deepEqual(runs, []);
@@ -172,18 +186,18 @@ test("a config in an ancestor below the git root counts; above the git root it d
   const wt = path.join(root, "wt");
   mkdirSync(path.join(wt, "src"), { recursive: true });
   writeFileSync(path.join(wt, ".git"), "gitdir: elsewhere\n");
-  const { fire, runs, toasts } = setup($, on, { run: () => DENY });
-  await fire("classic.CwdChanged", { new_cwd: sub });
+  const { bashIn, runs, toasts } = setup($, on, { run: () => DENY });
+  await bashIn(sub);
   assert.deepEqual(runs, [], "config above the git root -> not probed");
   assert.equal(toasts.length, 0);
   withConfig(root); // at the repo root: counts for pkg2
-  await fire("classic.CwdChanged", { new_cwd: sub2 });
+  await bashIn(sub2);
   assert.equal(runs.length, 1, "config in an ancestor -> probed (the one pick)");
   assert.deepEqual(toasts.map((t) => t.text), [toastText(sub2, COULD_NOT_START)]);
   // the failed probe is cached and the toast window is over, so a found config would toast again: no new toast
   // proves the walk stopped at wt
   vi.setSystemTime(T0 + 16_000);
-  await fire("classic.CwdChanged", { new_cwd: path.join(wt, "src") });
+  await bashIn(path.join(wt, "src"));
   assert.equal(toasts.length, 1, "a worktree (.git file) is its own root");
 });
 
@@ -300,32 +314,35 @@ test("PATH unset -> no PATH candidates, the ~/.dprint/bin step decides", async (
 test("one toast per 15 s across hooks and dirs (the cause is machine-wide), the next one after 15 s", async ($, on) => {
   const dir = withConfig(repo());
   const other = withConfig(repo());
-  const { fire, toasts } = setup($, on, { cwd: dir, run: () => DENY });
+  const third = withConfig(repo());
+  const { fire, bashIn, toasts } = setup($, on, { cwd: dir, run: () => DENY });
   await fire("tool.call", { tool: "EnterWorktree" });
-  await fire("classic.CwdChanged", { new_cwd: dir });
-  await fire("classic.CwdChanged", { new_cwd: other });
+  await bashIn(dir); // already checked by EnterWorktree: no-op
+  // other is recorded as handled during the window and not re-checked later (accepted: the cause was just toasted)
+  await bashIn(other);
   assert.equal(toasts.length, 1);
   vi.setSystemTime(T0 + 16_000);
-  await fire("classic.CwdChanged", { new_cwd: other });
-  assert.deepEqual(toasts.map((t) => t.text), [toastText(dir, COULD_NOT_START), toastText(other, COULD_NOT_START)]);
+  await bashIn(third);
+  assert.deepEqual(toasts.map((t) => t.text), [toastText(dir, COULD_NOT_START), toastText(third, COULD_NOT_START)]);
 });
 
-test("worktree tools check the dir their result names; CwdChanged checks new_cwd and does nothing without one", async ($, on) => {
+test("worktree tools check the dir their result names; Bash checks the session cwd", async ($, on) => {
   const stale = withConfig(repo()); // the session cwd: has a config, must never be the dir checked
   const bare = repo();
   const restored = withConfig(repo());
   const moved = withConfig(repo());
-  const { fire, runs, toasts } = setup($, on, { cwd: stale, run: () => DENY });
+  const { fire, bashIn, runs, toasts } = setup($, on, { cwd: stale, run: () => DENY });
   await fire("tool.call", { tool: "EnterWorktree", tool_response: { worktreePath: bare } });
   assert.deepEqual(runs, []);
   assert.equal(toasts.length, 0);
   await fire("tool.call", { tool: "ExitWorktree", tool_response: { restoredCwd: restored } });
   assert.deepEqual(toasts.map((t) => t.text), [toastText(restored, COULD_NOT_START)]);
-  await fire("classic.CwdChanged", { new_cwd: bare });
-  await fire("classic.CwdChanged", {});
+  await bashIn(bare);
+  assert.deepEqual(await bashIn({ deny: "boom" }), { result: NEXT }, "a refused session.cwd leaves the Bash result unchanged");
+  assert.equal(runs.length, 1);
   assert.equal(toasts.length, 1);
   vi.setSystemTime(T0 + 16_000); // past the toast window
-  await fire("classic.CwdChanged", { new_cwd: moved });
+  await bashIn(moved);
   assert.deepEqual(toasts.map((t) => t.text), [toastText(restored, COULD_NOT_START), toastText(moved, COULD_NOT_START)]);
 });
 
@@ -341,9 +358,9 @@ for (const tool of ["EnterWorktree", "ExitWorktree"]) {
 test("a successful probe is cached: a second config dir spawns nothing", async ($, on) => {
   const a = withConfig(repo());
   const b = withConfig(repo());
-  const { fire, runs, toasts } = setup($, on);
-  await fire("classic.CwdChanged", { new_cwd: a });
-  await fire("classic.CwdChanged", { new_cwd: b });
+  const { bashIn, runs, toasts } = setup($, on);
+  await bashIn(a);
+  await bashIn(b);
   assert.equal(runs.length, 1);
   assert.equal(toasts.length, 0);
 });
@@ -353,16 +370,16 @@ test("a failed probe is cached for 30 s (the new dir still gets its toast), then
   const b = withConfig(repo());
   const c = withConfig(repo());
   let result: unknown = DENY;
-  const { fire, runs, toasts } = setup($, on, { run: () => result });
-  await fire("classic.CwdChanged", { new_cwd: a });
+  const { bashIn, runs, toasts } = setup($, on, { run: () => result });
+  await bashIn(a);
   assert.equal(runs.length, 1);
   vi.setSystemTime(T0 + 16_000);
-  await fire("classic.CwdChanged", { new_cwd: b });
+  await bashIn(b);
   assert.equal(runs.length, 1, "within 30 s: no re-probe");
   assert.deepEqual(toasts.map((t) => t.text), [toastText(a, COULD_NOT_START), toastText(b, COULD_NOT_START)]);
   vi.setSystemTime(T0 + 31_000);
   result = OK;
-  await fire("classic.CwdChanged", { new_cwd: c });
+  await bashIn(c);
   assert.equal(runs.length, 2, "after 31 s: re-probed, the PATH dprint runs");
   assert.equal(toasts.length, 2);
 });
@@ -370,7 +387,8 @@ test("a failed probe is cached for 30 s (the new dir still gets its toast), then
 test("concurrent events share one in-flight probe", async ($, on) => {
   const dir = withConfig(repo());
   const { clock, toasts, runs } = setup($, on, { cwd: dir, run: () => DENY });
-  await Promise.all([$.session.start({}), $.classic.CwdChanged({ new_cwd: dir })]);
+  // both hooks always check (a Bash call could skip on lastDir and leave the shared probe unexercised)
+  await Promise.all([$.session.start({}), $.tool.call({ tool: "EnterWorktree", tool_response: { worktreePath: dir } })]);
   await clock.settle();
   assert.equal(runs.length, 1, "one probe (1 argv), not two");
   assert.equal(toasts.length, 1);
@@ -379,14 +397,15 @@ test("concurrent events share one in-flight probe", async ($, on) => {
 test("a rejecting env.get is cached as a failed probe for 30 s, then re-probed; no toast", async ($, on) => {
   const a = withConfig(repo());
   const b = withConfig(repo());
-  const { fire, runs, toasts, envGets } = setup($, on, { home: { deny: "boom" }, run: () => DENY });
-  await fire("classic.CwdChanged", { new_cwd: a });
+  const c = withConfig(repo());
+  const { bashIn, runs, toasts, envGets } = setup($, on, { home: { deny: "boom" }, run: () => DENY });
+  await bashIn(a);
   assert.equal(envGets.length, 3, "HOME, PATH and DPRINT_INSTALL are read together and both reject before any probe");
   vi.setSystemTime(T0 + 10_000);
-  await fire("classic.CwdChanged", { new_cwd: b });
+  await bashIn(b);
   assert.equal(envGets.length, 3, "within 30 s: no re-probe");
   vi.setSystemTime(T0 + 31_000);
-  await fire("classic.CwdChanged", { new_cwd: b });
+  await bashIn(c);
   assert.equal(envGets.length, 6, "after 31 s: re-probed");
   assert.deepEqual(runs, []);
   assert.equal(toasts.length, 0);
@@ -394,9 +413,10 @@ test("a rejecting env.get is cached as a failed probe for 30 s, then re-probed; 
 
 test("the hook returns next's result unchanged; a rejecting fs.exists -> no throw, no probe, no toast", async ($, on) => {
   const dir = repo();
-  const { fire, runs, toasts } = setup($, on, { cwd: dir, exists: () => ({ deny: "boom" }), run: () => DENY });
+  const { fire, bashIn, runs, toasts } = setup($, on, { cwd: dir, exists: () => ({ deny: "boom" }), run: () => DENY });
   assert.equal(await fire("session.start"), NEXT);
-  assert.equal(await fire("classic.CwdChanged", { new_cwd: dir }), NEXT);
+  // a fresh dir, so the walk with the rejecting fs.exists really runs
+  assert.deepEqual(await bashIn(repo()), { result: NEXT });
   assert.deepEqual(await fire("tool.call", { tool: "EnterWorktree" }), { result: NEXT });
   assert.deepEqual(await fire("tool.call", { tool: "ExitWorktree" }), { result: NEXT });
   assert.deepEqual(runs, []);
@@ -408,6 +428,58 @@ test("a rejecting session.cwd -> next's result unchanged, no throw, no toast", a
   assert.equal(await fire("session.start"), NEXT);
   assert.deepEqual(await fire("tool.call", { tool: "EnterWorktree" }), { result: NEXT });
   assert.deepEqual(await fire("tool.call", { tool: "ExitWorktree" }), { result: NEXT });
+  assert.equal(toasts.length, 0);
+});
+
+test("a Bash call in the dir already checked does no filesystem work", async ($, on) => {
+  const dir = repo(); // .git, no config: no toast, dprintRuns stays false
+  const { fire, bashIn, runs, toasts, existsCalls } = setup($, on, { cwd: dir, run: () => DENY });
+  await fire("session.start");
+  const before = existsCalls();
+  assert.ok(before > 0, "session.start walked the dir");
+  await bashIn(dir);
+  assert.equal(existsCalls(), before, "same dir as the last check: no walk");
+  assert.deepEqual(runs, []);
+  assert.equal(toasts.length, 0);
+});
+
+test("a Bash call after a cd checks the new dir", async ($, on) => {
+  const bare = repo();
+  const configDir = withConfig(repo());
+  const { fire, bashIn, runs, toasts } = setup($, on, { cwd: bare, run: () => DENY });
+  await fire("session.start");
+  assert.deepEqual(runs, []);
+  await bashIn(configDir);
+  assert.equal(runs.length, 1);
+  assert.deepEqual(toasts.map((t) => t.text), [toastText(configDir, COULD_NOT_START)]);
+});
+
+test("same dir after the toast window is not re-checked, another dir is", async ($, on) => {
+  const a = withConfig(repo());
+  const b = withConfig(repo());
+  const { bashIn, toasts, existsCalls } = setup($, on, { run: () => DENY });
+  await bashIn(a);
+  assert.deepEqual(toasts.map((t) => t.text), [toastText(a, COULD_NOT_START)]);
+  vi.setSystemTime(T0 + 16_000);
+  const before = existsCalls();
+  await bashIn(a);
+  assert.equal(existsCalls(), before, "same dir: no walk");
+  assert.equal(toasts.length, 1);
+  await bashIn(b);
+  assert.deepEqual(toasts.map((t) => t.text), [toastText(a, COULD_NOT_START), toastText(b, COULD_NOT_START)]);
+});
+
+test("after a successful probe a Bash call makes no engine call", async ($, on) => {
+  const a = withConfig(repo());
+  const b = withConfig(repo());
+  const { bashIn, runs, toasts, cwdReads, existsCalls } = setup($, on);
+  await bashIn(a);
+  assert.equal(runs.length, 1);
+  const reads = cwdReads();
+  const walked = existsCalls();
+  await bashIn(b);
+  assert.equal(cwdReads(), reads, "no session.cwd read once dprint runs");
+  assert.equal(existsCalls(), walked);
   assert.equal(toasts.length, 0);
 });
 
