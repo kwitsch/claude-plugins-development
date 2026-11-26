@@ -951,7 +951,7 @@ describe("build-task delivery scripts", () => {
 
   test("explore scribe is the Read/Write-only explore-scribe agent with a lens header/footer check and one retry; implement/review persist keep the exact-size check", () => {
     const ex = `${WORKFLOWS}/build-task-explore.workflow.js`;
-    expectHas(ex, ["agent(scribePrompt, { ...scribeOpts, label: \"scribe:retry\" })", "const lensProblems = (w) =>", "missing lens header(s): ", "lens header(s) without footer: "]);
+    expectHas(ex, ["Retry: the file may already exist from an earlier attempt; Read it first, then overwrite it.", "{ ...scribeOpts, label: \"scribe:retry\" })", "const lensProblems = (w) =>", "missing lens header(s): ", "lens header(s) without footer: "]);
     expectLacks(ex, ["TASKFLOW_MD_EOF", "NEVER the Write or Edit tool", "scribeRetryPrompt", "isIntactRetry", "printf", "w.bytes", "0.9"]);
     expectHas(`${AGENTS}/explore-scribe.md`, ["tools: [\"Read\", \"Write\"]", "with the Write tool", "Read the file back", "never what the prompt contained"]);
     expectHas(`${BT_WF}/explore.md`, ["with the Write tool"]);
