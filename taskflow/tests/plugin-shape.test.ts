@@ -1,4 +1,4 @@
-// Structural checks of the built taskflow plugin: manifest, the three skills, the eight workflow scripts, the twelve
+// Structural checks of the built taskflow plugin: manifest, the three skills, the eight workflow scripts, the thirteen
 // agents, the docs, plus the developer notes (taskflow/CLAUDE.md, taskflow/.claude/rules/) and .oxlintrc.json from
 // their source paths. Ported from the old bats suite; grep line matches become `m`-flag regexes over the whole text,
 // `[[:space:]]` becomes `[ \t]`. Shipped files are read from the built plugin/, so build before testing.
@@ -361,15 +361,18 @@ describe("build-task scripts", () => {
     expectLacks(F, ["difficulty", "AGENTS", "ROLE", "SKILL_DIR", "NO_NARRATION", "explorationBlock", "phase(\"Spec\")", "phase(\"Explore\")", "agent definition"]);
   });
 
-  test("spec.workflow.js: inline spec writer/reviewer, English, lean carry-forward, specReviewed", () => {
+  test("spec.workflow.js: spec-writer agent, inline reviewer, English, lean carry-forward, specReviewed", () => {
     const F = `${WORKFLOWS}/build-task-spec.workflow.js`;
     expect(nonEmpty(F)).toBe(true);
     expectHas(F, ["export const meta = {", "name: \"build-task-spec\"", "function decodeArgs", "decodeArgs([\"DRAFT_PATH\", \"SPEC_PATH\"], {})", "specWriter: \"sonnet\"", "specReview: \"sonnet\"", "specReviewerPrompt = `${NO_NARRATION}", "function reviewSpec", "function writeSpec", "specReviewed: specCheck != null", "lean/YAGNI decisions forward", "English", "specPath: SPEC_PATH"]);
     expect(followedBy("specWriterPrompt = (revision) =>", "`${NO_NARRATION}", F)).toBe(true);
-    expectLacks(F, ["agentType", "difficulty", "AGENTS", "taskflow:", "TASK", "EXPLORE_PATH"]);
+    expectHas(F, ["agentType: \"taskflow:spec-writer\""]);
+    expect(countLines(F, "agentType")).toBe(1);
+    expectLacks(F, ["difficulty", "AGENTS", "TASK", "EXPLORE_PATH"]);
+    expectHas(`${AGENTS}/spec-writer.md`, ["tools: [\"Read\", \"Write\"]", "with the Write tool", "model: sonnet"]);
   });
 
-  test("build-task scripts: meta, decodeArgs fail-fast, NO_NARRATION, no AGENTS map in explore and spec, no plugin agent in spec, clean comments", () => {
+  test("build-task scripts: meta, decodeArgs fail-fast, NO_NARRATION, no AGENTS map in explore and spec, clean comments", () => {
     expect(ls(WORKFLOWS, ".workflow.js").filter((n) => n.startsWith("build-task-"))).toHaveLength(7);
     for (const n of BT_NAMES) {
       const f = `${WORKFLOWS}/build-task-${n}.workflow.js`;
@@ -380,7 +383,6 @@ describe("build-task scripts", () => {
       expect(read(f)).toMatch(/stage:[ \t]*["']args["']/);
       expectLacks(f, ["Date.now()", "Math.random()", "new Date()"]);
       if (n === "explore" || n === "spec") expectLacks(f, ["agentType: AGENTS."]);
-      if (n === "spec") expectLacks(f, ["taskflow:"]);
       expect(read(f)).not.toMatch(/^import /m);
       expectEnglishComments(f);
     }
@@ -421,7 +423,7 @@ describe("agents", () => {
   test("every role file except pr-author requires an English final message", () => {
     const others = ls(AGENTS, ".md").filter((f) => f !== "pr-author.md");
     for (const f of others) expectHas(`${AGENTS}/${f}`, ["Write that final message in English, whatever the language of the task or its inputs; commit messages are not covered."]);
-    expect(others).toHaveLength(11);
+    expect(others).toHaveLength(12);
   });
 
   test("read-only-declared agents carry a least-privilege tools allowlist without Write/Edit", () => {
@@ -668,8 +670,8 @@ describe("ship merge-state remediation wiring", () => {
     expect(sweep(TREE, /pr_stale|pr_conflict/)).toEqual([]);
   });
 
-  test("the agent roster is exactly 12 *.md files", () => {
-    expect(ls(AGENTS, ".md")).toHaveLength(12);
+  test("the agent roster is exactly 13 *.md files", () => {
+    expect(ls(AGENTS, ".md")).toHaveLength(13);
   });
 
   test("plugin README and layout document the changes-audit skill and changes-review workflow", () => {
@@ -677,7 +679,7 @@ describe("ship merge-state remediation wiring", () => {
   });
 
   test("CLAUDE.md boundary rule and Opus-pin list cover changes-review and changes-audit", () => {
-    expectHas(DEV_NOTES, ["changes-review.workflow.js", "skills/changes-audit/", "12 static role prompts"]);
+    expectHas(DEV_NOTES, ["changes-review.workflow.js", "skills/changes-audit/", "13 static role prompts"]);
   });
 });
 
@@ -752,7 +754,7 @@ describe("ship merge-state documentation", () => {
   });
 
   test("CLAUDE.md documents ship-ensure-mergeable.mjs alongside the 12-agent roster", () => {
-    expectHas(DEV_NOTES, ["ship-ensure-mergeable.mjs", "12 static role prompts"]);
+    expectHas(DEV_NOTES, ["ship-ensure-mergeable.mjs", "13 static role prompts"]);
   });
 });
 
@@ -777,8 +779,8 @@ describe("ponytail design-phase enforcement and lean review", () => {
     expect(read(`${WORKFLOWS}/build-task-spec.workflow.js`).toLowerCase()).toContain("lean/yagni decisions forward");
   });
 
-  test("the nine build-task roles are plugin agents (INTERNAL ONLY, no-narration paragraph); no role files remain", () => {
-    for (const r of ["designer", "design-reviewer", "planner", "worktree-merger", "pr-author", "shipper", "ci-monitor", "ci-fixer", "explore-scribe"]) {
+  test("the ten build-task roles are plugin agents (INTERNAL ONLY, no-narration paragraph); no role files remain", () => {
+    for (const r of ["designer", "design-reviewer", "planner", "spec-writer", "worktree-merger", "pr-author", "shipper", "ci-monitor", "ci-fixer", "explore-scribe"]) {
       const f = `${AGENTS}/${r}.md`;
       expect(nonEmpty(f), f).toBe(true);
       expect(existsSync(abs(`${SKILL}/roles/${r}.md`))).toBe(false);
@@ -1029,10 +1031,10 @@ describe("explore lens check documentation", () => {
     expectLacks(F, ["90%", "wc -c", "Recorded project knowledge", "No plugin agent dependency", "(and spec)"]);
   });
 
-  test("developer notes and the workflow rule describe the explore-scribe agent and the twelve agentType roles", () => {
-    expectHas(DEV_NOTES, ["Nine of the plugin agents are build-task roles", "`explore-scribe`", "the other nine have one", "checks lens header/footer pairs instead of a byte count", "the lens header/footer lines come from the script", "(`SKILL.md` step 6)"]);
+  test("developer notes and the workflow rule describe the explore-scribe agent and the thirteen agentType roles", () => {
+    expectHas(DEV_NOTES, ["Ten of the plugin agents are build-task roles", "`explore-scribe`", "the other ten have one", "checks lens header/footer pairs instead of a byte count", "the lens header/footer lines come from the script", "(`SKILL.md` step 6)"]);
     expectLacks(DEV_NOTES, ["in the explore, implement and review scripts", "(`SKILL.md` step 5)", "Eight of the plugin agents"]);
-    expectHas(WF_RULE, ["Twelve roles are dispatched through a plugin `agentType`", "nine build-task roles", "`taskflow:explore-scribe` (`tools: Read, Write`)", "written as the lens `graphmind memory` (omitted when empty"]);
+    expectHas(WF_RULE, ["Thirteen roles are dispatched through a plugin `agentType`", "ten build-task roles", "`taskflow:explore-scribe` (`tools: Read, Write`)", "written as the lens `graphmind memory` (omitted when empty"]);
     expectLacks(WF_RULE, ["MIN_WRITE_RATIO", "Recorded project knowledge", "memory recall, scribe, spec writer", "Eleven roles"]);
   });
 
