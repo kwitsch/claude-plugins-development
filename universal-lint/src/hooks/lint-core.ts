@@ -27,7 +27,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { execFileSync, spawn } from "node:child_process";
 import type { ChildProcess, SpawnSyncOptionsWithStringEncoding, SpawnSyncReturns } from "node:child_process";
 import type { Hash } from "node:crypto";
-import { accessSync, constants as fsConstants, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import { accessSync, constants as fsConstants, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { availableParallelism, homedir, tmpdir } from "node:os";
 import path from "node:path";
@@ -2254,11 +2254,11 @@ function hasForeignLineBreak(fp: string): boolean {
 export interface EditRecord {
   /** `hashPath` of the file's real path: the record files of one file share this prefix. */
   key: string;
-  /** File name of the record inside the journal directory. */
+  /** Name of the record in the journal map: `<key>-<ms 15 digits>-<seq 12 digits>-<owner>.json`, sorting in append order. */
   name: string;
 }
 
-/** One journal record as stored: an edit of a file that no report has covered yet. */
+/** One journal record as stored in the server's memory: an edit of a file that no report has covered yet. */
 export interface PendingRecord {
   /** The edit's hunks, null when the whole file counts as edited (Write, FileChanged, malformed patch). */
   hunks: EditHunk[] | null;
@@ -2275,13 +2275,16 @@ export interface PendingRecord {
 }
 
 /**
- * Settle-window journal directory: `CLAUDE_PLUGIN_DATA` (OS temp dir when unset)/settle. Never inside the project tree.
- *
- * @returns Absolute path of the directory.
+ * The settle-window journal of this server process: record name -> pending record. Pruned by age in `recordEdit`
+ * (`PENDING_TTL_MS`); deleting a name is the exclusive claim of a report (`settleFindings`, `sweepFile`).
  */
-function settleDir(): string {
-  return path.resolve(process.env.CLAUDE_PLUGIN_DATA || tmpdir(), "settle");
-}
+const journal = new Map<string, PendingRecord>();
+/** When each owner last journaled a Write/Edit (epoch ms); pruned by `pruneActivity`. */
+const activity = new Map<string, number>();
+/** Owners whose last stop was blocked by a report (epoch ms of the block); pruned by `pruneActivity`. */
+const blocked = new Map<string, number>();
+/** Sequence number of the next journal record: orders records journaled in the same millisecond. */
+let journalSeq = 0;
 
 /**
  * The journal owner of a payload: the session and, inside a subagent, the agent. Findings are reported to the owner
@@ -2296,27 +2299,23 @@ export function ownerOf(args: PostToolUseHookInput | undefined): string {
 }
 
 /**
- * When the owner last journaled a Write/Edit (any file), from its activity stamp `settle/act/<owner>`.
+ * When the owner last journaled a Write/Edit (any file).
  *
  * @param owner - The `ownerOf` value.
- * @returns Epoch ms, or 0 when there is no readable stamp (counts as quiet: the hold ends, fail open).
+ * @returns Epoch ms, or 0 when the owner journaled nothing (counts as quiet: the hold ends, fail open).
  */
 function lastActivity(owner: string): number {
-  try {
-    const n = Number(readFileSync(path.join(settleDir(), "act", owner), "utf8"));
-    return Number.isFinite(n) ? n : 0;
-  } catch {
-    return 0;
-  }
+  return activity.get(owner) ?? 0;
 }
 
 /**
- * Journal one edit of a file: `<hashPath(real)>-<ms>-<pid>-<owner>.json` holding the edit's hunks (null = whole file),
- * its changed lines, the digest of the file after it, `before` (the digest of the file the hunks apply to: an Edit's
- * `originalFile`; null without hunks) and the file path and cwd its lint needs, written atomically (temp file +
- * `renameSync`). The record stays until a report covers it (`settleFindings`, `sweepHandler`) or a lint finds the
- * file clean. Also renews the owner's activity stamp. Entries dated more than `PENDING_TTL_MS` ago or more than
- * `HOOK_TIMEOUT_MS` ahead (temp leftovers too) are pruned first. Fails open to null (the lint then reports at once).
+ * Journal one edit of a file in the server's memory: `<hashPath(real)>-<ms 15 digits>-<seq 12 digits>-<owner>.json`
+ * holding the edit's hunks (null = whole file), its changed lines, the digest of the file after it, `before` (the
+ * digest of the file the hunks apply to: an Edit's `originalFile`; null without hunks) and the file path and cwd its
+ * lint needs. The sequence number keeps two records of one millisecond in append order. The record stays until a
+ * report covers it (`settleFindings`, `sweepHandler`) or a lint finds the file clean. Also renews the owner's
+ * activity. Records dated more than `PENDING_TTL_MS` ago or more than `HOOK_TIMEOUT_MS` ahead are pruned first.
+ * Fails open to null (an unreadable file for the digest; the lint then reports at once).
  *
  * @param fp - Lexical path of the edited file (read for the digest when `written` is not given).
  * @param real - Real path of the file (the key).
@@ -2339,21 +2338,16 @@ export function recordEdit(
   cwd = "",
 ): EditRecord | null {
   try {
-    const dir = settleDir();
-    mkdirSync(path.join(dir, "act"), { recursive: true });
     const now = Date.now();
     // a name dated ahead (clock stepped back) would sort after every fresh record and read as a later edit
-    for (const n of readdirSync(dir)) {
+    for (const n of journal.keys()) {
       const at = Number(n.split("-")[1]);
-      if (now - at > PENDING_TTL_MS || at - now > HOOK_TIMEOUT_MS) rmSync(path.join(dir, n), { force: true });
+      if (now - at > PENDING_TTL_MS || at - now > HOOK_TIMEOUT_MS) journal.delete(n);
     }
     const key = hashPath(real);
-    const name = `${key}-${String(now).padStart(15, "0")}-${process.pid}-${owner}.json`;
-    const tmp = path.join(dir, `${name}.tmp`);
-    const record: PendingRecord = { hunks, ranges: ranges ?? null, digest: written === undefined ? fileDigest(fp) : written, before: before ?? null, fp, cwd };
-    writeFileSync(tmp, JSON.stringify(record));
-    renameSync(tmp, path.join(dir, name));
-    writeFileSync(path.join(dir, "act", owner), String(now));
+    const name = `${key}-${String(now).padStart(15, "0")}-${String(journalSeq++).padStart(12, "0")}-${owner}.json`;
+    journal.set(name, { hunks, ranges: ranges ?? null, digest: written === undefined ? fileDigest(fp) : written, before: before ?? null, fp, cwd });
+    activity.set(owner, now);
     return { key, name };
   } catch {
     return null;
@@ -2366,15 +2360,11 @@ export function recordEdit(
  * A->B->A).
  *
  * @param rec - The lint's own journal record, or null.
- * @returns The newest record name of `rec.key`, or null (no record, or the journal is unreadable).
+ * @returns The newest record name of `rec.key`, or null (no record).
  */
 function journalTail(rec: EditRecord | null): string | null {
   if (!rec) return null;
-  try {
-    return readdirSync(settleDir()).filter((n) => n.startsWith(`${rec.key}-`) && n.endsWith(".json")).sort().at(-1) ?? null;
-  } catch {
-    return null;
-  }
+  return [...journal.keys()].filter((n) => n.startsWith(`${rec.key}-`)).sort().at(-1) ?? null;
 }
 
 /**
@@ -2382,35 +2372,33 @@ function journalTail(rec: EditRecord | null): string | null {
  *
  * @param key - `hashPath` of the file's real path.
  * @param owner - The `ownerOf` value.
- * @returns The record file names; throws when the journal cannot be read.
+ * @returns The record names.
  */
 function recordNames(key: string, owner: string): string[] {
-  return readdirSync(settleDir()).filter((n) => n.startsWith(`${key}-`) && n.endsWith(`-${owner}.json`)).sort();
+  return [...journal.keys()].filter((n) => n.startsWith(`${key}-`) && n.endsWith(`-${owner}.json`)).sort();
 }
 
 /**
- * Read journal records.
+ * Look up journal records.
  *
- * @param names - Record file names.
- * @returns The parsed records in the same order; throws on an unreadable or corrupt record.
+ * @param names - Record names.
+ * @returns The records in the same order; throws when one is gone (claimed or pruned meanwhile).
  */
 function readRecords(names: readonly string[]): PendingRecord[] {
-  return names.map((n) => JSON.parse(readFileSync(path.join(settleDir(), n), "utf8")) as PendingRecord);
+  return names.map((n) => {
+    const r = journal.get(n);
+    if (!r) throw new Error("record gone");
+    return r;
+  });
 }
 
 /**
- * Remove journal records (a report or a clean lint covered them). Never throws.
+ * Remove journal records (a report or a clean lint covered them).
  *
- * @param names - Record file names.
+ * @param names - Record names.
  */
 function clearRecords(names: readonly string[]): void {
-  for (const n of names) {
-    try {
-      rmSync(path.join(settleDir(), n), { force: true });
-    } catch {
-      // left for the TTL prune
-    }
-  }
+  for (const n of names) journal.delete(n);
 }
 
 /**
@@ -2458,15 +2446,11 @@ export function pendingRanges(recs: readonly PendingRecord[], d0: string | null)
  * @param owner - The `ownerOf` value.
  * @param d0 - Digest of the content the linter reads.
  * @param fallback - The ranges of the lint's own edit.
- * @returns The ranges to gate against, or null for the whole file (also when the journal cannot be read).
+ * @returns The ranges to gate against, or null for the whole file.
  */
 function pendingUnion(rec: EditRecord | null, owner: string, d0: string | null, fallback: Array<[number, number]> | null): Array<[number, number]> | null {
   if (!rec) return fallback;
-  try {
-    return pendingRanges(readRecords(recordNames(rec.key, owner)), d0);
-  } catch {
-    return null;
-  }
+  return pendingRanges(readRecords(recordNames(rec.key, owner)), d0);
 }
 
 /**
@@ -2479,11 +2463,7 @@ function pendingUnion(rec: EditRecord | null, owner: string, d0: string | null, 
  */
 function settleClean(rec: EditRecord | null, owner: string, unchanged: boolean): void {
   if (!rec || !unchanged) return;
-  try {
-    clearRecords(recordNames(rec.key, owner).filter((n) => n <= rec.name));
-  } catch {
-    // unreadable journal: the records stay for the sweep
-  }
+  clearRecords(recordNames(rec.key, owner).filter((n) => n <= rec.name));
 }
 
 /**
@@ -2496,10 +2476,10 @@ function settleClean(rec: EditRecord | null, owner: string, unchanged: boolean):
  * newer record of the file and owner exists (that edit's lint gates against the lines of every pending edit and
  * reports what persists), or the file changed outside Write/Edit during the hold (FileChanged lints a watched file):
  * whatever lint follows, or else the sweep at Stop/SubagentStop (`sweepHandler`), reports the final state. The own
- * record gone means a sweep or a later clean lint already covered it. Reporting claims the own record by removing it
- * (a sweep claims the same way, so one of the two reports) and clears the older records of the file and owner.
- * No own record, an unreadable file (`d0 === null`) or an unreadable journal mean "cannot tell": the findings are
- * returned at once (fail open, reported).
+ * record gone means a sweep or a later clean lint already covered it. Reporting claims the own record by deleting it
+ * from the journal map (a sweep claims the same way, so one of the two reports) and clears the older records of the
+ * file and owner. No own record or an unreadable file (`d0 === null`) mean "cannot tell": the findings are returned
+ * at once (fail open, reported).
  *
  * @param findings - The gated findings of the lint.
  * @param resolved - Lexical absolute path of the linted file.
@@ -2514,22 +2494,14 @@ export async function settleFindings(findings: Finding[], resolved: string, rec:
   if (d0 !== d1) return [];
   let names: string[];
   for (;;) {
-    try {
-      names = recordNames(rec.key, owner);
-    } catch {
-      return findings;
-    }
+    names = recordNames(rec.key, owner);
     if (names.at(-1) !== rec.name) return []; // a newer edit owns the report, or the own record is already covered
     const left = settleWaitMs(undefined, Date.now() - lastActivity(owner));
     if (left <= 0) break;
     await sleep(Math.min(left, SETTLE_POLL_MS));
   }
   if (digestOrNull(resolved) !== d0) return [];
-  try {
-    unlinkSync(path.join(settleDir(), rec.name)); // the claim: throws when a sweep took the record first
-  } catch {
-    return [];
-  }
+  if (!journal.delete(rec.name)) return []; // the claim: false when a sweep took the record first
   clearRecords(names);
   return findings;
 }
@@ -2702,8 +2674,9 @@ export async function lintFileHandler(args: PostToolUseHookInput, scoped: { fp: 
  * is claimed by removing its newest record (a held lint claims the same way, so one of the two reports), scoped
  * again, gated against the lines of its pending edits (`pendingRanges`) and linted, at most `FILE_CHANGED_SLOTS`
  * files at a time; a file whose lint could not end before the hook timeout (`slotDeadlineMs`) is left pending.
- * A report sets the marker `settle/act/<owner>.blocked`; the stop that follows it (`stop_hook_active`) is let
- * through without a sweep, so the hook never loops. Fails open to {}.
+ * Each file is claimed by deleting its newest record from the journal map. A report sets the owner's stop marker
+ * (`markBlocked`); the stop that follows it (`stop_hook_active`) is let through without a sweep, so the hook never
+ * loops. Fails open to {}.
  *
  * @param args - The Stop or SubagentStop hook payload.
  * @returns The hook result: findings as additionalContext, or an empty object.
@@ -2713,10 +2686,9 @@ export async function sweepHandler(args: PostToolUseHookInput): Promise<HookResu
     const ev = args.hook_event_name === "SubagentStop" ? "SubagentStop" : "Stop";
     const owner = ownerOf(args);
     if (stopAlreadyBlocked(args)) return {};
-    const dir = settleDir();
     pruneActivity();
     const groups = new Map<string, string[]>();
-    for (const n of readdirSync(dir).sort()) {
+    for (const n of [...journal.keys()].sort()) {
       if (!n.endsWith(`-${owner}.json`)) continue;
       const key = n.split("-")[0];
       groups.set(key, [...(groups.get(key) ?? []), n]);
@@ -2745,19 +2717,11 @@ export async function sweepHandler(args: PostToolUseHookInput): Promise<HookResu
 }
 
 /**
- * Remove the activity stamps and stop markers (`settle/act/`) of owners that journaled nothing for `PENDING_TTL_MS`:
- * one small file per agent would otherwise pile up. Run once per sweep. Never throws.
+ * Drop the activity times and stop markers of owners older than `PENDING_TTL_MS`: one entry per agent would otherwise
+ * pile up. Run once per sweep.
  */
 function pruneActivity(): void {
-  try {
-    const act = path.join(settleDir(), "act");
-    for (const n of readdirSync(act)) {
-      const file = path.join(act, n);
-      if (Date.now() - statSync(file).mtimeMs > PENDING_TTL_MS) rmSync(file, { force: true });
-    }
-  } catch {
-    // no stamps yet, or an unreadable one: left for the next sweep
-  }
+  for (const m of [activity, blocked]) for (const [o, at] of m) if (Date.now() - at > PENDING_TTL_MS) m.delete(o);
 }
 
 /**
@@ -2772,12 +2736,12 @@ async function sweepFile(names: readonly string[], args: PostToolUseHookInput): 
   try {
     recs = readRecords(names);
   } catch {
-    // corrupt record: the file cannot be named, its records are dropped below
+    // a record claimed or pruned meanwhile: the file cannot be named, its records are dropped below
   }
   const last = recs?.at(-1);
   const known = typeof last?.fp === "string" && typeof last.cwd === "string";
   if (known && elapsedMs() >= slotDeadlineMs(path.extname(last.fp).toLowerCase())) return []; // no time left: stays pending
-  unlinkSync(path.join(settleDir(), names[names.length - 1])); // the claim: throws when a held lint took it first
+  if (!journal.delete(names[names.length - 1])) throw new Error("claimed"); // the claim: a held lint took it first
   clearRecords(names);
   if (!recs || !known) return [];
   const s = scopedTarget(last.cwd, last.fp, scratchpadOf(args));
@@ -3221,38 +3185,28 @@ export function watchPathsHandler(args: PostToolUseHookInput): { hookSpecificOut
 }
 
 /**
- * Whether a Stop or SubagentStop payload is the continuation of a stop this owner already blocked: a marker from
- * `markBlocked` lets the active stop through. A stop that is not active clears the marker; a failed clear (unusable
- * data dir) is ignored (fail open).
+ * Whether a Stop or SubagentStop payload is the continuation of a stop this owner already blocked: the in-memory
+ * marker from `markBlocked` lets the active stop through. A stop that is not active clears the marker.
  *
  * @param args - The Stop or SubagentStop hook payload.
  * @returns True when the sweep must be skipped.
  */
 export function stopAlreadyBlocked(args: PostToolUseHookInput): boolean {
-  const mark = path.join(settleDir(), "act", `${ownerOf(args)}.blocked`);
+  const owner = ownerOf(args);
   if (args.stop_hook_active !== true) {
-    try {
-      rmSync(mark, { force: true });
-    } catch {
-      // fail open: an unusable data dir (ENOTDIR) must not cost the stop its reports
-    }
+    blocked.delete(owner);
     return false;
   }
-  return existsSync(mark);
+  return blocked.has(owner);
 }
 
 /**
- * Records that the stop of `owner` was blocked; fails open (without the marker the next active stop sweeps again).
+ * Records in memory that the stop of `owner` was blocked (pruned with the activity times).
  *
  * @param owner - The owner id from `ownerOf`.
  */
 export function markBlocked(owner: string): void {
-  try {
-    mkdirSync(path.join(settleDir(), "act"), { recursive: true });
-    writeFileSync(path.join(settleDir(), "act", `${owner}.blocked`), "");
-  } catch {
-    // fail open: without the marker the next active stop sweeps again
-  }
+  blocked.set(owner, Date.now());
 }
 
 /**

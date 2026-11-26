@@ -3,11 +3,10 @@
 // outbox): "the later lint reports, the earlier one stays silent" is asserted as "the marker is delivered exactly once".
 // The old per-process wall times (a held process ended early, the hold restarted) have no equivalent on one server.
 import assert from "node:assert/strict";
-import { existsSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { expect, test } from "vitest";
-import { hashPath, ownerOf } from "../src/hooks/lint-core.ts";
 import { type LintEnv, makeEnv, payload } from "./support/lint-hook.ts";
 
 /** The 4-line script the scenarios edit. */
@@ -115,8 +114,19 @@ async function intoHold(e: LintEnv, runs = 1): Promise<void> {
  */
 const times = (text: string, marker: string): number => text.split(marker).length - 1;
 
-/** The journal records of the env (empty when the directory does not exist; `act/` holds stamps and markers). */
-const journal = (e: LintEnv): string[] => (existsSync(path.join(e.data, "settle")) ? readdirSync(path.join(e.data, "settle")).filter((n) => n.endsWith(".json")) : []);
+/**
+ * Asserts that no journal record of the owner is pending: a fresh stop answers {} and runs no linter (a pending
+ * record would be linted by the sweep). The journal lives in the server's memory; this is its observable side.
+ *
+ * @param s - The test's setup.
+ * @param srv - The test's server.
+ * @param extra - `AGENT` for the subagent's SubagentStop.
+ */
+async function noPending(s: { e: LintEnv }, srv: Srv, extra?: Record<string, unknown>): Promise<void> {
+  const runs = s.e.lines().length;
+  assert.deepEqual(await srv.stop(extra), {});
+  assert.equal(s.e.lines().length, runs, "nothing pending: the stop linted nothing");
+}
 /** The same PostToolUse payload as made by a subagent. */
 const bySub = (input: string): string => JSON.stringify({ ...(JSON.parse(input) as Record<string, unknown>), ...AGENT });
 /** A FileChanged payload for `file`. */
@@ -129,13 +139,13 @@ test("a finding is held for the quiet time, a clean lint is not; both leave no r
   await srv.edit(edit);
   // lost: "a clean lint is not held" was the wall-time difference of two processes; here only its silence shows
   assert.equal(await srv.reports(1500), "");
-  assert.deepEqual(journal(s.e), []);
+  await noPending(s, srv);
   s.setFindings(FINDING_L2);
   await srv.edit(edit);
   await intoHold(s.e, 2);
   assert.equal(await srv.state(0), "timeout", "not ready while the hold runs");
   assert.match(await srv.reports(1500), /line2-marker/);
-  assert.deepEqual(journal(s.e), []);
+  await noPending(s, srv);
 });
 
 test("a finding outside the edited file is held too", async () => {
@@ -177,7 +187,7 @@ test("a later edit of the file whose lint is clean: nothing is reported and the 
   await intoHold(s.e, 2);
   // "ends early" was the held process's wall time; on one server only the silence is observable
   assert.equal(await srv.reports(1500), "");
-  assert.deepEqual(journal(s.e), []);
+  await noPending(s, srv);
 });
 
 test("a later edit elsewhere in the file while the error is still there: the later lint reports the earlier edit's line, once", async () => {
@@ -239,25 +249,24 @@ test("the FileChanged echo of a Write/Edit is no later edit: it records nothing 
   writeFileSync(s.file, SH4_FIXED); // what EDIT_L2 writes, so the recorded digest matches the echo
   await srv.edit(payload(s.file, s.e.cwd, { toolName: "Edit", toolResponse: { ...EDIT_L2, originalFile: SH4 } }));
   await intoHold(s.e);
-  const before = journal(s.e);
   await srv.changed(changed(s.file, s.e.cwd));
   await sleep(200); // the echo's detached run: a digest skip, done long before this
-  assert.deepEqual(journal(s.e), before);
   assert.match(await srv.reports(1500), /line2-marker/);
   assert.equal(s.e.lines().length, 1, "the echo did not lint");
+  await noPending(s, srv); // the echo journaled nothing the report left behind
 });
 
 test("FileChanged journals a whole-file edit for a file changed outside Write/Edit", async () => {
   const s = setup();
   const srv = server(s.e, s.findings, 1500);
-  s.setFindings(FINDING_L2);
+  s.setFindings("a.sh:3:6: note: line3-marker [SC2086]\n");
   await srv.changed(changed(s.file, s.e.cwd));
   await intoHold(s.e);
-  const names = journal(s.e);
-  assert.equal(names.length, 1);
-  assert.ok(names[0].endsWith(`-${ownerOf({ cwd: "", session_id: SESSION })}.json`), "owned by the main conversation");
-  assert.equal(JSON.parse(readFileSync(path.join(s.e.data, "settle", names[0]), "utf8")).hunks, null);
-  assert.match(await srv.reports(1500), /line2-marker/);
+  assert.deepEqual(await srv.stop(AGENT), {}, "not the subagent's record");
+  const swept = await srv.stop();
+  assert.equal(swept.decision, "block", "owned by the main conversation");
+  assert.match(swept.reason ?? "", /line3-marker/, "a whole-file record: no line is gated away");
+  assert.equal(await srv.reports(1500), "", "the sweep claimed the record: the held lint stays silent");
 });
 
 test("a FileChanged lint does not hold its slot while the findings settle", async () => {
@@ -329,7 +338,7 @@ test("a Write whose hook journals after a later Edit's hook: it reports the whol
   write.tool_input.content = SET_L4.originalFile;
   await srv.edit(JSON.stringify(write));
   assert.match(await srv.reports(300), /line2-marker/);
-  assert.deepEqual(journal(s.e), []);
+  await noPending(s, srv);
 });
 
 /** An edit and its exact undo while the linter of the first call (`kind`) runs; asserts the stale lint's line number is never reported. */
@@ -452,20 +461,16 @@ test("a subagent's Edit is journaled and not linted; an Edit that changed nothin
   const s = setup();
   const srv = server(s.e, s.findings, 0);
   s.setFindings(FINDING_L2);
-  const real = realpathSync(s.file);
   assert.equal(await srv.edit(bySub(payload(s.file, s.e.cwd, { toolName: "Edit", toolResponse: { structuredPatch: [] } }))), "");
-  assert.deepEqual(journal(s.e), []);
+  await noPending(s, srv, AGENT);
+  s.setFindings(`a.sh:1:1: note: line1-marker [SC2086]\n${FINDING_L2}`);
   assert.equal(await srv.edit(bySub(payload(s.file, s.e.cwd, { toolName: "Edit", toolResponse: SET_L2 }))), "");
   assert.deepEqual(s.e.lines(), [], "no linter ran");
-  const names = journal(s.e);
-  assert.equal(names.length, 1);
-  assert.ok(names[0].startsWith(`${hashPath(real)}-`));
-  assert.ok(names[0].endsWith(`-${ownerOf({ cwd: "", ...AGENT })}.json`));
-  const rec = JSON.parse(readFileSync(path.join(s.e.data, "settle", names[0]), "utf8"));
-  assert.equal(rec.hunks[0].oldLines, 4);
-  assert.deepEqual(rec.ranges, [[1, 1]]);
-  assert.equal(rec.fp, s.file);
-  assert.equal(rec.cwd, s.e.cwd);
+  assert.deepEqual(await srv.stop(), {}, "not the main conversation's record");
+  const swept = await srv.stop(AGENT);
+  assert.equal(swept.decision, "block");
+  assert.match(swept.reason ?? "", /line2-marker/, "the journaled ranges gate the sweep: the edited line");
+  assert.doesNotMatch(swept.reason ?? "", /line1-marker/, "a line outside the edit stays gated");
 });
 
 test("SubagentStop reports the agent's pending edits once, gated to the lines of all its edits", async () => {
@@ -475,7 +480,6 @@ test("SubagentStop reports the agent's pending edits once, gated to the lines of
   assert.equal(await srv.edit(bySub(payload(s.file, s.e.cwd, { toolName: "Edit", toolResponse: SET_L2 }))), "");
   writeFileSync(s.file, SH4_L4);
   assert.equal(await srv.edit(bySub(payload(s.file, s.e.cwd, { toolName: "Edit", toolResponse: { ...EDIT_L4, originalFile: SH4 } }))), "");
-  assert.equal(journal(s.e).length, 2);
   const swept = await srv.stop(AGENT);
   assert.equal(swept.decision, "block");
   assert.match(swept.reason ?? "", /^universal-lint: shellcheck found issues in a\.sh:/);
@@ -483,7 +487,7 @@ test("SubagentStop reports the agent's pending edits once, gated to the lines of
   assert.match(swept.reason ?? "", /line4-marker/);
   assert.doesNotMatch(swept.reason ?? "", /line1-marker/, "a line the agent did not touch stays gated");
   assert.equal(s.e.lines().length, 1, "one lint for the file, not one per edit");
-  assert.deepEqual(journal(s.e), []);
+  await noPending(s, srv, AGENT);
 });
 
 test("the stop that follows a report is let through without a sweep; the next fresh stop sweeps again", async () => {
@@ -497,7 +501,6 @@ test("the stop that follows a report is let through without a sweep; the next fr
   const again = await srv.stop({ ...AGENT, stop_hook_active: true });
   assert.equal(again.decision, undefined, "never block the same stop twice");
   assert.equal(s.e.lines().length, 1);
-  assert.equal(journal(s.e).length, 1, "the record stays pending");
   const fresh = await srv.stop(AGENT);
   assert.equal(fresh.decision, "block");
   assert.match(fresh.reason ?? "", /line2-marker/);
@@ -523,13 +526,14 @@ test("a sweep with nothing pending, with a clean file or with a file that is gon
   await srv.edit(edit);
   assert.equal((await srv.stop(AGENT)).decision, undefined);
   assert.equal(s.e.lines().length, 1);
-  assert.deepEqual(journal(s.e), []);
   s.setFindings(FINDING_L2);
+  await noPending(s, srv, AGENT);
   await srv.edit(edit);
   rmSync(s.file);
   assert.equal((await srv.stop(AGENT)).decision, undefined);
   assert.equal(s.e.lines().length, 1, "a file out of scope is not linted");
-  assert.deepEqual(journal(s.e), []);
+  writeFileSync(s.file, SH4);
+  await noPending(s, srv, AGENT); // the sweep dropped the gone file's records
 });
 
 test("Stop sweeps the main conversation's pending file: the held lint is claimed and stays silent; a subagent's stop does not touch it", async () => {
@@ -539,7 +543,6 @@ test("Stop sweeps the main conversation's pending file: the held lint is claimed
   await srv.edit(payload(s.file, s.e.cwd, { toolName: "Edit", toolResponse: SET_L2 }));
   await intoHold(s.e);
   assert.equal((await srv.stop(AGENT)).decision, undefined);
-  assert.equal(journal(s.e).length, 1);
   const swept = await srv.stop();
   assert.equal(swept.decision, "block");
   assert.match(swept.reason ?? "", /line2-marker/);
@@ -556,7 +559,8 @@ test("a held finding that the turn end finds repaired outside Write/Edit is neve
   writeFileSync(s.file, SH4_FIXED); // e.g. `sed -i` on an unwatched file
   s.setFindings("");
   assert.equal(await srv.reports(1500), "", "the file changed during the hold");
-  assert.equal(journal(s.e).length, 1, "left for the sweep");
+  const runs = s.e.lines().length;
   assert.equal((await srv.stop()).decision, undefined);
-  assert.deepEqual(journal(s.e), []);
+  assert.equal(s.e.lines().length, runs + 1, "left for the sweep: the stop linted the file");
+  await noPending(s, srv);
 });

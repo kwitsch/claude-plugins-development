@@ -1,10 +1,11 @@
 // Unit tests of the per-call context and the state cap of src/hooks/lint-core.ts.
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, test, vi } from "vitest";
-import { capSet, configExists, editedHandler, markBlocked, ownerOf, runInCall, settleWaitMs, spawnGroup, STATE_CAP, stopAlreadyBlocked } from "../src/hooks/lint-core.ts";
+import { capSet, configExists, editedHandler, markBlocked, ownerOf, recordEdit, runInCall, settleFindings, settleWaitMs, spawnGroup, STATE_CAP, stopAlreadyBlocked } from "../src/hooks/lint-core.ts";
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -71,7 +72,6 @@ test("runInCall clears the per-call memos: a config created between two calls is
 });
 
 test("stopAlreadyBlocked / markBlocked: a marked owner's active stop is let through; a fresh stop clears the marker", () => {
-  process.env.CLAUDE_PLUGIN_DATA = mkdtempSync(path.join(tmpdir(), "ul-cc-data-"));
   const args = { cwd: "", session_id: "cc-s1" };
   assert.equal(stopAlreadyBlocked({ ...args, stop_hook_active: true }), false, "no marker: sweep");
   markBlocked(ownerOf(args));
@@ -82,4 +82,21 @@ test("stopAlreadyBlocked / markBlocked: a marked owner's active stop is let thro
 
 test("editedHandler: out of scope answers {} (the old PostToolUse branch of main)", async () => {
   assert.deepEqual(await editedHandler({ cwd: tmpdir(), tool_name: "Write", tool_input: { file_path: "/nonexistent/a.json" } }), {});
+});
+
+test("two records in the same millisecond sort in append order", async () => {
+  process.env.UNIVERSAL_LINT_SETTLE_MS = "0";
+  const dir = mkdtempSync(path.join(tmpdir(), "ul-cc-seq-"));
+  const fp = path.join(dir, "a.sh");
+  writeFileSync(fp, "echo a\n");
+  const d = createHash("sha256").update("echo a\n").digest("base64");
+  const owner = ownerOf({ cwd: "", session_id: "cc-seq" });
+  const f = { tool: "shellcheck", target: "a.sh", base: dir, text: "a.sh:1:1: note: m [SC2086]" };
+  vi.spyOn(Date, "now").mockReturnValue(1_800_000_000_000);
+  const a = recordEdit(fp, fp, null, null, null, owner);
+  const b = recordEdit(fp, fp, null, null, null, owner);
+  assert.ok(a && b);
+  assert.ok(a.name < b.name);
+  assert.deepEqual(await settleFindings([f], fp, a, d, d, owner), [], "the newer record owns the report");
+  assert.deepEqual(await settleFindings([f], fp, b, d, d, owner), [f]);
 });

@@ -355,3 +355,10 @@ test("digest store: a keyed edit leaves no written/ directory (the digest lives 
   await w.s.call("file_edited", { ...w.edit(), key: await w.s.key("s1") });
   assert.equal(existsSync(path.join(w.e.data, "written")), false);
 });
+
+test("journal and stop marker: a subagent edit and a blocked stop leave no settle/ directory (both live in the server's memory)", async () => {
+  const w = world();
+  assert.deepEqual(await w.s.call("file_edited", w.edit({ key: await w.s.key("s1"), agent_id: "X" })), {});
+  assert.equal((await w.stop({ hook_event_name: "SubagentStop", agent_id: "X" }))["decision"], "block");
+  assert.equal(existsSync(path.join(w.e.data, "settle")), false);
+});

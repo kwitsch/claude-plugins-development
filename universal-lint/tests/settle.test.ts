@@ -1,12 +1,12 @@
 // Settle window (F34, F40): edits are journaled per owner, findings are held until the owner is quiet and reported by the lint of the newest state.
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
-import { afterAll, test } from "vitest";
-import { carryLine, editHunks, editRanges, hashPath, ownerOf, pendingRanges, recordEdit, settleFindings, settleWaitMs } from "../src/hooks/lint-core.ts";
+import { afterAll, afterEach, beforeAll, test, vi } from "vitest";
+import { carryLine, editHunks, editRanges, hashPath, ownerOf, pendingRanges, type PendingRecord, recordEdit, runInCall, settleFindings, settleWaitMs, sweepHandler } from "../src/hooks/lint-core.ts";
 
 /** The hook input type; the tests pass partial payloads on purpose (a Write, a missing patch). */
 type HookInput = Parameters<typeof editHunks>[0];
@@ -136,11 +136,29 @@ test("carryLine: a hunk without old lines names the line before it", () => {
 });
 
 // ---- journal, pending lines and the hold ----------------------------------------------------------------------------
+// The journal lives in the module's memory, shared by every test of this file: each world has its own owners, and the
+// presence of a record is asserted through behaviour (a sweep of the owner reports it, or answers {} when none is left).
+// Removed with the file journal (spec inventory): "recordEdit fails open: an unusable data dir gives null" and
+// "settleFindings: an unreadable journal means report"; a map has no unusable directory and no unreadable record.
 
 /** Scratch root of this file's journal tests, removed when the file finishes. */
 const SCRATCH = mkdtempSync(path.join(tmpdir(), "universal-lint-settle-"));
-afterAll(() => rmSync(SCRATCH, { recursive: true, force: true }));
-/** Counter giving every `world` its own directory. */
+/** A directory holding a `shellcheck` stub that reports a marker on lines 1 to 8 of `a.sh` (exit 1). */
+const STUB_BIN = path.join(SCRATCH, "bin");
+/** The PATH before this file put the stub first. */
+const OLD_PATH = process.env.PATH;
+beforeAll(() => {
+  mkdirSync(STUB_BIN, { recursive: true });
+  const out = [1, 2, 3, 4, 5, 6, 7, 8].map((n) => `a.sh:${n}:1: note: sweep-marker${n} [SC2086]`).join("\\n\\n");
+  writeFileSync(path.join(STUB_BIN, "shellcheck"), `#!/bin/sh\nprintf '${out}\\n'\nexit 1\n`, { mode: 0o755 });
+  process.env.PATH = `${STUB_BIN}${path.delimiter}${OLD_PATH ?? ""}`;
+});
+afterAll(() => {
+  process.env.PATH = OLD_PATH;
+  rmSync(SCRATCH, { recursive: true, force: true });
+});
+afterEach(() => vi.restoreAllMocks());
+/** Counter giving every `world` its own directory and owners. */
 let worlds = 0;
 /** The 6-line file the scenarios start from. */
 const SIX = "l1\nl2\nl3\nl4\nl5\nl6\n";
@@ -152,24 +170,21 @@ const REPLACE_3 = [{ oldStart: 1, oldLines: 6, newStart: 1, newLines: 6, lines: 
 const REPLACE_6 = [{ oldStart: 4, oldLines: 3, newStart: 4, newLines: 3, lines: [" l4", " l5", "-l6", "+L6"] }];
 /** Hunks inserting two lines after line 1 of SIX. */
 const INSERT_AFTER_1 = [{ oldStart: 1, oldLines: 3, newStart: 1, newLines: 5, lines: [" l1", "+n1", "+n2", " l2", " l3"] }];
-/** The owner of a payload without session and agent (what `recordEdit` and `settleFindings` default to). */
+/** The owner of a payload without session and agent. */
 const MAIN = ownerOf(undefined);
 /** Another owner: a subagent of the same (unnamed) session. */
 const AGENT = ownerOf({ cwd: "", agent_id: "a1" });
 
-/** Make the scratch directories of one scenario and point the plugin data dir at them. */
+/** Make the scratch directory of one scenario, with its own session and owners. */
 function world() {
-  const base = path.join(SCRATCH, String(worlds++));
-  const data = path.join(base, "data");
-  const proj = path.join(base, "proj");
+  const session = `w${worlds++}`;
+  const proj = path.join(SCRATCH, session);
   mkdirSync(proj, { recursive: true });
-  process.env.CLAUDE_PLUGIN_DATA = data;
   process.env.UNIVERSAL_LINT_SETTLE_MS = "0";
   const file = path.join(proj, "a.sh");
-  const journal = path.join(data, "settle");
-  /** The record files in the journal (the `act` directory holds the activity stamps). */
-  const records = (): string[] => readdirSync(journal).filter((n) => n.endsWith(".json"));
-  return { data, proj, file, journal, records, real: realpathSync(proj) + "/a.sh" };
+  /** The records this world's `journalEdit` calls stored, oldest first. */
+  const recs: PendingRecord[] = [];
+  return { proj, file, session, recs, real: realpathSync(proj) + "/a.sh", main: ownerOf({ cwd: "", session_id: session }), agent: ownerOf({ cwd: "", session_id: session, agent_id: "a1" }) };
 }
 
 /** A shellcheck-style finding with one diagnostic per given 1-based line. */
@@ -182,20 +197,40 @@ const found = (proj: string, lines: number[]) => ({ tool: "shellcheck", target: 
  * @param before - The content the hunks apply to.
  * @param content - The content after the edit.
  * @param hunks - The `structuredPatch` hunks, or null for a Write.
- * @param owner - The journal owner.
+ * @param owner - The journal owner; default the world's main conversation.
  * @returns The record handle.
  */
-async function journalEdit(w: ReturnType<typeof world>, before: string, content: string, hunks: unknown, owner = MAIN) {
-  await sleep(3); // same pid, same millisecond would collide on the record name
+function journalEdit(w: ReturnType<typeof world>, before: string, content: string, hunks: unknown, owner = w.main) {
   writeFileSync(w.file, content);
   const e = hunks === null ? { tool_name: "Write" } : edit(hunks);
-  const rec = recordEdit(w.file, w.real, editHunks(e as HookInput), hunks === null ? null : digestOf(before), digestOf(content), owner, editRanges(e as HookInput), w.proj);
+  const h = editHunks(e as HookInput);
+  const ranges = editRanges(e as HookInput);
+  const rec = recordEdit(w.file, w.real, h, hunks === null ? null : digestOf(before), digestOf(content), owner, ranges, w.proj);
   assert.ok(rec);
+  w.recs.push({ hunks: h, ranges: ranges ?? null, digest: digestOf(content), before: hunks === null ? null : digestOf(before), fp: w.file, cwd: w.proj });
   return rec;
 }
 
-/** The stored records of the world's file for an owner, oldest first. */
-const stored = (w: ReturnType<typeof world>, owner = MAIN) => w.records().filter((n) => n.endsWith(`-${owner}.json`)).sort().map((n) => JSON.parse(readFileSync(path.join(w.journal, n), "utf8")));
+/** The records the world's `journalEdit` calls stored, oldest first. */
+const stored = (w: ReturnType<typeof world>) => w.recs;
+
+/**
+ * The Stop sweep of the world's main conversation (or with `agent` its subagent's SubagentStop), in a call context.
+ *
+ * @param w - The `world`.
+ * @param agent - Sweep the subagent `a1` instead.
+ * @returns The sweep's hook result: the stub's findings when a record was pending, else {}.
+ */
+const sweep = (w: ReturnType<typeof world>, agent = false) => runInCall(new AbortController().signal, () => sweepHandler({ cwd: w.proj, session_id: w.session, ...(agent ? { agent_id: "a1", hook_event_name: "SubagentStop" } : { hook_event_name: "Stop" }) }));
+
+/**
+ * Whether a promise is still pending after `ms`.
+ *
+ * @param p - The promise.
+ * @param ms - How long to wait.
+ * @returns `"pending"` or `"held"` (settled first).
+ */
+const after = (p: Promise<unknown>, ms: number) => Promise.race([p.then(() => "held"), sleep(ms).then(() => "pending")]);
 
 test("ownerOf: the session and the agent name the owner, a payload without them is the main conversation of no session", () => {
   assert.match(MAIN, /^[0-9a-f]{16}$/);
@@ -207,183 +242,166 @@ test("ownerOf: the session and the agent name the owner, a payload without them 
   assert.notEqual(ownerOf({ cwd: "", session_id: "s1a", agent_id: "1" }), ownerOf({ cwd: "", session_id: "s1", agent_id: "a1" }));
 });
 
-test("recordEdit writes <key>-<ms>-<pid>-<owner>.json with hunks, lines, digests, path and cwd, and the activity stamp", () => {
+test("recordEdit names <key>-<ms 15>-<seq 12>-<owner>.json and makes the owner active", async () => {
   const w = world();
   writeFileSync(w.file, SIX);
-  const hunks = editHunks(edit(REPLACE_3) as HookInput);
-  const t0 = Date.now();
-  const rec = recordEdit(w.file, w.real, hunks, digestOf("before"), undefined, AGENT, [[2, 2]], w.proj);
+  const rec = recordEdit(w.file, w.real, editHunks(edit(REPLACE_3) as HookInput), digestOf("before"), undefined, w.agent, [[2, 2]], w.proj);
   assert.ok(rec);
   assert.equal(rec.key, hashPath(w.real));
-  assert.deepEqual(w.records(), [rec.name]);
-  assert.match(rec.name, new RegExp(`^[0-9a-f]{64}-\\d{15}-\\d+-${AGENT}\\.json$`));
-  assert.deepEqual(JSON.parse(readFileSync(path.join(w.journal, rec.name), "utf8")), { hunks, ranges: [[2, 2]], digest: digestOf(SIX), before: digestOf("before"), fp: w.file, cwd: w.proj });
-  assert.deepEqual(readdirSync(path.join(w.journal, "act")), [AGENT]);
-  const stamp = Number(readFileSync(path.join(w.journal, "act", AGENT), "utf8"));
-  assert.ok(stamp >= t0 && stamp <= Date.now());
+  assert.match(rec.name, new RegExp(`^[0-9a-f]{64}-\\d{15}-\\d{12}-${w.agent}\\.json$`));
+  process.env.UNIVERSAL_LINT_SETTLE_MS = "300";
+  const f = [found(w.proj, [3])];
+  const held = settleFindings(f, w.file, rec, digestOf(SIX), digestOf(SIX), w.agent);
+  assert.equal(await after(held, 100), "pending", "the owner just edited: the hold runs");
+  assert.equal(await held, f);
 });
 
-test("recordEdit keeps pending records for a day and prunes older ones, temp leftovers too", () => {
+test("recordEdit keeps pending records for a day and prunes older ones", async () => {
   const w = world();
   writeFileSync(w.file, SIX);
-  mkdirSync(w.journal, { recursive: true });
-  const stamp = (ms: number) => String(ms).padStart(15, "0");
+  const t = Date.now();
   const day = 24 * 60 * 60 * 1000;
-  const old = `${"a".repeat(64)}-${stamp(Date.now() - day - 60_000)}-1-${MAIN}.json`;
-  const oldTmp = `${"b".repeat(64)}-${stamp(Date.now() - 2 * day)}-1-${MAIN}.json.tmp`;
-  const pending = `${"c".repeat(64)}-${stamp(Date.now() - day + 60_000)}-1-${MAIN}.json`;
-  for (const n of [old, oldTmp, pending]) writeFileSync(path.join(w.journal, n), "{}");
-  const rec = recordEdit(w.file, w.real, null);
-  assert.ok(rec);
-  const byName = (a: string, b: string): number => a.localeCompare(b);
-  assert.deepEqual(w.records().sort(byName), [pending, rec.name].sort(byName));
-  assert.ok(!readdirSync(w.journal).includes(oldTmp));
+  const now = vi.spyOn(Date, "now").mockReturnValue(t);
+  assert.ok(recordEdit(w.file, w.real, null, null, null, w.agent, null, w.proj)); // the old record
+  now.mockReturnValue(t + 120_000);
+  assert.ok(recordEdit(w.file, w.real, null, null, null, w.main, null, w.proj)); // still pending a day later
+  now.mockReturnValue(t + day + 60_000);
+  const other = path.join(w.proj, "b.txt"); // not lintable: its record never reports
+  writeFileSync(other, "x\n");
+  assert.ok(recordEdit(other, realpathSync(other), null, null, null, w.main, null, w.proj));
+  now.mockRestore();
+  assert.deepEqual(await sweep(w, true), {}, "the day-old record was pruned");
+  assert.match(String((await sweep(w)).hookSpecificOutput?.additionalContext), /sweep-marker/, "the younger record stayed");
 });
 
 test("recordEdit also prunes a record dated far ahead (clock stepped back): it must not read as a later edit", async () => {
   const w = world();
   writeFileSync(w.file, SIX);
-  const first = recordEdit(w.file, w.real, null);
-  assert.ok(first);
-  const ahead = `${first.key}-${String(Date.now() + 3_600_000).padStart(15, "0")}-1-${MAIN}.json`;
-  writeFileSync(path.join(w.journal, ahead), "{}");
-  await sleep(3);
-  const own = recordEdit(w.file, w.real, null);
+  const t = Date.now();
+  const now = vi.spyOn(Date, "now").mockReturnValue(t + 3_600_000);
+  assert.ok(recordEdit(w.file, w.real, null, null, null, w.main, null, w.proj));
+  now.mockReturnValue(t);
+  const own = recordEdit(w.file, w.real, null, null, null, w.main, null, w.proj);
   assert.ok(own);
-  assert.ok(!w.records().includes(ahead));
+  now.mockRestore();
   const f = [found(w.proj, [3])];
-  assert.equal(await settleFindings(f, w.file, own, digestOf(SIX), digestOf(SIX)), f);
+  assert.equal(await settleFindings(f, w.file, own, digestOf(SIX), digestOf(SIX), w.main), f);
 });
 
-test("recordEdit fails open: an unusable data dir gives null", () => {
+test("pendingRanges: one record alone gives its own lines, whatever the digests say", () => {
   const w = world();
-  writeFileSync(w.file, SIX);
-  process.env.CLAUDE_PLUGIN_DATA = w.file; // a regular file: mkdir below it fails
-  assert.equal(recordEdit(w.file, w.real, null), null);
-});
-
-test("pendingRanges: one record alone gives its own lines, whatever the digests say", async () => {
-  const w = world();
-  await journalEdit(w, SIX, SIX.replace("l3", "L3"), REPLACE_3);
+  journalEdit(w, SIX, SIX.replace("l3", "L3"), REPLACE_3);
   assert.deepEqual(pendingRanges(stored(w), digestOf("a formatter rewrote the file")), [[2, 2]]);
   const v = world();
-  await journalEdit(v, SIX, "rewritten\n", null);
+  journalEdit(v, SIX, "rewritten\n", null);
   assert.equal(pendingRanges(stored(v), digestOf("rewritten\n")), null);
   assert.equal(pendingRanges([], digestOf(SIX)), null);
 });
 
-test("pendingRanges: an earlier edit's line is carried through a later insertion above it and joined with the later lines", async () => {
+test("pendingRanges: an earlier edit's line is carried through a later insertion above it and joined with the later lines", () => {
   const w = world();
   const a = SIX.replace("l3", "L3");
   const b = "l1\nn1\nn2\nl2\nL3\nl4\nl5\nl6\n";
-  await journalEdit(w, SIX, a, REPLACE_3);
-  await journalEdit(w, a, b, INSERT_AFTER_1);
+  journalEdit(w, SIX, a, REPLACE_3);
+  journalEdit(w, a, b, INSERT_AFTER_1);
   assert.deepEqual(pendingRanges(stored(w), digestOf(b)), [[4, 4], [1, 2]]);
 });
 
-test("pendingRanges: a line a later edit replaced is no longer an earlier edit's line", async () => {
+test("pendingRanges: a line a later edit replaced is no longer an earlier edit's line", () => {
   const w = world();
   const a = SIX.replace("l3", "L3");
   const b = a.replace("L3", "l3");
-  await journalEdit(w, SIX, a, REPLACE_3);
-  await journalEdit(w, a, b, [{ oldStart: 2, oldLines: 3, newStart: 2, newLines: 3, lines: [" l2", "-L3", "+l3", " l4"] }]);
+  journalEdit(w, SIX, a, REPLACE_3);
+  journalEdit(w, a, b, [{ oldStart: 2, oldLines: 3, newStart: 2, newLines: 3, lines: [" l2", "-L3", "+l3", " l4"] }]);
   assert.deepEqual(pendingRanges(stored(w), digestOf(b)), [[2, 2]]);
 });
 
-test("pendingRanges: a Write among the pending edits means the whole file", async () => {
+test("pendingRanges: a Write among the pending edits means the whole file", () => {
   const w = world();
-  await journalEdit(w, "", SIX, null);
-  await journalEdit(w, SIX, SIX.replace("l3", "L3"), REPLACE_3);
+  journalEdit(w, "", SIX, null);
+  journalEdit(w, SIX, SIX.replace("l3", "L3"), REPLACE_3);
   assert.equal(pendingRanges(stored(w), digestOf(SIX.replace("l3", "L3"))), null);
 });
 
-test("pendingRanges: a broken chain means the whole file (a change nobody journaled, a formatter, hooks out of edit order)", async () => {
+test("pendingRanges: a broken chain means the whole file (a change nobody journaled, a formatter, hooks out of edit order)", () => {
   const a = SIX.replace("l3", "L3");
   const b = a.replace("l6", "L6");
   const between = world(); // the second edit was cut from content no record holds
-  await journalEdit(between, SIX, a, REPLACE_3);
-  await journalEdit(between, "shifted by sed -i", b, REPLACE_6);
+  journalEdit(between, SIX, a, REPLACE_3);
+  journalEdit(between, "shifted by sed -i", b, REPLACE_6);
   assert.equal(pendingRanges(stored(between), digestOf(b)), null);
-  const after = world(); // the file is no longer what the last edit wrote
-  await journalEdit(after, SIX, a, REPLACE_3);
-  await journalEdit(after, a, b, REPLACE_6);
-  assert.deepEqual(pendingRanges(stored(after), digestOf(b)), [[2, 2], [5, 5]]);
-  assert.equal(pendingRanges(stored(after), digestOf("reformatted")), null);
+  const later = world(); // the file is no longer what the last edit wrote
+  journalEdit(later, SIX, a, REPLACE_3);
+  journalEdit(later, a, b, REPLACE_6);
+  assert.deepEqual(pendingRanges(stored(later), digestOf(b)), [[2, 2], [5, 5]]);
+  assert.equal(pendingRanges(stored(later), digestOf("reformatted")), null);
   const swapped = world(); // the later edit's hook journaled first
-  await journalEdit(swapped, a, b, REPLACE_6);
-  await journalEdit(swapped, SIX, a, REPLACE_3);
+  journalEdit(swapped, a, b, REPLACE_6);
+  journalEdit(swapped, SIX, a, REPLACE_3);
   assert.equal(pendingRanges(stored(swapped), digestOf(b)), null);
 });
 
 test("settleFindings: nothing to settle or nothing to tell returns at once", async () => {
   const w = world();
-  const rec = await journalEdit(w, "", SIX, null);
+  const rec = journalEdit(w, "", SIX, null);
   process.env.UNIVERSAL_LINT_SETTLE_MS = "400";
   const d0 = digestOf(SIX);
   const f = [found(w.proj, [3])];
-  const t0 = Date.now();
-  assert.deepEqual(await settleFindings([], w.file, rec, d0, d0), []);
-  assert.equal(await settleFindings(f, w.file, null, d0, d0), f, "no journal record: reported (fail open)");
-  assert.equal(await settleFindings(f, w.file, rec, null, null), f, "unreadable file: reported (fail open)");
-  assert.deepEqual(await settleFindings(f, w.file, rec, d0, "changed during the lint"), [], "a later lint or the sweep reports the new content");
-  assert.deepEqual(await settleFindings(f, w.file, rec, d0, null), []);
-  assert.ok(Date.now() - t0 < 200, "none of these holds");
-  assert.deepEqual(w.records(), [rec.name], "the record stays pending");
+  assert.equal(await after(settleFindings([], w.file, rec, d0, d0, w.main), 200), "held", "no findings: no hold");
+  assert.deepEqual(await settleFindings([], w.file, rec, d0, d0, w.main), []);
+  assert.equal(await settleFindings(f, w.file, null, d0, d0, w.main), f, "no journal record: reported (fail open)");
+  assert.equal(await settleFindings(f, w.file, rec, null, null, w.main), f, "unreadable file: reported (fail open)");
+  assert.deepEqual(await settleFindings(f, w.file, rec, d0, "changed during the lint", w.main), [], "a later lint or the sweep reports the new content");
+  assert.equal(await after(settleFindings(f, w.file, rec, d0, null, w.main), 200), "held", "a changed file: no hold");
+  assert.deepEqual(await settleFindings(f, w.file, rec, d0, null, w.main), []);
+  assert.match(String((await sweep(w)).hookSpecificOutput?.additionalContext), /sweep-marker/, "the record stays pending");
 });
 
 test("settleFindings: no later edit, the findings are reported and the file's records are cleared", async () => {
   const w = world();
   const a = SIX.replace("l3", "L3");
-  await journalEdit(w, SIX, a, REPLACE_3);
-  const rec = await journalEdit(w, a, a.replace("l6", "L6"), REPLACE_6);
+  journalEdit(w, SIX, a, REPLACE_3);
+  const rec = journalEdit(w, a, a.replace("l6", "L6"), REPLACE_6);
   const d0 = digestOf(a.replace("l6", "L6"));
   const f = [found(w.proj, [3])];
-  assert.equal(await settleFindings(f, w.file, rec, d0, d0), f);
-  assert.deepEqual(w.records(), []);
+  assert.equal(await settleFindings(f, w.file, rec, d0, d0, w.main), f);
+  assert.deepEqual(await sweep(w), {}, "no record left");
 });
 
 test("settleFindings: a newer edit of the file by the same owner takes the report over, the records stay for it", async () => {
   const w = world();
-  const rec = await journalEdit(w, "", SIX, null);
-  const later = await journalEdit(w, SIX, SIX.replace("l6", "L6"), REPLACE_6);
+  const rec = journalEdit(w, "", SIX, null);
+  journalEdit(w, SIX, SIX.replace("l6", "L6"), REPLACE_6);
   writeFileSync(w.file, SIX); // even with the content back to what the first lint read
-  assert.deepEqual(await settleFindings([found(w.proj, [3])], w.file, rec, digestOf(SIX), digestOf(SIX)), []);
-  assert.deepEqual(w.records().sort(), [rec.name, later.name].sort());
+  assert.deepEqual(await settleFindings([found(w.proj, [3])], w.file, rec, digestOf(SIX), digestOf(SIX), w.main), []);
+  assert.match(String((await sweep(w)).hookSpecificOutput?.additionalContext), /sweep-marker/, "the records stay pending");
 });
 
 test("settleFindings: another owner's record of the file is no newer edit of this owner", async () => {
   const w = world();
-  const rec = await journalEdit(w, "", SIX, null);
-  const other = await journalEdit(w, "", SIX, null, AGENT);
+  const rec = journalEdit(w, "", SIX, null);
+  journalEdit(w, "", SIX, null, w.agent);
   const f = [found(w.proj, [3])];
-  assert.equal(await settleFindings(f, w.file, rec, digestOf(SIX), digestOf(SIX)), f);
-  assert.deepEqual(w.records(), [other.name], "the other owner's record is not cleared");
+  assert.equal(await settleFindings(f, w.file, rec, digestOf(SIX), digestOf(SIX), w.main), f);
+  assert.match(String((await sweep(w, true)).hookSpecificOutput?.additionalContext), /sweep-marker/, "the other owner's record is not cleared");
 });
 
 test("settleFindings: the own record gone (a sweep claimed it, a later clean lint covered it) reports nothing", async () => {
   const w = world();
-  const rec = await journalEdit(w, "", SIX, null);
-  rmSync(path.join(w.journal, rec.name));
-  assert.deepEqual(await settleFindings([found(w.proj, [3])], w.file, rec, digestOf(SIX), digestOf(SIX)), []);
+  const rec = journalEdit(w, "", SIX, null);
+  await sweep(w); // the sweep claims the record
+  assert.deepEqual(await settleFindings([found(w.proj, [3])], w.file, rec, digestOf(SIX), digestOf(SIX), w.main), []);
 });
 
 test("settleFindings: a change outside Write/Edit during the hold reports nothing, the record stays for the sweep", async () => {
   const w = world();
-  const rec = await journalEdit(w, "", SIX, null);
+  const rec = journalEdit(w, "", SIX, null);
   process.env.UNIVERSAL_LINT_SETTLE_MS = "300";
-  const held = settleFindings([found(w.proj, [3])], w.file, rec, digestOf(SIX), digestOf(SIX));
+  const held = settleFindings([found(w.proj, [3])], w.file, rec, digestOf(SIX), digestOf(SIX), w.main);
   await sleep(100);
   writeFileSync(w.file, SIX.replace("l3", "fixed by sed -i"));
   assert.deepEqual(await held, []);
-  assert.deepEqual(w.records(), [rec.name]);
-});
-
-test("settleFindings: an unreadable journal means report", async () => {
-  const w = world();
-  const rec = await journalEdit(w, "", SIX, null);
-  const f = [found(w.proj, [3])];
-  rmSync(w.journal, { recursive: true });
-  assert.equal(await settleFindings(f, w.file, rec, digestOf(SIX), digestOf(SIX)), f);
+  assert.match(String((await sweep(w)).hookSpecificOutput?.additionalContext), /sweep-marker/);
 });
 
 test("settleFindings: holds every finding for the quiet time, also one outside the file", async () => {
@@ -391,10 +409,10 @@ test("settleFindings: holds every finding for the quiet time, also one outside t
   process.env.UNIVERSAL_LINT_SETTLE_MS = "400";
   const foreign = { tool: "tsc", target: "a.sh", base: w.proj, text: "/other/b.ts:1:1 error elsewhere-marker" };
   for (const f of [[found(w.proj, [3])], [foreign]]) {
-    const rec = await journalEdit(w, "", SIX, null);
-    const t0 = Date.now();
-    assert.equal(await settleFindings(f, w.file, rec, digestOf(SIX), digestOf(SIX)), f);
-    assert.ok(Date.now() - t0 >= 380, "held");
+    const rec = journalEdit(w, "", SIX, null);
+    const held = settleFindings(f, w.file, rec, digestOf(SIX), digestOf(SIX), w.main);
+    assert.equal(await after(held, 100), "pending", "held");
+    assert.equal(await held, f);
   }
 });
 
@@ -402,20 +420,18 @@ test("settleFindings: the quiet time starts again with every Write/Edit of the o
   const w = world();
   const other = path.join(w.proj, "b.sh");
   writeFileSync(other, "echo b\n");
-  const rec = await journalEdit(w, "", SIX, null);
+  const rec = journalEdit(w, "", SIX, null);
   process.env.UNIVERSAL_LINT_SETTLE_MS = "500";
   const f = [found(w.proj, [3])];
-  const t0 = Date.now();
-  const held = settleFindings(f, w.file, rec, digestOf(SIX), digestOf(SIX));
+  const held = settleFindings(f, w.file, rec, digestOf(SIX), digestOf(SIX), w.main);
   await sleep(300);
-  assert.ok(recordEdit(other, realpathSync(other), null, null, null, MAIN)); // the owner edits another file: quiet again from here
+  assert.ok(recordEdit(other, realpathSync(other), null, null, null, w.main)); // the owner edits another file: quiet again from here
+  assert.equal(await after(held, 350), "pending", "the hold restarted with the owner's edit");
   assert.equal(await held, f);
-  assert.ok(Date.now() - t0 >= 780, `held ${Date.now() - t0} ms`);
-  const rec2 = await journalEdit(w, "", SIX, null);
-  const t1 = Date.now();
-  const held2 = settleFindings(f, w.file, rec2, digestOf(SIX), digestOf(SIX));
+  const rec2 = journalEdit(w, "", SIX, null);
+  const held2 = settleFindings(f, w.file, rec2, digestOf(SIX), digestOf(SIX), w.main);
   await sleep(300);
-  assert.ok(recordEdit(other, realpathSync(other), null, null, null, AGENT));
+  assert.ok(recordEdit(other, realpathSync(other), null, null, null, w.agent));
+  assert.equal(await after(held2, 450), "held", "another owner's edit does not restart the hold");
   assert.equal(await held2, f);
-  assert.ok(Date.now() - t1 < 780, `held ${Date.now() - t1} ms`);
 });
