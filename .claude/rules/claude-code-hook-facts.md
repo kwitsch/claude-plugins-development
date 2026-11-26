@@ -23,7 +23,7 @@ Loading, hook order, budget, options, `$.env`, `$.store`: [mods-engine-lifecycle
 - A dispatch can be abandoned (interrupt, a hook above settled first, budget): `next.signal` aborts and whatever the hook returns is dropped. Check `next.signal?.aborted` after the last `await` and commit no conversation state (sent once, shown, searched) for an abandoned dispatch.
 - Conversation state in module memory is reset on `session.start`, on `session.end` (raised for `/clear` and an in-process `/resume`, where no `session.start` follows) and after a main-conversation `session.compact`. Skip the compaction reset for `trigger: "precompute"`, for an event with `agentId` and when `next`'s result carries `skip`. Machine-level caches (binary path, tool list) may survive.
 - Every `$` call can be refused by a hook above, and a hook's error after `next` is rethrown after the request ran: catch every `$` call that runs after `next` (`$.store.set` rejects past 4 MiB per plugin).
-- A user-tier plugin hook never runs for `classic.Stop`, `classic.SessionStart`, `classic.UserPromptSubmit`, `session.compact`, `prompt.compose`, `prompt.section` and `prompt.context` (`cc-plugin-sec-default` passes them on): do not build on such a hook.
+- A user-tier plugin hook never runs for `classic.Stop`, `classic.SessionStart`, `classic.UserPromptSubmit`, `classic.CwdChanged`, `session.compact`, `prompt.compose`, `prompt.section` and `prompt.context` (`cc-plugin-sec-default` passes them on): do not build on such a hook.
 
 ## Tools
 
