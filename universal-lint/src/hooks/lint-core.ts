@@ -2715,21 +2715,26 @@ export async function sweepHandler(args: PostToolUseHookInput): Promise<HookResu
     }
     const files = [...groups.values()];
     const found: Finding[][] = files.map(() => []);
+    /** Every file's records this sweep claimed: restored when the call is cancelled, also for files that finished before the cancel. */
+    const claims: Array<{ names: readonly string[]; recs: readonly PendingRecord[] }> = [];
     let next = 0;
     /** One lane of the pool: takes the next file until none is left. */
     const lane = async (): Promise<void> => {
       while (next < files.length && !callCancelled()) {
         const i = next++;
         try {
-          found[i] = await sweepFile(files[i], args);
+          found[i] = await sweepFile(files[i], args, claims);
         } catch {
           // fail open: this file reports nothing
         }
       }
     };
     await Promise.all(Array.from({ length: Math.min(FILE_CHANGED_SLOTS, files.length) }, lane));
-    // cancelled by the client: nothing is reported or blocked (sweepFile put the claimed records back), the next stop sweeps them
-    if (callCancelled()) return {};
+    // cancelled by the client: nothing is reported or blocked and every claim goes back (also of the files that finished), the next stop sweeps them
+    if (callCancelled()) {
+      restoreClaims(claims);
+      return {};
+    }
     const out = formatFindings(found.flat(), ev, "universal-lint");
     if (out.hookSpecificOutput) markBlocked(owner);
     return out;
@@ -2751,9 +2756,10 @@ function pruneActivity(): void {
  *
  * @param names - The journal records of the file and owner, oldest first.
  * @param args - The Stop or SubagentStop hook payload.
+ * @param claims - Collects the records this file's sweep claimed (the caller restores them when the call is cancelled).
  * @returns The gated findings; empty when the file is left pending, was claimed by a held lint, is out of scope or clean.
  */
-async function sweepFile(names: readonly string[], args: PostToolUseHookInput): Promise<Finding[]> {
+async function sweepFile(names: readonly string[], args: PostToolUseHookInput, claims: Array<{ names: readonly string[]; recs: readonly PendingRecord[] }>): Promise<Finding[]> {
   let recs: PendingRecord[] | null = null;
   try {
     recs = readRecords(names);
@@ -2765,6 +2771,7 @@ async function sweepFile(names: readonly string[], args: PostToolUseHookInput): 
   if (known && elapsedMs() >= slotDeadlineMs(path.extname(last.fp).toLowerCase())) return []; // no time left: stays pending
   if (!journal.delete(names[names.length - 1])) throw new Error("claimed"); // the claim: a held lint took it first
   clearRecords(names);
+  if (recs) claims.push({ names, recs }); // kept until the whole sweep commits: a cancel puts every claim back
   if (!recs || !known) return [];
   const s = scopedTarget(last.cwd, last.fp, scratchpadOf(args));
   if (!s) return [];
@@ -2774,13 +2781,16 @@ async function sweepFile(names: readonly string[], args: PostToolUseHookInput): 
   } catch {
     // malformed hunks: the whole file
   }
-  const found = await lintResolved(s.fp, last.cwd, ranges, "PostToolUse");
-  // cancelled by the client while the linter ran: the claim is released (the records go back), the next stop lints the file
-  if (callCancelled()) {
-    for (let i = 0; i < names.length; i++) journal.set(names[i], recs[i]);
-    return [];
-  }
-  return found;
+  return lintResolved(s.fp, last.cwd, ranges, "PostToolUse");
+}
+
+/**
+ * Puts claimed journal records back (a cancelled sweep releases every claim: the next stop lints those files).
+ *
+ * @param claims - The records a sweep claimed, per file, as `sweepFile` collected them.
+ */
+function restoreClaims(claims: ReadonlyArray<{ names: readonly string[]; recs: readonly PendingRecord[] }>): void {
+  for (const c of claims) for (let i = 0; i < c.names.length; i++) journal.set(c.names[i], c.recs[i]);
 }
 
 /**
