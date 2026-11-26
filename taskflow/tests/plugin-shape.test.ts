@@ -277,6 +277,14 @@ describe("build-task skill", () => {
     expect((read(F).match(/\n/g) ?? []).length).toBeLessThan(500);
   });
 
+  test("build-task SKILL.md runs the spec as step 4, after the intent confirmation; Deliver is step 5, the report step 6", () => {
+    expectHas(F, ["(Design → Intent confirmation → Spec →", "3. **Intent confirmation.**", "4. **Spec.** Runs once, after the \"Yes\" of step 3.", "5. **Deliver.**", "6. **Escalations & report.**", "checkpoint on the design; the spec (step 4) is written from the approved", "as `PLUGIN_ROOT` (step 5.4)", "create-or-update, step 5)", "(steps 2 and 5)", "design and step 5 calls", "step 6 then reports", "run step 6 (escalations + report)", "(step 6): the spec shipped without"]);
+    expectLacks(F, ["step 2.5", "5. **Spec.**", "4. **Deliver.**", "5. **Escalations & report.**", "(step 4.4)", "does the spec count as"]);
+    expectHas(`${BT_WF}/spec.md`, ["build-task runs this script once, after the user confirmed the design intent (SKILL.md step 4); intent corrections re-run only the design script."]);
+    expectLacks(`${BT_WF}/spec.md`, ["re-runs the design script and then"]);
+    expectHas(`${BT_WF}/review.md`, ["build-task's job (step 5)"]);
+  });
+
   test("build-task design-pipeline usage references exist and document their contracts", () => {
     for (const f of ["explore.md", "design.md", "spec.md"]) {
       expect(nonEmpty(`${BT_WF}/${f}`), f).toBe(true);
