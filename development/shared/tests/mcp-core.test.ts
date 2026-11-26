@@ -226,3 +226,17 @@ test("a cancel that arrives after the call finished is ignored: the finished cal
   assert.doesNotMatch(s.stderr(), /late abort/);
   await s.end();
 });
+
+test("tools/list: a tool with modelVisible and inputSchema lists them; a tool without keeps the two literals", async () => {
+  const child = spawn(process.execPath, [path.join(import.meta.dirname, "fixtures", "visible-server.ts")], { stdio: ["pipe", "pipe", "ignore"], env: process.env });
+  let buf = "";
+  const line = new Promise<string>((resolve) => child.stdout.on("data", (d: Buffer) => ((buf += d.toString()), buf.includes("\n") && resolve(buf.slice(0, buf.indexOf("\n"))))));
+  child.stdin.write(JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }) + "\n");
+  const tools = toolsOf((JSON.parse(await line) as Msg).result);
+  child.stdin.end();
+  assert.deepEqual(tools.map((t) => t.name), ["open", "hidden"]);
+  assert.deepEqual(tools[0]._meta, { ui: { visibility: ["model", "app"] } });
+  assert.deepEqual(tools[0].inputSchema, { type: "object", properties: { a: { type: "string" } }, required: ["a"] });
+  assert.deepEqual(tools[1]._meta, { ui: { visibility: ["app"] } });
+  assert.deepEqual(tools[1].inputSchema, { type: "object", additionalProperties: true });
+});
