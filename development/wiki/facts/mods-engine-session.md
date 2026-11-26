@@ -38,6 +38,13 @@ The constraints that follow load by themselves with [claude-code-hook-facts.md](
 - A hook that answers `{ messages }` without calling `next()` makes core never run. Skipped then: classic `PreCompact` hooks (a blocking one is ignored and its stdout never becomes instructions), the post-compact attachments (recently read files, plan file, invoked skills) and every lower `session.compact` hook including the builtin one that re-attaches agent instructions. Still run: `PostCompact` (with an empty `compact_summary`) and `SessionStart(compact)` hooks (binary 2.1.322).
 - A `precompute` dispatch happens only when a server flag is on and the context is at about 80% of the window or more (binary 2.1.322).
 
+## Agent identity and cwd (live 2.1.332)
+
+- The mod's `agentId` in `tool.call` equals the `agent_id` of the `mcp_tool` PreToolUse, PostToolUse and SubagentStop hooks for the same subagent (two subagents in one session, one of them isolated); `$.session.id()` equals the hooks' `session_id`; `agent_id` is the empty string in the main conversation (P2).
+- `$.session.cwd()` in a mod's `tool.call` is the cwd of the calling agent: the project root before EnterWorktree, `<root>/.claude/worktrees/<name>` after it (the EnterWorktree call itself still reports the old directory after `next`); a subagent with `isolation: "worktree"` gets its own `<root>/.claude/worktrees/agent-<id>`; a subagent without isolation gets the main conversation's current directory; a session started inside a worktree starts there (P6).
+- The `${cwd}` of PreToolUse, PostToolUse, Stop and SubagentStop `mcp_tool` hooks agrees with `$.session.cwd()` in every case above; SubagentStop carries the subagent's own cwd (P6).
+- An `mcp_tool` CwdChanged hook never fired, neither after a Bash `cd` nor after EnterWorktree (P6).
+
 ## Usage and cache
 
 - `turn.step` usage is `{ input_tokens, output_tokens, cache_read_input_tokens, cache_creation_input_tokens, model }` only. The API's `cache_creation` breakdown is dropped, so a mod cannot see whether the prompt cache has a 5-minute or a 1-hour lifetime. The real lifetime is 5 minutes with an API key, Bedrock, Vertex or Foundry, and 1 hour on a subscription within its limits; the setting `promptCacheTtl` and the environment variables `CLAUDE_CODE_PROMPT_CACHE_TTL` and `FORCE_PROMPT_CACHING_5M` override it (binary 2.1.322).
