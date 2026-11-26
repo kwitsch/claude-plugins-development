@@ -9,13 +9,13 @@ Why dprint's MCP tool input types (`src/mcp/hook-inputs.d.ts`) come from the pub
 
 ## Preset 0.4.1
 
-- Preset/core 0.2.0 copy every unknown top-level template key into the rendered `hooks.json`, so `hookTypes` would ship in `plugin/hooks/hooks.json` (an unknown key in a file Claude Code reads; the preset runs `claude plugin validate --strict`).
-- Preset 0.4.1 strips `hookTypes` and fails the build with `hook-types-stale` when the file is missing or differs (CRLF normalized). Its `index.d.mts` equals 0.2.0's, its tsdown peer is `~0.23.7`, and it uses core 0.4.1, the core the CLI depends on, so build check and CLI render identical text. `tsdown.config.ts` did not change.
+- Preset/core 0.2.0 copy every unknown top-level template key into the rendered `hooks.json`, so `hookTypes` would ship in `plugin/hooks/hooks.json` (an unknown key in a file Claude Code reads; the preset runs `claude plugin validate --strict`) (binary 0.2.0).
+- Preset 0.4.1 strips `hookTypes` and fails the build with `hook-types-stale` when the file is missing or differs, CRLF normalized (binary 0.4.1). Its `index.d.mts` equals 0.2.0's, its tsdown peer is `~0.23.7` (typings), and it uses core 0.4.1, the core the CLI depends on, so build check and CLI render identical text (binary 0.4.1). `tsdown.config.ts` did not change.
 - Only dprint moved; the other plugins stay on 0.2.0 / 0.3.0 because none has hook input types.
 
 ## Deep-optional handler inputs
 
-- The CLI makes every field required, which is accurate for hook calls: Claude Code substitutes every template field, an absent one as `""`.
+- The CLI makes every field required, which is accurate for hook calls: Claude Code substitutes every template field, an absent one as `""` (live 2.1.326, see below). The CLI output was read from the generated `hook-inputs.d.ts` (typings).
 - `development/shared/src/mcp-core.ts` passes `params?.arguments ?? {}` unvalidated, so a direct `tools/call` can omit any field. `format.ts` therefore wraps the generated map in `Loose<T>` (every field optional, nested objects too; `Partial` is shallow and `tool_input` / `tool_response` are nested) and exports `HookInput<K>`; handler bodies kept their `= {}` defaults, `?.` and `??` guards, and `tests/mcp-format.test.ts` keeps calling handlers with partial literals.
 - `Loose<T>` would also map through arrays and tuples; no current input has one.
 - `server.ts` keeps `type Tools = { [K in keyof HookInputs]: ToolDef<HookInput<K>, HookResult> }`: a tool without a hook, or a hook without a tool, is still a compile error.
@@ -27,7 +27,7 @@ Why dprint's MCP tool input types (`src/mcp/hook-inputs.d.ts`) come from the pub
 - One input shape per tool (the CLI silently forms a union).
 - `command` hooks: non-empty `command`, positive integer `timeout`, no `input`.
 
-Placeholder validation was dropped together with the script (design review resolution): the task was to use the published CLI, and upstream feature requests were out of scope. The guard is now the review rule in [hook-inputs.md](../../../../../dprint/.claude/rules/hook-inputs.md) plus the table below; template changes should also run `pnpm --filter dprint test:plugin` or the `live-verify` skill.
+Decision, 2026-11-26, design review of the hook-types-cli task (no individual decider recorded): placeholder validation is dropped together with the script. Reason: the task was to use the published CLI. Rejected: an upstream feature request for placeholder validation (out of scope) and keeping `hooks.ts` as validator (see below). The guard is now the review rule in [hook-inputs.md](../../../../../dprint/.claude/rules/hook-inputs.md) plus the table below; template changes should also run `pnpm --filter dprint test:plugin` or the `live-verify` skill.
 
 ## Two runtime outcomes of a bad placeholder
 
