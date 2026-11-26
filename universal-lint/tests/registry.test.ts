@@ -1,13 +1,13 @@
 // Unit tests of the exports of src/hooks/lint-core.ts (ported from test/universal-lint/registry.test.mjs).
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
 import type { SpawnSyncReturns } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { setTimeout as sleep } from "node:timers/promises";
 import { test } from "vitest";
+import { acquireSlot, buildArgv, classifyCheckstyleOutput, classifyExit, coalesceProjectCheck, configExists, editRanges, FILE_CHANGED_SLOTS, fileChangedHandler, gateFinding, hasProjectMarkdownlintConfig, hasProjectYamllintConfig, isToolAvailable, lintFileHandler, lintFilesHandler, looksLikeSolutionStyleTsconfig, oxlintConfigTypeChecks, recordWritten, REGISTRY, resolveCargoManifest, resolveCheckstyleConfig, resolveLintTarget, resolveOxlintConfig, resolveTsconfig, scopedTarget, slotDeadlineMs, stripTrailingCommas, truncate, tsBuildInfoPathFor, tscOutputHasSourceDiagnostic, WATCH_LIMIT, writtenContent } from "../src/hooks/lint-core.ts";
 import { makeEnv } from "./support/lint-hook.ts";
-import { acquireSlot, buildArgv, classifyCheckstyleOutput, classifyExit, coalesceProjectCheck, configExists, editRanges, FILE_CHANGED_SLOTS, fileChangedHandler, gateFinding, hashPath, hasProjectMarkdownlintConfig, hasProjectYamllintConfig, isToolAvailable, lintFileHandler, lintFilesHandler, looksLikeSolutionStyleTsconfig, oxlintConfigTypeChecks, recordWritten, REGISTRY, resolveCargoManifest, resolveCheckstyleConfig, resolveLintTarget, resolveOxlintConfig, resolveTsconfig, scopedTarget, slotDeadlineMs, stripTrailingCommas, truncate, tsBuildInfoPathFor, tscOutputHasSourceDiagnostic, WATCH_LIMIT, writtenContent } from "../src/hooks/lint-core.ts";
 
 /** The hook input type; the tests pass partial payloads on purpose (a Write, a missing patch). */
 type HookInput = Parameters<typeof writtenContent>[0];
@@ -331,204 +331,160 @@ test("tsBuildInfoPathFor: falls back to the OS temp dir (not cwd/'.') when CLAUD
   }
 });
 
-/**
- * Run `fn` with CLAUDE_PLUGIN_DATA set to a fresh temp dir, restoring the previous value afterwards.
- *
- * @param fn - Test body; receives the data dir. May be async (awaited before the restore).
- */
-async function withDataDir(fn: (dataDir: string) => void | Promise<void>): Promise<void> {
-  const dataDir = mkdtempSync(path.join(tmpdir(), "ul-data-"));
-  const prev = process.env.CLAUDE_PLUGIN_DATA;
-  process.env.CLAUDE_PLUGIN_DATA = dataDir;
-  try {
-    await fn(dataDir);
-  } finally {
-    if (prev === undefined) delete process.env.CLAUDE_PLUGIN_DATA;
-    else process.env.CLAUDE_PLUGIN_DATA = prev;
-  }
-}
-
-/**
- * Path of slot `i` under `dataDir`, as acquireSlot builds it.
- *
- * @param dataDir - Plugin data dir.
- * @param i - Slot index.
- * @returns The slot file path.
- */
-const slotPath = (dataDir: string, i: number) => path.join(path.resolve(dataDir), "fc-slots", String(i));
-
 test("slotDeadlineMs: the FileChanged slot wait stops at 85 s minus the file's lint reservation (.ts 75 s, .rs 45 s, other 30 s)", () => {
   assert.equal(slotDeadlineMs(".ts"), 10000);
   assert.equal(slotDeadlineMs(".rs"), 40000);
   assert.equal(slotDeadlineMs(".sh"), 55000);
 });
 
-test("acquireSlot: takes free slots holding this pid; a live pid with an mtime under 90 s in the future and an empty slot count as held; gives up after one round when all are held (F10)", async () => {
-  await withDataDir((dataDir) => {
-    for (let i = 0; i < FILE_CHANGED_SLOTS; i++) {
-      assert.equal(acquireSlot(0), slotPath(dataDir, i));
-      assert.equal(readFileSync(slotPath(dataDir, i), "utf8"), String(process.pid));
-    }
-    assert.equal(acquireSlot(0), null);
-    const future = new Date(Date.now() + 60000);
-    utimesSync(slotPath(dataDir, 1), future, future);
-    assert.equal(acquireSlot(0), null);
-    writeFileSync(slotPath(dataDir, 0), "");
-    assert.equal(acquireSlot(0), null);
-  });
+// The stale-slot cases (dead pid, mtime 90 s old or ahead) are gone with slotStale: the slots live in the server's memory.
+test("acquireSlot: FILE_CHANGED_SLOTS slots, a waiter gives up at its deadline, releases serve waiters in arrival order", async () => {
+  const held: (() => void)[] = [];
+  for (let i = 0; i < FILE_CHANGED_SLOTS; i++) {
+    const r = await acquireSlot(0);
+    assert.ok(r);
+    held.push(r);
+  }
+  assert.equal(await acquireSlot(0), null, "deadline already past: one try, no wait");
+  const order: number[] = [];
+  const w1 = acquireSlot(1e12).then((r) => (order.push(1), r));
+  const w2 = acquireSlot(1e12).then((r) => (order.push(2), r));
+  held[0]();
+  const r1 = await w1;
+  assert.deepEqual(order, [1]);
+  held[0]();
+  r1?.();
+  const r2 = await w2;
+  assert.deepEqual(order, [1, 2]);
+  r2?.();
+  for (const r of held.slice(1)) r();
+  const again = await acquireSlot(0);
+  assert.ok(again, "a double release frees one slot only; all slots are free again");
+  again();
 });
 
-test.each([
-  ["a dead pid", (slot: string) => writeFileSync(slot, String(spawnSync(process.execPath, ["-e", "0"]).pid))],
-  ["an mtime 91 s old", (slot: string) => {
-    const d = new Date(Date.now() - 91000);
-    utimesSync(slot, d, d);
-  }],
-  ["an mtime 91 s in the future", (slot: string) => {
-    const d = new Date(Date.now() + 91000);
-    utimesSync(slot, d, d);
-  }],
-])("acquireSlot: reclaims a slot whose pid is dead or whose mtime is at least 90 s old or at least 90 s in the future (F10): %s", async (_label, makeStale) => {
-  await withDataDir((dataDir) => {
-    for (let i = 0; i < FILE_CHANGED_SLOTS; i++) assert.notEqual(acquireSlot(0), null);
-    makeStale(slotPath(dataDir, 0));
-    assert.equal(acquireSlot(0), slotPath(dataDir, 0));
-    assert.equal(readFileSync(slotPath(dataDir, 0), "utf8"), String(process.pid));
-  });
+test("acquireSlot: a waiter whose deadline passes gets null and is no longer served", async () => {
+  const held: (() => void)[] = [];
+  for (let i = 0; i < FILE_CHANGED_SLOTS; i++) {
+    const r = await acquireSlot(0);
+    assert.ok(r);
+    held.push(r);
+  }
+  // uptime + 50 ms: a short wait that runs out while every slot is held
+  assert.equal(await acquireSlot(process.uptime() * 1000 + 50), null);
+  for (const r of held) r();
+  const all: (() => void)[] = [];
+  for (let i = 0; i < FILE_CHANGED_SLOTS; i++) {
+    const r = await acquireSlot(0);
+    assert.ok(r, "the timed-out waiter took no slot");
+    all.push(r);
+  }
+  for (const r of all) r();
 });
-
-/**
- * Path of `fc-locks/<key><ext>` under `dataDir`, as coalesceProjectCheck builds it.
- *
- * @param dataDir - Plugin data dir.
- * @param key - Project key passed to coalesceProjectCheck.
- * @param ext - `.lock` (the claim, shared by all sessions) or `.last` (the session's last completed run's start stamp).
- * @param session - Session id the `.last` stamp belongs to.
- * @returns The file path.
- */
-const lockPath = (dataDir: string, key: string, ext: ".lock" | ".last", session = "") => path.join(path.resolve(dataDir), "fc-locks", ext === ".lock" ? `${key}.lock` : `${key}-${hashPath(session)}.last`);
-
-/**
- * Block this thread for `ms` milliseconds (no `sleep` binary needed).
- *
- * @param ms - Milliseconds to wait.
- */
-const waitMs = (ms: number): void => {
-  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
-};
 
 /**
  * A counting stand-in for coalesceProjectCheck's async `run`.
  *
  * @param result - Fields merged over a clean spawn result (status 0, no error, no signal).
- * @param inside - Called during each run (assertions while the lock is held).
+ * @param inside - Awaited during each run (holds the lock while it is pending).
  * @returns The `run` function and its call counter.
  */
-function stubRun(result: Partial<SpawnSyncReturns<string>> = {}, inside: () => void = () => {}): { run: () => Promise<SpawnSyncReturns<string>>; calls: { n: number } } {
+function stubRun(result: Partial<SpawnSyncReturns<string>> = {}, inside: () => void | Promise<void> = () => {}): { run: () => Promise<SpawnSyncReturns<string>>; calls: { n: number } } {
   const calls = { n: 0 };
   const run = async (): Promise<SpawnSyncReturns<string>> => {
     calls.n++;
-    inside();
+    await inside();
     return { status: 0, stdout: "", stderr: "", error: undefined, signal: null, ...result } as SpawnSyncReturns<string>;
   };
   return { run, calls };
 }
 
-test("coalesceProjectCheck: a .last stamp newer than the file's ctime and not in the future skips the run (F13, async F18)", async () => {
-  await withDataDir(async (dataDir) => {
-    const file = path.join(dataDir, "a.ts");
-    writeFileSync(file, "export const a = 1;\n");
-    mkdirSync(path.join(dataDir, "fc-locks"), { recursive: true });
-    waitMs(20); // file timestamps use the coarse kernel clock, up to one tick behind Date.now()
-    writeFileSync(lockPath(dataDir, "k6", ".last"), String(Date.now()));
-    const { run, calls } = stubRun();
-    assert.equal(await coalesceProjectCheck("k6", file, 45000, run), null);
-    assert.equal(calls.n, 0);
-  });
-});
+/**
+ * A fresh `.ts` file whose ctime lies at least 20 ms in the past (file timestamps use the coarse kernel clock, up to
+ * one tick behind `Date.now()`), so a run started now covers it.
+ *
+ * @returns The file path.
+ */
+async function oldFile(): Promise<string> {
+  const file = path.join(mkdtempSync(path.join(tmpdir(), "ul-pc-")), "a.ts");
+  writeFileSync(file, "export const a = 1;\n");
+  await sleep(20);
+  return file;
+}
 
-test("coalesceProjectCheck: a future-dated .last stamp never covers, the check runs (F13)", async () => {
-  await withDataDir(async (dataDir) => {
-    const file = path.join(dataDir, "a.ts");
-    writeFileSync(file, "export const a = 1;\n");
-    mkdirSync(path.join(dataDir, "fc-locks"), { recursive: true });
-    writeFileSync(lockPath(dataDir, "k12", ".last"), String(Date.now() + 3600000));
-    const { run, calls } = stubRun();
-    assert.equal((await coalesceProjectCheck("k12", file, 45000, run))?.status, 0);
-    assert.equal(calls.n, 1);
-  });
-});
-
-test("coalesceProjectCheck: without a stamp it runs once, stamps the run's start and releases the lock (F13, async F18)", async () => {
-  await withDataDir(async (dataDir) => {
-    const file = path.join(dataDir, "a.ts");
-    writeFileSync(file, "export const a = 1;\n");
-    const { run, calls } = stubRun();
-    const before = Date.now();
-    const r = await coalesceProjectCheck("k7", file, 45000, run);
-    assert.equal(r?.status, 0);
-    assert.equal(calls.n, 1);
-    const t = Number(readFileSync(lockPath(dataDir, "k7", ".last"), "utf8"));
-    assert.ok(t >= before && t <= Date.now(), `stamp ${t} not within [${before}, now]`);
-    assert.equal(existsSync(lockPath(dataDir, "k7", ".lock")), false);
-  });
+// Removed with the file store: the planted future-dated `.last` stamp and the lock held by a dead pid (nothing can plant either in memory).
+test("coalesceProjectCheck: without a stamp it runs once and a second call for the same file and session is covered (null)", async () => {
+  const file = await oldFile();
+  const { run, calls } = stubRun();
+  assert.equal((await coalesceProjectCheck("m1", file, 45000, run))?.status, 0);
+  assert.equal(calls.n, 1);
+  assert.equal(await coalesceProjectCheck("m1", file, 45000, run), null);
+  assert.equal(calls.n, 1);
 });
 
 test("coalesceProjectCheck: the coverage stamp is per session: another session runs again, the same session is covered", async () => {
-  await withDataDir(async (dataDir) => {
-    const file = path.join(dataDir, "a.ts");
-    writeFileSync(file, "export const a = 1;\n");
-    waitMs(20); // file timestamps use the coarse kernel clock, up to one tick behind Date.now()
-    const { run, calls } = stubRun();
-    assert.equal((await coalesceProjectCheck("k11", file, 45000, run, "s1"))?.status, 0);
-    assert.equal((await coalesceProjectCheck("k11", file, 45000, run, "s2"))?.status, 0);
-    assert.equal(calls.n, 2);
-    assert.equal(await coalesceProjectCheck("k11", file, 45000, run, "s1"), null);
-    assert.equal(calls.n, 2);
-  });
+  const file = await oldFile();
+  const { run, calls } = stubRun();
+  assert.equal((await coalesceProjectCheck("m2", file, 45000, run, "s1"))?.status, 0);
+  assert.equal((await coalesceProjectCheck("m2", file, 45000, run, "s2"))?.status, 0);
+  assert.equal(calls.n, 2);
+  assert.equal(await coalesceProjectCheck("m2", file, 45000, run, "s1"), null);
+  assert.equal(calls.n, 2);
 });
 
-test("coalesceProjectCheck: an errored run is returned, writes no stamp and releases the lock (F13, async F18)", async () => {
-  await withDataDir(async (dataDir) => {
-    const file = path.join(dataDir, "a.ts");
-    writeFileSync(file, "export const a = 1;\n");
-    const { run, calls } = stubRun({ error: new Error("x") });
-    const r = await coalesceProjectCheck("k8", file, 45000, run);
-    assert.equal(r?.error?.message, "x");
-    assert.equal(calls.n, 1);
-    assert.equal(existsSync(lockPath(dataDir, "k8", ".last")), false);
-    assert.equal(existsSync(lockPath(dataDir, "k8", ".lock")), false);
-  });
+test("coalesceProjectCheck: a file changed after the run is not covered", async () => {
+  const file = await oldFile();
+  const { run, calls } = stubRun();
+  await coalesceProjectCheck("m3", file, 45000, run);
+  await sleep(20);
+  writeFileSync(file, "export const a = 2;\n");
+  assert.equal((await coalesceProjectCheck("m3", file, 45000, run))?.status, 0);
+  assert.equal(calls.n, 2);
 });
 
-test("coalesceProjectCheck: a lock held by a dead pid is reclaimed and holds this pid during the run (F13, async F18)", async () => {
-  await withDataDir(async (dataDir) => {
-    const file = path.join(dataDir, "a.ts");
-    writeFileSync(file, "export const a = 1;\n");
-    mkdirSync(path.join(dataDir, "fc-locks"), { recursive: true });
-    const lock = lockPath(dataDir, "k9", ".lock");
-    writeFileSync(lock, String(spawnSync(process.execPath, ["-e", "0"]).pid));
-    const { run, calls } = stubRun({}, () => assert.equal(readFileSync(lock, "utf8"), String(process.pid)));
-    assert.equal((await coalesceProjectCheck("k9", file, 45000, run))?.status, 0);
-    assert.equal(calls.n, 1);
-    assert.equal(existsSync(lock), false);
-  });
+test("coalesceProjectCheck: an errored run is returned, writes no stamp (the next call runs) and releases the lock (the next call does not wait)", async () => {
+  const file = await oldFile();
+  const { run, calls } = stubRun({ error: new Error("x") });
+  assert.equal((await coalesceProjectCheck("m4", file, 45000, run))?.error?.message, "x");
+  assert.equal((await coalesceProjectCheck("m4", file, 45000, run))?.error?.message, "x");
+  assert.equal(calls.n, 2);
 });
 
-test("coalesceProjectCheck: past the lock-wait deadline a live holder's lock is left alone and the check runs unlocked (F13, async F18)", async () => {
-  await withDataDir(async (dataDir) => {
-    const file = path.join(dataDir, "a.ts");
-    writeFileSync(file, "export const a = 1;\n");
-    mkdirSync(path.join(dataDir, "fc-locks"), { recursive: true });
-    const lock = lockPath(dataDir, "k10", ".lock");
-    writeFileSync(lock, String(process.pid)); // the vitest worker is alive: slotStale keeps the lock held
-    const { run, calls } = stubRun();
-    // reserveMs 1e9: FILE_CHANGED_BUDGET_MS - reserveMs is already past, so one claim attempt, then run unlocked.
-    assert.equal((await coalesceProjectCheck("k10", file, 1e9, run))?.status, 0);
-    assert.equal(calls.n, 1);
-    assert.equal(readFileSync(lock, "utf8"), String(process.pid));
-    assert.equal(existsSync(lockPath(dataDir, "k10", ".last")), false);
-  });
+test("coalesceProjectCheck: a throwing run releases the lock", async () => {
+  const file = await oldFile();
+  await assert.rejects(coalesceProjectCheck("m5", file, 45000, () => Promise.reject(new Error("boom"))), /boom/);
+  const { run, calls } = stubRun();
+  assert.equal((await coalesceProjectCheck("m5", file, 45000, run))?.status, 0);
+  assert.equal(calls.n, 1);
+});
+
+test("coalesceProjectCheck: a second caller waits while the first runs and is then covered", async () => {
+  const file = await oldFile();
+  let open = (): void => {};
+  const gate = new Promise<void>((r) => (open = r));
+  const { run, calls } = stubRun({}, () => gate);
+  const first = coalesceProjectCheck("m6", file, 45000, run);
+  const second = coalesceProjectCheck("m6", file, 45000, run);
+  assert.equal(await Promise.race([second.then(() => "done"), sleep(150).then(() => "pending")]), "pending");
+  open();
+  assert.equal((await first)?.status, 0);
+  assert.equal(await second, null);
+  assert.equal(calls.n, 1);
+});
+
+test("coalesceProjectCheck: past the lock-wait deadline it runs unlocked", async () => {
+  const file = await oldFile();
+  let open = (): void => {};
+  const gate = new Promise<void>((r) => (open = r));
+  const { run, calls } = stubRun({}, () => gate);
+  const first = coalesceProjectCheck("m7", file, 45000, run);
+  // reserveMs 1e9: FILE_CHANGED_BUDGET_MS - reserveMs is already past, so no wait for the held lock
+  const second = coalesceProjectCheck("m7", file, 1e9, run);
+  await sleep(0);
+  assert.equal(calls.n, 2);
+  open();
+  assert.equal((await second)?.status, 0);
+  assert.equal((await first)?.status, 0);
 });
 
 test("REGISTRY: yaml/markdown chain entries carry their line-length guard flags", () => {

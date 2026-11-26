@@ -24,15 +24,16 @@
  */
 import { isExcludedPath, outside, realish, walkToRoot } from "@shared/scope.js";
 import { AsyncLocalStorage } from "node:async_hooks";
-import { execFileSync, spawn } from "node:child_process";
+import { execFile, execFileSync, spawn } from "node:child_process";
 import type { ChildProcess, SpawnSyncOptionsWithStringEncoding, SpawnSyncReturns } from "node:child_process";
 import type { Hash } from "node:crypto";
-import { accessSync, constants as fsConstants, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { accessSync, constants as fsConstants, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, statSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { availableParallelism, homedir, tmpdir } from "node:os";
 import path from "node:path";
 import process from "node:process";
 import { setTimeout as sleep } from "node:timers/promises";
+import { promisify } from "node:util";
 
 /**
  * `node:crypto`'s `createHash`, loading the module on first use (`process.getBuiltinModule`, synchronous) so events that never
@@ -128,22 +129,24 @@ export function capSet<K, V>(map: Map<K, V>, key: K, value: V): void {
 /** Budget of each git call (ls-files for the watch list, status for the FileChanged gate). */
 const GIT_TIMEOUT_MS = 10000;
 
+/** `execFile` as a promise: the FileChanged git gate, so no tool call blocks the server process. */
+const execFileAsync = promisify(execFile);
+
 /**
- * hooks.json `timeout` of PostToolUse and FileChanged (90 s), the backstop that kills a hook process; a slot file whose
- * mtime is this far from now (past or future) was left by a killed holder or survived a clock jump. Re-derive with
- * hook-design.md "Timeout budget" when hooks.json changes.
+ * Budget of one tool call (90 s): what a Write/Edit or FileChanged lint of the server may take, per tool call (the
+ * `mcp_tool` hook timeout lies above it). Re-derive with hook-design.md "Timeout budget" when hooks.json changes.
  */
 export const HOOK_TIMEOUT_MS = 90000;
 
 /**
- * FileChanged nominal worst case (85 s): git status + slot wait + lint end by then; the 5 s under `HOOK_TIMEOUT_MS`
- * cover node startup before `process.uptime()` counts, the findings gate and the exit. The per-file lint budget
+ * FileChanged nominal worst case per tool call (85 s of call time, `elapsedMs`): git status + slot wait + lint end by
+ * then; the 5 s under `HOOK_TIMEOUT_MS` cover the findings gate and the answer. The per-file lint budget
  * `fileChangedHandler` reserves before waiting mirrors `runChainLint`'s one spawn timeout per tool
  * (`CARGO_SPAWN_TIMEOUT_MS` for a `manifestPath` tool, else `SPAWN_TIMEOUT_MS`) and `runTypeCheck`'s
  * `TSC_SPAWN_TIMEOUT_MS`; update it together with them (a chain that runs a second tool per file needs a larger
  * reservation). The reservation stays the sum chain + tsc although the phases overlap since F18, because the
  * oxlint-`typeCheck` fallback path runs them in sequence. `coalesceProjectCheck` (F13) stops waiting for a project-check
- * lock at uptime `FILE_CHANGED_BUDGET_MS` minus the check's spawn timeout and then runs unlocked, so the lock wait
+ * lock at call time `FILE_CHANGED_BUDGET_MS` minus the check's spawn timeout and then runs unlocked, so the lock wait
  * stays inside this budget. Worst end = max(slot deadline + sequential phases, lock-wait deadline + check timeout)
  * + `KILL_GRACE_MS` per phase: 40 + 45 + 1 = 86 s (`.ts` concurrent, `.rs`), 55 + 30 + 1 = 86 s (`.go`), 10 + 30 + 1
  * + 45 + 1 = 87 s (`.ts` fallback), all inside the 5 s margin under `HOOK_TIMEOUT_MS`.
@@ -151,8 +154,8 @@ export const HOOK_TIMEOUT_MS = 90000;
 const FILE_CHANGED_BUDGET_MS = HOOK_TIMEOUT_MS - 5000;
 
 /**
- * Concurrent FileChanged lints across all hook processes sharing one plugin data dir (3 on 12 cores, at least 2).
- * Exported for the tests.
+ * Concurrent FileChanged lints per server process (3 on 12 cores, at least 2), held in memory by `acquireSlot` with
+ * FIFO waiters; other sessions' server processes have their own (R2). Exported for the tests.
  */
 export const FILE_CHANGED_SLOTS = Math.max(2, Math.floor(availableParallelism() / 4));
 
@@ -2717,11 +2720,11 @@ export async function sweepHandler(args: PostToolUseHookInput): Promise<HookResu
 }
 
 /**
- * Drop the activity times and stop markers of owners older than `PENDING_TTL_MS`: one entry per agent would otherwise
- * pile up. Run once per sweep.
+ * Drop the activity times and stop markers of owners and the project-check stamps (`projectLast`) older than
+ * `PENDING_TTL_MS`: one entry per agent or project and session would otherwise pile up. Run once per sweep.
  */
 function pruneActivity(): void {
-  for (const m of [activity, blocked]) for (const [o, at] of m) if (Date.now() - at > PENDING_TTL_MS) m.delete(o);
+  for (const m of [activity, blocked, projectLast]) for (const [o, at] of m) if (Date.now() - at > PENDING_TTL_MS) m.delete(o);
 }
 
 /**
@@ -2886,89 +2889,80 @@ export async function lintFilesHandler(cwd: string, files: readonly string[]): P
   return [...chainBlocks, ...tscBlocks];
 }
 
+/** FileChanged slots held by lints of this server process (at most `FILE_CHANGED_SLOTS`). */
+let slotsHeld = 0;
+
+/** Callers waiting for a FileChanged slot, oldest first; each gets the slot's release function. */
+const slotWaiters: Array<(release: () => void) => void> = [];
+
 /**
- * Whether a FileChanged slot file (also used for `fc-locks/<key>.lock`, see `coalesceProjectCheck`) may be removed:
- * stale when its mtime is `HOOK_TIMEOUT_MS` (90 s) or more ago, or
- * `HOOK_TIMEOUT_MS` or more in the future (clock jumped back, synced data dir), or its pid no longer exists
- * (`process.kill(pid, 0)` throws ESRCH). Held: pid alive, EPERM (alive, another user's process), or an empty or
- * unparsable pid (a holder between its `wx` create and its write, or a garbage file; the mtime decides). A missing or
- * unreadable slot is not stale (the following `wx` create decides).
+ * A release function for one held slot: the first call hands the slot to the oldest waiter (`slotsHeld` unchanged) or
+ * frees it; any further call does nothing.
  *
- * @param slot - Slot file path.
- * @returns True when the slot may be removed; false when held, missing or unreadable.
+ * @returns The release function.
  */
-function slotStale(slot: string): boolean {
-  try {
-    // Both directions: a fresh slot's sub-ms mtime can be ahead of integer Date.now(); the pid check covers small clock jumps.
-    if (Math.abs(Date.now() - lstatSync(slot).mtimeMs) >= HOOK_TIMEOUT_MS) return true;
-    const pid = Number(readFileSync(slot, "utf8"));
-    if (Number.isInteger(pid) && pid > 0) process.kill(pid, 0);
-    return false;
-  } catch (e) {
-    return (e as NodeJS.ErrnoException).code === "ESRCH";
-  }
+function slotRelease(): () => void {
+  let done = false;
+  return () => {
+    if (done) return;
+    done = true;
+    const next = slotWaiters.shift();
+    if (next) next(slotRelease()); // the slot passes on: slotsHeld is unchanged
+    else slotsHeld--;
+  };
 }
 
 /**
- * Claim `file` exclusively (`wx`, holding this pid), first removing it when `slotStale` says so.
+ * Claim one of `FILE_CHANGED_SLOTS` FileChanged slots of this server process. While every slot is held, waits in
+ * arrival order (FIFO, no polling) until a release hands one on or `elapsedMs()` (call time; process uptime outside a
+ * call) reaches `untilMs`; a deadline already past gives one try and no wait. Per process only: sessions of other
+ * server processes share no slot (R2).
  *
- * @param file - Slot or lock file path.
- * @returns True when claimed; false when held (EEXIST).
- * @throws On any other error.
+ * @param untilMs - Elapsed call time (ms) after which waiting gives up.
+ * @returns The slot's release function (call it once the lint ended; a second call does nothing), or null when none
+ *   came free in time.
  */
-function claimFile(file: string): boolean {
-  // A waiter racing this removal can delete a file just re-created: one extra run for a moment (accepted).
-  if (slotStale(file)) rmSync(file, { force: true });
-  try {
-    writeFileSync(file, String(process.pid), { flag: "wx" });
-    return true;
-  } catch (e) {
-    if ((e as NodeJS.ErrnoException).code !== "EEXIST") throw e;
-    return false;
+export async function acquireSlot(untilMs: number): Promise<(() => void) | null> {
+  if (slotsHeld < FILE_CHANGED_SLOTS) {
+    slotsHeld++;
+    return slotRelease();
   }
+  const left = untilMs - elapsedMs();
+  if (left <= 0) return null;
+  return new Promise((resolve) => {
+    const waiter = (release: () => void): void => {
+      clearTimeout(timer);
+      resolve(release);
+    };
+    const timer = setTimeout(() => {
+      const i = slotWaiters.indexOf(waiter);
+      if (i >= 0) slotWaiters.splice(i, 1);
+      resolve(null);
+    }, Math.min(left, 2 ** 31 - 1));
+    slotWaiters.push(waiter);
+  });
 }
 
-/** Sleep 100 ms without a busy loop. */
-function sleep100(): void {
-  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 100);
-}
+/** Project keys whose whole-project check is running in this server process (`coalesceProjectCheck`). */
+const projectLocks = new Set<string>();
 
 /**
- * Claim one of `FILE_CHANGED_SLOTS` cross-process FileChanged slots: `${CLAUDE_PLUGIN_DATA || tmpdir()}/fc-slots/<i>`,
- * created exclusively (`wx`) holding this pid, after removing the slot when `slotStale` says so. While every slot is
- * held, sleeps 100 ms (`Atomics.wait`, no busy loop) between rounds until `process.uptime()` reaches `untilMs`; one
- * full round over all slots is always tried first, so `acquireSlot(0)` tries once without waiting.
- *
- * @param untilMs - Process uptime (ms) after which waiting gives up.
- * @returns The held slot file (the caller removes it), or null when none came free in time.
- * @throws On any slot error other than a held slot (EEXIST); the caller then lints without a slot (fail open).
+ * `Date.now()` taken before the spawn of the last run per `<key>\0<session>` that completed without error or signal;
+ * entries older than `PENDING_TTL_MS` are dropped by `pruneActivity`.
  */
-export function acquireSlot(untilMs: number): string | null {
-  const dir = path.resolve(process.env.CLAUDE_PLUGIN_DATA || tmpdir(), "fc-slots");
-  mkdirSync(dir, { recursive: true });
-  for (;;) {
-    for (let i = 0; i < FILE_CHANGED_SLOTS; i++) {
-      const slot = path.join(dir, String(i));
-      if (claimFile(slot)) return slot;
-    }
-    if (elapsedMs() >= untilMs) return null;
-    sleep100();
-  }
-}
+const projectLast = new Map<string, number>();
 
 /**
  * Run a whole-project check (`tsc -p`, `go vet <dir>`, `cargo ... --manifest-path`) once per FileChanged burst and
- * project. State under `${CLAUDE_PLUGIN_DATA || tmpdir()}/fc-locks/`: `<key>.lock` (exclusive `wx` create holding
- * this pid, reclaimed per `slotStale`; shared by all sessions, so their runs stay serialised) and
- * `<key>-<hashPath(session)>.last` (`Date.now()` taken before the spawn of the last run of this session that
- * completed without error or signal). Skips (returns null) when `.last` is newer than `file`'s ctime and not in the
- * future: a completed run started after the file's last change, so its process reported this file's findings to this
- * session (the data dir is shared by every session, and another session's report never reaches this one).
- * Otherwise claims the lock, re-checking `.last` every 100 ms (async `setTimeout` from `node:timers/promises`, so a
- * concurrent chain child keeps being read; under `lintResolved`'s concurrent branch this wait overlaps that child) while a live holder runs, until process
- * uptime reaches `FILE_CHANGED_BUDGET_MS - reserveMs`, after which it runs unlocked; after a claim it re-checks `.last`
- * once more, then awaits `run` inside the `try/finally`, so the lock release follows the child's `close`; writes `.last` on completion. Any stat, mkdir, claim or `.last`
- * error runs unlocked (fail open, as before F13). FileChanged only: `lintResolved` enables it from `hookEventName`.
+ * project, in this server process's memory. Skips (returns null) when the last completed run of this session for
+ * `key` (its start in `projectLast`) is newer than `file`'s ctime and not in the future: a completed run started after
+ * the file's last change, so it reported this file's findings to this session (a report reaches only its own
+ * session). Otherwise waits while another call holds the lock (`projectLocks`, shared by all sessions of the process),
+ * re-checking the coverage every 100 ms (async sleep), until the elapsed call time reaches
+ * `FILE_CHANGED_BUDGET_MS - reserveMs`, after which it runs unlocked. No `await` lies between the lock test and the
+ * claim, so the claim is exclusive. The lock is released in a `finally` after `run` settled; the stamp is written only
+ * for a run without error or signal. A stat error runs unlocked (fail open). FileChanged only: `lintResolved` enables
+ * it from `hookEventName`.
  *
  * @param key - Project key (`hashPath` of `<tool name>:<tsconfig path | package dir | Cargo.toml path>`).
  * @param file - The changed file (its ctime decides whether the last completed run covers it).
@@ -2978,9 +2972,7 @@ export function acquireSlot(untilMs: number): string | null {
  * @returns `run`'s result, or null when a completed run of this session already covers `file`.
  */
 export async function coalesceProjectCheck(key: string, file: string, reserveMs: number, run: () => Promise<SpawnSyncReturns<string>>, session = ""): Promise<SpawnSyncReturns<string> | null> {
-  const dir = path.resolve(process.env.CLAUDE_PLUGIN_DATA || tmpdir(), "fc-locks");
-  const lock = path.join(dir, `${key}.lock`);
-  const last = path.join(dir, `${key}-${hashPath(session)}.last`);
+  const stampKey = `${key}\0${session}`;
   let changed: number;
   try {
     // statSync: a symlinked file's target is what the check reads; ctime: copies can preserve an old mtime.
@@ -2988,55 +2980,35 @@ export async function coalesceProjectCheck(key: string, file: string, reserveMs:
   } catch {
     return await run();
   }
-  // A missing, empty or partial stamp gives NaN or a smaller number (not covered); a future-dated stamp never covers.
+  /** Whether a completed run of this session started after `file` last changed (a future-dated stamp never covers). */
   const covered = (): boolean => {
-    try {
-      const t = Number(readFileSync(last, "utf8"));
-      return t > changed && t <= Date.now();
-    } catch {
-      return false;
-    }
+    const t = projectLast.get(stampKey);
+    return t !== undefined && t > changed && t <= Date.now();
   };
   for (;;) {
     if (covered()) return null;
-    try {
-      mkdirSync(dir, { recursive: true }); // only once the cheap `.last` check did not cover the file
-      if (claimFile(lock)) break;
-    } catch {
-      return await run();
-    }
+    if (!projectLocks.has(key)) break;
     if (elapsedMs() >= FILE_CHANGED_BUDGET_MS - reserveMs) return await run();
     await sleep(100);
   }
+  projectLocks.add(key);
   try {
-    // The previous holder may have finished between the last check and this claim.
-    if (covered()) return null;
     const start = Date.now();
     const r = await run();
-    if (!r.error && !r.signal) {
-      try {
-        writeFileSync(last, String(start));
-      } catch {
-        // no stamp: the next process runs the check again
-      }
-    }
+    if (!r.error && !r.signal) projectLast.set(stampKey, start);
     return r;
   } finally {
-    try {
-      rmSync(lock, { force: true });
-    } catch {
-      // slotStale reclaims it once this pid is gone
-    }
+    projectLocks.delete(key);
   }
 }
 
 /**
- * Process uptime (ms) at which FileChanged's slot wait gives up for a file: what is left of `FILE_CHANGED_BUDGET_MS`
+ * Elapsed call time (ms, `elapsedMs`) at which FileChanged's slot wait gives up for a file: what is left of `FILE_CHANGED_BUDGET_MS`
  * once the file's nominal lint budget is reserved, chain + `tsc` kept as the sum for the sequential oxlint-`typeCheck`
  * fallback (`.ts`-family 10 s, `.rs` 40 s, any other extension 55 s; see `FILE_CHANGED_BUDGET_MS`).
  *
  * @param ext - The file's lower-cased extension with its dot.
- * @returns The slot-wait deadline in ms of process uptime.
+ * @returns The slot-wait deadline in ms of call time.
  */
 export function slotDeadlineMs(ext: string): number {
   return FILE_CHANGED_BUDGET_MS - (EXT_MAP[ext] === "rust" ? CARGO_SPAWN_TIMEOUT_MS : SPAWN_TIMEOUT_MS) - (TYPE_CHECK_EXTS.has(ext) ? TSC_SPAWN_TIMEOUT_MS : 0);
@@ -3045,15 +3017,14 @@ export function slotDeadlineMs(ext: string): number {
 /**
  * FileChanged: lint a watched file changed outside Write/Edit, whole file (no edit-range gate). Skips, first match
  * wins: `unlink` event; out of scope (`scopedTarget`); content still equal to the digest Write/Edit recorded; git says
- * ignored (`!!`) or unchanged (empty status). A git failure (no git, not a repo, timeout) lints. Then waits for one of
- * `FILE_CHANGED_SLOTS` cross-process slots (`acquireSlot`) until `FILE_CHANGED_BUDGET_MS` minus the file's lint
- * budget; no slot in time skips with a stderr note; a slot error lints without a slot. Inside `lintResolved` the
- * whole-project check (tsc, go vet/golangci-lint, cargo) runs through `coalesceProjectCheck`: once per burst and project
- * (F13). Settle window (F34, F40): once the digest check says the content changed, a whole-file edit is journaled
- * under the main conversation (`recordEdit`; the payload names no agent), a clean lint clears the file's records, and
- * findings are held by `settleFindings` after the slot is released. Returns {}
- * for every skip and on any error (fail open).
- * Async since F18 (the git call and `acquireSlot` stay sync: no child of this process exists yet).
+ * ignored (`!!`) or unchanged (empty status), asked with an async `git status` (the server's event loop stays free). A
+ * git failure (no git, not a repo, timeout) lints. Then waits for one of the server process's `FILE_CHANGED_SLOTS`
+ * slots (`acquireSlot`, FIFO) until `FILE_CHANGED_BUDGET_MS` minus the file's lint budget of call time; no slot in
+ * time skips with a stderr note. Inside `lintResolved` the whole-project check (tsc, go vet/golangci-lint, cargo) runs
+ * through `coalesceProjectCheck`: once per burst and project (F13). Settle window (F34, F40): once the digest check
+ * says the content changed, a whole-file edit is journaled under the main conversation (`recordEdit`, before the first
+ * `await`; the payload names no agent), a clean lint clears the file's records, and findings are held by
+ * `settleFindings` after the slot is released. Returns {} for every skip and on any error (fail open).
  *
  * @param args - The FileChanged hook payload.
  * @returns The hook result: findings as additionalContext, or an empty object.
@@ -3076,23 +3047,17 @@ export async function fileChangedHandler(args: PostToolUseHookInput): Promise<Ho
     const owner = ownerOf(args);
     const rec = recordEdit(s.fp, s.real, null, undefined, undefined, owner, null, cwd);
     try {
-      const status = execFileSync("git", ["--no-optional-locks", "--literal-pathspecs", "status", "--porcelain", "--untracked-files=normal", "--ignored=matching", "--", s.real], {
+      const { stdout } = await execFileAsync("git", ["--no-optional-locks", "--literal-pathspecs", "status", "--porcelain", "--untracked-files=normal", "--ignored=matching", "--", s.real], {
         cwd: path.dirname(s.real), // git maps a lexical path through an in-repo symlinked dir to a path not in the index
         encoding: "utf8",
         timeout: GIT_TIMEOUT_MS,
-        stdio: ["ignore", "pipe", "ignore"],
       });
-      if (status === "" || status.startsWith("!!")) return {};
+      if (stdout === "" || stdout.startsWith("!!")) return {};
     } catch {
       // no git, not a repo, timeout or non-zero exit: lint
     }
-    let slot: string | null | undefined; // undefined: slot error, lint without a slot (fail open, as before F10)
-    try {
-      slot = acquireSlot(slotDeadlineMs(path.extname(s.fp).toLowerCase()));
-    } catch {
-      // unusable slot dir or slot file: slot stays undefined
-    }
-    if (slot === null) {
+    const release = await acquireSlot(slotDeadlineMs(path.extname(s.fp).toLowerCase()));
+    if (release === null) {
       process.stderr.write(`universal-lint: FileChanged: no lint slot free in time, ${s.fp} not linted\n`);
       return {};
     }
@@ -3107,11 +3072,7 @@ export async function fileChangedHandler(args: PostToolUseHookInput): Promise<Ho
       if (journalTail(rec) === t0) d1 = digestOrNull(s.fp);
       if (kept.length === 0) settleClean(rec, owner, d0 !== null && d0 === d1);
     } finally {
-      try {
-        if (slot) rmSync(slot, { force: true });
-      } catch {
-        // left for slotStale: this pid is gone once the process exits
-      }
+      release();
     }
     // The hold comes after the slot release: a held finding must not keep one of the K slots busy.
     return formatFindings(await settleFindings(kept, s.fp, rec, d0, d1, owner), "FileChanged", "universal-lint (changed outside Write/Edit)");

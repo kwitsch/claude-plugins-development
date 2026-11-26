@@ -75,3 +75,5 @@ test("plugin README first ## heading is Install, with the install command and no
   assert.ok(readme.includes("/plugin install universal-lint@kwitsch-plugins"));
   assert.doesNotMatch(readme, /^## Hooks/m);
 });
+
+test("server.mjs holds no blocking wait", () => assert.doesNotMatch(readFileSync(SERVER, "utf8"), /Atomics\.wait/));

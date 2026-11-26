@@ -3,10 +3,11 @@
 // outbox): "the later lint reports, the earlier one stays silent" is asserted as "the marker is delivered exactly once".
 // The old per-process wall times (a held process ended early, the hold restarted) have no equivalent on one server.
 import assert from "node:assert/strict";
-import { existsSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { expect, test } from "vitest";
+import { FILE_CHANGED_SLOTS } from "../src/hooks/lint-core.ts";
 import { type LintEnv, makeEnv, payload } from "./support/lint-hook.ts";
 
 /** The 4-line script the scenarios edit. */
@@ -275,8 +276,11 @@ test("a FileChanged lint does not hold its slot while the findings settle", asyn
   s.setFindings(FINDING_L2);
   await srv.changed(changed(s.file, s.e.cwd));
   await intoHold(s.e);
-  assert.ok(existsSync(path.join(s.e.data, "fc-slots")), "the slot dir was used");
-  assert.deepEqual(readdirSync(path.join(s.e.data, "fc-slots")), [], "no slot is held during the hold");
+  // K further FileChanged lints all run while the first finding is held: had it kept its slot, one would wait for the hold's end
+  const others = Array.from({ length: FILE_CHANGED_SLOTS }, (_, i) => s.e.file(`b${i}.sh`, "echo b\n"));
+  for (const f of others) await srv.changed(changed(f, s.e.cwd));
+  await expect.poll(() => s.e.lines().length, { interval: 20, timeout: 10_000 }).toBe(1 + FILE_CHANGED_SLOTS);
+  assert.notEqual(await srv.state(0), "ready", "all K lints ran before the first report was ready");
   assert.match(await srv.reports(1500), /line2-marker/);
 });
 

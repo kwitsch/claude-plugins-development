@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { expect, test } from "vitest";
+import { FILE_CHANGED_SLOTS } from "../src/hooks/lint-core.ts";
 import { type LintEnv, makeEnv } from "./support/lint-hook.ts";
 
 /** The 4-line script the scenarios write. */
@@ -215,4 +216,18 @@ test("stdin close ends the server with a waiter and a detached lint pending, and
       return true;
     }
   }, { interval: 50, timeout: 2000 }).toBe(true);
+});
+
+test("a stop is answered while K FileChanged lints block and one more waits for a slot", async () => {
+  const w = setup();
+  const rel = path.join(path.dirname(w.e.cwd), "release");
+  // records a line, then blocks until the release file exists (node, not sleep: the PATH holds only bash/node/git)
+  w.e.stub("shellcheck", "echo run >> \"$RECORD\"", `node -e 'const fs = require("fs"); const t = () => { if (!fs.existsSync(${JSON.stringify(rel)})) setTimeout(t, 20); }; t();'`, "exit 0");
+  const files = Array.from({ length: FILE_CHANGED_SLOTS + 1 }, (_, i) => w.e.file(`b${i}.sh`, "echo b\n"));
+  for (const f of files) assert.deepEqual(await w.changed(f), {});
+  await linted(w.e, FILE_CHANGED_SLOTS);
+  // a SubagentStop of an agent without records: the main Stop's sweep would lint the K pending files with the blocking stub
+  assert.deepEqual(await w.stop({ hook_event_name: "SubagentStop", agent_id: "idle" }), {});
+  writeFileSync(rel, "");
+  await linted(w.e, FILE_CHANGED_SLOTS + 1);
 });

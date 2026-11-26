@@ -1,9 +1,10 @@
 // File detection: SessionStart/CwdChanged watch list (built watch-paths hook) and FileChanged linting (built server) in a real git repo.
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdirSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import { test } from "vitest";
+import { setTimeout as sleep } from "node:timers/promises";
+import { expect, test } from "vitest";
 import { FILE_CHANGED_SLOTS } from "../src/hooks/lint-core.ts";
 import { makeEnv } from "./support/lint-hook.ts";
 import type { LintEnv } from "./support/lint-hook.ts";
@@ -166,28 +167,36 @@ const OUT = "a.sh:1:6: note: marker [SC2086]";
  */
 const changed = (e: LintEnv, file: string, extra: Record<string, unknown> = {}) => e.runEvent({ hook_event_name: "FileChanged", cwd: e.cwd, file_path: file, event: "change", ...extra }, { out: OUT });
 
+/** One server of a test (`LintEnv.server`). */
+type Server = ReturnType<LintEnv["server"]>;
+
 /**
- * Send one FileChanged payload per file, all at once, each to its own server, and read each server's reports once at the end.
+ * Send one FileChanged payload per file to one server, all at once, then read its reports once at the end.
  *
  * @remarks
- * One server per event, not one server for all: the file-based slot wait (`acquireSlot`) still blocks its process, so
- * concurrent calls on one server would wait on each other; the slot cap moves into the server's memory later. The
- * reports are read with `prompt_submitted`, which drains them without a sweep (a `stop` would lint the other events'
- * pending files again).
+ * The slot cap and the project-check lock live in the server's memory, so concurrent calls on one server share them.
+ * The reports are read with `prompt_submitted`, which drains them without a sweep (a `stop` would lint the other
+ * events' pending files again).
  *
+ * @param s - The server (`UNIVERSAL_LINT_SETTLE_MS` 0: every call awaits its lint).
  * @param e - Test environment.
  * @param files - Changed files (absolute).
- * @returns The report texts of all events, joined ("" when none).
+ * @returns The report texts of all events ("" when none).
  */
-async function changedConcurrent(e: LintEnv, files: string[]): Promise<string> {
-  const texts = await Promise.all(files.map(async (f) => {
-    const s = e.server({ out: OUT });
-    await s.call("file_changed", { hook_event_name: "FileChanged", cwd: e.cwd, file_path: f, event: "change", session_id: "harness" });
-    const r = await s.call("prompt_submitted", { cwd: e.cwd, session_id: "harness" });
-    return (r["hookSpecificOutput"] as { additionalContext?: string } | undefined)?.additionalContext ?? "";
-  }));
-  return texts.join("\n\n");
+async function changedConcurrent(s: Server, e: LintEnv, files: string[]): Promise<string> {
+  await Promise.all(files.map((f) => s.call("file_changed", { hook_event_name: "FileChanged", cwd: e.cwd, file_path: f, event: "change", session_id: "harness" })));
+  const r = await s.call("prompt_submitted", { cwd: e.cwd, session_id: "harness" });
+  return (r["hookSpecificOutput"] as { additionalContext?: string } | undefined)?.additionalContext ?? "";
 }
+
+/**
+ * Recorded stub calls whose line starts with `prefix`.
+ *
+ * @param e - Test environment.
+ * @param prefix - Line prefix, e.g. `"tsc "`.
+ * @returns The count.
+ */
+const calls = (e: LintEnv, prefix: string): number => e.lines().filter((l) => l.startsWith(prefix)).length;
 
 test("FileChanged: a tracked, modified file is linted whole and labelled", () => {
   const e = makeEnv();
@@ -326,9 +335,11 @@ test("FileChanged: 20 concurrent events lint at most FILE_CHANGED_SLOTS at a tim
     "exit 1",
   );
   const files = Array.from({ length: 20 }, (_, i) => e.file(`f${i}.sh`, "echo a\n"));
+  const extra = e.file("g.sh", "echo a\n");
   gitInit(e);
-  for (const f of files) writeFileSync(f, "echo $1\n");
-  assert.match(await changedConcurrent(e, files), /marker/);
+  for (const f of [...files, extra]) writeFileSync(f, "echo $1\n");
+  const s = e.server({ out: OUT });
+  assert.match(await changedConcurrent(s, e, files), /marker/);
   const events = e.lines()
     .filter((l) => l.startsWith("start ") || l.startsWith("end "))
     .map((l) => ({ t: Number(l.split(" ")[1]), d: l.startsWith("start ") ? 1 : -1 }));
@@ -342,39 +353,48 @@ test("FileChanged: 20 concurrent events lint at most FILE_CHANGED_SLOTS at a tim
     max = Math.max(max, cur);
   }
   assert.ok(max <= FILE_CHANGED_SLOTS, `max overlap ${max} > FILE_CHANGED_SLOTS ${FILE_CHANGED_SLOTS}`);
-  assert.deepEqual(readdirSync(path.join(e.data, "fc-slots")), []);
+  // every slot was released: one more event lints
+  assert.match(await changedConcurrent(s, e, [extra]), /marker/);
+  assert.equal(calls(e, "start "), 21);
 });
 
-test("FileChanged: an unusable slot dir lints without a slot (fail open, F10)", () => {
-  const e = makeEnv();
-  e.recStub("shellcheck", 1);
-  const a = e.file("a.sh", "echo a\n");
-  gitInit(e);
-  writeFileSync(a, "echo $1\n");
-  writeFileSync(e.data, ""); // a regular file: mkdirSync(<data>/fc-slots) throws ENOTDIR
-  assert.equal(changed(e, a).status, 2);
-  assert.equal(e.lines().filter((l) => l.startsWith("shellcheck ")).length, 1);
-});
+// Removed: "an unusable slot dir lints without a slot" (no slot directory left to fail; the slots live in the server's memory).
 
-test("FileChanged: with every slot held a .ts file gives up at uptime 10 s with a stderr note, exit 0, slots untouched (F10)", () => {
-  // Costs about 10 s on purpose: the deadline is process-uptime based and has no test seam (do not add one).
+/**
+ * Drop a shellcheck stub that records `start`, then blocks until the file `$REL` exists, then exits 0.
+ *
+ * @param e - Test environment.
+ */
+function blockingStub(e: LintEnv): void {
+  e.stub(
+    "shellcheck",
+    "printf 'start\\n' >> \"$RECORD\"",
+    `node -e 'const fs = require("fs"); const w = () => { if (!fs.existsSync(process.env.REL)) setTimeout(w, 20); }; w();'`,
+    "exit 0",
+  );
+}
+
+// Removed with slotStale: the planted stale slot and the dead-pid slot cases.
+test("FileChanged: with every slot held a .ts file gives up after 10 s of call time with a stderr note while the held lints run on (F10)", { timeout: 30_000 }, async () => {
   const e = makeEnv();
+  const rel = path.join(path.dirname(e.cwd), "release");
+  blockingStub(e);
+  const files = Array.from({ length: FILE_CHANGED_SLOTS }, (_, i) => e.file(`b${i}.sh`, "echo a\n"));
   const a = e.file("a.ts", "export const a = 1;\n");
   gitInit(e);
+  for (const f of files) writeFileSync(f, "echo $1\n");
   writeFileSync(a, "export const a = 2;\n");
-  const dir = path.join(e.data, "fc-slots");
-  mkdirSync(dir, { recursive: true });
-  // The vitest worker pid is alive, so slotStale keeps every slot held.
-  for (let i = 0; i < FILE_CHANGED_SLOTS; i++) writeFileSync(path.join(dir, String(i)), String(process.pid));
-  const t0 = Date.now();
-  const r = changed(e, a);
-  assert.equal(r.status, 0);
-  assert.equal(r.stdout, "");
-  // r.stderr is the server's: its start line, then the note
-  assert.match(r.stderr, /^\[lint\] running \(v[^)]+\)\nuniversal-lint: FileChanged: no lint slot free in time, .*a\.ts not linted\n$/);
-  assert.ok(Date.now() - t0 >= 9500, `gave up after ${Date.now() - t0} ms, expected about 10 s`);
-  assert.equal(readdirSync(dir).length, FILE_CHANGED_SLOTS);
-  for (let i = 0; i < FILE_CHANGED_SLOTS; i++) assert.equal(readFileSync(path.join(dir, String(i)), "utf8"), String(process.pid));
+  const s = e.server({ env: { REL: rel } });
+  const held = Promise.all(files.map((f) => s.call("file_changed", { cwd: e.cwd, session_id: "s1", scratchpad_dir: "", file_path: f, event: "change" })));
+  let heldDone = false;
+  void held.then(() => (heldDone = true));
+  await expect.poll(() => calls(e, "start"), { interval: 20, timeout: 10_000 }).toBe(FILE_CHANGED_SLOTS);
+  assert.deepEqual(await s.call("file_changed", { cwd: e.cwd, session_id: "s1", scratchpad_dir: "", file_path: a, event: "change" }), {});
+  assert.equal(heldDone, false, "the K lints still hold their slots");
+  assert.match(s.stderr(), /universal-lint: FileChanged: no lint slot free in time, .*a\.ts not linted\n/);
+  writeFileSync(rel, "");
+  await held;
+  assert.equal(calls(e, "start"), FILE_CHANGED_SLOTS);
 });
 
 /** A tsconfig.json governing `*.ts` in the project root. */
@@ -400,24 +420,6 @@ function slowStub(e: LintEnv, name: string, ms: number, out: string, code: numbe
   );
 }
 
-/**
- * Block the test thread for `ms` milliseconds.
- *
- * @param ms - Milliseconds to wait.
- */
-const waitMs = (ms: number): void => {
-  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
-};
-
-/**
- * Recorded stub calls whose line starts with `prefix`.
- *
- * @param e - Test environment.
- * @param prefix - Line prefix, e.g. `"tsc "`.
- * @returns The count.
- */
-const calls = (e: LintEnv, prefix: string): number => e.lines().filter((l) => l.startsWith(prefix)).length;
-
 test("FileChanged: 10 concurrent .ts events run tsc once, the finding is reported once (F13)", async () => {
   const e = makeEnv();
   e.file("tsconfig.json", TSCONFIG);
@@ -426,14 +428,10 @@ test("FileChanged: 10 concurrent .ts events run tsc once, the finding is reporte
   const files = Array.from({ length: 10 }, (_, i) => e.file(`f${i}.ts`, `export const f${i} = ${i};\n`));
   gitInit(e);
   for (const [i, f] of files.entries()) writeFileSync(f, `export const f${i} = ${i + 1};\n`);
-  const text = await changedConcurrent(e, files);
-  // Deterministic count: late arrivals are covered by .last (their ctime precedes the holder's start) and lock
-  // waiters re-check .last after the claim; the 1 s sleep only exercises the waiter path, the count does not need it.
-  assert.equal(calls(e, "tsc "), 1);
+  const text = await changedConcurrent(e.server({ out: OUT }), e, files);
+  // Deterministic count: every file's ctime precedes the holder's start, so the lock waiters are covered once it ends.
+  assert.equal(calls(e, "tsc "), 1, "the tsc stub recorded exactly one run");
   assert.equal(text.split("TS2322: marker").length - 1, 1, "the finding is reported once");
-  const locks = readdirSync(path.join(e.data, "fc-locks"));
-  assert.equal(locks.filter((n) => n.endsWith(".last")).length, 1);
-  assert.equal(locks.filter((n) => n.endsWith(".lock")).length, 0);
 });
 
 test("FileChanged: 5 concurrent .go events run go vet once (F13)", async () => {
@@ -442,7 +440,7 @@ test("FileChanged: 5 concurrent .go events run go vet once (F13)", async () => {
   const files = Array.from({ length: 5 }, (_, i) => e.file(`pkg/a${i}.go`, "package pkg\n"));
   gitInit(e);
   for (const f of files) writeFileSync(f, "package pkg\n\n// changed\n");
-  const text = await changedConcurrent(e, files);
+  const text = await changedConcurrent(e.server({ out: OUT }), e, files);
   assert.equal(calls(e, "go vet"), 1);
   assert.equal(text.split("vet marker").length - 1, 1, "the finding is reported once");
 });
@@ -454,62 +452,58 @@ test("FileChanged: 5 concurrent .rs events run cargo check once (F13)", async ()
   const files = Array.from({ length: 5 }, (_, i) => e.file(`src/m${i}.rs`, "fn f() {}\n"));
   gitInit(e);
   for (const f of files) writeFileSync(f, "fn f() {}\n// changed\n");
-  const text = await changedConcurrent(e, files);
+  const text = await changedConcurrent(e.server({ out: OUT }), e, files);
   assert.equal(calls(e, "cargo check"), 1);
   assert.equal(text.split("cargo marker").length - 1, 1, "the finding is reported once");
 });
 
-test("FileChanged: a change after the last completed check runs tsc again, a newer stamp covers it (F13)", () => {
+/**
+ * One FileChanged call for `file` on server `s`.
+ *
+ * @param s - The server.
+ * @param e - Test environment.
+ * @param file - Changed file (absolute).
+ * @param session_id - The payload's session id.
+ * @returns The call's answer.
+ */
+const fileChanged = (s: Server, e: LintEnv, file: string, session_id = "s1") => s.call("file_changed", { cwd: e.cwd, session_id, scratchpad_dir: "", file_path: file, event: "change" });
+
+// Removed: the planted newer `.last` stamp (the stamp lives in the server's memory); "a second event without a rewrite does not" replaces it.
+test("FileChanged: a change after the last completed check runs tsc again, a second event without a rewrite does not (F13)", async () => {
   const e = makeEnv();
   e.file("tsconfig.json", TSCONFIG);
   slowStub(e, "tsc", 0, "a.ts(1,1): error TS2322: marker", 2);
   const a = e.file("a.ts", "export const a = 1;\n");
   gitInit(e);
   writeFileSync(a, "export const a = 2;\n");
-  assert.equal(changed(e, a).status, 2);
+  await sleep(20); // coarse kernel clock: the run's start must lie past the rewrite's ctime
+  const s = e.server({ out: OUT });
+  await fileChanged(s, e, a);
   assert.equal(calls(e, "tsc "), 1);
-  waitMs(50); // coarse kernel clock: the rewrite's ctime must land past the first run's .last
+  await sleep(50); // coarse kernel clock: the rewrite's ctime must land past the first run's start
   writeFileSync(a, "export const a = 3;\n");
-  assert.equal(changed(e, a).status, 2);
+  await sleep(20);
+  await fileChanged(s, e, a);
   assert.equal(calls(e, "tsc "), 2);
-  waitMs(50); // coarse kernel clock: keep this rewrite's ctime clear of the second run's .last
-  writeFileSync(a, "export const a = 4;\n");
-  waitMs(20); // coarse kernel clock: the forced stamp below must be newer than this rewrite's ctime
-  const dir = path.join(e.data, "fc-locks");
-  const lasts = readdirSync(dir).filter((n) => n.endsWith(".last"));
-  assert.equal(lasts.length, 1);
-  writeFileSync(path.join(dir, lasts[0]), String(Date.now()));
-  const r = changed(e, a);
-  assert.equal(r.status, 0);
+  await fileChanged(s, e, a);
   assert.equal(calls(e, "tsc "), 2);
 });
 
-test("FileChanged: the payload's session_id keys the coverage stamp, another session runs tsc again (F13)", () => {
+test("FileChanged: the payload's session_id keys the coverage stamp, another session runs tsc again (F13)", async () => {
   const e = makeEnv();
   e.file("tsconfig.json", TSCONFIG);
   slowStub(e, "tsc", 0, "a.ts(1,1): error TS2322: marker", 2);
   const a = e.file("a.ts", "export const a = 1;\n");
   gitInit(e);
   writeFileSync(a, "export const a = 2;\n");
+  await sleep(20);
+  const s = e.server({ out: OUT });
   for (const [i, session_id] of ["A", "B"].entries()) {
-    const r = changed(e, a, { session_id });
-    assert.equal(r.status, 2);
-    assert.match(r.ctx, /TS2322: marker/);
+    await fileChanged(s, e, a, session_id);
     assert.equal(calls(e, "tsc "), i + 1);
   }
-  assert.equal(changed(e, a, { session_id: "A" }).status, 0);
+  await fileChanged(s, e, a, "A");
   assert.equal(calls(e, "tsc "), 2);
 });
 
-test("FileChanged: an unusable fc-locks dir runs tsc unlocked (fail open, F13)", () => {
-  const e = makeEnv();
-  e.file("tsconfig.json", TSCONFIG);
-  slowStub(e, "tsc", 0, "a.ts(1,1): error TS2322: marker", 2);
-  const a = e.file("a.ts", "export const a = 1;\n");
-  gitInit(e);
-  writeFileSync(a, "export const a = 2;\n");
-  mkdirSync(e.data, { recursive: true });
-  writeFileSync(path.join(e.data, "fc-locks"), ""); // a regular file: mkdirSync(<data>/fc-locks) throws
-  assert.equal(changed(e, a).status, 2);
-  assert.equal(calls(e, "tsc "), 1);
-});
+// Removed: "an unusable fc-locks dir runs tsc unlocked" (no lock directory left to fail; the lock lives in the server's memory).
