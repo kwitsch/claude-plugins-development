@@ -6,7 +6,7 @@ Plugin parts, each with its own path-scoped rule in `.claude/rules/` (loaded whe
   `src/skills/dprint/`: `skill-scripts.md` (also `findDprint`/`findConfig` resolution, changing `MIN_VERSION`,
   refreshing `dprint-plugins.json`).
 - MCP server `dprint-hooks` (format, cwd-tracking and FileChanged hooks) in `src/mcp/`, its watch-list `command` hook in
-  `src/hooks/watch-paths.ts` (one file for the two events that call it, named after what it does): `mcp-server.md`; the `hooks.template.json` → `hook-inputs.d.ts` contract of `scripts/hooks.ts`: `hook-inputs.md`.
+  `src/hooks/watch-paths.ts` (one file for the two events that call it, named after what it does): `mcp-server.md`; the `hooks.template.json` → `hook-inputs.d.ts` contract (`claude-code-hook-types`): `hook-inputs.md`.
 - Function-hooks module `register` (toast when a dprint config exists but dprint cannot run) in `src/hooks/` (entry `register.ts`, helpers inlined into `register.js`):
   `notice-hook.md`.
 

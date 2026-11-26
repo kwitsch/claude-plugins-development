@@ -9,6 +9,7 @@ Working documents for agent sessions. Not shipped (`plugin/` is the installable 
 - [evaluations/EVALUATION-2026-11-13.md](evaluations/EVALUATION-2026-11-13.md): evaluation: dprint MCP server evaluation 2026-11-13 (plugin 0.13.0, re-run on 0.13.2)
 
 - [notes/hook-only-tools-audit.md](notes/hook-only-tools-audit.md): audit of the MCP server tools (all nine hook-only and hidden from the model), live check on 2.1.326
+- [design/hook-input-types.md](design/hook-input-types.md): hook input types from `claude-code-hook-types`, preset 0.4.1, deep-optional `HookInput<K>`, the dropped placeholder validator and the per-event field table
 
 ## How to work a task
 
