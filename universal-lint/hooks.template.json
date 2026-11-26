@@ -1,25 +1,12 @@
 {
-  "description": "One entry, lint-file.mjs, for six events: PostToolUse Write|Edit lints the just-written file (check-only) in the background; SessionStart and CwdChanged print the cwd's lintable git files as watchPaths; FileChanged lints a watched file changed outside Write/Edit in the background; Stop and SubagentStop lint the files whose edits no report has covered yet. Findings exit 2: they wake Claude (asyncRewake) or keep the stopping agent going.",
+  "mod": "./src/hooks/register.ts",
   "hooks": {
-    "PostToolUse": [
-      {
-        "matcher": "Write|Edit",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "./src/hooks/lint-file.ts",
-            "timeout": 90,
-            "asyncRewake": true
-          }
-        ]
-      }
-    ],
     "SessionStart": [
       {
         "hooks": [
           {
             "type": "command",
-            "command": "./src/hooks/lint-file.ts",
+            "command": "./src/hooks/watch-paths.ts",
             "timeout": 30
           }
         ]
@@ -30,8 +17,25 @@
         "hooks": [
           {
             "type": "command",
-            "command": "./src/hooks/lint-file.ts",
+            "command": "./src/hooks/watch-paths.ts",
             "timeout": 30
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "mcp_tool",
+            "server": "plugin:universal-lint:lint",
+            "tool": "prompt_submitted",
+            "timeout": 10,
+            "input": {
+              "cwd": "${cwd}",
+              "session_id": "${session_id}",
+              "scratchpad_dir": "${scratchpad_dir}"
+            }
           }
         ]
       }
@@ -40,10 +44,17 @@
       {
         "hooks": [
           {
-            "type": "command",
-            "command": "./src/hooks/lint-file.ts",
-            "timeout": 90,
-            "asyncRewake": true
+            "type": "mcp_tool",
+            "server": "plugin:universal-lint:lint",
+            "tool": "file_changed",
+            "timeout": 100,
+            "input": {
+              "cwd": "${cwd}",
+              "session_id": "${session_id}",
+              "scratchpad_dir": "${scratchpad_dir}",
+              "file_path": "${file_path}",
+              "event": "${event}"
+            }
           }
         ]
       }
@@ -52,9 +63,18 @@
       {
         "hooks": [
           {
-            "type": "command",
-            "command": "./src/hooks/lint-file.ts",
-            "timeout": 90
+            "type": "mcp_tool",
+            "server": "plugin:universal-lint:lint",
+            "tool": "stop",
+            "timeout": 100,
+            "input": {
+              "hook_event_name": "${hook_event_name}",
+              "cwd": "${cwd}",
+              "session_id": "${session_id}",
+              "agent_id": "${agent_id}",
+              "scratchpad_dir": "${scratchpad_dir}",
+              "stop_hook_active": "${stop_hook_active}"
+            }
           }
         ]
       }
@@ -63,9 +83,18 @@
       {
         "hooks": [
           {
-            "type": "command",
-            "command": "./src/hooks/lint-file.ts",
-            "timeout": 90
+            "type": "mcp_tool",
+            "server": "plugin:universal-lint:lint",
+            "tool": "stop",
+            "timeout": 100,
+            "input": {
+              "hook_event_name": "${hook_event_name}",
+              "cwd": "${cwd}",
+              "session_id": "${session_id}",
+              "agent_id": "${agent_id}",
+              "scratchpad_dir": "${scratchpad_dir}",
+              "stop_hook_active": "${stop_hook_active}"
+            }
           }
         ]
       }

@@ -178,6 +178,16 @@ test("bad input lines are logged and ignored; a request after them is still serv
   await s.end();
 });
 
+test("a raw U+2028 or U+2029 inside a JSON string is no line break: the request and the one after it are answered", async () => {
+  const s = start();
+  // JSON.stringify leaves both characters raw (valid JSON); readline would split the line at them
+  s.send({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "echo", arguments: { text: "a b c" } } });
+  s.send({ jsonrpc: "2.0", id: 2, method: "ping" });
+  assert.equal(await s.end(), 0);
+  assert.deepEqual((s.answers().find((a) => a.id === 1)?.result?.["structuredContent"]), { echo: { text: "a b c" } });
+  assert.deepEqual(s.answers().find((a) => a.id === 2)?.result, {});
+});
+
 test("closing stdin runs onClose and exits 0", async () => {
   const s = start();
   s.send({ jsonrpc: "2.0", id: 1, method: "ping" });

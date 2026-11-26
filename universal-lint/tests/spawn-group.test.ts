@@ -1,13 +1,12 @@
 // spawnGroup: detached process-group spawn with its own timeout, SIGTERM->SIGKILL escalation and per-stream cap (F18).
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
 import type { SpawnSyncOptionsWithStringEncoding } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { test } from "vitest";
 import { spawnGroup } from "../src/hooks/lint-core.ts";
-import { HOOK, makeEnv, payload } from "./support/lint-hook.ts";
+import { makeEnv, payload } from "./support/lint-hook.ts";
 
 /**
  * Options as `buildSpawnOpts` builds them, with a test-chosen timeout (the F18 test seam).
@@ -97,22 +96,24 @@ test("spawnGroup: a normal exit carries status, stdout and stderr and no error (
   assert.equal(r.stderr, "err\n");
 });
 
-test("hook: SIGTERM to the hook kills its live linter groups before it exits (F18)", async () => {
+test("server: SIGTERM to the server kills its live linter groups before it exits (F18)", async () => {
   const e = makeEnv();
   const pidfile = path.join(e.cwd, "sleep.pid");
-  // node, not sleep: the hook's PATH holds only bash/node/git, so a `sleep` stub would exit at once and prove nothing.
+  // node, not sleep: the server's PATH holds only bash/node/git, so a `sleep` stub would exit at once and prove nothing.
   e.stub("shellcheck", `node -e "setTimeout(() => {}, 30000)" & echo $! > "${pidfile}"`, "wait");
   const f = e.file("a.sh", "#!/bin/sh\necho hi\n");
-  const hook = spawn(process.execPath, [HOOK], { env: e.childEnv(), stdio: ["pipe", "ignore", "ignore"] });
-  const exited = new Promise<void>((resolve) => hook.on("exit", () => resolve()));
-  hook.stdin.end(payload(f, e.cwd));
+  const srv = e.server();
+  // not awaited: the call never answers once the server is killed
+  void srv.call("file_edited", { ...(JSON.parse(payload(f, e.cwd)) as Record<string, unknown>), session_id: "s1", key: await srv.key("s1") });
   const until = Date.now() + 5000;
   while (!existsSync(pidfile) || readFileSync(pidfile, "utf8").trim() === "") {
     assert.ok(Date.now() < until, "the shellcheck stub never started");
     await sleep(50);
   }
   const pid = Number(readFileSync(pidfile, "utf8"));
-  hook.kill("SIGTERM");
-  await exited;
-  assert.ok(await waitGone(pid, 2000), `forked sleep ${pid} survived the hook's SIGTERM`);
+  assert.ok(srv.pid !== undefined, "the server started");
+  process.kill(srv.pid, "SIGTERM");
+  // wait for the signal's exit, not close(): stdin EOF also ends the server, without killing an awaited lint's group
+  assert.ok(await waitGone(srv.pid, 5000), "the server exited on SIGTERM");
+  assert.ok(await waitGone(pid, 2000), `forked sleep ${pid} survived the server's SIGTERM`);
 }, 15_000);

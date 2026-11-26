@@ -2,14 +2,10 @@
  * universal-lint plugin: lint-only checker for Write/Edit results and files changed outside them.
  *
  * @remarks
- * Library of the command hook (entry: `lint-file.ts`, which only calls `main()`) and of the skill driver, which inlines it; nothing here runs at import. stdin = hook JSON (PostToolUseHookInput); `main()`
- * dispatches on `hook_event_name`: SessionStart/CwdChanged print the git watch list as `watchPaths` (stdout JSON,
- * exit 0); FileChanged lints a watched file changed outside Write/Edit (unlink, scope, digest and git gates, then a
- * cross-process slot); Stop/SubagentStop lint the files whose edits no report has covered yet (`sweepHandler`);
- * anything else is PostToolUse Write|Edit (digest recorded, then lint). `asyncRewake: true` in hooks.json for
- * PostToolUse and FileChanged: runs in the background (safe because linting never mutates the file); findings go to
- * stderr with exit 2, which wakes Claude with them (at Stop/SubagentStop, which are synchronous, it keeps the stopping
- * agent going); no finding = no output, exit 0.
+ * Library of the MCP server (`../mcp/handlers.ts`), of the watch-list command hook (`watch-paths.ts`) and of the skill
+ * driver, which all inline it; nothing here runs at import. `editedHandler` (a Write/Edit sent by the mod),
+ * `fileChangedHandler`, `sweepHandler` (Stop/SubagentStop) and `watchPathsHandler` are the entry functions; findings
+ * are returned as `additionalContext`, never printed.
  *
  * lint flow (every failure path returns `{}` silently, fail open): guard `tool_response.success !== false`, then
  * `scopedTarget` (real path strictly inside the real cwd, not excluded: node_modules/vendor/.git, .claude/worktrees,
@@ -21,8 +17,8 @@
  * process group, 30 s timeout, group killed on timeout, stdout+stderr captured), classified by exit code for most tools (checkstyle by stripped
  * output, since its exit code counts only ERROR-severity violations and the bundled default ruleset runs at
  * `warning`); and, for .ts/.tsx/.mts/.cts only, a whole-project `tsc --noEmit` via the nearest tsconfig.json (see
- * `runTypeCheck`). Any issues found: truncated, joined text (stderr, exit 2, chain finding first); no finding from either check: nothing
- * printed.
+ * `runTypeCheck`). Any issues found: truncated, joined text (returned as `additionalContext`, chain finding first); no finding from either check: an
+ * empty result.
  *
  * @packageDocumentation
  */
@@ -36,7 +32,6 @@ import { createRequire } from "node:module";
 import { availableParallelism, homedir, tmpdir } from "node:os";
 import path from "node:path";
 import process from "node:process";
-import { json } from "node:stream/consumers";
 import { setTimeout as sleep } from "node:timers/promises";
 
 /**
@@ -3302,7 +3297,8 @@ export function watchPathsHandler(args: PostToolUseHookInput): { hookSpecificOut
 
 /**
  * Whether a Stop or SubagentStop payload is the continuation of a stop this owner already blocked: a marker from
- * `markBlocked` lets the active stop through. A stop that is not active clears the marker.
+ * `markBlocked` lets the active stop through. A stop that is not active clears the marker; a failed clear (unusable
+ * data dir) is ignored (fail open).
  *
  * @param args - The Stop or SubagentStop hook payload.
  * @returns True when the sweep must be skipped.
@@ -3310,7 +3306,11 @@ export function watchPathsHandler(args: PostToolUseHookInput): { hookSpecificOut
 export function stopAlreadyBlocked(args: PostToolUseHookInput): boolean {
   const mark = path.join(settleDir(), "act", `${ownerOf(args)}.blocked`);
   if (args.stop_hook_active !== true) {
-    rmSync(mark, { force: true });
+    try {
+      rmSync(mark, { force: true });
+    } catch {
+      // fail open: an unusable data dir (ENOTDIR) must not cost the stop its reports
+    }
     return false;
   }
   return existsSync(mark);
@@ -3331,7 +3331,7 @@ export function markBlocked(owner: string): void {
 }
 
 /**
- * The Write/Edit hook: scopes the edit, records its digest and lints the file (the PostToolUse branch of `main`).
+ * A Write/Edit (the mod's `file_edited` call): scopes the edit, records its digest and lints the file.
  *
  * @param args - The PostToolUse hook payload.
  * @returns The hook result: findings as additionalContext, or an empty object.
@@ -3340,36 +3340,4 @@ export async function editedHandler(args: PostToolUseHookInput): Promise<HookRes
   const scoped = postToolScope(args);
   recordWrittenFor(scoped, args);
   return lintFileHandler(args, scoped);
-}
-
-/**
- * Read the hook's stdin JSON and dispatch on `hook_event_name`: SessionStart/CwdChanged print the watch-paths JSON on
- * stdout (exit 0); FileChanged runs fileChangedHandler; Stop/SubagentStop run sweepHandler; anything else
- * (PostToolUse, or a payload without the field) records the Write/Edit digest and runs lintFileHandler. Findings:
- * their text on stderr and exit 2 (asyncRewake wakes Claude with it; at Stop/SubagentStop it keeps the stopping agent
- * going). Fails open on any error — no output, exit 0.
- *
- * @remarks
- * Reads stdin asynchronously to EOF, never `readFileSync(0)`: fd 0 is non-blocking, so a sync read throws EAGAIN on a late writer or a payload above the pipe buffer (hook-design.md "stdin", F05). Never rejects (the whole body is in the try/catch), so the entry's `void main()` (`lint-file.ts`) is safe. Never calls `process.exit`: the process ends when the event loop drains after stdin EOF and every child's `close`, carrying `process.exitCode` 2 for findings, so the exit-code contract is unchanged.
- */
-export async function main(): Promise<void> {
-  try {
-    const input = (await json(process.stdin)) as PostToolUseHookInput;
-    const ev = input?.hook_event_name;
-    if (ev === "SessionStart" || ev === "CwdChanged") {
-      const r = watchPathsHandler(input);
-      if (r.hookSpecificOutput) process.stdout.write(JSON.stringify(r));
-      return;
-    }
-    let ctx: string | undefined;
-    if (ev === "FileChanged") ctx = (await fileChangedHandler(input)).hookSpecificOutput?.additionalContext;
-    else if (ev === "Stop" || ev === "SubagentStop") ctx = (await sweepHandler(input)).hookSpecificOutput?.additionalContext;
-    else ctx = (await editedHandler(input)).hookSpecificOutput?.additionalContext;
-    if (ctx) {
-      process.stderr.write(ctx + "\n");
-      process.exitCode = 2;
-    }
-  } catch {
-    // fail open — no output, exit 0
-  }
 }

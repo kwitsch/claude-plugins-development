@@ -1,12 +1,11 @@
 // Guard clauses and basic per-linter smoke tests (shellcheck/eslint/ruff/ktlint); ported from test/universal-lint/core.bats.
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "vitest";
 import { hashPath } from "../src/hooks/lint-core.ts";
-import { HOOK, type LintEnv, makeEnv, payload } from "./support/lint-hook.ts";
+import { type LintEnv, makeEnv, payload } from "./support/lint-hook.ts";
 
 /** A 4-line shell script; the Edit tests below edit line 2. */
 const SH4 = "echo a\necho $1\necho b\necho $2\n";
@@ -181,25 +180,10 @@ test("PostToolUse records the written content digest under CLAUDE_PLUGIN_DATA/wr
 /** 512 KiB of ASCII padding for the F05 payloads: far above the pipe buffer (about 128-192 KB), so the wire payload is always larger than a pipe holds. */
 const PAD = "x".repeat(512 * 1024);
 
-/**
- * Spawn the built hook with a stdin pipe and write `input` only 100 ms later (a late writer, F05).
- *
- * @param env - Child environment (`makeEnv().childEnv()`).
- * @param input - The payload JSON.
- * @returns The exit status once the hook has closed.
- */
-function runLate(env: Record<string, string>, input: string): Promise<number | null> {
-  return new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, [HOOK], { env, stdio: ["pipe", "ignore", "ignore"] });
-    child.on("error", reject);
-    child.on("close", resolve);
-    child.stdin.on("error", () => {}); // EPIPE when a broken hook exits before the write: let the assertions report it
-    setTimeout(() => child.stdin.end(input), 100);
-  });
-}
-
+// A late stdin writer (the old `runLate`) has no equivalent: the server reads JSON-RPC lines, so the F05 rows send the
+// 512 KB payload as one keyed `file_edited` call.
 // Edit payloads carry the whole `tool_response.originalFile`, Write payloads the whole `tool_input.content`.
-test.each([["Edit", "tool_response", "originalFile"], ["Write", "tool_input", "content"]])("PostToolUse %s: a 512 KB payload written 100 ms late is linted and records its digest (F05)", async (toolName, holder, key) => {
+test.each([["Edit", "tool_response", "originalFile"], ["Write", "tool_input", "content"]])("PostToolUse %s: a 512 KB payload sent to the server is linted and records its digest (F05)", async (toolName, holder, key) => {
   const e = makeEnv();
   e.recStub("shellcheck", 0);
   const f = e.file("a.sh", "echo hi\n");
@@ -207,7 +191,8 @@ test.each([["Edit", "tool_response", "originalFile"], ["Write", "tool_input", "c
   p[holder][key] = PAD;
   // the Edit turns the padding into the file's content, so the payload carries what was written
   if (toolName === "Edit") p.tool_response.structuredPatch = [{ oldStart: 1, oldLines: 1, newStart: 1, newLines: 1, lines: [`-${PAD}`, "\\ No newline at end of file", "+echo hi"] }];
-  assert.equal(await runLate(e.childEnv(), JSON.stringify(p)), 0);
+  const srv = e.server();
+  await srv.call("file_edited", { ...p, session_id: "s1", key: await srv.key("s1") });
   assert.ok(e.lines().some((l) => l.startsWith("shellcheck ")));
   assert.equal(readFileSync(path.join(e.data, "written", hashPath(realpathSync(f))), "utf8"), createHash("sha256").update(toolName === "Edit" ? "echo hi\n" : PAD).digest("base64"));
 });

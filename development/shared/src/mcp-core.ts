@@ -11,7 +11,6 @@
 import type { CallToolResult, DiscoverResult, Implementation, JSONRPCErrorResponse, JSONRPCRequest, JSONRPCResultResponse, ListToolsResult, ServerCapabilities, Tool } from "@modelcontextprotocol/server";
 import { readFileSync } from "node:fs";
 import process from "node:process";
-import readline from "node:readline";
 
 /** Protocol version answered when the client's `initialize` omits one. */
 const DEFAULT_PROTOCOL = "2025-11-25";
@@ -199,8 +198,12 @@ export function serveMcp(opts: ServeOptions): void {
 
   process.stderr.write(`[${SERVER_NAME}] running (v${SERVER_INFO.version})\n`);
 
-  const rl = readline.createInterface({ input: process.stdin });
-  rl.on("line", (line: string) => {
+  /**
+   * Serves one input line (one JSON-RPC message).
+   *
+   * @param line - The line without its line break.
+   */
+  const onLine = (line: string): void => {
     const trimmed = line.trim();
     if (!trimmed) return;
     let msg: unknown;
@@ -220,8 +223,21 @@ export function serveMcp(opts: ServeOptions): void {
       // a request (has an id) must always get a response, or the client hangs
       if (req.id !== undefined) fail(req.id, -32603, `internal error: ${errMsg(e)}`);
     });
+  };
+  // Lines end at "\n" only (stdio framing): readline also breaks at U+2028/U+2029, which JSON carries raw inside strings.
+  let buf = "";
+  process.stdin.setEncoding("utf8");
+  process.stdin.on("data", (chunk: string) => {
+    buf += chunk;
+    for (let i = buf.indexOf("\n"); i >= 0; i = buf.indexOf("\n")) {
+      const line = buf.slice(0, i);
+      buf = buf.slice(i + 1);
+      onLine(line.endsWith("\r") ? line.slice(0, -1) : line);
+    }
   });
-  rl.on("close", () => {
+  process.stdin.on("end", () => {
+    if (buf) onLine(buf);
+    buf = "";
     opts.onClose?.();
     process.exit(0);
   });

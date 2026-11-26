@@ -1,11 +1,11 @@
-// File detection: SessionStart/CwdChanged watch list and FileChanged linting, against the built hook in a real git repo.
+// File detection: SessionStart/CwdChanged watch list (built watch-paths hook) and FileChanged linting (built server) in a real git repo.
 import assert from "node:assert/strict";
-import { spawn, spawnSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import { chmodSync, mkdirSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "vitest";
 import { FILE_CHANGED_SLOTS } from "../src/hooks/lint-core.ts";
-import { HOOK, makeEnv } from "./support/lint-hook.ts";
+import { makeEnv } from "./support/lint-hook.ts";
 import type { LintEnv } from "./support/lint-hook.ts";
 
 /**
@@ -167,20 +167,26 @@ const OUT = "a.sh:1:6: note: marker [SC2086]";
 const changed = (e: LintEnv, file: string, extra: Record<string, unknown> = {}) => e.runEvent({ hook_event_name: "FileChanged", cwd: e.cwd, file_path: file, event: "change", ...extra }, { out: OUT });
 
 /**
- * Pipe one FileChanged payload for `file` into the hook without blocking (spawn, not spawnSync), so several overlap.
+ * Send one FileChanged payload per file, all at once, each to its own server, and read each server's reports once at the end.
+ *
+ * @remarks
+ * One server per event, not one server for all: the file-based slot wait (`acquireSlot`) still blocks its process, so
+ * concurrent calls on one server would wait on each other; the slot cap moves into the server's memory later. The
+ * reports are read with `prompt_submitted`, which drains them without a sweep (a `stop` would lint the other events'
+ * pending files again).
  *
  * @param e - Test environment.
- * @param file - Changed file (absolute).
- * @returns The hook's exit status once it closes.
+ * @param files - Changed files (absolute).
+ * @returns The report texts of all events, joined ("" when none).
  */
-function changedAsync(e: LintEnv, file: string): Promise<number | null> {
-  return new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, [HOOK], { env: e.childEnv({ out: OUT }), stdio: ["pipe", "ignore", "ignore"] });
-    child.on("error", reject);
-    child.on("close", resolve);
-    child.stdin.on("error", () => {}); // EPIPE when a broken hook exits before the write: let the assertions report it
-    child.stdin.end(JSON.stringify({ hook_event_name: "FileChanged", cwd: e.cwd, file_path: file, event: "change" }));
-  });
+async function changedConcurrent(e: LintEnv, files: string[]): Promise<string> {
+  const texts = await Promise.all(files.map(async (f) => {
+    const s = e.server({ out: OUT });
+    await s.call("file_changed", { hook_event_name: "FileChanged", cwd: e.cwd, file_path: f, event: "change", session_id: "harness" });
+    const r = await s.call("prompt_submitted", { cwd: e.cwd, session_id: "harness" });
+    return (r["hookSpecificOutput"] as { additionalContext?: string } | undefined)?.additionalContext ?? "";
+  }));
+  return texts.join("\n\n");
 }
 
 test("FileChanged: a tracked, modified file is linted whole and labelled", () => {
@@ -322,8 +328,7 @@ test("FileChanged: 20 concurrent events lint at most FILE_CHANGED_SLOTS at a tim
   const files = Array.from({ length: 20 }, (_, i) => e.file(`f${i}.sh`, "echo a\n"));
   gitInit(e);
   for (const f of files) writeFileSync(f, "echo $1\n");
-  const statuses = await Promise.all(files.map((f) => changedAsync(e, f)));
-  assert.deepEqual(statuses, files.map(() => 2));
+  assert.match(await changedConcurrent(e, files), /marker/);
   const events = e.lines()
     .filter((l) => l.startsWith("start ") || l.startsWith("end "))
     .map((l) => ({ t: Number(l.split(" ")[1]), d: l.startsWith("start ") ? 1 : -1 }));
@@ -365,7 +370,8 @@ test("FileChanged: with every slot held a .ts file gives up at uptime 10 s with 
   const r = changed(e, a);
   assert.equal(r.status, 0);
   assert.equal(r.stdout, "");
-  assert.match(r.stderr, /^universal-lint: FileChanged: no lint slot free in time, .*a\.ts not linted\n$/);
+  // r.stderr is the server's: its start line, then the note
+  assert.match(r.stderr, /^\[lint\] running \(v[^)]+\)\nuniversal-lint: FileChanged: no lint slot free in time, .*a\.ts not linted\n$/);
   assert.ok(Date.now() - t0 >= 9500, `gave up after ${Date.now() - t0} ms, expected about 10 s`);
   assert.equal(readdirSync(dir).length, FILE_CHANGED_SLOTS);
   for (let i = 0; i < FILE_CHANGED_SLOTS; i++) assert.equal(readFileSync(path.join(dir, String(i)), "utf8"), String(process.pid));
@@ -395,28 +401,6 @@ function slowStub(e: LintEnv, name: string, ms: number, out: string, code: numbe
 }
 
 /**
- * Pipe one FileChanged payload for `file` into the hook without blocking, keeping its stderr.
- *
- * @param e - Test environment.
- * @param file - Changed file (absolute).
- * @returns The hook's exit status and stderr once it closes.
- */
-function changedAsyncRun(e: LintEnv, file: string): Promise<{ status: number | null; stderr: string }> {
-  return new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, [HOOK], { env: e.childEnv({ out: OUT }), stdio: ["pipe", "ignore", "pipe"] });
-    let stderr = "";
-    child.stderr.setEncoding("utf8");
-    child.stderr.on("data", (d: string) => {
-      stderr += d;
-    });
-    child.on("error", reject);
-    child.on("close", (status) => resolve({ status, stderr }));
-    child.stdin.on("error", () => {}); // EPIPE when a broken hook exits before the write: let the assertions report it
-    child.stdin.end(JSON.stringify({ hook_event_name: "FileChanged", cwd: e.cwd, file_path: file, event: "change" }));
-  });
-}
-
-/**
  * Block the test thread for `ms` milliseconds.
  *
  * @param ms - Milliseconds to wait.
@@ -442,16 +426,11 @@ test("FileChanged: 10 concurrent .ts events run tsc once, the finding is reporte
   const files = Array.from({ length: 10 }, (_, i) => e.file(`f${i}.ts`, `export const f${i} = ${i};\n`));
   gitInit(e);
   for (const [i, f] of files.entries()) writeFileSync(f, `export const f${i} = ${i + 1};\n`);
-  const runs = await Promise.all(files.map((f) => changedAsyncRun(e, f)));
+  const text = await changedConcurrent(e, files);
   // Deterministic count: late arrivals are covered by .last (their ctime precedes the holder's start) and lock
   // waiters re-check .last after the claim; the 1 s sleep only exercises the waiter path, the count does not need it.
   assert.equal(calls(e, "tsc "), 1);
-  assert.equal(runs.filter((r) => r.status === 2).length, 1);
-  assert.equal(runs.filter((r) => r.status === 0).length, 9);
-  const reporters = runs.filter((r) => r.stderr.includes("TS2322: marker"));
-  assert.equal(reporters.length, 1);
-  assert.equal(reporters[0].status, 2);
-  for (const r of runs) if (r !== reporters[0]) assert.equal(r.stderr, "");
+  assert.equal(text.split("TS2322: marker").length - 1, 1, "the finding is reported once");
   const locks = readdirSync(path.join(e.data, "fc-locks"));
   assert.equal(locks.filter((n) => n.endsWith(".last")).length, 1);
   assert.equal(locks.filter((n) => n.endsWith(".lock")).length, 0);
@@ -463,10 +442,9 @@ test("FileChanged: 5 concurrent .go events run go vet once (F13)", async () => {
   const files = Array.from({ length: 5 }, (_, i) => e.file(`pkg/a${i}.go`, "package pkg\n"));
   gitInit(e);
   for (const f of files) writeFileSync(f, "package pkg\n\n// changed\n");
-  const runs = await Promise.all(files.map((f) => changedAsyncRun(e, f)));
+  const text = await changedConcurrent(e, files);
   assert.equal(calls(e, "go vet"), 1);
-  assert.equal(runs.filter((r) => r.status === 2).length, 1);
-  assert.equal(runs.filter((r) => r.status === 0).length, 4);
+  assert.equal(text.split("vet marker").length - 1, 1, "the finding is reported once");
 });
 
 test("FileChanged: 5 concurrent .rs events run cargo check once (F13)", async () => {
@@ -476,10 +454,9 @@ test("FileChanged: 5 concurrent .rs events run cargo check once (F13)", async ()
   const files = Array.from({ length: 5 }, (_, i) => e.file(`src/m${i}.rs`, "fn f() {}\n"));
   gitInit(e);
   for (const f of files) writeFileSync(f, "fn f() {}\n// changed\n");
-  const runs = await Promise.all(files.map((f) => changedAsyncRun(e, f)));
+  const text = await changedConcurrent(e, files);
   assert.equal(calls(e, "cargo check"), 1);
-  assert.equal(runs.filter((r) => r.status === 2).length, 1);
-  assert.equal(runs.filter((r) => r.status === 0).length, 4);
+  assert.equal(text.split("cargo marker").length - 1, 1, "the finding is reported once");
 });
 
 test("FileChanged: a change after the last completed check runs tsc again, a newer stamp covers it (F13)", () => {
@@ -517,7 +494,7 @@ test("FileChanged: the payload's session_id keys the coverage stamp, another ses
   for (const [i, session_id] of ["A", "B"].entries()) {
     const r = changed(e, a, { session_id });
     assert.equal(r.status, 2);
-    assert.match(r.stderr, /TS2322: marker/);
+    assert.match(r.ctx, /TS2322: marker/);
     assert.equal(calls(e, "tsc "), i + 1);
   }
   assert.equal(changed(e, a, { session_id: "A" }).status, 0);
