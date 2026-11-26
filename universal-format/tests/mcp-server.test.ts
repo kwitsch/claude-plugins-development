@@ -34,6 +34,7 @@ test("tools/list lists format_pre as the only tool, hidden from the model", asyn
   assert.deepEqual(list.tools.map((t) => t.name), ["format_pre"]);
   // hook-only: no model visibility, so ToolSearch never lists it while the mcp_tool hook still calls it
   assert.deepEqual(list.tools[0]._meta, { ui: { visibility: ["app"] } });
+  assert.deepEqual((list.tools[0] as { inputSchema?: unknown }).inputSchema, { type: "object", additionalProperties: true });
 });
 
 test("the startup line on stderr carries the manifest version; stdin EOF ends the server with exit 0", async () => {

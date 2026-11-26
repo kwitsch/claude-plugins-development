@@ -82,7 +82,7 @@ interface RpcReply {
   /** The request id. */
   id: number;
   /** The result (initialize, tools/list or tools/call fields). */
-  result: { serverInfo?: unknown; tools: { name: string }[]; structuredContent: ToolOut; resultType?: string };
+  result: { serverInfo?: unknown; tools: { name: string; inputSchema?: unknown }[]; structuredContent: ToolOut; resultType?: string };
 }
 
 const servers: ReturnType<typeof spawn>[] = [];
@@ -217,6 +217,7 @@ test("initialize reports dprint-hooks with the manifest version; tools/list has 
   // hook-only tools: no model visibility, so ToolSearch never lists them
   for (const t of list.result.tools) {
     assert.deepEqual((t as { _meta?: unknown })._meta, { ui: { visibility: ["app"] } });
+    assert.deepEqual(t.inputSchema, { type: "object", additionalProperties: true });
   }
   assert.deepEqual(
     list.result.tools.map((t) => t.name),

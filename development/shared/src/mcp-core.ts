@@ -21,7 +21,7 @@ const MODERN_PROTOCOL = "2026-07-28";
 const VERSION_META_KEY = "io.modelcontextprotocol/protocolVersion";
 /** Cache hint of list-like modern results: the tool table is static, so one hour for every client. */
 const CACHE_HINT = { ttlMs: 3_600_000, cacheScope: "public" };
-/** Input schema of every tool: any object, since Claude Code builds the input from the `hooks.json` templates. */
+/** Default input schema of a tool: any object, since Claude Code builds the input from the `hooks.json` templates. */
 const ANY_OBJECT: Tool["inputSchema"] = { type: "object", additionalProperties: true };
 /** Capabilities of both eras: tools only (no tasks: every tool is a short hook call). */
 const CAPABILITIES: ServerCapabilities = { tools: {} };
@@ -30,6 +30,8 @@ const CAPABILITIES: ServerCapabilities = { tools: {} };
  * them. Live-checked on Claude Code 2.1.323 with a local stdio server; the docs name it only for cloud sessions.
  */
 const HOOK_ONLY_META: Tool["_meta"] = { ui: { visibility: ["app"] } };
+/** Tool `_meta` of a tool the model may call: a mod reaches a tool through `$.mcp.call` only when `"model"` is listed. */
+const MODEL_META: Tool["_meta"] = { ui: { visibility: ["model", "app"] } };
 
 /** A JSON-RPC request id. */
 type RequestId = JSONRPCRequest["id"];
@@ -44,6 +46,10 @@ type RequestId = JSONRPCRequest["id"];
 export type ToolDef<A = never, R = Record<string, unknown>> = {
   /** Human-readable purpose shown in `tools/list`. */
   description: string;
+  /** Lets the model call the tool (`_meta.ui.visibility` `["model", "app"]`); a tool a mod reaches through `$.mcp.call` needs it. Default: hook-only. */
+  modelVisible?: true;
+  /** Input schema shown in `tools/list`; default: any object. Not enforced by the loop: the handler validates. */
+  inputSchema?: Tool["inputSchema"];
   /** Hook handler; its result becomes the tool call's `structuredContent`. `signal` aborts when the client cancels the call. */
   handler: (args: A, signal: AbortSignal) => R | Promise<R>;
 };
@@ -152,7 +158,7 @@ export function serveMcp(opts: ServeOptions): void {
         return reply({});
       case "tools/list":
         return reply({
-          tools: Object.entries(TOOLS).map(([toolName, { description }]) => ({ name: toolName, description, inputSchema: ANY_OBJECT, _meta: HOOK_ONLY_META })),
+          tools: Object.entries(TOOLS).map(([toolName, t]) => ({ name: toolName, description: t.description, inputSchema: t.inputSchema ?? ANY_OBJECT, _meta: t.modelVisible ? MODEL_META : HOOK_ONLY_META })),
           ...(modern ? { _meta: SERVER_INFO_META } : {}),
         }, true);
       case "tools/call": {
