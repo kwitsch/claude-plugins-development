@@ -281,7 +281,9 @@ test("a FileChanged lint does not hold its slot while the findings settle", asyn
   // and "K lints started while the first finding is held" can only hold if the first lint gave its slot back
   const release = path.join(path.dirname(s.e.record), "release");
   s.e.stub("shellcheck", "echo run >> \"$RECORD\"", `case "$*" in */b[0-9]*.sh*) while [ ! -e "${release}" ]; do node -e "setTimeout(() => {}, 20)"; done;; esac`, "if [ -s \"$FINDINGS\" ]; then printf '%s\\n' \"$(< \"$FINDINGS\")\"; exit 1; fi", "exit 0");
-  const srv = server(s.e, s.findings, 1500);
+  // a hold far longer than the whole test: the first report cannot become ready before the K lints started, whatever the machine's speed;
+  // the hold is then ended by the Stop sweep (which claims the pending records), not by waiting for its deadline
+  const srv = server(s.e, s.findings, 30_000);
   s.setFindings(FINDING_L2);
   await srv.changed(changed(s.file, s.e.cwd));
   await intoHold(s.e);
@@ -290,7 +292,9 @@ test("a FileChanged lint does not hold its slot while the findings settle", asyn
   await expect.poll(() => s.e.lines().length, { interval: 20, timeout: 10_000 }).toBe(1 + FILE_CHANGED_SLOTS);
   assert.notEqual(await srv.state(0), "ready", "all K lints started before the first report was ready");
   writeFileSync(release, "");
-  assert.match(await srv.reports(1500), /line2-marker/);
+  const swept = await srv.stop();
+  assert.equal(swept.decision, "block");
+  assert.match(swept.reason ?? "", /line2-marker/);
 });
 
 test("a later edit that fixed the cause of a held parse error on another line: the parse error is not reported", async () => {
