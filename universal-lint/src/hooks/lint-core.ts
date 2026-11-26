@@ -2135,15 +2135,10 @@ export function gateFinding(finding: Finding, ranges: Array<[number, number]> | 
 }
 
 /**
- * File holding the SHA-256 (base64) of the content Write/Edit last left at `real`:
- * `CLAUDE_PLUGIN_DATA` (OS temp dir when unset)/written/<hashPath(real)>. Never inside the project tree.
- *
- * @param real - Real path of the written file.
- * @returns Absolute path of the digest file.
+ * SHA-256 (base64) of the content Write/Edit last left at each real path, held in this server process's memory
+ * (capped by `capSet`). Not shared between sessions or server processes: a lost entry costs one duplicate lint.
  */
-function writtenDigestPath(real: string): string {
-  return path.resolve(process.env.CLAUDE_PLUGIN_DATA || tmpdir(), "written", hashPath(real));
-}
+const written = new Map<string, string>();
 
 /**
  * SHA-256 base64 of a file's bytes.
@@ -2200,28 +2195,16 @@ export function writtenContent(args: PostToolUseHookInput): string | null {
 }
 
 /**
- * Record the digest of the content a Write/Edit produced (`writtenContent`), atomically (temp file + renameSync), so a
- * FileChanged process can skip the file while its content still matches. Not the disk: a write by another program that
- * lands before the hook runs must still differ. Without content the old digest is removed. One file per real path:
- * concurrent hook processes need no locking. Fails open silently (cost: one duplicate lint, never a lost one).
+ * Record the digest of the content a Write/Edit produced (`writtenContent`) in the `written` map, so a FileChanged
+ * in the same server can skip the file while its content still matches. Not the disk: a write by another program that
+ * lands before the hook runs must still differ. Without content the old digest is removed.
  *
  * @param real - Real path of the written file (the digest key).
  * @param content - The content the tool wrote, or null when unknown.
  */
 export function recordWritten(real: string, content: string | null): void {
-  try {
-    const file = writtenDigestPath(real);
-    if (content === null) {
-      rmSync(file, { force: true });
-      return;
-    }
-    mkdirSync(path.dirname(file), { recursive: true });
-    const tmp = `${file}.${process.pid}.tmp`;
-    writeFileSync(tmp, digest(content));
-    renameSync(tmp, file);
-  } catch {
-    // fail open: a missing digest costs one duplicate lint
-  }
+  if (content === null) written.delete(real);
+  else capSet(written, real, digest(content));
 }
 
 /**
@@ -3119,19 +3102,10 @@ export async function fileChangedHandler(args: PostToolUseHookInput): Promise<Ho
     if (typeof cwd !== "string" || !cwd || typeof file !== "string" || !file) return {};
     const s = scopedTarget(cwd, file, scratchpadOf(args));
     if (!s) return {};
-    let recorded: string | null = null;
-    try {
-      recorded = readFileSync(writtenDigestPath(s.real), "utf8");
-    } catch {
-      // no digest: the file was not just written by Write/Edit
-    }
-    if (recorded !== null) {
+    const recorded = written.get(s.real);
+    if (recorded !== undefined) {
       if (recorded === fileDigest(s.fp)) return {};
-      try {
-        rmSync(writtenDigestPath(s.real), { force: true }); // stale: a later restore of the old bytes must lint
-      } catch {
-        // fail open: an unwritable store costs a duplicate lint later, never this one
-      }
+      written.delete(s.real); // stale: a later restore of the old bytes must lint
     }
     // The content changed outside Write/Edit (never for the digest-matched echo above): a whole-file edit for the
     // settle window, also when the git gate then skips the lint (a restore to committed content leaves no stale finding).

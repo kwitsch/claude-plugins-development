@@ -349,3 +349,9 @@ test("cancel: notifications/cancelled kills the running lint and leaves no answe
   assert.ok(await waitGone(pid, 2000), `linter child ${pid} survived the cancel`);
   assert.equal(e.lines().length, linesAtCancel);
 });
+
+test("digest store: a keyed edit leaves no written/ directory (the digest lives in the server's memory)", async () => {
+  const w = world();
+  await w.s.call("file_edited", { ...w.edit(), key: await w.s.key("s1") });
+  assert.equal(existsSync(path.join(w.e.data, "written")), false);
+});

@@ -1,7 +1,7 @@
 // File detection: SessionStart/CwdChanged watch list (built watch-paths hook) and FileChanged linting (built server) in a real git repo.
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { chmodSync, mkdirSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "vitest";
 import { FILE_CHANGED_SLOTS } from "../src/hooks/lint-core.ts";
@@ -258,53 +258,53 @@ test("FileChanged: a glob-like name unchanged against HEAD is skipped while a fi
   assert.deepEqual(e.lines(), []);
 });
 
-test("FileChanged: skipped while the content matches the Write/Edit digest, linted after a further change", () => {
+/**
+ * One server for the Write/Edit calls and the FileChanged calls of a session: the digest store lives in its memory.
+ *
+ * @param e - Test environment (its stub reports OUT).
+ * @returns The server, the session key and `change`, which runs one FileChanged and answers the report state.
+ */
+async function session(e: LintEnv) {
+  const s = e.server({ out: OUT });
+  const key = await s.key("s1");
+  const change = async (f: string): Promise<unknown> => {
+    await s.call("file_changed", { cwd: e.cwd, session_id: "s1", scratchpad_dir: "", file_path: f, event: "change" });
+    return (await s.call("next_report", { session_id: "s1", key, wait_ms: 0 }))["state"];
+  };
+  return { s, key, change };
+}
+
+test("FileChanged: skipped while the content matches the Write/Edit digest, linted after a further change", async () => {
   const e = makeEnv();
   e.recStub("shellcheck", 1);
   const a = e.file("a.sh", "echo a\n");
   gitInit(e);
   writeFileSync(a, "echo $1\n");
-  assert.equal(e.run(a, { out: OUT }).status, 2);
+  const { s, key, change } = await session(e);
+  await s.call("file_edited", { cwd: e.cwd, session_id: "s1", key, tool_name: "Write", tool_input: { file_path: a, content: "echo $1\n" }, tool_response: {} });
   assert.equal(e.lines().length, 1);
-  assert.equal(changed(e, a).status, 0);
+  assert.equal(await change(a), "timeout");
   assert.equal(e.lines().length, 1);
   writeFileSync(a, "echo $2\n");
-  assert.equal(changed(e, a).status, 2);
+  assert.equal(await change(a), "ready");
   assert.equal(e.lines().length, 2);
   // the stale digest is gone: an outside restore of the written bytes lints
   writeFileSync(a, "echo $1\n");
-  assert.equal(changed(e, a).status, 2);
+  assert.equal(await change(a), "ready");
   assert.equal(e.lines().length, 3);
 });
 
-test("FileChanged: a stale digest that cannot be removed (read-only store) still lints the change", () => {
-  const e = makeEnv();
-  e.recStub("shellcheck", 1);
-  const a = e.file("a.sh", "echo a\n");
-  gitInit(e);
-  writeFileSync(a, "echo $1\n");
-  e.run(a, { out: OUT });
-  const written = path.join(e.data, "written");
-  chmodSync(written, 0o555);
-  try {
-    writeFileSync(a, "echo $2\n");
-    assert.equal(changed(e, a).status, 2);
-    assert.equal(e.lines().length, 2);
-  } finally {
-    chmodSync(written, 0o755);
-  }
-});
-
-test("FileChanged: a write by another program that landed before the Edit's hook ran is still linted", () => {
+test("FileChanged: a write by another program that landed before the Edit's hook ran is still linted", async () => {
   const e = makeEnv();
   e.recStub("shellcheck", 1);
   const a = e.file("a.sh", "echo a\necho b\n");
   gitInit(e);
   writeFileSync(a, "echo A\necho $2\n"); // the Edit changed line 1, a formatter/editor then line 2, all before the hook
   const patch = [{ oldStart: 1, oldLines: 1, newStart: 1, newLines: 1, lines: ["-echo a", "+echo A"] }];
-  e.run(a, { toolName: "Edit", toolResponse: { originalFile: "echo a\necho b\n", structuredPatch: patch } });
+  const { s, key, change } = await session(e);
+  await s.call("file_edited", { cwd: e.cwd, session_id: "s1", key, tool_name: "Edit", tool_input: { file_path: a }, tool_response: { originalFile: "echo a\necho b\n", structuredPatch: patch } });
   const before = e.lines().length;
-  assert.equal(changed(e, a).status, 2);
+  assert.equal(await change(a), "ready");
   assert.equal(e.lines().length, before + 1);
 });
 

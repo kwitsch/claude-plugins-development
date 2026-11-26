@@ -2,12 +2,12 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import type { SpawnSyncReturns } from "node:child_process";
-import { createHash } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "vitest";
-import { acquireSlot, buildArgv, classifyCheckstyleOutput, classifyExit, coalesceProjectCheck, configExists, editRanges, FILE_CHANGED_SLOTS, gateFinding, hashPath, hasProjectMarkdownlintConfig, hasProjectYamllintConfig, isToolAvailable, lintFileHandler, lintFilesHandler, looksLikeSolutionStyleTsconfig, oxlintConfigTypeChecks, recordWritten, REGISTRY, resolveCargoManifest, resolveCheckstyleConfig, resolveLintTarget, resolveOxlintConfig, resolveTsconfig, scopedTarget, slotDeadlineMs, stripTrailingCommas, truncate, tsBuildInfoPathFor, tscOutputHasSourceDiagnostic, WATCH_LIMIT, writtenContent } from "../src/hooks/lint-core.ts";
+import { makeEnv } from "./support/lint-hook.ts";
+import { acquireSlot, buildArgv, classifyCheckstyleOutput, classifyExit, coalesceProjectCheck, configExists, editRanges, FILE_CHANGED_SLOTS, fileChangedHandler, gateFinding, hashPath, hasProjectMarkdownlintConfig, hasProjectYamllintConfig, isToolAvailable, lintFileHandler, lintFilesHandler, looksLikeSolutionStyleTsconfig, oxlintConfigTypeChecks, recordWritten, REGISTRY, resolveCargoManifest, resolveCheckstyleConfig, resolveLintTarget, resolveOxlintConfig, resolveTsconfig, scopedTarget, slotDeadlineMs, stripTrailingCommas, truncate, tsBuildInfoPathFor, tscOutputHasSourceDiagnostic, WATCH_LIMIT, writtenContent } from "../src/hooks/lint-core.ts";
 
 /** The hook input type; the tests pass partial payloads on purpose (a Write, a missing patch). */
 type HookInput = Parameters<typeof writtenContent>[0];
@@ -1274,23 +1274,26 @@ test("resolveLintTarget: null for a file inside the payload scratchpad_dir", () 
   assert.equal(resolveLintTarget(mockResolveArgs(dir, "s/e.sh")), path.join(dir, "s", "e.sh"));
 });
 
-test("recordWritten: stores the SHA-256 base64 of the given content at CLAUDE_PLUGIN_DATA/written/<hashPath(real)>, null removes it", () => {
-  const dir = mkdtempSync(path.join(tmpdir(), "ul-rw-"));
-  const data = path.join(dir, "data");
-  const fp = path.join(dir, "a.sh");
-  writeFileSync(fp, "echo other\n");
+test("recordWritten: a matching digest makes fileChangedHandler skip the file (in memory); a null record lints it again", async () => {
+  const e = makeEnv();
+  e.recStub("shellcheck", 1);
+  const fp = e.file("a.sh", "echo hi\n");
   const real = realpathSync(fp);
-  const digest = path.join(data, "written", hashPath(real));
-  const prev = process.env.CLAUDE_PLUGIN_DATA;
-  process.env.CLAUDE_PLUGIN_DATA = data;
+  const keep = { PATH: process.env.PATH, OUT: process.env.OUT, RECORD: process.env.RECORD, UNIVERSAL_LINT_SETTLE_MS: process.env.UNIVERSAL_LINT_SETTLE_MS, CLAUDE_PLUGIN_DATA: process.env.CLAUDE_PLUGIN_DATA };
+  Object.assign(process.env, { PATH: `${e.bin}${path.delimiter}${keep.PATH ?? ""}`, OUT: "a.sh:1:6: note: m [SC2086]", RECORD: e.record, UNIVERSAL_LINT_SETTLE_MS: "0", CLAUDE_PLUGIN_DATA: e.data });
   try {
+    const args = { cwd: e.cwd, file_path: fp, event: "change", session_id: "rw1", hook_event_name: "FileChanged" } as unknown as Parameters<typeof fileChangedHandler>[0];
     recordWritten(real, "echo hi\n");
-    assert.equal(readFileSync(digest, "utf8"), createHash("sha256").update("echo hi\n").digest("base64"));
+    assert.deepEqual(await fileChangedHandler(args), {});
+    assert.deepEqual(e.lines(), []);
     recordWritten(real, null);
-    assert.equal(existsSync(digest), false);
+    assert.match(String((await fileChangedHandler(args)).hookSpecificOutput?.additionalContext), /SC2086/);
+    assert.equal(e.lines().length, 1);
   } finally {
-    if (prev === undefined) delete process.env.CLAUDE_PLUGIN_DATA;
-    else process.env.CLAUDE_PLUGIN_DATA = prev;
+    for (const [k, v] of Object.entries(keep)) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
   }
 });
 
