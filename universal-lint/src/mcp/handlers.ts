@@ -8,7 +8,7 @@ import { randomUUID } from "node:crypto";
 import { realpathSync, statSync } from "node:fs";
 import path from "node:path";
 import process from "node:process";
-import { capSet, editedHandler, fileChangedHandler, HOOK_TIMEOUT_MS, type HookResult, markBlocked, ownerOf, type PostToolUseHookInput, runInCall, stopAlreadyBlocked, sweepHandler, truncate } from "../hooks/lint-core.js";
+import { capSet, editedHandler, fileChangedHandler, HOOK_TIMEOUT_MS, type HookResult, markBlocked, ownerOf, type PostToolUseHookInput, runInCall, settleWaitMs, stopAlreadyBlocked, sweepHandler, truncate } from "../hooks/lint-core.js";
 
 /** Longest hold of a keyed `next_report` (the mod's wake poll), in ms; a larger or missing `wait_ms` is clamped to it. */
 export const WAKE_WAIT_MS = 25_000;
@@ -55,6 +55,12 @@ export function createHandlers() {
    * @returns The owner key `ownerOf` gives a call without `agent_id`.
    */
   const mainOwner = (session: unknown): string => ownerOf({ cwd: "", session_id: session });
+  /**
+   * Whether a lint run is awaited by its call (no hold: `UNIVERSAL_LINT_SETTLE_MS=0`, headless) instead of detached.
+   *
+   * @returns True when the settle hold is 0.
+   */
+  const inline = (): boolean => settleWaitMs(0, 0) === 0;
 
   /**
    * Normalises a tool's arguments: `""` of the template-filled fields means absent, `stop_hook_active` (text in a hook input) becomes a boolean.
@@ -171,7 +177,8 @@ export function createHandlers() {
   }
 
   /**
-   * The mod's Write/Edit call (keyed): lints the written file (a subagent's edit is only journaled) and answers the main conversation's ready reports.
+   * The mod's Write/Edit call (keyed): lints the written file (a subagent's edit is only journaled) and answers the main
+   * conversation's ready reports. With a settle hold the lint runs detached and delivers through the outbox later.
    *
    * @param raw - Hook-shaped arguments plus `key`.
    * @param signal - Aborts when the call is cancelled.
@@ -189,7 +196,8 @@ export function createHandlers() {
       if (sp === undefined) Reflect.deleteProperty(a, "scratchpad_dir");
       else a.scratchpad_dir = sp;
       const owner = ownerOf(a);
-      deliver(owner, await run(() => editedHandler(a), signal));
+      if (inline()) deliver(owner, await run(() => editedHandler(a), signal));
+      else void run(() => editedHandler(a)).then((t) => deliver(owner, t), () => {});
       const main = mainOwner(a.session_id);
       return a.agent_id === undefined && pending(main) ? { context: drain(main) } : {};
     } catch {
@@ -198,20 +206,44 @@ export function createHandlers() {
   }
 
   /**
-   * The mod's wake poll (keyed): whether the main conversation has a ready report. Never carries finding text, consumes nothing.
+   * The mod's wake poll (keyed): holds up to `wait_ms` (clamped to `WAKE_WAIT_MS`, default it) until the main
+   * conversation has a ready report. Never carries finding text, consumes nothing. One waiter per owner: a newer keyed
+   * poll ends the older one `busy`; a prompt, a cancel and stdin closing end it `busy` too.
    *
    * @param raw - `session_id`, `key`, `wait_ms`.
-   * @returns `{ state: "ready" | "timeout" | "busy" }` or a key issue.
+   * @param signal - Aborts when the call is cancelled.
+   * @returns `{ state: "ready" | "timeout" | "busy" }` or a key issue; `busy` at once when headless.
    */
-  function next_report(raw: ToolArgs): Answer {
+  async function next_report(raw: ToolArgs, signal: AbortSignal): Promise<Answer> {
     try {
       const a = normalise(raw);
       const g = gate(a);
       if (g === "reject") return { state: "busy" };
       if (g !== "ok") return g;
-      if (pending(mainOwner(a.session_id))) return { state: "ready" };
+      const owner = mainOwner(a.session_id);
+      if (pending(owner)) return { state: "ready" };
       const wait = Math.min(Math.max(typeof a.wait_ms === "number" && Number.isFinite(a.wait_ms) ? a.wait_ms : WAKE_WAIT_MS, 0), WAKE_WAIT_MS);
-      return { state: wait === 0 ? "timeout" : "busy" };
+      if (wait === 0) return { state: "timeout" };
+      if (headless()) return { state: "busy" };
+      waiters.get(owner)?.({ state: "busy" });
+      return await new Promise<Answer>((resolve) => {
+        /**
+         * Ends this waiter once: clears its timer and abort listener and frees its slot.
+         *
+         * @param r - The answer.
+         */
+        const done = (r: Answer): void => {
+          clearTimeout(timer);
+          signal.removeEventListener("abort", onAbort);
+          if (waiters.get(owner) === done) waiters.delete(owner);
+          resolve(r);
+        };
+        /** The call was cancelled. */
+        const onAbort = (): void => done({ state: "busy" });
+        const timer = setTimeout(() => done({ state: "timeout" }), wait);
+        signal.addEventListener("abort", onAbort, { once: true });
+        waiters.set(owner, done);
+      });
     } catch {
       return { state: "busy" };
     }
@@ -241,7 +273,8 @@ export function createHandlers() {
   }
 
   /**
-   * FileChanged: lint a watched file changed outside Write/Edit; its findings go to the main conversation's outbox.
+   * FileChanged: lint a watched file changed outside Write/Edit; its findings go to the main conversation's outbox
+   * (detached, so the hook answers at once, when there is a settle hold).
    *
    * @param raw - The hook input.
    * @param signal - Aborts when the call is cancelled.
@@ -251,7 +284,9 @@ export function createHandlers() {
     try {
       const a = normalise(raw);
       learn(a);
-      deliver(mainOwner(a.session_id), await run(() => fileChangedHandler(a), signal));
+      const owner = mainOwner(a.session_id);
+      if (inline()) deliver(owner, await run(() => fileChangedHandler(a), signal));
+      else void run(() => fileChangedHandler(a)).then((t) => deliver(owner, t), () => {});
     } catch {
       // fail open
     }
@@ -276,10 +311,10 @@ export function createHandlers() {
     }
   }
 
-  /** stdin closed: abort every detached run and release every waiter. */
+  /** stdin closed: abort every detached run and release every waiter (over a copy: each waiter deletes itself). */
   function closeAll(): void {
     for (const c of jobs) c.abort();
-    for (const w of waiters.values()) w({ state: "busy" });
+    for (const w of [...waiters.values()]) w({ state: "busy" });
   }
 
   return { file_edited, next_report, stop, file_changed, prompt_submitted, closeAll };
