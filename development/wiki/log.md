@@ -237,3 +237,7 @@ Source: user decision 2026-11-20 (task spec), PR stacked on `feature/tsdown-plug
 ## [2026-11-26] ingest | dprint notice hook without classic.CwdChanged
 
 - `facts/mods-engine-lifecycle.md` "Order of hooks": `classic.CwdChanged` added to the skip list with its notice text (user-reported, not reproduced on an unmanaged run, live 2.1.332); a user-tier `tool.call` `{ tool: "Bash" }` hook runs and `$.session.cwd()` after `next` follows a Bash `cd` (live 2.1.332, unmanaged); the managed policy for that path and the hooks.json `CwdChanged` handlers are recorded as not verified. `.claude/rules/claude-code-hook-facts.md` skip line and `dprint/.claude/rules/notice-hook.md` follow. dprint 0.14.6 hooks `tool.call` for `Bash` instead of `classic.CwdChanged`. Source: branch `feature/dprint-no-classic-cwdchanged`, live run with `claude -p --plugin-dir` on a copy logging `$.session.cwd()`.
+
+## [2026-11-26] ingest | universal-lint: mod plus MCP server, probe results
+
+- New `plugins/universal-lint/evaluations/EVALUATION-2026-11-26-mod-server.md`: live probe on 2.1.332 (managed machine bypasses every `classic.*` hook of a user-tier mod; `tool.call` and `turn.complete` carry `agentId`; `$.mcp.call` takes the server string; hook calls carry no tasks extension), transcript mining of 112 universal-lint reports (all idle wakes came from subagent edits or FileChanged) and `tsc` cold versus warm (a watcher gives no gain). No decision taken; the 2026-11-06 decision stands until the user reverses it.

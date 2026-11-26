@@ -6,6 +6,7 @@ Working documents for agent sessions. Not shipped (`plugin/` is the installable 
 
 - [CLAUDE.md](../../../../universal-lint/CLAUDE.md): the plugin's overview and rule list (loads with the plugin's files).
 - [TASKS.md](TASKS.md): task list; `tasks/` holds one document per task. Start here for open work.
+- [evaluations/EVALUATION-2026-11-26-mod-server.md](evaluations/EVALUATION-2026-11-26-mod-server.md): evaluation: universal-lint evaluation 2026-11-26: mod plus MCP server instead of six command hooks (preparation, no code change)
 - [evaluations/EVALUATION-2026-11-14-v0.16.1.md](evaluations/EVALUATION-2026-11-14-v0.16.1.md): evaluation: universal-lint evaluation 2026-11-14b (plugin 0.16.1)
 - [evaluations/EVALUATION-2026-11-14.md](evaluations/EVALUATION-2026-11-14.md): evaluation: universal-lint evaluation 2026-11-14 (plugin 0.16.0)
 - [design/edit-range-gate.md](design/edit-range-gate.md): design: Edit-range gate (do not "fix" without reading this)
