@@ -27,6 +27,7 @@
  * @packageDocumentation
  */
 import { isExcludedPath, outside, realish, walkToRoot } from "@shared/scope.js";
+import { AsyncLocalStorage } from "node:async_hooks";
 import { execFileSync, spawn } from "node:child_process";
 import type { ChildProcess, SpawnSyncOptionsWithStringEncoding, SpawnSyncReturns } from "node:child_process";
 import type { Hash } from "node:crypto";
@@ -108,6 +109,27 @@ const BATCH_MAX_FILES = 100;
 /** Above this many lintable files the watch list is empty (nothing watched), as dprint's watch-list.mts. */
 export const WATCH_LIMIT = 5000;
 
+/** Entry cap of every capped state map (`written`, `roots`, `scratchpads`, `keys`, `outbox`); `capSet` drops the oldest. */
+export const STATE_CAP = 5000;
+
+/**
+ * Sets `key` as the newest entry of a capped map: a re-set key moves to the end, and past `STATE_CAP` the oldest
+ * entries are dropped.
+ *
+ * @param map - The capped map.
+ * @param key - Key to set.
+ * @param value - Value to store.
+ */
+export function capSet<K, V>(map: Map<K, V>, key: K, value: V): void {
+  map.delete(key);
+  map.set(key, value);
+  while (map.size > STATE_CAP) {
+    const oldest = map.keys().next();
+    if (oldest.done) break;
+    map.delete(oldest.value);
+  }
+}
+
 /** Budget of each git call (ls-files for the watch list, status for the FileChanged gate). */
 const GIT_TIMEOUT_MS = 10000;
 
@@ -116,7 +138,7 @@ const GIT_TIMEOUT_MS = 10000;
  * mtime is this far from now (past or future) was left by a killed holder or survived a clock jump. Re-derive with
  * hook-design.md "Timeout budget" when hooks.json changes.
  */
-const HOOK_TIMEOUT_MS = 90000;
+export const HOOK_TIMEOUT_MS = 90000;
 
 /**
  * FileChanged nominal worst case (85 s): git status + slot wait + lint end by then; the 5 s under `HOOK_TIMEOUT_MS`
@@ -189,7 +211,7 @@ export interface Finding {
 }
 
 /** The subset of Claude Code's hook payloads this module reads (PostToolUse, FileChanged, SessionStart, CwdChanged, Stop, SubagentStop). */
-interface PostToolUseHookInput {
+export interface PostToolUseHookInput {
   /** Project root the session runs in. */
   cwd: string;
   /** Hook event (`PostToolUse`, `FileChanged`, `SessionStart`, `CwdChanged`, `Stop`, `SubagentStop`); missing in older payloads (treated as PostToolUse). */
@@ -218,7 +240,7 @@ interface PostToolUseHookInput {
 }
 
 /** The hook's stdout JSON, empty when there is nothing to report. */
-interface HookResult {
+export interface HookResult {
   /** Findings, delivered to Claude as context on the next turn. */
   hookSpecificOutput?: { hookEventName: string; additionalContext: string };
 }
@@ -337,7 +359,7 @@ export const REGISTRY: Record<string, LangEntry> = {
 /** onPath answers persisted per PATH string: tool name -> directory it was found in, or -> Date.now() of the miss. */
 type ProbeStore = { hits: Record<string, string>; misses: Record<string, number> };
 
-/** Per-process memo of onPath answers (each hook event is its own process; the cross-process copy is the probe file). */
+/** Memo of onPath answers, per tool call (cleared by `runInCall`; per process in the skill driver and the watch-paths hook). The cross-process copy is the probe file. */
 const probeCache = new Map<string, boolean>();
 
 /** Probe store for the current PATH, loaded by the first onPath call of the process; null until then. */
@@ -555,7 +577,7 @@ function installSignalHandler(): void {
  * on resolution (`close` or that pre-spawn `error`), never on `exit`, so a group kill still reaches pipe-holding
  * grandchildren after the leader exited; the SIGKILL timer is a plain timer (no `unref`) and is always cleared. The
  * group's pid is held in `liveGroups` from spawn to resolution so `installSignalHandler`'s handler (installed on the
- * first call) can SIGKILL it when this process is signalled. The promise never rejects: every exceptional outcome is
+ * first call) can SIGKILL it when this process is signalled. A call cancelled through `runInCall` spawns nothing (`ECANCELED`) or, while its group runs, kills the group with the timeout sequence. The promise never rejects: every exceptional outcome is
  * in `error`. Residuals: a grandchild that called `setsid` leaves the group and, holding a pipe, delays `close` until
  * the hook backstop (same as spawnSync); the pid-reuse window between the leader's reap and `close` is microseconds
  * and needs a pid wraparound. Exported for the tests (the timeout argument is the test seam; no env override).
@@ -571,6 +593,11 @@ export function spawnGroup(cmd: string, argv: readonly string[], opts: SpawnSync
   const maxBuffer = opts.maxBuffer ?? MAX_BUFFER_BYTES;
   const timeout = opts.timeout ?? SPAWN_TIMEOUT_MS;
   return new Promise((resolve) => {
+    const sig = callCtx.getStore()?.signal;
+    if (sig?.aborted) {
+      resolve({ pid: 0, output: [null, "", ""] as unknown as string[], stdout: "", stderr: "", status: null, signal: null, error: Object.assign(new Error(`spawnGroup ${cmd}: ECANCELED`), { code: "ECANCELED" }) });
+      return;
+    }
     let error: Error | undefined;
     let done = false;
     let killTimer: NodeJS.Timeout | undefined;
@@ -593,6 +620,8 @@ export function spawnGroup(cmd: string, argv: readonly string[], opts: SpawnSync
       error ??= Object.assign(new Error(`spawnGroup ${cmd}: ${code}`), { code });
       kill();
     };
+    const onAbort = (): void => fail("ECANCELED");
+    sig?.addEventListener("abort", onAbort, { once: true });
     const timer = setTimeout(() => fail("ETIMEDOUT"), timeout);
     const out: Buffer[] = [];
     const err: Buffer[] = [];
@@ -612,6 +641,7 @@ export function spawnGroup(cmd: string, argv: readonly string[], opts: SpawnSync
       if (done) return;
       done = true;
       clearTimeout(timer);
+      sig?.removeEventListener("abort", onAbort);
       if (killTimer) clearTimeout(killTimer);
       if (pid !== undefined) liveGroups.delete(pid);
       resolve({ pid: pid ?? 0, output: [null, stdout, stderr] as unknown as string[], stdout, stderr, status, signal, error });
@@ -753,8 +783,35 @@ async function runLintTool(tool: LintTool, argv: string[], spawnOpts: SpawnSyncO
   return spawnGroup(spawnName, spawnArgv, spawnOpts);
 }
 
-/** Per-process memo for configExists: a prefiltered directory -> its entry names upper-cased, or null when readdirSync failed (each hook event is its own process; never invalidated). */
+/** Memo for configExists, per tool call (cleared by `runInCall`): a prefiltered directory -> its entry names upper-cased, or null when readdirSync failed. */
 const dirEntries = new Map<string, Set<string> | null>();
+
+/** Per-call context: the call's start (`performance.now()`) and the signal the client cancels it with. */
+const callCtx = new AsyncLocalStorage<{ t0: number; signal: AbortSignal }>();
+
+/**
+ * Runs one tool call inside its own context: the memos are cleared, deadlines count from the call's start and
+ * `spawnGroup` honours `signal`.
+ *
+ * @param signal - Aborted when the client cancels the call.
+ * @param fn - The call's work.
+ * @returns What `fn` resolves to.
+ */
+export function runInCall<T>(signal: AbortSignal, fn: () => Promise<T>): Promise<T> {
+  probeCache.clear();
+  dirEntries.clear();
+  return callCtx.run({ t0: performance.now(), signal }, fn);
+}
+
+/**
+ * Milliseconds since the current call started; process uptime outside a call (the hook process).
+ *
+ * @returns Elapsed milliseconds.
+ */
+function elapsedMs(): number {
+  const c = callCtx.getStore();
+  return c ? performance.now() - c.t0 : process.uptime() * 1000;
+}
 
 /**
  * Whether `name` exists in `dir`, with existsSync's answer exactly. With `prefilter` (by default when the walked path
@@ -1957,11 +2014,11 @@ const PENDING_TTL_MS = 24 * 60 * 60 * 1000;
  * the hold ends at least 1 s before the 90 s hook backstop. In a headless run (`claude -p`: `CLAUDE_CODE_ENTRYPOINT`
  * starts with `sdk`) nothing is held: Claude Code does not background the hook there, so no later edit can arrive.
  *
- * @param uptimeMs - Process uptime in ms (injectable for tests).
+ * @param uptimeMs - Milliseconds since the call started (injectable for tests).
  * @param idleMs - Time since the agent's last journaled Write/Edit in ms.
  * @returns Milliseconds to wait, never negative.
  */
-export function settleWaitMs(uptimeMs: number = process.uptime() * 1000, idleMs = 0): number {
+export function settleWaitMs(uptimeMs: number = elapsedMs(), idleMs = 0): number {
   const raw = process.env.UNIVERSAL_LINT_SETTLE_MS;
   const n = raw === undefined || raw.trim() === "" ? Number.NaN : Number(raw);
   const base = Number.isFinite(n) && n >= 0 ? n : process.env.CLAUDE_CODE_ENTRYPOINT?.startsWith("sdk") ? 0 : SETTLE_MS;
@@ -2726,10 +2783,8 @@ export async function sweepHandler(args: PostToolUseHookInput): Promise<HookResu
   try {
     const ev = args.hook_event_name === "SubagentStop" ? "SubagentStop" : "Stop";
     const owner = ownerOf(args);
+    if (stopAlreadyBlocked(args)) return {};
     const dir = settleDir();
-    const mark = path.join(dir, "act", `${owner}.blocked`);
-    if (args.stop_hook_active !== true) rmSync(mark, { force: true });
-    else if (existsSync(mark)) return {};
     pruneActivity();
     const groups = new Map<string, string[]>();
     for (const n of readdirSync(dir).sort()) {
@@ -2753,7 +2808,7 @@ export async function sweepHandler(args: PostToolUseHookInput): Promise<HookResu
     };
     await Promise.all(Array.from({ length: Math.min(FILE_CHANGED_SLOTS, files.length) }, lane));
     const out = formatFindings(found.flat(), ev, "universal-lint");
-    if (out.hookSpecificOutput) writeFileSync(mark, "");
+    if (out.hookSpecificOutput) markBlocked(owner);
     return out;
   } catch {
     return {};
@@ -2792,7 +2847,7 @@ async function sweepFile(names: readonly string[], args: PostToolUseHookInput): 
   }
   const last = recs?.at(-1);
   const known = typeof last?.fp === "string" && typeof last.cwd === "string";
-  if (known && process.uptime() * 1000 >= slotDeadlineMs(path.extname(last.fp).toLowerCase())) return []; // no time left: stays pending
+  if (known && elapsedMs() >= slotDeadlineMs(path.extname(last.fp).toLowerCase())) return []; // no time left: stays pending
   unlinkSync(path.join(settleDir(), names[names.length - 1])); // the claim: throws when a held lint took it first
   clearRecords(names);
   if (!recs || !known) return [];
@@ -3003,7 +3058,7 @@ export function acquireSlot(untilMs: number): string | null {
       const slot = path.join(dir, String(i));
       if (claimFile(slot)) return slot;
     }
-    if (process.uptime() * 1000 >= untilMs) return null;
+    if (elapsedMs() >= untilMs) return null;
     sleep100();
   }
 }
@@ -3057,7 +3112,7 @@ export async function coalesceProjectCheck(key: string, file: string, reserveMs:
     } catch {
       return await run();
     }
-    if (process.uptime() * 1000 >= FILE_CHANGED_BUDGET_MS - reserveMs) return await run();
+    if (elapsedMs() >= FILE_CHANGED_BUDGET_MS - reserveMs) return await run();
     await sleep(100);
   }
   try {
@@ -3246,6 +3301,48 @@ export function watchPathsHandler(args: PostToolUseHookInput): { hookSpecificOut
 }
 
 /**
+ * Whether a Stop or SubagentStop payload is the continuation of a stop this owner already blocked: a marker from
+ * `markBlocked` lets the active stop through. A stop that is not active clears the marker.
+ *
+ * @param args - The Stop or SubagentStop hook payload.
+ * @returns True when the sweep must be skipped.
+ */
+export function stopAlreadyBlocked(args: PostToolUseHookInput): boolean {
+  const mark = path.join(settleDir(), "act", `${ownerOf(args)}.blocked`);
+  if (args.stop_hook_active !== true) {
+    rmSync(mark, { force: true });
+    return false;
+  }
+  return existsSync(mark);
+}
+
+/**
+ * Records that the stop of `owner` was blocked; fails open (without the marker the next active stop sweeps again).
+ *
+ * @param owner - The owner id from `ownerOf`.
+ */
+export function markBlocked(owner: string): void {
+  try {
+    mkdirSync(path.join(settleDir(), "act"), { recursive: true });
+    writeFileSync(path.join(settleDir(), "act", `${owner}.blocked`), "");
+  } catch {
+    // fail open: without the marker the next active stop sweeps again
+  }
+}
+
+/**
+ * The Write/Edit hook: scopes the edit, records its digest and lints the file (the PostToolUse branch of `main`).
+ *
+ * @param args - The PostToolUse hook payload.
+ * @returns The hook result: findings as additionalContext, or an empty object.
+ */
+export async function editedHandler(args: PostToolUseHookInput): Promise<HookResult> {
+  const scoped = postToolScope(args);
+  recordWrittenFor(scoped, args);
+  return lintFileHandler(args, scoped);
+}
+
+/**
  * Read the hook's stdin JSON and dispatch on `hook_event_name`: SessionStart/CwdChanged print the watch-paths JSON on
  * stdout (exit 0); FileChanged runs fileChangedHandler; Stop/SubagentStop run sweepHandler; anything else
  * (PostToolUse, or a payload without the field) records the Write/Edit digest and runs lintFileHandler. Findings:
@@ -3267,11 +3364,7 @@ export async function main(): Promise<void> {
     let ctx: string | undefined;
     if (ev === "FileChanged") ctx = (await fileChangedHandler(input)).hookSpecificOutput?.additionalContext;
     else if (ev === "Stop" || ev === "SubagentStop") ctx = (await sweepHandler(input)).hookSpecificOutput?.additionalContext;
-    else {
-      const scoped = postToolScope(input);
-      recordWrittenFor(scoped, input);
-      ctx = (await lintFileHandler(input, scoped)).hookSpecificOutput?.additionalContext;
-    }
+    else ctx = (await editedHandler(input)).hookSpecificOutput?.additionalContext;
     if (ctx) {
       process.stderr.write(ctx + "\n");
       process.exitCode = 2;
