@@ -232,6 +232,7 @@ Lenses under exploration: ${subsystems.map((s) => s.name + " — " + s.focus).jo
    line each. If the tool errors or nothing relevant exists, report exactly "none".
 Write markdown, not raw JSON. Structured output only.`;
 
+if (subsystems.some((x) => x.name === "graphmind memory")) return { status: "error", stage: "Scout", error: "a scout lens is named graphmind memory, which is reserved for the memory recall" };
 phase("Explore");
 const exploreOpts = (s) => {
   const base = { label: s.name, phase: "Explore", schema: EXPLORE_SCHEMA, model: MODELS.explorer };
@@ -244,19 +245,20 @@ const batch = await parallel([...subsystems.map((s) => () => agent(pickPrompt(s)
 const exploreOuts = batch.slice(0, subsystems.length);
 const recalled = USE_GRAPHMIND ? batch[subsystems.length] : null;
 
-// Every Explore job gets one header/footer pair, a failed explorer and an empty
-// memory recall included, so the scribe check below covers every job.
+// Every Explore job that returned a report gets one header/footer pair; a failed
+// explorer and an empty memory recall are omitted, so no placeholder reaches the designer.
 const MEMORY_LENS = "graphmind memory";
 // Report lines that look like a marker get a leading backslash, so only the real markers match.
 const escapeMarkers = (body) => body.replace(/^(?=## Lens: |_End of lens: )/gm, "\\");
 const lensBlock = (name, body) => "## Lens: " + name + "\n" + escapeMarkers(body) + "\n_End of lens: " + name + "_";
 if (!exploreOuts.some((r) => r && r.report)) return { status: "error", stage: "Explore", error: "all explorers returned null" };
-const lenses = subsystems.map((s, i) => lensBlock(s.name, exploreOuts[i] && exploreOuts[i].report ? exploreOuts[i].report : "No report: this explorer returned no result."));
-if (USE_GRAPHMIND) {
-  const memo = recalled && typeof recalled.report === "string" ? recalled.report.trim() : "";
-  lenses.push(lensBlock(MEMORY_LENS, memo || "none"));
-}
-const expectedLenses = [...subsystems.map((s) => s.name), ...(USE_GRAPHMIND ? [MEMORY_LENS] : [])];
+const memo = USE_GRAPHMIND && recalled && typeof recalled.report === "string" ? recalled.report.trim() : "";
+const lensEntries = [
+  ...subsystems.map((s, i) => [s.name, exploreOuts[i] && exploreOuts[i].report ? exploreOuts[i].report : ""]),
+  ...(memo && memo !== "none" ? [[MEMORY_LENS, memo]] : []),
+].filter(([, body]) => body);
+const expectedLenses = lensEntries.map(([name]) => name);
+const lenses = lensEntries.map(([name, body]) => lensBlock(name, body));
 
 // ═════════════════════════════════════════════════════════════════════════════
 // SCRIBE  (the script has no FS access, and the skill must never hold the
@@ -273,13 +275,23 @@ const lensProblems = (w) => {
   const footers = Array.isArray(w.lensFooters) ? w.lensFooters.map((f) => String(f).trim()) : [];
   const missing = expectedLenses.filter((n) => !headers.includes(n));
   const open = headers.filter((n) => !footers.includes(n));
-  return [...(missing.length ? ["missing lens header(s): " + missing.join(", ")] : []), ...(open.length ? ["lens header(s) without footer: " + open.join(", ")] : [])];
+  const same = (a) => a.length === expectedLenses.length && a.every((n, i) => n === expectedLenses[i]);
+  return [
+    ...(missing.length ? ["missing lens header(s): " + missing.join(", ")] : []),
+    ...(open.length ? ["lens header(s) without footer: " + open.join(", ")] : []),
+    ...(same(headers) && same(footers) ? [] : ["lens headers/footers differ from the expected lenses in count or order"]),
+  ];
 };
 const scribeOpts = { label: "scribe", phase: "Scribe", schema: WRITE_RESULT, model: MODELS.scribe, agentType: "taskflow:explore-scribe" };
 let written = await agent(scribePrompt, scribeOpts);
 let problems = lensProblems(written);
 if (problems.length) {
-  written = await agent(scribePrompt + "\nRetry: the file may already exist from an earlier attempt; Read it first, then overwrite it.", { ...scribeOpts, label: "scribe:retry" });
+  // A file that was written is only re-read; a failed write is written again.
+  const rewrite = !written || written.status !== "written";
+  const followUp = rewrite
+    ? scribePrompt + "\nRetry: the file may already exist from an earlier attempt; Read it first, then overwrite it."
+    : `Do not write anything. Read ${EXPLORE_PATH} in full (offset/limit chunks until its end) and report its lens headers and footers.`;
+  written = await agent(followUp, { ...scribeOpts, label: "scribe:retry" });
   problems = lensProblems(written);
 }
 if (problems.length) return { status: "error", stage: "Scribe", error: "scribe could not write EXPLORE_PATH intact (" + problems.join("; ") + ")" };

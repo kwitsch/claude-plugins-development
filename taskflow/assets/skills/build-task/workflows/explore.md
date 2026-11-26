@@ -50,12 +50,12 @@ One structured object; `status` is the discriminator. Consume only this return.
 
 ### `status: 'error'`
 
-| `stage`   | Meaning                                                                                                                                   | Action                                                                  |
-| :-------- | :---------------------------------------------------------------------------------------------------------------------------------------- | :---------------------------------------------------------------------- |
-| `args`    | Invocation malformed, or `args global is undefined` (threading quirk)                                                                     | Fallback for `args global is undefined`; otherwise fix the call         |
-| `Scout`   | The scout returned no result                                                                                                              | Surface `stage` + `error` and stop; no file path is passed on to Design |
-| `Explore` | All explorers returned null                                                                                                               | Surface `stage` + `error` and stop; no file path is passed on to Design |
-| `Scribe`  | After one retry, the written file lacks a lens header for an Explore job or a footer for a header, or the scribe could not write the file | Surface `stage` + `error` and stop; no file path is passed on to Design |
+| `stage`   | Meaning                                                                                                                                               | Action                                                                  |
+| :-------- | :---------------------------------------------------------------------------------------------------------------------------------------------------- | :---------------------------------------------------------------------- |
+| `args`    | Invocation malformed, or `args global is undefined` (threading quirk)                                                                                 | Fallback for `args global is undefined`; otherwise fix the call         |
+| `Scout`   | The scout returned no result, or named a lens `graphmind memory` (reserved for the memory recall)                                                     | Surface `stage` + `error` and stop; no file path is passed on to Design |
+| `Explore` | All explorers returned null                                                                                                                           | Surface `stage` + `error` and stop; no file path is passed on to Design |
+| `Scribe`  | After one retry, the written file's lens headers or footers differ from the expected lenses (missing, extra, other order), or it could not be written | Surface `stage` + `error` and stop; no file path is passed on to Design |
 
 ## Behavior notes
 
@@ -64,14 +64,14 @@ One structured object; `status` is the discriminator. Consume only this return.
 - File content: `# Exploration reports`, then one block per Explore job (each
   lens, plus `graphmind memory` on the graphmind path): a `## Lens: <name>`
   line, the report, and an `_End of lens: <name>_` line. A failed explorer
-  gets the placeholder body `No report: this explorer returned no result.`,
-  an empty memory recall the body `none`. The script builds these lines; the
+  and an empty memory recall get no block. The script builds these lines; the
   scribe copies them.
 - Models: scout, explorers, memory recall and scribe on the `haiku` alias.
 - The scribe copies the script-built text through a model, with the Write tool
-  (one retry, same prompt), then Reads the file back and returns
+  (one retry), then Reads the file back in full and returns
   the lens names of the `## Lens: <name>` headers and `_End of lens: <name>_`
-  footers it found. The script fails (`stage: 'Scribe'`) unless every
-  Explore job has a header and every header a footer; a missing trailing
-  footer catches truncation. A same-length alteration inside a lens body is
-  not caught.
+  footers it found. The script fails (`stage: 'Scribe'`) unless the headers and the
+  footers equal the expected lenses exactly, in order; a missing trailing
+  footer catches truncation. The retry only re-reads a file that was written
+  and rewrites one that was not. An alteration inside a lens body is not
+  caught.

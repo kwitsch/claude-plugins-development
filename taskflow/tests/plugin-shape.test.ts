@@ -951,7 +951,7 @@ describe("build-task delivery scripts", () => {
 
   test("explore scribe is the Read/Write-only explore-scribe agent with a lens header/footer check and one retry; implement/review persist keep the exact-size check", () => {
     const ex = `${WORKFLOWS}/build-task-explore.workflow.js`;
-    expectHas(ex, ["Retry: the file may already exist from an earlier attempt; Read it first, then overwrite it.", "{ ...scribeOpts, label: \"scribe:retry\" })", "const lensProblems = (w) =>", "missing lens header(s): ", "lens header(s) without footer: "]);
+    expectHas(ex, ["Retry: the file may already exist from an earlier attempt; Read it first, then overwrite it.", "{ ...scribeOpts, label: \"scribe:retry\" })", "const lensProblems = (w) =>", "missing lens header(s): ", "lens header(s) without footer: ", "differ from the expected lenses in count or order", "Do not write anything. Read ", "reserved for the memory recall"]);
     expectLacks(ex, ["TASKFLOW_MD_EOF", "NEVER the Write or Edit tool", "scribeRetryPrompt", "isIntactRetry", "printf", "w.bytes", "0.9"]);
     expectHas(`${AGENTS}/explore-scribe.md`, ["tools: [\"Read\", \"Write\"]", "with the Write tool", "Read the file back", "never what the prompt contained"]);
     expectHas(`${BT_WF}/explore.md`, ["with the Write tool"]);
@@ -1032,7 +1032,7 @@ describe("explore lens check documentation", () => {
   test("developer notes and the workflow rule describe the explore-scribe agent and the twelve agentType roles", () => {
     expectHas(DEV_NOTES, ["Nine of the plugin agents are build-task roles", "`explore-scribe`", "the other nine have one", "checks lens header/footer pairs instead of a byte count", "the lens header/footer lines come from the script", "(`SKILL.md` step 6)"]);
     expectLacks(DEV_NOTES, ["in the explore, implement and review scripts", "(`SKILL.md` step 5)", "Eight of the plugin agents"]);
-    expectHas(WF_RULE, ["Twelve roles are dispatched through a plugin `agentType`", "nine build-task roles", "`taskflow:explore-scribe` (`tools: Read, Write`)", "written as the lens `graphmind memory` (body `none` when empty)"]);
+    expectHas(WF_RULE, ["Twelve roles are dispatched through a plugin `agentType`", "nine build-task roles", "`taskflow:explore-scribe` (`tools: Read, Write`)", "written as the lens `graphmind memory` (omitted when empty"]);
     expectLacks(WF_RULE, ["MIN_WRITE_RATIO", "Recorded project knowledge", "memory recall, scribe, spec writer", "Eleven roles"]);
   });
 
