@@ -14,7 +14,8 @@
  * @packageDocumentation
  */
 import { readManifestVersion, serveMcp, type ToolDef } from "@shared/mcp-core.js";
-import { bashFinished, bashStarted, cwdChanged, disposeLsp, drainNotices, fileChanged, fileWritten, formatPre, type HookInput, type HookInputs, type HookResult, worktreeEntered, worktreeExited } from "./format.js";
+import { bashFinished, bashStarted, cwdChanged, disposeLsp, drainNotices, fileChanged, fileWritten, formatPre, type HookResult, worktreeEntered, worktreeExited } from "./format.js";
+import type { HookInput, HookInputs } from "./hook-input-types.js";
 
 /**
  * Every tool `hooks.json` calls, keyed by name and typed by its generated input: a tool missing here, an

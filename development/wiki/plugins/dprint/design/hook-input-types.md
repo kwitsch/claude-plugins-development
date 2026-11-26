@@ -16,7 +16,7 @@ Why dprint's MCP tool input types (`src/mcp/hook-inputs.d.ts`) come from the pub
 ## Deep-optional handler inputs
 
 - The CLI makes every field required, which is accurate for hook calls: Claude Code substitutes every template field, an absent one as `""` (live 2.1.326, see below). The CLI output was read from the generated `hook-inputs.d.ts` (typings).
-- `development/shared/src/mcp-core.ts` passes `params?.arguments ?? {}` unvalidated, so a direct `tools/call` can omit any field. `format.ts` therefore wraps the generated map in `Loose<T>` (every field optional, nested objects too; `Partial` is shallow and `tool_input` / `tool_response` are nested) and exports `HookInput<K>`; handler bodies kept their `= {}` defaults, `?.` and `??` guards, and `tests/mcp-format.test.ts` keeps calling handlers with partial literals.
+- `development/shared/src/mcp-core.ts` passes `params?.arguments ?? {}` unvalidated, so a direct `tools/call` can omit any field. `src/mcp/hook-input-types.ts` therefore wraps the generated map in `Loose<T>` (every field optional, nested objects too; `Partial` is shallow and `tool_input` / `tool_response` are nested) and exports `HookInput<K>`; handler bodies kept their `= {}` defaults, `?.` and `??` guards, and `tests/mcp-format.test.ts` keeps calling handlers with partial literals.
 - `Loose<T>` would also map through arrays and tuples; no current input has one.
 - `server.ts` keeps `type Tools = { [K in keyof HookInputs]: ToolDef<HookInput<K>, HookResult> }`: a tool without a hook, or a hook without a tool, is still a compile error.
 
