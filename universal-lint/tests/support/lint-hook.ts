@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll } from "vitest";
+import { startServer } from "./call-server.ts";
 
 /** The built plugin under test. */
 export const PLUGIN = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../plugin");
@@ -13,6 +14,16 @@ export const PLUGIN = path.resolve(path.dirname(fileURLToPath(import.meta.url)),
 export const HOOK = path.join(PLUGIN, "hooks/lint-file.mjs");
 /** The built skill driver. */
 export const DRIVER = path.join(PLUGIN, "skills/universal-lint/lint-files.mjs");
+/** The built MCP server. */
+export const SERVER = path.join(PLUGIN, "mcp/server.mjs");
+/** The one-shot driver and server client (plain node script). */
+export const CALL = path.join(path.dirname(fileURLToPath(import.meta.url)), "call-server.ts");
+
+/** Every server `LintEnv.server` started in this test file; closed when it ends. */
+const servers: ReturnType<typeof startServer>[] = [];
+afterAll(async () => {
+  await Promise.all(servers.map((s) => s.close()));
+});
 
 /** One scratch root for the whole test file, removed when it finishes. */
 const ROOT = mkdtempSync(path.join(tmpdir(), "universal-lint-test-"));
@@ -72,6 +83,8 @@ export interface LintEnv {
   run(filePath: string, opts?: RunOptions): HookRun;
   /** Pipe an arbitrary hook payload (FileChanged, SessionStart, CwdChanged, ...) into a fresh hook process. */
   runEvent(payload: Record<string, unknown>, opts?: RunOptions): HookRun;
+  /** One server process with this env (multi-call tests); closed when the test file ends. */
+  server(opts?: RunOptions & { cwd?: string }): ReturnType<typeof startServer>;
 }
 
 /**
@@ -154,6 +167,11 @@ export function makeEnv(): LintEnv {
     runEvent(p, opts) {
       const r = spawnSync(process.execPath, [HOOK], { input: JSON.stringify(p), env: env.childEnv(opts), encoding: "utf8" });
       return toRun(r.status, r.stderr, r.stdout);
+    },
+    server: (opts = {}) => {
+      const s = startServer(SERVER, env.childEnv(opts), opts.cwd ?? cwd);
+      servers.push(s);
+      return s;
     },
   };
   return env;

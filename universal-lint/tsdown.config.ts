@@ -7,6 +7,7 @@ const { claudePlugin } = JSON.parse(readFileSync(new URL("package.json", import.
 
 export default await pluginConfig({
   hooksTemplate: "hooks.template.json",
+  mcpTemplate: "mcp.template.json",
   scripts: { skills: { "universal-lint": ["src/skills/universal-lint/lint-files.ts"] } },
   manifest: claudePlugin,
   overrides: {
