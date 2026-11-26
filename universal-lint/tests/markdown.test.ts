@@ -4,7 +4,6 @@ import assert from "node:assert/strict";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "vitest";
-import { hashPath } from "../src/hooks/lint-core.ts";
 import { makeEnv } from "./support/lint-hook.ts";
 
 const OUT = "a.md:1 MD041/first-line-heading";
@@ -28,7 +27,7 @@ test("markdown fallback: markdownlint-cli2 present -> wins over markdownlint (ch
   assert.ok(!e.lines().some((l) => l.startsWith("markdownlint ")));
 });
 
-test("markdown: a directory named markdownlint-cli2 earlier on PATH is no hit, fresh or stored -> markdownlint runs", () => {
+test("markdown: a directory named markdownlint-cli2 earlier on PATH is no hit, on the first or a second run -> markdownlint runs", () => {
   const e = makeEnv();
   const early = path.join(e.data, "..", "early-bin");
   mkdirSync(path.join(early, "markdownlint-cli2"), { recursive: true });
@@ -37,9 +36,7 @@ test("markdown: a directory named markdownlint-cli2 earlier on PATH is no hit, f
   const f = e.file("a.md", "# hi\n");
   assert.match(e.run(f, { out: OUT, env: { PATH } }).ctx, /MD041/);
   assert.ok(e.lines().some((l) => l.startsWith("markdownlint ")));
-  // a stored directory hit must not be re-validated as present either
-  const probe = path.join(e.data, `probe-${hashPath(PATH)}.json`);
-  writeFileSync(probe, JSON.stringify({ hits: { "markdownlint-cli2": early }, misses: {} }));
+  // a stored directory hit can no longer be planted; `isExecutableFile` re-validates every stored hit (core.test.ts)
   assert.match(e.run(f, { out: OUT, env: { PATH } }).ctx, /MD041/);
 });
 
