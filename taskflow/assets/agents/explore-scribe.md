@@ -20,7 +20,8 @@ path and a text between `<<<BEGIN>>>` and `<<<END>>>`.
 2. Read the file back.
 3. Return structured output: `status` "written", `lensHeaders` = the text after
    `## Lens: ` of every line that starts with it, in file order, and
-   `lensFooters` = the text between `_End of lens: ` and the closing `_` of
-   every line that has that form, in file order. Report what the file
+   `lensFooters` = for every line that starts with `_End of lens: ` and ends
+   with `_`, the text between them (drop exactly that one final `_`, keep any
+   other underscores), in file order. Report what the file
    contains, never what the prompt contained. If the Write fails, return
    `status` "blocked" with the error in `detail`.

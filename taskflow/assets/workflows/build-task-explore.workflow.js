@@ -247,7 +247,9 @@ const recalled = USE_GRAPHMIND ? batch[subsystems.length] : null;
 // Every Explore job gets one header/footer pair, a failed explorer and an empty
 // memory recall included, so the scribe check below covers every job.
 const MEMORY_LENS = "graphmind memory";
-const lensBlock = (name, body) => "## Lens: " + name + "\n" + body + "\n_End of lens: " + name + "_";
+// Report lines that look like a marker get a leading backslash, so only the real markers match.
+const escapeMarkers = (body) => body.replace(/^(?=## Lens: |_End of lens: )/gm, "\\");
+const lensBlock = (name, body) => "## Lens: " + name + "\n" + escapeMarkers(body) + "\n_End of lens: " + name + "_";
 if (!exploreOuts.some((r) => r && r.report)) return { status: "error", stage: "Explore", error: "all explorers returned null" };
 const lenses = subsystems.map((s, i) => lensBlock(s.name, exploreOuts[i] && exploreOuts[i].report ? exploreOuts[i].report : "No report: this explorer returned no result."));
 if (USE_GRAPHMIND) {
@@ -277,7 +279,7 @@ const scribeOpts = { label: "scribe", phase: "Scribe", schema: WRITE_RESULT, mod
 let written = await agent(scribePrompt, scribeOpts);
 let problems = lensProblems(written);
 if (problems.length) {
-  written = await agent(scribePrompt, { ...scribeOpts, label: "scribe:retry" });
+  written = await agent(scribePrompt + "\nRetry: the file may already exist from an earlier attempt; Read it first, then overwrite it.", { ...scribeOpts, label: "scribe:retry" });
   problems = lensProblems(written);
 }
 if (problems.length) return { status: "error", stage: "Scribe", error: "scribe could not write EXPLORE_PATH intact (" + problems.join("; ") + ")" };
