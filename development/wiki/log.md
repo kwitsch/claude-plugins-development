@@ -249,3 +249,7 @@ Source: user decision 2026-11-20 (task spec), PR stacked on `feature/tsdown-plug
 - Rules and memory: `universal-lint/.claude/rules/lint-file.md` (hook contract, who gets a finding, scope), `tests.md`, `skill-driver.md`, `universal-lint/CLAUDE.md`, `.claude/rules/mcp-dual-era.md`, `.claude/rules/tsdown-build.md`.
 - Design pages: `hook-design.md`, `settle-window.md` (delivery matrix, R1, R3), `file-detection.md` (in-memory slot cap and lock, worktree scope base, R2, R12), `npx-and-local-bin.md` (probe memo in memory, R10); `plugins/universal-lint/index.md` updated.
 - Not done here: the evaluation page of the run (`EVALUATION-<date>-v0.18.0.md`, Task 14); `decisions/tsdown-plugin-build.md` and `decisions/shared-source-layer.md` still name `lint-file.ts` in their history sections.
+
+## [2026-11-26] ingest | universal-lint 0.18.0 evaluation (live checks under the managed policy)
+
+- New `plugins/universal-lint/evaluations/EVALUATION-2026-11-26-v0.18.0.md`: local gate (tests 429 -> 513), the required live cases L3, L4, L6, L7 (a)/(b), L7c, L8, L10 (headless and tmux) and L11 (session at the project root and inside a worktree), plus L2, L5, L7b, L9, L12, all passed on Claude Code 2.1.332 (managed) with ruff 0.17.6 as the real linter; what was not run. `plugins/universal-lint/index.md` lists it. The root `index.md` is unchanged (plugin pages are listed only in the plugin index). Source: branch `feature/universal-lint-mod-server`, live runs in throwaway repositories.

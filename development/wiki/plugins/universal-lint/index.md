@@ -1,11 +1,12 @@
 # universal-lint knowledge
 
-Working documents for agent sessions. Not shipped (`plugin/` is the installable part), not user documentation. Language: English. The F01-F33 performance run is finished (0.15.1-0.15.29 plus the 0.15.30 closure), F34 shipped in 0.16.0; the evaluation of 2026-11-14 ([EVALUATION-2026-11-14.md](evaluations/EVALUATION-2026-11-14.md)) opened F35-F37, shipped in 0.16.1; the second one of that day ([EVALUATION-2026-11-14-v0.16.1.md](evaluations/EVALUATION-2026-11-14-v0.16.1.md), on 0.16.1) opened F38-F39. `TASKS.md` is the index.
+Working documents for agent sessions. Not shipped (`plugin/` is the installable part), not user documentation. Language: English. The F01-F33 performance run is finished (0.15.1-0.15.29 plus the 0.15.30 closure), F34 shipped in 0.16.0; the evaluation of 2026-11-14 ([EVALUATION-2026-11-14.md](evaluations/EVALUATION-2026-11-14.md)) opened F35-F37, shipped in 0.16.1; the second one of that day ([EVALUATION-2026-11-14-v0.16.1.md](evaluations/EVALUATION-2026-11-14-v0.16.1.md), on 0.16.1) opened F38-F39. 0.18.0 (mod plus MCP server) was checked live in [EVALUATION-2026-11-26-v0.18.0.md](evaluations/EVALUATION-2026-11-26-v0.18.0.md). `TASKS.md` is the index.
 
 ## Pages
 
 - [CLAUDE.md](../../../../universal-lint/CLAUDE.md): the plugin's overview and rule list (loads with the plugin's files).
 - [TASKS.md](TASKS.md): task list; `tasks/` holds one document per task. Start here for open work.
+- [evaluations/EVALUATION-2026-11-26-v0.18.0.md](evaluations/EVALUATION-2026-11-26-v0.18.0.md): evaluation: universal-lint evaluation 2026-11-26b (plugin 0.18.0): local gate and the live checks L2-L12 under the managed policy with ruff
 - [evaluations/EVALUATION-2026-11-26-mod-server.md](evaluations/EVALUATION-2026-11-26-mod-server.md): evaluation: universal-lint evaluation 2026-11-26: mod plus MCP server instead of six command hooks (preparation, no code change)
 - [evaluations/EVALUATION-2026-11-14-v0.16.1.md](evaluations/EVALUATION-2026-11-14-v0.16.1.md): evaluation: universal-lint evaluation 2026-11-14b (plugin 0.16.1)
 - [evaluations/EVALUATION-2026-11-14.md](evaluations/EVALUATION-2026-11-14.md): evaluation: universal-lint evaluation 2026-11-14 (plugin 0.16.0)
