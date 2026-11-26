@@ -282,10 +282,12 @@ async function startServer(env: NodeJS.ProcessEnv, cwd: string): Promise<Server>
   child.stdout.setEncoding("utf8").on("data", (d: string) => {
     buf += d;
     for (let i = buf.indexOf("\n"); i >= 0; i = buf.indexOf("\n")) {
-      const m = JSON.parse(buf.slice(0, i)) as { id?: number; result?: { structuredContent?: Answer } };
+      const m = JSON.parse(buf.slice(0, i)) as { id?: number; result?: { structuredContent?: Answer }; error?: { message?: string } };
       buf = buf.slice(i + 1);
       if (m.id !== undefined) {
-        waiting.get(m.id)?.resolve(m.result?.structuredContent ?? {});
+        // a JSON-RPC error fails the call (no empty answer that a row would score as a clean run); an empty structuredContent stays a valid answer
+        if (m.error) waiting.get(m.id)?.reject(new Error(`the server answered an error: ${m.error.message ?? JSON.stringify(m.error)}`));
+        else waiting.get(m.id)?.resolve(m.result?.structuredContent ?? {});
         waiting.delete(m.id);
       }
     }
