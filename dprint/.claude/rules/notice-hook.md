@@ -22,18 +22,21 @@ when the working directory has a dprint config but dprint cannot run.
   (`config-names.ts`), `MIN_VERSION` and check-dprint's `dprint X.Y.Z` regex (`check-dprint.ts`);
   `tests/notice.test.ts` fails when a copy drifts, so change both places.
 - The engine's static check wants hooks as named function literals declared in the entry (a top-level helper cannot
-  hold the state), so the entry's hooks are thin and call `afterSessionCwd`/`afterCwdChanged` in `probe.ts`.
+  hold the state), so the entry's hooks are thin and call `afterSessionCwd`/`afterBash` in `probe.ts`.
 - `claude plugin validate plugin` checks the module and lists `process.run`, `env.get` and the env vars
   `DPRINT_INSTALL`, `HOME` and `PATH` among its uses (its "gating hook without .catch" warning: root
   `claude-code-tool-hook-facts.md`).
+- Hook no `classic.*` event: a managed org's `cc-plugin-sec-default` passes them over user-tier plugins
+  ([mods-engine-lifecycle](../../../development/wiki/facts/mods-engine-lifecycle.md)).
 
 ## When it checks
 
-- Hooks `session.start`, `classic.CwdChanged` and `tool.call` for `EnterWorktree`/`ExitWorktree`; lets the event run
-  first, then checks detached (errors swallowed).
-- The resulting cwd: `new_cwd` for CwdChanged, the tool result's `worktreePath`/`restoredCwd` for the worktree tools,
-  else `$.session.cwd()`. It and its ancestors (up to the dir holding `.git`) are searched for `CONFIG_NAMES` with
-  `$.fs.exists`. No config: silent, nothing spawned.
+- Hooks `session.start`, `tool.call` for `Bash` (only when `$.session.cwd()` differs from the last checked dir
+  `NoticeState.lastDir`, set by every check; skipped entirely, without any `$` call, after a successful probe) and
+  `tool.call` for `EnterWorktree`/`ExitWorktree`; lets the event run first, then checks detached (errors swallowed).
+- The resulting cwd: the worktree tool result's `worktreePath`/`restoredCwd`, else `$.session.cwd()` (Bash included).
+  It and its ancestors (up to the dir holding `.git`) are searched for `CONFIG_NAMES` with `$.fs.exists`. No config:
+  silent, nothing spawned.
 
 ## Probe (why it differs from `findDprint`)
 
