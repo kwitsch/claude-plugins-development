@@ -5,8 +5,7 @@
  * EARLY ACCESS API (Claude Code 2.1.316 declarations). Fires after `session.start`, the `Bash` tool calls (only when
  * the session cwd changed) and the `EnterWorktree`/`ExitWorktree` tool calls. No classic Claude Code event is hooked:
  * a managed org's `cc-plugin-sec-default` passes those over user-tier plugins. The check runs detached after the event
- * and swallows every error,
- * so it never blocks, delays or alters the event. A directory without a dprint config is left alone and nothing is
+ * and swallows every error, so it never blocks, delays or alters the event. A directory without a dprint config is left alone and nothing is
  * spawned; with one, the module picks the one dprint `find-dprint.ts` would pick (first `<PATH entry>/dprint` that
  * exists, else `$DPRINT_INSTALL/bin/dprint` (default `~/.dprint/bin/dprint`), else the npx cache), runs `--version` on it via `$.process.run`, and only an
  * unusable pick (cannot start, exits non-zero, prints no version, older than `MIN_VERSION`) toasts, naming the
