@@ -332,6 +332,8 @@ test("cancel: notifications/cancelled kills the running lint and leaves no answe
   const s = e.server({ out: OUT });
   const k = await s.key("s1");
   const p = s.call("file_edited", { cwd: e.cwd, session_id: "s1", tool_name: "Write", tool_input: { file_path: file, content: "echo $1\n" }, tool_response: {}, key: k });
+  // observed, not awaited: the cancelled call must stay unanswered, and its rejection when the server closes is expected
+  const outcome = p.then(() => "answered", () => "closed");
   const until = Date.now() + 10_000;
   while (!existsSync(pidfile) || readFileSync(pidfile, "utf8").trim() === "") {
     assert.ok(Date.now() < until, "the shellcheck stub never started");
@@ -348,6 +350,59 @@ test("cancel: notifications/cancelled kills the running lint and leaves no answe
   }
   assert.ok(await waitGone(pid, 2000), `linter child ${pid} survived the cancel`);
   assert.equal(e.lines().length, linesAtCancel);
+  assert.equal(await Promise.race([outcome, sleep(500).then(() => "silent")]), "silent", "a cancelled call gets no reply for its id");
+});
+
+/**
+ * Env whose shellcheck stub hangs on its first run (the test cancels that call) and reports `OUT` on every later run.
+ *
+ * @returns The env, the file `a.sh`, the stub's pid file and the server client.
+ */
+function hangingFirstRun() {
+  const e = makeEnv();
+  const pidfile = path.join(path.dirname(e.cwd), "sleep.pid");
+  const mark = path.join(path.dirname(e.cwd), "first-run");
+  e.stub("shellcheck", `printf "shellcheck %s\\n" "$*" >> "$RECORD"`, `if [ ! -e "${mark}" ]; then : > "${mark}"; node -e "setTimeout(() => {}, 30000)" & echo $! > "${pidfile}"; wait; else printf '%s\\n' "$OUT"; exit 1; fi`);
+  const file = e.file("a.sh", "echo $1\n");
+  return { e, file, pidfile, s: e.server({ out: OUT }) };
+}
+
+/**
+ * Cancels the call `p` once the hanging linter runs and waits until the linter is gone.
+ *
+ * @param w - The `hangingFirstRun` world.
+ * @param p - The pending call.
+ */
+async function cancelWhenLinting(w: ReturnType<typeof hangingFirstRun>, p: Promise<unknown> & { id: number }): Promise<void> {
+  void p.catch(() => undefined);
+  const until = Date.now() + 10_000;
+  while (!existsSync(w.pidfile) || readFileSync(w.pidfile, "utf8").trim() === "") {
+    assert.ok(Date.now() < until, "the shellcheck stub never started");
+    await sleep(50);
+  }
+  const pid = Number(readFileSync(w.pidfile, "utf8"));
+  w.s.notify("notifications/cancelled", { requestId: p.id });
+  assert.ok(await waitGone(pid, 5000), `linter child ${pid} survived the cancel`);
+}
+
+test("a cancelled file_edited keeps its journal record: the next stop lints the file and reports it", async () => {
+  const w = hangingFirstRun();
+  const k = await w.s.key("s1");
+  await cancelWhenLinting(w, w.s.call("file_edited", { cwd: w.e.cwd, session_id: "s1", tool_name: "Write", tool_input: { file_path: w.file, content: "echo $1\n" }, tool_response: {}, key: k }));
+  const r = await w.s.call("stop", { hook_event_name: "Stop", cwd: w.e.cwd, session_id: "s1", agent_id: "", scratchpad_dir: "", stop_hook_active: "false" });
+  assert.equal(r["decision"], "block");
+  assert.match(String(r["reason"]), /SC2086/);
+});
+
+test("a cancelled SubagentStop sweep puts its claimed records back and blocks nothing: the next stop reports them", async () => {
+  const w = hangingFirstRun();
+  const k = await w.s.key("s1");
+  assert.deepEqual(await w.s.call("file_edited", { cwd: w.e.cwd, session_id: "s1", agent_id: "X", tool_name: "Write", tool_input: { file_path: w.file, content: "echo $1\n" }, tool_response: {}, key: k }), {});
+  const stop = { hook_event_name: "SubagentStop", cwd: w.e.cwd, session_id: "s1", agent_id: "X", scratchpad_dir: "", stop_hook_active: "false" };
+  await cancelWhenLinting(w, w.s.call("stop", stop));
+  const r = await w.s.call("stop", stop);
+  assert.equal(r["decision"], "block");
+  assert.match(String(r["reason"]), /SC2086/);
 });
 
 test("digest store: a keyed edit leaves no written/ directory (the digest lives in the server's memory)", async () => {

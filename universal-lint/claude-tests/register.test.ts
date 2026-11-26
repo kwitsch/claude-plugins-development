@@ -1,6 +1,6 @@
 // Runs under `claude plugin test` via development/scripts/plugin-test.ts (`pnpm --filter universal-lint test:plugin`), on a
-// temp copy of the built plugin/. Together the tests fire all 4 registrations of the built register.js: session.start,
-// tool.call for Write/Edit, turn.complete and session.end. No imports besides the kit: the fake world is in memory.
+// temp copy of the built plugin/. Together the tests fire all 5 registrations of the built register.js: session.start,
+// tool.call for Write/Edit, turn.complete, prompt.submit and session.end. No imports besides the kit: the fake world is in memory.
 import { expect, mock, test } from "claude-code/testing";
 
 /** The test's `on`, taken from the kit's own types. */
@@ -11,18 +11,18 @@ type On = Parameters<typeof mock.clock>[0];
  * with a finding and a keyed `next_report` with the next state of `poll` (`timeout` for `wait_ms: 0`).
  *
  * @param on - The test's `on`.
- * @param poll - States the wake poll's keyed `next_report` calls get, in order; `busy` once it is used up.
+ * @param poll - States the wake poll's keyed `next_report` calls get, in order (a promise holds that poll until the test resolves it); `busy` once it is used up.
  * @returns The tools called, the prompts submitted and the fake clock.
  */
-function world(on: On, poll: string[] = ["busy"]) {
+function world(on: On, poll: (string | Promise<string>)[] = ["busy"]) {
   const tools: string[] = [];
   const submitted: string[] = [];
   const clock = mock.clock(on);
   on("mcp.connect", () => ({ value: { isConnected: true, server: "plugin:universal-lint:lint" } }));
-  on("mcp.call", (_$, e) => {
+  on("mcp.call", async (_$, e) => {
     tools.push(String(e.tool));
     const args = e.args as { key?: string; wait_ms?: number };
-    const a = args.key === undefined ? { key: "K", headless: false } : e.tool === "file_edited" ? { context: "FINDING" } : { state: args.wait_ms === 0 ? "timeout" : poll.shift() ?? "busy" };
+    const a = args.key === undefined ? { key: "K", headless: false } : e.tool === "file_edited" ? { context: "FINDING" } : { state: args.wait_ms === 0 ? "timeout" : await (poll.shift() ?? "busy") };
     return { value: { content: [{ type: "text", text: JSON.stringify(a) }] } };
   });
   on("session.id", () => ({ value: "S" }));
@@ -57,11 +57,32 @@ test("the main turn end polls and a ready report submits the wake prompt (turn.c
   expect(w.submitted.length).toEqual(1);
 });
 
-test("session.end stops a pending poll (session.end)", async ($, on) => {
-  const w = world(on, ["timeout", "ready"]);
+/** The wake polls among the tools called: the `next_report` calls after the two key calls of `session.start`. */
+const wakePolls = (tools: string[]): number => tools.filter((t) => t === "next_report").length - 2;
+
+test("session.end ends a pending poll: its late ready answer submits nothing and starts no new poll (session.end)", async ($, on) => {
+  let release: (s: string) => void = () => undefined;
+  const w = world(on, [new Promise<string>((resolve) => (release = resolve))]);
   await $.session.start({ source: "startup", cwd: "/proj" });
-  await $.session.end({ reason: "clear" });
   await $.turn.complete({ turnId: "t1", reason: "answer", answer: "Done.", durationMs: 1, isAborted: false });
   await w.clock.settle();
-  expect(w.tools.filter((t) => t === "next_report").length > 2).toEqual(true);
+  expect(wakePolls(w.tools)).toEqual(1);
+  await $.session.end({ reason: "clear" });
+  release("ready");
+  await w.clock.settle();
+  expect(w.submitted).toEqual([]);
+  expect(wakePolls(w.tools)).toEqual(1);
+});
+
+test("a typed prompt ends a pending poll: its late ready answer submits nothing (prompt.submit)", async ($, on) => {
+  let release: (s: string) => void = () => undefined;
+  const w = world(on, [new Promise<string>((resolve) => (release = resolve))]);
+  await $.session.start({ source: "startup", cwd: "/proj" });
+  await $.turn.complete({ turnId: "t1", reason: "answer", answer: "Done.", durationMs: 1, isAborted: false });
+  await w.clock.settle();
+  await $.prompt.submit({ text: "typed" });
+  release("ready");
+  await w.clock.settle();
+  expect(w.submitted.filter((t) => t.startsWith("universal-lint:"))).toEqual([]);
+  expect(wakePolls(w.tools)).toEqual(1);
 });

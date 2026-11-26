@@ -5,11 +5,21 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, test, vi } from "vitest";
-import { capSet, configExists, editedHandler, markBlocked, ownerOf, recordEdit, runInCall, settleFindings, settleWaitMs, spawnGroup, STATE_CAP, stopAlreadyBlocked } from "../src/hooks/lint-core.ts";
+import { callCancelled, CANCELLED, capSet, configExists, editedHandler, markBlocked, ownerOf, recordEdit, runInCall, settleFindings, settleWaitMs, spawnGroup, STATE_CAP, stopAlreadyBlocked } from "../src/hooks/lint-core.ts";
 
 afterEach(() => {
   vi.restoreAllMocks();
   delete process.env.UNIVERSAL_LINT_SETTLE_MS;
+});
+
+test("callCancelled: true only for a client cancel, not for the call's own deadline, and false outside a call", async () => {
+  assert.equal(callCancelled(), false);
+  for (const [reason, expected] of [[CANCELLED, true], ["deadline", false], [undefined, false]] as const) {
+    const c = new AbortController();
+    assert.equal(await runInCall(c.signal, async () => callCancelled()), false, "not aborted yet");
+    c.abort(reason);
+    assert.equal(await runInCall(c.signal, async () => callCancelled()), expected, String(reason));
+  }
 });
 
 test("capSet: past STATE_CAP the oldest entry is dropped, the newest kept; exactly STATE_CAP entries are all kept", () => {

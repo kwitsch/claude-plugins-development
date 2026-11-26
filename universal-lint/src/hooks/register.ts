@@ -20,22 +20,59 @@ type McpResult = { content?: { text?: unknown }[]; isError?: unknown } | undefin
 /** The engine members the mod uses, typed structurally. */
 type Engine = {
   /** MCP access: `connect` answers the full server name that `call` takes. */
-  mcp: { connect(key: string): Promise<{ isConnected: boolean; server: string }>; call(server: string, tool: string, args: Record<string, unknown>): Promise<McpResult> };
+  mcp: {
+    /** Connects to the plugin's own server by its `.mcp.json` key; answers the full name (`plugin:<plugin>:<key>`) that `call` takes. */
+    connect(key: string): Promise<{ isConnected: boolean; server: string }>;
+    /** Calls a server tool; there is no timeout and a cancelled dispatch does not cancel the call, so the server enforces its own deadlines. */
+    call(server: string, tool: string, args: Record<string, unknown>): Promise<McpResult>;
+  };
   /** The session id and the calling agent's cwd. */
-  session: { id(): Promise<string>; cwd(): Promise<string> };
+  session: {
+    /** The current session id; it changes on `/clear` while the same server process keeps running. */
+    id(): Promise<string>;
+    /** The cwd of the calling agent (the worktree after EnterWorktree, a subagent's own worktree), read per call. */
+    cwd(): Promise<string>;
+  };
   /** Environment variables of the Claude Code process. */
-  env: { get(name: string): Promise<string | undefined> };
+  env: {
+    /** The value of a variable, or `undefined` when it is unset; a hook above can refuse the call. */
+    get(name: string): Promise<string | undefined>;
+  };
   /** Starts a turn in the idle session. */
-  prompt: { submit(input: { text: string }): Promise<unknown> };
+  prompt: {
+    /** Queues a prompt of this plugin that runs when the session is idle; it does not pass through this mod's own `prompt.submit` hook. */
+    submit(input: { text: string }): Promise<unknown>;
+  };
   /** Out-of-frame timers. */
-  clock: { after(ms: number, fn: () => unknown): unknown };
+  clock: {
+    /** Runs `fn` once after `ms` outside any hook frame; the returned handle is not used. */
+    after(ms: number, fn: () => unknown): unknown;
+  };
 };
 
-/** The `tool.call` event fields the mod reads (Write: `content`; `agentId` only for a subagent). */
-type ToolEvent = { tool?: string; file_path?: string; content?: string; agentId?: string };
+/** The `tool.call` event fields the mod reads. */
+type ToolEvent = {
+  /** The tool name (`Write` or `Edit` for this mod's matcher). */
+  tool?: string;
+  /** The path as the tool call gave it, absolute or relative to the agent's cwd. */
+  file_path?: string;
+  /** The written text, present for Write only. */
+  content?: string;
+  /** The calling subagent's id; absent in the main conversation. */
+  agentId?: string;
+};
 
-/** The `tool.call` result after `next`: `result` carries the patch and the old content for Write and Edit. */
-type ToolOutcome = { result?: { structuredPatch?: unknown; originalFile?: unknown }; context?: string[]; deny?: unknown; isError?: unknown } | undefined;
+/** The `tool.call` result after `next`. */
+type ToolOutcome = {
+  /** The tool's own result: for Write and Edit the jsdiff `structuredPatch` array and the `originalFile` text before the change. */
+  result?: { structuredPatch?: unknown; originalFile?: unknown };
+  /** Extra text for the model that rides on the tool result; this mod appends the findings here. */
+  context?: string[];
+  /** Set when a hook above refused the call. */
+  deny?: unknown;
+  /** Set when the tool itself failed. */
+  isError?: unknown;
+} | undefined;
 
 /**
  * The rest of the hook chain.
@@ -56,14 +93,34 @@ type Hook<E, R> = ($: Engine, e: E, next: Next<E, R>) => Promise<R>;
 /** The registration function the engine passes to {@link register}. */
 type On = {
   (event: "tool.call", matcher: { tool: string[] }, hook: Hook<ToolEvent, ToolOutcome>): void;
-  (event: "session.start" | "session.end" | "turn.complete", hook: Hook<{ agentId?: string }, unknown>): void;
+  (event: "session.start" | "session.end" | "turn.complete" | "prompt.submit", hook: Hook<{ agentId?: string }, unknown>): void;
 };
 
-/** Per-session mod state: server name, session key, three-valued headless flag, wake generation and whether a wake poll runs. */
-type State = { server: string | undefined; key: string | undefined; headless: boolean | undefined; gen: number; waiting: boolean };
+/** Mod state of one plugin load (it spans `/clear`: the server process and its session keys outlive a session id). */
+type State = {
+  /** The full server name after the first connect; cleared after a failed call so the next call connects again. */
+  server: string | undefined;
+  /** The session key the server issued; sent with every call after the first. */
+  key: string | undefined;
+  /** Whether the session is headless (`claude -p`): `true` or `false` once a source answered, `undefined` while unknown. Only `false` arms the idle wake. */
+  headless: boolean | undefined;
+  /** Generation of the idle window: bumped by `session.start`, `session.end` and every typed prompt, so a wake loop of an older window stops. */
+  gen: number;
+  /** Whether a wake loop of the current generation is scheduled or polling; owned by `turn.complete` (set) and the loop's `finally` (cleared). */
+  waiting: boolean;
+};
 
 /** A tool answer of the server: a key issue `{ key, headless }`, a `file_edited` `{ context }` or a `next_report` `{ state }`. */
-type Answer = { key?: unknown; headless?: unknown; context?: unknown; state?: unknown };
+type Answer = {
+  /** The session key of a key issue. */
+  key?: unknown;
+  /** The server's view of headless in a key issue. */
+  headless?: unknown;
+  /** The findings text for the tool result (a `file_edited` answer). */
+  context?: unknown;
+  /** The wake poll's state: `ready`, `timeout` or `busy` (a `next_report` answer). */
+  state?: unknown;
+};
 
 /**
  * One tool call with the current key; connects lazily.
@@ -140,6 +197,13 @@ export const register = (on: On): void => {
     st.waiting = false;
     return next(e);
   });
+  // A prompt typed by the person ends the idle window (the hook runs for typed and queued prompts, live 2.1.332, managed;
+  // the mod's own `$.prompt.submit` does not pass through it): a wake loop scheduled or sleeping between polls stops.
+  on("prompt.submit", async function onPrompt(_$, e, next) {
+    st.gen++;
+    st.waiting = false;
+    return next(e);
+  });
   on("tool.call", { tool: ["Write", "Edit"] }, async function onEdit($, e, next) {
     const r = await next(e);
     if (next.signal?.aborted || !r || r.deny !== undefined || r.isError) return r;
@@ -167,6 +231,7 @@ export const register = (on: On): void => {
       $.clock.after(0, async function wake() {
         try {
           for (;;) {
+            if (gen !== st.gen) return; // a prompt came in before this poll: the idle window is over
             const a = await call($, st, "next_report", { session_id: await $.session.id() });
             if (gen !== st.gen) return;
             if (a?.state === "ready") {

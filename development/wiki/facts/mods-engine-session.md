@@ -23,6 +23,8 @@ The constraints that follow load by themselves with [claude-code-hook-facts.md](
 
 - `origin.kind` is `composer` for a typed prompt, `sdk` for a `claude -p` or SDK prompt, `plugin` (with `name`) for a `$.prompt.submit`, which reaches the calling plugin's other hooks, and `task-notification` for a background-task notice, whose `isMeta` is undefined (typings, live 2.1.325).
 - Slash commands never go through `prompt.submit` (binary 2.1.322).
+- A user-tier `prompt.submit` hook runs under the managed policy (live 2.1.332, probe of 2026-11-26): `origin` `{ kind: "composer" }` for a typed prompt; a prompt typed while a turn runs also carries `turnId` and its event fires before that turn's `turn.complete` (one `turn.complete` then covers both prompts); the plugin's own `$.prompt.submit` does not pass through the plugin's own `prompt.submit` hook (seen: the wake prompt is absent from the hook's log) while its other hooks see it.
+- `/clear` raises `session.end` (`reason: "clear"`) and no `session.start`; `$.session.id()` is a new id afterwards while the plugin's MCP server process keeps running (same pid; live 2.1.332, probe of 2026-11-26). Per-session state of a server is keyed by the session id for that reason.
 - The event carries `turnId` only for a prompt typed while a turn runs; it is absent while idle, which tells a mid-turn prompt from a new request (live 2.1.325).
 
 ## `$.command.run`

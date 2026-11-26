@@ -262,7 +262,21 @@ async function startServer(env: NodeJS.ProcessEnv, cwd: string): Promise<Server>
   const child = spawn(SERVER, [], { env, cwd, stdio: ["pipe", "pipe", "pipe"] });
   const closed = new Promise<void>((resolve) => child.on("close", () => resolve()));
   child.stderr.resume();
-  const waiting = new Map<number, (answer: Answer) => void>();
+  const waiting = new Map<number, { resolve: (answer: Answer) => void; reject: (e: Error) => void }>();
+  /** Set once the process errored or closed: every later and every pending call rejects with it. */
+  let gone: Error | undefined;
+  /**
+   * Rejects every outstanding call and remembers why, so a dead server fails the run instead of hanging it.
+   *
+   * @param e - Why the server is gone.
+   */
+  const failAll = (e: Error): void => {
+    gone ??= e;
+    for (const w of waiting.values()) w.reject(e);
+    waiting.clear();
+  };
+  child.on("error", (e) => failAll(e));
+  child.on("close", (code) => failAll(new Error(`the server exited (${String(code)}) before it answered`)));
   let id = 0;
   let buf = "";
   child.stdout.setEncoding("utf8").on("data", (d: string) => {
@@ -271,19 +285,31 @@ async function startServer(env: NodeJS.ProcessEnv, cwd: string): Promise<Server>
       const m = JSON.parse(buf.slice(0, i)) as { id?: number; result?: { structuredContent?: Answer } };
       buf = buf.slice(i + 1);
       if (m.id !== undefined) {
-        waiting.get(m.id)?.(m.result?.structuredContent ?? {});
+        waiting.get(m.id)?.resolve(m.result?.structuredContent ?? {});
         waiting.delete(m.id);
       }
     }
   });
   const call = (tool: string, args: object): Promise<Answer> => {
+    if (gone) return Promise.reject(gone);
     const n = ++id;
-    return new Promise((resolve) => {
-      waiting.set(n, resolve);
+    return new Promise((resolve, reject) => {
+      waiting.set(n, { resolve, reject });
       child.stdin.write(JSON.stringify({ jsonrpc: "2.0", id: n, method: "tools/call", params: { name: tool, arguments: args } }) + "\n");
     });
   };
-  const key = String((await call("next_report", { session_id: SESSION, wait_ms: 0 }))["key"]);
+  // the first request runs under a deadline: a server that never answers is killed, not waited for
+  let key: string;
+  const timer = setTimeout(() => child.kill("SIGKILL"), RUN_TIMEOUT_MS);
+  try {
+    key = String((await call("next_report", { session_id: SESSION, wait_ms: 0 }))["key"]);
+  } catch (e) {
+    child.kill("SIGKILL");
+    await closed;
+    throw e;
+  } finally {
+    clearTimeout(timer);
+  }
   return {
     key,
     call,
@@ -312,8 +338,12 @@ async function runCase(c: Case, payloadFile: string, env: NodeJS.ProcessEnv, s: 
   const t0 = process.hrtime.bigint();
   const answer = await s.call(c.tool, args);
   const ms = Number(process.hrtime.bigint() - t0) / 1e6;
-  if (c.tool === "file_changed") await s.call("prompt_submitted", { cwd: c.cwd, session_id: SESSION }); // drain outside the timing
-  const context = typeof answer["context"] === "string" ? answer["context"] : "";
+  let context = typeof answer["context"] === "string" ? answer["context"] : "";
+  if (c.tool === "file_changed") {
+    // a FileChanged report is queued: drain it outside the timing and let it decide the row's status
+    const drained = (await s.call("prompt_submitted", { cwd: c.cwd, session_id: SESSION }))["hookSpecificOutput"] as { additionalContext?: unknown } | undefined;
+    if (typeof drained?.additionalContext === "string") context = drained.additionalContext;
+  }
   return { ms, status: context === "" ? 0 : 2, stdout: "", stderr: context };
 }
 

@@ -21,6 +21,9 @@ export const SERVER = path.join(PLUGIN, "mcp/server.mjs");
 /** The one-shot driver and server client (plain node script). */
 export const CALL = path.join(path.dirname(fileURLToPath(import.meta.url)), "call-server.ts");
 
+/** How long one one-shot driver run (`runEvent`) may take before it is killed, in ms. */
+const ONE_SHOT_TIMEOUT_MS = 60_000;
+
 /** Every server `LintEnv.server` started in this test file; closed when it ends. */
 const servers: ReturnType<typeof startServer>[] = [];
 afterAll(async () => {
@@ -156,7 +159,9 @@ export function makeEnv(): LintEnv {
         const r = spawnSync(process.execPath, [WATCH], { input: JSON.stringify(p), env: env.childEnv(opts), encoding: "utf8" });
         return { status: r.status, stderr: r.stderr, stdout: r.stdout, result: {}, ctx: "" };
       }
-      const r = spawnSync(process.execPath, [CALL, SERVER], { input: JSON.stringify(p), env: env.childEnv(opts), encoding: "utf8" });
+      // a stalled driver must not block the worker: past the deadline it is killed (its server ends with the closed stdin) and the test fails loudly
+      const r = spawnSync(process.execPath, [CALL, SERVER], { input: JSON.stringify(p), env: env.childEnv(opts), encoding: "utf8", timeout: ONE_SHOT_TIMEOUT_MS, killSignal: "SIGKILL" });
+      if (r.error) throw new Error(`one-shot driver for ${String(ev)} did not finish in ${ONE_SHOT_TIMEOUT_MS} ms: ${r.error.message}\n${r.stderr}`);
       const out = JSON.parse(r.stdout || "{\"text\":\"\",\"stderr\":\"\"}") as { text: string; stderr: string };
       const ctx = out.text.trim();
       return { status: ctx ? 2 : r.status, stderr: out.stderr + r.stderr, stdout: "", result: ctx ? { rewake: ctx } : {}, ctx };

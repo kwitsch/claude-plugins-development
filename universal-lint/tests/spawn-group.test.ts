@@ -104,7 +104,7 @@ test("server: SIGTERM to the server kills its live linter groups before it exits
   const f = e.file("a.sh", "#!/bin/sh\necho hi\n");
   const srv = e.server();
   // not awaited: the call never answers once the server is killed
-  void srv.call("file_edited", { ...(JSON.parse(payload(f, e.cwd)) as Record<string, unknown>), session_id: "s1", key: await srv.key("s1") });
+  void srv.call("file_edited", { ...(JSON.parse(payload(f, e.cwd)) as Record<string, unknown>), session_id: "s1", key: await srv.key("s1") }).catch(() => undefined); // the test SIGTERMs the server: this call is never answered
   const until = Date.now() + 5000;
   while (!existsSync(pidfile) || readFileSync(pidfile, "utf8").trim() === "") {
     assert.ok(Date.now() < until, "the shellcheck stub never started");

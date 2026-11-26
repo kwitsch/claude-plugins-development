@@ -237,9 +237,9 @@ export interface PostToolUseHookInput {
   [key: string]: unknown;
 }
 
-/** The hook's stdout JSON, empty when there is nothing to report. */
+/** The handlers' result, empty when there is nothing to report. */
 export interface HookResult {
-  /** Findings, delivered to Claude as context on the next turn. */
+  /** The internal carrier of the findings text; how and when it reaches Claude is the caller's delivery (`context`, a stop block or a prompt context). */
   hookSpecificOutput?: { hookEventName: string; additionalContext: string };
 }
 
@@ -750,6 +750,21 @@ export function runInCall<T>(signal: AbortSignal, fn: () => Promise<T>): Promise
   probeCache.clear();
   dirEntries.clear();
   return callCtx.run({ t0: performance.now(), signal }, fn);
+}
+
+/** Abort reason of a call its client cancelled (or that was dropped because the server closes); any other reason is the call's own deadline. */
+export const CANCELLED = "cancelled";
+
+/**
+ * Whether the current call was cancelled by its client: the work is dropped and the journal records it claimed stay
+ * for the next lint or the Stop sweep. A call that ran into its own deadline is not cancelled: a hanging file is not
+ * linted again for another full deadline at every stop.
+ *
+ * @returns True inside a call whose signal aborted with `CANCELLED`.
+ */
+export function callCancelled(): boolean {
+  const s = callCtx.getStore()?.signal;
+  return s?.aborted === true && s.reason === CANCELLED;
 }
 
 /**
@@ -2658,6 +2673,8 @@ export async function lintFileHandler(args: PostToolUseHookInput, scoped: { fp: 
     const t0 = journalTail(rec);
     // `await` inside the try is load-bearing: a rejected promise must land in the catch (fail open).
     const kept = await lintResolved(resolved, args.cwd, odd ? null : pendingUnion(rec, owner, d0, ranges), "PostToolUse");
+    // a client cancel killed the linter: its (empty) result covers nothing, so the record stays for the Stop sweep
+    if (callCancelled()) return {};
     // a record journaled during the lint (A->B->A) counts as a change
     const d1 = journalTail(rec) === t0 ? digestOrNull(resolved) : null;
     if (kept.length === 0) settleClean(rec, owner, d0 !== null && d0 === d1);
@@ -2701,7 +2718,7 @@ export async function sweepHandler(args: PostToolUseHookInput): Promise<HookResu
     let next = 0;
     /** One lane of the pool: takes the next file until none is left. */
     const lane = async (): Promise<void> => {
-      while (next < files.length) {
+      while (next < files.length && !callCancelled()) {
         const i = next++;
         try {
           found[i] = await sweepFile(files[i], args);
@@ -2711,6 +2728,8 @@ export async function sweepHandler(args: PostToolUseHookInput): Promise<HookResu
       }
     };
     await Promise.all(Array.from({ length: Math.min(FILE_CHANGED_SLOTS, files.length) }, lane));
+    // cancelled by the client: nothing is reported or blocked (sweepFile put the claimed records back), the next stop sweeps them
+    if (callCancelled()) return {};
     const out = formatFindings(found.flat(), ev, "universal-lint");
     if (out.hookSpecificOutput) markBlocked(owner);
     return out;
@@ -2755,7 +2774,13 @@ async function sweepFile(names: readonly string[], args: PostToolUseHookInput): 
   } catch {
     // malformed hunks: the whole file
   }
-  return lintResolved(s.fp, last.cwd, ranges, "PostToolUse");
+  const found = await lintResolved(s.fp, last.cwd, ranges, "PostToolUse");
+  // cancelled by the client while the linter ran: the claim is released (the records go back), the next stop lints the file
+  if (callCancelled()) {
+    for (let i = 0; i < names.length; i++) journal.set(names[i], recs[i]);
+    return [];
+  }
+  return found;
 }
 
 /**
@@ -3068,6 +3093,8 @@ export async function fileChangedHandler(args: PostToolUseHookInput): Promise<Ho
       d0 = digestOrNull(s.fp);
       const t0 = journalTail(rec);
       kept = await lintResolved(s.fp, cwd, null, "FileChanged", typeof args.session_id === "string" ? args.session_id : "");
+      // a client cancel killed the linter: its record stays for the Stop sweep
+      if (callCancelled()) return {};
       // a record journaled during the lint (A->B->A) counts as a change
       if (journalTail(rec) === t0) d1 = digestOrNull(s.fp);
       if (kept.length === 0) settleClean(rec, owner, d0 !== null && d0 === d1);

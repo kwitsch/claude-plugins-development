@@ -6,9 +6,13 @@ import path from "node:path";
 import { test } from "vitest";
 import { MOD, PLUGIN, SERVER, WATCH } from "./support/lint-hook.ts";
 
+/** A JSON file of the built plugin, parsed (path relative to `plugin/`). */
 const json = (rel: string) => JSON.parse(readFileSync(path.join(PLUGIN, rel), "utf8"));
+/** The built `hooks/hooks.json`. */
 const hooks = () => json("hooks/hooks.json");
+/** The server name an `mcp_tool` hook of this plugin names. */
 const LINT = "plugin:universal-lint:lint";
+/** The input of the two Stop events (Stop and SubagentStop): both pass exactly these fields, so one pin serves both. */
 const STOP_INPUT = { hook_event_name: "${hook_event_name}", cwd: "${cwd}", session_id: "${session_id}", agent_id: "${agent_id}", scratchpad_dir: "${scratchpad_dir}", stop_hook_active: "${stop_hook_active}" };
 
 test("plugin.json has no userConfig (deliberate, see CLAUDE.md)", () => assert.ok(!("userConfig" in json(".claude-plugin/plugin.json"))));
@@ -37,7 +41,7 @@ for (
   });
 }
 
-test(".mcp.json starts the lint server", () => assert.deepEqual(Object.keys(json(".mcp.json").mcpServers), ["lint"]));
+test(".mcp.json starts the lint server with node and the built server.mjs", () => assert.deepEqual(json(".mcp.json").mcpServers, { lint: { command: "node", args: ["${CLAUDE_PLUGIN_ROOT}/mcp/server.mjs"] } }));
 
 for (const [name, file] of [["watch-paths.mjs", WATCH], ["mcp/server.mjs", SERVER]] as const) {
   test(`${name} is executable and has a node shebang`, () => {
@@ -76,4 +80,4 @@ test("plugin README first ## heading is Install, with the install command and no
   assert.doesNotMatch(readme, /^## Hooks/m);
 });
 
-test("server.mjs holds no blocking wait", () => assert.doesNotMatch(readFileSync(SERVER, "utf8"), /Atomics\.wait/));
+test("server.mjs holds no blocking wait or synchronous spawn (Atomics.wait, spawnSync, execFileSync)", () => assert.doesNotMatch(readFileSync(SERVER, "utf8"), /Atomics\.wait|\bspawnSync\b|\bexecFileSync\b/));

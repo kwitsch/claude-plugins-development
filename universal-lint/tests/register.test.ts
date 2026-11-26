@@ -4,11 +4,23 @@ import assert from "node:assert/strict";
 import { WAKE_TEXT } from "../src/hooks/register.ts";
 
 const { test, mock } = createKit({ module: new URL("../src/hooks/register.ts", import.meta.url), plugin: "universal-lint" });
+/** The test's `on`, taken from the kit's own types. */
 type On = Parameters<typeof mock.clock>[0];
+/** One `$.mcp.call` the mod made: the server name, the tool and its arguments. */
 type McpCall = { server: string; tool: string; args: Record<string, unknown> };
-type Options = { entrypoint?: string | Error; answer?: (c: McpCall, n: number) => unknown; toolResult?: unknown };
+/** What a test changes in the fake world. */
+type Options = {
+  /** The `CLAUDE_CODE_ENTRYPOINT` `$.env.get` answers; an `Error` denies the call. */
+  entrypoint?: string | Error;
+  /** The JSON a tool call answers, given the call and its index (1-based); it may return a promise that resolves to the reply, and returning an `Error` denies the call. */
+  answer?: (c: McpCall, n: number) => unknown;
+  /** The result the stubbed `tool.call` bottom answers instead of `RESULT`. */
+  toolResult?: unknown;
+};
 
+/** The full server name `$.mcp.connect` answers. */
 const SERVER = "plugin:universal-lint:lint";
+/** The stubbed Write/Edit result: a patch and the old content, as the engine's `tool.call` gives them. */
 const RESULT = { ref: "r", result: { structuredPatch: [{ newStart: 1, lines: ["+x"] }], originalFile: "old\n" }, text: "ok" };
 
 /** The default server: a key issue for an unkeyed call, `busy` for a keyed `next_report`, `{}` for a keyed `file_edited`. */
@@ -163,6 +175,7 @@ for (const row of arming) {
     await $.turn.complete(row.agentId === undefined ? {} : { agentId: row.agentId });
     await w.clock.settle();
     assert.equal(polls(w.calls).length, row.armed ? 1 : 0);
+    if (row.armed) assert.equal(polls(w.calls)[0]?.args.key, "K1", "the poll carries the session key");
   });
 }
 
@@ -172,6 +185,53 @@ const pollingServer = (states: string[]) => (c: McpCall): unknown => {
   if (c.tool !== "next_report" || c.args.wait_ms === 0) return { state: "busy" };
   return { state: states.shift() ?? "busy" };
 };
+
+test("a typed prompt before the first poll stops the wake loop", async ($, on) => {
+  const w = world(on, { answer: pollingServer(["ready"]) });
+  await $.session.start({});
+  await $.turn.complete({});
+  await $.prompt.submit({ text: "typed" }); // the loop is scheduled (clock.after(0)) but has not polled yet
+  await w.clock.settle();
+  assert.equal(polls(w.calls).length, 0);
+  assert.deepEqual(w.submitted.filter((t) => t === WAKE_TEXT), []);
+});
+
+test("a typed prompt while a poll is pending stops the loop after that poll, with no wake and no second poll", async ($, on) => {
+  let release: (v: unknown) => void = () => undefined;
+  const held = new Promise((resolve) => (release = resolve));
+  let first = true;
+  const w = world(on, {
+    answer: (c) => {
+      if (c.args.key === undefined) return { key: "K1", headless: false };
+      if (c.tool === "next_report" && c.args.wait_ms === undefined && first) {
+        first = false;
+        return held;
+      }
+      return { state: "ready" };
+    },
+  });
+  await $.session.start({});
+  await $.turn.complete({});
+  await w.clock.settle();
+  assert.equal(polls(w.calls).length, 1);
+  await $.prompt.submit({ text: "typed" });
+  release({ state: "timeout" }); // the poll ends as a timeout: without the prompt hook the loop would poll again and wake
+  await w.clock.settle();
+  assert.equal(polls(w.calls).length, 1);
+  assert.deepEqual(w.submitted.filter((t) => t === WAKE_TEXT), []);
+});
+
+test("the next main turn.complete after a typed prompt arms the wake again", async ($, on) => {
+  const w = world(on, { answer: pollingServer(["busy", "ready"]) });
+  await $.session.start({});
+  await $.turn.complete({});
+  await w.clock.settle();
+  await $.prompt.submit({ text: "typed" });
+  await $.turn.complete({});
+  await w.clock.settle();
+  assert.equal(polls(w.calls).length, 2);
+  assert.deepEqual(w.submitted.filter((t) => t === WAKE_TEXT), [WAKE_TEXT]);
+});
 
 test("ready submits WAKE_TEXT once and stops", async ($, on) => {
   const w = world(on, { answer: pollingServer(["ready"]) });

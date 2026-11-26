@@ -8,7 +8,7 @@ import { randomUUID } from "node:crypto";
 import { realpathSync, statSync } from "node:fs";
 import path from "node:path";
 import process from "node:process";
-import { capSet, editedHandler, fileChangedHandler, HOOK_TIMEOUT_MS, type HookResult, markBlocked, ownerOf, type PostToolUseHookInput, runInCall, settleWaitMs, stopAlreadyBlocked, sweepHandler, truncate } from "../hooks/lint-core.js";
+import { CANCELLED, capSet, editedHandler, fileChangedHandler, HOOK_TIMEOUT_MS, type HookResult, markBlocked, ownerOf, type PostToolUseHookInput, runInCall, settleWaitMs, stopAlreadyBlocked, sweepHandler, truncate } from "../hooks/lint-core.js";
 
 /** Longest hold of a keyed `next_report` (the mod's wake poll), in ms; a larger or missing `wait_ms` is clamped to it. */
 export const WAKE_WAIT_MS = 25_000;
@@ -165,8 +165,9 @@ export function createHandlers() {
    */
   function run(fn: () => Promise<HookResult>, signal?: AbortSignal): Promise<string | undefined> {
     const c = new AbortController();
-    const onAbort = (): void => c.abort();
-    const timer = setTimeout(onAbort, HOOK_TIMEOUT_MS);
+    // a client cancel keeps the journal records (`callCancelled`); the run's own deadline does not
+    const onAbort = (): void => c.abort(CANCELLED);
+    const timer = setTimeout(() => c.abort("deadline"), HOOK_TIMEOUT_MS);
     if (signal) signal.addEventListener("abort", onAbort, { once: true });
     else jobs.add(c);
     return runInCall(c.signal, fn).then((r) => r.hookSpecificOutput?.additionalContext).finally(() => {
@@ -263,6 +264,7 @@ export function createHandlers() {
       const owner = ownerOf(a);
       if (stopAlreadyBlocked(a)) return {};
       const swept = await run(() => sweepHandler(a), signal);
+      if (signal.aborted) return {}; // cancelled: nothing is drained or blocked, the records stay for the next stop
       const reason = [drain(owner), swept].filter(Boolean).join("\n\n");
       if (!reason) return {};
       markBlocked(owner);
@@ -313,7 +315,7 @@ export function createHandlers() {
 
   /** stdin closed: abort every detached run and release every waiter (over a copy: each waiter deletes itself). */
   function closeAll(): void {
-    for (const c of jobs) c.abort();
+    for (const c of jobs) c.abort(CANCELLED);
     for (const w of [...waiters.values()]) w({ state: "busy" });
   }
 

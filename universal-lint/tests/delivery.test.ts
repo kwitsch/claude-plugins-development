@@ -2,6 +2,7 @@
 import assert from "node:assert/strict";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
+import { setTimeout as sleep } from "node:timers/promises";
 import { expect, test } from "vitest";
 import { FILE_CHANGED_SLOTS } from "../src/hooks/lint-core.ts";
 import { type LintEnv, makeEnv } from "./support/lint-hook.ts";
@@ -29,7 +30,9 @@ function setup(env: Record<string, string> = {}) {
   const findings = path.join(path.dirname(e.record), "findings");
   writeFileSync(findings, "");
   // PATH holds no cat: print the file with bash builtins
-  e.stub("shellcheck", "echo run >> \"$RECORD\"", "if [ -s \"$FINDINGS\" ]; then printf '%s\\n' \"$(< \"$FINDINGS\")\"; exit 1; fi", "exit 0");
+  // `run` is logged at the start, `read` (in `$RECORD.read`) once the findings are captured: a test that changes the
+  // findings file waits for `read`, so the change cannot land before this run saw the old text
+  e.stub("shellcheck", "echo run >> \"$RECORD\"", "out=\"$(< \"$FINDINGS\")\"", "echo read >> \"$RECORD.read\"", "if [ -n \"$out\" ]; then printf '%s\\n' \"$out\"; exit 1; fi", "exit 0");
   const file = e.file("a.sh", SH4);
   const s = e.server({ env: { FINDINGS: findings, UNIVERSAL_LINT_SETTLE_MS: HOLD, CLAUDE_CODE_ENTRYPOINT: "cli", ...env } });
   const setFindings = (text: string): void => writeFileSync(findings, text);
@@ -58,6 +61,17 @@ const settled = <T>(p: Promise<T>): Promise<boolean> => Promise.race([p.then(() 
  */
 async function linted(e: LintEnv, runs = 1): Promise<void> {
   await expect.poll(() => e.lines().length, { interval: 20, timeout: 10_000 }).toBeGreaterThanOrEqual(runs);
+}
+
+/**
+ * Waits until the stub linter has captured its findings `runs` times (its `read` marker).
+ *
+ * @param e - The env.
+ * @param runs - How many runs.
+ */
+async function captured(e: LintEnv, runs = 1): Promise<void> {
+  const reads = (): number => (existsSync(`${e.record}.read`) ? readFileSync(`${e.record}.read`, "utf8").split("\n").filter(Boolean).length : 0);
+  await expect.poll(reads, { interval: 20, timeout: 10_000 }).toBeGreaterThanOrEqual(runs);
 }
 
 test("detached: file_edited answers at once, next_report wakes ready, the prompt carries the report exactly once", async () => {
@@ -111,7 +125,7 @@ test("hold and supersede: a clean later edit of the file during the hold drops t
   w.setFindings(FINDING_L2);
   const k = await w.s.key("s1");
   assert.deepEqual(await w.edit(k), {});
-  await linted(w.e);
+  await captured(w.e); // the first lint holds the finding before the file is fixed
   writeFileSync(w.file, SH4_FIXED);
   w.setFindings("");
   assert.deepEqual(await w.edit(k, { tool_input: { file_path: w.file, content: SH4_FIXED } }), {});
@@ -203,7 +217,7 @@ test("stdin close ends the server with a waiter and a detached lint pending, and
   const file = e.file("a.sh", SH4);
   const s = e.server({ env: { UNIVERSAL_LINT_SETTLE_MS: HOLD, CLAUDE_CODE_ENTRYPOINT: "cli" } });
   const k = await s.key("s1");
-  void s.call("next_report", { session_id: "s1", key: k, wait_ms: 25_000 });
+  void s.call("next_report", { session_id: "s1", key: k, wait_ms: 25_000 }).catch(() => undefined); // the server may exit before it answers this one
   assert.deepEqual(await s.call("file_edited", { cwd: e.cwd, session_id: "s1", tool_name: "Write", tool_input: { file_path: file, content: SH4 }, tool_response: {}, key: k }), {});
   await expect.poll(() => existsSync(pidfile) && readFileSync(pidfile, "utf8").trim() !== "", { interval: 50, timeout: 10_000 }).toBe(true);
   const pid = Number(readFileSync(pidfile, "utf8"));
@@ -228,6 +242,9 @@ test("a stop is answered while K FileChanged lints block and one more waits for 
   await linted(w.e, FILE_CHANGED_SLOTS);
   // a SubagentStop of an agent without records: the main Stop's sweep would lint the K pending files with the blocking stub
   assert.deepEqual(await w.stop({ hook_event_name: "SubagentStop", agent_id: "idle" }), {});
+  // the K+1th file was accepted (the stop above was answered after it) but waits for a slot: no linter run beyond the K blocked ones
+  await sleep(300);
+  assert.equal(w.e.lines().length, FILE_CHANGED_SLOTS);
   writeFileSync(rel, "");
   await linted(w.e, FILE_CHANGED_SLOTS + 1);
 });

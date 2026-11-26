@@ -90,10 +90,15 @@ function server(e: LintEnv, findings: string, ms: number, env: Record<string, st
     stop: (extra = {}) => srv.call("stop", { hook_event_name: "agent_id" in extra ? "SubagentStop" : "Stop", cwd: e.cwd, session_id: SESSION, stop_hook_active: false, ...extra }),
     state,
     async reports(holdMs) {
-      while ((await state(holdMs + 1500)) === "ready") {
+      // ends on `timeout` (nothing more is coming); `busy` or anything else is asked again (bounded), never taken for "done"
+      for (let round = 0; round < 20; round++) {
+        const s = await state(holdMs + 1500);
+        if (s === "timeout") break;
+        if (s !== "ready") continue;
         const a = await srv.call("prompt_submitted", { cwd: e.cwd, session_id: SESSION });
         const text = (a["hookSpecificOutput"] as { additionalContext?: string } | undefined)?.additionalContext;
-        if (text) got.push(text);
+        assert.ok(text, "a ready report must come out of prompt_submitted");
+        got.push(text);
       }
       return got.splice(0).join("\n\n");
     },
@@ -272,15 +277,19 @@ test("FileChanged journals a whole-file edit for a file changed outside Write/Ed
 
 test("a FileChanged lint does not hold its slot while the findings settle", async () => {
   const s = setup();
+  // the K further files' linters block after they started (until `release` exists), so no slot is free for a later one
+  // and "K lints started while the first finding is held" can only hold if the first lint gave its slot back
+  const release = path.join(path.dirname(s.e.record), "release");
+  s.e.stub("shellcheck", "echo run >> \"$RECORD\"", `case "$*" in */b[0-9]*.sh*) while [ ! -e "${release}" ]; do node -e "setTimeout(() => {}, 20)"; done;; esac`, "if [ -s \"$FINDINGS\" ]; then printf '%s\\n' \"$(< \"$FINDINGS\")\"; exit 1; fi", "exit 0");
   const srv = server(s.e, s.findings, 1500);
   s.setFindings(FINDING_L2);
   await srv.changed(changed(s.file, s.e.cwd));
   await intoHold(s.e);
-  // K further FileChanged lints all run while the first finding is held: had it kept its slot, one would wait for the hold's end
   const others = Array.from({ length: FILE_CHANGED_SLOTS }, (_, i) => s.e.file(`b${i}.sh`, "echo b\n"));
   for (const f of others) await srv.changed(changed(f, s.e.cwd));
   await expect.poll(() => s.e.lines().length, { interval: 20, timeout: 10_000 }).toBe(1 + FILE_CHANGED_SLOTS);
-  assert.notEqual(await srv.state(0), "ready", "all K lints ran before the first report was ready");
+  assert.notEqual(await srv.state(0), "ready", "all K lints started before the first report was ready");
+  writeFileSync(release, "");
   assert.match(await srv.reports(1500), /line2-marker/);
 });
 
@@ -397,16 +406,19 @@ test("an edit and its exact undo while a FileChanged lint runs (A->B->A): the la
 async function foreignBreakAboveFinding(kind: "write" | "changed"): Promise<void> {
   const s = setup();
   const srv = server(s.e, s.findings, 1500);
-  // patch lines: 1 `# x<U+2028>y`, 2 `echo $1`, 3 `echo b`; the linter counts U+2028 and reports `echo $1` on line 3
+  // patch lines: 1 `# x<U+2028>y`, 2 `echo $1`, 3 `echo b`, 4 `echo c`; the linter counts U+2028 and reports `echo $1` on line 3
   const A = "# x\u2028y\necho $1\necho b\necho c\n";
   writeFileSync(s.file, A);
   s.setFindings("a.sh:3:6: note: ls-marker [SC2086]\n");
-  if (kind === "write") await srv.edit(payload(s.file, s.e.cwd));
+  // "write": the held lint is an Edit of patch line 2 only (a Write or FileChanged record is whole-file anyway and would hide the guard);
+  // the finding sits on linter line 3, so with the patch's numbers it lies outside [2, 2] and outside the later edit's line 4
+  const first = { structuredPatch: [{ oldStart: 1, oldLines: 3, newStart: 1, newLines: 3, lines: [" # x\u2028y", "-echo $x", "+echo $1", " echo b"] }], originalFile: A.replace("echo $1", "echo $x") };
+  if (kind === "write") await srv.edit(payload(s.file, s.e.cwd, { toolName: "Edit", toolResponse: first }));
   else await srv.changed(changed(s.file, s.e.cwd));
   await intoHold(s.e);
-  // the later Edit rewrites patch line 3 (`echo b`), which the linter numbers 4: with the patch's numbers the finding would be gated away
-  writeFileSync(s.file, A.replace("echo b", "echo 'b'"));
-  const edit = { structuredPatch: [{ oldStart: 2, oldLines: 3, newStart: 2, newLines: 3, lines: [" echo $1", "-echo b", "+echo 'b'", " echo c"] }], originalFile: A };
+  // the later Edit rewrites patch line 4 (`echo c`), which the linter numbers 5
+  writeFileSync(s.file, A.replace("echo c", "echo 'c'"));
+  const edit = { structuredPatch: [{ oldStart: 2, oldLines: 3, newStart: 2, newLines: 3, lines: [" echo $1", " echo b", "-echo c", "+echo 'c'"] }], originalFile: A };
   await srv.edit(payload(s.file, s.e.cwd, { toolName: "Edit", toolResponse: edit }));
   await intoHold(s.e, 2);
   assert.equal(times(await srv.reports(1500), "ls-marker"), 1, "a file with such a line break is linted whole");
