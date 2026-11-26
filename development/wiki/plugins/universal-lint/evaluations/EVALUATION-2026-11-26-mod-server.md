@@ -41,6 +41,15 @@ Preparation for the question "should the lint logic move into an MCP server driv
 
 Warm RSS: 248-302 MB for the `tsc 7` watcher on the repository, 460-595 MB for the JS API. A watcher is no faster than the incremental spawn on the repository, so a persistent checker is not a reason for a server (the plugin already keeps its build info in the data dir).
 
+### Second probe round: `mcp_tool` hooks, command hooks, in-turn delivery (Claude Code 2.1.332, managed, same probe plus tool `hook` on the stub server)
+
+- **`mcp_tool` hooks block like exit 2 (live 2.1.332, headless).** A Stop `mcp_tool` hook whose result text is `{"decision":"block","reason":"…"}` made the stopping agent continue and act on the reason; the next Stop carried `stop_hook_active: true`. A SubagentStop `mcp_tool` hook did the same for the subagent (`agent_id` in the payload, second call `stop_hook_active: true`). Input templates used: `${stop_hook_active}`, `${agent_id}` (empty string in the main conversation), `${file_path}`, `${tool_input.file_path}`.
+- **FileChanged as `mcp_tool` hook works.** `watchPaths` came from a SessionStart _command_ hook (stdout JSON); the later change of the watched file reached the server's `file_changed`-style tool.
+- **Command hooks still run under the managed policy**: a Stop command hook exiting 2 once made the agent continue (`cmdstop`); SessionStart command hooks ran.
+- **In-turn delivery reaches the model from both routes**: the PostToolUse `mcp_tool` result `{"hookSpecificOutput":{"hookEventName":"PostToolUse","additionalContext":…}}` (record `hook_additional_context`, debug `provided additionalContext`) and a mod's `tool.call` result `context: [...]` added after `next` (record `hook_additional_context`); the model listed both markers.
+- **`default` permission mode** (interactive, `--allowedTools Write`): the out-of-frame `$.mcp.call` from a `$.clock.after` callback ran in 11 ms without a dialog; `$.prompt.submit` from a timer woke the idle session again (the model reads it as `Prompt from the probe plugin`).
+- **Not seen**: whether a SubagentStop `mcp_tool` block text reaches the _subagent_ as its own instruction (the subagent's second SubagentStop shows it continued); the `mcp_tool` hook `timeout` against a long lint.
+
 ## Bug hunt
 
 None run: the plugin code was not touched. Findings about the plugin itself: none. Findings about the wiki: `facts/mods-engine-io.md` says `$.mcp.connect` answers the server name; on 2.1.332 it answers `{ isConnected, server }` and `$.mcp.call` wants the `server` string (see Results).
