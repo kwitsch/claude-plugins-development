@@ -5,7 +5,7 @@
 // No wall-clock thresholds: the hold is far longer than any test (`HOLD_MS`) and `reports()` ends it by moving the
 // server's clock (`support/skew-clock.ts`), so a slow machine cannot end a hold before the test's later edit arrives.
 import assert from "node:assert/strict";
-import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
