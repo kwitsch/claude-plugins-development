@@ -8,7 +8,7 @@ import { randomUUID } from "node:crypto";
 import { realpathSync, statSync } from "node:fs";
 import path from "node:path";
 import process from "node:process";
-import { CANCELLED, capSet, editedHandler, fileChangedHandler, HOOK_TIMEOUT_MS, type HookResult, markBlocked, ownerOf, type PostToolUseHookInput, runInCall, settleWaitMs, stopAlreadyBlocked, sweepHandler, truncate } from "../hooks/lint-core.js";
+import { CANCELLED, capSet, editedHandler, fileChangedHandler, HOOK_TIMEOUT_MS, type HookResult, isHeadless, markBlocked, ownerOf, type PostToolUseHookInput, runInCall, settleWaitMs, stopAlreadyBlocked, sweepHandler, truncate } from "../hooks/lint-core.js";
 
 /** Longest hold of a keyed `next_report` (the mod's wake poll), in ms; a larger or missing `wait_ms` is clamped to it. */
 export const WAKE_WAIT_MS = 25_000;
@@ -42,12 +42,6 @@ export function createHandlers() {
   capSet(roots, process.cwd(), true);
   if (process.env.CLAUDE_PROJECT_DIR) capSet(roots, process.env.CLAUDE_PROJECT_DIR, true);
 
-  /**
-   * Whether the session runs headless (SDK, `claude -p`): no idle wake there.
-   *
-   * @returns True when `CLAUDE_CODE_ENTRYPOINT` starts with `sdk`.
-   */
-  const headless = (): boolean => process.env.CLAUDE_CODE_ENTRYPOINT?.startsWith("sdk") === true;
   /**
    * The main conversation's owner of a session.
    *
@@ -87,7 +81,7 @@ export function createHandlers() {
     if (known === undefined) {
       const key = randomUUID();
       capSet(keys, a.session_id, key);
-      return { key, headless: headless() };
+      return { key, headless: isHeadless() };
     }
     return a.key === known ? "ok" : "reject";
   }
@@ -178,6 +172,18 @@ export function createHandlers() {
   }
 
   /**
+   * Runs a lint and delivers its findings to `owner`: awaited by the call when there is no settle hold, else detached.
+   *
+   * @param owner - The owner the findings go to.
+   * @param fn - The lint-core handler run.
+   * @param signal - The tool call's abort signal (used only for the awaited run).
+   */
+  async function lintInto(owner: string, fn: () => Promise<HookResult>, signal: AbortSignal): Promise<void> {
+    if (inline()) deliver(owner, await run(fn, signal));
+    else void run(fn).then((t) => deliver(owner, t), () => {});
+  }
+
+  /**
    * The mod's Write/Edit call (keyed): lints the written file (a subagent's edit is only journaled) and answers the main
    * conversation's ready reports. With a settle hold the lint runs detached and delivers through the outbox later.
    *
@@ -197,8 +203,7 @@ export function createHandlers() {
       if (sp === undefined) Reflect.deleteProperty(a, "scratchpad_dir");
       else a.scratchpad_dir = sp;
       const owner = ownerOf(a);
-      if (inline()) deliver(owner, await run(() => editedHandler(a), signal));
-      else void run(() => editedHandler(a)).then((t) => deliver(owner, t), () => {});
+      await lintInto(owner, () => editedHandler(a), signal);
       const main = mainOwner(a.session_id);
       return a.agent_id === undefined && pending(main) ? { context: drain(main) } : {};
     } catch {
@@ -225,7 +230,7 @@ export function createHandlers() {
       if (pending(owner)) return { state: "ready" };
       const wait = Math.min(Math.max(typeof a.wait_ms === "number" && Number.isFinite(a.wait_ms) ? a.wait_ms : WAKE_WAIT_MS, 0), WAKE_WAIT_MS);
       if (wait === 0) return { state: "timeout" };
-      if (headless()) return { state: "busy" };
+      if (isHeadless()) return { state: "busy" };
       waiters.get(owner)?.({ state: "busy" });
       return await new Promise<Answer>((resolve) => {
         /**
@@ -287,8 +292,7 @@ export function createHandlers() {
       const a = normalise(raw);
       learn(a);
       const owner = mainOwner(a.session_id);
-      if (inline()) deliver(owner, await run(() => fileChangedHandler(a), signal));
-      else void run(() => fileChangedHandler(a)).then((t) => deliver(owner, t), () => {});
+      await lintInto(owner, () => fileChangedHandler(a), signal);
     } catch {
       // fail open
     }

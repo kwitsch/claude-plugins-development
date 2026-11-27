@@ -6,7 +6,7 @@ import path from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { test } from "vitest";
 import { spawnGroup } from "../src/hooks/lint-core.ts";
-import { makeEnv, payload } from "./support/lint-hook.ts";
+import { makeEnv, payload, waitGone } from "./support/lint-hook.ts";
 
 /**
  * Options as `buildSpawnOpts` builds them, with a test-chosen timeout (the F18 test seam).
@@ -17,26 +17,6 @@ import { makeEnv, payload } from "./support/lint-hook.ts";
  */
 function opts(cwd: string, timeout: number): SpawnSyncOptionsWithStringEncoding {
   return { cwd, timeout, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], maxBuffer: 10 * 1024 * 1024 };
-}
-
-/**
- * Poll `kill(pid, 0)` until it throws (ESRCH: the process is gone) or `ms` elapsed.
- *
- * @param pid - The pid to watch.
- * @param ms - How long to poll.
- * @returns True when the process is gone.
- */
-export async function waitGone(pid: number, ms: number): Promise<boolean> {
-  const until = Date.now() + ms;
-  for (;;) {
-    try {
-      process.kill(pid, 0);
-    } catch {
-      return true;
-    }
-    if (Date.now() >= until) return false;
-    await sleep(50);
-  }
 }
 
 /**

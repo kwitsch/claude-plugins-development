@@ -208,9 +208,10 @@ export const register = (on: On): void => {
     const r = await next(e);
     if (next.signal?.aborted || !r || r.deny !== undefined || r.isError) return r;
     try {
+      const [cwd, session_id] = await Promise.all([$.session.cwd(), $.session.id()]);
       const a = await call($, st, "file_edited", {
-        cwd: await $.session.cwd(),
-        session_id: await $.session.id(),
+        cwd,
+        session_id,
         agent_id: e.agentId,
         tool_name: e.tool,
         tool_input: { file_path: e.file_path, content: e.content },

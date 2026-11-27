@@ -4,6 +4,7 @@ import { spawnSync } from "node:child_process";
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { setTimeout as sleep } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 import { afterAll } from "vitest";
 import { startServer } from "./call-server.ts";
@@ -173,4 +174,24 @@ export function makeEnv(): LintEnv {
     },
   };
   return env;
+}
+
+/**
+ * Poll `kill(pid, 0)` until it throws (ESRCH: the process is gone) or `ms` elapsed.
+ *
+ * @param pid - The pid to watch.
+ * @param ms - How long to poll.
+ * @returns True when the process is gone.
+ */
+export async function waitGone(pid: number, ms: number): Promise<boolean> {
+  const until = Date.now() + ms;
+  for (;;) {
+    try {
+      process.kill(pid, 0);
+    } catch {
+      return true;
+    }
+    if (Date.now() >= until) return false;
+    await sleep(50);
+  }
 }

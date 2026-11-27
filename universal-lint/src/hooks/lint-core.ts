@@ -1973,6 +1973,15 @@ const SETTLE_POLL_MS = 250;
 const PENDING_TTL_MS = 24 * 60 * 60 * 1000;
 
 /**
+ * Whether this process runs under a headless Claude Code (SDK, `claude -p`): no hold and no idle wake there.
+ *
+ * @returns True when `CLAUDE_CODE_ENTRYPOINT` starts with `sdk`.
+ */
+export function isHeadless(): boolean {
+  return process.env.CLAUDE_CODE_ENTRYPOINT?.startsWith("sdk") === true;
+}
+
+/**
  * What is left of the hold for this process: the quiet time (`UNIVERSAL_LINT_SETTLE_MS`, a finite number >= 0; a test
  * and perf-harness seam, not a user setting; else `SETTLE_MS`) minus the time the agent has already been quiet, cut so
  * the hold ends at least 1 s before the 90 s hook backstop. In a headless run (`claude -p`: `CLAUDE_CODE_ENTRYPOINT`
@@ -1985,7 +1994,7 @@ const PENDING_TTL_MS = 24 * 60 * 60 * 1000;
 export function settleWaitMs(uptimeMs: number = elapsedMs(), idleMs = 0): number {
   const raw = process.env.UNIVERSAL_LINT_SETTLE_MS;
   const n = raw === undefined || raw.trim() === "" ? Number.NaN : Number(raw);
-  const base = Number.isFinite(n) && n >= 0 ? n : process.env.CLAUDE_CODE_ENTRYPOINT?.startsWith("sdk") ? 0 : SETTLE_MS;
+  const base = Number.isFinite(n) && n >= 0 ? n : isHeadless() ? 0 : SETTLE_MS;
   return Math.max(0, Math.min(base - idleMs, HOOK_TIMEOUT_MS - 1000 - uptimeMs));
 }
 

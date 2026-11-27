@@ -6,7 +6,7 @@ import path from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { test } from "vitest";
 import { FILE_CHANGED_SLOTS } from "../src/hooks/lint-core.ts";
-import { type LintEnv, makeEnv, PLUGIN, SERVER } from "./support/lint-hook.ts";
+import { type LintEnv, makeEnv, PLUGIN, SERVER, waitGone } from "./support/lint-hook.ts";
 
 /** `_meta` of a 2026-07-28-era request. */
 const MODERN = { _meta: { "io.modelcontextprotocol/protocolVersion": "2026-07-28" } };
@@ -31,26 +31,6 @@ function world(extraEnv: Record<string, string> = {}, e: LintEnv = makeEnv(), cw
   const stop = (over: Record<string, unknown> = {}) => s.call("stop", { hook_event_name: "Stop", cwd: e.cwd, session_id: "s1", agent_id: "", scratchpad_dir: "", stop_hook_active: "false", ...over });
   const changed = (f: string = file) => s.call("file_changed", { cwd: e.cwd, session_id: "s1", scratchpad_dir: "", file_path: f, event: "change" });
   return { e, file, s, edit, stop, changed };
-}
-
-/**
- * Polls until a process is gone.
- *
- * @param pid - The process.
- * @param ms - How long to wait.
- * @returns Whether it is gone within `ms`.
- */
-async function waitGone(pid: number, ms: number): Promise<boolean> {
-  const until = Date.now() + ms;
-  for (;;) {
-    try {
-      process.kill(pid, 0);
-    } catch {
-      return true;
-    }
-    if (Date.now() >= until) return false;
-    await sleep(50);
-  }
 }
 
 /**
