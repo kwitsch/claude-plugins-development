@@ -2,10 +2,13 @@
 // A test with a hold runs every call on a server with that hold (every lint is detached, reports arrive through the
 // outbox): "the later lint reports, the earlier one stays silent" is asserted as "the marker is delivered exactly once".
 // The old per-process wall times (a held process ended early, the hold restarted) have no equivalent on one server.
+// No wall-clock thresholds: the hold is far longer than any test (`HOLD_MS`) and `reports()` ends it by moving the
+// server's clock (`support/skew-clock.ts`), so a slow machine cannot end a hold before the test's later edit arrives.
 import assert from "node:assert/strict";
-import { rmSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
+import { fileURLToPath } from "node:url";
 import { expect, test } from "vitest";
 import { FILE_CHANGED_SLOTS } from "../src/hooks/lint-core.ts";
 import { type LintEnv, makeEnv, payload } from "./support/lint-hook.ts";
@@ -49,7 +52,7 @@ interface Srv {
   stop(extra?: Record<string, unknown>): Promise<StopAnswer>;
   /** The keyed `next_report` state after waiting up to `waitMs`. */
   state(waitMs: number): Promise<unknown>;
-  /** Every report delivered to the main conversation until none arrives for `holdMs` plus 1.5 s, joined; "" when none. */
+  /** Ends the hold by moving the server's clock, then every report delivered to the main conversation until none arrives for `holdMs` plus 1.5 s, joined; "" when none. */
   reports(holdMs: number): Promise<string>;
 }
 
@@ -64,17 +67,25 @@ function setup(): { e: LintEnv; file: string; findings: string; setFindings(text
   return { e, file, findings, setFindings: (text) => writeFileSync(findings, text) };
 }
 
+/** The quiet time of a held server: longer than any test runs (the server caps a hold at 89 s); `reports()` ends it by moving the server's clock. */
+const HOLD_MS = 60_000;
+
+/** The preload that lets a test move the server's `Date.now()`. */
+const SKEW_CLOCK = fileURLToPath(new URL("./support/skew-clock.ts", import.meta.url));
+
 /**
- * Start the test's server: hold `ms` (0 = every lint is awaited by its call), interactive (`cli`, so `next_report` waits).
+ * Start the test's server: held (any `ms` above 0; 0 = every lint is awaited by its call), interactive (`cli`, so `next_report` waits).
  *
  * @param e - Test environment.
  * @param findings - The stub's findings file ("" for a stub that ignores it).
- * @param ms - `UNIVERSAL_LINT_SETTLE_MS`.
+ * @param ms - 0 for no hold, else the server holds `HOLD_MS` of its (movable) clock.
  * @param env - Extra environment of the server (and so of every stub it runs).
  * @returns The server's helpers.
  */
 function server(e: LintEnv, findings: string, ms: number, env: Record<string, string> = {}): Srv {
-  const srv = e.server({ env: { FINDINGS: findings, UNIVERSAL_LINT_SETTLE_MS: String(ms), CLAUDE_CODE_ENTRYPOINT: "cli", ...env } });
+  const skewFile = path.join(path.dirname(e.record), "skew");
+  let skewed = 0;
+  const srv = e.server({ env: { FINDINGS: findings, UNIVERSAL_LINT_SETTLE_MS: String(ms === 0 ? 0 : HOLD_MS), CLAUDE_CODE_ENTRYPOINT: "cli", NODE_OPTIONS: `--import=${SKEW_CLOCK}`, SKEW_FILE: skewFile, ...env } });
   const got: string[] = [];
   let key: string | undefined;
   const k = async (): Promise<string> => (key ??= await srv.key(SESSION));
@@ -90,6 +101,9 @@ function server(e: LintEnv, findings: string, ms: number, env: Record<string, st
     stop: (extra = {}) => srv.call("stop", { hook_event_name: "agent_id" in extra ? "SubagentStop" : "Stop", cwd: e.cwd, session_id: SESSION, stop_hook_active: false, ...extra }),
     state,
     async reports(holdMs) {
+      // the quiet time is over for every held lint: the server's clock runs past it
+      skewed += HOLD_MS + 1000;
+      writeFileSync(skewFile, String(skewed));
       // ends on `timeout` (nothing more is coming); `busy` or anything else is asked again (bounded), never taken for "done"
       for (let round = 0; round < 20; round++) {
         const s = await state(holdMs + 1500);
@@ -361,28 +375,31 @@ test("a Write whose hook journals after a later Edit's hook: it reports the whol
 /** An edit and its exact undo while the linter of the first call (`kind`) runs; asserts the stale lint's line number is never reported. */
 async function editAndUndoDuringLint(kind: "write" | "changed"): Promise<void> {
   const e = makeEnv();
-  // stub shellcheck: log `run`; only its first run waits READ_DELAY, reads the file, logs `read <delay>` and waits
-  // POST_DELAY (the env is the server's, so it reaches every run); reports each `echo $1` line
+  // stub shellcheck: log `run`; only its first run waits for the file GO_READ, reads the file, logs `read` and waits for
+  // the file GO_POST (the env is the server's, so it reaches every run); reports each `echo $1` line. The test creates the
+  // two files, so the edits of the scenario land exactly between the linter's start, its read and its end.
   const js = path.join(path.dirname(e.record), "stub.mjs");
   writeFileSync(
     js,
     [
-      "import { appendFileSync, readFileSync } from 'node:fs';",
-      "const s = (ms) => new Promise((r) => setTimeout(r, Number(ms || 0)));",
+      "import { appendFileSync, existsSync, readFileSync } from 'node:fs';",
+      "const s = (ms) => new Promise((r) => setTimeout(r, ms));",
+      "const wait = async (p) => { while (!existsSync(p)) await s(20); };",
       "const f = process.argv.at(-1);",
       "appendFileSync(process.env.RECORD, 'run\\n');",
       "const first = readFileSync(process.env.RECORD, 'utf8').split('\\n').filter((l) => l === 'run').length === 1;",
-      "const delay = first ? process.env.READ_DELAY : 0;",
-      "await s(delay);",
+      "if (first) await wait(process.env.GO_READ);",
       "const lines = readFileSync(f, 'utf8').split('\\n');",
-      "appendFileSync(process.env.RECORD, `read ${delay ?? 0}\\n`);",
-      "await s(first ? process.env.POST_DELAY : 0);",
+      "appendFileSync(process.env.RECORD, 'read\\n');",
+      "if (first) await wait(process.env.GO_POST);",
       "const out = lines.flatMap((l, i) => (l.includes('echo $1') ? [`a.sh:${i + 1}:6: note: aba-marker [SC2086]`] : []));",
       "if (out.length) { console.log(out.join('\\n')); process.exit(1); }",
     ].join("\n"),
   );
   e.stub("shellcheck", `exec node "${js}" "$@"`);
-  const srv = server(e, "", 3000, { READ_DELAY: "1500", POST_DELAY: "2500" });
+  const goRead = path.join(path.dirname(e.record), "go-read");
+  const goPost = path.join(path.dirname(e.record), "go-post");
+  const srv = server(e, "", 3000, { GO_READ: goRead, GO_POST: goPost });
   const A = "echo a\necho $1\necho b\necho c\n";
   const B = `x\n${A}`;
   const file = e.file("a.sh", A);
@@ -393,10 +410,12 @@ async function editAndUndoDuringLint(kind: "write" | "changed"): Promise<void> {
   // B inserts a line at the top before the first linter reads
   writeFileSync(file, B);
   await srv.edit(edit([{ oldStart: 1, oldLines: 3, newStart: 1, newLines: 4, lines: ["+x", " echo a", " echo $1", " echo b"] }], A));
-  await expect.poll(() => e.lines().includes("read 1500"), { interval: 20, timeout: 10_000 }).toBe(true);
+  writeFileSync(goRead, "");
+  await expect.poll(() => e.lines().includes("read"), { interval: 20, timeout: 10_000 }).toBe(true);
   // C undoes B while the first linter still runs: the file is A again when that lint ends, but it read B
   writeFileSync(file, A);
   await srv.edit(edit([{ oldStart: 1, oldLines: 4, newStart: 1, newLines: 3, lines: ["-x", " echo a", " echo $1", " echo b"] }], B));
+  writeFileSync(goPost, "");
   const text = await srv.reports(3000);
   assert.equal(times(text, "a.sh:2:6: note: aba-marker"), 1, "the newest lint reports the finding at its line in A");
   assert.doesNotMatch(text, /a\.sh:3:6/, "a lint that saw the file change reports nothing: its line numbers are those of B");
