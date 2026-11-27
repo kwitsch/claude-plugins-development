@@ -56,7 +56,7 @@ type ToolEvent = {
   tool?: string;
   /** The path as the tool call gave it, absolute or relative to the agent's cwd. */
   file_path?: string;
-  /** The written text, present for Write only. */
+  /** The written text as the model gave it, present for Write only: a PreToolUse `updatedInput` rewrite (universal-format) comes after it, so it is not what landed (`ToolOutcome` has that). */
   content?: string;
   /** The calling subagent's id; absent in the main conversation. */
   agentId?: string;
@@ -64,8 +64,8 @@ type ToolEvent = {
 
 /** The `tool.call` result after `next`. */
 type ToolOutcome = {
-  /** The tool's own result: for Write and Edit the jsdiff `structuredPatch` array and the `originalFile` text before the change. */
-  result?: { structuredPatch?: unknown; originalFile?: unknown };
+  /** The tool's own result: for Write and Edit the jsdiff `structuredPatch` array and the `originalFile` text before the change, for Write also the `content` that landed (after any PreToolUse `updatedInput` rewrite or permission-dialog edit; live 2.1.332). */
+  result?: { structuredPatch?: unknown; originalFile?: unknown; content?: unknown };
   /** Extra text for the model that rides on the tool result; this mod appends the findings here. */
   context?: string[];
   /** Set when a hook above refused the call. */
@@ -96,12 +96,17 @@ type On = {
   (event: "session.start" | "session.end" | "turn.complete" | "prompt.submit", hook: Hook<{ agentId?: string }, unknown>): void;
 };
 
+/** Most session ids whose key the mod remembers; past it the oldest is dropped (that session would not get its key back). */
+const MAX_KEYS = 50;
+
 /** Mod state of one plugin load (it spans `/clear`: the server process and its session keys outlive a session id). */
 type State = {
   /** The full server name after the first connect; cleared after a failed call so the next call connects again. */
   server: string | undefined;
-  /** The session key the server issued; sent with every call after the first. */
-  key: string | undefined;
+  /** The session key the server issued, per session id: the server keys each id once, and the process can come back to an id it keyed before. */
+  keys: Map<string, string>;
+  /** The call that is fetching the key of a session id; overlapping calls of that session wait for it (see `call`). */
+  shakes: Map<string, Promise<unknown>>;
   /** Whether the session is headless (`claude -p`): `true` or `false` once a source answered, `undefined` while unknown. Only `false` arms the idle wake. */
   headless: boolean | undefined;
   /** Generation of the idle window: bumped by `session.start`, `session.end` and every typed prompt, so a wake loop of an older window stops. */
@@ -123,24 +128,24 @@ type Answer = {
 };
 
 /**
- * One tool call with the current key; connects lazily.
+ * One tool call with the key of the call's session id (none yet: unkeyed); connects lazily.
  *
  * @param $ - The engine.
  * @param st - The mod state.
  * @param tool - The server tool.
- * @param args - The tool arguments without the key.
+ * @param args - The tool arguments without the key; `session_id` names the session.
  * @returns The parsed answer; throws on a missing answer or `isError`.
  */
 async function callOnce($: Engine, st: State, tool: string, args: Record<string, unknown>): Promise<Answer | undefined> {
   st.server ??= (await $.mcp.connect("lint")).server;
-  const r = await $.mcp.call(st.server, tool, { ...args, key: st.key });
+  const r = await $.mcp.call(st.server, tool, { ...args, key: st.keys.get(String(args.session_id)) });
   const text = r?.content?.[0]?.text;
   if (r?.isError || typeof text !== "string") throw new Error("no answer");
   return JSON.parse(text) as Answer;
 }
 
 /**
- * One keyed tool call; a key-issue answer is stored and the call repeated once (a second key issue gives `undefined`).
+ * One keyed tool call; a key-issue answer is stored for the call's session id and the call repeated once (a second key issue gives `undefined`).
  *
  * @param $ - The engine.
  * @param st - The mod state.
@@ -148,12 +153,19 @@ async function callOnce($: Engine, st: State, tool: string, args: Record<string,
  * @param args - The tool arguments without the key.
  * @returns The answer, or `undefined` on any error (the server name is then cleared, so the next call reconnects).
  */
-async function call($: Engine, st: State, tool: string, args: Record<string, unknown>): Promise<Answer | undefined> {
+async function callKeyed($: Engine, st: State, tool: string, args: Record<string, unknown>): Promise<Answer | undefined> {
+  const sid = String(args.session_id);
   try {
     for (let round = 0; round < 2; round++) {
       const a = await callOnce($, st, tool, args);
       if (typeof a?.key !== "string") return a;
-      st.key = a.key;
+      // the newest entry; past `MAX_KEYS` ids the oldest goes
+      st.keys.delete(sid);
+      st.keys.set(sid, a.key);
+      for (const old of st.keys.keys()) {
+        if (st.keys.size <= MAX_KEYS) break;
+        st.keys.delete(old);
+      }
       // the server's view: `true` always wins, `false` only fills an unknown
       if (a.headless === true) st.headless = true;
       else if (st.headless === undefined && a.headless === false) st.headless = false;
@@ -166,13 +178,35 @@ async function call($: Engine, st: State, tool: string, args: Record<string, unk
 }
 
 /**
+ * One tool call of the mod's session. The server issues a session id's key to its first call and answers every other
+ * call without that key neutrally (`{}`, `busy`), which reads as 'nothing to report': overlapping calls of a session
+ * the mod has no key for therefore take turns, the first fetches the key and the others wait for it.
+ *
+ * @param $ - The engine.
+ * @param st - The mod state.
+ * @param tool - The server tool.
+ * @param args - The tool arguments without the key; `session_id` names the session.
+ * @returns The answer, or `undefined` on any error.
+ */
+async function call($: Engine, st: State, tool: string, args: Record<string, unknown>): Promise<Answer | undefined> {
+  const sid = String(args.session_id);
+  for (let first = st.shakes.get(sid); first && !st.keys.has(sid); first = st.shakes.get(sid)) await first;
+  const run = callKeyed($, st, tool, args);
+  if (!st.keys.has(sid)) {
+    st.shakes.set(sid, run);
+    void run.finally(() => st.shakes.get(sid) === run && st.shakes.delete(sid));
+  }
+  return run;
+}
+
+/**
  * Module entry point called by the engine.
  *
  * @param on - Registers a hook for an event.
  */
 export const register = (on: On): void => {
   // State lives here, not at module level: the test kit reloads only this entry.
-  const st: State = { server: undefined, key: undefined, headless: undefined, gen: 0, waiting: false };
+  const st: State = { server: undefined, keys: new Map(), shakes: new Map(), headless: undefined, gen: 0, waiting: false };
   on("session.start", async function onSessionStart($, e, next) {
     st.gen++;
     st.waiting = false;
@@ -214,7 +248,8 @@ export const register = (on: On): void => {
         session_id,
         agent_id: e.agentId,
         tool_name: e.tool,
-        tool_input: { file_path: e.file_path, content: e.content },
+        // the text that landed: `e.content` is the model's, before a PreToolUse rewrite, so its digest would not match the disk and the Write's own FileChanged echo would be linted again
+        tool_input: { file_path: e.file_path, content: typeof r.result?.content === "string" ? r.result.content : e.content },
         tool_response: { structuredPatch: r.result?.structuredPatch, originalFile: r.result?.originalFile },
       });
       if (typeof a?.context === "string" && a.context !== "" && !next.signal?.aborted) return { ...r, context: [...(r.context ?? []), a.context] };

@@ -18,8 +18,10 @@ function start() {
   const answers: Msg[] = [];
   let stderr = "";
   let buf = "";
-  child.stdout.on("data", (d: Buffer) => {
-    buf += d.toString();
+  // decoded by the stream, not per chunk: a multibyte character can straddle two pipe chunks
+  child.stdout.setEncoding("utf8");
+  child.stdout.on("data", (d: string) => {
+    buf += d;
     for (let i = buf.indexOf("\n"); i >= 0; i = buf.indexOf("\n")) {
       answers.push(JSON.parse(buf.slice(0, i)) as Msg);
       buf = buf.slice(i + 1);
@@ -186,6 +188,17 @@ test("a raw U+2028 or U+2029 inside a JSON string is no line break: the request 
   assert.equal(await s.end(), 0);
   assert.deepEqual((s.answers().find((a) => a.id === 1)?.result?.["structuredContent"]), { echo: { text: "a b c" } });
   assert.deepEqual(s.answers().find((a) => a.id === 2)?.result, {});
+});
+
+test("a message far larger than a pipe chunk is answered whole, and so is the CRLF-terminated request behind it", async () => {
+  const s = start();
+  // multibyte text: the 64 KiB pipe chunks end inside characters and inside the one line, which is joined once
+  const text = "é".repeat(1_000_000);
+  s.raw(JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "echo", arguments: { text } } }));
+  s.raw(JSON.stringify({ jsonrpc: "2.0", id: 2, method: "ping" }) + "\r");
+  assert.deepEqual((await s.answer(1)).result?.["structuredContent"], { echo: { text } });
+  assert.deepEqual((await s.answer(2)).result, {});
+  await s.end();
 });
 
 test("closing stdin runs onClose and exits 0", async () => {

@@ -29,11 +29,32 @@ function serverAnswer(c: McpCall): unknown {
   return c.tool === "next_report" ? { state: "busy" } : {};
 }
 
+/**
+ * The server's key gate (handlers.ts `gate`): the first call of a session id is issued its key, any other call without that
+ * key gets the neutral answer (`{}`, `busy`), a keyed call is answered with a finding naming the session and its key.
+ *
+ * @returns The `answer` option of `world`.
+ */
+function gateServer(): (c: McpCall) => unknown {
+  const keys = new Map<string, string>();
+  return (c) => {
+    const sid = String(c.args.session_id);
+    const known = keys.get(sid);
+    if (known === undefined) {
+      const key = `K${keys.size + 1}-${sid}`;
+      keys.set(sid, key);
+      return { key, headless: false };
+    }
+    if (c.args.key !== known) return c.tool === "next_report" ? { state: "busy" } : {};
+    return c.tool === "next_report" ? { state: "busy" } : { context: `FINDING ${sid} ${known}` };
+  };
+}
+
 /** Stubs every engine call of the mod; `answer(call, n)` gives the JSON a tool call answers (an Error denies it, a promise holds it). */
 function world(on: On, o: Options = {}) {
   const calls: McpCall[] = [];
   const submitted: string[] = [];
-  const state = { cwd: "/proj" };
+  const state = { cwd: "/proj", session: "S1" };
   const clock = mock.clock(on);
   on("mcp.connect", () => ({ value: { isConnected: true, server: SERVER } }));
   on("mcp.call", async (_$, e) => {
@@ -43,7 +64,7 @@ function world(on: On, o: Options = {}) {
     if (a instanceof Error) return { deny: a.message };
     return { value: { content: [{ type: "text", text: JSON.stringify(a) }] } };
   });
-  on("session.id", () => ({ value: "S1" }));
+  on("session.id", () => ({ value: state.session }));
   on("session.cwd", () => ({ value: state.cwd }));
   on("env.get", () => (o.entrypoint instanceof Error ? { deny: o.entrypoint.message } : { value: o.entrypoint ?? "cli" }));
   on("prompt.submit", (_$, e) => (submitted.push(String(e.text)), { value: undefined }));
@@ -122,6 +143,38 @@ test("file_edited payload follows the session cwd per edit", async ($, on) => {
   w.state.cwd = "/proj/.claude/worktrees/w1";
   await $.tool.call({ tool: "Edit", file_path: "/proj/.claude/worktrees/w1/a.sh", old_string: "a", new_string: "b" });
   assert.equal(w.calls.at(-1)?.args.cwd, "/proj/.claude/worktrees/w1");
+});
+
+/** One Write through the test's `$.tool.call`; the answer carries the `context` the mod appended. */
+const write = (call: (input?: Record<string, unknown>) => Promise<unknown>, file = "/proj/a.sh", content = "x") => call({ tool: "Write", file_path: file, content }) as Promise<{ context?: unknown }>;
+
+test("overlapping edits of a session the mod has no key for both reach the server with the issued key", async ($, on) => {
+  const w = world(on, { answer: gateServer() });
+  await $.session.start({}); // S1 is keyed
+  w.state.session = "S2"; // /clear: a new session id and no session.start
+  const [a, b] = await Promise.all([write($.tool.call, "/proj/a.sh"), write($.tool.call, "/proj/b.sh")]);
+  assert.deepEqual([a.context, b.context], [["FINDING S2 K2-S2"], ["FINDING S2 K2-S2"]]);
+});
+
+test("returning to a session id the server keyed before sends that session's own key", async ($, on) => {
+  const w = world(on, { answer: gateServer() });
+  await $.session.start({}); // S1: K1
+  w.state.session = "S2";
+  assert.deepEqual((await write($.tool.call)).context, ["FINDING S2 K2-S2"]);
+  w.state.session = "S1"; // an in-process /resume back to S1: no session.start
+  assert.deepEqual((await write($.tool.call)).context, ["FINDING S1 K1-S1"]);
+});
+
+test("a Write sends the text that landed (the result's content), not the model's text from before a PreToolUse rewrite", async ($, on) => {
+  const w = world(on, { toolResult: { ...RESULT, result: { ...RESULT.result, content: "REWRITTEN" } } });
+  await write($.tool.call, "/proj/a.sh", "ORIGINAL");
+  assert.deepEqual(w.calls.at(-1)?.args.tool_input, { file_path: "/proj/a.sh", content: "REWRITTEN" });
+});
+
+test("a Write whose result carries no content sends the model's text", async ($, on) => {
+  const w = world(on);
+  await write($.tool.call, "/proj/a.sh", "ORIGINAL");
+  assert.deepEqual(w.calls.at(-1)?.args.tool_input, { file_path: "/proj/a.sh", content: "ORIGINAL" });
 });
 
 test("agent_id is sent for a subagent's edit", async ($, on) => {

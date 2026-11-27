@@ -225,19 +225,24 @@ export function serveMcp(opts: ServeOptions): void {
     });
   };
   // Lines end at "\n" only (stdio framing): readline also breaks at U+2028/U+2029, which JSON carries raw inside strings.
-  let buf = "";
+  // Each chunk is searched alone and the unfinished line is kept as parts, joined once per line: searching or appending
+  // to one growing string copies all of it on every chunk (quadratic: about 3 s for a 20 MB message).
+  let parts: string[] = [];
   process.stdin.setEncoding("utf8");
   process.stdin.on("data", (chunk: string) => {
-    buf += chunk;
-    for (let i = buf.indexOf("\n"); i >= 0; i = buf.indexOf("\n")) {
-      const line = buf.slice(0, i);
-      buf = buf.slice(i + 1);
+    let rest = chunk;
+    for (let i = rest.indexOf("\n"); i >= 0; i = rest.indexOf("\n")) {
+      const line = parts.join("") + rest.slice(0, i);
+      parts = [];
+      rest = rest.slice(i + 1);
       onLine(line.endsWith("\r") ? line.slice(0, -1) : line);
     }
+    if (rest) parts.push(rest);
   });
   process.stdin.on("end", () => {
-    if (buf) onLine(buf);
-    buf = "";
+    const tail = parts.join("");
+    parts = [];
+    if (tail) onLine(tail);
     opts.onClose?.();
     process.exit(0);
   });
