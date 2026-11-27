@@ -5,6 +5,7 @@ import { readFileSync } from "node:fs";
 const { claudePlugin } = JSON.parse(readFileSync(new URL("package.json", import.meta.url), "utf8")) as { claudePlugin: PresetOptions["manifest"] };
 
 export default await pluginConfig({
+  hooksTemplate: "hooks.template.json",
   scripts: { bin: ["src/bin/ship-ensure-mergeable.ts"] },
   manifest: claudePlugin,
 });

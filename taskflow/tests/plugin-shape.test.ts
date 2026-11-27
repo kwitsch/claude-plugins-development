@@ -203,8 +203,8 @@ describe("manifest", () => {
     expect(manifest).not.toHaveProperty("userConfig");
   });
 
-  test("package.json and plugin.json versions agree and are 2.3.0", () => {
-    expect(pkg.version).toBe("2.3.0");
+  test("package.json and plugin.json versions agree and are 2.4.0", () => {
+    expect(pkg.version).toBe("2.4.0");
     expect(manifest.version).toBe(pkg.version);
   });
 
@@ -272,7 +272,7 @@ describe("build-task skill", () => {
   });
 
   test("build-task SKILL.md runs all seven scripts by scriptPath and sizes the task (jev-api or own reasoning)", () => {
-    expectHas(F, ["Never use `scriptPath`", "taskflow:build-task-<name>", "build-task-explore", "build-task-design", "build-task-spec", "args global is undefined", "select:mcp__jev-api__request", "S: a few lines in one place", "M: one component", "L: several functionalities, modules or subprojects", "XL: cross-cutting or architectural", "confidence >= 0.6", "explore-<slug>.md", "The skill never Reads these files", "EXPLORE_PATH", "SIZE", "build-task-plan", "build-task-implement", "build-task-review", "build-task-ship", "IMPLEMENT_PATH", "REVIEW_PATH", "PR_BODY_PATH", "implement-<slug>.json", "review-<slug>.json", "pr-body-<slug>.md", "Review level: <level> (size <X>)"]);
+    expectHas(F, ["Never use `scriptPath`", "taskflow:build-task-<name>", "build-task-explore", "build-task-design", "build-task-spec", "args global is undefined", "select:mcp__jev-api__request", "select:mcp__taskflow__size-task", "mcp__taskflow__size-task", "Size: <result>", "explore-<slug>.md", "The skill never Reads these files", "EXPLORE_PATH", "SIZE", "build-task-plan", "build-task-implement", "build-task-review", "build-task-ship", "IMPLEMENT_PATH", "REVIEW_PATH", "PR_BODY_PATH", "implement-<slug>.json", "review-<slug>.json", "pr-body-<slug>.md", "Review level: <level> (size <X>)"]);
     expectLacks(F, ["design-to-spec", "difficulty", "spec-driven-delivery", "SHIP: false", "invoke by name"]);
     expect((read(F).match(/\n/g) ?? []).length).toBeLessThan(500);
   });
