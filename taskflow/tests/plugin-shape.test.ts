@@ -611,6 +611,17 @@ describe("review-task skill", () => {
     expect(lines.length).toBeGreaterThan(0);
     for (const l of lines) expect(l).toMatch(/\bno\b/i);
   });
+
+  test("review-task takes --headless, strips it before --size and routes decisions through taskflow:decide", () => {
+    expect(read(F)).toMatch(/^argument-hint: "\[--headless\] \[--size=S\|M\|L\|XL\] \[base ref\]"$/m);
+    for (const t of ["AskUserQuestion", "Agent"]) expect(read(F)).toMatch(new RegExp(`^allowed-tools:.*"${t}"`, "m"));
+    expectHas(F, ["## Decisions", "Skill(skill: \"taskflow:decide\", args: \"[--headless] <JSON>\")", "`DECISIONS:`", "never call `AskUserQuestion` directly", "`Decided ...`"]);
+    const strip = read(F).indexOf("Strip `--headless` first");
+    expect(strip).toBeGreaterThan(-1);
+    expect(strip).toBeLessThan(read(F).indexOf("then the `--size=<v>` token"));
+    // AskUserQuestion survives only in allowed-tools and the never-call sentence
+    for (const l of read(F).split("\n").filter((x) => x.includes("AskUserQuestion"))) expect(l).toMatch(/^allowed-tools:|never call `AskUserQuestion` directly/);
+  });
 });
 
 describe("decide skill", () => {
