@@ -22,9 +22,19 @@ test("hooks.json lists the mod and exactly six events, none of them a tool hook"
   assert.deepEqual(Object.keys(hooks().hooks).sort(), ["CwdChanged", "FileChanged", "SessionStart", "Stop", "SubagentStop", "UserPromptSubmit"]);
 });
 
-for (const ev of ["SessionStart", "CwdChanged"]) {
-  test(`${ev}: exactly one command hook, watch-paths.mjs, timeout 30`, () => {
-    assert.deepEqual(hooks().hooks[ev], [{ hooks: [{ type: "command", command: "node", args: ["${CLAUDE_PLUGIN_ROOT}/hooks/watch-paths.mjs"], timeout: 30 }] }]);
+/** The spinner text of each hook (`statusMessage`): English, names the plugin and what the hook does. */
+const STATUS = {
+  SessionStart: "universal-lint: reading the file watch list",
+  CwdChanged: "universal-lint: updating the file watch list",
+  UserPromptSubmit: "universal-lint: collecting lint reports",
+  FileChanged: "universal-lint: linting the changed file",
+  Stop: "universal-lint: linting this turn's edits",
+  SubagentStop: "universal-lint: linting the subagent's edits",
+} as const;
+
+for (const ev of ["SessionStart", "CwdChanged"] as const) {
+  test(`${ev}: exactly one command hook, watch-paths.mjs, timeout 30, status message`, () => {
+    assert.deepEqual(hooks().hooks[ev], [{ hooks: [{ type: "command", statusMessage: STATUS[ev], command: "node", args: ["${CLAUDE_PLUGIN_ROOT}/hooks/watch-paths.mjs"], timeout: 30 }] }]);
   });
 }
 
@@ -36,8 +46,8 @@ for (
     ["SubagentStop", "stop", 100, STOP_INPUT],
   ] as const
 ) {
-  test(`${ev}: one mcp_tool hook, tool ${tool}, timeout ${timeout}, exact input`, () => {
-    assert.deepEqual(hooks().hooks[ev], [{ hooks: [{ type: "mcp_tool", server: LINT, tool, timeout, input }] }]);
+  test(`${ev}: one mcp_tool hook, tool ${tool}, timeout ${timeout}, exact input, status message`, () => {
+    assert.deepEqual(hooks().hooks[ev], [{ hooks: [{ type: "mcp_tool", statusMessage: STATUS[ev], server: LINT, tool, timeout, input }] }]);
   });
 }
 

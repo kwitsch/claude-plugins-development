@@ -6,6 +6,7 @@
         "hooks": [
           {
             "type": "command",
+            "statusMessage": "universal-lint: reading the file watch list",
             "command": "./src/hooks/watch-paths.ts",
             "timeout": 30
           }
@@ -17,6 +18,7 @@
         "hooks": [
           {
             "type": "command",
+            "statusMessage": "universal-lint: updating the file watch list",
             "command": "./src/hooks/watch-paths.ts",
             "timeout": 30
           }
@@ -28,6 +30,7 @@
         "hooks": [
           {
             "type": "mcp_tool",
+            "statusMessage": "universal-lint: collecting lint reports",
             "server": "plugin:universal-lint:lint",
             "tool": "prompt_submitted",
             "timeout": 10,
@@ -45,6 +48,7 @@
         "hooks": [
           {
             "type": "mcp_tool",
+            "statusMessage": "universal-lint: linting the changed file",
             "server": "plugin:universal-lint:lint",
             "tool": "file_changed",
             "timeout": 100,
@@ -64,6 +68,7 @@
         "hooks": [
           {
             "type": "mcp_tool",
+            "statusMessage": "universal-lint: linting this turn's edits",
             "server": "plugin:universal-lint:lint",
             "tool": "stop",
             "timeout": 100,
@@ -84,6 +89,7 @@
         "hooks": [
           {
             "type": "mcp_tool",
+            "statusMessage": "universal-lint: linting the subagent's edits",
             "server": "plugin:universal-lint:lint",
             "tool": "stop",
             "timeout": 100,
