@@ -3156,6 +3156,8 @@ export async function fileChangedHandler(args: PostToolUseHookInput): Promise<Ho
     const rec = recordEdit(s.fp, s.real, null, undefined, undefined, owner, null, cwd);
     const releaseGit = await admitGit();
     try {
+      // the permit may have been granted late: a call that was cancelled or ran into its deadline meanwhile spawns nothing (its record stays pending)
+      if (callCtx.getStore()?.signal.aborted) return {};
       const { stdout } = await execFileAsync("git", ["--no-optional-locks", "--literal-pathspecs", "status", "--porcelain", "--untracked-files=normal", "--ignored=matching", "--", s.real], {
         cwd: path.dirname(s.real), // git maps a lexical path through an in-repo symlinked dir to a path not in the index
         encoding: "utf8",

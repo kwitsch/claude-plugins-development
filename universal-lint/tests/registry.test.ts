@@ -1311,6 +1311,33 @@ test("recordWritten: a matching digest makes fileChangedHandler skip the file (i
   }
 });
 
+test("fileChangedHandler: a call that was aborted while it waited for a git permit spawns no git", async () => {
+  const e = makeEnv();
+  rmSync(path.join(e.bin, "git"), { force: true }); // the harness symlinks the real git: replace it by a recording stub
+  e.recStub("git", 0);
+  const fp = e.file("a.sh", "echo hi\n");
+  const keep = { PATH: process.env.PATH, RECORD: process.env.RECORD, UNIVERSAL_LINT_SETTLE_MS: process.env.UNIVERSAL_LINT_SETTLE_MS, CLAUDE_PLUGIN_DATA: process.env.CLAUDE_PLUGIN_DATA };
+  Object.assign(process.env, { PATH: e.bin, RECORD: e.record, UNIVERSAL_LINT_SETTLE_MS: "0", CLAUDE_PLUGIN_DATA: e.data });
+  const held: (() => void)[] = [];
+  try {
+    for (let i = 0; i < GIT_GATE_MAX; i++) held.push(await admitGit());
+    const args = { cwd: e.cwd, file_path: fp, event: "change", session_id: "gg1", hook_event_name: "FileChanged" } as unknown as Parameters<typeof fileChangedHandler>[0];
+    const ac = new AbortController();
+    const run = runInCall(ac.signal, () => fileChangedHandler(args));
+    await sleep(50); // the call waits for a permit
+    ac.abort("deadline");
+    held[0](); // the permit goes to the aborted call
+    assert.deepEqual(await run, {});
+    assert.deepEqual(e.lines(), [], "no git was spawned");
+  } finally {
+    for (const r of held.slice(1)) r();
+    for (const [k, v] of Object.entries(keep)) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
+  }
+});
+
 test("writtenContent: Write content; Edit hunks applied to originalFile (insertion, deletion, `\\ No newline`); null without them", () => {
   const edit = (originalFile: unknown, structuredPatch: unknown) => writtenContent({ tool_name: "Edit", tool_response: { originalFile, structuredPatch } } as HookInput);
   assert.equal(writtenContent({ tool_name: "Write", tool_input: { content: "x\n" } } as HookInput), "x\n");
