@@ -60,6 +60,20 @@ jobs:
           done
           exit $rc
 
+      # publish-shared.yml never overwrites a published version, so changed shared code needs a higher one
+      - name: Shared package version must be bumped
+        if: github.base_ref == 'main'
+        env:
+          BASE: ${{ github.base_ref }}
+        run: |
+          from=$(git merge-base "origin/$BASE" HEAD)
+          git diff --quiet "$from" HEAD -- development/shared/src development/shared/tsdown.config.ts && exit 0
+          v=$(jq -r .version development/shared/package.json)
+          old=$(git show "origin/$BASE:development/shared/package.json" | jq -r '.version // empty')
+          if [ -n "$old" ] && { [ "$v" = "$old" ] || ! printf '%s\n%s\n' "$old" "$v" | sort -V -C; }; then
+            echo "::error::development/shared changed but version $v is not higher than $old on $BASE"; exit 1
+          fi
+
       - uses: pnpm/action-setup@v6
       - uses: actions/setup-node@v7
         with:

@@ -30,23 +30,6 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: pnpm/action-setup@v6
-      # no setup-node registry option: the only registry credential is the user-level pnpm token of the publish step
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 26
-          cache: pnpm
-
-      - name: Install
-        run: pnpm install --frozen-lockfile
-
-      - name: Build
-        run: pnpm --filter "$PKG" build
-
-      # after the build: dist.test.ts skips itself without a built dist
-      - name: Test
-        run: pnpm --filter "$PKG" test
-
       # never overwrite: a version already in the registry ends the run with a notice (re-runs are idempotent)
       - name: Check version and registry
         id: published
@@ -69,6 +52,28 @@ jobs:
             *) echo "::error::$PKG: registry check answered HTTP $code"; exit 1 ;;
           esac
           echo "skip=false" >> "$GITHUB_OUTPUT"
+
+      - uses: pnpm/action-setup@v6
+        if: steps.published.outputs.skip != 'true'
+      # no setup-node registry option: the only registry credential is the user-level pnpm token of the publish step
+      - uses: actions/setup-node@v7
+        if: steps.published.outputs.skip != 'true'
+        with:
+          node-version: 26
+          cache: pnpm
+
+      - name: Install
+        if: steps.published.outputs.skip != 'true'
+        run: pnpm install --frozen-lockfile
+
+      - name: Build
+        if: steps.published.outputs.skip != 'true'
+        run: pnpm --filter "$PKG" build
+
+      # after the build: dist.test.ts skips itself without a built dist
+      - name: Test
+        if: steps.published.outputs.skip != 'true'
+        run: pnpm --filter "$PKG" test
 
       # pnpm 11 ignores credentials in a project .npmrc, so the token goes to the runner's user-level config
       - name: Publish

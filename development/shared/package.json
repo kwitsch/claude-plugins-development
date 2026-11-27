@@ -7,18 +7,24 @@
   "author": "Kwitsch",
   "type": "module",
   "exports": {
-    "./*": { "types": "./dist/*.d.mts", "default": "./dist/*.mjs" }
+    "./scope": { "types": "./dist/scope.d.mts", "default": "./dist/scope.mjs" },
+    "./mcp-core": { "types": "./dist/mcp-core.d.mts", "default": "./dist/mcp-core.mjs" },
+    "./graphmind-paths": { "types": "./dist/graphmind-paths.d.mts", "default": "./dist/graphmind-paths.mjs" }
   },
   "files": ["dist"],
   "scripts": {
     "build": "tsdown",
     "test": "vitest run --config \"$(git rev-parse --show-toplevel)/vitest.config.mts\""
   },
-  "dependencies": {
-    "@modelcontextprotocol/server": "2.4.0"
-  },
   "devDependencies": {
+    "@modelcontextprotocol/server": "2.4.0",
     "tsdown": "0.23.7"
+  },
+  "peerDependencies": {
+    "@modelcontextprotocol/server": "^2.4.0"
+  },
+  "peerDependenciesMeta": {
+    "@modelcontextprotocol/server": { "optional": true }
   },
   "publishConfig": { "registry": "https://npm.pkg.github.com" }
 }
