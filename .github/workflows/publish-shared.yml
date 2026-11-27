@@ -39,6 +39,10 @@ jobs:
       - name: Build
         run: pnpm --filter "$PKG" build
 
+      # dist.test.ts skips itself without a built dist, so the first Test step never checks it
+      - name: Test built dist
+        run: pnpm --filter "$PKG" test
+
       - name: Version must be X.Y.Z
         id: version
         run: |
