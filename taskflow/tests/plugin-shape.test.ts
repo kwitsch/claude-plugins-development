@@ -18,6 +18,8 @@ const SKILL = `${PLUGIN}/skills/build-task`;
 const DISPATCH = `${PLUGIN}/skills/dispatch-task`;
 /** The changes-audit skill. */
 const CHANGES_AUDIT = `${PLUGIN}/skills/changes-audit`;
+/** The review-task skill. */
+const REVIEW_TASK = `${PLUGIN}/skills/review-task`;
 /** build-task's seven usage docs. */
 const BT_WF = `${SKILL}/workflows`;
 /** The agent files. */
@@ -633,6 +635,40 @@ describe("changes-audit skill", () => {
 
   test("changes-audit SKILL.md never contains a load-time exclamation-backtick sequence", () => {
     expectLacks(F, ["!`"]);
+  });
+});
+
+describe("review-task skill", () => {
+  const F = `${REVIEW_TASK}/SKILL.md`;
+
+  test("review-task SKILL.md exists and is non-empty", () => {
+    expect(nonEmpty(F)).toBe(true);
+  });
+
+  test("review-task frontmatter: name, description, argument-hint; model-invocable; not forked", () => {
+    expect(read(F)).toMatch(/^name:[ \t]*review-task$/m);
+    expect(read(F)).toMatch(/^description:/m);
+    expect(read(F)).toMatch(/^argument-hint:/m);
+    expect(read(F)).not.toMatch(/^disable-model-invocation:[ \t]*true/m);
+    expect(read(F)).not.toMatch(/^context:[ \t]*fork/m);
+  });
+
+  test("review-task allowed-tools includes Bash, Skill and ToolSearch", () => {
+    for (const t of ["Bash", "Skill", "ToolSearch"]) expect(read(F)).toMatch(new RegExp(`^allowed-tools:.*"${t}"`, "m"));
+  });
+
+  test("review-task parses --size, sizes itself, maps size to level, runs simplify then code-review --fix and commits", () => {
+    expectHas(F, ["--size=", "mcp__taskflow__size-task", "own reasoning", "Review level: <level> (size <X>)", "`S` → `medium`, `M` → `high`, `L` → `xhigh`, `XL` → `max`", "\"simplify\"", "\"code-review\"", "--fix", "git status --porcelain", "git add -A"]);
+    const simplify = read(F).indexOf("skill: \"simplify\"");
+    expect(simplify).toBeGreaterThan(-1);
+    expect(simplify).toBeLessThan(read(F).indexOf("skill: \"code-review\""));
+  });
+
+  test("review-task SKILL.md has no load-time exclamation-backtick sequence and mentions Co-Authored-By only to forbid it", () => {
+    expectLacks(F, ["!`"]);
+    const lines = read(F).split("\n").filter((l) => l.includes("Co-Authored-By"));
+    expect(lines.length).toBeGreaterThan(0);
+    for (const l of lines) expect(l).toMatch(/\bno\b/i);
   });
 });
 
