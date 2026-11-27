@@ -1,0 +1,78 @@
+name: Publish shared
+
+# Publishes @kwitsch/claude-code-plugin-shared (development/shared) to GitHub Packages when its version is not there yet.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "development/shared/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    env:
+      PKG: "@kwitsch/claude-code-plugin-shared"
+      REGISTRY: https://npm.pkg.github.com
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: pnpm/action-setup@v6
+      # no setup-node registry option: the only registry credential is the user-level pnpm token of the publish step
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 26
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile --filter "@kwitsch/claude-code-plugin-shared..."
+
+      - name: Test
+        run: pnpm --filter "$PKG" test
+
+      - name: Build
+        run: pnpm --filter "$PKG" build
+
+      - name: Version must be X.Y.Z
+        id: version
+        run: |
+          v=$(jq -r .version development/shared/package.json)
+          if ! [[ "$v" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::$PKG: version '$v' must be X.Y.Z"; exit 1
+          fi
+          echo "v=$v" >> "$GITHUB_OUTPUT"
+
+      # never overwrite: a version already in the registry ends the run with a notice (re-runs are idempotent)
+      - name: Skip if already published
+        id: published
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          V: ${{ steps.version.outputs.v }}
+        run: |
+          code=$(curl -sS -o "$RUNNER_TEMP/meta.json" -w '%{http_code}' -H "Authorization: Bearer $GITHUB_TOKEN" "$REGISTRY/@kwitsch%2fclaude-code-plugin-shared")
+          case $code in
+            200)
+              if jq -e --arg v "$V" '.versions | has($v)' "$RUNNER_TEMP/meta.json" > /dev/null; then
+                echo "::notice::$PKG@$V already published"
+                echo "skip=true" >> "$GITHUB_OUTPUT"
+                exit 0
+              fi ;;
+            404) ;; # package does not exist yet
+            *) echo "::error::$PKG: registry check answered HTTP $code"; exit 1 ;;
+          esac
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+
+      # pnpm 11 ignores credentials in a project .npmrc, so the token goes to the runner's user-level config
+      - name: Publish
+        if: steps.published.outputs.skip != 'true'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          pnpm config set "//npm.pkg.github.com/:_authToken" "$GITHUB_TOKEN"
+          pnpm --filter "$PKG" publish --no-git-checks
