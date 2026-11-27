@@ -33,12 +33,15 @@ if (!system || !model) throw new Error("HAIKU_SYSTEM or HAIKU_MODEL not found in
  */
 function rebuild(options: string[], a: Record<string, unknown>): Record<string, unknown> | undefined {
   const probs = a["probabilities"] as Record<string, number> | undefined;
+  const conf = a["confidence"];
+  // jev-api's checkAnswer wants a confidence in 0..1 too
+  if (typeof conf !== "number" || !(conf >= 0 && conf <= 1)) return undefined;
   if (a["type"] !== "choice" || typeof a["choice"] !== "string" || !options.includes(a["choice"]) || !probs) return undefined;
   const raw = options.map((o) => probs[o]);
   if (raw.some((p) => typeof p !== "number" || !(p >= 0 && p <= 1))) return undefined;
   const sum = raw.reduce((t, p) => t + p, 0);
   if (!(sum > 0)) return undefined;
-  return { type: "choice", choice: a["choice"], confidence: a["confidence"], probabilities: Object.fromEntries(options.map((o, i) => [o, raw[i] / sum])) };
+  return { type: "choice", choice: a["choice"], confidence: conf, probabilities: Object.fromEntries(options.map((o, i) => [o, Math.round((raw[i] / sum) * 10000) / 10000])) };
 }
 
 async function one(variant: string, item: Item): Promise<void> {
