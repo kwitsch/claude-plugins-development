@@ -96,8 +96,8 @@ type On = {
   (event: "session.start" | "session.end" | "turn.complete" | "prompt.submit", hook: Hook<{ agentId?: string }, unknown>): void;
 };
 
-/** Most session ids whose key the mod remembers; past it the oldest is dropped (that session would not get its key back). */
-const MAX_KEYS = 50;
+/** Most session ids whose key the mod remembers; past it the oldest is dropped (that session would not get its key back). The server's `STATE_CAP` for its keys (a mod imports no lint-core): the mod must not forget a key before the server does. */
+const MAX_KEYS = 5000;
 
 /** Mod state of one plugin load (it spans `/clear`: the server process and its session keys outlive a session id). */
 type State = {

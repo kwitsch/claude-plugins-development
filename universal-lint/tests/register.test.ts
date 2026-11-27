@@ -167,6 +167,18 @@ test("a server respawn: overlapping edits with the stale key both end up linted,
   assert.equal(w.calls.filter((c) => c.tool === "file_edited" && c.args.key === "K1b-S1").length, 2);
 });
 
+test("the mod keeps the keys of 5000 session ids (the server's cap); the 5001st drops the oldest", async ($, on) => {
+  const w = world(on, { answer: gateServer() });
+  for (let i = 0; i < 5001; i++) {
+    w.state.session = `T${i}`;
+    await write($.tool.call);
+  }
+  w.state.session = "T1";
+  assert.deepEqual((await write($.tool.call)).context, ["FINDING T1 K2-T1"], "inside the cap: the key is still known");
+  w.state.session = "T0";
+  assert.equal((await write($.tool.call)).context, undefined, "the oldest id lost its key: the server's neutral answer");
+});
+
 test("returning to a session id the server keyed before sends that session's own key", async ($, on) => {
   const w = world(on, { answer: gateServer() });
   await $.session.start({}); // S1: K1
