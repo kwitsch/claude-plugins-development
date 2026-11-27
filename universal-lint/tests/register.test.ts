@@ -33,15 +33,16 @@ function serverAnswer(c: McpCall): unknown {
  * The server's key gate (handlers.ts `gate`): the first call of a session id is issued its key, any other call without that
  * key gets the neutral answer (`{}`, `busy`), a keyed call is answered with a finding naming the session and its key.
  *
+ * @param epoch - Text in every key it issues: a respawned server issues keys the old one did not.
  * @returns The `answer` option of `world`.
  */
-function gateServer(): (c: McpCall) => unknown {
+function gateServer(epoch = ""): (c: McpCall) => unknown {
   const keys = new Map<string, string>();
   return (c) => {
     const sid = String(c.args.session_id);
     const known = keys.get(sid);
     if (known === undefined) {
-      const key = `K${keys.size + 1}-${sid}`;
+      const key = `K${keys.size + 1}${epoch}-${sid}`;
       keys.set(sid, key);
       return { key, headless: false };
     }
@@ -154,6 +155,16 @@ test("overlapping edits of a session the mod has no key for both reach the serve
   w.state.session = "S2"; // /clear: a new session id and no session.start
   const [a, b] = await Promise.all([write($.tool.call, "/proj/a.sh"), write($.tool.call, "/proj/b.sh")]);
   assert.deepEqual([a.context, b.context], [["FINDING S2 K2-S2"], ["FINDING S2 K2-S2"]]);
+});
+
+test("a server respawn: overlapping edits with the stale key both end up linted, the rejected one is repeated with the new key", async ($, on) => {
+  let server = gateServer();
+  const w = world(on, { answer: (c) => server(c) });
+  await $.session.start({}); // S1: K1-S1
+  server = gateServer("b"); // the server process was replaced: it knows no key, the mod still holds K1-S1
+  const [a, b] = await Promise.all([write($.tool.call, "/proj/a.sh"), write($.tool.call, "/proj/b.sh")]);
+  assert.deepEqual([a.context, b.context], [["FINDING S1 K1b-S1"], ["FINDING S1 K1b-S1"]]);
+  assert.equal(w.calls.filter((c) => c.tool === "file_edited" && c.args.key === "K1b-S1").length, 2);
 });
 
 test("returning to a session id the server keyed before sends that session's own key", async ($, on) => {

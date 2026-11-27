@@ -145,7 +145,7 @@ async function callOnce($: Engine, st: State, tool: string, args: Record<string,
 }
 
 /**
- * One keyed tool call; a key-issue answer is stored for the call's session id and the call repeated once (a second key issue gives `undefined`).
+ * One keyed tool call; a key-issue answer is stored for the call's session id and the call repeated once (a second key issue gives `undefined`). A neutral answer to a call whose key is no longer the stored one (a parallel call fetched the new key meanwhile) repeats the call with the stored key, in the same two rounds.
  *
  * @param $ - The engine.
  * @param st - The mod state.
@@ -157,8 +157,13 @@ async function callKeyed($: Engine, st: State, tool: string, args: Record<string
   const sid = String(args.session_id);
   try {
     for (let round = 0; round < 2; round++) {
+      const sent = st.keys.get(sid);
       const a = await callOnce($, st, tool, args);
-      if (typeof a?.key !== "string") return a;
+      if (typeof a?.key !== "string") {
+        // a stale key (the server respawned): a parallel call may have fetched the new one meanwhile, this answer is only the neutral rejection
+        if (st.keys.get(sid) !== sent && st.keys.has(sid)) continue;
+        return a;
+      }
       // the newest entry; past `MAX_KEYS` ids the oldest goes
       st.keys.delete(sid);
       st.keys.set(sid, a.key);
