@@ -9,6 +9,7 @@ All plugins moved to the preset on 2026-11-24: [tsdown-plugin-build](../../../de
 - `overrides.alias` maps `@shared` to `development/shared/src`; the helper is inlined as before (measured 2026-11-22).
 - The package keeps its `claudePlugin` key: CI and tests find plugins by it.
 - The preset is installed from npmjs without a token or an `.npmrc` (0.1.2, exact). 0.1.0 was published to GitHub Packages only; the pilot first used it from there, which needed `read:packages` and a user-level `pnpm config set` token because pnpm 11 ignores credentials in a project `.npmrc` ("environment variables are not expanded in registry credentials from a project .npmrc"). The packages moved to npmjs with 0.1.1 (npm trusted publishing with provenance from 0.1.2), so those parts are gone again. `minimumReleaseAgeExclude: ["@kwitsch/*"]` stays for fresh releases (decided 2026-11-22).
+- Decided 2026-11-27 (user): the `@kwitsch` scope moves back to GitHub Packages (with the token setup described above), as part of publishing the shared code there: [shared-source-layer](../../../decisions/shared-source-layer.md).
 - Root `rolldown` went from 1.2.16 to 1.3.3 first, in its own pull request. Rebuilding all eight plugins with the old build changed only `universal-format` (vendor chunk file names), which got a patch bump (measured 2026-11-22).
 
 ## Output comparison (measured 2026-11-22, preset 0.1.0, rolldown 1.3.3, 0.2.4 against 0.2.5; rebuilt with 0.1.2 on 2026-11-22: no byte changes)
