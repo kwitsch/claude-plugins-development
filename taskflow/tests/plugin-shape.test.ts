@@ -1,4 +1,4 @@
-// Structural checks of the built taskflow plugin: manifest, the three skills, the six workflow scripts, the ten
+// Structural checks of the built taskflow plugin: manifest, the three skills, the six workflow scripts, the eleven
 // agents, the docs, plus the developer notes (taskflow/CLAUDE.md, taskflow/.claude/rules/) and .oxlintrc.json from
 // their source paths. Ported from the old bats suite; grep line matches become `m`-flag regexes over the whole text,
 // `[[:space:]]` becomes `[ \t]`. Shipped files are read from the built plugin/, so build before testing.
@@ -399,7 +399,7 @@ describe("agents", () => {
   test("every role file except pr-author requires an English final message", () => {
     const others = ls(AGENTS, ".md").filter((f) => f !== "pr-author.md");
     for (const f of others) expectHas(`${AGENTS}/${f}`, ["Write that final message in English, whatever the language of the task or its inputs; commit messages are not covered."]);
-    expect(others).toHaveLength(9);
+    expect(others).toHaveLength(10);
   });
 
   test("read-only-declared agents carry a least-privilege tools allowlist without Write/Edit", () => {
@@ -407,6 +407,12 @@ describe("agents", () => {
       expect(read(`${AGENTS}/${a}.md`)).toMatch(/^tools:/m);
       expect(read(`${AGENTS}/${a}.md`)).not.toMatch(/^tools:.*[ \t,[\]"'](Write|Edit)([ \t,[\]"']|$)/m);
     }
+  });
+
+  test("decider: opus at effort high, read-only Read/Grep/Glob, answers as a JSON array", () => {
+    const F = `${AGENTS}/decider.md`;
+    expectHas(F, ["name: decider", "description: INTERNAL ONLY", "model: opus", "effort: high", "tools: [\"Read\", \"Grep\", \"Glob\"]", "You are read-only: never use Write, Edit, NotebookEdit, or a Bash command that changes files or git state.", "\"answer\": \"<option text verbatim or free text>\""]);
+    expect(read(F)).not.toMatch(/^tools:.*(Write|Edit|Bash)/m);
   });
 
   test("worktree-merger checks the current branch before merging, not primary-vs-worktree", () => {
@@ -632,8 +638,8 @@ describe("ship merge-state remediation wiring", () => {
     expect(sweep(TREE, /pr_stale|pr_conflict/)).toEqual([]);
   });
 
-  test("the agent roster is exactly 10 *.md files", () => {
-    expect(ls(AGENTS, ".md")).toHaveLength(10);
+  test("the agent roster is exactly 11 *.md files", () => {
+    expect(ls(AGENTS, ".md")).toHaveLength(11);
   });
 
   test("plugin README and layout document the review-task skill", () => {
