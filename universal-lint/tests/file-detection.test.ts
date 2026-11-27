@@ -1,12 +1,12 @@
 // File detection: SessionStart/CwdChanged watch list (built watch-paths hook) and FileChanged linting (built server) in a real git repo.
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { expect, test } from "vitest";
 import { FILE_CHANGED_SLOTS } from "../src/hooks/lint-core.ts";
-import { makeEnv } from "./support/lint-hook.ts";
+import { makeEnv, WATCH } from "./support/lint-hook.ts";
 import type { LintEnv } from "./support/lint-hook.ts";
 
 /**
@@ -51,6 +51,24 @@ test("SessionStart: watchPaths = tracked + untracked lintable in-scope files onl
   assert.equal(out.hookSpecificOutput.hookEventName, "SessionStart");
   assert.equal(out.hookSpecificOutput.watchPaths.length, 2);
   assert.deepEqual(new Set(out.hookSpecificOutput.watchPaths), new Set([a, b]));
+});
+
+// F05: Claude Code writes the payload after it spawned the hook, so fd 0 is a non-blocking pipe and a synchronous read throws EAGAIN;
+// `runEvent` feeds the payload at spawn time (`spawnSync` input) and cannot show it
+test("SessionStart: a payload written 100 ms after the spawn (a late stdin writer, F05) still yields the watch list", async () => {
+  const e = makeEnv();
+  const a = e.file("a.sh", "echo a\n");
+  gitInit(e);
+  const stdout = await new Promise<string>((resolve, reject) => {
+    const child = spawn(process.execPath, [WATCH], { env: e.childEnv(), stdio: ["pipe", "pipe", "ignore"] });
+    let out = "";
+    child.stdout.setEncoding("utf8").on("data", (d: string) => (out += d));
+    child.on("error", reject);
+    child.on("close", () => resolve(out));
+    child.stdin.on("error", () => {}); // EPIPE when a broken hook exits before the write: the assertion reports it
+    setTimeout(() => child.stdin.end(JSON.stringify({ hook_event_name: "SessionStart", source: "startup", cwd: e.cwd })), 100);
+  });
+  assert.deepEqual((JSON.parse(stdout) as { hookSpecificOutput: { watchPaths: string[] } }).hookSpecificOutput.watchPaths, [a]);
 });
 
 test("SessionStart: a tracked file under a directory replaced by a symlink pointing outside the cwd is not watched", () => {

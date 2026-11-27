@@ -48,12 +48,12 @@ function createHash(algorithm: string): Hash {
   return (process.getBuiltinModule?.("node:crypto") ?? (createRequire(import.meta.url)("node:crypto") as typeof import("node:crypto"))).createHash(algorithm);
 }
 
-/** Inner linter timeout: kills the child's whole process group (SIGTERM, SIGKILL after `KILL_GRACE_MS`); the hook-level timeout (hooks.json timeout: 90 = the lint budget) is the backstop. */
+/** Inner linter timeout: kills the child's whole process group (SIGTERM, SIGKILL after `KILL_GRACE_MS`); the call's own deadline (`HOOK_TIMEOUT_MS`, 90 s) is the backstop. */
 const SPAWN_TIMEOUT_MS = 30000;
 
 /**
  * Budget of every npx-route spawn: bare `npx --yes` (a cold install can exceed SPAWN_TIMEOUT_MS) and the npx-cached
- * bin `runNpx` runs directly. One spawn ends within 56 s with `KILL_GRACE_MS`, inside the hooks.json timeout 90, but
+ * bin `runNpx` runs directly. One spawn ends within 56.5 s with `KILL_GRACE_MS` and `SETTLE_GRACE_MS`, inside the call deadline of 90 s, but
  * it is not in the FileChanged reservation (`FILE_CHANGED_BUDGET_MS`): the sequential oxlint-`typeCheck` fallback
  * (55 + 45 + 2 s) or a late-slotted npx-route FileChanged lint can pass 90 s and is lost (hook-design.md "Timeout
  * budget", Accepted). A timeout kills the child's whole process group (SIGTERM, SIGKILL after `KILL_GRACE_MS`).
@@ -70,15 +70,15 @@ const NPX_REFRESH_MS = 24 * 60 * 60 * 1000;
 /** How long a negative onPath answer kept in `probeStore` stays valid: a linter installed later is found within this window. */
 const PROBE_MISS_TTL_MS = 10 * 60 * 1000;
 
-/** Cap on the additionalContext findings text. */
-const MAX_CONTEXT_CHARS = 4000;
+/** Cap on the additionalContext findings text of one message (one report, or the reports one delivery carries). */
+export const MAX_CONTEXT_CHARS = 4000;
 
 /** Per-stream output cap of `spawnGroup` (spawnSync's 1MB default truncated a noisy linter's output as ENOBUFS). */
 const MAX_BUFFER_BYTES = 10 * 1024 * 1024;
 
 /**
  * Full-project incremental type-check: slower than a single-file/dir tool (SPAWN_TIMEOUT_MS) but not a cold registry
- * install (NPX_SPAWN_TIMEOUT_MS); kept its own, smaller budget so a stale async finding (this hook is async:true)
+ * install (NPX_SPAWN_TIMEOUT_MS); kept its own, smaller budget so a stale finding
  * doesn't arrive too late to be useful. A timeout kills the child's whole process group (SIGTERM, SIGKILL after
  * `KILL_GRACE_MS`). Runs at once with the chain unless an oxlint `typeCheck` config exists (`lintResolved`).
  */
@@ -86,13 +86,16 @@ const TSC_SPAWN_TIMEOUT_MS = 45000;
 
 /**
  * cargo check/clippy compile the crate; slower than a single-file/dir tool (SPAWN_TIMEOUT_MS), same budget rationale
- * as TSC_SPAWN_TIMEOUT_MS; stays under the hook-level timeout backstop. A timeout kills the child's whole process
+ * as TSC_SPAWN_TIMEOUT_MS; stays under the call deadline (`HOOK_TIMEOUT_MS`). A timeout kills the child's whole process
  * group (SIGTERM, SIGKILL after `KILL_GRACE_MS`): rustc/clippy-driver grandchildren die with cargo.
  */
 const CARGO_SPAWN_TIMEOUT_MS = 45000;
 
 /** SIGKILL follows the timeout's SIGTERM to the process group after this long (a child trapping SIGTERM must still die). */
 const KILL_GRACE_MS = 1000;
+
+/** After the SIGKILL, `spawnGroup` waits this long for `close` and then settles anyway: a pipe holder outside the group (a `setsid` daemon) would keep it from ever firing. */
+const SETTLE_GRACE_MS = 500;
 
 /**
  * Most files per chain-tool spawn in `lintFilesHandler` (the skill driver's batch path). Caps the argv length (sized
@@ -404,8 +407,9 @@ function isFile(p: string): boolean {
  * later chain tool, a local bin or npx runs meanwhile); (2) a copy added to an earlier PATH dir is not noticed
  * (presence only: the spawn is by bare name, so PATH's first binary runs); (3) a tool reachable only through a
  * relative PATH entry is cwd-dependent: never stored as a hit, and its miss is per process, not per cwd.
+ * Exported for the tests (the miss TTL).
  */
-function onPath(tool: string): boolean {
+export function onPath(tool: string): boolean {
   const cached = probeCache.get(tool);
   if (cached !== undefined) return cached;
   probeStore ??= { hits: {}, misses: {} };
@@ -493,8 +497,11 @@ function killGroup(pgid: number, sig: NodeJS.Signals): void {
 /**
  * Install, once per process, one handler for SIGTERM, SIGINT and SIGHUP that SIGKILLs every live `spawnGroup` group
  * (the children are detached, so the signal that kills the hook or driver would not reach them), removes itself and
- * re-raises the signal on this process so the default exit still happens. Normal exit is unchanged. A SIGKILL of the
- * hook cannot be handled: its children die on EPIPE at their next write (tsc runs to its natural end).
+ * re-raises the signal on this process so the default exit still happens, and an `exit` listener that SIGKILLs the
+ * live groups too: the server ends with `process.exit(0)` when its stdin closes, with no signal before it (a client
+ * that died), and a group of an awaited run, or one that traps SIGTERM, would outlive it. A normal exit of the driver
+ * or the watch-list hook has no live group. A SIGKILL of the process cannot be handled: its children die on EPIPE at
+ * their next write (tsc runs to its natural end).
  */
 function installSignalHandler(): void {
   if (groupSignalHandlerInstalled) return;
@@ -506,6 +513,9 @@ function installSignalHandler(): void {
     process.kill(process.pid, sig);
   };
   for (const s of GROUP_KILL_SIGNALS) process.on(s, onSignal);
+  process.on("exit", () => {
+    for (const pgid of liveGroups) killGroup(pgid, "SIGKILL");
+  });
 }
 
 /**
@@ -522,13 +532,16 @@ function installSignalHandler(): void {
  * `"SIGKILL"`). When one stream's bytes exceed `opts.maxBuffer` (`MAX_BUFFER_BYTES`) further chunks of it are
  * discarded, `error.code` is `"ENOBUFS"` and the group is killed with the same SIGTERM/SIGKILL sequence (spawnSync
  * semantics: per stream, child killed). A spawn failure (`error` event before `close`: ENOENT, EACCES) resolves with
- * that error, `status` and `signal` null and empty output; `spawnBin` reads its `code`. Both timers are cleared only
+ * that error, `status` and `signal` null and empty output; `spawnBin` reads its `code`. The timers are cleared only
  * on resolution (`close` or that pre-spawn `error`), never on `exit`, so a group kill still reaches pipe-holding
  * grandchildren after the leader exited; the SIGKILL timer is a plain timer (no `unref`) and is always cleared. The
  * group's pid is held in `liveGroups` from spawn to resolution so `installSignalHandler`'s handler (installed on the
  * first call) can SIGKILL it when this process is signalled. A call cancelled through `runInCall` spawns nothing (`ECANCELED`) or, while its group runs, kills the group with the timeout sequence. The promise never rejects: every exceptional outcome is
- * in `error`. Residuals: a grandchild that called `setsid` leaves the group and, holding a pipe, delays `close` until
- * the hook backstop (same as spawnSync); the pid-reuse window between the leader's reap and `close` is microseconds
+ * in `error`. Residuals: a grandchild that called `setsid` leaves the group and, holding a pipe, delays `close`; the
+ * server has no process kill behind it (the hook process had one at its 90 s timeout), so once a timeout, ENOBUFS or
+ * a cancel killed the group, `SETTLE_GRACE_MS` after the SIGKILL the promise settles anyway (pipes destroyed,
+ * `signal` `"SIGKILL"`, `error` set, the output collected so far), while a leader that exited normally still waits for
+ * its timeout; the pid-reuse window between the leader's reap and `close` is microseconds
  * and needs a pid wraparound. Exported for the tests (the timeout argument is the test seam; no env override).
  *
  * @param cmd - Command (bare name resolved on `opts.env.PATH` or `process.env.PATH`, or an absolute path).
@@ -563,7 +576,15 @@ export function spawnGroup(cmd: string, argv: readonly string[], opts: SpawnSync
     const kill = (): void => {
       if (pid === undefined || killTimer) return;
       killGroup(pid, "SIGTERM");
-      killTimer = setTimeout(() => killGroup(pid, "SIGKILL"), KILL_GRACE_MS);
+      killTimer = setTimeout(() => {
+        killGroup(pid, "SIGKILL");
+        // `close` waits for every pipe holder, also one outside the group: settle with what was collected
+        killTimer = setTimeout(() => {
+          child.stdout?.destroy();
+          child.stderr?.destroy();
+          finish(null, "SIGKILL", Buffer.concat(out).toString("utf8"), Buffer.concat(err).toString("utf8"));
+        }, SETTLE_GRACE_MS);
+      }, KILL_GRACE_MS);
     };
     const fail = (code: string): void => {
       error ??= Object.assign(new Error(`spawnGroup ${cmd}: ${code}`), { code });
@@ -1533,7 +1554,9 @@ export function classifyCheckstyleOutput(stdout: string): { status: "clean" | "i
 }
 
 /**
- * Trim, collapse runs of 3+ blank lines to one, and cap at `max` (default MAX_CONTEXT_CHARS).
+ * Trim, collapse runs of 3+ blank lines to one, and cap at `max` (default MAX_CONTEXT_CHARS). The cut is by code point:
+ * a character outside the BMP that straddles the cap is dropped whole, never left as a lone high surrogate (the text
+ * travels as JSON to the model, where an ill-formed string would break the request).
  *
  * @param text - Findings text.
  * @param max - Character cap; the skill driver passes MAX_CONTEXT_CHARS times the files of a batched run.
@@ -1542,7 +1565,8 @@ export function classifyCheckstyleOutput(stdout: string): { status: "clean" | "i
 export function truncate(text: string, max = MAX_CONTEXT_CHARS): string {
   const collapsed = text.replace(/\n{3,}/g, "\n\n").trim();
   if (collapsed.length <= max) return collapsed;
-  return collapsed.slice(0, max) + "\n… (truncated)";
+  const last = collapsed.charCodeAt(max - 1);
+  return collapsed.slice(0, last >= 0xd800 && last <= 0xdbff ? max - 1 : max) + "\n… (truncated)";
 }
 
 /**
@@ -1982,10 +2006,10 @@ export function isHeadless(): boolean {
 }
 
 /**
- * What is left of the hold for this process: the quiet time (`UNIVERSAL_LINT_SETTLE_MS`, a finite number >= 0; a test
+ * What is left of the hold of this call: the quiet time (`UNIVERSAL_LINT_SETTLE_MS`, a finite number >= 0; a test
  * and perf-harness seam, not a user setting; else `SETTLE_MS`) minus the time the agent has already been quiet, cut so
- * the hold ends at least 1 s before the 90 s hook backstop. In a headless run (`claude -p`: `CLAUDE_CODE_ENTRYPOINT`
- * starts with `sdk`) nothing is held: Claude Code does not background the hook there, so no later edit can arrive.
+ * the hold ends at least 1 s before the call's 90 s deadline (`HOOK_TIMEOUT_MS`). In a headless run (`claude -p`:
+ * `CLAUDE_CODE_ENTRYPOINT` starts with `sdk`) nothing is held: the call is awaited there, so no later edit can arrive.
  *
  * @param uptimeMs - Milliseconds since the call started (injectable for tests).
  * @param idleMs - Time since the agent's last journaled Write/Edit in ms.
@@ -2281,7 +2305,7 @@ function hasForeignLineBreak(fp: string): boolean {
 export interface EditRecord {
   /** `hashPath` of the file's real path: the record files of one file share this prefix. */
   key: string;
-  /** Name of the record in the journal map: `<key>-<ms 15 digits>-<seq 12 digits>-<owner>.json`, sorting in append order. */
+  /** Name of the record in the journal map: `<key>-<seq 12 digits>-<ms 15 digits>-<owner>.json`, sorting in append order (the sequence number first: the wall clock can step back). */
   name: string;
 }
 
@@ -2310,8 +2334,12 @@ const journal = new Map<string, PendingRecord>();
 const activity = new Map<string, number>();
 /** Owners whose last stop was blocked by a report (epoch ms of the block); pruned by `pruneActivity`. */
 const blocked = new Map<string, number>();
-/** Sequence number of the next journal record: orders records journaled in the same millisecond. */
+/** Sequence number of the next journal record: the append order, which the record names sort by (the wall clock can step back). */
 let journalSeq = 0;
+/** The journal is pruned at most this often (ms): a burst of FileChanged events journals one record each, and a prune walks the whole journal. */
+const JOURNAL_PRUNE_MS = 1000;
+/** `Date.now()` of the last journal prune. */
+let lastPrune = 0;
 
 /**
  * The journal owner of a payload: the session and, inside a subagent, the agent. Findings are reported to the owner
@@ -2336,12 +2364,13 @@ function lastActivity(owner: string): number {
 }
 
 /**
- * Journal one edit of a file in the server's memory: `<hashPath(real)>-<ms 15 digits>-<seq 12 digits>-<owner>.json`
+ * Journal one edit of a file in the server's memory: `<hashPath(real)>-<seq 12 digits>-<ms 15 digits>-<owner>.json`
  * holding the edit's hunks (null = whole file), its changed lines, the digest of the file after it, `before` (the
  * digest of the file the hunks apply to: an Edit's `originalFile`; null without hunks) and the file path and cwd its
- * lint needs. The sequence number keeps two records of one millisecond in append order. The record stays until a
- * report covers it (`settleFindings`, `sweepHandler`) or a lint finds the file clean. Also renews the owner's
- * activity. Records dated more than `PENDING_TTL_MS` ago or more than `HOOK_TIMEOUT_MS` ahead are pruned first.
+ * lint needs. The names sort by the sequence number, so a wall clock that steps back cannot make a later edit sort
+ * before an earlier one; the milliseconds are only for the age prune. The record stays until a report covers it
+ * (`settleFindings`, `sweepHandler`) or a lint finds the file clean. Also renews the owner's activity. Records dated
+ * more than `PENDING_TTL_MS` ago are pruned first, at most once per `JOURNAL_PRUNE_MS`.
  * Fails open to null (an unreadable file for the digest; the lint then reports at once).
  *
  * @param fp - Lexical path of the edited file (read for the digest when `written` is not given).
@@ -2366,13 +2395,12 @@ export function recordEdit(
 ): EditRecord | null {
   try {
     const now = Date.now();
-    // a name dated ahead (clock stepped back) would sort after every fresh record and read as a later edit
-    for (const n of journal.keys()) {
-      const at = Number(n.split("-")[1]);
-      if (now - at > PENDING_TTL_MS || at - now > HOOK_TIMEOUT_MS) journal.delete(n);
+    if (now - lastPrune >= JOURNAL_PRUNE_MS || now < lastPrune) {
+      lastPrune = now;
+      for (const n of journal.keys()) if (now - Number(n.split("-")[2]) > PENDING_TTL_MS) journal.delete(n);
     }
     const key = hashPath(real);
-    const name = `${key}-${String(now).padStart(15, "0")}-${String(journalSeq++).padStart(12, "0")}-${owner}.json`;
+    const name = `${key}-${String(journalSeq++).padStart(12, "0")}-${String(now).padStart(15, "0")}-${owner}.json`;
     journal.set(name, { hunks, ranges: ranges ?? null, digest: written === undefined ? fileDigest(fp) : written, before: before ?? null, fp, cwd });
     activity.set(owner, now);
     return { key, name };
@@ -2974,6 +3002,11 @@ export async function acquireSlot(untilMs: number): Promise<(() => void) | null>
   const left = untilMs - elapsedMs();
   if (left <= 0) return null;
   return new Promise((resolve) => {
+    /**
+     * Hands the slot to this waiter: stops its give-up timer and resolves with the release function.
+     *
+     * @param release - The release function of the slot passed on.
+     */
     const waiter = (release: () => void): void => {
       clearTimeout(timer);
       resolve(release);
@@ -2985,6 +3018,36 @@ export async function acquireSlot(untilMs: number): Promise<(() => void) | null>
     }, Math.min(left, 2 ** 31 - 1));
     slotWaiters.push(waiter);
   });
+}
+
+/** Concurrent `git status` spawns of FileChanged calls in this server process (`admitGit`). */
+export const GIT_GATE_MAX = 8;
+
+/** `git status` spawns of FileChanged calls in flight. */
+let gitActive = 0;
+
+/** FileChanged calls waiting for a `git status` spawn, oldest first. */
+const gitWaiting: Array<() => void> = [];
+
+/**
+ * Waits for one of `GIT_GATE_MAX` concurrent `git status` spawns of FileChanged calls (FIFO). A spawn forks
+ * synchronously on the server's one event loop, so a burst of events (a branch switch, a formatter run) that spawned
+ * all of them at once would hold up every other tool call of the server; admitted in turn, the spawns interleave with
+ * them. Separate from the lint slots, which a lint holds for its whole run.
+ *
+ * @returns The release function: call it once the spawn ended (a second call does nothing).
+ */
+export async function admitGit(): Promise<() => void> {
+  if (gitActive >= GIT_GATE_MAX) await new Promise<void>((resolve) => gitWaiting.push(resolve));
+  else gitActive++;
+  let done = false;
+  return () => {
+    if (done) return;
+    done = true;
+    const next = gitWaiting.shift();
+    if (next) next(); // the spawn passes on: gitActive is unchanged
+    else gitActive--;
+  };
 }
 
 /** Project keys whose whole-project check is running in this server process (`coalesceProjectCheck`). */
@@ -3061,7 +3124,8 @@ export function slotDeadlineMs(ext: string): number {
 /**
  * FileChanged: lint a watched file changed outside Write/Edit, whole file (no edit-range gate). Skips, first match
  * wins: `unlink` event; out of scope (`scopedTarget`); content still equal to the digest Write/Edit recorded; git says
- * ignored (`!!`) or unchanged (empty status), asked with an async `git status` (the server's event loop stays free). A
+ * ignored (`!!`) or unchanged (empty status), asked with an async `git status` (the server's event loop stays free),
+ * at most `GIT_GATE_MAX` spawns at a time over all calls (`admitGit`: a burst of events does not spawn all at once). A
  * git failure (no git, not a repo, timeout) lints. Then waits for one of the server process's `FILE_CHANGED_SLOTS`
  * slots (`acquireSlot`, FIFO) until `FILE_CHANGED_BUDGET_MS` minus the file's lint budget of call time; no slot in
  * time skips with a stderr note. Inside `lintResolved` the whole-project check (tsc, go vet/golangci-lint, cargo) runs
@@ -3090,6 +3154,7 @@ export async function fileChangedHandler(args: PostToolUseHookInput): Promise<Ho
     // settle window, also when the git gate then skips the lint (a restore to committed content leaves no stale finding).
     const owner = ownerOf(args);
     const rec = recordEdit(s.fp, s.real, null, undefined, undefined, owner, null, cwd);
+    const releaseGit = await admitGit();
     try {
       const { stdout } = await execFileAsync("git", ["--no-optional-locks", "--literal-pathspecs", "status", "--porcelain", "--untracked-files=normal", "--ignored=matching", "--", s.real], {
         cwd: path.dirname(s.real), // git maps a lexical path through an in-repo symlinked dir to a path not in the index
@@ -3099,6 +3164,8 @@ export async function fileChangedHandler(args: PostToolUseHookInput): Promise<Ho
       if (stdout === "" || stdout.startsWith("!!")) return {};
     } catch {
       // no git, not a repo, timeout or non-zero exit: lint
+    } finally {
+      releaseGit();
     }
     const release = await acquireSlot(slotDeadlineMs(path.extname(s.fp).toLowerCase()));
     if (release === null) {

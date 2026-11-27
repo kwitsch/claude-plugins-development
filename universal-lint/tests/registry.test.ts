@@ -1,12 +1,12 @@
 // Unit tests of the exports of src/hooks/lint-core.ts (ported from test/universal-lint/registry.test.mjs).
 import assert from "node:assert/strict";
 import type { SpawnSyncReturns } from "node:child_process";
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
-import { test } from "vitest";
-import { acquireSlot, buildArgv, classifyCheckstyleOutput, classifyExit, coalesceProjectCheck, configExists, editRanges, FILE_CHANGED_SLOTS, fileChangedHandler, gateFinding, hasProjectMarkdownlintConfig, hasProjectYamllintConfig, isToolAvailable, lintFileHandler, lintFilesHandler, looksLikeSolutionStyleTsconfig, oxlintConfigTypeChecks, recordWritten, REGISTRY, resolveCargoManifest, resolveCheckstyleConfig, resolveLintTarget, resolveOxlintConfig, resolveTsconfig, scopedTarget, slotDeadlineMs, stripTrailingCommas, truncate, tsBuildInfoPathFor, tscOutputHasSourceDiagnostic, WATCH_LIMIT, writtenContent } from "../src/hooks/lint-core.ts";
+import { test, vi } from "vitest";
+import { acquireSlot, admitGit, buildArgv, classifyCheckstyleOutput, classifyExit, coalesceProjectCheck, configExists, editRanges, FILE_CHANGED_SLOTS, fileChangedHandler, gateFinding, GIT_GATE_MAX, hasProjectMarkdownlintConfig, hasProjectYamllintConfig, isToolAvailable, lintFileHandler, lintFilesHandler, looksLikeSolutionStyleTsconfig, onPath, oxlintConfigTypeChecks, recordWritten, REGISTRY, resolveCargoManifest, resolveCheckstyleConfig, resolveLintTarget, resolveOxlintConfig, resolveTsconfig, runInCall, scopedTarget, slotDeadlineMs, stripTrailingCommas, truncate, tsBuildInfoPathFor, tscOutputHasSourceDiagnostic, WATCH_LIMIT, writtenContent } from "../src/hooks/lint-core.ts";
 import { makeEnv } from "./support/lint-hook.ts";
 
 /** The hook input type; the tests pass partial payloads on purpose (a Write, a missing patch). */
@@ -361,6 +361,64 @@ test("acquireSlot: FILE_CHANGED_SLOTS slots, a waiter gives up at its deadline, 
   const again = await acquireSlot(0);
   assert.ok(again, "a double release frees one slot only; all slots are free again");
   again();
+});
+
+test("onPath: a miss is trusted for PROBE_MISS_TTL_MS, a miss dated in the future counts as expired", async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "onpath-"));
+  const oldPath = process.env.PATH;
+  process.env.PATH = dir;
+  const bin = path.join(dir, "ttl-probe-tool");
+  /** Puts an executable of the probed name into the one PATH directory. */
+  const install = (): void => {
+    writeFileSync(bin, "#!/bin/sh\n");
+    chmodSync(bin, 0o755);
+  };
+  /** One probe in its own call context: the per-call memo starts empty, only the server's store carries over. */
+  const probe = (): Promise<boolean> => runInCall(new AbortController().signal, () => Promise.resolve(onPath("ttl-probe-tool")));
+  const t = Date.now();
+  const now = vi.spyOn(Date, "now").mockReturnValue(t);
+  try {
+    assert.equal(await probe(), false, "absent: a miss is stored");
+    install();
+    now.mockReturnValue(t + 9 * 60_000);
+    assert.equal(await probe(), false, "9 min later the miss is still trusted: no PATH scan");
+    now.mockReturnValue(t + 11 * 60_000);
+    assert.equal(await probe(), true, "past the TTL PATH is scanned again");
+    rmSync(bin);
+    now.mockReturnValue(t + 60 * 60_000);
+    assert.equal(await probe(), false, "the stored hit is gone: a miss, dated an hour ahead");
+    install();
+    now.mockReturnValue(t);
+    assert.equal(await probe(), true, "the clock stepped back: a miss dated in the future counts as expired");
+  } finally {
+    now.mockRestore();
+    process.env.PATH = oldPath;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("admitGit: GIT_GATE_MAX concurrent spawns, further callers wait in arrival order, a double release frees one spawn only", async () => {
+  const held: (() => void)[] = [];
+  for (let i = 0; i < GIT_GATE_MAX; i++) held.push(await admitGit());
+  const order: number[] = [];
+  const w1 = admitGit().then((r) => (order.push(1), r));
+  const w2 = admitGit().then((r) => (order.push(2), r));
+  await sleep(10);
+  assert.deepEqual(order, [], "every spawn is taken: both wait");
+  held[0]();
+  const r1 = await w1;
+  assert.deepEqual(order, [1]);
+  held[0](); // a second release does nothing: w2 keeps waiting
+  await sleep(10);
+  assert.deepEqual(order, [1]);
+  r1();
+  const r2 = await w2;
+  assert.deepEqual(order, [1, 2]);
+  r2();
+  for (const r of held.slice(1)) r();
+  const again: (() => void)[] = [];
+  for (let i = 0; i < GIT_GATE_MAX; i++) again.push(await admitGit()); // all spawns are free again: none of these waits
+  for (const r of again) r();
 });
 
 test("acquireSlot: a waiter whose deadline passes gets null and is no longer served", async () => {

@@ -292,6 +292,13 @@ async function startServer(env: NodeJS.ProcessEnv, cwd: string): Promise<Server>
       }
     }
   });
+  /**
+   * One tool call: resolves with the answer's `structuredContent` (`{}` when it has none), rejects on a JSON-RPC error and once the server is gone.
+   *
+   * @param tool - The tool name.
+   * @param args - The tool arguments.
+   * @returns The answer.
+   */
   const call = (tool: string, args: object): Promise<Answer> => {
     if (gone) return Promise.reject(gone);
     const n = ++id;
@@ -315,6 +322,7 @@ async function startServer(env: NodeJS.ProcessEnv, cwd: string): Promise<Server>
   return {
     key,
     call,
+    /** Closes the server's stdin and waits for it to exit; it is killed after `RUN_TIMEOUT_MS`. */
     close: async () => {
       const timer = setTimeout(() => child.kill("SIGKILL"), RUN_TIMEOUT_MS);
       child.stdin.end();

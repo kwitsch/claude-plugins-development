@@ -48,6 +48,28 @@ test("spawnGroup: a child trapping SIGTERM is SIGKILLed after the grace and stil
   assert.equal(r.signal, "SIGKILL");
 });
 
+test("spawnGroup: a pipe holder outside the group (setsid) cannot keep the promise pending: it settles after the kill sequence, the holder still alive", async () => {
+  const e = makeEnv();
+  const pidfile = path.join(e.cwd, "holder.pid");
+  // the stub exits at once; `setsid sleep` leaves the group (its own session) and keeps the inherited stdout and stderr open
+  e.stub("holder", `setsid sleep 30 & echo $! > "${pidfile}"`, "exit 0");
+  const r = await spawnGroup(path.join(e.bin, "holder"), [], opts(e.cwd, 300));
+  const pid = Number(readFileSync(pidfile, "utf8"));
+  try {
+    assert.equal(codeOf(r.error), "ETIMEDOUT");
+    assert.equal(r.signal, "SIGKILL");
+    assert.equal(r.status, null);
+    assert.ok(pid > 0);
+    process.kill(pid, 0); // throws when the holder is gone: the promise did not wait for it to exit
+  } finally {
+    try {
+      process.kill(pid, "SIGKILL");
+    } catch {
+      // already gone
+    }
+  }
+}, 10_000);
+
 test("spawnGroup: a missing bin reports ENOENT with no output (F18)", async () => {
   const e = makeEnv();
   const r = await spawnGroup("/nonexistent", [], opts(e.cwd, 1000));
@@ -93,7 +115,7 @@ test("server: SIGTERM to the server kills its live linter groups before it exits
   const pid = Number(readFileSync(pidfile, "utf8"));
   assert.ok(srv.pid !== undefined, "the server started");
   process.kill(srv.pid, "SIGTERM");
-  // wait for the signal's exit, not close(): stdin EOF also ends the server, without killing an awaited lint's group
+  // stdin stays open: the signal handler alone ends the server and kills the group (the stdin EOF path has its own test, delivery.test.ts)
   assert.ok(await waitGone(srv.pid, 5000), "the server exited on SIGTERM");
   assert.ok(await waitGone(pid, 2000), `forked sleep ${pid} survived the server's SIGTERM`);
 }, 15_000);

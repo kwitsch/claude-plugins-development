@@ -100,6 +100,28 @@ test("second carrier: a ready FileChanged report with no prompt goes out with th
   assert.deepEqual(await w.prompt(), {});
 });
 
+test("a carrier takes whole reports only: three FileChanged reports above one message's cap come out over several carriers, none cut", async () => {
+  const w = setup();
+  const k = await w.s.key("s1");
+  // about 2.5k characters per report: one fits a message (4000), two do not
+  w.setFindings(Array.from({ length: 40 }, (_, i) => `x.sh:2:6: note: finding-${String(i).padStart(2, "0")} padding padding padding [SC2086]`).join("\n") + "\n");
+  const names = ["a.sh", "b.sh", "c.sh"];
+  for (const n of names) await w.changed(w.e.file(n, SH4));
+  await captured(w.e, 3);
+  assert.deepEqual(await w.poll(k, 25_000), { state: "ready" });
+  await sleep(300); // the three holds end in the same 250 ms poll tick of the quiet-time loop: wait for the other two
+  const got: string[] = [];
+  while ((await w.poll(k, 0))["state"] === "ready" && got.length < 5) got.push(String(((await w.prompt())["hookSpecificOutput"] as Record<string, unknown>)["additionalContext"]));
+  assert.equal(got.length, 3, "one report per carrier");
+  for (const n of names) assert.equal(got.filter((g) => g.includes(`found issues in ${n}:`)).length, 1, n);
+  for (const g of got) {
+    assert.doesNotMatch(g, /\(truncated\)/);
+    assert.match(g, /finding-39/);
+  }
+  assert.deepEqual(await w.prompt(), {});
+  assert.deepEqual(await w.stop(), {});
+});
+
 test("prompt_submitted resolves a pending waiter busy", async () => {
   const w = setup();
   const k = await w.s.key("s1");
@@ -207,6 +229,29 @@ test("clamp: a short wait_ms times out; a non-numeric one waits the default unti
   assert.equal(await settled(p), false);
   await w.prompt();
   assert.deepEqual(await p, { state: "busy" });
+});
+
+test("stdin close ends the server while a call awaits its lint (no hold), and the linter dies with it", async () => {
+  const e = makeEnv();
+  const pidfile = path.join(path.dirname(e.cwd), "sleep.pid");
+  // node, not sleep: the server's PATH holds only bash/node/git
+  e.stub("shellcheck", `node -e "setTimeout(() => {}, 30000)" & echo $! > "${pidfile}"`, "wait");
+  const file = e.file("a.sh", SH4);
+  const s = e.server({ env: { UNIVERSAL_LINT_SETTLE_MS: "0", CLAUDE_CODE_ENTRYPOINT: "cli" } });
+  const k = await s.key("s1");
+  // awaited by its call, which never answers: the server exits first
+  void s.call("file_edited", { cwd: e.cwd, session_id: "s1", tool_name: "Write", tool_input: { file_path: file, content: SH4 }, tool_response: {}, key: k }).catch(() => undefined);
+  await expect.poll(() => existsSync(pidfile) && readFileSync(pidfile, "utf8").trim() !== "", { interval: 50, timeout: 10_000 }).toBe(true);
+  const pid = Number(readFileSync(pidfile, "utf8"));
+  assert.equal(await s.close(), 0);
+  await expect.poll(() => {
+    try {
+      process.kill(pid, 0);
+      return false;
+    } catch {
+      return true;
+    }
+  }, { interval: 50, timeout: 2000 }).toBe(true);
 });
 
 test("stdin close ends the server with a waiter and a detached lint pending, and kills the linter", async () => {

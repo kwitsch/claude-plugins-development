@@ -242,13 +242,13 @@ test("ownerOf: the session and the agent name the owner, a payload without them 
   assert.notEqual(ownerOf({ cwd: "", session_id: "s1a", agent_id: "1" }), ownerOf({ cwd: "", session_id: "s1", agent_id: "a1" }));
 });
 
-test("recordEdit names <key>-<ms 15>-<seq 12>-<owner>.json and makes the owner active", async () => {
+test("recordEdit names <key>-<seq 12>-<ms 15>-<owner>.json and makes the owner active", async () => {
   const w = world();
   writeFileSync(w.file, SIX);
   const rec = recordEdit(w.file, w.real, editHunks(edit(REPLACE_3) as HookInput), digestOf("before"), undefined, w.agent, [[2, 2]], w.proj);
   assert.ok(rec);
   assert.equal(rec.key, hashPath(w.real));
-  assert.match(rec.name, new RegExp(`^[0-9a-f]{64}-\\d{15}-\\d{12}-${w.agent}\\.json$`));
+  assert.match(rec.name, new RegExp(`^[0-9a-f]{64}-\\d{12}-\\d{15}-${w.agent}\\.json$`));
   process.env.UNIVERSAL_LINT_SETTLE_MS = "300";
   const f = [found(w.proj, [3])];
   const held = settleFindings(f, w.file, rec, digestOf(SIX), digestOf(SIX), w.agent);
@@ -274,7 +274,7 @@ test("recordEdit keeps pending records for a day and prunes older ones", async (
   assert.match(String((await sweep(w)).hookSpecificOutput?.additionalContext), /sweep-marker/, "the younger record stayed");
 });
 
-test("recordEdit also prunes a record dated far ahead (clock stepped back): it must not read as a later edit", async () => {
+test("a record dated far ahead (clock stepped back) does not read as a later edit: the journal orders by sequence, not by the clock", async () => {
   const w = world();
   writeFileSync(w.file, SIX);
   const t = Date.now();
@@ -286,6 +286,21 @@ test("recordEdit also prunes a record dated far ahead (clock stepped back): it m
   now.mockRestore();
   const f = [found(w.proj, [3])];
   assert.equal(await settleFindings(f, w.file, own, digestOf(SIX), digestOf(SIX), w.main), f);
+});
+
+test("a clock stepped back between two edits of a file does not reorder them: the later edit is the newest record and reports", async () => {
+  const w = world();
+  writeFileSync(w.file, SIX);
+  const t = Date.now();
+  const now = vi.spyOn(Date, "now").mockReturnValue(t);
+  const first = recordEdit(w.file, w.real, null, null, null, w.main, null, w.proj);
+  now.mockReturnValue(t - 5000);
+  const second = recordEdit(w.file, w.real, null, null, null, w.main, null, w.proj);
+  now.mockRestore();
+  assert.ok(first && second);
+  const f = [found(w.proj, [3])];
+  assert.deepEqual(await settleFindings(f, w.file, first, digestOf(SIX), digestOf(SIX), w.main), [], "a newer edit owns the report");
+  assert.equal(await settleFindings(f, w.file, second, digestOf(SIX), digestOf(SIX), w.main), f);
 });
 
 test("pendingRanges: one record alone gives its own lines, whatever the digests say", () => {

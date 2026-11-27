@@ -8,7 +8,7 @@ import { randomUUID } from "node:crypto";
 import { realpathSync, statSync } from "node:fs";
 import path from "node:path";
 import process from "node:process";
-import { CANCELLED, capSet, editedHandler, fileChangedHandler, HOOK_TIMEOUT_MS, type HookResult, isHeadless, markBlocked, ownerOf, type PostToolUseHookInput, runInCall, settleWaitMs, stopAlreadyBlocked, sweepHandler, truncate } from "../hooks/lint-core.js";
+import { CANCELLED, capSet, editedHandler, fileChangedHandler, HOOK_TIMEOUT_MS, type HookResult, isHeadless, markBlocked, MAX_CONTEXT_CHARS, ownerOf, type PostToolUseHookInput, runInCall, settleWaitMs, stopAlreadyBlocked, sweepHandler, truncate } from "../hooks/lint-core.js";
 
 /** Longest hold of a keyed `next_report` (the mod's wake poll), in ms; a larger or missing `wait_ms` is clamped to it. */
 export const WAKE_WAIT_MS = 25_000;
@@ -22,7 +22,7 @@ const EMPTY_AS_ABSENT = ["agent_id", "scratchpad_dir", "file_path", "event", "ke
 /**
  * Creates the five tool handlers with their shared state.
  *
- * @returns `file_edited`, `next_report` (called by the mod, keyed), `stop`, `file_changed`, `prompt_submitted` (called by `mcp_tool` hooks) and `closeAll` (stdin closed: abort every run, release every waiter).
+ * @returns `file_edited`, `next_report` (called by the mod, keyed), `stop`, `file_changed`, `prompt_submitted` (called by `mcp_tool` hooks) and `closeAll` (stdin closed: abort every detached run, release every waiter; the linter groups of awaited runs die with the process, see `installSignalHandler`).
  */
 export function createHandlers() {
   /** Accepted cwds (the server's cwd, the project dir, every cwd a hook or a keyed call named). */
@@ -135,16 +135,22 @@ export function createHandlers() {
    */
   const pending = (owner: string): boolean => [...outbox.values()].some((o) => o.owner === owner);
   /**
-   * Takes every ready report of an owner out of the outbox.
+   * Takes the ready reports of an owner out of the outbox, oldest first, as many whole reports as one message holds
+   * (`MAX_CONTEXT_CHARS`; the first always goes). A report cut out of the joined text would be lost: its journal
+   * records were claimed when it was released, so no later lint or sweep repeats it. The rest stays queued for the
+   * next carrier (`pending` stays true, so the wake poll answers `ready` again).
    *
    * @param owner - The owner.
-   * @returns The reports joined by a blank line, truncated; `""` when there is none.
+   * @returns The reports joined by a blank line; `""` when there is none.
    */
   function drain(owner: string): string {
     const texts: string[] = [];
+    let length = 0;
     for (const [n, o] of outbox) {
       if (o.owner !== owner) continue;
+      if (texts.length > 0 && length + o.text.length > MAX_CONTEXT_CHARS) break;
       texts.push(o.text);
+      length += o.text.length + 2;
       outbox.delete(n);
     }
     return truncate(texts.join("\n\n"));
