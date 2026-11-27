@@ -23,6 +23,8 @@ The constraints that follow load by themselves with [claude-code-hook-facts.md](
 
 - `origin.kind` is `composer` for a typed prompt, `sdk` for a `claude -p` or SDK prompt, `plugin` (with `name`) for a `$.prompt.submit`, which reaches the calling plugin's other hooks, and `task-notification` for a background-task notice, whose `isMeta` is undefined (typings, live 2.1.325).
 - Slash commands never go through `prompt.submit` (binary 2.1.322).
+- A user-tier `prompt.submit` hook runs under the managed policy (live 2.1.332, probe of 2026-11-26): `origin` `{ kind: "composer" }` for a typed prompt; a prompt typed while a turn runs also carries `turnId` and its event fires before that turn's `turn.complete` (one `turn.complete` then covers both prompts); the plugin's own `$.prompt.submit` does not pass through the plugin's own `prompt.submit` hook (seen: the wake prompt is absent from the hook's log) while its other hooks see it.
+- `/clear` raises `session.end` (`reason: "clear"`) and no `session.start`; `$.session.id()` is a new id afterwards while the plugin's MCP server process keeps running (same pid; live 2.1.332, probe of 2026-11-26). Per-session state of a server is keyed by the session id for that reason.
 - The event carries `turnId` only for a prompt typed while a turn runs; it is absent while idle, which tells a mid-turn prompt from a new request (live 2.1.325).
 
 ## `$.command.run`
@@ -37,6 +39,13 @@ The constraints that follow load by themselves with [claude-code-hook-facts.md](
 
 - A hook that answers `{ messages }` without calling `next()` makes core never run. Skipped then: classic `PreCompact` hooks (a blocking one is ignored and its stdout never becomes instructions), the post-compact attachments (recently read files, plan file, invoked skills) and every lower `session.compact` hook including the builtin one that re-attaches agent instructions. Still run: `PostCompact` (with an empty `compact_summary`) and `SessionStart(compact)` hooks (binary 2.1.322).
 - A `precompute` dispatch happens only when a server flag is on and the context is at about 80% of the window or more (binary 2.1.322).
+
+## Agent identity and cwd (live 2.1.332)
+
+- The mod's `agentId` in `tool.call` equals the `agent_id` of the `mcp_tool` PreToolUse, PostToolUse and SubagentStop hooks for the same subagent (two subagents in one session, one of them isolated); `$.session.id()` equals the hooks' `session_id`; `agent_id` is the empty string in the main conversation (P2).
+- `$.session.cwd()` in a mod's `tool.call` is the cwd of the calling agent: the project root before EnterWorktree, `<root>/.claude/worktrees/<name>` after it (the EnterWorktree call itself still reports the old directory after `next`); a subagent with `isolation: "worktree"` gets its own `<root>/.claude/worktrees/agent-<id>`; a subagent without isolation gets the main conversation's current directory; a session started inside a worktree starts there (P6).
+- The `${cwd}` of PreToolUse, PostToolUse, Stop and SubagentStop `mcp_tool` hooks agrees with `$.session.cwd()` in every case above; SubagentStop carries the subagent's own cwd (P6).
+- An `mcp_tool` CwdChanged hook never fired, neither after a Bash `cd` nor after EnterWorktree (P6).
 
 ## Usage and cache
 

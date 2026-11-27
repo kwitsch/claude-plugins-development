@@ -4,15 +4,32 @@ import { spawnSync } from "node:child_process";
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { setTimeout as sleep } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 import { afterAll } from "vitest";
+import { startServer } from "./call-server.ts";
 
 /** The built plugin under test. */
 export const PLUGIN = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../plugin");
-/** The built hook script. */
-export const HOOK = path.join(PLUGIN, "hooks/lint-file.mjs");
+/** The built watch-list command hook (SessionStart, CwdChanged). */
+export const WATCH = path.join(PLUGIN, "hooks/watch-paths.mjs");
+/** The built function-hooks module. */
+export const MOD = path.join(PLUGIN, "hooks/register.js");
 /** The built skill driver. */
 export const DRIVER = path.join(PLUGIN, "skills/universal-lint/lint-files.mjs");
+/** The built MCP server. */
+export const SERVER = path.join(PLUGIN, "mcp/server.mjs");
+/** The one-shot driver and server client (plain node script). */
+export const CALL = path.join(path.dirname(fileURLToPath(import.meta.url)), "call-server.ts");
+
+/** How long one one-shot driver run (`runEvent`) may take before it is killed, in ms. */
+const ONE_SHOT_TIMEOUT_MS = 60_000;
+
+/** Every server `LintEnv.server` started in this test file; closed when it ends. */
+const servers: ReturnType<typeof startServer>[] = [];
+afterAll(async () => {
+  await Promise.all(servers.map((s) => s.close()));
+});
 
 /** One scratch root for the whole test file, removed when it finishes. */
 const ROOT = mkdtempSync(path.join(tmpdir(), "universal-lint-test-"));
@@ -20,17 +37,17 @@ afterAll(() => rmSync(ROOT, { recursive: true, force: true }));
 /** Counter giving every `makeEnv` its own directory. */
 let counter = 0;
 
-/** Result of one hook run. */
+/** Result of one run: the watch-list command hook (SessionStart, CwdChanged) or one server driven through `CALL`. */
 export interface HookRun {
-  /** Exit status (null when killed by a signal). */
+  /** 2 when a report text came back, else the process's exit status (0; null when killed by a signal). */
   status: number | null;
-  /** Raw stderr. */
+  /** The server's stderr plus the driver's (the watch-list hook's own stderr for SessionStart/CwdChanged). */
   stderr: string;
-  /** Raw stdout (the watch-paths JSON of SessionStart/CwdChanged). */
+  /** Raw stdout of the watch-list hook (its watch-paths JSON); "" for a server run. */
   stdout: string;
-  /** `{ rewake: <findings> }` on exit 2 (asyncRewake wakes Claude), `{}` otherwise (no finding). */
+  /** `{ rewake: <report> }` when a report text came back, `{}` otherwise (no finding). */
   result: { rewake?: string };
-  /** The findings text (stderr on exit 2), or "" when there is none. */
+  /** The report text (`file_edited` context, `stop` reason), or "" when there is none. */
   ctx: string;
 }
 
@@ -68,10 +85,12 @@ export interface LintEnv {
   lines(): string[];
   /** Env of a child process. */
   childEnv(opts?: RunOptions): Record<string, string>;
-  /** Pipe one PostToolUse payload for `filePath` into a fresh hook process. */
+  /** Send one Write/Edit payload for `filePath` to a fresh server (`file_edited`, through `CALL`). */
   run(filePath: string, opts?: RunOptions): HookRun;
-  /** Pipe an arbitrary hook payload (FileChanged, SessionStart, CwdChanged, ...) into a fresh hook process. */
+  /** Run one hook payload: SessionStart/CwdChanged through the watch-list hook, any other event through a fresh server (`CALL`). */
   runEvent(payload: Record<string, unknown>, opts?: RunOptions): HookRun;
+  /** One server process with this env (multi-call tests); closed when the test file ends. */
+  server(opts?: RunOptions & { cwd?: string }): ReturnType<typeof startServer>;
 }
 
 /**
@@ -92,19 +111,6 @@ export const payload = (filePath: string, cwd: string, opts: RunOptions = {}): s
   }
   return JSON.stringify({ hook_event_name: "PostToolUse", tool_name: tool, tool_input: { file_path: filePath, content }, tool_response: { success: true, ...opts.toolResponse }, cwd });
 };
-
-/**
- * Build a HookRun from the exit status and raw stderr.
- *
- * @param status - Exit status.
- * @param stderr - Raw stderr.
- * @param stdout - Raw stdout.
- * @returns The run.
- */
-function toRun(status: number | null, stderr: string, stdout: string): HookRun {
-  const ctx = status === 2 ? stderr.trim() : "";
-  return { status, stderr, stdout, result: ctx ? { rewake: ctx } : {}, ctx };
-}
 
 /**
  * Create a fresh isolated environment.
@@ -147,14 +153,45 @@ export function makeEnv(): LintEnv {
     lines: () => readFileSync(record, "utf8").split("\n").filter(Boolean),
     // UNIVERSAL_LINT_SETTLE_MS=0: findings are reported at once; a test of the settle window overrides it through opts.env.
     childEnv: (opts = {}) => ({ PATH: bin, HOME: home, RECORD: record, OUT: opts.out ?? "", CLAUDE_PLUGIN_DATA: data, GIT_CONFIG_NOSYSTEM: "1", UNIVERSAL_LINT_SETTLE_MS: "0", ...opts.env }),
-    run(filePath, opts) {
-      const r = spawnSync(process.execPath, [HOOK], { input: payload(filePath, cwd, opts), env: env.childEnv(opts), encoding: "utf8" });
-      return toRun(r.status, r.stderr, r.stdout);
-    },
+    run: (filePath, opts) => env.runEvent(JSON.parse(payload(filePath, cwd, opts)) as Record<string, unknown>, opts),
     runEvent(p, opts) {
-      const r = spawnSync(process.execPath, [HOOK], { input: JSON.stringify(p), env: env.childEnv(opts), encoding: "utf8" });
-      return toRun(r.status, r.stderr, r.stdout);
+      const ev = p["hook_event_name"];
+      if (ev === "SessionStart" || ev === "CwdChanged") {
+        const r = spawnSync(process.execPath, [WATCH], { input: JSON.stringify(p), env: env.childEnv(opts), encoding: "utf8" });
+        return { status: r.status, stderr: r.stderr, stdout: r.stdout, result: {}, ctx: "" };
+      }
+      // a stalled driver must not block the worker: past the deadline it is killed (its server ends with the closed stdin) and the test fails loudly
+      const r = spawnSync(process.execPath, [CALL, SERVER], { input: JSON.stringify(p), env: env.childEnv(opts), encoding: "utf8", timeout: ONE_SHOT_TIMEOUT_MS, killSignal: "SIGKILL" });
+      if (r.error) throw new Error(`one-shot driver for ${String(ev)} did not finish in ${ONE_SHOT_TIMEOUT_MS} ms: ${r.error.message}\n${r.stderr}`);
+      const out = JSON.parse(r.stdout || "{\"text\":\"\",\"stderr\":\"\"}") as { text: string; stderr: string };
+      const ctx = out.text.trim();
+      return { status: ctx ? 2 : r.status, stderr: out.stderr + r.stderr, stdout: "", result: ctx ? { rewake: ctx } : {}, ctx };
+    },
+    server: (opts = {}) => {
+      const s = startServer(SERVER, env.childEnv(opts), opts.cwd ?? cwd);
+      servers.push(s);
+      return s;
     },
   };
   return env;
+}
+
+/**
+ * Poll `kill(pid, 0)` until it throws (ESRCH: the process is gone) or `ms` elapsed.
+ *
+ * @param pid - The pid to watch.
+ * @param ms - How long to poll.
+ * @returns True when the process is gone.
+ */
+export async function waitGone(pid: number, ms: number): Promise<boolean> {
+  const until = Date.now() + ms;
+  for (;;) {
+    try {
+      process.kill(pid, 0);
+    } catch {
+      return true;
+    }
+    if (Date.now() >= until) return false;
+    await sleep(50);
+  }
 }

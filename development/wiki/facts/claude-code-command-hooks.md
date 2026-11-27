@@ -18,6 +18,8 @@ Tool hooks, subagent payloads, `Stop`/`SubagentStop`, FileChanged and `watchPath
 - Hook payloads carry the physical, symlink-resolved cwd: in a session started in a symlinked directory the payload `cwd`, `CLAUDE_PROJECT_DIR` and the hook's `process.cwd()` are the real path, and so is the payload `cwd` after a `cd` into a symlinked subdirectory. Only the inherited `$PWD` of the hook process keeps the symlink until the first `cd` (live 2.1.325, headless; 2.1.323 gave the same for `CwdChanged` `new_cwd`). What follows for hook code: [hook-file-safety.md](../../../.claude/rules/hook-file-safety.md).
 - `watchPaths` printed by a FileChanged hook is honoured under `asyncRewake` (exit 0 plus JSON), but the watcher is re-created only when the sorted list changes: an identical list is a no-op, and a changing list re-creates the watcher on every event and drops events during a checkout. `provided N watchPaths` is logged for SessionStart hooks only (live 2.1.319).
 
+- A `${tool_response.structuredPatch}` placeholder in an `mcp_tool` hook input arrives as JSON text (`[]` for a new file, jsdiff hunks otherwise), `${tool_response.originalFile}` as the plain string (live 2.1.332, P4). A mod reads the same values as arrays and strings from `r.result` after `next` (see [mods-engine-tools.md](mods-engine-tools.md)).
+
 ## What a hook's exit 2 leaves in a transcript
 
 - A finding of a background (`asyncRewake`) hook is queued: the main transcript gets a `queue-operation` record with `operation: "enqueue"` whose `content` is `<task-notification>...Stop hook feedback...` followed by `Stop hook blocking error from command "<Event>:<Tool>": <stderr>`. The enqueue timestamp is the moment the hook exited (transcripts of 2.1.319-2.1.325).

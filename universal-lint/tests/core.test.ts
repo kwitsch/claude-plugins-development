@@ -1,12 +1,9 @@
 // Guard clauses and basic per-linter smoke tests (shellcheck/eslint/ruff/ktlint); ported from test/universal-lint/core.bats.
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
-import { createHash } from "node:crypto";
-import { chmodSync, existsSync, mkdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "vitest";
-import { hashPath } from "../src/hooks/lint-core.ts";
-import { HOOK, type LintEnv, makeEnv, payload } from "./support/lint-hook.ts";
+import { type LintEnv, makeEnv, payload } from "./support/lint-hook.ts";
 
 /** A 4-line shell script; the Edit tests below edit line 2. */
 const SH4 = "echo a\necho $1\necho b\necho $2\n";
@@ -170,159 +167,134 @@ test("json extension -> linter never invoked (deliberately uncovered)", () => {
   assert.deepEqual(e.lines(), []);
 });
 
-test("PostToolUse records the written content digest under CLAUDE_PLUGIN_DATA/written", () => {
+/**
+ * FileChanged of one file on a server (session `s1`), then the report state: `ready` when a finding is waiting,
+ * `timeout` when nothing is (skipped, or clean).
+ *
+ * @param srv - The server of the session.
+ * @param key - The session key.
+ * @param cwd - The payload cwd.
+ * @param f - The changed file.
+ * @returns The `state` of `next_report`.
+ */
+async function changedState(srv: ReturnType<LintEnv["server"]>, key: string, cwd: string, f: string): Promise<unknown> {
+  await srv.call("file_changed", { cwd, session_id: "s1", scratchpad_dir: "", file_path: f, event: "change" });
+  return (await srv.call("next_report", { session_id: "s1", key, wait_ms: 0 }))["state"];
+}
+
+test("PostToolUse Write: a FileChanged of the content just written is skipped as an echo; a different content lints", async () => {
   const e = makeEnv();
+  e.recStub("shellcheck", 1);
+  const f = e.file("a.sh", "echo $1\n");
+  const srv = e.server({ out: SC_OUT });
+  const key = await srv.key("s1");
+  await srv.call("file_edited", { cwd: e.cwd, session_id: "s1", key, tool_name: "Write", tool_input: { file_path: f, content: "echo $1\n" }, tool_response: {} });
+  assert.equal(e.lines().length, 1);
+  assert.equal(await changedState(srv, key, e.cwd, f), "timeout");
+  assert.equal(e.lines().length, 1);
+  writeFileSync(f, "echo $2\n");
+  assert.equal(await changedState(srv, key, e.cwd, f), "ready");
+  assert.equal(e.lines().length, 2);
+});
+
+test("PostToolUse: no digest survives on disk (in-memory store)", async () => {
+  const e = makeEnv();
+  e.recStub("shellcheck", 0);
   const f = e.file("a.sh", "echo hi\n");
-  assert.equal(e.run(f).status, 0);
-  const digestFile = path.join(e.data, "written", hashPath(realpathSync(f)));
-  assert.equal(readFileSync(digestFile, "utf8"), createHash("sha256").update(readFileSync(f)).digest("base64"));
+  const srv = e.server();
+  await srv.call("file_edited", { cwd: e.cwd, session_id: "s1", key: await srv.key("s1"), tool_name: "Write", tool_input: { file_path: f, content: "echo hi\n" }, tool_response: {} });
+  assert.equal(existsSync(path.join(e.data, "written")), false);
 });
 
 /** 512 KiB of ASCII padding for the F05 payloads: far above the pipe buffer (about 128-192 KB), so the wire payload is always larger than a pipe holds. */
 const PAD = "x".repeat(512 * 1024);
 
-/**
- * Spawn the built hook with a stdin pipe and write `input` only 100 ms later (a late writer, F05).
- *
- * @param env - Child environment (`makeEnv().childEnv()`).
- * @param input - The payload JSON.
- * @returns The exit status once the hook has closed.
- */
-function runLate(env: Record<string, string>, input: string): Promise<number | null> {
-  return new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, [HOOK], { env, stdio: ["pipe", "ignore", "ignore"] });
-    child.on("error", reject);
-    child.on("close", resolve);
-    child.stdin.on("error", () => {}); // EPIPE when a broken hook exits before the write: let the assertions report it
-    setTimeout(() => child.stdin.end(input), 100);
-  });
-}
-
+// A late stdin writer (the old `runLate`) has no equivalent: the server reads JSON-RPC lines, so the F05 rows send the
+// 512 KB payload as one keyed `file_edited` call.
 // Edit payloads carry the whole `tool_response.originalFile`, Write payloads the whole `tool_input.content`.
-test.each([["Edit", "tool_response", "originalFile"], ["Write", "tool_input", "content"]])("PostToolUse %s: a 512 KB payload written 100 ms late is linted and records its digest (F05)", async (toolName, holder, key) => {
+test.each([["Edit", "tool_response", "originalFile"], ["Write", "tool_input", "content"]])("PostToolUse %s: a 512 KB payload sent to the server is linted; the FileChanged echo of it is skipped (F05)", async (toolName, holder, field) => {
   const e = makeEnv();
-  e.recStub("shellcheck", 0);
+  e.recStub("shellcheck", 1);
   const f = e.file("a.sh", "echo hi\n");
+  // the Write leaves the padding on disk, the Edit leaves "echo hi" (the content its patch produced)
+  if (toolName === "Write") writeFileSync(f, PAD);
   const p = JSON.parse(payload(f, e.cwd, { toolName })) as Record<string, Record<string, unknown>>;
-  p[holder][key] = PAD;
+  p[holder][field] = PAD;
   // the Edit turns the padding into the file's content, so the payload carries what was written
   if (toolName === "Edit") p.tool_response.structuredPatch = [{ oldStart: 1, oldLines: 1, newStart: 1, newLines: 1, lines: [`-${PAD}`, "\\ No newline at end of file", "+echo hi"] }];
-  assert.equal(await runLate(e.childEnv(), JSON.stringify(p)), 0);
+  const srv = e.server({ out: SC_OUT });
+  const key = await srv.key("s1");
+  await srv.call("file_edited", { ...p, session_id: "s1", key });
   assert.ok(e.lines().some((l) => l.startsWith("shellcheck ")));
-  assert.equal(readFileSync(path.join(e.data, "written", hashPath(realpathSync(f))), "utf8"), createHash("sha256").update(toolName === "Edit" ? "echo hi\n" : PAD).digest("base64"));
+  assert.equal(await changedState(srv, key, e.cwd, f), "timeout");
 });
 
-test("PostToolUse Edit records the digest of what the Edit wrote, not of a later write already on disk", () => {
+test("PostToolUse Edit records the digest of what the Edit wrote, not of a later write already on disk", async () => {
   const e = makeEnv();
+  e.recStub("shellcheck", 1);
   const f = e.file("a.sh", "echo A\necho b\necho $d\n"); // the Edit wrote line 1, another writer then line 3
   const patch = [{ oldStart: 1, oldLines: 1, newStart: 1, newLines: 1, lines: ["-echo a", "+echo A"] }];
-  assert.equal(e.run(f, { toolName: "Edit", toolResponse: { originalFile: "echo a\necho b\necho d\n", structuredPatch: patch } }).status, 0);
-  assert.equal(readFileSync(path.join(e.data, "written", hashPath(realpathSync(f))), "utf8"), createHash("sha256").update("echo A\necho b\necho d\n").digest("base64"));
+  const srv = e.server({ out: SC_OUT });
+  const key = await srv.key("s1");
+  await srv.call("file_edited", { cwd: e.cwd, session_id: "s1", key, tool_name: "Edit", tool_input: { file_path: f }, tool_response: { originalFile: "echo a\necho b\necho d\n", structuredPatch: patch } });
+  assert.equal(await changedState(srv, key, e.cwd, f), "ready");
 });
 
-test("PostToolUse with success false records no digest", () => {
+test("PostToolUse with success false records nothing: a later FileChanged of the same content lints", async () => {
   const e = makeEnv();
-  const f = e.file("a.sh", "echo hi\n");
-  e.run(f, { toolResponse: { success: false } });
-  assert.equal(existsSync(path.join(e.data, "written")), false);
+  e.recStub("shellcheck", 1);
+  const f = e.file("a.sh", "echo $1\n");
+  const srv = e.server({ out: SC_OUT });
+  const key = await srv.key("s1");
+  await srv.call("file_edited", { cwd: e.cwd, session_id: "s1", key, tool_name: "Write", tool_input: { file_path: f, content: "echo $1\n" }, tool_response: { success: false } });
+  assert.equal(await changedState(srv, key, e.cwd, f), "ready");
 });
 
 /** shellcheck output that makes a recording stub's exit 1 a finding. */
 const SC_OUT = "a.sh:1:6: note: Double quote to prevent globbing. [SC2086]";
 
-/** Shape of the onPath probe store file (F11). */
-type ProbeFile = { hits: Record<string, string>; misses: Record<string, number> };
-
-/**
- * Probe file of an env for a PATH string (default: the env's own PATH, its bin dir).
- *
- * @param e - The environment.
- * @param PATH - PATH string the hook ran with.
- * @returns Absolute path of `probe-<hashPath(PATH)>.json` under the env's data dir.
- */
-const probeFile = (e: LintEnv, PATH = e.bin): string => path.join(e.data, `probe-${hashPath(PATH)}.json`);
-
-/**
- * Read and parse a probe file.
- *
- * @param f - Probe file path.
- * @returns The parsed store.
- */
-const readProbe = (f: string): ProbeFile => JSON.parse(readFileSync(f, "utf8")) as ProbeFile;
-
-/**
- * Write a probe file by hand (creates the data dir, which makeEnv does not).
- *
- * @param e - The environment.
- * @param store - Store to write.
- */
-function writeProbe(e: LintEnv, store: ProbeFile): void {
-  mkdirSync(e.data, { recursive: true });
-  writeFileSync(probeFile(e), JSON.stringify(store));
-}
-
-test("probe file: a persisted miss is served without a PATH scan, then expires after PROBE_MISS_TTL_MS", () => {
+test("probe memo: a miss is trusted on the next call of the same server (no PATH scan), a hit is used", async () => {
   const e = makeEnv();
   const f = e.file("a.sh", "echo $1\n");
-  assert.deepEqual(e.run(f, { out: SC_OUT }).result, {});
-  const first = readProbe(probeFile(e));
-  assert.equal(typeof first.misses.shellcheck, "number");
+  const s = e.server({ out: SC_OUT });
+  const k = await s.key("s1");
+  const lint = () => s.call("file_edited", { cwd: e.cwd, session_id: "s1", key: k, tool_name: "Write", tool_input: { file_path: f, content: "echo $1\n" }, tool_response: {} });
+  assert.deepEqual(await lint(), {});
   e.recStub("shellcheck", 1);
-  assert.deepEqual(e.run(f, { out: SC_OUT }).result, {}); // persisted miss answered: the new stub is not seen
+  assert.deepEqual(await lint(), {}); // the miss is memoized in the server: the stub added since is not seen
   assert.deepEqual(e.lines(), []);
-  const expired = readProbe(probeFile(e));
-  expired.misses.shellcheck = Date.now() - 11 * 60 * 1000;
-  writeFileSync(probeFile(e), JSON.stringify(expired));
-  assert.equal(e.run(f, { out: SC_OUT }).status, 2);
-  assert.ok(e.lines().some((l) => l.startsWith("shellcheck ")));
 
-  const future = makeEnv();
-  writeProbe(future, { hits: {}, misses: { shellcheck: Date.now() + 60_000 } });
-  future.recStub("shellcheck", 1);
-  assert.equal(future.run(future.file("a.sh", "echo $1\n"), { out: SC_OUT }).status, 2); // future-dated miss = expired
+  const h = makeEnv();
+  const g = h.file("a.sh", "echo $1\n");
+  h.recStub("shellcheck", 1);
+  const hs = h.server({ out: SC_OUT });
+  const hk = await hs.key("s1");
+  const hlint = () => hs.call("file_edited", { cwd: h.cwd, session_id: "s1", key: hk, tool_name: "Write", tool_input: { file_path: g, content: "echo $1\n" }, tool_response: {} });
+  assert.ok("context" in (await hlint()));
+  assert.ok("context" in (await hlint()));
+  assert.equal(h.lines().filter((l) => l.startsWith("shellcheck ")).length, 2);
 });
 
-test("probe file: a persisted hit is re-validated and replaced by a miss once the tool is gone", () => {
+test("probe memo: a hit is re-validated and replaced by a miss once the tool is gone", async () => {
   const e = makeEnv();
   const f = e.file("a.sh", "echo $1\n");
   e.recStub("shellcheck", 1);
-  assert.equal(e.run(f, { out: SC_OUT }).status, 2);
-  assert.equal(readProbe(probeFile(e)).hits.shellcheck, e.bin);
+  const s = e.server({ out: SC_OUT });
+  const k = await s.key("s1");
+  const lint = () => s.call("file_edited", { cwd: e.cwd, session_id: "s1", key: k, tool_name: "Write", tool_input: { file_path: f, content: "echo $1\n" }, tool_response: {} });
+  assert.match(String((await lint())["context"]), /SC2086/);
   rmSync(path.join(e.bin, "shellcheck"));
-  assert.deepEqual(e.run(f, { out: SC_OUT }).result, {});
-  const after = readProbe(probeFile(e));
-  assert.equal("shellcheck" in after.hits, false);
-  assert.equal(typeof after.misses.shellcheck, "number");
+  assert.deepEqual(await lint(), {});
 });
 
-test("probe file: a PATH change uses another probe file", () => {
+test("probe memo: no file is written under CLAUDE_PLUGIN_DATA", async () => {
   const e = makeEnv();
   const f = e.file("a.sh", "echo $1\n");
-  assert.deepEqual(e.run(f, { out: SC_OUT }).result, {});
-  assert.equal(typeof readProbe(probeFile(e)).misses.shellcheck, "number");
-  const extra = path.join(e.data, "..", "extra-bin");
-  mkdirSync(extra, { recursive: true });
-  const stub = path.join(extra, "shellcheck");
-  writeFileSync(stub, ["#!/usr/bin/env bash", `printf "%s %s\\n" "shellcheck" "$*" >> "$RECORD"`, "printf '%s\\n' \"$OUT\"", "exit 1", ""].join("\n"));
-  chmodSync(stub, 0o755);
-  const PATH = [e.bin, extra].join(path.delimiter);
-  assert.equal(e.run(f, { out: SC_OUT, env: { PATH } }).status, 2);
-  assert.ok(existsSync(probeFile(e)));
-  assert.equal(readProbe(probeFile(e, PATH)).hits.shellcheck, extra);
-});
-
-test("probe file: a corrupt store or an unusable data dir fails open", () => {
-  const e = makeEnv();
-  mkdirSync(e.data, { recursive: true });
-  writeFileSync(probeFile(e), "{not json");
   e.recStub("shellcheck", 1);
-  assert.equal(e.run(e.file("a.sh", "echo $1\n"), { out: SC_OUT }).status, 2);
-  assert.equal(readProbe(probeFile(e)).hits.shellcheck, e.bin);
-
-  const file = makeEnv();
-  writeFileSync(file.data, ""); // CLAUDE_PLUGIN_DATA is a regular file: nothing can be persisted
-  file.recStub("shellcheck", 1);
-  assert.equal(file.run(file.file("a.sh", "echo $1\n"), { out: SC_OUT }).status, 2);
+  const s = e.server({ out: SC_OUT });
+  const k = await s.key("s1");
+  assert.match(String((await s.call("file_edited", { cwd: e.cwd, session_id: "s1", key: k, tool_name: "Write", tool_input: { file_path: f, content: "echo $1\n" }, tool_response: {} }))["context"]), /SC2086/);
+  assert.ok(!existsSync(e.data) || readdirSync(e.data).every((n) => !n.startsWith("probe-")));
 });
 
 test("PostToolUse: a file inside the payload's scratchpad_dir -> linter never invoked (also a symlink there to an in-cwd file)", () => {

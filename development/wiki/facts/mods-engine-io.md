@@ -38,7 +38,10 @@ The constraints that follow load by themselves with [claude-code-hook-facts.md](
 
 ## `$.mcp`
 
-- `$.mcp.connect("<key in .mcp.json>")` answers the server name `plugin:<plugin>:<key>`; `$.mcp.call(server, tool, args)` works headless without allow rules for a model-visible tool and resolves `{ isError, content: [{ type, text }] }`. `connect` inside `session.start` took 5 ms (live 2.1.325).
+- A `$.mcp.call` left pending at the main `turn.complete` of a `claude -p` run keeps the run alive until it answers: 33 s against 4 s for the same run without it (a 25 s call); the server saw neither a cancel nor a stdin close before it answered (live 2.1.332, P7). A mod must therefore arm a long-poll only when it knows the session is not headless.
+- A mod's `$.mcp.call` (arguments and answer) left no trace in the session transcript, and the model, asked to list every line containing the marker, found none (live 2.1.332, P8).
+
+- `$.mcp.connect("<key in .mcp.json>")` answers `{ isConnected, server }` on 2.1.332 (live 2.1.332, the `server` field is the name `plugin:<plugin>:<key>`); `$.mcp.call` takes that `server` string, and an object as first argument fails with `mcp.call: takes { server, tool, args? } (host check)` (live 2.1.332). Earlier note (live 2.1.325): `$.mcp.call(server, tool, args)` works headless without allow rules for a model-visible tool and resolves `{ isError, content: [{ type, text }] }`. `connect` inside `session.start` took 5 ms (live 2.1.325).
 - The model sees such a tool as `mcp__plugin_<plugin>_<key>__<tool>` (live 2.1.325).
 - A plugin's stdio MCP server inherits the whole environment of the Claude Code process, including the settings `env` block and the user's shell variables, without any `env` block in `.mcp.json`; `${VAR:-default}` interpolation in `.mcp.json` `env` works too (live 2.1.325).
 

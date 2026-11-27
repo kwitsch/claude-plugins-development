@@ -291,7 +291,8 @@ test("lint-files.mjs keeps a leading space in a listed name (git prints ' lead.s
   assert.equal(e.lines().filter((l) => l.startsWith("shellcheck ")).length, 1);
 });
 
-// The driver inlines the hook's library; if it also inlined the hook's entry it would start the hook's stdin loop and hang.
+// The driver inlines lint-core.ts, which starts no work at import; if it also inlined an entry (the server, the
+// watch-list hook) it would start that entry's stdin loop and hang.
 test("lint-files.mjs exits on its own with the report while its stdin stays open", async () => {
   const e = makeEnv();
   e.recStub("shellcheck", 0);

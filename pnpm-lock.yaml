@@ -152,8 +152,11 @@ importers:
   universal-lint:
     devDependencies:
       '@kwitsch/tsdown-preset-claude-code':
-        specifier: 0.2.0
-        version: 0.2.0(rolldown@1.3.3)(tsdown@0.23.7)
+        specifier: 0.4.2
+        version: 0.4.2(rolldown@1.3.3)(tsdown@0.23.7)
+      claude-engine-vitest:
+        specifier: workspace:*
+        version: link:../development/vitest/claude-engine
       tsdown:
         specifier: 0.23.7
         version: 0.23.7
@@ -202,6 +205,10 @@ packages:
     resolution: {integrity: sha512-6HhNtU+HltG41FYmTCHGyoF122xfI7lglgXBwgAKaneQBzAT1GxTP0o/D9EYIlfaek7rYFuGFETtoDG+UDpaxw==}
     engines: {node: '>=26'}
 
+  '@kwitsch/claude-code-plugin-core@0.5.0':
+    resolution: {integrity: sha512-1XVKFREyB1LgG5CKTBg796DDOHv1wAY2v3DVdxKAAeU8g5/XAGscDY0xYQA1C8iTbi4aFHCcws/R8+lxxUAzWw==}
+    engines: {node: '>=26'}
+
   '@kwitsch/rolldown-plugin-claude-code@0.2.0':
     resolution: {integrity: sha512-BRR7Mvi5BLMPfs8uULaUWzByI1GsyKxe5iidHsYd984NwPrXv+LU4XD1Gx7BeDgyi9QSW0qoI04y4RXCqXwEqw==}
     engines: {node: '>=26'}
@@ -220,6 +227,12 @@ packages:
     peerDependencies:
       rolldown: ^1.3.0
 
+  '@kwitsch/rolldown-plugin-claude-code@0.4.2':
+    resolution: {integrity: sha512-xslrZ9eCZnkl3/Y+JWWb8E+C2iq71r1pEjAhpPReeq215kGdF8gn7bl5/XO5aIg9Codbai6pMiBZkZ8mvN0+UA==}
+    engines: {node: '>=26'}
+    peerDependencies:
+      rolldown: ^1.3.0
+
   '@kwitsch/tsdown-preset-claude-code@0.2.0':
     resolution: {integrity: sha512-KyYroUFkKyZwTr1Gy5TtttdWmL7iasIhlEV9mLxiFqMJXDSOVED7PbyfXgxDTgCYM8KtLQDpsOB8LJ0qKB9qsQ==}
     engines: {node: '>=26'}
@@ -234,6 +247,12 @@ packages:
 
   '@kwitsch/tsdown-preset-claude-code@0.4.1':
     resolution: {integrity: sha512-xNZM5ucoDcPKoUGV8SDkyoQ2y1qXKkVtoHzo/bDCYmbGbfHu5Z0+JcH8r1QuznliEKdWn7TtAUdjALBb3MSXxw==}
+    engines: {node: '>=26'}
+    peerDependencies:
+      tsdown: ~0.23.7
+
+  '@kwitsch/tsdown-preset-claude-code@0.4.2':
+    resolution: {integrity: sha512-E/UhOnpj8naZLDCwXUQ4NipoM2+VxpXGFK4FYVHiPxHfS9cK4RuDZabKgcjiH7SnDdBDm8YQZaL1S4toATB9kQ==}
     engines: {node: '>=26'}
     peerDependencies:
       tsdown: ~0.23.7
@@ -1231,6 +1250,8 @@ snapshots:
 
   '@kwitsch/claude-code-plugin-core@0.4.1': {}
 
+  '@kwitsch/claude-code-plugin-core@0.5.0': {}
+
   '@kwitsch/rolldown-plugin-claude-code@0.2.0(rolldown@1.3.3)':
     dependencies:
       '@kwitsch/claude-code-plugin-core': 0.2.0
@@ -1244,6 +1265,11 @@ snapshots:
   '@kwitsch/rolldown-plugin-claude-code@0.4.1(rolldown@1.3.3)':
     dependencies:
       '@kwitsch/claude-code-plugin-core': 0.4.1
+      rolldown: 1.3.3
+
+  '@kwitsch/rolldown-plugin-claude-code@0.4.2(rolldown@1.3.3)':
+    dependencies:
+      '@kwitsch/claude-code-plugin-core': 0.5.0
       rolldown: 1.3.3
 
   '@kwitsch/tsdown-preset-claude-code@0.2.0(rolldown@1.3.3)(tsdown@0.23.7)':
@@ -1266,6 +1292,14 @@ snapshots:
     dependencies:
       '@kwitsch/claude-code-plugin-core': 0.4.1
       '@kwitsch/rolldown-plugin-claude-code': 0.4.1(rolldown@1.3.3)
+      tsdown: 0.23.7
+    transitivePeerDependencies:
+      - rolldown
+
+  '@kwitsch/tsdown-preset-claude-code@0.4.2(rolldown@1.3.3)(tsdown@0.23.7)':
+    dependencies:
+      '@kwitsch/claude-code-plugin-core': 0.5.0
+      '@kwitsch/rolldown-plugin-claude-code': 0.4.2(rolldown@1.3.3)
       tsdown: 0.23.7
     transitivePeerDependencies:
       - rolldown

@@ -2,14 +2,10 @@
  * universal-lint plugin: lint-only checker for Write/Edit results and files changed outside them.
  *
  * @remarks
- * Library of the command hook (entry: `lint-file.ts`, which only calls `main()`) and of the skill driver, which inlines it; nothing here runs at import. stdin = hook JSON (PostToolUseHookInput); `main()`
- * dispatches on `hook_event_name`: SessionStart/CwdChanged print the git watch list as `watchPaths` (stdout JSON,
- * exit 0); FileChanged lints a watched file changed outside Write/Edit (unlink, scope, digest and git gates, then a
- * cross-process slot); Stop/SubagentStop lint the files whose edits no report has covered yet (`sweepHandler`);
- * anything else is PostToolUse Write|Edit (digest recorded, then lint). `asyncRewake: true` in hooks.json for
- * PostToolUse and FileChanged: runs in the background (safe because linting never mutates the file); findings go to
- * stderr with exit 2, which wakes Claude with them (at Stop/SubagentStop, which are synchronous, it keeps the stopping
- * agent going); no finding = no output, exit 0.
+ * Library of the MCP server (`../mcp/handlers.ts`), of the watch-list command hook (`watch-paths.ts`) and of the skill
+ * driver, which all inline it; nothing here runs at import. `editedHandler` (a Write/Edit sent by the mod),
+ * `fileChangedHandler`, `sweepHandler` (Stop/SubagentStop) and `watchPathsHandler` are the entry functions; findings
+ * are returned as `additionalContext`, never printed.
  *
  * lint flow (every failure path returns `{}` silently, fail open): guard `tool_response.success !== false`, then
  * `scopedTarget` (real path strictly inside the real cwd, not excluded: node_modules/vendor/.git, .claude/worktrees,
@@ -21,22 +17,23 @@
  * process group, 30 s timeout, group killed on timeout, stdout+stderr captured), classified by exit code for most tools (checkstyle by stripped
  * output, since its exit code counts only ERROR-severity violations and the bundled default ruleset runs at
  * `warning`); and, for .ts/.tsx/.mts/.cts only, a whole-project `tsc --noEmit` via the nearest tsconfig.json (see
- * `runTypeCheck`). Any issues found: truncated, joined text (stderr, exit 2, chain finding first); no finding from either check: nothing
- * printed.
+ * `runTypeCheck`). Any issues found: truncated, joined text (returned as `additionalContext`, chain finding first); no finding from either check: an
+ * empty result.
  *
  * @packageDocumentation
  */
 import { isExcludedPath, outside, realish, walkToRoot } from "@shared/scope.js";
-import { execFileSync, spawn } from "node:child_process";
+import { AsyncLocalStorage } from "node:async_hooks";
+import { execFile, execFileSync, spawn } from "node:child_process";
 import type { ChildProcess, SpawnSyncOptionsWithStringEncoding, SpawnSyncReturns } from "node:child_process";
 import type { Hash } from "node:crypto";
-import { accessSync, constants as fsConstants, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import { accessSync, constants as fsConstants, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, statSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { availableParallelism, homedir, tmpdir } from "node:os";
 import path from "node:path";
 import process from "node:process";
-import { json } from "node:stream/consumers";
 import { setTimeout as sleep } from "node:timers/promises";
+import { promisify } from "node:util";
 
 /**
  * `node:crypto`'s `createHash`, loading the module on first use (`process.getBuiltinModule`, synchronous) so events that never
@@ -51,12 +48,12 @@ function createHash(algorithm: string): Hash {
   return (process.getBuiltinModule?.("node:crypto") ?? (createRequire(import.meta.url)("node:crypto") as typeof import("node:crypto"))).createHash(algorithm);
 }
 
-/** Inner linter timeout: kills the child's whole process group (SIGTERM, SIGKILL after `KILL_GRACE_MS`); the hook-level timeout (hooks.json timeout: 90 = the lint budget) is the backstop. */
+/** Inner linter timeout: kills the child's whole process group (SIGTERM, SIGKILL after `KILL_GRACE_MS`); the call's own deadline (`HOOK_TIMEOUT_MS`, 90 s) is the backstop. */
 const SPAWN_TIMEOUT_MS = 30000;
 
 /**
  * Budget of every npx-route spawn: bare `npx --yes` (a cold install can exceed SPAWN_TIMEOUT_MS) and the npx-cached
- * bin `runNpx` runs directly. One spawn ends within 56 s with `KILL_GRACE_MS`, inside the hooks.json timeout 90, but
+ * bin `runNpx` runs directly. One spawn ends within 56.5 s with `KILL_GRACE_MS` and `SETTLE_GRACE_MS`, inside the call deadline of 90 s, but
  * it is not in the FileChanged reservation (`FILE_CHANGED_BUDGET_MS`): the sequential oxlint-`typeCheck` fallback
  * (55 + 45 + 2 s) or a late-slotted npx-route FileChanged lint can pass 90 s and is lost (hook-design.md "Timeout
  * budget", Accepted). A timeout kills the child's whole process group (SIGTERM, SIGKILL after `KILL_GRACE_MS`).
@@ -70,18 +67,18 @@ const NPX_SPAWN_TIMEOUT_MS = 55000;
  */
 const NPX_REFRESH_MS = 24 * 60 * 60 * 1000;
 
-/** How long a negative onPath answer persisted in the probe file stays valid: a linter installed later is found within this window. */
+/** How long a negative onPath answer kept in `probeStore` stays valid: a linter installed later is found within this window. */
 const PROBE_MISS_TTL_MS = 10 * 60 * 1000;
 
-/** Cap on the additionalContext findings text. */
-const MAX_CONTEXT_CHARS = 4000;
+/** Cap on the additionalContext findings text of one message (one report, or the reports one delivery carries). */
+export const MAX_CONTEXT_CHARS = 4000;
 
 /** Per-stream output cap of `spawnGroup` (spawnSync's 1MB default truncated a noisy linter's output as ENOBUFS). */
 const MAX_BUFFER_BYTES = 10 * 1024 * 1024;
 
 /**
  * Full-project incremental type-check: slower than a single-file/dir tool (SPAWN_TIMEOUT_MS) but not a cold registry
- * install (NPX_SPAWN_TIMEOUT_MS); kept its own, smaller budget so a stale async finding (this hook is async:true)
+ * install (NPX_SPAWN_TIMEOUT_MS); kept its own, smaller budget so a stale finding
  * doesn't arrive too late to be useful. A timeout kills the child's whole process group (SIGTERM, SIGKILL after
  * `KILL_GRACE_MS`). Runs at once with the chain unless an oxlint `typeCheck` config exists (`lintResolved`).
  */
@@ -89,13 +86,16 @@ const TSC_SPAWN_TIMEOUT_MS = 45000;
 
 /**
  * cargo check/clippy compile the crate; slower than a single-file/dir tool (SPAWN_TIMEOUT_MS), same budget rationale
- * as TSC_SPAWN_TIMEOUT_MS; stays under the hook-level timeout backstop. A timeout kills the child's whole process
+ * as TSC_SPAWN_TIMEOUT_MS; stays under the call deadline (`HOOK_TIMEOUT_MS`). A timeout kills the child's whole process
  * group (SIGTERM, SIGKILL after `KILL_GRACE_MS`): rustc/clippy-driver grandchildren die with cargo.
  */
 const CARGO_SPAWN_TIMEOUT_MS = 45000;
 
 /** SIGKILL follows the timeout's SIGTERM to the process group after this long (a child trapping SIGTERM must still die). */
 const KILL_GRACE_MS = 1000;
+
+/** After the SIGKILL, `spawnGroup` waits this long for `close` and then settles anyway: a pipe holder outside the group (a `setsid` daemon) would keep it from ever firing. */
+const SETTLE_GRACE_MS = 500;
 
 /**
  * Most files per chain-tool spawn in `lintFilesHandler` (the skill driver's batch path). Caps the argv length (sized
@@ -108,25 +108,48 @@ const BATCH_MAX_FILES = 100;
 /** Above this many lintable files the watch list is empty (nothing watched), as dprint's watch-list.mts. */
 export const WATCH_LIMIT = 5000;
 
+/** Entry cap of every capped state map (`written`, `roots`, `scratchpads`, `keys`, `outbox`); `capSet` drops the oldest. */
+export const STATE_CAP = 5000;
+
+/**
+ * Sets `key` as the newest entry of a capped map: a re-set key moves to the end, and past `STATE_CAP` the oldest
+ * entries are dropped.
+ *
+ * @param map - The capped map.
+ * @param key - Key to set.
+ * @param value - Value to store.
+ */
+export function capSet<K, V>(map: Map<K, V>, key: K, value: V): void {
+  map.delete(key);
+  map.set(key, value);
+  while (map.size > STATE_CAP) {
+    const oldest = map.keys().next();
+    if (oldest.done) break;
+    map.delete(oldest.value);
+  }
+}
+
 /** Budget of each git call (ls-files for the watch list, status for the FileChanged gate). */
 const GIT_TIMEOUT_MS = 10000;
 
-/**
- * hooks.json `timeout` of PostToolUse and FileChanged (90 s), the backstop that kills a hook process; a slot file whose
- * mtime is this far from now (past or future) was left by a killed holder or survived a clock jump. Re-derive with
- * hook-design.md "Timeout budget" when hooks.json changes.
- */
-const HOOK_TIMEOUT_MS = 90000;
+/** `execFile` as a promise: the FileChanged git gate, so no tool call blocks the server process. */
+const execFileAsync = promisify(execFile);
 
 /**
- * FileChanged nominal worst case (85 s): git status + slot wait + lint end by then; the 5 s under `HOOK_TIMEOUT_MS`
- * cover node startup before `process.uptime()` counts, the findings gate and the exit. The per-file lint budget
+ * Budget of one tool call (90 s): what a Write/Edit or FileChanged lint of the server may take, per tool call (the
+ * `mcp_tool` hook timeout lies above it). Re-derive with hook-design.md "Timeout budget" when hooks.json changes.
+ */
+export const HOOK_TIMEOUT_MS = 90000;
+
+/**
+ * FileChanged nominal worst case per tool call (85 s of call time, `elapsedMs`): git status + slot wait + lint end by
+ * then; the 5 s under `HOOK_TIMEOUT_MS` cover the findings gate and the answer. The per-file lint budget
  * `fileChangedHandler` reserves before waiting mirrors `runChainLint`'s one spawn timeout per tool
  * (`CARGO_SPAWN_TIMEOUT_MS` for a `manifestPath` tool, else `SPAWN_TIMEOUT_MS`) and `runTypeCheck`'s
  * `TSC_SPAWN_TIMEOUT_MS`; update it together with them (a chain that runs a second tool per file needs a larger
  * reservation). The reservation stays the sum chain + tsc although the phases overlap since F18, because the
  * oxlint-`typeCheck` fallback path runs them in sequence. `coalesceProjectCheck` (F13) stops waiting for a project-check
- * lock at uptime `FILE_CHANGED_BUDGET_MS` minus the check's spawn timeout and then runs unlocked, so the lock wait
+ * lock at call time `FILE_CHANGED_BUDGET_MS` minus the check's spawn timeout and then runs unlocked, so the lock wait
  * stays inside this budget. Worst end = max(slot deadline + sequential phases, lock-wait deadline + check timeout)
  * + `KILL_GRACE_MS` per phase: 40 + 45 + 1 = 86 s (`.ts` concurrent, `.rs`), 55 + 30 + 1 = 86 s (`.go`), 10 + 30 + 1
  * + 45 + 1 = 87 s (`.ts` fallback), all inside the 5 s margin under `HOOK_TIMEOUT_MS`.
@@ -134,8 +157,8 @@ const HOOK_TIMEOUT_MS = 90000;
 const FILE_CHANGED_BUDGET_MS = HOOK_TIMEOUT_MS - 5000;
 
 /**
- * Concurrent FileChanged lints across all hook processes sharing one plugin data dir (3 on 12 cores, at least 2).
- * Exported for the tests.
+ * Concurrent FileChanged lints per server process (3 on 12 cores, at least 2), held in memory by `acquireSlot` with
+ * FIFO waiters; other sessions' server processes have their own (R2). Exported for the tests.
  */
 export const FILE_CHANGED_SLOTS = Math.max(2, Math.floor(availableParallelism() / 4));
 
@@ -189,7 +212,7 @@ export interface Finding {
 }
 
 /** The subset of Claude Code's hook payloads this module reads (PostToolUse, FileChanged, SessionStart, CwdChanged, Stop, SubagentStop). */
-interface PostToolUseHookInput {
+export interface PostToolUseHookInput {
   /** Project root the session runs in. */
   cwd: string;
   /** Hook event (`PostToolUse`, `FileChanged`, `SessionStart`, `CwdChanged`, `Stop`, `SubagentStop`); missing in older payloads (treated as PostToolUse). */
@@ -217,9 +240,9 @@ interface PostToolUseHookInput {
   [key: string]: unknown;
 }
 
-/** The hook's stdout JSON, empty when there is nothing to report. */
-interface HookResult {
-  /** Findings, delivered to Claude as context on the next turn. */
+/** The handlers' result, empty when there is nothing to report. */
+export interface HookResult {
+  /** The internal carrier of the findings text; how and when it reaches Claude is the caller's delivery (`context`, a stop block or a prompt context). */
   hookSpecificOutput?: { hookEventName: string; additionalContext: string };
 }
 
@@ -334,60 +357,14 @@ export const REGISTRY: Record<string, LangEntry> = {
   },
 };
 
-/** onPath answers persisted per PATH string: tool name -> directory it was found in, or -> Date.now() of the miss. */
+/** onPath answers of this process: tool name -> directory it was found in, or -> Date.now() of the miss. */
 type ProbeStore = { hits: Record<string, string>; misses: Record<string, number> };
 
-/** Per-process memo of onPath answers (each hook event is its own process; the cross-process copy is the probe file). */
+/** Memo of onPath answers, per tool call (cleared by `runInCall`; per process in the skill driver and the watch-paths hook). */
 const probeCache = new Map<string, boolean>();
 
-/** Probe store for the current PATH, loaded by the first onPath call of the process; null until then. */
+/** PATH probe answers of this process (the server's lifetime; one driver run), created empty by the first `onPath`. */
 let probeStore: ProbeStore | null = null;
-
-/**
- * Absolute path of the probe file for the current PATH: `${CLAUDE_PLUGIN_DATA || os.tmpdir()}/probe-<hashPath(PATH)>.json`.
- * Never inside the project tree; both env values are constant within a hook process.
- *
- * @returns Absolute path of the probe file.
- */
-function probeFilePath(): string {
-  return path.resolve(process.env.CLAUDE_PLUGIN_DATA || tmpdir(), `probe-${hashPath(process.env.PATH || "")}.json`);
-}
-
-/**
- * Read and shape-check the probe file; any read, parse or shape failure returns an empty store (probe again).
- * Single entries are type-checked at lookup in onPath, so a bad entry costs one probe and is overwritten.
- *
- * @param file - Probe file path (`probeFilePath()`).
- * @returns The stored answers, or an empty store.
- */
-function loadProbeStore(file: string): ProbeStore {
-  const isObject = (v: unknown): boolean => typeof v === "object" && v !== null && !Array.isArray(v);
-  try {
-    const s = JSON.parse(readFileSync(file, "utf8")) as { hits?: unknown; misses?: unknown } | null;
-    if (isObject(s) && isObject(s?.hits) && isObject(s?.misses)) return s as ProbeStore;
-  } catch {
-    // unreadable or not JSON: probe again
-  }
-  return { hits: {}, misses: {} };
-}
-
-/**
- * Write the store atomically (temp file + renameSync); errors are swallowed (cost: the next process probes again).
- * No locking: the last writer wins.
- *
- * @param file - Probe file path (`probeFilePath()`).
- * @param store - Store to persist.
- */
-function saveProbeStore(file: string, store: ProbeStore): void {
-  try {
-    mkdirSync(path.dirname(file), { recursive: true });
-    const tmp = `${file}.${process.pid}.tmp`;
-    writeFileSync(tmp, JSON.stringify(store));
-    renameSync(tmp, file);
-  } catch {
-    // fail open: an unwritable data dir means the next process probes again
-  }
-}
 
 /**
  * Whether a path is an executable regular file, as `command -v` checks (a directory passes `X_OK` alone).
@@ -419,24 +396,23 @@ function isFile(p: string): boolean {
 }
 
 /**
- * Whether a tool is executable on PATH (memoized per process, persisted across processes in the probe file).
+ * Whether a tool is executable on PATH (memoized per tool call in `probeCache`, across calls in `probeStore`).
  *
  * @param tool - Binary name to look for.
  * @returns True when an executable of that name sits in a PATH directory.
  * @remarks A stored hit is re-validated with `isExecutableFile` on its directory; a stored miss is trusted while
  * `0 <= Date.now() - at < PROBE_MISS_TTL_MS` (a future-dated miss is expired); otherwise PATH is scanned and the
- * result written back. Residuals: (1) a newly installed tool is not seen for up to 10 min after a persisted miss,
- * also an earlier chain tool (a later chain tool, a local bin or npx runs meanwhile); (2) a copy added to an
- * earlier PATH dir is not noticed (presence only: the spawn is by bare name, so PATH's first binary runs); (3) a
- * tool reachable only through a relative PATH entry is cwd-dependent: never cached as a hit, and its miss is per
- * PATH string, not per cwd; (4) in the shared `os.tmpdir()` fallback another user with the same PATH string can
- * plant entries (a hit only for a tool executable in that dir, a miss suppresses that tool's lint for the TTL).
+ * result stored. Nothing is persisted: the store lives in the process, so a planted or stale file cannot answer.
+ * Residuals: (1) a newly installed tool is not seen for up to 10 min after a miss, also an earlier chain tool (a
+ * later chain tool, a local bin or npx runs meanwhile); (2) a copy added to an earlier PATH dir is not noticed
+ * (presence only: the spawn is by bare name, so PATH's first binary runs); (3) a tool reachable only through a
+ * relative PATH entry is cwd-dependent: never stored as a hit, and its miss is per process, not per cwd.
+ * Exported for the tests (the miss TTL).
  */
-function onPath(tool: string): boolean {
+export function onPath(tool: string): boolean {
   const cached = probeCache.get(tool);
   if (cached !== undefined) return cached;
-  const file = probeFilePath();
-  probeStore ??= loadProbeStore(file);
+  probeStore ??= { hits: {}, misses: {} };
   const known = probeStore.hits[tool];
   if (typeof known === "string" && path.isAbsolute(known)) {
     if (isExecutableFile(path.join(known, tool))) {
@@ -467,7 +443,6 @@ function onPath(tool: string): boolean {
     Reflect.deleteProperty(probeStore.misses, tool);
     if (foundDir === null) probeStore.misses[tool] = Date.now();
     else probeStore.hits[tool] = foundDir;
-    saveProbeStore(file, probeStore);
   }
   const found = foundDir !== null;
   probeCache.set(tool, found);
@@ -522,8 +497,11 @@ function killGroup(pgid: number, sig: NodeJS.Signals): void {
 /**
  * Install, once per process, one handler for SIGTERM, SIGINT and SIGHUP that SIGKILLs every live `spawnGroup` group
  * (the children are detached, so the signal that kills the hook or driver would not reach them), removes itself and
- * re-raises the signal on this process so the default exit still happens. Normal exit is unchanged. A SIGKILL of the
- * hook cannot be handled: its children die on EPIPE at their next write (tsc runs to its natural end).
+ * re-raises the signal on this process so the default exit still happens, and an `exit` listener that SIGKILLs the
+ * live groups too: the server ends with `process.exit(0)` when its stdin closes, with no signal before it (a client
+ * that died), and a group of an awaited run, or one that traps SIGTERM, would outlive it. A normal exit of the driver
+ * or the watch-list hook has no live group. A SIGKILL of the process cannot be handled: its children die on EPIPE at
+ * their next write (tsc runs to its natural end).
  */
 function installSignalHandler(): void {
   if (groupSignalHandlerInstalled) return;
@@ -535,6 +513,9 @@ function installSignalHandler(): void {
     process.kill(process.pid, sig);
   };
   for (const s of GROUP_KILL_SIGNALS) process.on(s, onSignal);
+  process.on("exit", () => {
+    for (const pgid of liveGroups) killGroup(pgid, "SIGKILL");
+  });
 }
 
 /**
@@ -551,13 +532,16 @@ function installSignalHandler(): void {
  * `"SIGKILL"`). When one stream's bytes exceed `opts.maxBuffer` (`MAX_BUFFER_BYTES`) further chunks of it are
  * discarded, `error.code` is `"ENOBUFS"` and the group is killed with the same SIGTERM/SIGKILL sequence (spawnSync
  * semantics: per stream, child killed). A spawn failure (`error` event before `close`: ENOENT, EACCES) resolves with
- * that error, `status` and `signal` null and empty output; `spawnBin` reads its `code`. Both timers are cleared only
+ * that error, `status` and `signal` null and empty output; `spawnBin` reads its `code`. The timers are cleared only
  * on resolution (`close` or that pre-spawn `error`), never on `exit`, so a group kill still reaches pipe-holding
  * grandchildren after the leader exited; the SIGKILL timer is a plain timer (no `unref`) and is always cleared. The
  * group's pid is held in `liveGroups` from spawn to resolution so `installSignalHandler`'s handler (installed on the
- * first call) can SIGKILL it when this process is signalled. The promise never rejects: every exceptional outcome is
- * in `error`. Residuals: a grandchild that called `setsid` leaves the group and, holding a pipe, delays `close` until
- * the hook backstop (same as spawnSync); the pid-reuse window between the leader's reap and `close` is microseconds
+ * first call) can SIGKILL it when this process is signalled. A call cancelled through `runInCall` spawns nothing (`ECANCELED`) or, while its group runs, kills the group with the timeout sequence. The promise never rejects: every exceptional outcome is
+ * in `error`. Residuals: a grandchild that called `setsid` leaves the group and, holding a pipe, delays `close`; the
+ * server has no process kill behind it (the hook process had one at its 90 s timeout), so once a timeout, ENOBUFS or
+ * a cancel killed the group, `SETTLE_GRACE_MS` after the SIGKILL the promise settles anyway (pipes destroyed,
+ * `signal` `"SIGKILL"`, `error` set, the output collected so far), while a leader that exited normally still waits for
+ * its timeout; the pid-reuse window between the leader's reap and `close` is microseconds
  * and needs a pid wraparound. Exported for the tests (the timeout argument is the test seam; no env override).
  *
  * @param cmd - Command (bare name resolved on `opts.env.PATH` or `process.env.PATH`, or an absolute path).
@@ -571,6 +555,11 @@ export function spawnGroup(cmd: string, argv: readonly string[], opts: SpawnSync
   const maxBuffer = opts.maxBuffer ?? MAX_BUFFER_BYTES;
   const timeout = opts.timeout ?? SPAWN_TIMEOUT_MS;
   return new Promise((resolve) => {
+    const sig = callCtx.getStore()?.signal;
+    if (sig?.aborted) {
+      resolve({ pid: 0, output: [null, "", ""] as unknown as string[], stdout: "", stderr: "", status: null, signal: null, error: Object.assign(new Error(`spawnGroup ${cmd}: ECANCELED`), { code: "ECANCELED" }) });
+      return;
+    }
     let error: Error | undefined;
     let done = false;
     let killTimer: NodeJS.Timeout | undefined;
@@ -587,12 +576,22 @@ export function spawnGroup(cmd: string, argv: readonly string[], opts: SpawnSync
     const kill = (): void => {
       if (pid === undefined || killTimer) return;
       killGroup(pid, "SIGTERM");
-      killTimer = setTimeout(() => killGroup(pid, "SIGKILL"), KILL_GRACE_MS);
+      killTimer = setTimeout(() => {
+        killGroup(pid, "SIGKILL");
+        // `close` waits for every pipe holder, also one outside the group: settle with what was collected
+        killTimer = setTimeout(() => {
+          child.stdout?.destroy();
+          child.stderr?.destroy();
+          finish(null, "SIGKILL", Buffer.concat(out).toString("utf8"), Buffer.concat(err).toString("utf8"));
+        }, SETTLE_GRACE_MS);
+      }, KILL_GRACE_MS);
     };
     const fail = (code: string): void => {
       error ??= Object.assign(new Error(`spawnGroup ${cmd}: ${code}`), { code });
       kill();
     };
+    const onAbort = (): void => fail("ECANCELED");
+    sig?.addEventListener("abort", onAbort, { once: true });
     const timer = setTimeout(() => fail("ETIMEDOUT"), timeout);
     const out: Buffer[] = [];
     const err: Buffer[] = [];
@@ -612,6 +611,7 @@ export function spawnGroup(cmd: string, argv: readonly string[], opts: SpawnSync
       if (done) return;
       done = true;
       clearTimeout(timer);
+      sig?.removeEventListener("abort", onAbort);
       if (killTimer) clearTimeout(killTimer);
       if (pid !== undefined) liveGroups.delete(pid);
       resolve({ pid: pid ?? 0, output: [null, stdout, stderr] as unknown as string[], stdout, stderr, status, signal, error });
@@ -753,8 +753,50 @@ async function runLintTool(tool: LintTool, argv: string[], spawnOpts: SpawnSyncO
   return spawnGroup(spawnName, spawnArgv, spawnOpts);
 }
 
-/** Per-process memo for configExists: a prefiltered directory -> its entry names upper-cased, or null when readdirSync failed (each hook event is its own process; never invalidated). */
+/** Memo for configExists, per tool call (cleared by `runInCall`): a prefiltered directory -> its entry names upper-cased, or null when readdirSync failed. */
 const dirEntries = new Map<string, Set<string> | null>();
+
+/** Per-call context: the call's start (`performance.now()`) and the signal the client cancels it with. */
+const callCtx = new AsyncLocalStorage<{ t0: number; signal: AbortSignal }>();
+
+/**
+ * Runs one tool call inside its own context: the memos are cleared, deadlines count from the call's start and
+ * `spawnGroup` honours `signal`.
+ *
+ * @param signal - Aborted when the client cancels the call.
+ * @param fn - The call's work.
+ * @returns What `fn` resolves to.
+ */
+export function runInCall<T>(signal: AbortSignal, fn: () => Promise<T>): Promise<T> {
+  probeCache.clear();
+  dirEntries.clear();
+  return callCtx.run({ t0: performance.now(), signal }, fn);
+}
+
+/** Abort reason of a call its client cancelled (or that was dropped because the server closes); any other reason is the call's own deadline. */
+export const CANCELLED = "cancelled";
+
+/**
+ * Whether the current call was cancelled by its client: the work is dropped and the journal records it claimed stay
+ * for the next lint or the Stop sweep. A call that ran into its own deadline is not cancelled: a hanging file is not
+ * linted again for another full deadline at every stop.
+ *
+ * @returns True inside a call whose signal aborted with `CANCELLED`.
+ */
+export function callCancelled(): boolean {
+  const s = callCtx.getStore()?.signal;
+  return s?.aborted === true && s.reason === CANCELLED;
+}
+
+/**
+ * Milliseconds since the current call started; process uptime outside a call (the hook process).
+ *
+ * @returns Elapsed milliseconds.
+ */
+function elapsedMs(): number {
+  const c = callCtx.getStore();
+  return c ? performance.now() - c.t0 : process.uptime() * 1000;
+}
 
 /**
  * Whether `name` exists in `dir`, with existsSync's answer exactly. With `prefilter` (by default when the walked path
@@ -1512,7 +1554,9 @@ export function classifyCheckstyleOutput(stdout: string): { status: "clean" | "i
 }
 
 /**
- * Trim, collapse runs of 3+ blank lines to one, and cap at `max` (default MAX_CONTEXT_CHARS).
+ * Trim, collapse runs of 3+ blank lines to one, and cap at `max` (default MAX_CONTEXT_CHARS). The cut is by code point:
+ * a character outside the BMP that straddles the cap is dropped whole, never left as a lone high surrogate (the text
+ * travels as JSON to the model, where an ill-formed string would break the request).
  *
  * @param text - Findings text.
  * @param max - Character cap; the skill driver passes MAX_CONTEXT_CHARS times the files of a batched run.
@@ -1521,7 +1565,8 @@ export function classifyCheckstyleOutput(stdout: string): { status: "clean" | "i
 export function truncate(text: string, max = MAX_CONTEXT_CHARS): string {
   const collapsed = text.replace(/\n{3,}/g, "\n\n").trim();
   if (collapsed.length <= max) return collapsed;
-  return collapsed.slice(0, max) + "\n… (truncated)";
+  const last = collapsed.charCodeAt(max - 1);
+  return collapsed.slice(0, last >= 0xd800 && last <= 0xdbff ? max - 1 : max) + "\n… (truncated)";
 }
 
 /**
@@ -1952,19 +1997,28 @@ const SETTLE_POLL_MS = 250;
 const PENDING_TTL_MS = 24 * 60 * 60 * 1000;
 
 /**
- * What is left of the hold for this process: the quiet time (`UNIVERSAL_LINT_SETTLE_MS`, a finite number >= 0; a test
- * and perf-harness seam, not a user setting; else `SETTLE_MS`) minus the time the agent has already been quiet, cut so
- * the hold ends at least 1 s before the 90 s hook backstop. In a headless run (`claude -p`: `CLAUDE_CODE_ENTRYPOINT`
- * starts with `sdk`) nothing is held: Claude Code does not background the hook there, so no later edit can arrive.
+ * Whether this process runs under a headless Claude Code (SDK, `claude -p`): no hold and no idle wake there.
  *
- * @param uptimeMs - Process uptime in ms (injectable for tests).
+ * @returns True when `CLAUDE_CODE_ENTRYPOINT` starts with `sdk`.
+ */
+export function isHeadless(): boolean {
+  return process.env.CLAUDE_CODE_ENTRYPOINT?.startsWith("sdk") === true;
+}
+
+/**
+ * What is left of the hold of this call: the quiet time (`UNIVERSAL_LINT_SETTLE_MS`, a finite number >= 0; a test
+ * and perf-harness seam, not a user setting; else `SETTLE_MS`) minus the time the agent has already been quiet, cut so
+ * the hold ends at least 1 s before the call's 90 s deadline (`HOOK_TIMEOUT_MS`). In a headless run (`claude -p`:
+ * `CLAUDE_CODE_ENTRYPOINT` starts with `sdk`) nothing is held: the call is awaited there, so no later edit can arrive.
+ *
+ * @param uptimeMs - Milliseconds since the call started (injectable for tests).
  * @param idleMs - Time since the agent's last journaled Write/Edit in ms.
  * @returns Milliseconds to wait, never negative.
  */
-export function settleWaitMs(uptimeMs: number = process.uptime() * 1000, idleMs = 0): number {
+export function settleWaitMs(uptimeMs: number = elapsedMs(), idleMs = 0): number {
   const raw = process.env.UNIVERSAL_LINT_SETTLE_MS;
   const n = raw === undefined || raw.trim() === "" ? Number.NaN : Number(raw);
-  const base = Number.isFinite(n) && n >= 0 ? n : process.env.CLAUDE_CODE_ENTRYPOINT?.startsWith("sdk") ? 0 : SETTLE_MS;
+  const base = Number.isFinite(n) && n >= 0 ? n : isHeadless() ? 0 : SETTLE_MS;
   return Math.max(0, Math.min(base - idleMs, HOOK_TIMEOUT_MS - 1000 - uptimeMs));
 }
 
@@ -2132,15 +2186,10 @@ export function gateFinding(finding: Finding, ranges: Array<[number, number]> | 
 }
 
 /**
- * File holding the SHA-256 (base64) of the content Write/Edit last left at `real`:
- * `CLAUDE_PLUGIN_DATA` (OS temp dir when unset)/written/<hashPath(real)>. Never inside the project tree.
- *
- * @param real - Real path of the written file.
- * @returns Absolute path of the digest file.
+ * SHA-256 (base64) of the content Write/Edit last left at each real path, held in this server process's memory
+ * (capped by `capSet`). Not shared between sessions or server processes: a lost entry costs one duplicate lint.
  */
-function writtenDigestPath(real: string): string {
-  return path.resolve(process.env.CLAUDE_PLUGIN_DATA || tmpdir(), "written", hashPath(real));
-}
+const written = new Map<string, string>();
 
 /**
  * SHA-256 base64 of a file's bytes.
@@ -2197,28 +2246,16 @@ export function writtenContent(args: PostToolUseHookInput): string | null {
 }
 
 /**
- * Record the digest of the content a Write/Edit produced (`writtenContent`), atomically (temp file + renameSync), so a
- * FileChanged process can skip the file while its content still matches. Not the disk: a write by another program that
- * lands before the hook runs must still differ. Without content the old digest is removed. One file per real path:
- * concurrent hook processes need no locking. Fails open silently (cost: one duplicate lint, never a lost one).
+ * Record the digest of the content a Write/Edit produced (`writtenContent`) in the `written` map, so a FileChanged
+ * in the same server can skip the file while its content still matches. Not the disk: a write by another program that
+ * lands before the hook runs must still differ. Without content the old digest is removed.
  *
  * @param real - Real path of the written file (the digest key).
  * @param content - The content the tool wrote, or null when unknown.
  */
 export function recordWritten(real: string, content: string | null): void {
-  try {
-    const file = writtenDigestPath(real);
-    if (content === null) {
-      rmSync(file, { force: true });
-      return;
-    }
-    mkdirSync(path.dirname(file), { recursive: true });
-    const tmp = `${file}.${process.pid}.tmp`;
-    writeFileSync(tmp, digest(content));
-    renameSync(tmp, file);
-  } catch {
-    // fail open: a missing digest costs one duplicate lint
-  }
+  if (content === null) written.delete(real);
+  else capSet(written, real, digest(content));
 }
 
 /**
@@ -2268,11 +2305,11 @@ function hasForeignLineBreak(fp: string): boolean {
 export interface EditRecord {
   /** `hashPath` of the file's real path: the record files of one file share this prefix. */
   key: string;
-  /** File name of the record inside the journal directory. */
+  /** Name of the record in the journal map: `<key>-<seq 12 digits>-<ms 15 digits>-<owner>.json`, sorting in append order (the sequence number first: the wall clock can step back). */
   name: string;
 }
 
-/** One journal record as stored: an edit of a file that no report has covered yet. */
+/** One journal record as stored in the server's memory: an edit of a file that no report has covered yet. */
 export interface PendingRecord {
   /** The edit's hunks, null when the whole file counts as edited (Write, FileChanged, malformed patch). */
   hunks: EditHunk[] | null;
@@ -2289,13 +2326,20 @@ export interface PendingRecord {
 }
 
 /**
- * Settle-window journal directory: `CLAUDE_PLUGIN_DATA` (OS temp dir when unset)/settle. Never inside the project tree.
- *
- * @returns Absolute path of the directory.
+ * The settle-window journal of this server process: record name -> pending record. Pruned by age in `recordEdit`
+ * (`PENDING_TTL_MS`); deleting a name is the exclusive claim of a report (`settleFindings`, `sweepFile`).
  */
-function settleDir(): string {
-  return path.resolve(process.env.CLAUDE_PLUGIN_DATA || tmpdir(), "settle");
-}
+const journal = new Map<string, PendingRecord>();
+/** When each owner last journaled a Write/Edit (epoch ms); pruned by `pruneActivity`. */
+const activity = new Map<string, number>();
+/** Owners whose last stop was blocked by a report (epoch ms of the block); pruned by `pruneActivity`. */
+const blocked = new Map<string, number>();
+/** Sequence number of the next journal record: the append order, which the record names sort by (the wall clock can step back). */
+let journalSeq = 0;
+/** The journal is pruned at most this often (ms): a burst of FileChanged events journals one record each, and a prune walks the whole journal. */
+const JOURNAL_PRUNE_MS = 1000;
+/** `Date.now()` of the last journal prune. */
+let lastPrune = 0;
 
 /**
  * The journal owner of a payload: the session and, inside a subagent, the agent. Findings are reported to the owner
@@ -2310,27 +2354,24 @@ export function ownerOf(args: PostToolUseHookInput | undefined): string {
 }
 
 /**
- * When the owner last journaled a Write/Edit (any file), from its activity stamp `settle/act/<owner>`.
+ * When the owner last journaled a Write/Edit (any file).
  *
  * @param owner - The `ownerOf` value.
- * @returns Epoch ms, or 0 when there is no readable stamp (counts as quiet: the hold ends, fail open).
+ * @returns Epoch ms, or 0 when the owner journaled nothing (counts as quiet: the hold ends, fail open).
  */
 function lastActivity(owner: string): number {
-  try {
-    const n = Number(readFileSync(path.join(settleDir(), "act", owner), "utf8"));
-    return Number.isFinite(n) ? n : 0;
-  } catch {
-    return 0;
-  }
+  return activity.get(owner) ?? 0;
 }
 
 /**
- * Journal one edit of a file: `<hashPath(real)>-<ms>-<pid>-<owner>.json` holding the edit's hunks (null = whole file),
- * its changed lines, the digest of the file after it, `before` (the digest of the file the hunks apply to: an Edit's
- * `originalFile`; null without hunks) and the file path and cwd its lint needs, written atomically (temp file +
- * `renameSync`). The record stays until a report covers it (`settleFindings`, `sweepHandler`) or a lint finds the
- * file clean. Also renews the owner's activity stamp. Entries dated more than `PENDING_TTL_MS` ago or more than
- * `HOOK_TIMEOUT_MS` ahead (temp leftovers too) are pruned first. Fails open to null (the lint then reports at once).
+ * Journal one edit of a file in the server's memory: `<hashPath(real)>-<seq 12 digits>-<ms 15 digits>-<owner>.json`
+ * holding the edit's hunks (null = whole file), its changed lines, the digest of the file after it, `before` (the
+ * digest of the file the hunks apply to: an Edit's `originalFile`; null without hunks) and the file path and cwd its
+ * lint needs. The names sort by the sequence number, so a wall clock that steps back cannot make a later edit sort
+ * before an earlier one; the milliseconds are only for the age prune. The record stays until a report covers it
+ * (`settleFindings`, `sweepHandler`) or a lint finds the file clean. Also renews the owner's activity. Records dated
+ * more than `PENDING_TTL_MS` ago are pruned first, at most once per `JOURNAL_PRUNE_MS`.
+ * Fails open to null (an unreadable file for the digest; the lint then reports at once).
  *
  * @param fp - Lexical path of the edited file (read for the digest when `written` is not given).
  * @param real - Real path of the file (the key).
@@ -2353,21 +2394,15 @@ export function recordEdit(
   cwd = "",
 ): EditRecord | null {
   try {
-    const dir = settleDir();
-    mkdirSync(path.join(dir, "act"), { recursive: true });
     const now = Date.now();
-    // a name dated ahead (clock stepped back) would sort after every fresh record and read as a later edit
-    for (const n of readdirSync(dir)) {
-      const at = Number(n.split("-")[1]);
-      if (now - at > PENDING_TTL_MS || at - now > HOOK_TIMEOUT_MS) rmSync(path.join(dir, n), { force: true });
+    if (now - lastPrune >= JOURNAL_PRUNE_MS || now < lastPrune) {
+      lastPrune = now;
+      for (const n of journal.keys()) if (now - Number(n.split("-")[2]) > PENDING_TTL_MS) journal.delete(n);
     }
     const key = hashPath(real);
-    const name = `${key}-${String(now).padStart(15, "0")}-${process.pid}-${owner}.json`;
-    const tmp = path.join(dir, `${name}.tmp`);
-    const record: PendingRecord = { hunks, ranges: ranges ?? null, digest: written === undefined ? fileDigest(fp) : written, before: before ?? null, fp, cwd };
-    writeFileSync(tmp, JSON.stringify(record));
-    renameSync(tmp, path.join(dir, name));
-    writeFileSync(path.join(dir, "act", owner), String(now));
+    const name = `${key}-${String(journalSeq++).padStart(12, "0")}-${String(now).padStart(15, "0")}-${owner}.json`;
+    journal.set(name, { hunks, ranges: ranges ?? null, digest: written === undefined ? fileDigest(fp) : written, before: before ?? null, fp, cwd });
+    activity.set(owner, now);
     return { key, name };
   } catch {
     return null;
@@ -2380,15 +2415,11 @@ export function recordEdit(
  * A->B->A).
  *
  * @param rec - The lint's own journal record, or null.
- * @returns The newest record name of `rec.key`, or null (no record, or the journal is unreadable).
+ * @returns The newest record name of `rec.key`, or null (no record).
  */
 function journalTail(rec: EditRecord | null): string | null {
   if (!rec) return null;
-  try {
-    return readdirSync(settleDir()).filter((n) => n.startsWith(`${rec.key}-`) && n.endsWith(".json")).sort().at(-1) ?? null;
-  } catch {
-    return null;
-  }
+  return [...journal.keys()].filter((n) => n.startsWith(`${rec.key}-`)).sort().at(-1) ?? null;
 }
 
 /**
@@ -2396,35 +2427,33 @@ function journalTail(rec: EditRecord | null): string | null {
  *
  * @param key - `hashPath` of the file's real path.
  * @param owner - The `ownerOf` value.
- * @returns The record file names; throws when the journal cannot be read.
+ * @returns The record names.
  */
 function recordNames(key: string, owner: string): string[] {
-  return readdirSync(settleDir()).filter((n) => n.startsWith(`${key}-`) && n.endsWith(`-${owner}.json`)).sort();
+  return [...journal.keys()].filter((n) => n.startsWith(`${key}-`) && n.endsWith(`-${owner}.json`)).sort();
 }
 
 /**
- * Read journal records.
+ * Look up journal records.
  *
- * @param names - Record file names.
- * @returns The parsed records in the same order; throws on an unreadable or corrupt record.
+ * @param names - Record names.
+ * @returns The records in the same order; throws when one is gone (claimed or pruned meanwhile).
  */
 function readRecords(names: readonly string[]): PendingRecord[] {
-  return names.map((n) => JSON.parse(readFileSync(path.join(settleDir(), n), "utf8")) as PendingRecord);
+  return names.map((n) => {
+    const r = journal.get(n);
+    if (!r) throw new Error("record gone");
+    return r;
+  });
 }
 
 /**
- * Remove journal records (a report or a clean lint covered them). Never throws.
+ * Remove journal records (a report or a clean lint covered them).
  *
- * @param names - Record file names.
+ * @param names - Record names.
  */
 function clearRecords(names: readonly string[]): void {
-  for (const n of names) {
-    try {
-      rmSync(path.join(settleDir(), n), { force: true });
-    } catch {
-      // left for the TTL prune
-    }
-  }
+  for (const n of names) journal.delete(n);
 }
 
 /**
@@ -2472,15 +2501,11 @@ export function pendingRanges(recs: readonly PendingRecord[], d0: string | null)
  * @param owner - The `ownerOf` value.
  * @param d0 - Digest of the content the linter reads.
  * @param fallback - The ranges of the lint's own edit.
- * @returns The ranges to gate against, or null for the whole file (also when the journal cannot be read).
+ * @returns The ranges to gate against, or null for the whole file.
  */
 function pendingUnion(rec: EditRecord | null, owner: string, d0: string | null, fallback: Array<[number, number]> | null): Array<[number, number]> | null {
   if (!rec) return fallback;
-  try {
-    return pendingRanges(readRecords(recordNames(rec.key, owner)), d0);
-  } catch {
-    return null;
-  }
+  return pendingRanges(readRecords(recordNames(rec.key, owner)), d0);
 }
 
 /**
@@ -2493,11 +2518,7 @@ function pendingUnion(rec: EditRecord | null, owner: string, d0: string | null, 
  */
 function settleClean(rec: EditRecord | null, owner: string, unchanged: boolean): void {
   if (!rec || !unchanged) return;
-  try {
-    clearRecords(recordNames(rec.key, owner).filter((n) => n <= rec.name));
-  } catch {
-    // unreadable journal: the records stay for the sweep
-  }
+  clearRecords(recordNames(rec.key, owner).filter((n) => n <= rec.name));
 }
 
 /**
@@ -2510,10 +2531,10 @@ function settleClean(rec: EditRecord | null, owner: string, unchanged: boolean):
  * newer record of the file and owner exists (that edit's lint gates against the lines of every pending edit and
  * reports what persists), or the file changed outside Write/Edit during the hold (FileChanged lints a watched file):
  * whatever lint follows, or else the sweep at Stop/SubagentStop (`sweepHandler`), reports the final state. The own
- * record gone means a sweep or a later clean lint already covered it. Reporting claims the own record by removing it
- * (a sweep claims the same way, so one of the two reports) and clears the older records of the file and owner.
- * No own record, an unreadable file (`d0 === null`) or an unreadable journal mean "cannot tell": the findings are
- * returned at once (fail open, reported).
+ * record gone means a sweep or a later clean lint already covered it. Reporting claims the own record by deleting it
+ * from the journal map (a sweep claims the same way, so one of the two reports) and clears the older records of the
+ * file and owner. No own record or an unreadable file (`d0 === null`) mean "cannot tell": the findings are returned
+ * at once (fail open, reported).
  *
  * @param findings - The gated findings of the lint.
  * @param resolved - Lexical absolute path of the linted file.
@@ -2528,22 +2549,14 @@ export async function settleFindings(findings: Finding[], resolved: string, rec:
   if (d0 !== d1) return [];
   let names: string[];
   for (;;) {
-    try {
-      names = recordNames(rec.key, owner);
-    } catch {
-      return findings;
-    }
+    names = recordNames(rec.key, owner);
     if (names.at(-1) !== rec.name) return []; // a newer edit owns the report, or the own record is already covered
     const left = settleWaitMs(undefined, Date.now() - lastActivity(owner));
     if (left <= 0) break;
     await sleep(Math.min(left, SETTLE_POLL_MS));
   }
   if (digestOrNull(resolved) !== d0) return [];
-  try {
-    unlinkSync(path.join(settleDir(), rec.name)); // the claim: throws when a sweep took the record first
-  } catch {
-    return [];
-  }
+  if (!journal.delete(rec.name)) return []; // the claim: false when a sweep took the record first
   clearRecords(names);
   return findings;
 }
@@ -2697,6 +2710,8 @@ export async function lintFileHandler(args: PostToolUseHookInput, scoped: { fp: 
     const t0 = journalTail(rec);
     // `await` inside the try is load-bearing: a rejected promise must land in the catch (fail open).
     const kept = await lintResolved(resolved, args.cwd, odd ? null : pendingUnion(rec, owner, d0, ranges), "PostToolUse");
+    // a client cancel killed the linter: its (empty) result covers nothing, so the record stays for the Stop sweep
+    if (callCancelled()) return {};
     // a record journaled during the lint (A->B->A) counts as a change
     const d1 = journalTail(rec) === t0 ? digestOrNull(resolved) : null;
     if (kept.length === 0) settleClean(rec, owner, d0 !== null && d0 === d1);
@@ -2716,8 +2731,9 @@ export async function lintFileHandler(args: PostToolUseHookInput, scoped: { fp: 
  * is claimed by removing its newest record (a held lint claims the same way, so one of the two reports), scoped
  * again, gated against the lines of its pending edits (`pendingRanges`) and linted, at most `FILE_CHANGED_SLOTS`
  * files at a time; a file whose lint could not end before the hook timeout (`slotDeadlineMs`) is left pending.
- * A report sets the marker `settle/act/<owner>.blocked`; the stop that follows it (`stop_hook_active`) is let
- * through without a sweep, so the hook never loops. Fails open to {}.
+ * Each file is claimed by deleting its newest record from the journal map. A report sets the owner's stop marker
+ * (`markBlocked`); the stop that follows it (`stop_hook_active`) is let through without a sweep, so the hook never
+ * loops. Fails open to {}.
  *
  * @param args - The Stop or SubagentStop hook payload.
  * @returns The hook result: findings as additionalContext, or an empty object.
@@ -2726,34 +2742,38 @@ export async function sweepHandler(args: PostToolUseHookInput): Promise<HookResu
   try {
     const ev = args.hook_event_name === "SubagentStop" ? "SubagentStop" : "Stop";
     const owner = ownerOf(args);
-    const dir = settleDir();
-    const mark = path.join(dir, "act", `${owner}.blocked`);
-    if (args.stop_hook_active !== true) rmSync(mark, { force: true });
-    else if (existsSync(mark)) return {};
+    if (stopAlreadyBlocked(args)) return {};
     pruneActivity();
     const groups = new Map<string, string[]>();
-    for (const n of readdirSync(dir).sort()) {
+    for (const n of [...journal.keys()].sort()) {
       if (!n.endsWith(`-${owner}.json`)) continue;
       const key = n.split("-")[0];
       groups.set(key, [...(groups.get(key) ?? []), n]);
     }
     const files = [...groups.values()];
     const found: Finding[][] = files.map(() => []);
+    /** Every file's records this sweep claimed: restored when the call is cancelled, also for files that finished before the cancel. */
+    const claims: Array<{ names: readonly string[]; recs: readonly PendingRecord[] }> = [];
     let next = 0;
     /** One lane of the pool: takes the next file until none is left. */
     const lane = async (): Promise<void> => {
-      while (next < files.length) {
+      while (next < files.length && !callCancelled()) {
         const i = next++;
         try {
-          found[i] = await sweepFile(files[i], args);
+          found[i] = await sweepFile(files[i], args, claims);
         } catch {
           // fail open: this file reports nothing
         }
       }
     };
     await Promise.all(Array.from({ length: Math.min(FILE_CHANGED_SLOTS, files.length) }, lane));
+    // cancelled by the client: nothing is reported or blocked and every claim goes back (also of the files that finished), the next stop sweeps them
+    if (callCancelled()) {
+      restoreClaims(claims);
+      return {};
+    }
     const out = formatFindings(found.flat(), ev, "universal-lint");
-    if (out.hookSpecificOutput) writeFileSync(mark, "");
+    if (out.hookSpecificOutput) markBlocked(owner);
     return out;
   } catch {
     return {};
@@ -2761,19 +2781,11 @@ export async function sweepHandler(args: PostToolUseHookInput): Promise<HookResu
 }
 
 /**
- * Remove the activity stamps and stop markers (`settle/act/`) of owners that journaled nothing for `PENDING_TTL_MS`:
- * one small file per agent would otherwise pile up. Run once per sweep. Never throws.
+ * Drop the activity times and stop markers of owners and the project-check stamps (`projectLast`) older than
+ * `PENDING_TTL_MS`: one entry per agent or project and session would otherwise pile up. Run once per sweep.
  */
 function pruneActivity(): void {
-  try {
-    const act = path.join(settleDir(), "act");
-    for (const n of readdirSync(act)) {
-      const file = path.join(act, n);
-      if (Date.now() - statSync(file).mtimeMs > PENDING_TTL_MS) rmSync(file, { force: true });
-    }
-  } catch {
-    // no stamps yet, or an unreadable one: left for the next sweep
-  }
+  for (const m of [activity, blocked, projectLast]) for (const [o, at] of m) if (Date.now() - at > PENDING_TTL_MS) m.delete(o);
 }
 
 /**
@@ -2781,20 +2793,22 @@ function pruneActivity(): void {
  *
  * @param names - The journal records of the file and owner, oldest first.
  * @param args - The Stop or SubagentStop hook payload.
+ * @param claims - Collects the records this file's sweep claimed (the caller restores them when the call is cancelled).
  * @returns The gated findings; empty when the file is left pending, was claimed by a held lint, is out of scope or clean.
  */
-async function sweepFile(names: readonly string[], args: PostToolUseHookInput): Promise<Finding[]> {
+async function sweepFile(names: readonly string[], args: PostToolUseHookInput, claims: Array<{ names: readonly string[]; recs: readonly PendingRecord[] }>): Promise<Finding[]> {
   let recs: PendingRecord[] | null = null;
   try {
     recs = readRecords(names);
   } catch {
-    // corrupt record: the file cannot be named, its records are dropped below
+    // a record claimed or pruned meanwhile: the file cannot be named, its records are dropped below
   }
   const last = recs?.at(-1);
   const known = typeof last?.fp === "string" && typeof last.cwd === "string";
-  if (known && process.uptime() * 1000 >= slotDeadlineMs(path.extname(last.fp).toLowerCase())) return []; // no time left: stays pending
-  unlinkSync(path.join(settleDir(), names[names.length - 1])); // the claim: throws when a held lint took it first
+  if (known && elapsedMs() >= slotDeadlineMs(path.extname(last.fp).toLowerCase())) return []; // no time left: stays pending
+  if (!journal.delete(names[names.length - 1])) throw new Error("claimed"); // the claim: a held lint took it first
   clearRecords(names);
+  if (recs) claims.push({ names, recs }); // kept until the whole sweep commits: a cancel puts every claim back
   if (!recs || !known) return [];
   const s = scopedTarget(last.cwd, last.fp, scratchpadOf(args));
   if (!s) return [];
@@ -2805,6 +2819,15 @@ async function sweepFile(names: readonly string[], args: PostToolUseHookInput): 
     // malformed hunks: the whole file
   }
   return lintResolved(s.fp, last.cwd, ranges, "PostToolUse");
+}
+
+/**
+ * Puts claimed journal records back (a cancelled sweep releases every claim: the next stop lints those files).
+ *
+ * @param claims - The records a sweep claimed, per file, as `sweepFile` collected them.
+ */
+function restoreClaims(claims: ReadonlyArray<{ names: readonly string[]; recs: readonly PendingRecord[] }>): void {
+  for (const c of claims) for (let i = 0; i < c.names.length; i++) journal.set(c.names[i], c.recs[i]);
 }
 
 /**
@@ -2938,89 +2961,115 @@ export async function lintFilesHandler(cwd: string, files: readonly string[]): P
   return [...chainBlocks, ...tscBlocks];
 }
 
+/** FileChanged slots held by lints of this server process (at most `FILE_CHANGED_SLOTS`). */
+let slotsHeld = 0;
+
+/** Callers waiting for a FileChanged slot, oldest first; each gets the slot's release function. */
+const slotWaiters: Array<(release: () => void) => void> = [];
+
 /**
- * Whether a FileChanged slot file (also used for `fc-locks/<key>.lock`, see `coalesceProjectCheck`) may be removed:
- * stale when its mtime is `HOOK_TIMEOUT_MS` (90 s) or more ago, or
- * `HOOK_TIMEOUT_MS` or more in the future (clock jumped back, synced data dir), or its pid no longer exists
- * (`process.kill(pid, 0)` throws ESRCH). Held: pid alive, EPERM (alive, another user's process), or an empty or
- * unparsable pid (a holder between its `wx` create and its write, or a garbage file; the mtime decides). A missing or
- * unreadable slot is not stale (the following `wx` create decides).
+ * A release function for one held slot: the first call hands the slot to the oldest waiter (`slotsHeld` unchanged) or
+ * frees it; any further call does nothing.
  *
- * @param slot - Slot file path.
- * @returns True when the slot may be removed; false when held, missing or unreadable.
+ * @returns The release function.
  */
-function slotStale(slot: string): boolean {
-  try {
-    // Both directions: a fresh slot's sub-ms mtime can be ahead of integer Date.now(); the pid check covers small clock jumps.
-    if (Math.abs(Date.now() - lstatSync(slot).mtimeMs) >= HOOK_TIMEOUT_MS) return true;
-    const pid = Number(readFileSync(slot, "utf8"));
-    if (Number.isInteger(pid) && pid > 0) process.kill(pid, 0);
-    return false;
-  } catch (e) {
-    return (e as NodeJS.ErrnoException).code === "ESRCH";
-  }
+function slotRelease(): () => void {
+  let done = false;
+  return () => {
+    if (done) return;
+    done = true;
+    const next = slotWaiters.shift();
+    if (next) next(slotRelease()); // the slot passes on: slotsHeld is unchanged
+    else slotsHeld--;
+  };
 }
 
 /**
- * Claim `file` exclusively (`wx`, holding this pid), first removing it when `slotStale` says so.
+ * Claim one of `FILE_CHANGED_SLOTS` FileChanged slots of this server process. While every slot is held, waits in
+ * arrival order (FIFO, no polling) until a release hands one on or `elapsedMs()` (call time; process uptime outside a
+ * call) reaches `untilMs`; a deadline already past gives one try and no wait. Per process only: sessions of other
+ * server processes share no slot (R2).
  *
- * @param file - Slot or lock file path.
- * @returns True when claimed; false when held (EEXIST).
- * @throws On any other error.
+ * @param untilMs - Elapsed call time (ms) after which waiting gives up.
+ * @returns The slot's release function (call it once the lint ended; a second call does nothing), or null when none
+ *   came free in time.
  */
-function claimFile(file: string): boolean {
-  // A waiter racing this removal can delete a file just re-created: one extra run for a moment (accepted).
-  if (slotStale(file)) rmSync(file, { force: true });
-  try {
-    writeFileSync(file, String(process.pid), { flag: "wx" });
-    return true;
-  } catch (e) {
-    if ((e as NodeJS.ErrnoException).code !== "EEXIST") throw e;
-    return false;
+export async function acquireSlot(untilMs: number): Promise<(() => void) | null> {
+  if (slotsHeld < FILE_CHANGED_SLOTS) {
+    slotsHeld++;
+    return slotRelease();
   }
+  const left = untilMs - elapsedMs();
+  if (left <= 0) return null;
+  return new Promise((resolve) => {
+    /**
+     * Hands the slot to this waiter: stops its give-up timer and resolves with the release function.
+     *
+     * @param release - The release function of the slot passed on.
+     */
+    const waiter = (release: () => void): void => {
+      clearTimeout(timer);
+      resolve(release);
+    };
+    const timer = setTimeout(() => {
+      const i = slotWaiters.indexOf(waiter);
+      if (i >= 0) slotWaiters.splice(i, 1);
+      resolve(null);
+    }, Math.min(left, 2 ** 31 - 1));
+    slotWaiters.push(waiter);
+  });
 }
 
-/** Sleep 100 ms without a busy loop. */
-function sleep100(): void {
-  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 100);
-}
+/** Concurrent `git status` spawns of FileChanged calls in this server process (`admitGit`). */
+export const GIT_GATE_MAX = 8;
+
+/** `git status` spawns of FileChanged calls in flight. */
+let gitActive = 0;
+
+/** FileChanged calls waiting for a `git status` spawn, oldest first. */
+const gitWaiting: Array<() => void> = [];
 
 /**
- * Claim one of `FILE_CHANGED_SLOTS` cross-process FileChanged slots: `${CLAUDE_PLUGIN_DATA || tmpdir()}/fc-slots/<i>`,
- * created exclusively (`wx`) holding this pid, after removing the slot when `slotStale` says so. While every slot is
- * held, sleeps 100 ms (`Atomics.wait`, no busy loop) between rounds until `process.uptime()` reaches `untilMs`; one
- * full round over all slots is always tried first, so `acquireSlot(0)` tries once without waiting.
+ * Waits for one of `GIT_GATE_MAX` concurrent `git status` spawns of FileChanged calls (FIFO). A spawn forks
+ * synchronously on the server's one event loop, so a burst of events (a branch switch, a formatter run) that spawned
+ * all of them at once would hold up every other tool call of the server; admitted in turn, the spawns interleave with
+ * them. Separate from the lint slots, which a lint holds for its whole run.
  *
- * @param untilMs - Process uptime (ms) after which waiting gives up.
- * @returns The held slot file (the caller removes it), or null when none came free in time.
- * @throws On any slot error other than a held slot (EEXIST); the caller then lints without a slot (fail open).
+ * @returns The release function: call it once the spawn ended (a second call does nothing).
  */
-export function acquireSlot(untilMs: number): string | null {
-  const dir = path.resolve(process.env.CLAUDE_PLUGIN_DATA || tmpdir(), "fc-slots");
-  mkdirSync(dir, { recursive: true });
-  for (;;) {
-    for (let i = 0; i < FILE_CHANGED_SLOTS; i++) {
-      const slot = path.join(dir, String(i));
-      if (claimFile(slot)) return slot;
-    }
-    if (process.uptime() * 1000 >= untilMs) return null;
-    sleep100();
-  }
+export async function admitGit(): Promise<() => void> {
+  if (gitActive >= GIT_GATE_MAX) await new Promise<void>((resolve) => gitWaiting.push(resolve));
+  else gitActive++;
+  let done = false;
+  return () => {
+    if (done) return;
+    done = true;
+    const next = gitWaiting.shift();
+    if (next) next(); // the spawn passes on: gitActive is unchanged
+    else gitActive--;
+  };
 }
+
+/** Project keys whose whole-project check is running in this server process (`coalesceProjectCheck`). */
+const projectLocks = new Set<string>();
+
+/**
+ * `Date.now()` taken before the spawn of the last run per `<key>\0<session>` that completed without error or signal;
+ * entries older than `PENDING_TTL_MS` are dropped by `pruneActivity`.
+ */
+const projectLast = new Map<string, number>();
 
 /**
  * Run a whole-project check (`tsc -p`, `go vet <dir>`, `cargo ... --manifest-path`) once per FileChanged burst and
- * project. State under `${CLAUDE_PLUGIN_DATA || tmpdir()}/fc-locks/`: `<key>.lock` (exclusive `wx` create holding
- * this pid, reclaimed per `slotStale`; shared by all sessions, so their runs stay serialised) and
- * `<key>-<hashPath(session)>.last` (`Date.now()` taken before the spawn of the last run of this session that
- * completed without error or signal). Skips (returns null) when `.last` is newer than `file`'s ctime and not in the
- * future: a completed run started after the file's last change, so its process reported this file's findings to this
- * session (the data dir is shared by every session, and another session's report never reaches this one).
- * Otherwise claims the lock, re-checking `.last` every 100 ms (async `setTimeout` from `node:timers/promises`, so a
- * concurrent chain child keeps being read; under `lintResolved`'s concurrent branch this wait overlaps that child) while a live holder runs, until process
- * uptime reaches `FILE_CHANGED_BUDGET_MS - reserveMs`, after which it runs unlocked; after a claim it re-checks `.last`
- * once more, then awaits `run` inside the `try/finally`, so the lock release follows the child's `close`; writes `.last` on completion. Any stat, mkdir, claim or `.last`
- * error runs unlocked (fail open, as before F13). FileChanged only: `lintResolved` enables it from `hookEventName`.
+ * project, in this server process's memory. Skips (returns null) when the last completed run of this session for
+ * `key` (its start in `projectLast`) is newer than `file`'s ctime and not in the future: a completed run started after
+ * the file's last change, so it reported this file's findings to this session (a report reaches only its own
+ * session). Otherwise waits while another call holds the lock (`projectLocks`, shared by all sessions of the process),
+ * re-checking the coverage every 100 ms (async sleep), until the elapsed call time reaches
+ * `FILE_CHANGED_BUDGET_MS - reserveMs`, after which it runs unlocked. No `await` lies between the lock test and the
+ * claim, so the claim is exclusive. The lock is released in a `finally` after `run` settled; the stamp is written only
+ * for a run without error or signal. A stat error runs unlocked (fail open). FileChanged only: `lintResolved` enables
+ * it from `hookEventName`.
  *
  * @param key - Project key (`hashPath` of `<tool name>:<tsconfig path | package dir | Cargo.toml path>`).
  * @param file - The changed file (its ctime decides whether the last completed run covers it).
@@ -3030,9 +3079,7 @@ export function acquireSlot(untilMs: number): string | null {
  * @returns `run`'s result, or null when a completed run of this session already covers `file`.
  */
 export async function coalesceProjectCheck(key: string, file: string, reserveMs: number, run: () => Promise<SpawnSyncReturns<string>>, session = ""): Promise<SpawnSyncReturns<string> | null> {
-  const dir = path.resolve(process.env.CLAUDE_PLUGIN_DATA || tmpdir(), "fc-locks");
-  const lock = path.join(dir, `${key}.lock`);
-  const last = path.join(dir, `${key}-${hashPath(session)}.last`);
+  const stampKey = `${key}\0${session}`;
   let changed: number;
   try {
     // statSync: a symlinked file's target is what the check reads; ctime: copies can preserve an old mtime.
@@ -3040,55 +3087,35 @@ export async function coalesceProjectCheck(key: string, file: string, reserveMs:
   } catch {
     return await run();
   }
-  // A missing, empty or partial stamp gives NaN or a smaller number (not covered); a future-dated stamp never covers.
+  /** Whether a completed run of this session started after `file` last changed (a future-dated stamp never covers). */
   const covered = (): boolean => {
-    try {
-      const t = Number(readFileSync(last, "utf8"));
-      return t > changed && t <= Date.now();
-    } catch {
-      return false;
-    }
+    const t = projectLast.get(stampKey);
+    return t !== undefined && t > changed && t <= Date.now();
   };
   for (;;) {
     if (covered()) return null;
-    try {
-      mkdirSync(dir, { recursive: true }); // only once the cheap `.last` check did not cover the file
-      if (claimFile(lock)) break;
-    } catch {
-      return await run();
-    }
-    if (process.uptime() * 1000 >= FILE_CHANGED_BUDGET_MS - reserveMs) return await run();
+    if (!projectLocks.has(key)) break;
+    if (elapsedMs() >= FILE_CHANGED_BUDGET_MS - reserveMs) return await run();
     await sleep(100);
   }
+  projectLocks.add(key);
   try {
-    // The previous holder may have finished between the last check and this claim.
-    if (covered()) return null;
     const start = Date.now();
     const r = await run();
-    if (!r.error && !r.signal) {
-      try {
-        writeFileSync(last, String(start));
-      } catch {
-        // no stamp: the next process runs the check again
-      }
-    }
+    if (!r.error && !r.signal) projectLast.set(stampKey, start);
     return r;
   } finally {
-    try {
-      rmSync(lock, { force: true });
-    } catch {
-      // slotStale reclaims it once this pid is gone
-    }
+    projectLocks.delete(key);
   }
 }
 
 /**
- * Process uptime (ms) at which FileChanged's slot wait gives up for a file: what is left of `FILE_CHANGED_BUDGET_MS`
+ * Elapsed call time (ms, `elapsedMs`) at which FileChanged's slot wait gives up for a file: what is left of `FILE_CHANGED_BUDGET_MS`
  * once the file's nominal lint budget is reserved, chain + `tsc` kept as the sum for the sequential oxlint-`typeCheck`
  * fallback (`.ts`-family 10 s, `.rs` 40 s, any other extension 55 s; see `FILE_CHANGED_BUDGET_MS`).
  *
  * @param ext - The file's lower-cased extension with its dot.
- * @returns The slot-wait deadline in ms of process uptime.
+ * @returns The slot-wait deadline in ms of call time.
  */
 export function slotDeadlineMs(ext: string): number {
   return FILE_CHANGED_BUDGET_MS - (EXT_MAP[ext] === "rust" ? CARGO_SPAWN_TIMEOUT_MS : SPAWN_TIMEOUT_MS) - (TYPE_CHECK_EXTS.has(ext) ? TSC_SPAWN_TIMEOUT_MS : 0);
@@ -3097,15 +3124,15 @@ export function slotDeadlineMs(ext: string): number {
 /**
  * FileChanged: lint a watched file changed outside Write/Edit, whole file (no edit-range gate). Skips, first match
  * wins: `unlink` event; out of scope (`scopedTarget`); content still equal to the digest Write/Edit recorded; git says
- * ignored (`!!`) or unchanged (empty status). A git failure (no git, not a repo, timeout) lints. Then waits for one of
- * `FILE_CHANGED_SLOTS` cross-process slots (`acquireSlot`) until `FILE_CHANGED_BUDGET_MS` minus the file's lint
- * budget; no slot in time skips with a stderr note; a slot error lints without a slot. Inside `lintResolved` the
- * whole-project check (tsc, go vet/golangci-lint, cargo) runs through `coalesceProjectCheck`: once per burst and project
- * (F13). Settle window (F34, F40): once the digest check says the content changed, a whole-file edit is journaled
- * under the main conversation (`recordEdit`; the payload names no agent), a clean lint clears the file's records, and
- * findings are held by `settleFindings` after the slot is released. Returns {}
- * for every skip and on any error (fail open).
- * Async since F18 (the git call and `acquireSlot` stay sync: no child of this process exists yet).
+ * ignored (`!!`) or unchanged (empty status), asked with an async `git status` (the server's event loop stays free),
+ * at most `GIT_GATE_MAX` spawns at a time over all calls (`admitGit`: a burst of events does not spawn all at once). A
+ * git failure (no git, not a repo, timeout) lints. Then waits for one of the server process's `FILE_CHANGED_SLOTS`
+ * slots (`acquireSlot`, FIFO) until `FILE_CHANGED_BUDGET_MS` minus the file's lint budget of call time; no slot in
+ * time skips with a stderr note. Inside `lintResolved` the whole-project check (tsc, go vet/golangci-lint, cargo) runs
+ * through `coalesceProjectCheck`: once per burst and project (F13). Settle window (F34, F40): once the digest check
+ * says the content changed, a whole-file edit is journaled under the main conversation (`recordEdit`, before the first
+ * `await`; the payload names no agent), a clean lint clears the file's records, and findings are held by
+ * `settleFindings` after the slot is released. Returns {} for every skip and on any error (fail open).
  *
  * @param args - The FileChanged hook payload.
  * @returns The hook result: findings as additionalContext, or an empty object.
@@ -3118,42 +3145,32 @@ export async function fileChangedHandler(args: PostToolUseHookInput): Promise<Ho
     if (typeof cwd !== "string" || !cwd || typeof file !== "string" || !file) return {};
     const s = scopedTarget(cwd, file, scratchpadOf(args));
     if (!s) return {};
-    let recorded: string | null = null;
-    try {
-      recorded = readFileSync(writtenDigestPath(s.real), "utf8");
-    } catch {
-      // no digest: the file was not just written by Write/Edit
-    }
-    if (recorded !== null) {
+    const recorded = written.get(s.real);
+    if (recorded !== undefined) {
       if (recorded === fileDigest(s.fp)) return {};
-      try {
-        rmSync(writtenDigestPath(s.real), { force: true }); // stale: a later restore of the old bytes must lint
-      } catch {
-        // fail open: an unwritable store costs a duplicate lint later, never this one
-      }
+      written.delete(s.real); // stale: a later restore of the old bytes must lint
     }
     // The content changed outside Write/Edit (never for the digest-matched echo above): a whole-file edit for the
     // settle window, also when the git gate then skips the lint (a restore to committed content leaves no stale finding).
     const owner = ownerOf(args);
     const rec = recordEdit(s.fp, s.real, null, undefined, undefined, owner, null, cwd);
+    const releaseGit = await admitGit();
     try {
-      const status = execFileSync("git", ["--no-optional-locks", "--literal-pathspecs", "status", "--porcelain", "--untracked-files=normal", "--ignored=matching", "--", s.real], {
+      // the permit may have been granted late: a call that was cancelled or ran into its deadline meanwhile spawns nothing (its record stays pending)
+      if (callCtx.getStore()?.signal.aborted) return {};
+      const { stdout } = await execFileAsync("git", ["--no-optional-locks", "--literal-pathspecs", "status", "--porcelain", "--untracked-files=normal", "--ignored=matching", "--", s.real], {
         cwd: path.dirname(s.real), // git maps a lexical path through an in-repo symlinked dir to a path not in the index
         encoding: "utf8",
         timeout: GIT_TIMEOUT_MS,
-        stdio: ["ignore", "pipe", "ignore"],
       });
-      if (status === "" || status.startsWith("!!")) return {};
+      if (stdout === "" || stdout.startsWith("!!")) return {};
     } catch {
       // no git, not a repo, timeout or non-zero exit: lint
+    } finally {
+      releaseGit();
     }
-    let slot: string | null | undefined; // undefined: slot error, lint without a slot (fail open, as before F10)
-    try {
-      slot = acquireSlot(slotDeadlineMs(path.extname(s.fp).toLowerCase()));
-    } catch {
-      // unusable slot dir or slot file: slot stays undefined
-    }
-    if (slot === null) {
+    const release = await acquireSlot(slotDeadlineMs(path.extname(s.fp).toLowerCase()));
+    if (release === null) {
       process.stderr.write(`universal-lint: FileChanged: no lint slot free in time, ${s.fp} not linted\n`);
       return {};
     }
@@ -3164,15 +3181,13 @@ export async function fileChangedHandler(args: PostToolUseHookInput): Promise<Ho
       d0 = digestOrNull(s.fp);
       const t0 = journalTail(rec);
       kept = await lintResolved(s.fp, cwd, null, "FileChanged", typeof args.session_id === "string" ? args.session_id : "");
+      // a client cancel killed the linter: its record stays for the Stop sweep
+      if (callCancelled()) return {};
       // a record journaled during the lint (A->B->A) counts as a change
       if (journalTail(rec) === t0) d1 = digestOrNull(s.fp);
       if (kept.length === 0) settleClean(rec, owner, d0 !== null && d0 === d1);
     } finally {
-      try {
-        if (slot) rmSync(slot, { force: true });
-      } catch {
-        // left for slotStale: this pid is gone once the process exits
-      }
+      release();
     }
     // The hold comes after the slot release: a held finding must not keep one of the K slots busy.
     return formatFindings(await settleFindings(kept, s.fp, rec, d0, d1, owner), "FileChanged", "universal-lint (changed outside Write/Edit)");
@@ -3246,37 +3261,38 @@ export function watchPathsHandler(args: PostToolUseHookInput): { hookSpecificOut
 }
 
 /**
- * Read the hook's stdin JSON and dispatch on `hook_event_name`: SessionStart/CwdChanged print the watch-paths JSON on
- * stdout (exit 0); FileChanged runs fileChangedHandler; Stop/SubagentStop run sweepHandler; anything else
- * (PostToolUse, or a payload without the field) records the Write/Edit digest and runs lintFileHandler. Findings:
- * their text on stderr and exit 2 (asyncRewake wakes Claude with it; at Stop/SubagentStop it keeps the stopping agent
- * going). Fails open on any error — no output, exit 0.
+ * Whether a Stop or SubagentStop payload is the continuation of a stop this owner already blocked: the in-memory
+ * marker from `markBlocked` lets the active stop through. A stop that is not active clears the marker.
  *
- * @remarks
- * Reads stdin asynchronously to EOF, never `readFileSync(0)`: fd 0 is non-blocking, so a sync read throws EAGAIN on a late writer or a payload above the pipe buffer (hook-design.md "stdin", F05). Never rejects (the whole body is in the try/catch), so the entry's `void main()` (`lint-file.ts`) is safe. Never calls `process.exit`: the process ends when the event loop drains after stdin EOF and every child's `close`, carrying `process.exitCode` 2 for findings, so the exit-code contract is unchanged.
+ * @param args - The Stop or SubagentStop hook payload.
+ * @returns True when the sweep must be skipped.
  */
-export async function main(): Promise<void> {
-  try {
-    const input = (await json(process.stdin)) as PostToolUseHookInput;
-    const ev = input?.hook_event_name;
-    if (ev === "SessionStart" || ev === "CwdChanged") {
-      const r = watchPathsHandler(input);
-      if (r.hookSpecificOutput) process.stdout.write(JSON.stringify(r));
-      return;
-    }
-    let ctx: string | undefined;
-    if (ev === "FileChanged") ctx = (await fileChangedHandler(input)).hookSpecificOutput?.additionalContext;
-    else if (ev === "Stop" || ev === "SubagentStop") ctx = (await sweepHandler(input)).hookSpecificOutput?.additionalContext;
-    else {
-      const scoped = postToolScope(input);
-      recordWrittenFor(scoped, input);
-      ctx = (await lintFileHandler(input, scoped)).hookSpecificOutput?.additionalContext;
-    }
-    if (ctx) {
-      process.stderr.write(ctx + "\n");
-      process.exitCode = 2;
-    }
-  } catch {
-    // fail open — no output, exit 0
+export function stopAlreadyBlocked(args: PostToolUseHookInput): boolean {
+  const owner = ownerOf(args);
+  if (args.stop_hook_active !== true) {
+    blocked.delete(owner);
+    return false;
   }
+  return blocked.has(owner);
+}
+
+/**
+ * Records in memory that the stop of `owner` was blocked (pruned with the activity times).
+ *
+ * @param owner - The owner id from `ownerOf`.
+ */
+export function markBlocked(owner: string): void {
+  blocked.set(owner, Date.now());
+}
+
+/**
+ * A Write/Edit (the mod's `file_edited` call): scopes the edit, records its digest and lints the file.
+ *
+ * @param args - The PostToolUse hook payload.
+ * @returns The hook result: findings as additionalContext, or an empty object.
+ */
+export async function editedHandler(args: PostToolUseHookInput): Promise<HookResult> {
+  const scoped = postToolScope(args);
+  recordWrittenFor(scoped, args);
+  return lintFileHandler(args, scoped);
 }

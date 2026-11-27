@@ -101,6 +101,6 @@ test("yaml: the target is ./<path relative to the spawn cwd>, so the project's a
   // yamllint stand-in: gitwildmatch of the anchored pattern against the argument exactly as given.
   e.stub("yamllint", "case \"$1\" in ./gen/*.yaml|gen/*.yaml) exit 0;; esac", "printf \"%s\\n  1:5  error  trailing spaces  (trailing-spaces)\\n\" \"$1\"", "exit 1");
   const r = e.run(e.file("gen/b.yaml", "a: 1   \n"));
-  assert.equal(r.status, 0, r.stderr);
-  assert.equal(r.stderr, "");
+  assert.equal(r.status, 0, r.ctx);
+  assert.equal(r.ctx, "");
 });

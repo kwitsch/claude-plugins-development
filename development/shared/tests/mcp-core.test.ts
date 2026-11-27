@@ -18,8 +18,10 @@ function start() {
   const answers: Msg[] = [];
   let stderr = "";
   let buf = "";
-  child.stdout.on("data", (d: Buffer) => {
-    buf += d.toString();
+  // decoded by the stream, not per chunk: a multibyte character can straddle two pipe chunks
+  child.stdout.setEncoding("utf8");
+  child.stdout.on("data", (d: string) => {
+    buf += d;
     for (let i = buf.indexOf("\n"); i >= 0; i = buf.indexOf("\n")) {
       answers.push(JSON.parse(buf.slice(0, i)) as Msg);
       buf = buf.slice(i + 1);
@@ -178,6 +180,27 @@ test("bad input lines are logged and ignored; a request after them is still serv
   await s.end();
 });
 
+test("a raw U+2028 or U+2029 inside a JSON string is no line break: the request and the one after it are answered", async () => {
+  const s = start();
+  // JSON.stringify leaves both characters raw (valid JSON); readline would split the line at them
+  s.send({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "echo", arguments: { text: "a b c" } } });
+  s.send({ jsonrpc: "2.0", id: 2, method: "ping" });
+  assert.equal(await s.end(), 0);
+  assert.deepEqual((s.answers().find((a) => a.id === 1)?.result?.["structuredContent"]), { echo: { text: "a b c" } });
+  assert.deepEqual(s.answers().find((a) => a.id === 2)?.result, {});
+});
+
+test("a message far larger than a pipe chunk is answered whole, and so is the CRLF-terminated request behind it", async () => {
+  const s = start();
+  // multibyte text: the 64 KiB pipe chunks end inside characters and inside the one line, which is joined once
+  const text = "é".repeat(1_000_000);
+  s.raw(JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "echo", arguments: { text } } }));
+  s.raw(JSON.stringify({ jsonrpc: "2.0", id: 2, method: "ping" }) + "\r");
+  assert.deepEqual((await s.answer(1)).result?.["structuredContent"], { echo: { text } });
+  assert.deepEqual((await s.answer(2)).result, {});
+  await s.end();
+});
+
 test("closing stdin runs onClose and exits 0", async () => {
   const s = start();
   s.send({ jsonrpc: "2.0", id: 1, method: "ping" });
@@ -225,4 +248,18 @@ test("a cancel that arrives after the call finished is ignored: the finished cal
   await s.answer(2);
   assert.doesNotMatch(s.stderr(), /late abort/);
   await s.end();
+});
+
+test("tools/list: a tool with modelVisible and inputSchema lists them; a tool without keeps the two literals", async () => {
+  const child = spawn(process.execPath, [path.join(import.meta.dirname, "fixtures", "visible-server.ts")], { stdio: ["pipe", "pipe", "ignore"], env: process.env });
+  let buf = "";
+  const line = new Promise<string>((resolve) => child.stdout.on("data", (d: Buffer) => ((buf += d.toString()), buf.includes("\n") && resolve(buf.slice(0, buf.indexOf("\n"))))));
+  child.stdin.write(JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }) + "\n");
+  const tools = toolsOf((JSON.parse(await line) as Msg).result);
+  child.stdin.end();
+  assert.deepEqual(tools.map((t) => t.name), ["open", "hidden"]);
+  assert.deepEqual(tools[0]._meta, { ui: { visibility: ["model", "app"] } });
+  assert.deepEqual(tools[0].inputSchema, { type: "object", properties: { a: { type: "string" } }, required: ["a"] });
+  assert.deepEqual(tools[1]._meta, { ui: { visibility: ["app"] } });
+  assert.deepEqual(tools[1].inputSchema, { type: "object", additionalProperties: true });
 });

@@ -23,6 +23,9 @@ The constraints that follow from these facts load by themselves with [claude-cod
 - Not verified: whether core still runs hooks.json `CwdChanged` `command` and `mcp_tool` handlers (not mod registrations) for a plugin under that policy; the notice names only the mod event.
 - No event fires when the tool list changes; `tool.describe` fires only on a tool's first schema render per session. Re-list with `$.tool.list()` per turn to follow another plugin's tools (binary 2.1.322).
 
+- An `mcp_tool` UserPromptSubmit hook runs for the first prompt of `claude -p`, for typed prompts of an interactive session and for a prompt raised by `$.prompt.submit`; its `additionalContext` reaches the model each time, and the woken turn ends with its own Stop hook call (live 2.1.332, P5).
+- A `$.prompt.submit` from a `turn.complete` callback of an idle interactive session starts a turn (live 2.1.332, out of frame, 53 ms after the call).
+
 ## Budget, failures and abandonment
 
 - A hook has 10,000 ms of its own time per dispatch (`catchMs` 1,000, `lingerMs` 5,000). The clock stops while a `$` call or `next` is in flight, except for `$.clock` waits; time spent awaiting an own promise counts (typings 2.1.323, docs).
@@ -31,7 +34,7 @@ The constraints that follow from these facts load by themselves with [claude-cod
 - When `next.signal` aborts (interrupt, a hook above settled first, budget) the engine does not abort the hook's in-flight `$` operations, and a new one started after the abort runs normally (`claude plugin test` 2.1.322). Whatever the abandoned hook returns is dropped: conversation state committed for it (sent once, shown, searched) means the next prompt never gets what this one lost (live 2.1.325).
 - An in-flight `$.tool.call` does not use up the budget: a 30 s call inside `prompt.submit` was not cut (live 2.1.325).
 - A hook's error after `next` is rethrown after the request ran (live 2.1.325).
-- In-frame calls: core routes `$.mcp.call` through `$.tool.call` and its permission check although the typings promise no prompt, and a plugin's own hooks see a call the plugin raises only while one of its hooks runs. A permission-checked call (`$.tool.call`, `$.process.run`, storage through `$.mcp.call`) from an unawaited chain or a `$.clock.every` callback therefore gets a permission dialog per call in `default` mode and is denied headless (live 2.1.296).
+- In-frame calls: core routes `$.mcp.call` through `$.tool.call` and its permission check although the typings promise no prompt, and a plugin's own hooks see a call the plugin raises only while one of its hooks runs. A permission-checked call (`$.tool.call`, `$.process.run`, storage through `$.mcp.call`) from an unawaited chain or a `$.clock.every` callback therefore gets a permission dialog per call in `default` mode and is denied headless (live 2.1.296). Correction for `$.mcp.call` (live 2.1.332, managed): an out-of-frame `$.mcp.call` from a `$.clock.after` callback ran in 11-13 ms with no dialog in `default`, auto and headless runs; the 2.1.296 result is not reproduced for that call.
 
 ## Module state across a session
 
@@ -45,6 +48,8 @@ The constraints that follow from these facts load by themselves with [claude-cod
 - A string option's default arrives in `register(on, options)` as a plain string (live 2.1.325).
 
 ## `$.env`, `$.store`, session paths
+
+- The stdio server and the mod's `$.env.get` both see `CLAUDE_CODE_ENTRYPOINT` = `sdk-cli` in `claude -p` and `cli` interactively; the server's `CLAUDE_PROJECT_DIR` and `process.cwd()` equal the start directory, the worktree for a session started inside one. `$.mcp.connect`, `$.mcp.call` and `$.session.id()` work in `session.start` after `next` (live 2.1.332, P3).
 
 - `$.env.get` reads `process.env` of the Claude Code process. A shell `export` after launch never reaches it; settings `env` is applied at startup (binary 2.1.322). A project's `.claude/settings.json` `env` overrides the user settings' `env` (live 2.1.325).
 - Inside a mod `$.env.get("CLAUDE_PLUGIN_DATA")` and `("CLAUDE_PLUGIN_ROOT")` answer `undefined`; those are exported to hook processes and MCP/LSP servers only (live 2.1.325).

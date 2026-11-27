@@ -11,7 +11,6 @@
 import type { CallToolResult, DiscoverResult, Implementation, JSONRPCErrorResponse, JSONRPCRequest, JSONRPCResultResponse, ListToolsResult, ServerCapabilities, Tool } from "@modelcontextprotocol/server";
 import { readFileSync } from "node:fs";
 import process from "node:process";
-import readline from "node:readline";
 
 /** Protocol version answered when the client's `initialize` omits one. */
 const DEFAULT_PROTOCOL = "2025-11-25";
@@ -21,7 +20,7 @@ const MODERN_PROTOCOL = "2026-07-28";
 const VERSION_META_KEY = "io.modelcontextprotocol/protocolVersion";
 /** Cache hint of list-like modern results: the tool table is static, so one hour for every client. */
 const CACHE_HINT = { ttlMs: 3_600_000, cacheScope: "public" };
-/** Input schema of every tool: any object, since Claude Code builds the input from the `hooks.json` templates. */
+/** Default input schema of a tool: any object, since Claude Code builds the input from the `hooks.json` templates. */
 const ANY_OBJECT: Tool["inputSchema"] = { type: "object", additionalProperties: true };
 /** Capabilities of both eras: tools only (no tasks: every tool is a short hook call). */
 const CAPABILITIES: ServerCapabilities = { tools: {} };
@@ -30,6 +29,8 @@ const CAPABILITIES: ServerCapabilities = { tools: {} };
  * them. Live-checked on Claude Code 2.1.323 with a local stdio server; the docs name it only for cloud sessions.
  */
 const HOOK_ONLY_META: Tool["_meta"] = { ui: { visibility: ["app"] } };
+/** Tool `_meta` of a tool the model may call: a mod reaches a tool through `$.mcp.call` only when `"model"` is listed. */
+const MODEL_META: Tool["_meta"] = { ui: { visibility: ["model", "app"] } };
 
 /** A JSON-RPC request id. */
 type RequestId = JSONRPCRequest["id"];
@@ -44,6 +45,10 @@ type RequestId = JSONRPCRequest["id"];
 export type ToolDef<A = never, R = Record<string, unknown>> = {
   /** Human-readable purpose shown in `tools/list`. */
   description: string;
+  /** Lets the model call the tool (`_meta.ui.visibility` `["model", "app"]`); a tool a mod reaches through `$.mcp.call` needs it. Default: hook-only. */
+  modelVisible?: true;
+  /** Input schema shown in `tools/list`; default: any object. Not enforced by the loop: the handler validates. */
+  inputSchema?: Tool["inputSchema"];
   /** Hook handler; its result becomes the tool call's `structuredContent`. `signal` aborts when the client cancels the call. */
   handler: (args: A, signal: AbortSignal) => R | Promise<R>;
 };
@@ -152,7 +157,7 @@ export function serveMcp(opts: ServeOptions): void {
         return reply({});
       case "tools/list":
         return reply({
-          tools: Object.entries(TOOLS).map(([toolName, { description }]) => ({ name: toolName, description, inputSchema: ANY_OBJECT, _meta: HOOK_ONLY_META })),
+          tools: Object.entries(TOOLS).map(([toolName, t]) => ({ name: toolName, description: t.description, inputSchema: t.inputSchema ?? ANY_OBJECT, _meta: t.modelVisible ? MODEL_META : HOOK_ONLY_META })),
           ...(modern ? { _meta: SERVER_INFO_META } : {}),
         }, true);
       case "tools/call": {
@@ -193,8 +198,12 @@ export function serveMcp(opts: ServeOptions): void {
 
   process.stderr.write(`[${SERVER_NAME}] running (v${SERVER_INFO.version})\n`);
 
-  const rl = readline.createInterface({ input: process.stdin });
-  rl.on("line", (line: string) => {
+  /**
+   * Serves one input line (one JSON-RPC message).
+   *
+   * @param line - The line without its line break.
+   */
+  const onLine = (line: string): void => {
     const trimmed = line.trim();
     if (!trimmed) return;
     let msg: unknown;
@@ -214,8 +223,26 @@ export function serveMcp(opts: ServeOptions): void {
       // a request (has an id) must always get a response, or the client hangs
       if (req.id !== undefined) fail(req.id, -32603, `internal error: ${errMsg(e)}`);
     });
+  };
+  // Lines end at "\n" only (stdio framing): readline also breaks at U+2028/U+2029, which JSON carries raw inside strings.
+  // Each chunk is searched alone and the unfinished line is kept as parts, joined once per line: searching or appending
+  // to one growing string copies all of it on every chunk (quadratic: about 3 s for a 20 MB message).
+  let parts: string[] = [];
+  process.stdin.setEncoding("utf8");
+  process.stdin.on("data", (chunk: string) => {
+    let rest = chunk;
+    for (let i = rest.indexOf("\n"); i >= 0; i = rest.indexOf("\n")) {
+      const line = parts.join("") + rest.slice(0, i);
+      parts = [];
+      rest = rest.slice(i + 1);
+      onLine(line.endsWith("\r") ? line.slice(0, -1) : line);
+    }
+    if (rest) parts.push(rest);
   });
-  rl.on("close", () => {
+  process.stdin.on("end", () => {
+    const tail = parts.join("");
+    parts = [];
+    if (tail) onLine(tail);
     opts.onClose?.();
     process.exit(0);
   });

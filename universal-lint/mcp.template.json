@@ -1,0 +1,7 @@
+{
+  "mcpServers": {
+    "lint": {
+      "command": "./src/mcp/server.ts"
+    }
+  }
+}

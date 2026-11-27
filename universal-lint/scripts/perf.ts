@@ -1,54 +1,78 @@
 #!/usr/bin/env node
 // Usage: node universal-lint/scripts/perf.ts [runs=5]   (from any directory; run `pnpm --filter universal-lint build` first)
-// Per-event cost of the built hook plugin/hooks/lint-file.mjs (dev only, never shipped): spawns it directly through
-// its shebang (as hooks.json does) with a payload file as stdin for 16 cases, once with the real PATH and once with
-// the /mnt/ dirs removed, and prints a Markdown table of median (min-max) ms over `runs` timed rounds after one
-// warm-up round. Fixtures live in an os.tmpdir() directory removed at the end; nothing is written into the repo.
-// Needs the real linters on PATH to reproduce real costs; the header lists which of them were found per PATH variant.
+// Per-call cost of the built server plugin/mcp/server.mjs (one process per PATH variant) and of plugin/hooks/watch-paths.mjs
+// (dev only, never shipped). The Write/Edit and FileChanged rows are tool calls of the server, timed from writing the
+// tools/call line to its answer line; the SessionStart rows and the floor spawn their process directly. 16 cases, once
+// with the real PATH and once with the /mnt/ dirs removed, print a Markdown table of median (min-max) ms over `runs`
+// timed rounds after one warm-up round. Fixtures live in an os.tmpdir() directory removed at the end; nothing is written
+// into the repo. Needs the real linters on PATH to reproduce real costs; the header lists which of them were found per PATH variant.
 // Exit 0 = every run passed its check, 1 = a case failed, 2 = usage error, missing build or a setup/spawn error.
 import { execFileSync, spawn } from "node:child_process";
-import { createHash } from "node:crypto";
-import { closeSync, existsSync, mkdirSync, mkdtempSync, openSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { closeSync, existsSync, mkdirSync, mkdtempSync, openSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { availableParallelism, homedir, loadavg, release, tmpdir, totalmem } from "node:os";
 import { dirname, join, resolve } from "node:path";
 
 /** The universal-lint plugin directory (parent of scripts/). */
 const ROOT = resolve(import.meta.dirname, "..");
-/** The built hook under measurement. */
-const HOOK = join(ROOT, "plugin/hooks/lint-file.mjs");
+/** The built MCP server under measurement (one process per PATH variant). */
+const SERVER = join(ROOT, "plugin/mcp/server.mjs");
+/** The built SessionStart/CwdChanged watch-paths hook under measurement. */
+const WATCH = join(ROOT, "plugin/hooks/watch-paths.mjs");
 /** universal-lint version from package.json (the only manifest source). */
 const VERSION = String((JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8")) as Record<string, unknown>).version);
-/** Per-run kill timeout: above the hook's 90 s budget, so a hook-side kill shows as its own status. */
+/** Per-run kill timeout: above the 90 s tool-call budget, so a server-side kill shows as its own status. */
 const RUN_TIMEOUT_MS = 120_000;
 /** Linters the cases invoke (`.sh`, `.py`, `.yml`, `.md`, `.css`, `.ts`, `.mts`); the header says which were found on PATH. */
 const TOOLS = ["shellcheck", "ruff", "yamllint", "markdownlint-cli2", "eslint", "oxlint", "stylelint"];
 /** Printed to stderr on a bad argument. */
 const USAGE = "usage: node universal-lint/scripts/perf.ts [runs=5]";
+/** Session id the harness uses for its one main-conversation session per server. */
+const SESSION = "perf";
+
+/** A JSON object of a tool answer or a hook answer. */
+type Answer = Record<string, unknown>;
 
 /** One measured case (a table row). */
 interface Case {
   /** Row name. */
   name: string;
-  /** Spawn cwd. */
+  /** Spawn cwd, and the cwd of the payload. */
   cwd: string;
   /** Hook payload; null = the floor case (`node -e 0`, no hook). */
   payload: object | null;
   /** Expected exit status: 0 = no finding or skip, 2 = finding. */
   expect: number;
-  /** Extra per-run assertion: `"watchPaths"` in stdout, or the `.sh` digest file written. */
-  observable?: "watchPaths" | "digest";
+  /** The server tool the row calls, from the payload's event; null = a spawned process (watch-paths or the floor). */
+  tool: "file_edited" | "file_changed" | null;
+  /** Extra per-run assertion: `"watchPaths"` in stdout, or `"skipped"`: a FileChanged of `a.sh` right after its Write is skipped. */
+  observable?: "watchPaths" | "skipped";
 }
 
-/** One timed process run. */
+/** One timed run. */
 interface Run {
-  /** Wall time from spawn to close, ms. */
+  /** Wall time, ms. */
   ms: number;
-  /** Exit status; null when killed by a signal. */
+  /** Exit status (0 or 2 for a server row); null when killed by a signal. */
   status: number | null;
-  /** Captured stdout. */
+  /** Captured stdout (spawned rows only). */
   stdout: string;
-  /** Captured stderr. */
+  /** Captured stderr, or the finding text of a server row. */
   stderr: string;
+}
+
+/** One running server with its session key: the JSON-RPC line client of tests/support/call-server.ts (scripts do not import tests). */
+interface Server {
+  /** The session key the server issued for `SESSION`. */
+  key: string;
+  /**
+   * Call a tool; resolves with its structured content (`{}` for a JSON-RPC error).
+   *
+   * @param tool - Tool name.
+   * @param args - Tool arguments.
+   */
+  call(tool: string, args: object): Promise<Answer>;
+  /** Close stdin and wait for the process to exit (killed after `RUN_TIMEOUT_MS`). */
+  close(): Promise<void>;
 }
 
 /**
@@ -60,6 +84,20 @@ interface Run {
  */
 function git(cwd: string, ...args: string[]): void {
   execFileSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", "-c", "commit.gpgsign=false", "-c", "core.hooksPath=/dev/null", ...args], { cwd, stdio: "ignore" });
+}
+
+/**
+ * The server tool a payload's row calls: `file_changed` for a FileChanged payload, `null` for a SessionStart payload
+ * (watch-paths) and for the floor (no payload), `file_edited` for everything else (PostToolUse and the empty payload).
+ *
+ * @param payload - The row's payload, or null for the floor.
+ * @returns The tool name, or null when the row spawns a process.
+ */
+function toolOf(payload: object | null): Case["tool"] {
+  if (payload === null) return null;
+  const ev = (payload as { hook_event_name?: unknown }).hook_event_name;
+  if (ev === "SessionStart") return null;
+  return ev === "FileChanged" ? "file_changed" : "file_edited";
 }
 
 /**
@@ -98,18 +136,18 @@ function makeFixtures(dir: string): Case[] {
   const start = (cwd: string): object => ({ hook_event_name: "SessionStart", source: "startup", cwd });
   /** Edit hunk replacing line 1 of a.ts (EDIT_L1 shape from tests/tsc.test.ts). */
   const edit = { structuredPatch: [{ oldStart: 1, oldLines: 2, newStart: 1, newLines: 2, lines: ["-export const x = 1;", "+export const x: number = 1;", " export const y: string = \"2\";"] }] };
-  return [
+  const rows: Omit<Case, "tool">[] = [
     { name: "floor node -e 0", cwd: dir, payload: null, expect: 0 },
     { name: "empty payload", cwd: dir, payload: {}, expect: 0 },
     { name: "out-of-scope .json Write", cwd: dir, payload: post("Write", "a.json"), expect: 0 },
-    { name: ".sh Write", cwd: dir, payload: post("Write", "a.sh"), expect: 0, observable: "digest" },
+    { name: ".sh Write", cwd: dir, payload: post("Write", "a.sh"), expect: 0, observable: "skipped" },
     { name: ".py Write", cwd: dir, payload: post("Write", "a.py"), expect: 0 },
     { name: ".yml Write", cwd: dir, payload: post("Write", "a.yml"), expect: 0 },
     { name: ".md Write", cwd: dir, payload: post("Write", "a.md"), expect: 0 },
     { name: ".css Write (no stylelint config)", cwd: dir, payload: post("Write", "a.css"), expect: 0 },
     { name: ".ts Write (no eslint config)", cwd: dir, payload: post("Write", "a.ts"), expect: 0 },
     { name: ".ts Edit (no eslint config)", cwd: dir, payload: post("Edit", "a.ts", edit), expect: 0 },
-    // A real repo file through the root .oxlintrc.json and node_modules/.bin/oxlint (F04's local-bin route); the digest lands in CLAUDE_PLUGIN_DATA.
+    // A real repo file through the root .oxlintrc.json and node_modules/.bin/oxlint (F04's local-bin route).
     { name: ".mts Write (this repo)", cwd: repo, payload: { hook_event_name: "PostToolUse", tool_name: "Write", tool_input: { file_path: join(repo, "universal-lint/scripts/perf.ts") }, tool_response: { success: true }, cwd: repo }, expect: 0 },
     { name: "FileChanged tracked unchanged", cwd: dir, payload: changed("change", "t.sh"), expect: 0 },
     { name: "FileChanged ignored", cwd: dir, payload: changed("change", "ign.sh"), expect: 0 },
@@ -117,6 +155,7 @@ function makeFixtures(dir: string): Case[] {
     { name: "SessionStart fixture", cwd: dir, payload: start(dir), expect: 0, observable: "watchPaths" },
     { name: "SessionStart this repo", cwd: repo, payload: start(repo), expect: 0, observable: "watchPaths" },
   ];
+  return rows.map((c) => ({ tool: toolOf(c.payload), ...c }));
 }
 
 /**
@@ -179,9 +218,10 @@ function onPath(tool: string, path: string): boolean {
 }
 
 /**
- * Spawn one run of `c` with `payloadFile` as stdin (a file descriptor, so the timing excludes the parent's pipe writes) and time it.
+ * Spawn one run of a process row (the SessionStart rows run watch-paths, the floor runs `node -e 0`) with `payloadFile`
+ * as stdin (a file descriptor, so the timing excludes the parent's pipe writes) and time it.
  *
- * @param c - The case; `payload: null` spawns the bare `node -e 0`, resolved through `env.PATH` like the hook's shebang.
+ * @param c - The case; `payload: null` spawns the bare `node -e 0`, resolved through `env.PATH` like a hook's shebang.
  * @param payloadFile - Payload JSON file.
  * @param env - Child environment.
  * @returns Wall time, exit status (null when killed after `RUN_TIMEOUT_MS`), stdout and stderr.
@@ -192,7 +232,7 @@ function runOnce(c: Case, payloadFile: string, env: NodeJS.ProcessEnv): Promise<
     const t0 = process.hrtime.bigint();
     const child = c.payload === null
       ? spawn("node", ["-e", "0"], { cwd: c.cwd, env, stdio: [fd, "pipe", "pipe"] })
-      : spawn(HOOK, [], { cwd: c.cwd, env, stdio: [fd, "pipe", "pipe"] });
+      : spawn(WATCH, [], { cwd: c.cwd, env, stdio: [fd, "pipe", "pipe"] });
     closeSync(fd); // the child holds its own copy once spawn() returns
     let stdout = "";
     let stderr = "";
@@ -209,6 +249,127 @@ function runOnce(c: Case, payloadFile: string, env: NodeJS.ProcessEnv): Promise<
       done({ ms, status, stdout, stderr });
     });
   });
+}
+
+/**
+ * Start one server with `env` in `cwd` and fetch the harness session's key (a keyless `next_report` with `wait_ms: 0`).
+ *
+ * @param env - Child environment (one PATH variant).
+ * @param cwd - Server working directory.
+ * @returns The running server; its `key` is the session key.
+ */
+async function startServer(env: NodeJS.ProcessEnv, cwd: string): Promise<Server> {
+  const child = spawn(SERVER, [], { env, cwd, stdio: ["pipe", "pipe", "pipe"] });
+  const closed = new Promise<void>((resolve) => child.on("close", () => resolve()));
+  child.stderr.resume();
+  const waiting = new Map<number, { resolve: (answer: Answer) => void; reject: (e: Error) => void }>();
+  /** Set once the process errored or closed: every later and every pending call rejects with it. */
+  let gone: Error | undefined;
+  /**
+   * Rejects every outstanding call and remembers why, so a dead server fails the run instead of hanging it.
+   *
+   * @param e - Why the server is gone.
+   */
+  const failAll = (e: Error): void => {
+    gone ??= e;
+    for (const w of waiting.values()) w.reject(e);
+    waiting.clear();
+  };
+  child.on("error", (e) => failAll(e));
+  child.on("close", (code) => failAll(new Error(`the server exited (${String(code)}) before it answered`)));
+  let id = 0;
+  let buf = "";
+  child.stdout.setEncoding("utf8").on("data", (d: string) => {
+    buf += d;
+    for (let i = buf.indexOf("\n"); i >= 0; i = buf.indexOf("\n")) {
+      const m = JSON.parse(buf.slice(0, i)) as { id?: number; result?: { structuredContent?: Answer }; error?: { message?: string } };
+      buf = buf.slice(i + 1);
+      if (m.id !== undefined) {
+        // a JSON-RPC error fails the call (no empty answer that a row would score as a clean run); an empty structuredContent stays a valid answer
+        if (m.error) waiting.get(m.id)?.reject(new Error(`the server answered an error: ${m.error.message ?? JSON.stringify(m.error)}`));
+        else waiting.get(m.id)?.resolve(m.result?.structuredContent ?? {});
+        waiting.delete(m.id);
+      }
+    }
+  });
+  /**
+   * One tool call: resolves with the answer's `structuredContent` (`{}` when it has none), rejects on a JSON-RPC error and once the server is gone.
+   *
+   * @param tool - The tool name.
+   * @param args - The tool arguments.
+   * @returns The answer.
+   */
+  const call = (tool: string, args: object): Promise<Answer> => {
+    if (gone) return Promise.reject(gone);
+    const n = ++id;
+    return new Promise((resolve, reject) => {
+      waiting.set(n, { resolve, reject });
+      child.stdin.write(JSON.stringify({ jsonrpc: "2.0", id: n, method: "tools/call", params: { name: tool, arguments: args } }) + "\n");
+    });
+  };
+  // the first request runs under a deadline: a server that never answers is killed, not waited for
+  let key: string;
+  const timer = setTimeout(() => child.kill("SIGKILL"), RUN_TIMEOUT_MS);
+  try {
+    key = String((await call("next_report", { session_id: SESSION, wait_ms: 0 }))["key"]);
+  } catch (e) {
+    child.kill("SIGKILL");
+    await closed;
+    throw e;
+  } finally {
+    clearTimeout(timer);
+  }
+  return {
+    key,
+    call,
+    /** Closes the server's stdin and waits for it to exit; it is killed after `RUN_TIMEOUT_MS`. */
+    close: async () => {
+      const timer = setTimeout(() => child.kill("SIGKILL"), RUN_TIMEOUT_MS);
+      child.stdin.end();
+      await closed;
+      clearTimeout(timer);
+    },
+  };
+}
+
+/**
+ * Run one case: a server row calls its tool (timed from the request line to the answer line, the findings of a
+ * FileChanged row drained after the timing); a process row spawns its process.
+ *
+ * @param c - The case.
+ * @param payloadFile - Payload JSON file (process rows only).
+ * @param env - Child environment (process rows only).
+ * @param s - The server of this PATH variant.
+ * @returns The run; a server row's status is 2 when its answer carries a finding (`context`), else 0.
+ */
+async function runCase(c: Case, payloadFile: string, env: NodeJS.ProcessEnv, s: Server): Promise<Run> {
+  if (c.tool === null) return runOnce(c, payloadFile, env);
+  const args = c.payload !== null && Object.keys(c.payload).length > 0 ? { ...c.payload, session_id: SESSION, key: s.key } : {};
+  const t0 = process.hrtime.bigint();
+  const answer = await s.call(c.tool, args);
+  const ms = Number(process.hrtime.bigint() - t0) / 1e6;
+  let context = typeof answer["context"] === "string" ? answer["context"] : "";
+  if (c.tool === "file_changed") {
+    // a FileChanged report is queued: drain it outside the timing and let it decide the row's status
+    const drained = (await s.call("prompt_submitted", { cwd: c.cwd, session_id: SESSION }))["hookSpecificOutput"] as { additionalContext?: unknown } | undefined;
+    if (typeof drained?.additionalContext === "string") context = drained.additionalContext;
+  }
+  return { ms, status: context === "" ? 0 : 2, stdout: "", stderr: context };
+}
+
+/**
+ * The `skipped` observable, checked outside the timing: a FileChanged of `a.sh` right after its Write leaves no
+ * report (the keyed `next_report` answers `timeout`). Drains whatever a report left.
+ *
+ * @param s - The server of this PATH variant.
+ * @param dir - Fixture directory.
+ * @returns Whether the FileChanged was skipped.
+ */
+async function skipped(s: Server, dir: string): Promise<boolean> {
+  await s.call("file_changed", { hook_event_name: "FileChanged", event: "change", file_path: join(dir, "a.sh"), cwd: dir, session_id: SESSION });
+  const state = (await s.call("next_report", { session_id: SESSION, key: s.key, wait_ms: 0 }))["state"];
+  await s.call("prompt_submitted", { cwd: dir, session_id: SESSION });
+  return state === "timeout";
 }
 
 /**
@@ -231,7 +392,7 @@ async function main(): Promise<void> {
     console.error(USAGE);
     process.exit(2);
   }
-  if (!existsSync(HOOK)) {
+  if (!existsSync(SERVER) || !existsSync(WATCH)) {
     console.error("build first: pnpm --filter universal-lint build");
     process.exit(2);
   }
@@ -242,6 +403,7 @@ async function main(): Promise<void> {
   // without /mnt/ entries both variants are the same PATH: run only the real one
   const paths = mnt > 0 ? [realPath, dirs.filter((d) => !d.startsWith("/mnt/")).join(":")] : [realPath];
   const dir = mkdtempSync(join(tmpdir(), "ul-perf-"));
+  const servers: Server[] = [];
   try {
     const seen = stylelintConfigVisible(dir);
     if (seen) console.error(`skipping the .css row: a stylelint config is visible from the fixture dir (${seen}), so it would not measure the no-config skip`);
@@ -249,12 +411,11 @@ async function main(): Promise<void> {
     const tsc = tscLabel(dir);
     const data = join(dir, "data");
     cases.forEach((c, i) => writeFileSync(join(data, `p${i}.json`), JSON.stringify(c.payload ?? {})));
-    // the hook's writtenDigestPath(hashPath(real path)): sha256 hex of the real path under <CLAUDE_PLUGIN_DATA>/written/
-    const digest = join(data, "written", createHash("sha256").update(realpathSync(join(dir, "a.sh"))).digest("hex"));
     // UNIVERSAL_LINT_SETTLE_MS=0: the harness measures lint cost, not the quiet-time hold of findings (F34, F40)
     const base: NodeJS.ProcessEnv = { ...process.env, CLAUDE_PLUGIN_DATA: data, UNIVERSAL_LINT_SETTLE_MS: "0" };
     delete base.NODE_OPTIONS;
     const envs = paths.map((PATH) => ({ ...base, PATH }));
+    for (const env of envs) servers.push(await startServer(env, dir));
     const times = cases.map(() => envs.map((): number[] => []));
     const fails = cases.map(() => new Map<string, number>());
     const firstErr = cases.map((): string | null => null);
@@ -262,15 +423,14 @@ async function main(): Promise<void> {
     for (let round = 0; round <= runs; round++) {
       for (const [v, env] of envs.entries()) {
         for (const [i, c] of cases.entries()) {
-          if (c.observable === "digest") rmSync(digest, { force: true });
-          const r = await runOnce(c, join(data, `p${i}.json`), env);
+          const r = await runCase(c, join(data, `p${i}.json`), env, servers[v]);
           process.stderr.write(".");
           if (round > 0) times[i][v].push(r.ms);
           const labels: string[] = [];
           if (r.status === null) labels.push("killed");
           else if (r.status !== c.expect) labels.push(`expected ${c.expect}, got ${r.status}`);
           if (c.observable === "watchPaths" && !r.stdout.includes("\"watchPaths\"")) labels.push("no watchPaths");
-          if (c.observable === "digest" && !existsSync(digest)) labels.push("no digest");
+          if (c.observable === "skipped" && !(await skipped(servers[v], dir))) labels.push("a.sh FileChanged after Write not skipped");
           for (const l of labels) fails[i].set(l, (fails[i].get(l) ?? 0) + 1);
           if (labels.length > 0 && firstErr[i] === null) firstErr[i] = r.stderr;
         }
@@ -302,6 +462,7 @@ async function main(): Promise<void> {
     console.log(out.join("\n"));
     process.exitCode = fails.some((f) => f.size > 0) ? 1 : 0;
   } finally {
+    await Promise.all(servers.map((s) => s.close()));
     rmSync(dir, { recursive: true, force: true });
   }
 }
