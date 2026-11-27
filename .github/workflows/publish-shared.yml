@@ -11,8 +11,15 @@ on:
 permissions:
   contents: read
 
+# the check-then-publish below is not atomic
+concurrency:
+  group: publish-shared
+  cancel-in-progress: false
+
 jobs:
   publish:
+    # workflow_dispatch from another branch must not publish unreviewed code
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -31,39 +38,30 @@ jobs:
           cache: pnpm
 
       - name: Install
-        run: pnpm install --frozen-lockfile --filter "@kwitsch/claude-code-plugin-shared..."
-
-      - name: Test
-        run: pnpm --filter "$PKG" test
+        run: pnpm install --frozen-lockfile
 
       - name: Build
         run: pnpm --filter "$PKG" build
 
-      # dist.test.ts skips itself without a built dist, so the first Test step never checks it
-      - name: Test built dist
+      # after the build: dist.test.ts skips itself without a built dist
+      - name: Test
         run: pnpm --filter "$PKG" test
 
-      - name: Version must be X.Y.Z
-        id: version
+      # never overwrite: a version already in the registry ends the run with a notice (re-runs are idempotent)
+      - name: Check version and registry
+        id: published
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           v=$(jq -r .version development/shared/package.json)
           if ! [[ "$v" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
             echo "::error::$PKG: version '$v' must be X.Y.Z"; exit 1
           fi
-          echo "v=$v" >> "$GITHUB_OUTPUT"
-
-      # never overwrite: a version already in the registry ends the run with a notice (re-runs are idempotent)
-      - name: Skip if already published
-        id: published
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          V: ${{ steps.version.outputs.v }}
-        run: |
-          code=$(curl -sS -o "$RUNNER_TEMP/meta.json" -w '%{http_code}' -H "Authorization: Bearer $GITHUB_TOKEN" "$REGISTRY/@kwitsch%2fclaude-code-plugin-shared")
+          code=$(curl -sS -o "$RUNNER_TEMP/meta.json" -w '%{http_code}' -H "Authorization: Bearer $GITHUB_TOKEN" "$REGISTRY/${PKG/\//%2f}")
           case $code in
             200)
-              if jq -e --arg v "$V" '.versions | has($v)' "$RUNNER_TEMP/meta.json" > /dev/null; then
-                echo "::notice::$PKG@$V already published"
+              if jq -e --arg v "$v" '.versions | has($v)' "$RUNNER_TEMP/meta.json" > /dev/null; then
+                echo "::notice::$PKG@$v already published"
                 echo "skip=true" >> "$GITHUB_OUTPUT"
                 exit 0
               fi ;;
