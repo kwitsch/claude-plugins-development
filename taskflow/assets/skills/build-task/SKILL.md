@@ -282,8 +282,12 @@ Every pipeline file is session-only, never a repository file:
       `code-review <level> --fix` over `<BASE_BRANCH>...HEAD`, commits each
       pass's edits and prints `Size:` and the line
       `Review level: <level> (size <X>)` (it owns the size → level table).
-      review-task stopped on an error (branch guard, commit failure) →
-      surface its message and stop (no Ship). Otherwise Write `REVIEW_PATH`
+      review-task stopped on an error (branch guard, commit failure), or its
+      report lists `simplify` or `code-review` as unavailable or failed →
+      surface its message and stop (no Ship). Then check every commit
+      review-task made (`git show <hash>`) against the approved spec: a fix
+      that reverses a spec decision → one `AskUserQuestion` (keep / revert
+      with `git revert`); never leave it unasked. Otherwise Write `REVIEW_PATH`
       (English) with the Write tool:
       `{"size": "<SIZE>", "level": "<level>", "commits": ["<hash> <subject>", ...], "summary": "<simplify and code-review summary from the report, incl. found-but-not-fixed items>"}`
       — `commits` from the report's `git log --oneline` list. When

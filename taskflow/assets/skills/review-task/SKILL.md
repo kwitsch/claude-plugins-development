@@ -71,9 +71,7 @@ Otherwise `ToolSearch(query: "select:mcp__taskflow__size-task")`, then call
 
 The result starts with the size: `SIZE` = `S`, `M`, `L` or `XL`; print one
 line `Size: <result>`. Tool missing or an error result: decide `SIZE`
-yourself from the same input — `S` one single edit in one place, `M` a
-feature or fix with tests inside one plugin/module, `L` several distinct
-parts or two to four plugins, `XL` repository-wide — and print
+yourself from the same input (`S`, `M`, `L` or `XL`) and print
 `Size: <X> (own reasoning: <reason>)`. No retry; sizing never fails the run.
 
 ## 6. Level
