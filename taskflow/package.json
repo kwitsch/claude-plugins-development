@@ -31,8 +31,7 @@
       "workflows/build-task-implement.workflow.js",
       "workflows/build-task-plan.workflow.js",
       "workflows/build-task-ship.workflow.js",
-      "workflows/build-task-spec.workflow.js",
-      "workflows/changes-review.workflow.js"
+      "workflows/build-task-spec.workflow.js"
     ]
   }
 }
