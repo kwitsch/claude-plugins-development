@@ -1,4 +1,4 @@
-// Structural checks of the built taskflow plugin: manifest, the three skills, the eight workflow scripts, the thirteen
+// Structural checks of the built taskflow plugin: manifest, the three skills, the six workflow scripts, the ten
 // agents, the docs, plus the developer notes (taskflow/CLAUDE.md, taskflow/.claude/rules/) and .oxlintrc.json from
 // their source paths. Ported from the old bats suite; grep line matches become `m`-flag regexes over the whole text,
 // `[[:space:]]` becomes `[ \t]`. Shipped files are read from the built plugin/, so build before testing.
@@ -203,8 +203,8 @@ describe("manifest", () => {
     expect(manifest).not.toHaveProperty("userConfig");
   });
 
-  test("package.json and plugin.json versions agree and are 2.4.0", () => {
-    expect(pkg.version).toBe("2.4.0");
+  test("package.json and plugin.json versions agree and are 3.0.0", () => {
+    expect(pkg.version).toBe("3.0.0");
     expect(manifest.version).toBe(pkg.version);
   });
 
@@ -213,8 +213,7 @@ describe("manifest", () => {
     expect(manifest.description).toBe(pkg.description);
     expect(manifest.author).toEqual({ name: "Kwitsch" });
     expect(manifest).not.toHaveProperty("userConfig");
-    expect(manifest.description).toContain("runs the design pipeline (explore, design, spec)");
-    expect(manifest.description).toContain("and the delivery pipeline (plan, wave-parallel implement, combined review, ship)");
+    expect(manifest.description).toBe("Runs a spec-driven design and delivery pipeline for a task (/taskflow:build-task) and reviews and fixes a branch's changes (/taskflow:review-task).");
   });
 
   test("no design-to-spec mention survives in the plugin or its developer notes", () => {
@@ -637,12 +636,14 @@ describe("ship merge-state remediation wiring", () => {
     expect(ls(AGENTS, ".md")).toHaveLength(10);
   });
 
-  test("plugin README and layout document the changes-audit skill and changes-review workflow", () => {
-    expectHas(`${PLUGIN}/README.md`, ["| `changes-audit`", "| `changes-review`", "skills/changes-audit/", "changes-review.workflow.js"]);
+  test("plugin README and layout document the review-task skill", () => {
+    expectHas(`${PLUGIN}/README.md`, ["| `review-task`", "skills/review-task/", "/taskflow:review-task"]);
+    expectLacks(`${PLUGIN}/README.md`, ["changes-review", "changes-audit", "build-task-review.workflow.js", "review-finder", "fix-applier", "ponytailReview"]);
   });
 
-  test("CLAUDE.md boundary rule and Opus-pin list cover changes-review and changes-audit", () => {
-    expectHas(DEV_NOTES, ["changes-review.workflow.js", "skills/changes-audit/", "13 static role prompts"]);
+  test("CLAUDE.md boundary rule covers review-task, its size → level table and the 10 agents", () => {
+    expectHas(DEV_NOTES, ["skills/review-task/", "10 static role prompts", "`S` → `medium`, `M` → `high`, `L` → `xhigh`, `XL` → `max`", "(../development/wiki/plugins/taskflow/design/review-task.md)"]);
+    expectLacks(DEV_NOTES, ["changes-review", "changes-audit", "build-task-review.workflow.js", "13 static role prompts", "fix-applier", "review-finder"]);
   });
 });
 
@@ -716,8 +717,8 @@ describe("ship merge-state documentation", () => {
     expect(read(`${PLUGIN}/README.md`).toLowerCase()).toContain("merge-state");
   });
 
-  test("CLAUDE.md documents ship-ensure-mergeable.mjs alongside the 12-agent roster", () => {
-    expectHas(DEV_NOTES, ["ship-ensure-mergeable.mjs", "13 static role prompts"]);
+  test("CLAUDE.md documents ship-ensure-mergeable.mjs alongside the 10-agent roster", () => {
+    expectHas(DEV_NOTES, ["ship-ensure-mergeable.mjs", "10 static role prompts"]);
   });
 });
 
@@ -895,11 +896,11 @@ describe("build-task delivery scripts", () => {
     expect(sweep(TREE, /spec-driven-delivery/)).toEqual([]);
   });
 
-  test("dev notes and README describe the seven build-task scripts, eight role files and the size-driven choices", () => {
-    expectHas(DEV_NOTES, ["build-task-plan.workflow.js", "build-task-implement.workflow.js", "build-task-review.workflow.js", "build-task-ship.workflow.js", "implement-<slug>.json", "review-<slug>.json", "pr-body-<slug>.md", "agents/planner.md", "agents/shipper.md", "agents/worktree-merger.md", "carry a `tools` allowlist", "passed as `LEVEL`", "`plan.md`, `implement.md`, `review.md`, `ship.md`"]);
-    expectHas(WF_RULE, ["plan.workflow.js", "review.workflow.js", "`S → sonnet`, `M → opus`, `L → opus`, `XL → fable`", "`LEVEL`", "carries `NO_NARRATION`"]);
-    expectLacks(WF_RULE, ["CLASSIFY_SCHEMA", "simple → sonnet", "hardest", "agents/planner.md"]);
-    expectHas(`${PLUGIN}/README.md`, ["plan.workflow.js", "implement.workflow.js", "review.workflow.js", "ship.workflow.js", "planner.md", "ci-fixer.md", "review-finder.md"]);
+  test("dev notes and README describe the six build-task scripts, the role files and the size-driven choices", () => {
+    expectHas(DEV_NOTES, ["build-task-plan.workflow.js", "build-task-implement.workflow.js", "build-task-ship.workflow.js", "implement-<slug>.json", "review-<slug>.json", "pr-body-<slug>.md", "agents/planner.md", "agents/shipper.md", "agents/worktree-merger.md", "carry a `tools` allowlist", "`--size=<SIZE>`", "`plan.md`, `implement.md`, `ship.md`"]);
+    expectHas(WF_RULE, ["plan.workflow.js", "`S → sonnet`, `M → opus`, `L → opus`, `XL → fable`", "`review-task`", "carries `NO_NARRATION`"]);
+    expectLacks(WF_RULE, ["CLASSIFY_SCHEMA", "simple → sonnet", "hardest", "agents/planner.md", "`LEVEL`", "changes-review", "build-task-review", "ponytailReview", "fix-applier", "review-finder"]);
+    expectHas(`${PLUGIN}/README.md`, ["plan.workflow.js", "implement.workflow.js", "ship.workflow.js", "planner.md", "ci-fixer.md"]);
     expectLacks(`${PLUGIN}/README.md`, ["references/"]);
     expectHas(`${BT_WF}/spec.md`, ["input of the plan script"]);
   });
@@ -928,11 +929,11 @@ describe("explore lens check documentation", () => {
     expectLacks(F, ["90%", "wc -c", "Recorded project knowledge", "No plugin agent dependency", "(and spec)"]);
   });
 
-  test("developer notes and the workflow rule describe the explore-scribe agent and the thirteen agentType roles", () => {
-    expectHas(DEV_NOTES, ["Ten of the plugin agents are build-task roles", "`explore-scribe`", "the other ten have one", "checks lens header/footer pairs instead of a byte count", "the lens header/footer lines come from the script", "(`SKILL.md` step 6)"]);
-    expectLacks(DEV_NOTES, ["in the explore, implement and review scripts", "(`SKILL.md` step 5)", "Eight of the plugin agents"]);
-    expectHas(WF_RULE, ["Thirteen roles are dispatched through a plugin `agentType`", "ten build-task roles", "`taskflow:explore-scribe` (`tools: Read, Write`)", "written as the lens `graphmind memory` (omitted when empty"]);
-    expectLacks(WF_RULE, ["MIN_WRITE_RATIO", "Recorded project knowledge", "memory recall, scribe, spec writer", "Eleven roles"]);
+  test("developer notes and the workflow rule describe the explore-scribe agent and the ten agentType roles", () => {
+    expectHas(DEV_NOTES, ["Ten of the plugin agents are build-task roles", "`explore-scribe`", "checks lens header/footer pairs instead of a byte count", "the lens header/footer lines come from the script", "(`SKILL.md` step 6)"]);
+    expectLacks(DEV_NOTES, ["in the explore, implement and review scripts", "(`SKILL.md` step 5)", "Eight of the plugin agents", "the other ten have one"]);
+    expectHas(WF_RULE, ["Ten roles are dispatched through a plugin `agentType`", "ten build-task roles", "`taskflow:explore-scribe` (`tools: Read, Write`)", "written as the lens `graphmind memory` (omitted when empty"]);
+    expectLacks(WF_RULE, ["MIN_WRITE_RATIO", "Recorded project knowledge", "memory recall, scribe, spec writer", "Eleven roles", "Thirteen roles"]);
   });
 
   test("the wiki gives the reasons for the lens check and for the spec after the intent confirmation", () => {
