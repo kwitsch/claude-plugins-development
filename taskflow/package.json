@@ -1,8 +1,8 @@
 {
   "name": "taskflow",
-  "version": "2.4.0",
+  "version": "3.0.0",
   "private": true,
-  "description": "Spec-driven design & delivery pipeline: /taskflow:build-task runs the design pipeline (explore, design, spec) and the delivery pipeline (plan, wave-parallel implement, combined review, ship); /taskflow:changes-audit reviews a branch standalone.",
+  "description": "Runs a spec-driven design and delivery pipeline for a task (/taskflow:build-task) and reviews and fixes a branch's changes (/taskflow:review-task).",
   "author": {
     "name": "Kwitsch"
   },
@@ -24,17 +24,14 @@
       "skills/build-task/workflows/explore.md",
       "skills/build-task/workflows/implement.md",
       "skills/build-task/workflows/plan.md",
-      "skills/build-task/workflows/review.md",
       "skills/build-task/workflows/ship.md",
       "skills/build-task/workflows/spec.md",
       "workflows/build-task-design.workflow.js",
       "workflows/build-task-explore.workflow.js",
       "workflows/build-task-implement.workflow.js",
       "workflows/build-task-plan.workflow.js",
-      "workflows/build-task-review.workflow.js",
       "workflows/build-task-ship.workflow.js",
-      "workflows/build-task-spec.workflow.js",
-      "workflows/changes-review.workflow.js"
+      "workflows/build-task-spec.workflow.js"
     ]
   }
 }

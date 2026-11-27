@@ -1,4 +1,4 @@
-// Structural checks of the built taskflow plugin: manifest, the three skills, the eight workflow scripts, the thirteen
+// Structural checks of the built taskflow plugin: manifest, the three skills, the six workflow scripts, the ten
 // agents, the docs, plus the developer notes (taskflow/CLAUDE.md, taskflow/.claude/rules/) and .oxlintrc.json from
 // their source paths. Ported from the old bats suite; grep line matches become `m`-flag regexes over the whole text,
 // `[[:space:]]` becomes `[ \t]`. Shipped files are read from the built plugin/, so build before testing.
@@ -16,9 +16,9 @@ const PLUGIN = "taskflow/plugin";
 const SKILL = `${PLUGIN}/skills/build-task`;
 /** The dispatch-task skill. */
 const DISPATCH = `${PLUGIN}/skills/dispatch-task`;
-/** The changes-audit skill. */
-const CHANGES_AUDIT = `${PLUGIN}/skills/changes-audit`;
-/** build-task's seven usage docs. */
+/** The review-task skill. */
+const REVIEW_TASK = `${PLUGIN}/skills/review-task`;
+/** build-task's six usage docs. */
 const BT_WF = `${SKILL}/workflows`;
 /** The agent files. */
 const AGENTS = `${PLUGIN}/agents`;
@@ -36,9 +36,9 @@ const TREE = [PLUGIN, DEV_NOTES, "taskflow/.claude/rules"];
 const NO_NARRATION_CONST = "const NO_NARRATION = \"No narrative text between tool calls — call tools silently and speak only in your final message (the report or structured output). Write that final message in English, whatever the language of the task or its inputs; commit messages are not covered.\";";
 /** German stopwords that must not appear in workflow comments. */
 const GERMAN = /\b(und|oder|nicht|wird|werden|auch|sowie|sind|eine|einen|kein|keine|wenn|dass|immer|nie|schritt)\b/i;
-/** The seven build-task script names. */
-const BT_NAMES = ["explore", "design", "spec", "plan", "implement", "review", "ship"];
-/** The seven usage docs, relative to the build-task skill. */
+/** The six build-task script names. */
+const BT_NAMES = ["explore", "design", "spec", "plan", "implement", "ship"];
+/** The six usage docs, relative to the build-task skill. */
 const USAGE_DOCS = BT_NAMES.map((n) => `workflows/${n}.md`);
 
 /**
@@ -203,8 +203,8 @@ describe("manifest", () => {
     expect(manifest).not.toHaveProperty("userConfig");
   });
 
-  test("package.json and plugin.json versions agree and are 2.4.0", () => {
-    expect(pkg.version).toBe("2.4.0");
+  test("package.json and plugin.json versions agree and are 3.0.0", () => {
+    expect(pkg.version).toBe("3.0.0");
     expect(manifest.version).toBe(pkg.version);
   });
 
@@ -213,8 +213,7 @@ describe("manifest", () => {
     expect(manifest.description).toBe(pkg.description);
     expect(manifest.author).toEqual({ name: "Kwitsch" });
     expect(manifest).not.toHaveProperty("userConfig");
-    expect(manifest.description).toContain("runs the design pipeline (explore, design, spec)");
-    expect(manifest.description).toContain("and the delivery pipeline (plan, wave-parallel implement, combined review, ship)");
+    expect(manifest.description).toBe("Runs a spec-driven design and delivery pipeline for a task (/taskflow:build-task) and reviews and fixes a branch's changes (/taskflow:review-task).");
   });
 
   test("no design-to-spec mention survives in the plugin or its developer notes", () => {
@@ -262,27 +261,28 @@ describe("build-task skill", () => {
     expect(read(F)).not.toMatch(/^disable-model-invocation:[ \t]*true/m);
   });
 
-  test("build-task SKILL.md references all seven usage reference files", () => {
+  test("build-task SKILL.md references all six usage reference files", () => {
     expectHas(F, USAGE_DOCS);
   });
 
-  test("all seven usage reference files exist and are non-empty; the references/ directory is gone", () => {
+  test("all six usage reference files exist and are non-empty; the references/ directory is gone", () => {
     for (const f of USAGE_DOCS) expect(nonEmpty(`${SKILL}/${f}`), f).toBe(true);
     expect(existsSync(abs(`${SKILL}/references`))).toBe(false);
   });
 
-  test("build-task SKILL.md runs all seven scripts by scriptPath and sizes the task (jev-api or own reasoning)", () => {
-    expectHas(F, ["Never use `scriptPath`", "taskflow:build-task-<name>", "build-task-explore", "build-task-design", "build-task-spec", "args global is undefined", "select:mcp__jev-api__request", "select:mcp__taskflow__size-task", "mcp__taskflow__size-task", "Size: <result>", "explore-<slug>.md", "The skill never Reads these files", "EXPLORE_PATH", "SIZE", "build-task-plan", "build-task-implement", "build-task-review", "build-task-ship", "IMPLEMENT_PATH", "REVIEW_PATH", "PR_BODY_PATH", "implement-<slug>.json", "review-<slug>.json", "pr-body-<slug>.md", "Review level: <level> (size <X>)"]);
-    expectLacks(F, ["design-to-spec", "difficulty", "spec-driven-delivery", "SHIP: false", "invoke by name"]);
+  test("build-task SKILL.md runs all six scripts by name, sizes the task (jev-api or own reasoning) and reviews with review-task", () => {
+    expectHas(F, ["Never use `scriptPath`", "taskflow:build-task-<name>", "build-task-explore", "build-task-design", "build-task-spec", "args global is undefined", "select:mcp__jev-api__request", "select:mcp__taskflow__size-task", "mcp__taskflow__size-task", "Size: <result>", "explore-<slug>.md", "The skill never Reads these files", "EXPLORE_PATH", "SIZE", "build-task-plan", "build-task-implement", "build-task-ship", "IMPLEMENT_PATH", "REVIEW_PATH", "PR_BODY_PATH", "implement-<slug>.json", "review-<slug>.json", "pr-body-<slug>.md", "Review level: <level> (size <X>)", "taskflow:review-task", "--size=<SIZE>", "except `REVIEW_PATH`, which the skill writes itself in step 5.3"]);
+    expect(read(F)).toMatch(/^allowed-tools:.*"Skill"/m);
+    expectLacks(F, ["design-to-spec", "difficulty", "spec-driven-delivery", "SHIP: false", "invoke by name", "build-task-review", "escalatedToUser", "ponytailReview", "workflows/review.md"]);
     expect((read(F).match(/\n/g) ?? []).length).toBeLessThan(500);
   });
 
   test("build-task SKILL.md runs the spec as step 4, after the intent confirmation; Deliver is step 5, the report step 6", () => {
-    expectHas(F, ["(Design → Intent confirmation → Spec →", "3. **Intent confirmation.**", "4. **Spec.** Runs once, after the \"Yes\" of step 3.", "5. **Deliver.**", "6. **Escalations & report.**", "checkpoint on the design; the spec (step 4) is written from the approved", "as `PLUGIN_ROOT` (step 5.4)", "create-or-update, step 5)", "(steps 2 and 5)", "design and step 5 calls", "step 6 then reports", "run step 6 (escalations + report)", "(step 6): the spec shipped without"]);
-    expectLacks(F, ["step 2.5", "5. **Spec.**", "4. **Deliver.**", "5. **Escalations & report.**", "(step 4.4)", "does the spec count as"]);
+    expectHas(F, ["(Design → Intent confirmation → Spec →", "3. **Intent confirmation.**", "4. **Spec.** Runs once, after the \"Yes\" of step 3.", "5. **Deliver.**", "6. **Report.**", "checkpoint on the design; the spec (step 4) is written from the approved", "as `PLUGIN_ROOT` (step 5.4)", "create-or-update, step 5)", "(steps 2 and 5)", "design and step 5 calls", "step 6 then reports", "(step 6): the spec shipped without"]);
+    expectLacks(F, ["step 2.5", "5. **Spec.**", "4. **Deliver.**", "5. **Escalations & report.**", "(step 4.4)", "does the spec count as", "6. **Escalations & report.**"]);
     expectHas(`${BT_WF}/spec.md`, ["build-task runs this script once, after the user confirmed the design intent (SKILL.md step 4); intent corrections re-run only the design script."]);
     expectLacks(`${BT_WF}/spec.md`, ["re-runs the design script and then"]);
-    expectHas(`${BT_WF}/review.md`, ["build-task's job (step 5)"]);
+    expect(existsSync(abs(`${BT_WF}/review.md`))).toBe(false);
   });
 
   test("build-task design-pipeline usage references exist and document their contracts", () => {
@@ -298,38 +298,16 @@ describe("build-task skill", () => {
 });
 
 describe("workflows/", () => {
-  const CR = `${WORKFLOWS}/changes-review.workflow.js`;
-
-  test("the plugin workflow scripts exist and declare export const meta", () => {
-    expect(nonEmpty(CR)).toBe(true);
-    expectHas(CR, ["export const meta = {"]);
+  test("every workflow script declares export const meta; spec-driven-delivery is gone", () => {
+    for (const n of ls(WORKFLOWS, ".workflow.js")) expectHas(`${WORKFLOWS}/${n}`, ["export const meta = {"]);
     expect(existsSync(abs(`${WORKFLOWS}/spec-driven-delivery.workflow.js`))).toBe(false);
   });
 
-  test("workflow meta names match their filenames", () => {
-    expect(read(CR)).toMatch(/name:[ \t]*["']changes-review["']/);
-  });
-
-  test("workflow scripts guard args via a decodeArgs fail-fast", () => {
-    expectHas(CR, ["function decodeArgs"]);
-    expect(read(CR)).toMatch(/stage:[ \t]*["']args["']/);
-  });
-
-  test("workflow scripts contain no leftover German comments", () => {
-    expectEnglishComments(CR);
-  });
-
   test("every agentType referenced by the workflows has a matching agents/*.md file", () => {
-    for (const f of [CR, `${WORKFLOWS}/build-task-review.workflow.js`, `${WORKFLOWS}/build-task-explore.workflow.js`]) {
+    for (const f of ls(WORKFLOWS, ".workflow.js").map((n) => `${WORKFLOWS}/${n}`)) {
       const names = new Set([...read(f).matchAll(/taskflow:([a-z-]+)/g)].map((m) => m[1]));
       for (const n of names) expect(existsSync(abs(`${AGENTS}/${n}.md`)), n).toBe(true);
     }
-  });
-
-  test("the plugin workflow scripts forbid narrative text in every inline (non-agentType) prompt", () => {
-    expectHas(CR, [NO_NARRATION_CONST]);
-    expect(followedBy("NO_NARRATION", "+ \"\\n\\n", CR)).toBe(true);
-    expectHas(CR, ["schema: SCOPE_SCHEMA", "schema: REPORT_SCHEMA", "ponytailReviewPrompt ="]);
   });
 });
 
@@ -373,7 +351,7 @@ describe("build-task scripts", () => {
   });
 
   test("build-task scripts: meta, decodeArgs fail-fast, NO_NARRATION, no AGENTS map in explore and spec, clean comments", () => {
-    expect(ls(WORKFLOWS, ".workflow.js").filter((n) => n.startsWith("build-task-"))).toHaveLength(7);
+    expect(ls(WORKFLOWS, ".workflow.js").filter((n) => n.startsWith("build-task-"))).toHaveLength(6);
     for (const n of BT_NAMES) {
       const f = `${WORKFLOWS}/build-task-${n}.workflow.js`;
       expect(nonEmpty(f), f).toBe(true);
@@ -399,44 +377,36 @@ describe("build-task scripts", () => {
 });
 
 describe("agents", () => {
-  const REVIEW_AGENTS = ["review-finder", "review-verifier", "fix-applier"];
+  /** Every shipped agent name, from agents/*.md. */
+  const allAgents = (): string[] => ls(AGENTS, ".md").map((f) => f.replace(/\.md$/, ""));
 
-  test("all 3 agent files exist with matching name frontmatter", () => {
-    for (const a of REVIEW_AGENTS) {
-      expect(existsSync(abs(`${AGENTS}/${a}.md`)), a).toBe(true);
-      expect(read(`${AGENTS}/${a}.md`)).toMatch(new RegExp(`^name:[ \\t]*${lit(a)}$`, "m"));
-    }
+  test("every agent file has a matching name frontmatter", () => {
+    for (const a of allAgents()) expect(read(`${AGENTS}/${a}.md`)).toMatch(new RegExp(`^name:[ \\t]*${lit(a)}$`, "m"));
   });
 
-  test("all agent files declare a model; the three review agents run on sonnet", () => {
-    for (const a of REVIEW_AGENTS) expect(read(`${AGENTS}/${a}.md`)).toMatch(/^model: sonnet$/m);
+  test("all agent files declare a bare model alias", () => {
+    for (const a of allAgents()) expect(read(`${AGENTS}/${a}.md`)).toMatch(/^model: (haiku|sonnet|opus)$/m);
   });
 
-  test("all agent descriptions are exactly INTERNAL ONLY (no model auto-selection)", () => {
-    for (const a of REVIEW_AGENTS) expect(read(`${AGENTS}/${a}.md`)).toMatch(/^description: INTERNAL ONLY$/m);
+  test("all agent descriptions are INTERNAL ONLY (no model auto-selection)", () => {
+    for (const a of allAgents()) expectHas(`${AGENTS}/${a}.md`, ["description: INTERNAL ONLY"]);
   });
 
   test("all agent files forbid narrative text between tool calls", () => {
-    for (const a of REVIEW_AGENTS) expectHas(`${AGENTS}/${a}.md`, ["No narrative text between tool calls"]);
+    for (const a of allAgents()) expectHas(`${AGENTS}/${a}.md`, ["No narrative text between tool calls"]);
   });
 
   test("every role file except pr-author requires an English final message", () => {
     const others = ls(AGENTS, ".md").filter((f) => f !== "pr-author.md");
     for (const f of others) expectHas(`${AGENTS}/${f}`, ["Write that final message in English, whatever the language of the task or its inputs; commit messages are not covered."]);
-    expect(others).toHaveLength(12);
+    expect(others).toHaveLength(9);
   });
 
   test("read-only-declared agents carry a least-privilege tools allowlist without Write/Edit", () => {
-    for (const a of ["review-finder", "review-verifier"]) {
+    for (const a of ["design-reviewer", "ci-monitor"]) {
       expect(read(`${AGENTS}/${a}.md`)).toMatch(/^tools:/m);
       expect(read(`${AGENTS}/${a}.md`)).not.toMatch(/^tools:.*[ \t,[\]"'](Write|Edit)([ \t,[\]"']|$)/m);
     }
-  });
-
-  test("fix-applier checks the current branch matches the work branch, not primary-vs-worktree", () => {
-    const F = `${AGENTS}/fix-applier.md`;
-    expectHas(F, ["git branch", "--show-current"]);
-    expect(read(F).toLowerCase()).not.toContain("not a linked worktree");
   });
 
   test("worktree-merger checks the current branch before merging, not primary-vs-worktree", () => {
@@ -470,10 +440,6 @@ describe("agents", () => {
     expectHas(DISPATCH_RULE, ["only creates a `feature/<slug>` worktree"]);
   });
 
-  test("fix-applier applies and tests fixes per-fix before a single category commit", () => {
-    expect(read(`${AGENTS}/fix-applier.md`).toLowerCase()).toContain("per-fix");
-  });
-
   test("ci-monitor collects a rerunId per failed job; ci-fixer consumes it", () => {
     for (const f of [`${AGENTS}/ci-monitor.md`, `${AGENTS}/ci-fixer.md`, `${WORKFLOWS}/build-task-ship.workflow.js`]) expectHas(f, ["rerunId"]);
   });
@@ -482,10 +448,6 @@ describe("agents", () => {
     expectHas(`${WORKFLOWS}/build-task-design.workflow.js`, ["never embedded as text/tags"]);
     expectHas(`${AGENTS}/designer.md`, ["never write `openQuestions` as text or tags"]);
   });
-
-  test("review script guards agent array fields before iterating", () => {
-    expectHas(`${WORKFLOWS}/build-task-review.workflow.js`, ["r.verdicts || []", "Array.isArray(r.candidates)", "Array.isArray(sweep.candidates)"]);
-  });
 });
 
 describe("model assignment", () => {
@@ -493,8 +455,6 @@ describe("model assignment", () => {
     expectHas(`${WORKFLOWS}/build-task-design.workflow.js`, ["const DESIGN_MODEL = { S: \"sonnet\", M: \"opus\", L: \"opus\", XL: \"fable\" };", "const designerModel = (s) => DESIGN_MODEL[String(s).toUpperCase()] || \"opus\";", "model: DESIGNER_MODEL"]);
     expectHas(`${WORKFLOWS}/build-task-plan.workflow.js`, ["const PLAN_MODEL = { S: \"sonnet\", M: \"opus\", L: \"opus\", XL: \"fable\" };", "const plannerModel = (s) => PLAN_MODEL[String(s).toUpperCase()] || \"opus\";", "model: PLANNER_MODEL"]);
     expect(sweep([WORKFLOWS], /PINNED_OPUS/)).toEqual([]);
-    expectHas(`${WORKFLOWS}/build-task-review.workflow.js`, ["synthesizer: \"opus\""]);
-    expectHas(`${WORKFLOWS}/changes-review.workflow.js`, ["synthesizer: \"opus\""]);
   });
 
   test("explore scout schema carries no difficulty; the designer model comes from build-task's SIZE", () => {
@@ -511,8 +471,6 @@ describe("model assignment", () => {
     expectHas(`${WORKFLOWS}/build-task-explore.workflow.js`, ["explorer: \"haiku\""]);
     expectHas(`${WORKFLOWS}/build-task-implement.workflow.js`, ["merger: \"haiku\"", "const implModel = (t) => (t.complexity === \"complex\" ? \"opus\" : \"haiku\");"]);
     expectHas(`${WORKFLOWS}/build-task-plan.workflow.js`, ["planChecker: \"sonnet\""]);
-    expectHas(`${WORKFLOWS}/changes-review.workflow.js`, ["finder: \"sonnet\""]);
-    expectHas(`${WORKFLOWS}/build-task-review.workflow.js`, ["applier: \"sonnet\""]);
   });
 
   test("the workflow rule's Model assignment section drops the Opus pin and documents the classifier", () => {
@@ -526,7 +484,7 @@ describe("model assignment", () => {
   });
 
   test("README and the design/delivery usage references carry no pinned model ID and name fable", () => {
-    for (const f of [`${PLUGIN}/README.md`, `${BT_WF}/design.md`, `${BT_WF}/plan.md`, `${BT_WF}/implement.md`, `${BT_WF}/review.md`, `${BT_WF}/ship.md`]) expectLacks(f, ["claude-opus-4-8"]);
+    for (const f of [`${PLUGIN}/README.md`, `${BT_WF}/design.md`, `${BT_WF}/plan.md`, `${BT_WF}/implement.md`, `${BT_WF}/ship.md`]) expectLacks(f, ["claude-opus-4-8"]);
     for (const f of [`${PLUGIN}/README.md`, `${BT_WF}/design.md`, `${BT_WF}/plan.md`]) expectHas(f, ["fable"]);
   });
 
@@ -606,33 +564,37 @@ describe("dispatch-task skill", () => {
   });
 });
 
-describe("changes-audit skill", () => {
-  const F = `${CHANGES_AUDIT}/SKILL.md`;
+describe("review-task skill", () => {
+  const F = `${REVIEW_TASK}/SKILL.md`;
 
-  test("changes-audit SKILL.md exists and is non-empty", () => {
+  test("review-task SKILL.md exists and is non-empty", () => {
     expect(nonEmpty(F)).toBe(true);
   });
 
-  test("changes-audit frontmatter: name, description, argument-hint; model-invocable; not forked", () => {
-    expect(read(F)).toMatch(/^name:[ \t]*changes-audit/m);
+  test("review-task frontmatter: name, description, argument-hint; model-invocable; not forked", () => {
+    expect(read(F)).toMatch(/^name:[ \t]*review-task$/m);
     expect(read(F)).toMatch(/^description:/m);
     expect(read(F)).toMatch(/^argument-hint:/m);
     expect(read(F)).not.toMatch(/^disable-model-invocation:[ \t]*true/m);
     expect(read(F)).not.toMatch(/^context:[ \t]*fork/m);
   });
 
-  test("changes-audit allowed-tools includes Workflow, Agent, AskUserQuestion", () => {
-    expect(read(F)).toMatch(/^allowed-tools:.*Workflow/m);
-    expect(read(F)).toMatch(/^allowed-tools:.*Agent/m);
-    expect(read(F)).toMatch(/^allowed-tools:.*AskUserQuestion/m);
+  test("review-task allowed-tools includes Bash, Skill and ToolSearch", () => {
+    for (const t of ["Bash", "Skill", "ToolSearch"]) expect(read(F)).toMatch(new RegExp(`^allowed-tools:.*"${t}"`, "m"));
   });
 
-  test("changes-audit parses --fix, invokes the review workflow, dispatches fix-applier", () => {
-    expectHas(F, ["--fix", "AskUserQuestion", "taskflow:changes-review", "taskflow:fix-applier"]);
+  test("review-task parses --size, sizes itself, maps size to level, runs simplify then code-review --fix and commits", () => {
+    expectHas(F, ["--size=", "mcp__taskflow__size-task", "own reasoning", "Review level: <level> (size <X>)", "`S` → `medium`, `M` → `high`, `L` → `xhigh`, `XL` → `max`", "\"simplify\"", "\"code-review\"", "--fix", "git status --porcelain", "git add -A"]);
+    const simplify = read(F).indexOf("skill: \"simplify\"");
+    expect(simplify).toBeGreaterThan(-1);
+    expect(simplify).toBeLessThan(read(F).indexOf("skill: \"code-review\""));
   });
 
-  test("changes-audit SKILL.md never contains a load-time exclamation-backtick sequence", () => {
+  test("review-task SKILL.md has no load-time exclamation-backtick sequence and mentions Co-Authored-By only to forbid it", () => {
     expectLacks(F, ["!`"]);
+    const lines = read(F).split("\n").filter((l) => l.includes("Co-Authored-By"));
+    expect(lines.length).toBeGreaterThan(0);
+    for (const l of lines) expect(l).toMatch(/\bno\b/i);
   });
 });
 
@@ -670,16 +632,18 @@ describe("ship merge-state remediation wiring", () => {
     expect(sweep(TREE, /pr_stale|pr_conflict/)).toEqual([]);
   });
 
-  test("the agent roster is exactly 13 *.md files", () => {
-    expect(ls(AGENTS, ".md")).toHaveLength(13);
+  test("the agent roster is exactly 10 *.md files", () => {
+    expect(ls(AGENTS, ".md")).toHaveLength(10);
   });
 
-  test("plugin README and layout document the changes-audit skill and changes-review workflow", () => {
-    expectHas(`${PLUGIN}/README.md`, ["| `changes-audit`", "| `changes-review`", "skills/changes-audit/", "changes-review.workflow.js"]);
+  test("plugin README and layout document the review-task skill", () => {
+    expectHas(`${PLUGIN}/README.md`, ["| `review-task`", "skills/review-task/", "/taskflow:review-task"]);
+    expectLacks(`${PLUGIN}/README.md`, ["changes-review", "changes-audit", "build-task-review.workflow.js", "review-finder", "fix-applier", "ponytailReview"]);
   });
 
-  test("CLAUDE.md boundary rule and Opus-pin list cover changes-review and changes-audit", () => {
-    expectHas(DEV_NOTES, ["changes-review.workflow.js", "skills/changes-audit/", "13 static role prompts"]);
+  test("CLAUDE.md boundary rule covers review-task, its size → level table and the 10 agents", () => {
+    expectHas(DEV_NOTES, ["skills/review-task/", "10 static role prompts", "`S` → `medium`, `M` → `high`, `L` → `xhigh`, `XL` → `max`", "(../development/wiki/plugins/taskflow/design/review-task.md)"]);
+    expectLacks(DEV_NOTES, ["changes-review", "changes-audit", "build-task-review.workflow.js", "13 static role prompts", "fix-applier", "review-finder"]);
   });
 });
 
@@ -753,15 +717,12 @@ describe("ship merge-state documentation", () => {
     expect(read(`${PLUGIN}/README.md`).toLowerCase()).toContain("merge-state");
   });
 
-  test("CLAUDE.md documents ship-ensure-mergeable.mjs alongside the 12-agent roster", () => {
-    expectHas(DEV_NOTES, ["ship-ensure-mergeable.mjs", "13 static role prompts"]);
+  test("CLAUDE.md documents ship-ensure-mergeable.mjs alongside the 10-agent roster", () => {
+    expectHas(DEV_NOTES, ["ship-ensure-mergeable.mjs", "10 static role prompts"]);
   });
 });
 
-describe("ponytail design-phase enforcement and lean review", () => {
-  const REVIEW = `${WORKFLOWS}/build-task-review.workflow.js`;
-  const CR = `${WORKFLOWS}/changes-review.workflow.js`;
-
+describe("ponytail design-phase enforcement", () => {
   test("designer prompt embeds the ponytail reuse ladder and the never-trim carve-out", () => {
     const md = read(`${AGENTS}/designer.md`);
     expect(md.toLowerCase()).toContain("reuse ladder");
@@ -793,32 +754,8 @@ describe("ponytail design-phase enforcement and lean review", () => {
     expect(existsSync(abs(`${WORKFLOWS}/design-to-spec.workflow.js`))).toBe(false);
   });
 
-  test("review script defines the lean-review schema, sonnet model, and returns ponytailReview", () => {
-    expectHas(REVIEW, ["PONYTAIL_REVIEW_SCHEMA", "ponytailReviewer: \"sonnet\"", "ponytailReview"]);
-  });
-
-  test("the lean-review step is scoped to over-engineering only and stays report-only", () => {
-    expectHas(REVIEW, ["over-engineering ONLY"]);
-    // report-only: the ponytail review is never routed to the fix applier
-    expect(read(REVIEW).split("\n").filter((l) => l.includes("ponytail") && /applier/i.test(l))).toEqual([]);
-  });
-
-  test("lean-review findings are independently verified and deduped against the combined review", () => {
-    expectHas(REVIEW, ["verifyGroups(ponytailCandidates)", "combinedLocs"]);
-  });
-
-  test("changes-review workflow is review-only (no apply/ship/spec) and returns review + ponytailReview", () => {
-    expectHas(CR, ["export const meta = {", "stage: \"done\"", "ponytailReview", "synthesizer: \"opus\""]);
-    expectLacks(CR, ["phase(\"Apply\")", "phase(\"Ship\")", "escalatedToUser", "SPEC_PATH", "taskflow:changes-review"]);
-  });
-
   test("pr-author documents the Lean review heading fed from the ponytail pass", () => {
     expect(read(`${AGENTS}/pr-author.md`).toLowerCase()).toContain("lean review");
-  });
-
-  test("review reference records the report-only lean (ponytail) review contract", () => {
-    expectHas(`${BT_WF}/review.md`, ["ponytailReview"]);
-    expect(read(`${BT_WF}/review.md`).toLowerCase()).toContain("over-engineering");
   });
 });
 
@@ -875,15 +812,6 @@ describe("build-task delivery scripts", () => {
     expect(read(F).split("\n").filter((l) => l.includes("stage: \"Implement\"") && !/tasks: .*waves.*minorFindings/.test(l))).toEqual([]);
   });
 
-  test("implement and review persist() are identical except the phase label", () => {
-    const body = (n: string): string => {
-      const t = read(`${WORKFLOWS}/build-task-${n}.workflow.js`);
-      const start = t.indexOf("async function persist(path, obj) {");
-      return t.slice(start, t.indexOf("\n}\n", start)).replace(/phase: "[A-Za-z]+"/, "phase: X");
-    };
-    expect(body("implement")).toBe(body("review"));
-  });
-
   test("implement.md documents the implement script contract and the wave rules", () => {
     const F = `${BT_WF}/implement.md`;
     expect(nonEmpty(F)).toBe(true);
@@ -891,34 +819,10 @@ describe("build-task delivery scripts", () => {
     expectLacks(F, ["claude-opus-4-8", "spec-driven-delivery", "even for single-task waves"]);
   });
 
-  test("review.workflow.js: LEVEL arg (never derived), three plugin agents, lean pass, apply, Write scribe with Write retry, returns", () => {
-    const F = `${WORKFLOWS}/build-task-review.workflow.js`;
-    expect(nonEmpty(F)).toBe(true);
-    expectHas(F, ["name: \"build-task-review\"", "decodeArgs([\"SPEC_PATH\", \"PLAN_PATH\", \"REVIEW_PATH\", \"BRANCH_NAME\"], { BASE_BRANCH: \"main\", LEVEL: \"high\" })", "if (LEVEL !== \"high\" && LEVEL !== \"max\")", "must be an absolute path", "phase(\"Review\")", "phase(\"Apply\")", "const SWEEP_MAX = 8;", "const PONYTAIL_MAX = 8;", "synthesizer: \"opus\"", "finder: \"sonnet\"", "verifier: \"sonnet\"", "applier: \"sonnet\"", "ponytailReviewer: \"sonnet\"", "scribe: \"haiku\"", "r.verdicts || []", "Array.isArray(r.candidates)", "Array.isArray(sweep.candidates)", "PONYTAIL_REVIEW_SCHEMA", "over-engineering ONLY", "USER-APPROVED", "verifyGroups(ponytailCandidates)", "combinedLocs", "findings.filter((f) => !f.reversesDecision)", "async function persist(path, obj)", "w.bytes === expectedBytes || w.bytes === expectedBytes + 1", "label: \"persist:retry\"", "with the Write tool", "agent(prompt, { ...opts, label: \"persist:retry\" })", "error: \"could not write REVIEW_PATH\", level: LEVEL, applied: applyReport, escalatedToUser: escalated, ponytailReview", "reviewPath: REVIEW_PATH", "findingCount: findings.length", "escalatedToUser: escalated"]);
-    expect(followedBy("NO_NARRATION", "+ \"\\n\\n", F)).toBe(true);
-    expectLacks(F, ["TASKFLOW_JSON_EOF", "<<'", "WRITE_VIA_BASH_NOT_WRITE_EDIT", "NEVER the Write or Edit tool", "retryPrompt", "tasks.length > 4", "classify", "PINNED_OPUS", "difficulty", "stage: \"done\"", "phase(\"Ship\")", "SKILL_DIR.replace", "role definition", "pipelineSummary", "BASH_SHAPE_HINT"]);
-    // exactly the three plugin review agents, each backed by an agents/*.md file
-    expect([...new Set([...read(F).matchAll(/taskflow:[a-z-]+/g)].map((m) => m[0]))].sort()).toEqual(["taskflow:fix-applier", "taskflow:review-finder", "taskflow:review-verifier"]);
-    for (const n of ["review-finder", "review-verifier", "fix-applier"]) expect(existsSync(abs(`${AGENTS}/${n}.md`)), n).toBe(true);
-    // report-only: the ponytail review is never routed to the fix applier
-    expect(read(F).split("\n").filter((l) => l.includes("ponytail") && /applier/i.test(l))).toEqual([]);
-    // scope/no-diff errors carry no applied/escalatedToUser keys
-    const errorLines = read(F).split("\n").filter((l) => l.includes("error: \"scope agent returned no result\"") || l.includes("error: \"no changes found to review"));
-    expect(errorLines.filter((l) => /applied|escalatedToUser/.test(l))).toEqual([]);
-  });
-
-  test("review.md documents the review script contract, LEVEL and the lean review", () => {
-    const F = `${BT_WF}/review.md`;
-    expect(nonEmpty(F)).toBe(true);
-    expectHas(F, ["taskflow:build-task-", "args global is undefined", "const args = { … }", "stage: 'args'", "`SPEC_PATH`", "`PLAN_PATH`", "`REVIEW_PATH`", "`BRANCH_NAME`", "`BASE_BRANCH`", "`LEVEL`", "`reviewPath`", "`findingCount`", "`applied`", "`escalatedToUser`", "ponytailReview", "taskflow:review-finder", "taskflow:review-verifier", "taskflow:fix-applier", "findings.filter((f) => !f.reversesDecision)", "`S`/`M` → `high`, `L`/`XL` → `max`", "## Contents", "## Preconditions"]);
-    expect(read(F).toLowerCase()).toContain("over-engineering");
-    expectLacks(F, ["claude-opus-4-8", "spec-driven-delivery", ">4 tasks"]);
-  });
-
   test("ship.workflow.js: result-file paths to pr-author, role files, CI loop bounds, reportable ship states", () => {
     const F = `${WORKFLOWS}/build-task-ship.workflow.js`;
     expect(nonEmpty(F)).toBe(true);
-    expectHas(F, ["name: \"build-task-ship\"", "decodeArgs([\"SPEC_PATH\", \"PLAN_PATH\", \"IMPLEMENT_PATH\", \"REVIEW_PATH\", \"PR_BODY_PATH\", \"BRANCH_NAME\"], { BASE_BRANCH: \"main\", PLUGIN_ROOT: \"\" })", "must be an absolute path", "A.PLUGIN_ROOT.includes(\"${\")", "prAuthor: \"haiku\"", "shipper: \"haiku\"", "ciMonitor: \"haiku\"", "ciFixer: \"sonnet\"", "agentType: \"taskflow:pr-author\"", "agentType: \"taskflow:shipper\"", "agentType: \"taskflow:ci-monitor\"", "agentType: \"taskflow:ci-fixer\"", "Pipeline result files (faithful source of truth — Read both): implement result ", "(tasks, waves, per-task minor findings), review result ", "(level, summary, applied/skipped, escalated open items, fix commits, lean-review findings)", "PR_BODY_PATH", "bodyPath: { type: \"string\" }", "required: [\"title\", \"bodyPath\"]", "mergeState: { enum: [\"clean\", \"rebased\", \"resolved\", \"unknown\"] }", "required: [\"status\"]", "ship-ensure-mergeable.mjs", "created.mergeState", "mergeState?", "rerunId", "rerunTried", "const MAX_CI_MONITOR_ROUNDS = 6;", "const MAX_CI_FIX_ROUNDS = 2;", "with the Write tool", "label: \"pr-author:retry\"", "return { status: \"complete\", ship };"]);
+    expectHas(F, ["name: \"build-task-ship\"", "decodeArgs([\"SPEC_PATH\", \"PLAN_PATH\", \"IMPLEMENT_PATH\", \"REVIEW_PATH\", \"PR_BODY_PATH\", \"BRANCH_NAME\"], { BASE_BRANCH: \"main\", PLUGIN_ROOT: \"\" })", "must be an absolute path", "A.PLUGIN_ROOT.includes(\"${\")", "prAuthor: \"haiku\"", "shipper: \"haiku\"", "ciMonitor: \"haiku\"", "ciFixer: \"sonnet\"", "agentType: \"taskflow:pr-author\"", "agentType: \"taskflow:shipper\"", "agentType: \"taskflow:ci-monitor\"", "agentType: \"taskflow:ci-fixer\"", "Pipeline result files (faithful source of truth — Read both): implement result ", "(tasks, waves, per-task minor findings), review result ", "(size, level, review commits, summary)", "PR_BODY_PATH", "bodyPath: { type: \"string\" }", "required: [\"title\", \"bodyPath\"]", "mergeState: { enum: [\"clean\", \"rebased\", \"resolved\", \"unknown\"] }", "required: [\"status\"]", "ship-ensure-mergeable.mjs", "created.mergeState", "mergeState?", "rerunId", "rerunTried", "const MAX_CI_MONITOR_ROUNDS = 6;", "const MAX_CI_FIX_ROUNDS = 2;", "with the Write tool", "label: \"pr-author:retry\"", "return { status: \"complete\", ship };"]);
     expectLacks(F, ["agent definition", "per your agent", "pipelineSummary", "SCRATCH_DIR", "if (SHIP)", "status: \"skipped\"", "stage: \"done\"", "classify", "PINNED_OPUS", "<<<BODY", "stage: \"Ship\"", "<<'EOF'", "WRITE_VIA_BASH_NOT_WRITE_EDIT", "NEVER the Write or Edit tool"]);
     // word boundary: a plain "prText.body" would match prText.bodyPath
     expect(read(F)).not.toMatch(/prText\.body\b/);
@@ -935,38 +839,35 @@ describe("build-task delivery scripts", () => {
   });
 
   test("no delivery script keeps the classifier, the opus pin, the built-in Explore agent or the plan-derived review level", () => {
-    for (const n of ["plan", "implement", "review", "ship"]) {
+    for (const n of ["plan", "implement", "ship"]) {
       expectLacks(`${WORKFLOWS}/build-task-${n}.workflow.js`, ["classifyPrompt", "CLASSIFY_SCHEMA", "label: \"classify\"", "agentType: \"Explore\"", "difficulty", "PINNED_OPUS", "tasks.length > 4"]);
     }
     const bt = ls(WORKFLOWS, ".workflow.js").filter((n) => n.startsWith("build-task-")).map((n) => `${WORKFLOWS}/${n}`);
     expect(sweep(bt, /classify|PINNED_OPUS|tasks.length > 4/)).toEqual([]);
   });
 
-  test("build-task SKILL.md step 4 runs plan, implement, review and ship with the documented args and one error rule", () => {
+  test("build-task SKILL.md step 5 runs plan, implement and ship with the documented args, review-task as Review, and one error rule", () => {
     const F = `${SKILL}/SKILL.md`;
-    expectHas(F, ["{SPEC_PATH, PLAN_PATH, SIZE, GRAPHMIND_AVAILABLE, REPO_PATH, JEV_AVAILABLE}", "{PLAN_PATH, IMPLEMENT_PATH, BRANCH_NAME, SCRATCH_DIR, GRAPHMIND_AVAILABLE, REPO_PATH}", "{SPEC_PATH, PLAN_PATH, REVIEW_PATH, BRANCH_NAME, BASE_BRANCH, LEVEL, GRAPHMIND_AVAILABLE, REPO_PATH}", "{SPEC_PATH, PLAN_PATH, IMPLEMENT_PATH, REVIEW_PATH, PR_BODY_PATH, BRANCH_NAME, BASE_BRANCH, PLUGIN_ROOT, GRAPHMIND_AVAILABLE, REPO_PATH, JEV_AVAILABLE}", "`S` or `M` → `high`, `L` or `XL` → `max`", "PR/MR skipped at the user", "`SIZE` picks the designer model, the planner model and the review level.", "taskflow:review-finder", "taskflow:review-verifier", "taskflow:fix-applier", "plannerModel", "never retry the merge", "half-implemented plan"]);
-    // the error rule is stated exactly once
-    expect(countLines(F, "Review error")).toBe(1);
-    expectHas(F, ["Review error that carries"]);
-    expectLacks(F, ["CLAUDE_PLUGIN_ROOT}/workflows"]);
+    expectHas(F, ["{SPEC_PATH, PLAN_PATH, SIZE, GRAPHMIND_AVAILABLE, REPO_PATH, JEV_AVAILABLE}", "{PLAN_PATH, IMPLEMENT_PATH, BRANCH_NAME, SCRATCH_DIR, GRAPHMIND_AVAILABLE, REPO_PATH}", "Skill(skill: \"taskflow:review-task\", args: \"--size=<SIZE> <BASE_BRANCH>\")", "{\"size\": \"<SIZE>\", \"level\": \"<level>\", \"commits\": [", "{SPEC_PATH, PLAN_PATH, IMPLEMENT_PATH, REVIEW_PATH, PR_BODY_PATH, BRANCH_NAME, BASE_BRANCH, PLUGIN_ROOT, GRAPHMIND_AVAILABLE, REPO_PATH, JEV_AVAILABLE}", "PR/MR skipped at the user", "`SIZE` picks the designer model, the planner model and the review level.", "plannerModel", "never retry the merge", "half-implemented plan", "The one error rule for the script sub-steps"]);
+    expectLacks(F, ["CLAUDE_PLUGIN_ROOT}/workflows", "Review error", "`S` or `M` → `high`", "taskflow:review-finder", "taskflow:review-verifier", "taskflow:fix-applier", "LEVEL, GRAPHMIND_AVAILABLE"]);
   });
 
-  test("explore scribe is the Read/Write-only explore-scribe agent with a lens header/footer check and one retry; implement/review persist keep the exact-size check", () => {
+  test("explore scribe is the Read/Write-only explore-scribe agent with a lens header/footer check and one retry; implement persist keeps the exact-size check", () => {
     const ex = `${WORKFLOWS}/build-task-explore.workflow.js`;
     expectHas(ex, ["Retry: the file may already exist from an earlier attempt; Read it first, then overwrite it.", "{ ...scribeOpts, label: \"scribe:retry\" })", "const lensProblems = (w) =>", "missing lens header(s): ", "lens header(s) without footer: ", "differ from the expected lenses in count or order", "Do not write anything. Read ", "reserved for the memory recall"]);
     expectLacks(ex, ["TASKFLOW_MD_EOF", "NEVER the Write or Edit tool", "scribeRetryPrompt", "isIntactRetry", "printf", "w.bytes", "0.9"]);
     expectHas(`${AGENTS}/explore-scribe.md`, ["tools: [\"Read\", \"Write\"]", "with the Write tool", "Read the file back", "never what the prompt contained"]);
     expectHas(`${BT_WF}/explore.md`, ["with the Write tool"]);
-    for (const n of ["explore", "implement", "review"]) expectLacks(`${WORKFLOWS}/build-task-${n}.workflow.js`, ["printf", "retryPrompt"]);
+    for (const n of ["explore", "implement"]) expectLacks(`${WORKFLOWS}/build-task-${n}.workflow.js`, ["printf", "retryPrompt"]);
     expectLacks(`${BT_WF}/explore.md`, ["heredoc"]);
-    for (const n of ["implement", "review"]) {
+    for (const n of ["implement"]) {
       const f = `${WORKFLOWS}/build-task-${n}.workflow.js`;
       expect(countLines(f, "w.bytes === expectedBytes || w.bytes === expectedBytes + 1")).toBe(1);
       expectLacks(f, ["0.9"]);
       expectLacks(`${BT_WF}/${n}.md`, ["heredoc"]);
       expectHas(`${BT_WF}/${n}.md`, ["with the Write tool", "a trailing newline"]);
     }
-    for (const d of [WF_RULE, `${BT_WF}/explore.md`, `${BT_WF}/implement.md`, `${BT_WF}/review.md`]) expectLacks(d, ["that count plus one", "byte count is verified"]);
+    for (const d of [WF_RULE, `${BT_WF}/explore.md`, `${BT_WF}/implement.md`]) expectLacks(d, ["that count plus one", "byte count is verified"]);
   });
 
   test("rule, developer notes and SKILL.md describe the Write-only write path", () => {
@@ -977,10 +878,10 @@ describe("build-task delivery scripts", () => {
     expectLacks(`${SKILL}/SKILL.md`, ["unsure dispatched workers can read", "!`"]);
   });
 
-  test("build-task ships seven usage references and no role-file directory; the plugin keeps eight workflows", () => {
+  test("build-task ships six usage references and no role-file directory; the plugin keeps six workflows", () => {
     expect(existsSync(abs(`${SKILL}/roles`))).toBe(false);
-    expect(ls(BT_WF, ".md")).toHaveLength(7);
-    expect(ls(WORKFLOWS, ".workflow.js")).toHaveLength(8);
+    expect(ls(BT_WF, ".md")).toHaveLength(6);
+    expect(ls(WORKFLOWS, ".workflow.js")).toHaveLength(6);
   });
 
   test("moved role files: ci-monitor is Bash-only by instruction, pr-author names the result files, planner stays English", () => {
@@ -991,34 +892,31 @@ describe("build-task delivery scripts", () => {
     for (const r of ["planner", "worktree-merger", "pr-author", "shipper", "ci-monitor", "ci-fixer"]) expectLacks(`${AGENTS}/${r}.md`, ["agent definition"]);
   });
 
-  test("the three review agents carry no stale spec-driven-delivery reference", () => {
-    for (const a of ["review-finder", "review-verifier", "fix-applier"]) expectLacks(`${AGENTS}/${a}.md`, ["spec-driven-delivery"]);
-  });
-
-  test("changes-review comments point at the build-task review script, not the removed workflow", () => {
-    const F = `${WORKFLOWS}/changes-review.workflow.js`;
-    expect(countLines(F, "workflows/build-task-review.workflow.js")).toBe(3);
-    expectHas(F, ["the NO_NARRATION constant of the build-task scripts"]);
-    expectLacks(F, ["spec-driven-delivery"]);
-  });
-
   test("no spec-driven-delivery mention survives in the plugin or its developer notes", () => {
     expect(sweep(TREE, /spec-driven-delivery/)).toEqual([]);
   });
 
-  test("dev notes and README describe the seven build-task scripts, eight role files and the size-driven choices", () => {
-    expectHas(DEV_NOTES, ["build-task-plan.workflow.js", "build-task-implement.workflow.js", "build-task-review.workflow.js", "build-task-ship.workflow.js", "implement-<slug>.json", "review-<slug>.json", "pr-body-<slug>.md", "agents/planner.md", "agents/shipper.md", "agents/worktree-merger.md", "carry a `tools` allowlist", "passed as `LEVEL`", "`plan.md`, `implement.md`, `review.md`, `ship.md`"]);
-    expectHas(WF_RULE, ["plan.workflow.js", "review.workflow.js", "`S → sonnet`, `M → opus`, `L → opus`, `XL → fable`", "`LEVEL`", "carries `NO_NARRATION`"]);
-    expectLacks(WF_RULE, ["CLASSIFY_SCHEMA", "simple → sonnet", "hardest", "agents/planner.md"]);
-    expectHas(`${PLUGIN}/README.md`, ["plan.workflow.js", "implement.workflow.js", "review.workflow.js", "ship.workflow.js", "planner.md", "ci-fixer.md", "review-finder.md"]);
+  test("dev notes and README describe the six build-task scripts, the role files and the size-driven choices", () => {
+    expectHas(DEV_NOTES, ["build-task-plan.workflow.js", "build-task-implement.workflow.js", "build-task-ship.workflow.js", "implement-<slug>.json", "review-<slug>.json", "pr-body-<slug>.md", "agents/planner.md", "agents/shipper.md", "agents/worktree-merger.md", "carry a `tools` allowlist", "`--size=<SIZE>`", "`plan.md`, `implement.md`, `ship.md`"]);
+    expectHas(WF_RULE, ["plan.workflow.js", "`S → sonnet`, `M → opus`, `L → opus`, `XL → fable`", "`review-task`", "carries `NO_NARRATION`"]);
+    expectLacks(WF_RULE, ["CLASSIFY_SCHEMA", "simple → sonnet", "hardest", "agents/planner.md", "`LEVEL`", "changes-review", "build-task-review", "ponytailReview", "fix-applier", "review-finder"]);
+    expectHas(`${PLUGIN}/README.md`, ["plan.workflow.js", "implement.workflow.js", "ship.workflow.js", "planner.md", "ci-fixer.md"]);
     expectLacks(`${PLUGIN}/README.md`, ["references/"]);
     expectHas(`${BT_WF}/spec.md`, ["input of the plan script"]);
   });
 
   test("tool hints: scripts append graphmind/jev-api hints only when the skill detected the tool", () => {
-    for (const n of ["design", "implement", "review", "ship"]) expectHas(`${WORKFLOWS}/build-task-${n}.workflow.js`, ["const gmHint = (purpose, project) =>", "GRAPHMIND_AVAILABLE=true requires a non-empty absolute REPO_PATH"]);
+    for (const n of ["design", "implement", "ship"]) expectHas(`${WORKFLOWS}/build-task-${n}.workflow.js`, ["const gmHint = (purpose, project) =>", "GRAPHMIND_AVAILABLE=true requires a non-empty absolute REPO_PATH"]);
     for (const n of ["plan", "ship"]) expectHas(`${WORKFLOWS}/build-task-${n}.workflow.js`, ["A.JEV_AVAILABLE === true", "mcp__jev-api__request"]);
     expectHas(`${SKILL}/SKILL.md`, ["JEV_AVAILABLE = true"]);
+  });
+});
+
+describe("removed review engine", () => {
+  test("changes-audit, both review workflows, review.md and the three review agents are not shipped", () => {
+    for (const p of [`${PLUGIN}/skills/changes-audit`, `${WORKFLOWS}/changes-review.workflow.js`, `${WORKFLOWS}/build-task-review.workflow.js`, `${BT_WF}/review.md`, `${AGENTS}/review-finder.md`, `${AGENTS}/review-verifier.md`, `${AGENTS}/fix-applier.md`]) {
+      expect(existsSync(abs(p)), p).toBe(false);
+    }
   });
 });
 
@@ -1031,15 +929,26 @@ describe("explore lens check documentation", () => {
     expectLacks(F, ["90%", "wc -c", "Recorded project knowledge", "No plugin agent dependency", "(and spec)"]);
   });
 
-  test("developer notes and the workflow rule describe the explore-scribe agent and the thirteen agentType roles", () => {
-    expectHas(DEV_NOTES, ["Ten of the plugin agents are build-task roles", "`explore-scribe`", "the other ten have one", "checks lens header/footer pairs instead of a byte count", "the lens header/footer lines come from the script", "(`SKILL.md` step 6)"]);
-    expectLacks(DEV_NOTES, ["in the explore, implement and review scripts", "(`SKILL.md` step 5)", "Eight of the plugin agents"]);
-    expectHas(WF_RULE, ["Thirteen roles are dispatched through a plugin `agentType`", "ten build-task roles", "`taskflow:explore-scribe` (`tools: Read, Write`)", "written as the lens `graphmind memory` (omitted when empty"]);
-    expectLacks(WF_RULE, ["MIN_WRITE_RATIO", "Recorded project knowledge", "memory recall, scribe, spec writer", "Eleven roles"]);
+  test("developer notes and the workflow rule describe the explore-scribe agent and the ten agentType roles", () => {
+    expectHas(DEV_NOTES, ["Ten of the plugin agents are build-task roles", "`explore-scribe`", "checks lens header/footer pairs instead of a byte count", "the lens header/footer lines come from the script", "(`SKILL.md` step 6)"]);
+    expectLacks(DEV_NOTES, ["in the explore, implement and review scripts", "(`SKILL.md` step 5)", "Eight of the plugin agents", "the other ten have one"]);
+    expectHas(WF_RULE, ["Ten roles are dispatched through a plugin `agentType`", "ten build-task roles", "`taskflow:explore-scribe` (`tools: Read, Write`)", "written as the lens `graphmind memory` (omitted when empty"]);
+    expectLacks(WF_RULE, ["MIN_WRITE_RATIO", "Recorded project knowledge", "memory recall, scribe, spec writer", "Eleven roles", "Thirteen roles"]);
   });
 
   test("the wiki gives the reasons for the lens check and for the spec after the intent confirmation", () => {
     expectHas(WIKI, ["`agent()` call has no tools option", "runs the spec once, as step 4, after the \"Yes\""]);
     expectLacks(WIKI, ["90%"]);
+  });
+});
+
+describe("review-task wiki page", () => {
+  const PAGE = "development/wiki/plugins/taskflow/design/review-task.md";
+
+  test("the wiki records why review-task replaced the review engine and its size → level table", () => {
+    expectHas(PAGE, ["# review-task", "`S` → `medium`, `M` → `high`, `L` → `xhigh`, `XL` → `max`", "never `max`", "`REVIEW_PATH`", "## Accepted losses"]);
+    expectHas("development/wiki/plugins/taskflow/index.md", ["(design/review-task.md)"]);
+    expectHas("development/wiki/plugins/index.md", ["dispatch-task and review-task"]);
+    expectLacks("development/wiki/plugins/taskflow/design/workflows.md", ["copies the review engine", "Lean (ponytail) review", "the 15 files"]);
   });
 });

@@ -266,3 +266,7 @@ Source: user decision 2026-11-20 (task spec), PR stacked on `feature/tsdown-plug
 - Haiku fallback measured with the same corpus (`size-calibration-haiku.ts`, `claude -p` stand-in): the shared choice question and threshold 0.5 hold (96% accepted, 79% exact, no undersizing); a choice-specific `HAIKU_SYSTEM` sentence gave no reliable gain and was not shipped. No jev-api change.
 
 - taskflow 2.4.0 ships the size step as the mod tool `size-task` (jev-api first, then a plain Opus call; a plain model with the descriptions measured 81% Haiku, 84% Sonnet, 85% Opus exact on the 80 tasks); live-verified both paths on 2.1.332.
+
+## [2026-11-27] ingest | taskflow 3.0.0: review-task replaces the review engine
+
+- New `plugins/taskflow/design/review-task.md`: why the `review-task` skill runs the bundled `simplify` and `code-review --fix` instead of taskflow's own review engine (deleted: the `changes-audit` skill, the `changes-review` and `build-task-review` workflows, `review.md`, three review agents), the size → level mapping and why XL reaches `max`, the accepted losses (spec escalation, lean pass, pick-list) and why build-task writes `REVIEW_PATH` itself. `plugins/taskflow/design/workflows.md` drops the engine-copy and lean-review reasons (12 shipped asset files now); `plugins/taskflow/index.md` and `plugins/index.md` follow. Source: approved spec, branch `feature/review-task-skill`.
