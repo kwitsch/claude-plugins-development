@@ -108,10 +108,14 @@ test("a carrier takes whole reports only: three FileChanged reports above one me
   const names = ["a.sh", "b.sh", "c.sh"];
   for (const n of names) await w.changed(w.e.file(n, SH4));
   await captured(w.e, 3);
-  assert.deepEqual(await w.poll(k, 25_000), { state: "ready" });
-  await sleep(300); // the three holds end in the same 250 ms poll tick of the quiet-time loop: wait for the other two
+  // the three holds end within a few 250 ms poll ticks of the quiet-time loop: take one report per carrier until all three came out
   const got: string[] = [];
-  while ((await w.poll(k, 0))["state"] === "ready" && got.length < 5) got.push(String(((await w.prompt())["hookSpecificOutput"] as Record<string, unknown>)["additionalContext"]));
+  const until = Date.now() + 10_000;
+  while (got.length < 3) {
+    assert.ok(Date.now() < until, `only ${got.length} of 3 reports arrived`);
+    if ((await w.poll(k, 0))["state"] === "ready") got.push(String(((await w.prompt())["hookSpecificOutput"] as Record<string, unknown>)["additionalContext"]));
+    else await sleep(50);
+  }
   assert.equal(got.length, 3, "one report per carrier");
   for (const n of names) assert.equal(got.filter((g) => g.includes(`found issues in ${n}:`)).length, 1, n);
   for (const g of got) {
