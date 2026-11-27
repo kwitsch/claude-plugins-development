@@ -940,3 +940,14 @@ describe("explore lens check documentation", () => {
     expectLacks(WIKI, ["90%"]);
   });
 });
+
+describe("review-task wiki page", () => {
+  const PAGE = "development/wiki/plugins/taskflow/design/review-task.md";
+
+  test("the wiki records why review-task replaced the review engine and its size → level table", () => {
+    expectHas(PAGE, ["# review-task", "`S` → `medium`, `M` → `high`, `L` → `xhigh`, `XL` → `max`", "never `max`", "`REVIEW_PATH`", "## Accepted losses"]);
+    expectHas("development/wiki/plugins/taskflow/index.md", ["(design/review-task.md)"]);
+    expectHas("development/wiki/plugins/index.md", ["dispatch-task and review-task"]);
+    expectLacks("development/wiki/plugins/taskflow/design/workflows.md", ["copies the review engine", "Lean (ponytail) review", "the 15 files"]);
+  });
+});
