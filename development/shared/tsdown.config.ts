@@ -10,7 +10,8 @@ export default defineConfig({
   platform: "node",
   target: "node26",
   fixedExtension: true, // .mjs / .d.mts, matching the exports map
-  // no typescript in the workspace: isolatedDeclarations selects the oxc declaration generator
+  // no typescript in the workspace. `dts: { oxc: true }` fails with tsdown 0.23.7: the root tsconfig lacks
+  // isolatedDeclarations, and with it in compilerOptions rolldown-plugin-dts crashes on oxc.stripInternal.
   dts: { compilerOptions: { isolatedDeclarations: true } },
   minify: false, // consumers minify when they inline
   clean: true,
