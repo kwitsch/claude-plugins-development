@@ -80,8 +80,8 @@ committed either way.
 ## Behavior notes
 
 - `pr-author` (`haiku` alias) Reads the implement and review result files plus
-  the spec and plan and writes a faithful title/body (repo template respected,
-  escalated findings listed as open items, lean-review findings report-only);
+  the spec and plan and writes a faithful title/body (repo template respected;
+  the review file carries size, level, review commits and summary);
   the body goes to `PR_BODY_PATH` with the Write tool (one retry).
 - `shipper` (`haiku`) pushes (NEVER force), creates-or-updates the PR/MR
   idempotently, then runs `bin/ship-ensure-mergeable.mjs` to ensure it is

@@ -52,6 +52,8 @@ reset, stash or check out anything: no work is ever discarded.
 
 ## 4. Diff check
 
+First `git rev-parse --verify --quiet "<BASE>^{commit}"` must succeed, else
+stop and report that `<BASE>` is not a valid ref. Then
 `git diff --quiet "<BASE>"...HEAD` exits 0 → report "no changes to review
 against `<BASE>`" (plus the step-3 commit, if one was made) and stop.
 
@@ -99,7 +101,7 @@ on; step 9 lists what stayed uncommitted.
 ## 9. Final check
 
 `git status --porcelain` must be empty. Otherwise `git add -A`, then
-`git commit -m "Apply code-review fixes"` once more. Still not empty → list
+`git commit -m "Apply leftover review changes"`. Still not empty → list
 the dirty paths in the report.
 
 ## 10. Report
