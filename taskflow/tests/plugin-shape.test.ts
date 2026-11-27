@@ -1,4 +1,4 @@
-// Structural checks of the built taskflow plugin: manifest, the three skills, the six workflow scripts, the eleven
+// Structural checks of the built taskflow plugin: manifest, the four skills, the six workflow scripts, the eleven
 // agents, the docs, plus the developer notes (taskflow/CLAUDE.md, taskflow/.claude/rules/) and .oxlintrc.json from
 // their source paths. Ported from the old bats suite; grep line matches become `m`-flag regexes over the whole text,
 // `[[:space:]]` becomes `[ \t]`. Shipped files are read from the built plugin/, so build before testing.
@@ -601,6 +601,22 @@ describe("review-task skill", () => {
     const lines = read(F).split("\n").filter((l) => l.includes("Co-Authored-By"));
     expect(lines.length).toBeGreaterThan(0);
     for (const l of lines) expect(l).toMatch(/\bno\b/i);
+  });
+});
+
+describe("decide skill", () => {
+  const F = `${PLUGIN}/skills/decide/SKILL.md`;
+
+  test("decide frontmatter: name, AskUserQuestion and Agent allowed, model-invocable, inline", () => {
+    expect(read(F)).toMatch(/^name:[ \t]*decide$/m);
+    for (const t of ["AskUserQuestion", "Agent"]) expect(read(F)).toMatch(new RegExp(`^allowed-tools:.*"${t}"`, "m"));
+    expect(read(F)).not.toMatch(/^disable-model-invocation:[ \t]*true/m);
+    expect(read(F)).not.toMatch(/^context:[ \t]*fork/m);
+  });
+
+  test("decide body: --headless, advisor first, taskflow:decider fallback, DECISIONS line, error texts, no exclamation-backtick", () => {
+    expectHas(F, ["--headless", "advisor()", "taskflow:decider", "DECISIONS:", "decide: invalid input:", "decide: no headless decision:", "Decided <id>: <answer> (<BY>: <reason>)", "Headless never falls back to `AskUserQuestion`"]);
+    expectLacks(F, ["!`"]);
   });
 });
 
