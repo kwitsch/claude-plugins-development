@@ -203,8 +203,8 @@ describe("manifest", () => {
     expect(manifest).not.toHaveProperty("userConfig");
   });
 
-  test("package.json and plugin.json versions agree and are 3.0.0", () => {
-    expect(pkg.version).toBe("3.0.0");
+  test("package.json and plugin.json versions agree and are 3.1.0", () => {
+    expect(pkg.version).toBe("3.1.0");
     expect(manifest.version).toBe(pkg.version);
   });
 
@@ -683,8 +683,8 @@ describe("ship merge-state remediation wiring", () => {
     expectLacks(`${PLUGIN}/README.md`, ["changes-review", "changes-audit", "build-task-review.workflow.js", "review-finder", "fix-applier", "ponytailReview"]);
   });
 
-  test("CLAUDE.md boundary rule covers review-task, its size → level table and the 10 agents", () => {
-    expectHas(DEV_NOTES, ["skills/review-task/", "10 static role prompts", "`S` → `medium`, `M` → `high`, `L` → `xhigh`, `XL` → `max`", "(../development/wiki/plugins/taskflow/design/review-task.md)"]);
+  test("CLAUDE.md boundary rule covers review-task, its size → level table and the 11 agents", () => {
+    expectHas(DEV_NOTES, ["skills/review-task/", "11 static role prompts", "`S` → `medium`, `M` → `high`, `L` → `xhigh`, `XL` → `max`", "(../development/wiki/plugins/taskflow/design/review-task.md)"]);
     expectLacks(DEV_NOTES, ["changes-review", "changes-audit", "build-task-review.workflow.js", "13 static role prompts", "fix-applier", "review-finder"]);
   });
 });
@@ -759,8 +759,27 @@ describe("ship merge-state documentation", () => {
     expect(read(`${PLUGIN}/README.md`).toLowerCase()).toContain("merge-state");
   });
 
-  test("CLAUDE.md documents ship-ensure-mergeable.mjs alongside the 10-agent roster", () => {
-    expectHas(DEV_NOTES, ["ship-ensure-mergeable.mjs", "10 static role prompts"]);
+  test("CLAUDE.md documents ship-ensure-mergeable.mjs alongside the 11-agent roster", () => {
+    expectHas(DEV_NOTES, ["ship-ensure-mergeable.mjs", "11 static role prompts"]);
+  });
+});
+
+describe("decide documentation", () => {
+  const PAGE = "development/wiki/plugins/taskflow/design/decide.md";
+
+  test("README documents the decide skill, --headless and the decider agent", () => {
+    expectHas(`${PLUGIN}/README.md`, ["| `decide`", "| `decider`", "decide/", "decider.md", "11 agents", "/taskflow:build-task --headless"]);
+  });
+
+  test("CLAUDE.md names skills/decide/, the decider agent and the wiki page; build-task no longer owns AskUserQuestion", () => {
+    expectHas(DEV_NOTES, ["skills/decide/", "(../development/wiki/plugins/taskflow/design/decide.md)", "`taskflow:decider`", "routes every decision through `decide`", "or the decide skill for `decider`"]);
+    expectLacks(DEV_NOTES, ["owns `AskUserQuestion` checkpoints", "Each has one caller, its build-task script."]);
+  });
+
+  test("the wiki records why decide exists, the headless order and the unverified points", () => {
+    expectHas(PAGE, ["# decide", "`DECISIONS: [{id, answer}]`", "## Headless: advisor first, then the decider agent", "## Not verified", "(docs)"]);
+    expectHas("development/wiki/plugins/taskflow/index.md", ["(design/decide.md)"]);
+    expectHas("development/wiki/log.md", ["taskflow 3.1.0: decide skill and --headless"]);
   });
 });
 
