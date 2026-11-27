@@ -1,11 +1,24 @@
 {
-  "name": "shared-code",
-  "private": true,
+  "name": "@kwitsch/claude-code-plugin-shared",
+  "version": "0.1.0",
+  "description": "Build-time shared code for kwitsch Claude Code plugins (path scope, dual-era MCP loop, graphmind paths); inlined by the consuming plugin's build.",
+  "repository": { "type": "git", "url": "git+https://github.com/kwitsch/claude-plugins-development.git", "directory": "development/shared" },
+  "license": "MIT",
+  "author": "Kwitsch",
   "type": "module",
+  "exports": {
+    "./*": { "types": "./dist/*.d.mts", "default": "./dist/*.mjs" }
+  },
+  "files": ["dist"],
   "scripts": {
+    "build": "tsdown",
     "test": "vitest run --config \"$(git rev-parse --show-toplevel)/vitest.config.mts\""
   },
-  "devDependencies": {
+  "dependencies": {
     "@modelcontextprotocol/server": "2.4.0"
-  }
+  },
+  "devDependencies": {
+    "tsdown": "0.23.7"
+  },
+  "publishConfig": { "registry": "https://npm.pkg.github.com" }
 }

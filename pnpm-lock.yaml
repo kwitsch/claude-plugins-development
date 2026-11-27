@@ -36,10 +36,14 @@ importers:
   development/scripts: {}
 
   development/shared:
-    devDependencies:
+    dependencies:
       '@modelcontextprotocol/server':
         specifier: 2.4.0
         version: 2.4.0
+    devDependencies:
+      tsdown:
+        specifier: 0.23.7
+        version: 0.23.7
 
   development/vitest/claude-engine:
     dependencies:
