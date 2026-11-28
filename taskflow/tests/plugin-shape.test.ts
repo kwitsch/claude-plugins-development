@@ -1,4 +1,4 @@
-// Structural checks of the built taskflow plugin: manifest, the six skills, the five workflow scripts, the eleven
+// Structural checks of the built taskflow plugin: manifest, the seven skills, the five workflow scripts, the eleven
 // agents, the docs, plus the developer notes (taskflow/CLAUDE.md, taskflow/.claude/rules/) and .oxlintrc.json from
 // their source paths. Ported from the old bats suite; grep line matches become `m`-flag regexes over the whole text,
 // `[[:space:]]` becomes `[ \t]`. Shipped files are read from the built plugin/, so build before testing.
@@ -26,6 +26,10 @@ const PLAN_TASK = `${PLUGIN}/skills/plan-task`;
 const SPEC_REF = `${SPEC_TASK}/workflows/spec.md`;
 /** The plan script's usage doc, owned by plan-task. */
 const PLAN_REF = `${PLAN_TASK}/workflows/plan.md`;
+/** The design-task skill. */
+const DESIGN_TASK = `${PLUGIN}/skills/design-task`;
+/** The design script's usage doc, owned by design-task. */
+const DESIGN_REF = `${DESIGN_TASK}/workflows/design.md`;
 /** build-task's four usage docs. */
 const BT_WF = `${SKILL}/workflows`;
 /** The agent files. */
@@ -673,6 +677,27 @@ describe("spec-task and plan-task skills", () => {
       expectHas(s.ref, ["`USER_INPUT`", "`user_input_required`"]);
     });
   }
+});
+
+describe("design-task skill", () => {
+  const F = `${DESIGN_TASK}/SKILL.md`;
+
+  test("design-task SKILL.md: contract, workflow run, decide routing, designer-only dispatch, acceptance and RESULT line", () => {
+    expect(nonEmpty(F)).toBe(true);
+    expect(read(F)).toMatch(/^name: design-task$/m);
+    expect(read(F)).toMatch(/^argument-hint: "\[--headless\] <task prompt>"$/m);
+    for (const t of ["Read", "Bash", "Workflow", "ToolSearch", "Skill", "Agent"]) expect(read(F)).toMatch(new RegExp(`^allowed-tools:.*"${t}"`, "m"));
+    expectHas(F, ["taskflow:build-task-design", "args global is undefined", "Never use `scriptPath`", "Plugin root: ${CLAUDE_PLUGIN_ROOT}", "Skill(skill: \"taskflow:decide\", args: \"[--headless] <JSON>\")", "`DECISIONS:`", "context: whyItMatters", "Re-run explore", "Retry the design", "Run another design round", "subagent_type: \"taskflow:designer\"", "There is no StructuredOutput tool in this run", "<openQuestions", "DECISIONS_SO_FAR", "\"id\": \"intent\"", "\"Yes — proceed\", \"No — needs changes\"", "\"id\": \"changes\"", "headless design did not converge after 3 re-runs", "headless intent check rejected the design without corrections", "RESULT: {\"explorePath\"", "design-task: missing task prompt", "Size: <sizeLine>", "`Decided ...`", "workflows/design.md", "graphmind which", "select:mcp__graphmind__gm_search", "explore-<slug>.md", "draft-<slug>.md"]);
+    expectLacks(F, ["!`", "context: fork", "disable-model-invocation", "--size="]);
+    // AskUserQuestion appears only in the never-call sentence
+    for (const l of read(F).split("\n").filter((x) => x.includes("AskUserQuestion"))) expect(l).toMatch(/never call `AskUserQuestion` directly/);
+  });
+
+  test("design-task ships the design script's usage reference with the merged contract", () => {
+    expect(nonEmpty(DESIGN_REF)).toBe(true);
+    expectHas(DESIGN_REF, ["taskflow:build-task-design", "args global is undefined", "const args = { … }", "stage: 'args'", "`TASK`", "`EXPLORE_PATH`", "`DRAFT_PATH`", "`GRAPHMIND_AVAILABLE`", "`REPO_PATH`", "`explorePath`", "`subsystems`", "`blocked`", "`minorFindings`", "haiku", "fable", "with the Write tool", "`GRAPHMIND_AVAILABLE` only adds a hint to the designer and design-reviewer prompts", "`taskflow:explore-scribe`", "`## Lens: <name>`", "`_End of lens: <name>_`", "| `Scout`", "| `Explore`", "| `Scribe`", "`graphmind memory`", "mcp__taskflow__size-task", "never by re-running this script's Design stage"]);
+    expectLacks(DESIGN_REF, ["claude-opus-4-8", "design-to-spec", "`RESUME`", "`USER_INPUT`", "`user_input_required`", "heredoc", "90%", "wc -c", "that count plus one", "byte count is verified", "Recorded project knowledge"]);
+  });
 });
 
 describe("ship merge-state remediation wiring", () => {

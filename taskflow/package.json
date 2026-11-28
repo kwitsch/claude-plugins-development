@@ -24,6 +24,7 @@
       "skills/build-task/workflows/explore.md",
       "skills/build-task/workflows/implement.md",
       "skills/build-task/workflows/ship.md",
+      "skills/design-task/workflows/design.md",
       "skills/plan-task/workflows/plan.md",
       "skills/spec-task/workflows/spec.md",
       "workflows/build-task-design.workflow.js",
