@@ -351,11 +351,13 @@ describe("build-task scripts", () => {
   test("spec.workflow.js: spec-writer agent, inline reviewer, English, lean carry-forward, specReviewed", () => {
     const F = `${WORKFLOWS}/build-task-spec.workflow.js`;
     expect(nonEmpty(F)).toBe(true);
-    expectHas(F, ["export const meta = {", "name: \"build-task-spec\"", "function decodeArgs", "decodeArgs([\"DRAFT_PATH\", \"SPEC_PATH\"], {})", "specWriter: \"sonnet\"", "specReview: \"sonnet\"", "specReviewerPrompt = `${NO_NARRATION}", "function reviewSpec", "function writeSpec", "specReviewed: specCheck != null", "lean/YAGNI decisions forward", "English", "specPath: SPEC_PATH"]);
+    expectHas(F, ["export const meta = {", "name: \"build-task-spec\"", "function decodeArgs", "decodeArgs([\"DRAFT_PATH\", \"SPEC_PATH\"], { USER_INPUT: \"\" })", "specWriter: \"sonnet\"", "specReview: \"sonnet\"", "specReviewerPrompt = `${NO_NARRATION}", "function reviewSpec", "function writeSpec", "specReviewed: specCheck != null", "lean/YAGNI decisions forward", "English", "specPath: SPEC_PATH"]);
     expect(followedBy("specWriterPrompt = (revision) =>", "`${NO_NARRATION}", F)).toBe(true);
     expectHas(F, ["agentType: \"taskflow:spec-writer\""]);
     expect(countLines(F, "agentType")).toBe(1);
     expectLacks(F, ["difficulty", "AGENTS", "TASK", "EXPLORE_PATH"]);
+    expectHas(F, ["severity: { enum: [\"blocking\", \"minor\", \"conflict\"] }", "options: { type: \"array\", items: { type: \"string\" } }", "USER_INPUT", "status: \"user_input_required\"", "reason: \"conflict\"", "reason: \"rounds_exhausted\"", "Binding user decisions (JSON below) override the input document where they differ.", "writeSpec(USER_INPUT || null, \"spec-write\")", "Address exactly these findings and binding user decisions", "7. Conflicts"]);
+    expectLacks(F, ["still blocking after one"]);
     expectHas(`${AGENTS}/spec-writer.md`, ["tools: [\"Read\", \"Write\"]", "with the Write tool", "model: sonnet"]);
   });
 
