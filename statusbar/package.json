@@ -1,0 +1,26 @@
+{
+  "name": "statusbar",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Keeps the status line's folder, git branch, context use and 5-hour and 7-day quota current, refreshed every 10 seconds.",
+  "keywords": [
+    "statusline",
+    "ui",
+    "mod"
+  ],
+  "author": {
+    "name": "Kwitsch"
+  },
+  "type": "module",
+  "scripts": {
+    "build": "tsdown",
+    "test": "vitest run --config \"$(git rev-parse --show-toplevel)/vitest.config.mts\"",
+    "test:plugin": "node ../development/scripts/plugin-test.ts"
+  },
+  "devDependencies": {
+    "@kwitsch/tsdown-preset-claude-code": "0.4.2",
+    "claude-engine-vitest": "workspace:*",
+    "tsdown": "0.23.7"
+  },
+  "claudePlugin": {}
+}
