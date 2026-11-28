@@ -47,16 +47,18 @@ Every stop below ends with one last line starting `spec-task: ` and no
 `$ARGUMENTS` may hold `--headless`, one `--size=<v>` token and the input path,
 in any order. Strip `--headless` first (sets `HEADLESS`), then the
 `--size=<v>` token. `<v>` uppercased must be `S`, `M`, `L` or `XL`; anything
-else → stop with exactly `Invalid --size "<v>": use S, M, L or XL.` and do
-nothing else. Set `SIZE` to the uppercased value, or leave it unset when the
-token is absent.
+else → stop with the last line `spec-task: Invalid --size "<v>": use S, M, L or XL.`
+and do nothing else. Set `SIZE` to the uppercased value, or leave it unset
+when the token is absent.
 
 The remainder, trimmed, is `INPUT_PATH`:
 
 - empty → last line `spec-task: missing input file path`, stop;
 - not starting with `/` → `spec-task: input path must be absolute: <INPUT_PATH>`, stop;
-- Read `INPUT_PATH`; the read fails or the file is empty →
-  `spec-task: cannot read input file <INPUT_PATH>`, stop.
+- Read the first 200 lines of `INPUT_PATH` (`limit: 200`: enough for the
+  existence check and the `Keypoints` and `Goal` sections; never the whole
+  file, the pipeline files stay out of this conversation); the read fails or
+  returns nothing → `spec-task: cannot read input file <INPUT_PATH>`, stop.
 
 ## 2. Output path
 
@@ -102,7 +104,10 @@ first call.
 4. Consume only the structured return.
 
 State held in this running skill: `DECISIONS_SO_FAR`, a list of
-`{id, answer}` starting empty, and `RESUMES` = 0. A **resume** re-runs item 2
+`{id, question, answer}` starting empty (`question` is the question text as
+asked, so a later resume still shows what a short answer such as "Stop" or
+"Resolve it with the smallest change to the input's intent" decided), and
+`RESUMES` = 0. A **resume** re-runs item 2
 with the same paths and `USER_INPUT` = the JSON string
 `{"decisions": DECISIONS_SO_FAR, "findings": <findings of the return that triggered this resume, [] for intent corrections>}`,
 and adds 1 to `RESUMES`. Send every decision so far each time. The script is
@@ -128,16 +133,20 @@ Branch on `status`:
   most 4 questions per decide call; more conflicts → further decide calls
   before the resume. Any answer `Stop` →
   `spec-task: stopped by decision on a conflict: <OUTPUT_PATH>`, stop.
-  Otherwise append every `{id, answer}` to `DECISIONS_SO_FAR` and resume.
+  Otherwise append every `{id, question, answer}` to `DECISIONS_SO_FAR` and
+  resume.
 - `user_input_required` with `reason: "rounds_exhausted"` → one decide call
   with `content` = the blocking findings as `<severity>: <description>` and
   the question
   `{"id": "rounds-<n>", "question": "Blocking findings remain after the correction round. How should the spec continue?", "options": ["Run another correction round", "Accept the spec as is", "Stop"]}`.
   - `Run another correction round` or a free-text answer → append
-    `{id, answer}` to `DECISIONS_SO_FAR`, resume.
+    `{id, question, answer}` to `DECISIONS_SO_FAR`, resume.
   - `Accept the spec as is` → continue as if `complete`, with
     `REVIEWED` = `true` and the remaining blocking findings added to the
-    reported findings; go to step 5.
+    reported findings; go to step 5. Append `{id, question, answer}` to
+    `DECISIONS_SO_FAR` with the accepted findings' descriptions added to
+    `answer`, so that a later resume (step 5 corrections) does not re-raise
+    them.
   - `Stop` → `spec-task: stopped by decision after the correction round: <OUTPUT_PATH>`, stop.
 - `complete` → `REVIEWED` = its `specReviewed`, keep its `minorFindings`, go
   to step 5.
@@ -146,14 +155,15 @@ Branch on `status`:
 
 `SIZE` `S` or `M` → step 6. Otherwise:
 
-1. Read `OUTPUT_PATH`.
+1. Read the first 200 lines of `OUTPUT_PATH` (`limit: 200`; `Keypoints` is the
+   spec's first section).
 2. One decide call with `content` = the spec's `Keypoints` bullets, one item
    per bullet, verbatim, and the one question
    `{"id": "intent", "question": "Does this spec match the approved design? Proceed? Picking No requires describing the change.", "options": ["Yes — proceed", "No — needs changes"]}`.
 3. By answer:
    - `Yes — proceed` → step 6.
    - Any answer other than the two options is the corrections → append
-     `{"id": "intent-<n>", "answer": <the corrections>}` to
+     `{"id": "intent-<n>", "question": <the intent question>, "answer": <the corrections>}` to
      `DECISIONS_SO_FAR`, resume the script (step 4, resume cap included) with
      `"findings": []`, handle its return as in step 4, then repeat this step
      from the new spec.

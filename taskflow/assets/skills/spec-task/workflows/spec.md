@@ -23,11 +23,11 @@ agents.
 
 ## Parameters (`args` object)
 
-| Key          | Type   | Required | Meaning                                                                                                                                                                                                                                                                |
-| :----------- | :----- | :------- | :--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `DRAFT_PATH` | string | yes      | Absolute path of the decision-complete draft (the design script's `complete` `draftPath`)                                                                                                                                                                              |
-| `SPEC_PATH`  | string | yes      | Absolute target path of the spec (input of the plan script)                                                                                                                                                                                                            |
-| `USER_INPUT` | string | no       | `''` (default). Non-empty = resume: the JSON string `{"decisions": [{id, answer}], "findings": [...]}` with every decision so far. The writer rewrites `SPEC_PATH` in place following it; the reviewer treats it as binding and never re-flags a point that follows it |
+| Key          | Type   | Required | Meaning                                                                                                                                                                                                                                                                          |
+| :----------- | :----- | :------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `DRAFT_PATH` | string | yes      | Absolute path of the decision-complete draft (the design script's `complete` `draftPath`)                                                                                                                                                                                        |
+| `SPEC_PATH`  | string | yes      | Absolute target path of the spec (input of the plan script)                                                                                                                                                                                                                      |
+| `USER_INPUT` | string | no       | `''` (default). Non-empty = resume: the JSON string `{"decisions": [{id, question, answer}], "findings": [...]}` with every decision so far. The writer rewrites `SPEC_PATH` in place following it; the reviewer treats it as binding and never re-flags a point that follows it |
 
 Guards: missing required keys return `status: 'error', stage: 'args'` before
 any agent is dispatched.

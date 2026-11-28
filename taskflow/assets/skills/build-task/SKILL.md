@@ -4,7 +4,8 @@ description: >-
   End-to-end pipeline for a described task: design (explore, draft, review,
   spec) and delivery (plan, wave-parallel implementation, review (simplify +
   code-review), ship), all executed by prebuilt Workflow scripts shipped with this skill. Human
-  checkpoints: open design questions and the intent confirmation, via the
+  checkpoints: open design questions, the intent confirmation and, in the spec
+  and plan steps, conflicts and unresolved blocking findings, via the
   decide skill (AskUserQuestion, or with --headless the advisor or a decider agent).
 argument-hint: "[--skip-branch-check] [--headless] [task-description]"
 arguments: task_description
@@ -73,7 +74,7 @@ a redundant check. `--headless` makes every decision without the user
 (decide with `--headless`: the advisor or the `taskflow:decider` agent
 answers) and the run never waits for input; where an interactive run would
 ask again, a headless run stops with a report (step 3, and the resume cap in
-step 2.4).
+step 2.4; spec-task and plan-task have the same rules for their own steps).
 
 ## Plugin context
 
@@ -217,8 +218,8 @@ Every pipeline file is session-only, never a repository file:
    `git branch --show-current` and `REPO_PATH` =
    `git rev-parse --show-toplevel` (absolute repo root) — also on the
    `--skip-branch-check` path (`dispatch-task` always passes it): the explore
-   script and the plan script (steps 2 and 5) fail loud with
-   `stage:'args'` on an empty `REPO_PATH` whenever graphmind is available.
+   script (step 2) fails loud with `stage:'args'` on an empty `REPO_PATH`
+   whenever graphmind is available.
 2. **Design.** Four sub-steps; paths come from the temp directory above.
    1. **Graphmind probe.** Probe once whether graphmind is usable for this
       checkout: (a) `ToolSearch(query: "select:mcp__graphmind__gm_search")` —
@@ -311,8 +312,9 @@ Every pipeline file is session-only, never a repository file:
       with the step-2.3 `SIZE`, with `--headless` prepended to `args` when
       this run got `--headless`, and follow it to its last line.
       `RESULT: {…}` → `PLAN_PATH` = its `path`; keep its `model` as
-      `plannerModel`. A last line starting `plan-task:`, or no `RESULT:`
-      line → surface that last line, then stop.
+      `plannerModel` and its `findings` (accepted blocking findings, usually
+      empty) as the plan findings. A last line starting `plan-task:`, or no
+      `RESULT:` line → surface that last line, then stop.
    2. **Implement.** Run the implement script with args
       `{PLAN_PATH, IMPLEMENT_PATH, BRANCH_NAME, SCRATCH_DIR, GRAPHMIND_AVAILABLE, REPO_PATH}`
       (`SCRATCH_DIR` is the session-temp directory from "Session temp files"
@@ -365,7 +367,9 @@ Every pipeline file is session-only, never a repository file:
    implement return), the `Review level:` line, the review commits and the
    review summary (step 5.3), the collected minor findings (the implement
    return's `minorFindings`, design — from the last design return — and
-   spec — the `findings` of spec-task's `RESULT` line), and the `ship` outcome from the ship
+   spec — the `findings` of spec-task's `RESULT` line), the plan findings
+   (the `findings` of plan-task's `RESULT` line: blocking findings the user
+   accepted), and the `ship` outcome from the ship
    return (PR/MR url, CI status; on `ci_failed`/`blocked` state plainly what
    the human must pick up) — or "PR/MR skipped at the user's request".
    With `--headless`, the report also lists every `Decided ...` line that

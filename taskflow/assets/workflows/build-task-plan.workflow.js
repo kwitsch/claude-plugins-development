@@ -25,7 +25,7 @@
 //   REPO_PATH — optional; absolute checkout root, passed as graphmind's project.
 //   JEV_AVAILABLE — optional; true ⇒ the planner gets the jev-api complexity hint.
 //   USER_INPUT — optional, default ''; non-empty means resume: the JSON string
-//               {"decisions": [{id, answer}], "findings": [...]} with every
+//               {"decisions": [{id, question, answer}], "findings": [...]} with every
 //               decision so far, binding for planner and plan checker.
 //
 // Invocation contract:
@@ -173,7 +173,7 @@ call errors or returns nothing.
   }${
     revision
       ? `
-This is a REVISION. Apply exactly these findings and binding user decisions, then rewrite ${PLAN_PATH} in place:
+This is a REVISION. Apply exactly these findings and binding user decisions, then rewrite ${PLAN_PATH} in place (a binding user decision overrides the spec and your role's rule not to re-open design decisions wherever they differ):
 ${revision}
 `
       : ""

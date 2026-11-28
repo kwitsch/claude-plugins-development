@@ -13,7 +13,7 @@
 //   DRAFT_PATH — absolute path of the approved, decision-complete draft
 //   SPEC_PATH  — absolute target path of the spec (create/overwrite)
 //   USER_INPUT — optional, default ''; non-empty means resume: the JSON string
-//                {"decisions": [{id, answer}], "findings": [...]} with every
+//                {"decisions": [{id, question, answer}], "findings": [...]} with every
 //                decision so far, binding for writer and reviewer
 //
 // Exit contract:
@@ -138,7 +138,7 @@ English regardless of the draft's language (translate faithfully if needed)
   (checkable, exact commands); Risks; '## Global Constraints' (verbatim from
   the draft — one line each, exact values); '## Decisions & assumptions'.
 - NO Open-questions section — a spec with open questions is invalid.
-${revision ? "\nThis is a FIX round. Address exactly these findings and binding user decisions, then rewrite " + SPEC_PATH + " in place:\n" + revision + "\n" : ""}
+${revision ? "\nThis is a FIX round. Address exactly these findings and binding user decisions, then rewrite " + SPEC_PATH + " in place (a binding user decision overrides the draft and the carry-over rules above wherever they differ):\n" + revision + "\n" : ""}
 Return structured output: status (+ detail when blocked).`;
 
 const specReviewerPrompt = `${NO_NARRATION}

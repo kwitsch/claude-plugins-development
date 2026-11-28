@@ -19,7 +19,10 @@ Why build-task runs its spec step and its plan step through the internal `spec-t
 
 ## Every decision is re-sent on every resume
 
-- The scripts are stateless. A resume passes `USER_INPUT` = `{"decisions": [every {id, answer} so far], "findings": [the triggering findings]}` to both the writer/planner and the reviewer/checker. Without all earlier decisions the reviewer would flag a decided deviation again, and the writer could undo it. The fix or revision round of a resumed run carries the decisions as well.
+- The scripts are stateless. A resume passes `USER_INPUT` = `{"decisions": [every {id, question, answer} so far], "findings": [the triggering findings]}` to both the writer/planner and the reviewer/checker. Without all earlier decisions the reviewer would flag a decided deviation again, and the writer could undo it. The fix or revision round of a resumed run carries the decisions as well.
+- Each decision carries its question text: `findings` holds only the findings of the latest triggering return, so a later resume would otherwise show a bare answer such as "Stop" or "Resolve it with the smallest change to the input's intent" with nothing to say what it resolved. An accepted `rounds_exhausted` outcome is recorded as a decision too (answer plus the accepted findings), or an L/XL acceptance correction after it would make the reviewer raise them again.
+- The writer and planner prompts of a resumed run say that a binding decision overrides the input and their own carry-over rules (`spec-writer`: carry over every draft decision, `USER DECISION` immutable; `planner`: never re-open design decisions, constraints verbatim). A resolved conflict deviates from the input by definition, and the reviewer and checker already treat decisions as overriding.
+- The skills never Read a whole pipeline file: they Read the first 200 lines of the input (existence check, `Keypoints` and `Goal` for sizing and acceptance) and grep the plan's `### Task` headings. The plan holds full code for every task and the Read tool stops at 2000 lines, so a full Read would also cut the acceptance list short.
 - `USER_INPUT` grows with every resume. Interactive runs are unbounded by design. Headless runs are capped (below).
 
 ## Output path

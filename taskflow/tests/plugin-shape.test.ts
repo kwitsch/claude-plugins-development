@@ -286,7 +286,7 @@ describe("build-task skill", () => {
   });
 
   test("build-task SKILL.md runs the spec as step 4, after the intent confirmation; Deliver is step 5, the report step 6", () => {
-    expectHas(F, ["(Design → Intent confirmation → Spec →", "3. **Intent confirmation.**", "4. **Spec.** Runs once, after the \"Yes\" of step 3.", "5. **Deliver.**", "6. **Report.**", "checkpoint on the design; the spec (step 4) is written from the approved", "as `PLUGIN_ROOT` (step 5.4)", "create-or-update, step 5)", "(steps 2 and 5)", "design and step 5 calls", "step 6 then reports", "(step 6): the spec shipped without"]);
+    expectHas(F, ["(Design → Intent confirmation → Spec →", "3. **Intent confirmation.**", "4. **Spec.** Runs once, after the \"Yes\" of step 3.", "5. **Deliver.**", "6. **Report.**", "checkpoint on the design; the spec (step 4) is written from the approved", "as `PLUGIN_ROOT` (step 5.4)", "create-or-update, step 5)", "script (step 2) fails loud", "design and step 5 calls", "step 6 then reports", "(step 6): the spec shipped without"]);
     expectLacks(F, ["step 2.5", "5. **Spec.**", "4. **Deliver.**", "5. **Escalations & report.**", "(step 4.4)", "does the spec count as", "6. **Escalations & report.**"]);
     expectHas(F, ["Skill(skill: \"taskflow:spec-task\", args: \"--size=<SIZE> <DRAFT_PATH>\")", "A last line starting `spec-task:`", "[spec-task](../spec-task/SKILL.md)", "[plan-task](../plan-task/SKILL.md)"]);
     expectLacks(F, ["{DRAFT_PATH, SPEC_PATH}", "workflows/spec.md", "workflows/plan.md"]);
@@ -656,8 +656,8 @@ describe("decide skill", () => {
 
 describe("spec-task and plan-task skills", () => {
   const SKILLS = [
-    { name: "spec-task", dir: SPEC_TASK, ref: SPEC_REF, script: "taskflow:build-task-spec", extra: ["\"reviewed\": ", "\"id\": \"intent\"", "Does this spec match the approved design?", "draft-"] },
-    { name: "plan-task", dir: PLAN_TASK, ref: PLAN_REF, script: "taskflow:build-task-plan", extra: ["\"model\": ", "graphmind which", "select:mcp__graphmind__gm_search", "select:mcp__jev-api__request", "git rev-parse --show-toplevel", "Does this plan implement the approved spec?", "spec-"] },
+    { name: "spec-task", input: "draft", dir: SPEC_TASK, ref: SPEC_REF, script: "taskflow:build-task-spec", extra: ["\"reviewed\": ", "\"id\": \"intent\"", "Does this spec match the approved design?", "draft-"] },
+    { name: "plan-task", input: "spec", dir: PLAN_TASK, ref: PLAN_REF, script: "taskflow:build-task-plan", extra: ["\"model\": ", "graphmind which", "select:mcp__graphmind__gm_search", "select:mcp__jev-api__request", "git rev-parse --show-toplevel", "Does this plan implement the approved spec?", "spec-"] },
   ];
   for (const s of SKILLS) {
     const F = `${s.dir}/SKILL.md`;
@@ -665,9 +665,9 @@ describe("spec-task and plan-task skills", () => {
     test(`${s.name} SKILL.md: contract, sizing, decide routing, resume cap, acceptance and RESULT line`, () => {
       expect(nonEmpty(F)).toBe(true);
       expect(read(F)).toMatch(new RegExp(`^name: ${s.name}$`, "m"));
-      expect(read(F)).toMatch(/^argument-hint: "\[--headless\] \[--size=S\|M\|L\|XL\] <(draft|spec) path>"$/m);
+      expect(read(F)).toMatch(new RegExp(`^argument-hint: "\\[--headless\\] \\[--size=S\\|M\\|L\\|XL\\] <${s.input} path>"$`, "m"));
       for (const t of ["Read", "Workflow", "ToolSearch", "Skill", "mcp__taskflow__size-task"]) expect(read(F)).toMatch(new RegExp(`^allowed-tools:.*"${t}"`, "m"));
-      expectHas(F, [`name: ${s.name}`, "[--headless] [--size=S|M|L|XL]", "Invalid --size \"<v>\": use S, M, L or XL.", "taskflow:decide", "Skill(skill: \"taskflow:decide\", args: \"[--headless] <JSON>\")", "`DECISIONS:`", "select:mcp__taskflow__size-task", "Size: <SIZE> (from --size)", "own reasoning", "user_input_required", "conflict", "rounds_exhausted", "Run another correction round", "Accept the", "\"Stop\"", "\"Yes — proceed\", \"No — needs changes\"", "did not converge after 3 resumes", "rejected the", "RESULT: {\"path\": ", s.script, "args global is undefined", "Never use `scriptPath`", "Plugin root: ${CLAUDE_PLUGIN_ROOT}", "DECISIONS_SO_FAR", "`Decided ...`", `${s.name}: `, "workflows/"]);
+      expectHas(F, [`name: ${s.name}`, "[--headless] [--size=S|M|L|XL]", "Invalid --size \"<v>\": use S, M, L or XL.", "taskflow:decide", "Skill(skill: \"taskflow:decide\", args: \"[--headless] <JSON>\")", "`DECISIONS:`", "select:mcp__taskflow__size-task", "Size: <SIZE> (from --size)", "own reasoning", "user_input_required", "conflict", "rounds_exhausted", "Run another correction round", "Accept the", "`{id, question, answer}`", "the pipeline files stay out of this conversation", "\"Stop\"", "\"Yes — proceed\", \"No — needs changes\"", "did not converge after 3 resumes", "rejected the", "RESULT: {\"path\": ", s.script, "args global is undefined", "Never use `scriptPath`", "Plugin root: ${CLAUDE_PLUGIN_ROOT}", "DECISIONS_SO_FAR", "`Decided ...`", `${s.name}: `, "workflows/"]);
       expectHas(F, s.extra);
       expectLacks(F, ["!`", "context: fork", "disable-model-invocation"]);
       // AskUserQuestion appears only in the never-call sentence
@@ -954,7 +954,7 @@ describe("build-task delivery scripts", () => {
 
   test("build-task SKILL.md step 5 runs plan, implement and ship with the documented args, review-task as Review, and one error rule", () => {
     const F = `${SKILL}/SKILL.md`;
-    expectHas(F, ["Skill(skill: \"taskflow:plan-task\", args: \"--size=<SIZE> <SPEC_PATH>\")", "A last line starting `plan-task:`", "{PLAN_PATH, IMPLEMENT_PATH, BRANCH_NAME, SCRATCH_DIR, GRAPHMIND_AVAILABLE, REPO_PATH}", "Skill(skill: \"taskflow:review-task\", args: \"--size=<SIZE> <BASE_BRANCH>\")", "{\"size\": \"<SIZE>\", \"level\": \"<level>\", \"commits\": [", "{SPEC_PATH, PLAN_PATH, IMPLEMENT_PATH, REVIEW_PATH, PR_BODY_PATH, BRANCH_NAME, BASE_BRANCH, PLUGIN_ROOT, GRAPHMIND_AVAILABLE, REPO_PATH, JEV_AVAILABLE}", "PR/MR skipped at the user", "`SIZE` picks the designer model, the planner model and the review level.", "plannerModel", "never retry the merge", "half-implemented plan", "The one error rule for the script sub-steps"]);
+    expectHas(F, ["Skill(skill: \"taskflow:plan-task\", args: \"--size=<SIZE> <SPEC_PATH>\")", "A last line starting `plan-task:`", "the plan findings", "`findings` of plan-task's `RESULT` line", "{PLAN_PATH, IMPLEMENT_PATH, BRANCH_NAME, SCRATCH_DIR, GRAPHMIND_AVAILABLE, REPO_PATH}", "Skill(skill: \"taskflow:review-task\", args: \"--size=<SIZE> <BASE_BRANCH>\")", "{\"size\": \"<SIZE>\", \"level\": \"<level>\", \"commits\": [", "{SPEC_PATH, PLAN_PATH, IMPLEMENT_PATH, REVIEW_PATH, PR_BODY_PATH, BRANCH_NAME, BASE_BRANCH, PLUGIN_ROOT, GRAPHMIND_AVAILABLE, REPO_PATH, JEV_AVAILABLE}", "PR/MR skipped at the user", "`SIZE` picks the designer model, the planner model and the review level.", "plannerModel", "never retry the merge", "half-implemented plan", "The one error rule for the script sub-steps"]);
     expectLacks(F, ["CLAUDE_PLUGIN_ROOT}/workflows", "Review error", "`S` or `M` → `high`", "taskflow:review-finder", "taskflow:review-verifier", "taskflow:fix-applier", "LEVEL, GRAPHMIND_AVAILABLE", "{SPEC_PATH, PLAN_PATH, SIZE, GRAPHMIND_AVAILABLE, REPO_PATH, JEV_AVAILABLE}"]);
     expect(countLines(F, "taskflow:spec-task") + countLines(F, "taskflow:plan-task")).toBeGreaterThanOrEqual(2);
   });
