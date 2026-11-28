@@ -75,6 +75,7 @@ function world(on: On, state: State) {
   on("session.start", () => ({ cwd: "/proj" }));
   on("turn.complete", () => ({ text: "" }));
   on("session.measure", () => ({}));
+  on("session.end", () => ({}));
   return { clock, seen, counts };
 }
 
@@ -175,4 +176,39 @@ test("context falls back to tokens / window when percent is missing", async ($, 
   await $.ui.mount(SITE);
   await w.clock.settle();
   expect(w.seen.at(-1)).toBe(`\u{1F4C2} proj | ⎇ main | ${G}\u{1F5C3}️ 25%${X} | ${Y}\u{1F554} 85%${X}`);
+});
+
+test("an explicit context percent of 0 is kept, not replaced by tokens / window", async ($, on) => {
+  const w = world(on, { context: { percent: 0, tokens: 50_000, window: 200_000 }, five: 85 });
+  await $.session.start(START);
+  await $.ui.mount(SITE);
+  await w.clock.settle();
+  expect(w.seen.at(-1)).toBe(`\u{1F4C2} proj | ⎇ main | ${G}\u{1F5C3}️ 0%${X} | ${Y}\u{1F554} 85%${X}`);
+});
+
+test("session.end stops the timer and drops the line", async ($, on) => {
+  const w = world(on, { context: { percent: 42 }, five: 85 });
+  await $.session.start(START);
+  await $.session.end({ reason: "clear", sessionId: "s", resume: { id: "s" } });
+  await w.clock.settle();
+  const before = w.counts.usage;
+  await w.clock.advance(10_000);
+  expect(w.counts.usage).toBe(before);
+  await $.ui.mount(SITE);
+  await w.clock.settle();
+  expect(w.seen.at(-1)).toBe("cmd");
+});
+
+test("a refresh that began before session.end commits nothing", async ($, on) => {
+  let release!: () => void;
+  const hold = new Promise<void>((resolve) => (release = resolve));
+  const w = world(on, { context: { percent: 42 }, five: 85, hold });
+  const started = $.session.start(START);
+  await w.clock.settle();
+  await $.session.end({ reason: "clear", sessionId: "s", resume: { id: "s" } });
+  release();
+  await started;
+  await $.ui.mount(SITE);
+  await w.clock.settle();
+  expect(w.seen.at(-1)).toBe("cmd");
 });

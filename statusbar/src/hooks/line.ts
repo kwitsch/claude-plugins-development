@@ -82,24 +82,27 @@ function finite(v: number | undefined): number | undefined {
   return v !== undefined && Number.isFinite(v) ? v : undefined;
 }
 
+/** A Windows path (drive letter or UNC): only there is `\` a separator; on POSIX it is an ordinary name character. */
+const WINDOWS = /^(?:[A-Za-z]:|\\\\)/;
+
 /**
- * Strips trailing `/` and `\` separators.
+ * Strips trailing separators (`/`, and `\` in a Windows path).
  *
  * @param path - A path.
  * @returns The path without trailing separators (`""` for a root).
  */
 function stripSep(path: string): string {
-  return path.replace(/[/\\]+$/, "");
+  return path.replace(WINDOWS.test(path) ? /[/\\]+$/ : /\/+$/, "");
 }
 
 /**
- * The index of the last `/` or `\`.
+ * The index of the last separator (`/`, and `\` in a Windows path).
  *
  * @param path - A path.
  * @returns The index, or -1.
  */
 function lastSep(path: string): number {
-  return Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\"));
+  return WINDOWS.test(path) ? Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\")) : path.lastIndexOf("/");
 }
 
 /**

@@ -66,6 +66,8 @@ type Hook<E, R> = ($: Engine, e: E, next: Next<E, R>) => Promise<R>;
 type On = {
   /** Arms the timer and draws the first line. */
   (event: "session.start", hook: Hook<unknown, unknown>): void;
+  /** Stops the timer and drops the line (`/clear`, `/resume`, exit). */
+  (event: "session.end", hook: Hook<unknown, unknown>): void;
   /** Redraws after every completed turn (main or subagent). */
   (event: "turn.complete", hook: Hook<unknown, unknown>): void;
   /** Redraws whenever the engine measures the session. */
@@ -80,6 +82,17 @@ let shown: string | undefined;
 let timer: { cancel(): void } | undefined;
 /** A refresh is running; an overlapping trigger returns at once (`$.clock.every` does not wait for its callback). */
 let busy = false;
+/** Counts session resets; a refresh that began before a reset commits nothing. */
+let generation = 0;
+
+/** Forgets the session's state at `session.start` and `session.end`: stops the timer, drops the line and any running refresh. */
+function reset(): void {
+  generation++;
+  timer?.cancel();
+  timer = undefined;
+  shown = undefined;
+  busy = false;
+}
 
 /**
  * Recomputes the line from the cwd, the git HEAD and the usage, and redraws the StatusLine site when it changed.
@@ -90,21 +103,22 @@ let busy = false;
 async function refresh($: Engine): Promise<void> {
   if (busy) return;
   busy = true;
+  const gen = generation;
   try {
     const [cwd, u] = await Promise.all([$.session.cwd(), $.session.usage()]);
     const git = await gitBranch(cwd, { exists: (path) => $.fs.exists(path), read: (path) => $.fs.read(path) });
     const c = u.context;
-    const context = c.percent || (c.window ? ((c.tokens ?? 0) / c.window) * 100 : undefined);
+    const context = c.percent ?? (c.window ? ((c.tokens ?? 0) / c.window) * 100 : undefined);
     const used = (kind: string): number | undefined => u.rateLimits?.find((r) => r.kind === kind)?.percentUsed;
     const line = statusLine({ cwd, isGit: git.isGit, branch: git.branch, context, fiveHour: used("five_hour"), sevenDay: used("seven_day") });
-    if (line !== shown) {
+    if (gen === generation && line !== shown) {
       shown = line;
       $.ui.invalidate("ui.render");
     }
   } catch {
     // keep the last line; the next trigger retries
   } finally {
-    busy = false;
+    if (gen === generation) busy = false;
   }
 }
 
@@ -131,13 +145,18 @@ const redraw: Hook<unknown, unknown> = async ($, e, next) => {
 export const register = (on: On): void => {
   on("session.start", async function sessionStart($, e, next) {
     const r = await next(e);
+    reset();
     try {
-      timer?.cancel();
       timer = $.clock.every(10_000, () => void refresh($));
     } catch {
       // the hook never throws after next; the next trigger redraws
     }
     await refresh($);
+    return r;
+  });
+  on("session.end", async function sessionEnd(_$, e, next) {
+    const r = await next(e);
+    reset();
     return r;
   });
   on("turn.complete", redraw);

@@ -85,6 +85,8 @@ const folderRows: [string, LineInput, string][] = [
   ["folder with a space", { ...BASE, cwd: "/work/my proj" }, `${DIR} my proj | ${BR} main | ${CTX} 0% | ${H5} 0%`],
   ["cwd /", { ...BASE, cwd: "/" }, `${DIR} / | ${BR} main | ${CTX} 0% | ${H5} 0%`],
   ["cwd /a/b/", { ...BASE, cwd: "/a/b/" }, `${DIR} b | ${BR} main | ${CTX} 0% | ${H5} 0%`],
+  ["POSIX folder with a literal backslash", { ...BASE, cwd: "/work/my\\proj" }, `${DIR} my\\proj | ${BR} main | ${CTX} 0% | ${H5} 0%`],
+  ["Windows path", { ...BASE, cwd: "C:\\work\\proj\\" }, `${DIR} proj | ${BR} main | ${CTX} 0% | ${H5} 0%`],
   [
     "all segments",
     { ...BASE, context: 42, fiveHour: 85, sevenDay: 95 },
@@ -133,6 +135,7 @@ const gitRows: [string, string, [string, string][], string | undefined, { isGit:
   ["HEAD read rejects", "/r", [["/r/.git/HEAD", "ref: refs/heads/main\n"]], "/r/.git/HEAD", { isGit: true, branch: "" }],
   ["garbage HEAD", "/r", [["/r/.git/HEAD", "garbage\n"]], undefined, { isGit: true, branch: "" }],
   ["ref outside refs/heads", "/r", [["/r/.git/HEAD", "ref: refs/remotes/origin/main\n"]], undefined, { isGit: true, branch: "" }],
+  ["POSIX backslash is no separator", "/w/a\\b", [["/w/a/.git/HEAD", "ref: refs/heads/main\n"]], undefined, { isGit: false, branch: "" }],
   [".git at the root", "/a", [["/.git/HEAD", "ref: refs/heads/root\n"]], undefined, { isGit: true, branch: "root" }],
 ];
 for (const [label, cwd, files, failRead, expected] of gitRows) {
