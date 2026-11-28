@@ -274,3 +274,7 @@ Source: user decision 2026-11-20 (task spec), PR stacked on `feature/tsdown-plug
 ## [2026-11-28] ingest | taskflow 3.1.0: decide skill and --headless
 
 - New `plugins/taskflow/design/decide.md`: why every build-task and review-task decision goes through the `decide` skill, why headless asks the advisor tool first and the `decider` agent (opus) second, why there is no `AskUserQuestion` fallback in headless, the bare-"No" stop and the 3-resume cap, and what is not verified live (advisor detection, `effort` honoured). `plugins/taskflow/index.md` lists it. Source: approved spec, branch `feature/decide-skill-headless`.
+
+## [2026-11-28] ingest | statusbar: StatusLine site, live usage and timer checks
+
+- New `facts/mods-engine-status-line.md` (live checks L1-L4 of the statusbar probe: StatusLine site and `props.text`, `rateLimits` freshness after a turn ended, `$.fs` from a timer callback, `session.measure`) and `plugins/statusbar/design/drawing-the-status-line.md` (user decisions, rejected alternatives, residuals, outcomes). Source: approved spec, branch `feature/statusbar-plugin`.
