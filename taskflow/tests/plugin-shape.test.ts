@@ -279,7 +279,7 @@ describe("build-task skill", () => {
   });
 
   test("build-task SKILL.md runs all six scripts by name, sizes the task (jev-api or own reasoning) and reviews with review-task", () => {
-    expectHas(F, ["Never use `scriptPath`", "taskflow:build-task-<name>", "build-task-explore", "build-task-design", "build-task-spec", "args global is undefined", "select:mcp__jev-api__request", "select:mcp__taskflow__size-task", "mcp__taskflow__size-task", "Size: <result>", "explore-<slug>.md", "The skill never Reads these files", "EXPLORE_PATH", "SIZE", "build-task-plan", "build-task-implement", "build-task-ship", "IMPLEMENT_PATH", "REVIEW_PATH", "PR_BODY_PATH", "implement-<slug>.json", "review-<slug>.json", "pr-body-<slug>.md", "Review level: <level> (size <X>)", "taskflow:review-task", "--size=<SIZE>", "except `REVIEW_PATH`, which the skill writes itself in step 5.3"]);
+    expectHas(F, ["Never use `scriptPath`", "taskflow:build-task-<name>", "build-task-explore", "build-task-design", "build-task-spec", "args global is undefined", "select:mcp__jev-api__request", "select:mcp__taskflow__size-task", "mcp__taskflow__size-task", "Size: <result>", "explore-<slug>.md", "The skill never Reads these files", "EXPLORE_PATH", "SIZE", "build-task-plan", "build-task-implement", "build-task-ship", "IMPLEMENT_PATH", "REVIEW_PATH", "PR_BODY_PATH", "implement-<slug>.json", "review-<slug>.json", "pr-body-<slug>.md", "Review level: <level> (size <X>)", "taskflow:review-task", "--size=<SIZE>", "except `REVIEW_PATH`, which the skill writes itself in step 5.3", "taskflow:spec-task", "taskflow:plan-task", "build-task-plan`"]);
     expect(read(F)).toMatch(/^allowed-tools:.*"Skill"/m);
     expectLacks(F, ["design-to-spec", "difficulty", "spec-driven-delivery", "SHIP: false", "invoke by name", "build-task-review", "escalatedToUser", "ponytailReview", "workflows/review.md"]);
     expect((read(F).match(/\n/g) ?? []).length).toBeLessThan(500);
@@ -288,6 +288,8 @@ describe("build-task skill", () => {
   test("build-task SKILL.md runs the spec as step 4, after the intent confirmation; Deliver is step 5, the report step 6", () => {
     expectHas(F, ["(Design → Intent confirmation → Spec →", "3. **Intent confirmation.**", "4. **Spec.** Runs once, after the \"Yes\" of step 3.", "5. **Deliver.**", "6. **Report.**", "checkpoint on the design; the spec (step 4) is written from the approved", "as `PLUGIN_ROOT` (step 5.4)", "create-or-update, step 5)", "(steps 2 and 5)", "design and step 5 calls", "step 6 then reports", "(step 6): the spec shipped without"]);
     expectLacks(F, ["step 2.5", "5. **Spec.**", "4. **Deliver.**", "5. **Escalations & report.**", "(step 4.4)", "does the spec count as", "6. **Escalations & report.**"]);
+    expectHas(F, ["Skill(skill: \"taskflow:spec-task\", args: \"--size=<SIZE> <DRAFT_PATH>\")", "A last line starting `spec-task:`", "[spec-task](../spec-task/SKILL.md)", "[plan-task](../plan-task/SKILL.md)"]);
+    expectLacks(F, ["{DRAFT_PATH, SPEC_PATH}", "workflows/spec.md", "workflows/plan.md"]);
     expectHas(SPEC_REF, ["spec-task runs this script; build-task calls spec-task once, after the user confirmed the design intent (build-task SKILL.md step 4); intent corrections re-run only the design script."]);
     expectLacks(SPEC_REF, ["re-runs the design script and then"]);
     expect(existsSync(abs(`${BT_WF}/review.md`))).toBe(false);
@@ -648,6 +650,7 @@ describe("decide skill", () => {
   test("decide body: --headless, advisor first, taskflow:decider fallback, DECISIONS line, error texts, no exclamation-backtick", () => {
     expectHas(F, ["--headless", "advisor()", "taskflow:decider", "DECISIONS:", "decide: invalid input:", "decide: no headless decision:", "Decided <id>: <answer> (<BY>: <reason>)", "Headless never falls back to `AskUserQuestion`"]);
     expectLacks(F, ["!`"]);
+    expectHas(F, ["# decide — one decision step for taskflow's skills", "build-task, review-task, spec-task and plan-task"]);
   });
 });
 
@@ -951,8 +954,9 @@ describe("build-task delivery scripts", () => {
 
   test("build-task SKILL.md step 5 runs plan, implement and ship with the documented args, review-task as Review, and one error rule", () => {
     const F = `${SKILL}/SKILL.md`;
-    expectHas(F, ["{SPEC_PATH, PLAN_PATH, SIZE, GRAPHMIND_AVAILABLE, REPO_PATH, JEV_AVAILABLE}", "{PLAN_PATH, IMPLEMENT_PATH, BRANCH_NAME, SCRATCH_DIR, GRAPHMIND_AVAILABLE, REPO_PATH}", "Skill(skill: \"taskflow:review-task\", args: \"--size=<SIZE> <BASE_BRANCH>\")", "{\"size\": \"<SIZE>\", \"level\": \"<level>\", \"commits\": [", "{SPEC_PATH, PLAN_PATH, IMPLEMENT_PATH, REVIEW_PATH, PR_BODY_PATH, BRANCH_NAME, BASE_BRANCH, PLUGIN_ROOT, GRAPHMIND_AVAILABLE, REPO_PATH, JEV_AVAILABLE}", "PR/MR skipped at the user", "`SIZE` picks the designer model, the planner model and the review level.", "plannerModel", "never retry the merge", "half-implemented plan", "The one error rule for the script sub-steps"]);
-    expectLacks(F, ["CLAUDE_PLUGIN_ROOT}/workflows", "Review error", "`S` or `M` → `high`", "taskflow:review-finder", "taskflow:review-verifier", "taskflow:fix-applier", "LEVEL, GRAPHMIND_AVAILABLE"]);
+    expectHas(F, ["Skill(skill: \"taskflow:plan-task\", args: \"--size=<SIZE> <SPEC_PATH>\")", "A last line starting `plan-task:`", "{PLAN_PATH, IMPLEMENT_PATH, BRANCH_NAME, SCRATCH_DIR, GRAPHMIND_AVAILABLE, REPO_PATH}", "Skill(skill: \"taskflow:review-task\", args: \"--size=<SIZE> <BASE_BRANCH>\")", "{\"size\": \"<SIZE>\", \"level\": \"<level>\", \"commits\": [", "{SPEC_PATH, PLAN_PATH, IMPLEMENT_PATH, REVIEW_PATH, PR_BODY_PATH, BRANCH_NAME, BASE_BRANCH, PLUGIN_ROOT, GRAPHMIND_AVAILABLE, REPO_PATH, JEV_AVAILABLE}", "PR/MR skipped at the user", "`SIZE` picks the designer model, the planner model and the review level.", "plannerModel", "never retry the merge", "half-implemented plan", "The one error rule for the script sub-steps"]);
+    expectLacks(F, ["CLAUDE_PLUGIN_ROOT}/workflows", "Review error", "`S` or `M` → `high`", "taskflow:review-finder", "taskflow:review-verifier", "taskflow:fix-applier", "LEVEL, GRAPHMIND_AVAILABLE", "{SPEC_PATH, PLAN_PATH, SIZE, GRAPHMIND_AVAILABLE, REPO_PATH, JEV_AVAILABLE}"]);
+    expect(countLines(F, "taskflow:spec-task") + countLines(F, "taskflow:plan-task")).toBeGreaterThanOrEqual(2);
   });
 
   test("explore scribe is the Read/Write-only explore-scribe agent with a lens header/footer check and one retry; implement persist keeps the exact-size check", () => {
