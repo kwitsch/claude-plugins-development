@@ -54,6 +54,7 @@ Entry format and sections: `.claude/rules/plugin-docs-tasks.md`; `wiki-check.ts`
 - [x] [F36](tasks/F36-held-parse-error-fixed-elsewhere.md) `done` low: A held parse error is reported although a later edit fixed its cause on another line
 - [x] [F37](tasks/F37-hook-design-rule-size.md) `done` low: hook-design.md is over the 40,000-character rule limit
 - [x] [F40](tasks/F40-mid-edit-findings.md) `done` high: Mid-edit findings - route to the editing agent, report a burst's final state once, sweep at turn end
+- [x] [F41](tasks/F41-skip-git-operation-changes.md) `done` medium: Skip files that git pull, a branch switch or a worktree switch changed
 
 ## Closed without code
 
