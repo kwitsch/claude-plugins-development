@@ -29,10 +29,10 @@ relevant one BEFORE each invocation:
 - [workflows/design.md](workflows/design.md) — Draft design → Design review
   → one revision round. Exits `complete` (draft decision-complete) or
   `user_input_required` (draft persisted + open user questions, resumable).
-- [workflows/spec.md](workflows/spec.md) — Write spec → Spec review → one
-  fix round. Exits `complete` (spec written) or `error`.
-- [workflows/plan.md](workflows/plan.md) — Plan → plan check → one revision
-  round. Exits `complete` (plan written to `PLAN_PATH`) or `error`.
+- [../spec-task/workflows/spec.md](../spec-task/workflows/spec.md) — Write spec → Spec review → one
+  fix round. Exits `complete`, `user_input_required` or `error`.
+- [../plan-task/workflows/plan.md](../plan-task/workflows/plan.md) — Plan → plan check → one revision
+  round. Exits `complete`, `user_input_required` or `error`.
 - [workflows/implement.md](workflows/implement.md) — wave-parallel Implement
   (worktree/merge rules per wave size are in the reference). Exits `complete`
   (result file + per-task results) or `error` (hard stop).
