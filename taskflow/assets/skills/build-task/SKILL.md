@@ -315,7 +315,9 @@ Every pipeline file is session-only, never a repository file:
       each fix that reverses a spec decision, one decide call with
       `content` = [`<hash> <subject>`, the spec decision it reverses] and
       `{"id": "reversal-<hash>", "question": "Keep this fix or revert it?", "options": ["Keep", "Revert with git revert"]}`;
-      never leave it unasked. Otherwise Write `REVIEW_PATH`
+      never leave it unasked. "Revert with git revert" → run
+      `git revert --no-edit <hash>` (failure → stop and report) and list the
+      revert commit in `commits`; "Keep" → change nothing. Then Write `REVIEW_PATH`
       (English) with the Write tool:
       `{"size": "<SIZE>", "level": "<level>", "commits": ["<hash> <subject>", ...], "summary": "<simplify and code-review summary from the report, incl. found-but-not-fixed items>"}`
       — `commits` from the report's `git log --oneline` list. When
