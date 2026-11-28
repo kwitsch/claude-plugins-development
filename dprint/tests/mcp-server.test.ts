@@ -3,10 +3,11 @@
 import type { JSONRPCErrorResponse } from "@modelcontextprotocol/server";
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
+import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { createInterface } from "node:readline";
+import { setTimeout as sleep } from "node:timers/promises";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { afterEach, beforeEach, test } from "vitest";
 import type { HookResult } from "../src/mcp/format.ts";
@@ -1458,6 +1459,186 @@ test("bash_finished on a slow file system: a file inside a changed git submodule
   assert.match(r.hookSpecificOutput.additionalContext, /"mod\/s\.ts"/);
   assert.equal(readFileSync(path.join(repo, "mod/s.ts"), "utf8"), "s2\n");
 });
+
+/** Runs real git in `cwd` with a fixed identity, branch `main` and no user/system config; `ok: false` allows a non-zero exit (a merge that stops on a conflict). */
+type Git = (cwd: string, args: string[], opts?: { ok?: boolean; env?: Record<string, string> }) => string;
+
+/**
+ * Symlink the real git into the test bin (the server's PATH) and return a fixture runner.
+ *
+ * @returns The runner, or `null` when git is not installed.
+ */
+function realGit(): Git | null {
+  const git = spawnSync("which", ["git"], { encoding: "utf8" }).stdout?.trim();
+  if (!git) return null;
+  symlinkSync(git, path.join(bin, "git"));
+  return (cwd, args, opts = {}) => {
+    const r = spawnSync(
+      git,
+      ["-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false", "-c", "init.defaultBranch=main", ...args],
+      { cwd, encoding: "utf8", env: { ...process.env, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_NOSYSTEM: "1", ...opts.env } },
+    );
+    if (opts.ok !== false) assert.equal(r.status, 0, r.stderr);
+    return r.stdout;
+  };
+}
+
+/**
+ * Fresh repository in `cwd`: c.ts, d.ts, e.ts committed on `main`; branch `side` changes c.ts line 1 and d.ts; `main`
+ * then changes c.ts line 1 again, so `git merge side` stops with c.ts `UU` and d.ts `M ` (auto-merged, staged). Every
+ * line carries trailing spaces, so a format is visible as their removal. Leaves `main` checked out.
+ *
+ * @param g - Fixture runner from {@link realGit}.
+ * @param cwd - Directory to turn into the repository.
+ */
+function mergeFixture(g: Git, cwd: string): void {
+  g(cwd, ["init", "-q"]);
+  writeFileSync(path.join(cwd, "c.ts"), "c1  \nc2  \n");
+  writeFileSync(path.join(cwd, "d.ts"), "d  \n");
+  writeFileSync(path.join(cwd, "e.ts"), "e  \n");
+  g(cwd, ["add", "c.ts", "d.ts", "e.ts"]);
+  g(cwd, ["commit", "-qm", "base"]);
+  g(cwd, ["checkout", "-qb", "side"]);
+  writeFileSync(path.join(cwd, "c.ts"), "side  \nc2  \n");
+  writeFileSync(path.join(cwd, "d.ts"), "d2  \n");
+  g(cwd, ["commit", "-qam", "side"]);
+  g(cwd, ["checkout", "-q", "main"]);
+  writeFileSync(path.join(cwd, "c.ts"), "main  \nc2  \n");
+  g(cwd, ["commit", "-qam", "main"]);
+}
+
+test("git operation: file_changed leaves git's files of a stopped merge alone and formats a later worktree edit", async (t) => {
+  const g = realGit();
+  if (!g) return t.skip("git not on PATH");
+  stubDprint();
+  mergeFixture(g, repo);
+  g(repo, ["merge", "--no-edit", "side"], { ok: false });
+  const st = g(repo, ["status", "--porcelain"]);
+  assert.match(st, /^UU c\.ts$/m);
+  assert.match(st, /^M {2}d\.ts$/m);
+  const before = { c: readFileSync(path.join(repo, "c.ts"), "utf8"), d: readFileSync(path.join(repo, "d.ts"), "utf8") };
+  assert.match(before.c, /^<<<<<<< /m); // git's conflict content
+  const s = startServer();
+  for (const f of ["c", "d"] as const) {
+    assert.deepEqual(await s.tool("file_changed", { cwd: repo, file_path: path.join(repo, `${f}.ts`), event: "change" }), {});
+    assert.equal(readFileSync(path.join(repo, `${f}.ts`), "utf8"), before[f], `${f}.ts`);
+  }
+  // a worktree change made after git's (" M") is ours: formatted
+  writeFileSync(path.join(repo, "e.ts"), "e2  \n");
+  assert.deepEqual(await s.tool("file_changed", { cwd: repo, file_path: path.join(repo, "e.ts"), event: "change" }), {});
+  assert.equal(readFileSync(path.join(repo, "e.ts"), "utf8"), "e2\n");
+});
+
+for (const marker of ["MERGE_HEAD", "rebase-merge", "rebase-apply", null] as const) {
+  test(`git operation: file_changed on a staged-only file ${marker ? `is skipped while .git/${marker} exists` : "is formatted without a merge or rebase marker"}`, async (t) => {
+    const g = realGit();
+    if (!g) return t.skip("git not on PATH");
+    stubDprint();
+    const c = path.join(repo, "c.ts");
+    writeFileSync(c, "c  \n");
+    g(repo, ["init", "-q"]);
+    g(repo, ["add", "c.ts"]);
+    g(repo, ["commit", "-qm", "c"]);
+    writeFileSync(c, "c2  \n");
+    g(repo, ["add", "c.ts"]); // staged, worktree equal to the index: "M "
+    if (marker === "MERGE_HEAD") writeFileSync(path.join(repo, ".git", marker), g(repo, ["rev-parse", "HEAD"]));
+    else if (marker) mkdirSync(path.join(repo, ".git", marker));
+    const s = startServer();
+    assert.deepEqual(await s.tool("file_changed", { cwd: repo, file_path: c, event: "change" }), {});
+    assert.equal(readFileSync(c, "utf8"), marker ? "c2  \n" : "c2\n");
+  });
+}
+
+test("git operation: file_changed in a linked worktree reads the worktree's own git dir (merge stopped there)", async (t) => {
+  const g = realGit();
+  if (!g) return t.skip("git not on PATH");
+  stubDprint();
+  mergeFixture(g, repo);
+  const wt = path.join(tmp, "wt");
+  g(repo, ["worktree", "add", "-q", "-b", "wt-branch", wt]);
+  g(wt, ["merge", "--no-edit", "side"], { ok: false });
+  assert.match(g(wt, ["status", "--porcelain"]), /^UU c\.ts$/m);
+  // the merge marker exists only in the worktree's git dir, which wt/.git (a file) points to
+  assert.ok(existsSync(path.join(repo, ".git", "worktrees", "wt", "MERGE_HEAD")));
+  assert.ok(!existsSync(path.join(repo, ".git", "MERGE_HEAD")));
+  writeFileSync(path.join(wt, "dprint.json"), "{}");
+  const c = path.join(wt, "c.ts");
+  const before = readFileSync(c, "utf8");
+  const s = startServer();
+  assert.deepEqual(await s.tool("file_changed", { cwd: wt, file_path: c, event: "change" }), {});
+  assert.equal(readFileSync(c, "utf8"), before);
+});
+
+test("git operation: file_changed waits for a git operation's index.lock and then sees git's end state", async (t) => {
+  const g = realGit();
+  if (!g) return t.skip("git not on PATH");
+  stubDprint();
+  const c = path.join(repo, "c.ts");
+  const index = path.join(repo, ".git", "index");
+  const lock = `${index}.lock`;
+  writeFileSync(c, "c  \n");
+  g(repo, ["init", "-q"]);
+  g(repo, ["add", "c.ts"]);
+  g(repo, ["commit", "-qm", "c"]);
+  const s = startServer();
+  await s.rpc("tools/list", {}); // server is up: without the lock wait the call below reaches git status at once
+  // a git operation in flight: the worktree already has the new content, the new index is still the lock file
+  cpSync(index, lock);
+  writeFileSync(c, "c2  \n");
+  g(repo, ["add", "c.ts"], { env: { GIT_INDEX_FILE: lock } });
+  // HEAD moves with the new index (as after a pull/checkout): once the lock is the index, c.ts is clean
+  g(repo, ["commit", "-qm", "c2"], { env: { GIT_INDEX_FILE: lock } });
+  const pending = s.tool("file_changed", { cwd: repo, file_path: c, event: "change" });
+  await sleep(300); // ordering wait, not an asserted threshold: lets the call reach its lock wait
+  renameSync(lock, index); // git's commit step: lock release and index update are one rename
+  assert.deepEqual(await pending, {});
+  assert.equal(readFileSync(c, "utf8"), "c2  \n");
+});
+
+test("git operation: a stale index.lock only delays the verdict (DPRINT_HOOKS_LOCK_WAIT_MS=200): ignored and clean files stay skipped", async (t) => {
+  const g = realGit();
+  if (!g) return t.skip("git not on PATH");
+  stubDprint();
+  for (const [f, text] of [["c.ts", "c  \n"], ["k.ts", "k  \n"], [".gitignore", "ig.ts\n"]] as const) writeFileSync(path.join(repo, f), text);
+  g(repo, ["init", "-q"]);
+  g(repo, ["add", "c.ts", "k.ts", ".gitignore"]);
+  g(repo, ["commit", "-qm", "init"]);
+  writeFileSync(path.join(repo, ".git", "index.lock"), ""); // left behind by a crashed git, never removed
+  writeFileSync(path.join(repo, "c.ts"), "c2  \n");
+  writeFileSync(path.join(repo, "ig.ts"), "i  \n");
+  const s = startServer({ env: { DPRINT_HOOKS_LOCK_WAIT_MS: "200" } });
+  for (const [f, after] of [["c.ts", "c2\n"], ["k.ts", "k  \n"], ["ig.ts", "i  \n"]] as const) {
+    assert.deepEqual(await s.tool("file_changed", { cwd: repo, file_path: path.join(repo, f), event: "change" }), {});
+    assert.equal(readFileSync(path.join(repo, f), "utf8"), after, f);
+  }
+});
+
+for (const op of ["checkout", "merge"] as const) {
+  test(`git operation: bash_finished leaves the files of a Bash-run git ${op} alone`, async (t) => {
+    const g = realGit();
+    if (!g) return t.skip("git not on PATH");
+    writeFileSync(
+      path.join(bin, "dprint"),
+      [
+        "#!/usr/bin/env bash",
+        `if [ "$1" = "file-paths" ]; then printf '%s\\n' "$PWD/c.ts" "$PWD/d.ts"; exit 0; fi`,
+        `exec node "${path.join(tmp, "stub-lsp.mjs")}" ok`,
+        "",
+      ].join("\n"),
+    );
+    chmodSync(path.join(bin, "dprint"), 0o755);
+    mergeFixture(g, repo);
+    const s = startServer();
+    const ctx = { cwd: repo, ...SESSION, tool_use_id: "G" };
+    await s.tool("bash_started", ctx);
+    // the Bash call: a branch switch (files equal the index) or a merge stopped on a conflict (c.ts UU, d.ts "M ")
+    if (op === "checkout") g(repo, ["checkout", "-q", "side"]);
+    else g(repo, ["merge", "--no-edit", "side"], { ok: false });
+    const after = ["c.ts", "d.ts"].map((f) => readFileSync(path.join(repo, f), "utf8"));
+    assert.deepEqual(await s.tool("bash_finished", ctx), {});
+    assert.deepEqual(["c.ts", "d.ts"].map((f) => readFileSync(path.join(repo, f), "utf8")), after);
+  });
+}
 
 test("bash_started starts the (slow) watch-list read, so bash_finished does not wait for it", { timeout: 20_000 }, async () => {
   symlinkSync(spawnSync("sh", ["-c", "command -v sleep"], { encoding: "utf8" }).stdout.trim(), path.join(bin, "sleep"));

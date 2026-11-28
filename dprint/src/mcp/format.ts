@@ -13,6 +13,7 @@ import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import path from "node:path";
+import { setTimeout as sleep } from "node:timers/promises";
 import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 import { findConfig } from "../skills/dprint/find-config.js";
@@ -510,6 +511,47 @@ const utf8 = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }); // keep
 /** `execFile` returning a promise of `{ stdout, stderr }`. */
 const execFileAsync = promisify(execFile);
 
+/** Longest wait for a running git operation's `.git/index.lock` before the status verdict; `DPRINT_HOOKS_LOCK_WAIT_MS` overrides it (tests). */
+const LOCK_WAIT_MS = Number(process.env.DPRINT_HOOKS_LOCK_WAIT_MS ?? "5000");
+/** Poll interval of the index.lock wait. */
+const LOCK_POLL_MS = 100;
+/** `git status --porcelain` XY codes git leaves during a stopped merge/rebase: unmerged, and staged with a clean worktree. */
+const MERGE_STAGED = /^(?:DD|AU|UD|UA|DU|AA|UU|[MADRC] )$/;
+/** Files in the git dir that mark a stopped merge (`git pull`/`merge`) or rebase. */
+const MERGE_MARKERS = ["MERGE_HEAD", "rebase-merge", "rebase-apply"];
+
+/**
+ * Git dir of the repository containing a directory: the nearest `.git` directory, or the target of a `.git` file
+ * (`gitdir: <path>`, linked worktree or submodule), resolved against the file's directory.
+ *
+ * @remarks
+ * `GIT_DIR`/`GIT_WORK_TREE` are not honoured (the status call does not set them either; a mismatch only drops the
+ * lock wait and the merge check). Never throws.
+ *
+ * @param dir - Absolute real directory to start from.
+ * @returns The git dir, or `null` outside a repository or when `.git` cannot be read (the callers then skip the lock
+ * wait and the merge check).
+ */
+function gitDirOf(dir: string): string | null {
+  for (let d = dir; ; d = path.dirname(d)) {
+    const dotGit = path.join(d, ".git");
+    let isDir: boolean;
+    try {
+      isDir = statSync(dotGit).isDirectory();
+    } catch {
+      if (d === path.dirname(d)) return null; // filesystem root reached
+      continue;
+    }
+    if (isDir) return dotGit;
+    try {
+      const target = /^gitdir: (.+)$/m.exec(readFileSync(dotGit, "utf8"))?.[1];
+      return target ? path.resolve(d, target.trim()) : null;
+    } catch {
+      return null;
+    }
+  }
+}
+
 /**
  * Whether git ignores a file (`git check-ignore`); tracked files never count as ignored.
  *
@@ -584,11 +626,14 @@ function releaseChangeSlot(): void {
  * Skips files above {@link MAX_CHANGED_BYTES}, files with a lone `\r`, content equal to the {@link written} digest, and
  * (user decision) gitignored files and tracked files unchanged against the git index (one
  * `git status --porcelain --untracked-files=normal --ignored=matching`: `!!` or empty output, e.g. after
- * checkout/pull/reset/stash); when git fails or is absent the file is formatted. CRLF files are formatted on their LF
- * view and written back with CRLF. At most {@link MAX_ACTIVE_CHANGES} calls run git and dprint at once, the rest wait
- * in order (beyond {@link MAX_WAITING_CHANGES} waiting they are dropped with a stderr line), on a `dprint lsp` of
- * their own. The whole file is formatted via `textDocument/formatting` and written in place only when dprint changed
- * it and the file did not change meanwhile.
+ * checkout/pull/reset/stash); when git fails or is absent the file is formatted. Files git operations wrote are left
+ * alone: while `index.lock` exists in the file's git dir ({@link gitDirOf}) the status waits up to
+ * {@link LOCK_WAIT_MS} (a lock that outlives the wait leaves the usual verdict), and during a stopped merge or rebase
+ * ({@link MERGE_MARKERS}) unmerged and staged-only files ({@link MERGE_STAGED}) are skipped. CRLF files are formatted
+ * on their LF view and written back with CRLF. At most {@link MAX_ACTIVE_CHANGES} calls run git and dprint at once,
+ * the rest wait in order (beyond {@link MAX_WAITING_CHANGES} waiting they are dropped with a stderr line), on a
+ * `dprint lsp` of their own. The whole file is formatted via `textDocument/formatting` and written in place only when
+ * dprint changed it and the file did not change meanwhile.
  *
  * @param sc - Scope of the hook call.
  * @param s - The file, from {@link inScope}.
@@ -618,6 +663,14 @@ async function formatOnDisk(sc: Scope, s: { fp: string; real: string }, signal?:
       // one spawn answers both. --untracked-files=normal is required: under status.showUntrackedFiles=no git
       // rejects --ignored otherwise. --no-optional-locks keeps .git/index.lock free for the user's git,
       // cwd = dirname picks the nearest repository (nested repos, submodules)
+      // a running git operation (pull, checkout, merge) writes the worktree under index.lock before the index is final:
+      // wait for it, bounded, so the verdict sees git's end state; a lock that outlives the wait leaves the old verdicts
+      const gitDir = gitDirOf(path.dirname(s.real));
+      const lockEnd = Date.now() + LOCK_WAIT_MS;
+      while (gitDir !== null && existsSync(path.join(gitDir, "index.lock")) && Date.now() < lockEnd) {
+        await sleep(LOCK_POLL_MS);
+        if (signal?.aborted) return false;
+      }
       try {
         const { stdout } = await execFileAsync(
           "git",
@@ -625,6 +678,8 @@ async function formatOnDisk(sc: Scope, s: { fp: string; real: string }, signal?:
           { cwd: path.dirname(s.real), encoding: "utf8", timeout: 10_000 },
         );
         if (stdout === "" || stdout.startsWith("!!")) return false;
+        // a stopped merge/rebase (conflict in pull, merge, rebase): unmerged and staged-only files are git's, not ours
+        if (gitDir !== null && MERGE_STAGED.test(stdout.slice(0, 2)) && MERGE_MARKERS.some((m) => existsSync(path.join(gitDir, m)))) return false;
       } catch {
         // no git, not a repository or timeout: format
       }
