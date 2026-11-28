@@ -286,3 +286,7 @@ Source: user decision 2026-11-20 (task spec), PR stacked on `feature/tsdown-plug
 ## [2026-11-28] ingest | universal-format: git-operation exemption holds by construction, hook statusMessage
 
 - `plugins/universal-format/design/hook-design.md` gains `## Changes made by git operations` (the git-operation exemption holds by construction); the hook gets a `statusMessage` (universal-format 0.19.8). Source: approved spec, branch `feature/universal-format-git-skip-status`.
+
+## [2026-11-28] ingest | spec-task and plan-task skills
+
+- New `plugins/taskflow/design/spec-and-plan-skills.md`: why build-task's spec and plan steps became the internal `spec-task` and `plan-task` skills (taskflow 3.2.0), the resumable scripts (`USER_INPUT`, `user_input_required` with `conflict` / `rounds_exhausted`), why every decision is re-sent on each resume, the output-path derivation, the headless cap of 3, and the unverified three-level Skill nesting. `design/workflows.md`, `design/decide.md` and `plugins/taskflow/index.md` were updated. Source: approved spec, branch `feature/spec-plan-skills-from-build-task`.
