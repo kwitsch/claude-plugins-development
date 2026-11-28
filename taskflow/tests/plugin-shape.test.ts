@@ -652,7 +652,7 @@ describe("decide skill", () => {
   test("decide body: --headless, advisor first, taskflow:decider fallback, DECISIONS line, error texts, no exclamation-backtick", () => {
     expectHas(F, ["--headless", "advisor()", "taskflow:decider", "DECISIONS:", "decide: invalid input:", "decide: no headless decision:", "Decided <id>: <answer> (<BY>: <reason>)", "Headless never falls back to `AskUserQuestion`"]);
     expectLacks(F, ["!`"]);
-    expectHas(F, ["# decide — one decision step for taskflow's skills", "build-task, review-task, spec-task and plan-task"]);
+    expectHas(F, ["# decide — one decision step for taskflow's skills", "build-task, design-task, review-task, spec-task and plan-task"]);
   });
 });
 

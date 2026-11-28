@@ -3,7 +3,7 @@
  * the text reads: S = one place, at most ~10 files and ~120 lines; M = one plugin, ~10-20 files or up to ~1000 lines;
  * L = one plugin above ~1000 lines, or two plugins; XL = five or more plugins or repository-wide infrastructure.
  * Texts are written as a user would type a `build-task` argument (no size words); `subs` are the `<name> — <focus>`
- * lines the explore script would return.
+ * lines the design script's scout would return.
  */
 
 import type { Size } from "../src/hooks/size.ts";

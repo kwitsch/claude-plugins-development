@@ -456,7 +456,10 @@ Return structured output: status, the Keypoints section verbatim as the
 field (empty array when decision-complete) — never embedded as text/tags
 inside \`keypoints\`.`;
 
-const initialMode = "This is a fresh run: produce the first complete draft.";
+// A full re-run (design-task) reuses DRAFT_PATH and carries earlier user answers in TASK as
+// "Binding user decisions from earlier rounds": the designer must Read an existing draft before
+// Write may overwrite it, and must record those answers so the reviewer's USER DECISION check sees them.
+const initialMode = "This is a fresh run: produce the first complete draft. If the draft file already exists from an earlier run, Read it first (Write refuses to overwrite an unread file) and replace its whole content. Any 'Binding user decisions from earlier rounds' in the task are user answers: record each under Decisions & assumptions as 'USER DECISION' and never reverse them.";
 
 // A schema-valid result can still be garbage: observed in production, the designer
 // sometimes fails to place openQuestions in its own structured-output field and

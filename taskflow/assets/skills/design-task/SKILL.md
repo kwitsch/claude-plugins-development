@@ -202,8 +202,10 @@ One decide call: `content` = [`<stage>: <reason>`], followed by the
 2. The `explore` question is answered → full re-run (step 4, headless cap
    first). The answer `Re-run explore` keeps `FOCUS`; a free-text answer sets
    `FOCUS` = that text.
-3. Any answer `Re-run explore` → `FOCUS` = `reason`; full re-run (step 4,
-   headless cap first).
+3. Any answer `Re-run explore` → when it answers `design-blocked`, `FOCUS` =
+   the current `FOCUS` (when set) followed by `reason`; for any other question
+   `FOCUS` stays as it is (its `reason` is no exploration focus); full re-run
+   (step 4, headless cap first).
 4. Otherwise → append every answer except the control answers
    `Retry the design` and `Run another design round` to `DECISIONS_SO_FAR` as
    `{id, question, answer}` (`question` = the question text as asked); keep
