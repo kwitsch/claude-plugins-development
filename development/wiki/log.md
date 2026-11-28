@@ -282,3 +282,7 @@ Source: user decision 2026-11-20 (task spec), PR stacked on `feature/tsdown-plug
 ## [2026-11-28] ingest | dprint 0.15.0: on-disk formatting skips files git operations wrote
 
 - New `plugins/dprint/tasks/F30-skip-git-operation-changes.md`: `formatOnDisk` waits (up to 5 s) for `index.lock` in the file's git dir before its `git status`, and skips unmerged and staged-only files while `MERGE_HEAD`, `rebase-merge` or `rebase-apply` exists there; why the lock wait has its own budget instead of F41's shared deadline, why it sits inside the slot, why no Bash-command detection and no `rev-parse` spawn. `TASKS.md`, `dprint/.claude/rules/mcp-server.md` and the README follow. Source: approved spec, branch `feature/dprint-skip-git-external-changes`.
+
+## [2026-11-28] ingest | universal-format: git-operation exemption holds by construction, hook statusMessage
+
+- `plugins/universal-format/design/hook-design.md` gains `## Changes made by git operations` (the git-operation exemption holds by construction); the hook gets a `statusMessage` (universal-format 0.19.8). Source: approved spec, branch `feature/universal-format-git-skip-status`.

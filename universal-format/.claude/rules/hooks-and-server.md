@@ -12,6 +12,7 @@ Each section names its design page in `development/wiki/plugins/universal-format
 ## Hook contract
 
 - One hook: PreToolUse `Write|Edit`, `mcp_tool`, server `plugin:universal-format:universal-format-hooks` (the namespaced name, never the bare `.mcp.json` key), tool `format_pre`, `timeout: 60`, no `async`, no `if`. Never add a hook that runs after the write, a `CwdChanged` hook or an `EnterWorktree` hook.
+- Every hook carries an English `statusMessage` `universal-format: <what the hook does>` (lower case after the prefix); `tests/manifest.test.ts` pins it.
 - The hook's `input` template is required and lists exactly the fields the handler reads (`cwd`, `scratchpad_dir`, `tool_name`, `tool_input.file_path/content/old_string/new_string/replace_all`): without `input` the tool gets `{}`. A new field the handler reads needs its placeholder there.
 - The template substitutes text: a boolean arrives as `"true"`/`"false"`, a field the tool call lacks as `""`. Keep the comparison of `replace_all` against both `true` and `"true"`.
 - `format_pre` never sets `permissionDecision`; it answers `updatedInput` plus the `additionalContext` notice, or `{}`.
