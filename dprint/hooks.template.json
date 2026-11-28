@@ -8,6 +8,7 @@
         "hooks": [
           {
             "type": "mcp_tool",
+            "statusMessage": "dprint: formatting the file before it is written",
             "server": "plugin:dprint:dprint-hooks",
             "tool": "format_pre",
             "timeout": 60,
@@ -33,6 +34,7 @@
         "hooks": [
           {
             "type": "mcp_tool",
+            "statusMessage": "dprint: noting the start of the Bash command",
             "server": "plugin:dprint:dprint-hooks",
             "tool": "bash_started",
             "timeout": 10,
@@ -51,6 +53,7 @@
         "hooks": [
           {
             "type": "mcp_tool",
+            "statusMessage": "dprint: collecting format notices",
             "server": "plugin:dprint:dprint-hooks",
             "tool": "drain_notices",
             "timeout": 10,
@@ -70,6 +73,7 @@
         "hooks": [
           {
             "type": "mcp_tool",
+            "statusMessage": "dprint: following the worktree switch",
             "server": "plugin:dprint:dprint-hooks",
             "tool": "worktree_entered",
             "timeout": 60,
@@ -86,6 +90,7 @@
         "hooks": [
           {
             "type": "mcp_tool",
+            "statusMessage": "dprint: following the worktree exit",
             "server": "plugin:dprint:dprint-hooks",
             "tool": "worktree_exited",
             "timeout": 60,
@@ -102,6 +107,7 @@
         "hooks": [
           {
             "type": "mcp_tool",
+            "statusMessage": "dprint: recording the written file",
             "server": "plugin:dprint:dprint-hooks",
             "tool": "file_written",
             "timeout": 60,
@@ -120,6 +126,7 @@
         "hooks": [
           {
             "type": "mcp_tool",
+            "statusMessage": "dprint: formatting files the Bash command changed",
             "server": "plugin:dprint:dprint-hooks",
             "tool": "bash_finished",
             "timeout": 30,
@@ -141,6 +148,7 @@
         "hooks": [
           {
             "type": "mcp_tool",
+            "statusMessage": "dprint: formatting files the failed Bash command changed",
             "server": "plugin:dprint:dprint-hooks",
             "tool": "bash_finished",
             "timeout": 30,
@@ -161,6 +169,7 @@
         "hooks": [
           {
             "type": "mcp_tool",
+            "statusMessage": "dprint: following the directory change",
             "server": "plugin:dprint:dprint-hooks",
             "tool": "cwd_changed",
             "timeout": 60,
@@ -172,6 +181,7 @@
           },
           {
             "type": "command",
+            "statusMessage": "dprint: updating the file watch list",
             "command": "./src/hooks/watch-paths.ts",
             "timeout": 30
           }
@@ -183,6 +193,7 @@
         "hooks": [
           {
             "type": "mcp_tool",
+            "statusMessage": "dprint: formatting the changed file",
             "server": "plugin:dprint:dprint-hooks",
             "tool": "file_changed",
             "timeout": 60,
@@ -203,6 +214,7 @@
         "hooks": [
           {
             "type": "command",
+            "statusMessage": "dprint: reading the file watch list",
             "command": "./src/hooks/watch-paths.ts",
             "timeout": 30
           }
@@ -214,6 +226,7 @@
         "hooks": [
           {
             "type": "mcp_tool",
+            "statusMessage": "dprint: collecting format notices",
             "server": "plugin:dprint:dprint-hooks",
             "tool": "drain_notices",
             "timeout": 10,
