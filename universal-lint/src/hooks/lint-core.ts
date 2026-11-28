@@ -3050,6 +3050,33 @@ export async function admitGit(): Promise<() => void> {
   };
 }
 
+/**
+ * The per-worktree git dir of the repo `dir` lies in: walks up to the first `.git`; a directory is the git dir, a
+ * file (linked worktree, submodule) names it in its `gitdir:` line, relative to the file's directory.
+ *
+ * @param dir - Real path of a directory.
+ * @returns Absolute git dir, or null (no repo found, unreadable `.git` file).
+ */
+function gitDirOf(dir: string): string | null {
+  let found: string | null = null;
+  try {
+    walkToRoot(dir, (d) => {
+      const dotGit = path.join(d, ".git");
+      if (!existsSync(dotGit)) return false;
+      if (statSync(dotGit).isDirectory()) found = dotGit;
+      else {
+        const m = /^gitdir:(.*)$/m.exec(readFileSync(dotGit, "utf8"));
+        const named = m?.[1]?.trim();
+        if (named) found = path.resolve(d, named);
+      }
+      return true;
+    });
+  } catch {
+    return null;
+  }
+  return found;
+}
+
 /** Project keys whose whole-project check is running in this server process (`coalesceProjectCheck`). */
 const projectLocks = new Set<string>();
 
@@ -3123,10 +3150,17 @@ export function slotDeadlineMs(ext: string): number {
 
 /**
  * FileChanged: lint a watched file changed outside Write/Edit, whole file (no edit-range gate). Skips, first match
- * wins: `unlink` event; out of scope (`scopedTarget`); content still equal to the digest Write/Edit recorded; git says
- * ignored (`!!`) or unchanged (empty status), asked with an async `git status` (the server's event loop stays free),
- * at most `GIT_GATE_MAX` spawns at a time over all calls (`admitGit`: a burst of events does not spawn all at once). A
- * git failure (no git, not a repo, timeout) lints. Then waits for one of the server process's `FILE_CHANGED_SLOTS`
+ * wins: `unlink` event; out of scope (`scopedTarget`); content still equal to the digest Write/Edit recorded; the git
+ * gate (F41): while the repo's `index.lock` exists (`gitDirOf`; a git operation is still writing) the call polls every
+ * 100 ms without a git permit, up to one `GIT_TIMEOUT_MS` deadline it shares with the `git status` after it; then git
+ * says ignored (`!!`) or unchanged (empty status), or, during a stopped merge or rebase (`MERGE_HEAD`, `rebase-merge`,
+ * `rebase-apply` in the git dir), the file is unmerged or staged-only. The `git status` is async (the server's event
+ * loop stays free) and at most `GIT_GATE_MAX` spawns run at a time over all calls (`admitGit`: a burst of events does
+ * not spawn all at once). Every git skip deletes the whole-file record this call journaled, so the Stop/SubagentStop
+ * sweep does not lint the file either; this holds for every cause of a clean or ignored verdict (a pull, a branch
+ * switch, `checkout -- f`, `restore`, `reset --hard`, `stash`, an editor writing back committed bytes). A git failure
+ * (no git, not a repo, timeout) lints; no git dir found means no lock wait and no merge-state check. A call cancelled
+ * during the lock wait returns and keeps its record. Then waits for one of the server process's `FILE_CHANGED_SLOTS`
  * slots (`acquireSlot`, FIFO) until `FILE_CHANGED_BUDGET_MS` minus the file's lint budget of call time; no slot in
  * time skips with a stderr note. Inside `lintResolved` the whole-project check (tsc, go vet/golangci-lint, cargo) runs
  * through `coalesceProjectCheck`: once per burst and project (F13). Settle window (F34, F40): once the digest check
@@ -3151,9 +3185,26 @@ export async function fileChangedHandler(args: PostToolUseHookInput): Promise<Ho
       written.delete(s.real); // stale: a later restore of the old bytes must lint
     }
     // The content changed outside Write/Edit (never for the digest-matched echo above): a whole-file edit for the
-    // settle window, also when the git gate then skips the lint (a restore to committed content leaves no stale finding).
+    // settle window, journaled before the first await (the generation marker of a concurrent lint); a git skip deletes it again.
     const owner = ownerOf(args);
     const rec = recordEdit(s.fp, s.real, null, undefined, undefined, owner, null, cwd);
+    /**
+     * Skips the lint for a git verdict and deletes this call's own record, so the Stop sweep does not lint the file either.
+     *
+     * @returns The empty hook result.
+     */
+    const skip = (): HookResult => {
+      if (rec) journal.delete(rec.name);
+      return {};
+    };
+    const gitDir = gitDirOf(path.dirname(s.real));
+    const gitEnd = Date.now() + GIT_TIMEOUT_MS; // one deadline for the lock wait and git status
+    // git writes the worktree under index.lock, then commits the index and moves HEAD: a status before that sees its writes as changes
+    while (gitDir !== null && existsSync(path.join(gitDir, "index.lock"))) {
+      if (callCtx.getStore()?.signal.aborted) return {};
+      if (Date.now() >= gitEnd) break;
+      await sleep(100);
+    }
     const releaseGit = await admitGit();
     try {
       // the permit may have been granted late: a call that was cancelled or ran into its deadline meanwhile spawns nothing (its record stays pending)
@@ -3161,9 +3212,11 @@ export async function fileChangedHandler(args: PostToolUseHookInput): Promise<Ho
       const { stdout } = await execFileAsync("git", ["--no-optional-locks", "--literal-pathspecs", "status", "--porcelain", "--untracked-files=normal", "--ignored=matching", "--", s.real], {
         cwd: path.dirname(s.real), // git maps a lexical path through an in-repo symlinked dir to a path not in the index
         encoding: "utf8",
-        timeout: GIT_TIMEOUT_MS,
+        timeout: Math.max(1, gitEnd - Date.now()),
       });
-      if (stdout === "" || stdout.startsWith("!!")) return {};
+      if (stdout === "" || stdout.startsWith("!!")) return skip();
+      // a stopped merge or rebase: unmerged and staged-only files are git's content; worktree changes (` M`, `MM`, `??`) still lint
+      if (gitDir !== null && /^(?:DD|AU|UD|UA|DU|AA|UU|[MADRC] )$/.test(stdout.slice(0, 2)) && ["MERGE_HEAD", "rebase-merge", "rebase-apply"].some((n) => existsSync(path.join(gitDir, n)))) return skip();
     } catch {
       // no git, not a repo, timeout or non-zero exit: lint
     } finally {

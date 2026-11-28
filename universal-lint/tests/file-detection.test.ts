@@ -1,9 +1,10 @@
 // File detection: SessionStart/CwdChanged watch list (built watch-paths hook) and FileChanged linting (built server) in a real git repo.
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
-import { mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { appendFileSync, copyFileSync, mkdirSync, readFileSync, readlinkSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
+import { fileURLToPath } from "node:url";
 import { expect, test } from "vitest";
 import { FILE_CHANGED_SLOTS } from "../src/hooks/lint-core.ts";
 import { makeEnv, WATCH } from "./support/lint-hook.ts";
@@ -341,6 +342,208 @@ test("FileChanged: outside a git repo the file is linted (git failure means lint
   const a = e.file("a.sh", "echo $1\n");
   assert.equal(changed(e, a).status, 2);
   assert.equal(e.lines().length, 1);
+});
+
+/** git identity for commits, merges and ref updates (the hermetic HOME has no git config). */
+const ID = ["-c", "user.email=t@t", "-c", "user.name=t"];
+
+/**
+ * Stage everything in `dir` and commit it.
+ *
+ * @param e - Test environment.
+ * @param dir - Repository or worktree directory.
+ * @param msg - Commit message.
+ */
+function commitAll(e: LintEnv, dir: string, msg: string): void {
+  git(e, dir, "add", "-A");
+  git(e, dir, ...ID, "commit", "-qm", msg);
+}
+
+/**
+ * A recording shellcheck stub (reports OUT, exit 1) and a committed repo with `a.sh`, `c.sh`, `m.sh`, `x.sh` (`echo <name>`).
+ *
+ * @param e - Test environment.
+ */
+function seed(e: LintEnv): void {
+  e.recStub("shellcheck", 1);
+  for (const n of ["a", "c", "m", "x"]) e.file(`${n}.sh`, `echo ${n}\n`);
+  gitInit(e);
+}
+
+/**
+ * One server started in `dir` with FileChanged and Stop calls of session s1, so both act for one owner (the main conversation).
+ *
+ * @param e - Test environment (its stub reports OUT).
+ * @param dir - Server cwd and payload cwd.
+ * @returns The server, `change` (one `file_changed` call) and `stop` (one Stop, which sweeps the owner's pending records).
+ */
+function gitSession(e: LintEnv, dir: string) {
+  const s = e.server({ out: OUT, cwd: dir });
+  const change = (f: string) => s.call("file_changed", { hook_event_name: "FileChanged", cwd: dir, session_id: "s1", scratchpad_dir: "", file_path: f, event: "change" });
+  const stop = () => s.call("stop", { hook_event_name: "Stop", cwd: dir, session_id: "s1", agent_id: "", scratchpad_dir: "", stop_hook_active: "false" });
+  return { s, change, stop };
+}
+
+/**
+ * Commits a change of `a.sh` on a new branch `other` in `dir`, switches back and to `other` again, then runs FileChanged
+ * for `a.sh` and a Stop through one server: neither may lint (F41).
+ *
+ * @param e - Test environment (`seed` ran; no linter call recorded yet).
+ * @param dir - Repository or linked-worktree directory holding the committed `a.sh` (`echo a`).
+ */
+async function assertBranchSwitchSkipped(e: LintEnv, dir: string): Promise<void> {
+  const a = path.join(dir, "a.sh");
+  git(e, dir, "checkout", "-q", "-b", "other");
+  writeFileSync(a, "echo $1\n");
+  commitAll(e, dir, "other");
+  git(e, dir, "checkout", "-q", "-");
+  assert.equal(readFileSync(a, "utf8"), "echo a\n");
+  git(e, dir, "checkout", "-q", "other");
+  assert.equal(readFileSync(a, "utf8"), "echo $1\n");
+  const { change, stop } = gitSession(e, dir);
+  assert.deepEqual(await change(a), {});
+  assert.deepEqual(await stop(), {});
+  assert.deepEqual(e.lines(), []);
+}
+
+/**
+ * Leaves `dir` in a pull stopped on a conflict (`UU c.sh`, auto-merged `M  m.sh`) plus an outside edit (` M x.sh`), then:
+ * FileChanged for c.sh and m.sh and a Stop lint nothing; FileChanged for x.sh lints it (F41).
+ *
+ * @param e - Test environment (`seed` ran; no linter call recorded yet).
+ * @param dir - Repository or linked-worktree directory of the env's repo.
+ */
+async function assertStoppedPullSkipped(e: LintEnv, dir: string): Promise<void> {
+  const up = path.join(e.cwd, "..", `up-${path.basename(dir)}`);
+  git(e, e.cwd, "clone", "-q", e.cwd, up);
+  writeFileSync(path.join(up, "c.sh"), "echo up\n");
+  writeFileSync(path.join(up, "m.sh"), "echo $2\n");
+  commitAll(e, up, "up");
+  const c = path.join(dir, "c.sh");
+  const m = path.join(dir, "m.sh");
+  const x = path.join(dir, "x.sh");
+  writeFileSync(c, "echo mine\n");
+  commitAll(e, dir, "mine");
+  const pull = spawnSync(path.join(e.bin, "git"), [...ID, "pull", "-q", "--no-rebase", up, "HEAD"], { cwd: dir, env: e.childEnv(), encoding: "utf8" });
+  assert.notEqual(pull.status, 0, `the pull stops on the conflict: ${pull.stderr}`);
+  writeFileSync(x, "echo $3\n");
+  const st = git(e, dir, "status", "--porcelain");
+  assert.match(st, /^UU c\.sh$/m);
+  assert.match(st, /^M {2}m\.sh$/m);
+  assert.match(st, /^ M x\.sh$/m);
+  const { change, stop } = gitSession(e, dir);
+  assert.deepEqual(await change(c), {});
+  assert.deepEqual(await change(m), {});
+  assert.deepEqual(await stop(), {});
+  assert.deepEqual(e.lines(), []);
+  await change(x);
+  assert.equal(e.lines().length, 1);
+  assert.match(e.lines()[0], /^shellcheck .*x\.sh/);
+}
+
+test("FileChanged: a file a branch switch rewrote is linted neither inline nor by the Stop sweep (F41)", async () => {
+  const e = makeEnv();
+  seed(e);
+  await assertBranchSwitchSkipped(e, e.cwd);
+});
+
+test("FileChanged: a file a fast-forward pull rewrote is linted neither inline nor by the Stop sweep (F41)", async () => {
+  const e = makeEnv();
+  seed(e);
+  const a = path.join(e.cwd, "a.sh");
+  const up = path.join(e.cwd, "..", "up");
+  git(e, e.cwd, "clone", "-q", e.cwd, up);
+  writeFileSync(path.join(up, "a.sh"), "echo $1\n");
+  commitAll(e, up, "up");
+  git(e, e.cwd, ...ID, "pull", "-q", "--ff-only", up, "HEAD");
+  assert.equal(readFileSync(a, "utf8"), "echo $1\n");
+  const { change, stop } = gitSession(e, e.cwd);
+  assert.deepEqual(await change(a), {});
+  assert.deepEqual(await stop(), {});
+  assert.deepEqual(e.lines(), []);
+});
+
+test("FileChanged: during a pull stopped on a conflict the conflicted and the auto-merged file are skipped, an outside edit is linted (F41)", async () => {
+  const e = makeEnv();
+  seed(e);
+  await assertStoppedPullSkipped(e, e.cwd);
+});
+
+test("FileChanged: a staged-only change outside a merge or rebase is linted (F41)", async () => {
+  const e = makeEnv();
+  seed(e);
+  const m = path.join(e.cwd, "m.sh");
+  writeFileSync(m, "echo $2\n");
+  git(e, e.cwd, "add", "m.sh");
+  assert.equal(git(e, e.cwd, "status", "--porcelain", "--", "m.sh"), "M  m.sh\n");
+  const { change } = gitSession(e, e.cwd);
+  await change(m);
+  assert.equal(e.lines().length, 1);
+  assert.match(e.lines()[0], /^shellcheck /);
+});
+
+test("FileChanged: in a linked worktree (.git is a gitdir: file) a branch switch and a stopped pull are skipped (F41)", async () => {
+  const e = makeEnv();
+  seed(e);
+  const wt = path.join(e.cwd, "..", "wt");
+  git(e, e.cwd, "worktree", "add", "-q", wt);
+  assert.match(readFileSync(path.join(wt, ".git"), "utf8"), /^gitdir: /);
+  await assertBranchSwitchSkipped(e, wt);
+  // MERGE_HEAD lies in <repo>/.git/worktrees/wt: the auto-merged m.sh is skipped only when gitDirOf follows the gitdir: line
+  await assertStoppedPullSkipped(e, wt);
+});
+
+test("FileChanged: while index.lock exists git status waits; the state git commits after it is clean, so nothing is linted (F41)", async () => {
+  const e = makeEnv();
+  seed(e);
+  const a = path.join(e.cwd, "a.sh");
+  const dotGit = path.join(e.cwd, ".git");
+  const c1 = git(e, e.cwd, "rev-parse", "HEAD").trim();
+  writeFileSync(a, "echo $1\n");
+  commitAll(e, e.cwd, "c2");
+  const c2 = git(e, e.cwd, "rev-parse", "HEAD").trim();
+  copyFileSync(path.join(dotGit, "index"), path.join(dotGit, "next-index"));
+  // back to the moment git is still writing: HEAD and index at c1, the worktree already holds c2's bytes
+  git(e, e.cwd, ...ID, "reset", "-q", c1);
+  assert.equal(git(e, e.cwd, "status", "--porcelain", "--", "a.sh"), " M a.sh\n");
+  renameSync(path.join(dotGit, "next-index"), path.join(dotGit, "index.lock"));
+  // the server's git spawns are recorded, then the real git runs (remove the symlink first: writing through it would overwrite git)
+  const realGit = readlinkSync(path.join(e.bin, "git"));
+  rmSync(path.join(e.bin, "git"));
+  e.stub("git", `printf 'git %s\\n' "$*" >> "$RECORD"`, `exec ${JSON.stringify(realGit)} "$@"`);
+  const { s, change, stop } = gitSession(e, e.cwd);
+  await s.key("s1"); // the server is up before the event arrives
+  const pending = change(a);
+  await sleep(300);
+  // git's last steps: HEAD moves, then the new index replaces the lock in one rename
+  git(e, e.cwd, ...ID, "update-ref", "HEAD", c2);
+  appendFileSync(e.record, "released\n");
+  renameSync(path.join(dotGit, "index.lock"), path.join(dotGit, "index"));
+  assert.deepEqual(await pending, {});
+  assert.deepEqual(await stop(), {});
+  const lines = e.lines();
+  const status = lines.findIndex((l) => l.startsWith("git --no-optional-locks"));
+  assert.ok(status > lines.indexOf("released"), `git status ran only after the lock was released: ${lines.join(" | ")}`);
+  assert.equal(lines.filter((l) => l.startsWith("shellcheck")).length, 0);
+});
+
+// the server's clock jumps past GIT_TIMEOUT_MS (`support/skew-clock.ts`) while the lock stays: no wall-clock threshold
+test("FileChanged: an index.lock that never goes away ends the wait at GIT_TIMEOUT_MS and the file is linted (fail open, F41)", async () => {
+  const e = makeEnv();
+  seed(e);
+  const a = path.join(e.cwd, "a.sh");
+  writeFileSync(a, "echo $1\n");
+  writeFileSync(path.join(e.cwd, ".git", "index.lock"), "");
+  const skewFile = path.join(path.dirname(e.record), "skew");
+  const s = e.server({ out: OUT, cwd: e.cwd, env: { NODE_OPTIONS: `--import=${fileURLToPath(new URL("./support/skew-clock.ts", import.meta.url))}`, SKEW_FILE: skewFile } });
+  await s.key("s1");
+  const pending = s.call("file_changed", { hook_event_name: "FileChanged", cwd: e.cwd, session_id: "s1", scratchpad_dir: "", file_path: a, event: "change" });
+  await sleep(300);
+  assert.equal(e.lines().length, 0, "the call is still waiting for the lock");
+  writeFileSync(skewFile, "11000");
+  await pending;
+  assert.equal(e.lines().length, 1);
+  assert.match(e.lines()[0], /^shellcheck /);
 });
 
 test("FileChanged: 20 concurrent events lint at most FILE_CHANGED_SLOTS at a time, all 20 linted, slots released (F10)", async () => {
