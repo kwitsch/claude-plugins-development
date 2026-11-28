@@ -1,6 +1,6 @@
 # Size calibration: why the size step asks a `choice` and accepts at probability 0.5
 
-Why `build-task` (SKILL.md step 2.3) sizes with a `choice` question over S/M/L/XL, with these descriptions, and accepts the answer at `probabilities[choice] >= 0.5`. Measured 2026-11-27 against the real System One endpoint (taskflow 2.4.0). `size-task` implements it. Re-run the scripts below before changing the wording.
+Why taskflow's size step (since 3.3.0 the `Size` stage of `build-task-design.workflow.js`, before that build-task SKILL.md step 2.3) sizes with a `choice` question over S/M/L/XL, with these descriptions, and accepts the answer at `probabilities[choice] >= 0.5`. Measured 2026-11-27 against the real System One endpoint (taskflow 2.4.0). `size-task` implements it. Re-run the scripts below before changing the wording.
 
 ## Problem
 

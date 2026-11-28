@@ -1,6 +1,6 @@
 {
   "name": "taskflow",
-  "version": "3.2.0",
+  "version": "3.3.0",
   "private": true,
   "description": "Runs a spec-driven design and delivery pipeline for a task (/taskflow:build-task) and reviews and fixes a branch's changes (/taskflow:review-task).",
   "author": {
@@ -20,14 +20,12 @@
   "claudePlugin": {},
   "pluginBuild": {
     "assets": [
-      "skills/build-task/workflows/design.md",
-      "skills/build-task/workflows/explore.md",
       "skills/build-task/workflows/implement.md",
       "skills/build-task/workflows/ship.md",
+      "skills/design-task/workflows/design.md",
       "skills/plan-task/workflows/plan.md",
       "skills/spec-task/workflows/spec.md",
       "workflows/build-task-design.workflow.js",
-      "workflows/build-task-explore.workflow.js",
       "workflows/build-task-implement.workflow.js",
       "workflows/build-task-plan.workflow.js",
       "workflows/build-task-ship.workflow.js",

@@ -1,4 +1,4 @@
-// Structural checks of the built taskflow plugin: manifest, the six skills, the six workflow scripts, the eleven
+// Structural checks of the built taskflow plugin: manifest, the seven skills, the five workflow scripts, the eleven
 // agents, the docs, plus the developer notes (taskflow/CLAUDE.md, taskflow/.claude/rules/) and .oxlintrc.json from
 // their source paths. Ported from the old bats suite; grep line matches become `m`-flag regexes over the whole text,
 // `[[:space:]]` becomes `[ \t]`. Shipped files are read from the built plugin/, so build before testing.
@@ -26,7 +26,11 @@ const PLAN_TASK = `${PLUGIN}/skills/plan-task`;
 const SPEC_REF = `${SPEC_TASK}/workflows/spec.md`;
 /** The plan script's usage doc, owned by plan-task. */
 const PLAN_REF = `${PLAN_TASK}/workflows/plan.md`;
-/** build-task's four usage docs. */
+/** The design-task skill. */
+const DESIGN_TASK = `${PLUGIN}/skills/design-task`;
+/** The design script's usage doc, owned by design-task. */
+const DESIGN_REF = `${DESIGN_TASK}/workflows/design.md`;
+/** build-task's two usage docs. */
 const BT_WF = `${SKILL}/workflows`;
 /** The agent files. */
 const AGENTS = `${PLUGIN}/agents`;
@@ -40,14 +44,14 @@ const WF_RULE = "taskflow/.claude/rules/workflows.md";
 const DISPATCH_RULE = "taskflow/.claude/rules/dispatch-task.md";
 /** Everything the old suite swept as "the plugin": the shipped files and the developer notes. */
 const TREE = [PLUGIN, DEV_NOTES, "taskflow/.claude/rules"];
-/** The NO_NARRATION constant every script except design defines. */
+/** The NO_NARRATION constant every build-task script defines. */
 const NO_NARRATION_CONST = "const NO_NARRATION = \"No narrative text between tool calls — call tools silently and speak only in your final message (the report or structured output). Write that final message in English, whatever the language of the task or its inputs; commit messages are not covered.\";";
 /** German stopwords that must not appear in workflow comments. */
 const GERMAN = /\b(und|oder|nicht|wird|werden|auch|sowie|sind|eine|einen|kein|keine|wenn|dass|immer|nie|schritt)\b/i;
-/** The six build-task script names. */
-const BT_NAMES = ["explore", "design", "spec", "plan", "implement", "ship"];
-/** build-task's four usage docs, relative to the build-task skill (spec.md and plan.md live in spec-task and plan-task). */
-const USAGE_DOCS = ["explore", "design", "implement", "ship"].map((n) => `workflows/${n}.md`);
+/** The five build-task script names. */
+const BT_NAMES = ["design", "spec", "plan", "implement", "ship"];
+/** build-task's two usage docs, relative to the build-task skill (design.md, spec.md and plan.md live in design-task, spec-task and plan-task). */
+const USAGE_DOCS = ["implement", "ship"].map((n) => `workflows/${n}.md`);
 
 /**
  * Absolute path of a repository path.
@@ -211,8 +215,8 @@ describe("manifest", () => {
     expect(manifest).not.toHaveProperty("userConfig");
   });
 
-  test("package.json and plugin.json versions agree and are 3.2.0", () => {
-    expect(pkg.version).toBe("3.2.0");
+  test("package.json and plugin.json versions agree and are 3.3.0", () => {
+    expect(pkg.version).toBe("3.3.0");
     expect(manifest.version).toBe(pkg.version);
   });
 
@@ -269,40 +273,44 @@ describe("build-task skill", () => {
     expect(read(F)).not.toMatch(/^disable-model-invocation:[ \t]*true/m);
   });
 
-  test("build-task SKILL.md references its four usage reference files", () => {
+  test("build-task SKILL.md references its two usage reference files", () => {
     expectHas(F, USAGE_DOCS);
   });
 
-  test("all four build-task usage reference files exist and are non-empty; the references/ directory is gone", () => {
+  test("both build-task usage reference files exist and are non-empty; the references/ directory is gone", () => {
     for (const f of USAGE_DOCS) expect(nonEmpty(`${SKILL}/${f}`), f).toBe(true);
     expect(existsSync(abs(`${SKILL}/references`))).toBe(false);
   });
 
-  test("build-task SKILL.md runs all six scripts by name, sizes the task (jev-api or own reasoning) and reviews with review-task", () => {
-    expectHas(F, ["Never use `scriptPath`", "taskflow:build-task-<name>", "build-task-explore", "build-task-design", "build-task-spec", "args global is undefined", "select:mcp__jev-api__request", "select:mcp__taskflow__size-task", "mcp__taskflow__size-task", "Size: <result>", "explore-<slug>.md", "The skill never Reads these files", "EXPLORE_PATH", "SIZE", "build-task-plan", "build-task-implement", "build-task-ship", "IMPLEMENT_PATH", "REVIEW_PATH", "PR_BODY_PATH", "implement-<slug>.json", "review-<slug>.json", "pr-body-<slug>.md", "Review level: <level> (size <X>)", "taskflow:review-task", "--size=<SIZE>", "except `REVIEW_PATH`, which the skill writes itself in step 5.3", "taskflow:spec-task", "taskflow:plan-task", "build-task-plan`"]);
+  test("build-task SKILL.md runs implement and ship by name, design, spec and plan through their skills, and reviews with review-task", () => {
+    expectHas(F, ["Never use `scriptPath`", "taskflow:build-task-<name>", "build-task-design", "build-task-spec", "args global is undefined", "select:mcp__jev-api__request", "The skill never Reads these files", "EXPLORE_PATH", "SIZE", "build-task-plan", "build-task-implement", "build-task-ship", "IMPLEMENT_PATH", "REVIEW_PATH", "PR_BODY_PATH", "implement-<slug>.json", "review-<slug>.json", "pr-body-<slug>.md", "Review level: <level> (size <X>)", "taskflow:review-task", "--size=<SIZE>", "except `REVIEW_PATH`, which the skill writes itself in step 4.3", "taskflow:spec-task", "taskflow:plan-task", "build-task-plan`", "taskflow:design-task", "[design-task](../design-task/SKILL.md)"]);
     expect(read(F)).toMatch(/^allowed-tools:.*"Skill"/m);
-    expectLacks(F, ["design-to-spec", "difficulty", "spec-driven-delivery", "SHIP: false", "invoke by name", "build-task-review", "escalatedToUser", "ponytailReview", "workflows/review.md"]);
+    expectLacks(F, ["design-to-spec", "difficulty", "spec-driven-delivery", "SHIP: false", "invoke by name", "build-task-review", "escalatedToUser", "ponytailReview", "workflows/review.md", "build-task-explore", "mcp__taskflow__size-task", "Size: <result>", "RESUME", "USER_INPUT", "user_input_required", "workflows/explore.md", "workflows/design.md"]);
     expect((read(F).match(/\n/g) ?? []).length).toBeLessThan(500);
+    expect(countLines(F, "taskflow:design-task")).toBeGreaterThanOrEqual(1);
   });
 
-  test("build-task SKILL.md runs the spec as step 4, after the intent confirmation; Deliver is step 5, the report step 6", () => {
-    expectHas(F, ["(Design → Intent confirmation → Spec →", "3. **Intent confirmation.**", "4. **Spec.** Runs once, after the \"Yes\" of step 3.", "5. **Deliver.**", "6. **Report.**", "checkpoint on the design; the spec (step 4) is written from the approved", "as `PLUGIN_ROOT` (step 5.4)", "create-or-update, step 5)", "script (step 2) fails loud", "design and step 5 calls", "step 6 then reports", "(step 6): the spec shipped without"]);
-    expectLacks(F, ["step 2.5", "5. **Spec.**", "4. **Deliver.**", "5. **Escalations & report.**", "(step 4.4)", "does the spec count as", "6. **Escalations & report.**"]);
+  test("build-task SKILL.md runs design-task as step 2 and the spec as step 3; Deliver is step 4, the report step 5", () => {
+    expectHas(F, ["(Design → Spec → Plan → Implement → Review → Ship)", "Skill(skill: \"taskflow:design-task\", args: \"<task text>\")", "A last line starting `design-task:`", "3. **Spec.** Runs once, after design-task's `RESULT:` line.", "4. **Deliver.**", "5. **Report.**", "as `PLUGIN_ROOT` (step 4.4)", "create-or-update, step 4)", "scripts (step 4) fail loud", "for the step 4 calls", "step 5 then reports", "(step 5): the spec shipped without", "`SIZE` picks the designer model, the planner model and the review level."]);
+    expectLacks(F, ["step 2.5", "3. **Intent confirmation.**", "5. **Spec.**", "4. **Spec.**", "5. **Deliver.**", "6. **Report.**", "(step 5.4)", "5. **Escalations & report.**", "does the spec count as", "6. **Escalations & report.**"]);
     expectHas(F, ["Skill(skill: \"taskflow:spec-task\", args: \"--size=<SIZE> <DRAFT_PATH>\")", "A last line starting `spec-task:`", "[spec-task](../spec-task/SKILL.md)", "[plan-task](../plan-task/SKILL.md)"]);
     expectLacks(F, ["{DRAFT_PATH, SPEC_PATH}", "workflows/spec.md", "workflows/plan.md"]);
-    expectHas(SPEC_REF, ["spec-task runs this script; build-task calls spec-task once, after the user confirmed the design intent (build-task SKILL.md step 4); intent corrections re-run only the design script."]);
-    expectLacks(SPEC_REF, ["re-runs the design script and then"]);
+    expectHas(SPEC_REF, ["spec-task runs this script; build-task calls spec-task once, after design-task returned the approved design (build-task SKILL.md step 3); intent corrections go to the designer inside design-task."]);
+    expectLacks(SPEC_REF, ["re-runs the design script and then", "build-task SKILL.md step 4"]);
+    expectHas(`${SPEC_TASK}/SKILL.md`, ["build-task calls it as\nits step 3."]);
+    expectHas(`${PLAN_TASK}/SKILL.md`, ["its step 4.1."]);
+    expectHas(`${REVIEW_TASK}/SKILL.md`, ["(step 4.3)"]);
     expect(existsSync(abs(`${BT_WF}/review.md`))).toBe(false);
   });
 
-  test("build-task design-pipeline usage references exist and document their contracts", () => {
-    for (const f of [`${BT_WF}/explore.md`, `${BT_WF}/design.md`, SPEC_REF]) {
+  test("design-pipeline usage references exist and document their contracts; build-task's explore.md and design.md are gone", () => {
+    for (const f of [DESIGN_REF, SPEC_REF]) {
       expect(nonEmpty(f), f).toBe(true);
       expectHas(f, ["taskflow:build-task-", "args global is undefined", "const args = { … }", "stage: 'args'"]);
       expectLacks(f, ["claude-opus-4-8", "design-to-spec"]);
     }
-    expectHas(`${BT_WF}/explore.md`, ["`TASK`", "`EXPLORE_PATH`", "`GRAPHMIND_AVAILABLE`", "`REPO_PATH`", "`explorePath`", "`subsystems`", "haiku"]);
-    expectHas(`${BT_WF}/design.md`, ["`EXPLORE_PATH`", "`DRAFT_PATH`", "`SIZE`", "`RESUME`", "`USER_INPUT`", "`user_input_required`", "`minorFindings`", "fable", "`GRAPHMIND_AVAILABLE` only adds a hint to the designer and design-reviewer prompts"]);
+    expect(existsSync(abs(`${BT_WF}/explore.md`))).toBe(false);
+    expect(existsSync(abs(`${BT_WF}/design.md`))).toBe(false);
     expectHas(SPEC_REF, ["`DRAFT_PATH`", "`SPEC_PATH`", "`specPath`", "`specReviewed`", "`minorFindings`", "`USER_INPUT`", "`user_input_required`", "`conflict`", "`rounds_exhausted`"]);
     expectLacks(SPEC_REF, ["still blocking after one", "blocking findings survived the fix round"]);
   });
@@ -310,8 +318,8 @@ describe("build-task skill", () => {
   test("build-task routes every decision through taskflow:decide and forwards --headless", () => {
     expect(read(F)).toMatch(/^argument-hint: "\[--skip-branch-check\] \[--headless\] \[task-description\]"$/m);
     expect(read(F)).toMatch(/^allowed-tools:.*"Agent"/m);
-    expectHas(F, ["Skill(skill: \"taskflow:decide\", args: \"[--headless] <JSON>\")", "`DECISIONS:`", "never call `AskUserQuestion` directly", "`$ARGUMENTS` may start with `--skip-branch-check` and/or `--headless`", "context: whyItMatters", "\"id\": \"intent\"", "\"Yes — proceed\", \"No — needs changes\"", "\"id\": \"changes\"", "headless intent check rejected the design without corrections", "headless design did not converge after 3 resumes", "with `--headless` prepended to `args`", "\"id\": \"reversal-<hash>\"", "`Decided ...`", "(step 3's Keypoints are shown by its decide call)"]);
-    expectLacks(F, ["User decisions go through `AskUserQuestion`", "separate, mandatory"]);
+    expectHas(F, ["Skill(skill: \"taskflow:decide\", args: \"[--headless] <JSON>\")", "`DECISIONS:`", "never call `AskUserQuestion` directly", "`$ARGUMENTS` may start with `--skip-branch-check` and/or `--headless`", "with `--headless` prepended to `args`", "\"id\": \"reversal-<hash>\"", "`Decided ...`"]);
+    expectLacks(F, ["User decisions go through `AskUserQuestion`", "separate, mandatory", "\"id\": \"intent\"", "\"id\": \"changes\"", "(step 3's Keypoints are shown by its decide call)", "headless design did not converge after 3 resumes"]);
     // AskUserQuestion survives only in allowed-tools, the description and the never-call sentence
     for (const l of read(F).split("\n").filter((x) => x.includes("AskUserQuestion"))) expect(l).toMatch(/^allowed-tools:|decide skill \(AskUserQuestion|never call `AskUserQuestion` directly/);
   });
@@ -332,31 +340,26 @@ describe("workflows/", () => {
 });
 
 describe("build-task scripts", () => {
-  test("explore.workflow.js: meta, three phases, args guard, NO_NARRATION on every inline prompt, graphmind path, lens-checked scribe", () => {
-    const F = `${WORKFLOWS}/build-task-explore.workflow.js`;
-    expect(nonEmpty(F)).toBe(true);
-    expectHas(F, ["export const meta = {", "name: \"build-task-explore\"", "function decodeArgs", "decodeArgs([\"TASK\", \"EXPLORE_PATH\"], { GRAPHMIND_AVAILABLE: false, REPO_PATH: \"\" })", NO_NARRATION_CONST, "scoutPrompt = `${NO_NARRATION}", "`${NO_NARRATION}\\n\\nYou are a read-only codebase explorer", "seenProposedNames", "explorer: \"haiku\"", "scribe: \"haiku\"", "required: [\"subsystems\"]", "mcp__graphmind__gm_search", "mcp__graphmind__gm_memory_search", "project: \"${REPO}\"", "GRAPHMIND_AVAILABLE=true requires a non-empty absolute REPO_PATH", "{ title: \"Scout\"", "{ title: \"Explore\"", "{ title: \"Scribe\"", "phase(\"Scout\")", "phase(\"Explore\")", "phase(\"Scribe\")", "label: s.name", "label: \"graphmind memory\"", "## Lens: ", "_End of lens: ", "lensHeaders", "lensFooters", "agentType: \"taskflow:explore-scribe\"", "stage: \"Scout\"", "stage: \"Scribe\"", "<<<BEGIN>>>", "label: \"scribe:retry\"", "scribe could not write EXPLORE_PATH", "explorePath: EXPLORE_PATH"]);
-    // exactly one phase() call per section: Scout, Explore, Scribe
-    expect(countLines(F, "phase(\"")).toBe(3);
-    expect(followedBy("graphmindExplorePrompt = (s) =>", "`${NO_NARRATION}\\n\\nYou are a read-only codebase explorer", F)).toBe(true);
-    expect(followedBy("graphmindRecallPrompt = () =>", "`${NO_NARRATION}", F)).toBe(true);
-    expect(followedBy("explorerPrompt = (s) =>", "`${NO_NARRATION}", F)).toBe(true);
-    expectLacks(F, ["difficulty", "resumeNote", "AGENTS", "DRAFT_PATH", "SPEC_PATH", "Task:\\n${TASK}", "explore:", "wc -c", "MIN_WRITE_RATIO", "minBytes", "expectedBytes", "Recorded project knowledge", "scribePrompt = `${NO_NARRATION}"]);
-    // the only agentTypes allowed in the explore script: the built-in Explore agent and the Read/Write-only explore scribe
-    expect(read(F).split("\n").filter((l) => l.includes("agentType") && !l.includes("agentType: \"Explore\"") && !l.includes("agentType: \"taskflow:explore-scribe\""))).toEqual([]);
-  });
-
   test("build-task design-pipeline scripts parse as async function bodies", () => {
     for (const f of ls(WORKFLOWS, ".workflow.js").filter((n) => n.startsWith("build-task-"))) {
       expect(() => parsesAsAsyncBody(read(`${WORKFLOWS}/${f}`)), f).not.toThrow();
     }
   });
 
-  test("design.workflow.js: args guards, SIZE-keyed designer model, role files by absolute path, inline prompts", () => {
+  test("design.workflow.js: meta, five phases, args guards, NO_NARRATION on every inline prompt, graphmind path, lens-checked scribe, size agent, SIZE-keyed designer, blocked exits", () => {
     const F = `${WORKFLOWS}/build-task-design.workflow.js`;
     expect(nonEmpty(F)).toBe(true);
-    expectHas(F, ["export const meta = {", "name: \"build-task-design\"", "function decodeArgs", "decodeArgs([\"TASK\", \"EXPLORE_PATH\", \"DRAFT_PATH\"], { SIZE: \"\", RESUME: false, USER_INPUT: \"\" })", "RESUME=true requires USER_INPUT", "const DESIGN_MODEL = { S: \"sonnet\", M: \"opus\", L: \"opus\", XL: \"fable\" };", "const designerModel = (s) => DESIGN_MODEL[String(s).toUpperCase()] || \"opus\";", "let DESIGNER_MODEL = designerModel(SIZE);", "model: DESIGNER_MODEL", "designReview: \"sonnet\"", "if (DESIGNER_MODEL !== \"fable\") throw e;", "DESIGNER_MODEL = \"opus\";", "function hasContaminatedKeypoints", "if (d === null || hasContaminatedKeypoints(d))", "never embedded as text/tags", "agentType: \"taskflow:designer\"", "agentType: \"taskflow:design-reviewer\"", "Read the exploration file at ${EXPLORE_PATH} before designing", "per your role", "Apply your full checklist (role definition)", "status: \"user_input_required\"", "Re-run this workflow with RESUME=true, the same DRAFT_PATH and EXPLORE_PATH, and the answers as USER_INPUT (recommended: JSON [{id, answer}]).", "minorFindings: (review.findings || []).filter((f) => f.severity === \"minor\")"]);
-    expectLacks(F, ["difficulty", "AGENTS", "ROLE", "SKILL_DIR", "NO_NARRATION", "explorationBlock", "phase(\"Spec\")", "phase(\"Explore\")", "agent definition"]);
+    expectHas(F, ["export const meta = {", "name: \"build-task-design\"", "function decodeArgs", "decodeArgs([\"TASK\", \"EXPLORE_PATH\", \"DRAFT_PATH\"], { GRAPHMIND_AVAILABLE: false, REPO_PATH: \"\" })", NO_NARRATION_CONST, "scoutPrompt = `${NO_NARRATION}", "`${NO_NARRATION}\\n\\nYou are a read-only codebase explorer", "seenProposedNames", "explorer: \"haiku\"", "scribe: \"haiku\"", "size: \"haiku\"", "required: [\"subsystems\"]", "mcp__graphmind__gm_search", "mcp__graphmind__gm_memory_search", "project: \"${REPO}\"", "GRAPHMIND_AVAILABLE=true requires a non-empty absolute REPO_PATH", "must be an absolute path", "{ title: \"Scout\"", "{ title: \"Explore\"", "{ title: \"Scribe\"", "{ title: \"Size\"", "{ title: \"Design\"", "phase(\"Scout\")", "phase(\"Explore\")", "phase(\"Scribe\")", "phase(\"Size\")", "phase(\"Design\")", "label: s.name", "label: \"graphmind memory\"", "## Lens: ", "_End of lens: ", "lensHeaders", "lensFooters", "agentType: \"taskflow:explore-scribe\"", "stage: \"Scout\"", "stage: \"Explore\"", "stage: \"Scribe\"", "<<<BEGIN>>>", "label: \"scribe:retry\"", "scribe could not write EXPLORE_PATH", "explorePath: EXPLORE_PATH", "select:mcp__taskflow__size-task", "label: \"size\"", "label: \"size:retry\"", "size: { enum: [\"S\", \"M\", \"L\", \"XL\"] }", "M (size agent returned no result; default)", "own reasoning", "status: \"blocked\"", "\"Re-run explore\"", "\"Retry the design\"", "\"Run another design round\"", "id: \"explore\"", "id: \"design-blocked\"", "id: \"review-failed\"", "id: \"findings\"", "open design questions", "const DESIGN_MODEL = { S: \"sonnet\", M: \"opus\", L: \"opus\", XL: \"fable\" };", "const designerModel = (s) => DESIGN_MODEL[String(s).toUpperCase()] || \"opus\";", "let DESIGNER_MODEL = designerModel(SIZE);", "model: DESIGNER_MODEL", "designReview: \"sonnet\"", "if (DESIGNER_MODEL !== \"fable\") throw e;", "DESIGNER_MODEL = \"opus\";", "function hasContaminatedKeypoints", "if (d === null || hasContaminatedKeypoints(d))", "never embedded as text/tags", "agentType: \"taskflow:designer\"", "agentType: \"taskflow:design-reviewer\"", "Read the exploration file at ${EXPLORE_PATH} before designing", "per your role", "Apply your full checklist (role definition)", "minorFindings: (review.findings || []).filter((f) => f.severity === \"minor\")"]);
+    // exactly one phase() call per section: Scout, Explore, Scribe, Size, Design
+    expect(countLines(F, "phase(\"")).toBe(5);
+    expect(followedBy("graphmindExplorePrompt = (s) =>", "`${NO_NARRATION}\\n\\nYou are a read-only codebase explorer", F)).toBe(true);
+    expect(followedBy("graphmindRecallPrompt = () =>", "`${NO_NARRATION}", F)).toBe(true);
+    expect(followedBy("explorerPrompt = (s) =>", "`${NO_NARRATION}", F)).toBe(true);
+    expect(followedBy("sizePrompt =", "`${NO_NARRATION}", F)).toBe(true);
+    expectLacks(F, ["difficulty", "resumeNote", "AGENTS", "ROLE", "SKILL_DIR", "SPEC_PATH", "explore:", "wc -c", "MIN_WRITE_RATIO", "minBytes", "expectedBytes", "Recorded project knowledge", "scribePrompt = `${NO_NARRATION}", "explorationBlock", "phase(\"Spec\")", "agent definition", "RESUME", "USER_INPUT", "user_input_required"]);
+    // the only agentTypes allowed in the design script: the built-in Explore agent and the three plugin roles
+    const allowed = ["agentType: \"Explore\"", "agentType: \"taskflow:explore-scribe\"", "agentType: \"taskflow:designer\"", "agentType: \"taskflow:design-reviewer\""];
+    expect(read(F).split("\n").filter((l) => l.includes("agentType") && !allowed.some((a) => l.includes(a)))).toEqual([]);
   });
 
   test("spec.workflow.js: spec-writer agent, inline reviewer, English, lean carry-forward, specReviewed", () => {
@@ -372,17 +375,17 @@ describe("build-task scripts", () => {
     expectHas(`${AGENTS}/spec-writer.md`, ["tools: [\"Read\", \"Write\"]", "with the Write tool", "model: sonnet"]);
   });
 
-  test("build-task scripts: meta, decodeArgs fail-fast, NO_NARRATION, no AGENTS map in explore and spec, clean comments", () => {
-    expect(ls(WORKFLOWS, ".workflow.js").filter((n) => n.startsWith("build-task-"))).toHaveLength(6);
+  test("build-task scripts: meta, decodeArgs fail-fast, NO_NARRATION, no AGENTS map in spec, clean comments", () => {
+    expect(ls(WORKFLOWS, ".workflow.js").filter((n) => n.startsWith("build-task-"))).toHaveLength(5);
     for (const n of BT_NAMES) {
       const f = `${WORKFLOWS}/build-task-${n}.workflow.js`;
       expect(nonEmpty(f), f).toBe(true);
       expectHas(f, ["export const meta = {", "function decodeArgs", "args global is "]);
       expect(read(f)).toMatch(new RegExp(`name:[ \\t]*["']build-task-${n}["']`));
-      if (n !== "design") expectHas(f, [NO_NARRATION_CONST]);
+      expectHas(f, [NO_NARRATION_CONST]);
       expect(read(f)).toMatch(/stage:[ \t]*["']args["']/);
       expectLacks(f, ["Date.now()", "Math.random()", "new Date()"]);
-      if (n === "explore" || n === "spec") expectLacks(f, ["agentType: AGENTS."]);
+      if (n === "spec") expectLacks(f, ["agentType: AGENTS."]);
       expect(read(f)).not.toMatch(/^import /m);
       expectEnglishComments(f);
     }
@@ -485,10 +488,9 @@ describe("model assignment", () => {
     expect(sweep([WORKFLOWS], /PINNED_OPUS/)).toEqual([]);
   });
 
-  test("explore scout schema carries no difficulty; the designer model comes from build-task's SIZE", () => {
-    expectHas(`${WORKFLOWS}/build-task-explore.workflow.js`, ["required: [\"subsystems\"]"]);
-    expectLacks(`${WORKFLOWS}/build-task-explore.workflow.js`, ["difficulty"]);
-    expectHas(`${WORKFLOWS}/build-task-design.workflow.js`, ["let DESIGNER_MODEL = designerModel(SIZE)"]);
+  test("the scout schema carries no difficulty; the designer model comes from the Size stage", () => {
+    expectHas(`${WORKFLOWS}/build-task-design.workflow.js`, ["required: [\"subsystems\"]", "let DESIGNER_MODEL = designerModel(SIZE)"]);
+    expectLacks(`${WORKFLOWS}/build-task-design.workflow.js`, ["difficulty"]);
   });
 
   test("design.workflow.js designer dispatch falls back from fable to opus on a throw", () => {
@@ -496,7 +498,7 @@ describe("model assignment", () => {
   });
 
   test("sonnet and haiku workflow assignments stay bare aliases", () => {
-    expectHas(`${WORKFLOWS}/build-task-explore.workflow.js`, ["explorer: \"haiku\""]);
+    expectHas(`${WORKFLOWS}/build-task-design.workflow.js`, ["explorer: \"haiku\"", "size: \"haiku\""]);
     expectHas(`${WORKFLOWS}/build-task-implement.workflow.js`, ["merger: \"haiku\"", "const implModel = (t) => (t.complexity === \"complex\" ? \"opus\" : \"haiku\");"]);
     expectHas(`${WORKFLOWS}/build-task-plan.workflow.js`, ["planChecker: \"sonnet\""]);
   });
@@ -512,8 +514,8 @@ describe("model assignment", () => {
   });
 
   test("README and the design/delivery usage references carry no pinned model ID and name fable", () => {
-    for (const f of [`${PLUGIN}/README.md`, `${BT_WF}/design.md`, PLAN_REF, `${BT_WF}/implement.md`, `${BT_WF}/ship.md`]) expectLacks(f, ["claude-opus-4-8"]);
-    for (const f of [`${PLUGIN}/README.md`, `${BT_WF}/design.md`, PLAN_REF]) expectHas(f, ["fable"]);
+    for (const f of [`${PLUGIN}/README.md`, DESIGN_REF, PLAN_REF, `${BT_WF}/implement.md`, `${BT_WF}/ship.md`]) expectLacks(f, ["claude-opus-4-8"]);
+    for (const f of [`${PLUGIN}/README.md`, DESIGN_REF, PLAN_REF]) expectHas(f, ["fable"]);
   });
 
   test("no claude-opus-4-8 pin survives anywhere in the plugin or its developer notes", () => {
@@ -650,7 +652,7 @@ describe("decide skill", () => {
   test("decide body: --headless, advisor first, taskflow:decider fallback, DECISIONS line, error texts, no exclamation-backtick", () => {
     expectHas(F, ["--headless", "advisor()", "taskflow:decider", "DECISIONS:", "decide: invalid input:", "decide: no headless decision:", "Decided <id>: <answer> (<BY>: <reason>)", "Headless never falls back to `AskUserQuestion`"]);
     expectLacks(F, ["!`"]);
-    expectHas(F, ["# decide — one decision step for taskflow's skills", "build-task, review-task, spec-task and plan-task"]);
+    expectHas(F, ["# decide — one decision step for taskflow's skills", "build-task, design-task, review-task, spec-task and plan-task"]);
   });
 });
 
@@ -679,6 +681,27 @@ describe("spec-task and plan-task skills", () => {
       expectHas(s.ref, ["`USER_INPUT`", "`user_input_required`"]);
     });
   }
+});
+
+describe("design-task skill", () => {
+  const F = `${DESIGN_TASK}/SKILL.md`;
+
+  test("design-task SKILL.md: contract, workflow run, decide routing, designer-only dispatch, acceptance and RESULT line", () => {
+    expect(nonEmpty(F)).toBe(true);
+    expect(read(F)).toMatch(/^name: design-task$/m);
+    expect(read(F)).toMatch(/^argument-hint: "\[--headless\] <task prompt>"$/m);
+    for (const t of ["Read", "Bash", "Workflow", "ToolSearch", "Skill", "Agent"]) expect(read(F)).toMatch(new RegExp(`^allowed-tools:.*"${t}"`, "m"));
+    expectHas(F, ["taskflow:build-task-design", "args global is undefined", "Never use `scriptPath`", "Plugin root: ${CLAUDE_PLUGIN_ROOT}", "Skill(skill: \"taskflow:decide\", args: \"[--headless] <JSON>\")", "`DECISIONS:`", "context: whyItMatters", "Re-run explore", "Retry the design", "Run another design round", "subagent_type: \"taskflow:designer\"", "There is no StructuredOutput tool in this run", "<openQuestions", "DECISIONS_SO_FAR", "\"id\": \"intent\"", "\"Yes — proceed\", \"No — needs changes\"", "\"id\": \"changes\"", "headless design did not converge after 3 re-runs", "headless intent check rejected the design without corrections", "RESULT: {\"explorePath\"", "design-task: missing task prompt", "Size: <sizeLine>", "`Decided ...`", "workflows/design.md", "graphmind which", "select:mcp__graphmind__gm_search", "explore-<slug>.md", "draft-<slug>.md"]);
+    expectLacks(F, ["!`", "context: fork", "disable-model-invocation", "--size="]);
+    // AskUserQuestion appears only in the never-call sentence
+    for (const l of read(F).split("\n").filter((x) => x.includes("AskUserQuestion"))) expect(l).toMatch(/never call `AskUserQuestion` directly/);
+  });
+
+  test("design-task ships the design script's usage reference with the merged contract", () => {
+    expect(nonEmpty(DESIGN_REF)).toBe(true);
+    expectHas(DESIGN_REF, ["taskflow:build-task-design", "args global is undefined", "const args = { … }", "stage: 'args'", "`TASK`", "`EXPLORE_PATH`", "`DRAFT_PATH`", "`GRAPHMIND_AVAILABLE`", "`REPO_PATH`", "`explorePath`", "`subsystems`", "`blocked`", "`minorFindings`", "haiku", "fable", "with the Write tool", "`GRAPHMIND_AVAILABLE` only adds a hint to the designer and design-reviewer prompts", "`taskflow:explore-scribe`", "`## Lens: <name>`", "`_End of lens: <name>_`", "| `Scout`", "| `Explore`", "| `Scribe`", "`graphmind memory`", "mcp__taskflow__size-task", "never by re-running this script's Design stage"]);
+    expectLacks(DESIGN_REF, ["claude-opus-4-8", "design-to-spec", "`RESUME`", "`USER_INPUT`", "`user_input_required`", "heredoc", "90%", "wc -c", "that count plus one", "byte count is verified", "Recorded project knowledge"]);
+  });
 });
 
 describe("ship merge-state remediation wiring", () => {
@@ -870,8 +893,8 @@ describe("graphmind", () => {
     expectHas(`${SKILL}/SKILL.md`, ["select:mcp__graphmind__gm_search", "graphmind which", "GRAPHMIND_AVAILABLE, REPO_PATH}"]);
   });
 
-  test("reference docs document GRAPHMIND_AVAILABLE and REPO_PATH for the explore script and the plan script", () => {
-    for (const f of [`${BT_WF}/explore.md`, PLAN_REF]) expectHas(f, ["`GRAPHMIND_AVAILABLE`", "`REPO_PATH`"]);
+  test("reference docs document GRAPHMIND_AVAILABLE and REPO_PATH for the design script and the plan script", () => {
+    for (const f of [DESIGN_REF, PLAN_REF]) expectHas(f, ["`GRAPHMIND_AVAILABLE`", "`REPO_PATH`"]);
   });
 
   test("the workflow rule documents the conditional graphmind path and README mentions graphmind", () => {
@@ -960,13 +983,13 @@ describe("build-task delivery scripts", () => {
   });
 
   test("explore scribe is the Read/Write-only explore-scribe agent with a lens header/footer check and one retry; implement persist keeps the exact-size check", () => {
-    const ex = `${WORKFLOWS}/build-task-explore.workflow.js`;
+    const ex = `${WORKFLOWS}/build-task-design.workflow.js`;
     expectHas(ex, ["Retry: the file may already exist from an earlier attempt; Read it first, then overwrite it.", "{ ...scribeOpts, label: \"scribe:retry\" })", "const lensProblems = (w) =>", "missing lens header(s): ", "lens header(s) without footer: ", "differ from the expected lenses in count or order", "Do not write anything. Read ", "reserved for the memory recall"]);
     expectLacks(ex, ["TASKFLOW_MD_EOF", "NEVER the Write or Edit tool", "scribeRetryPrompt", "isIntactRetry", "printf", "w.bytes", "0.9"]);
     expectHas(`${AGENTS}/explore-scribe.md`, ["tools: [\"Read\", \"Write\"]", "with the Write tool", "Read the file back", "never what the prompt contained"]);
-    expectHas(`${BT_WF}/explore.md`, ["with the Write tool"]);
-    for (const n of ["explore", "implement"]) expectLacks(`${WORKFLOWS}/build-task-${n}.workflow.js`, ["printf", "retryPrompt"]);
-    expectLacks(`${BT_WF}/explore.md`, ["heredoc"]);
+    expectHas(DESIGN_REF, ["with the Write tool"]);
+    for (const n of ["design", "implement"]) expectLacks(`${WORKFLOWS}/build-task-${n}.workflow.js`, ["printf", "retryPrompt"]);
+    expectLacks(DESIGN_REF, ["heredoc"]);
     for (const n of ["implement"]) {
       const f = `${WORKFLOWS}/build-task-${n}.workflow.js`;
       expect(countLines(f, "w.bytes === expectedBytes || w.bytes === expectedBytes + 1")).toBe(1);
@@ -974,7 +997,7 @@ describe("build-task delivery scripts", () => {
       expectLacks(`${BT_WF}/${n}.md`, ["heredoc"]);
       expectHas(`${BT_WF}/${n}.md`, ["with the Write tool", "a trailing newline"]);
     }
-    for (const d of [WF_RULE, `${BT_WF}/explore.md`, `${BT_WF}/implement.md`]) expectLacks(d, ["that count plus one", "byte count is verified"]);
+    for (const d of [WF_RULE, DESIGN_REF, `${BT_WF}/implement.md`]) expectLacks(d, ["that count plus one", "byte count is verified"]);
   });
 
   test("rule, developer notes and SKILL.md describe the Write-only write path", () => {
@@ -985,12 +1008,13 @@ describe("build-task delivery scripts", () => {
     expectLacks(`${SKILL}/SKILL.md`, ["unsure dispatched workers can read", "!`"]);
   });
 
-  test("build-task ships four usage references and no role-file directory; spec.md and plan.md live in spec-task and plan-task; the plugin keeps six workflows", () => {
+  test("build-task ships two usage references and no role-file directory; design.md, spec.md and plan.md live in design-task, spec-task and plan-task; the plugin keeps five workflows", () => {
     expect(existsSync(abs(`${SKILL}/roles`))).toBe(false);
-    expect(ls(BT_WF, ".md")).toEqual(["design.md", "explore.md", "implement.md", "ship.md"]);
+    expect(ls(BT_WF, ".md")).toEqual(["implement.md", "ship.md"]);
+    expect(ls(`${DESIGN_TASK}/workflows`, ".md")).toEqual(["design.md"]);
     expect(ls(`${SPEC_TASK}/workflows`, ".md")).toEqual(["spec.md"]);
     expect(ls(`${PLAN_TASK}/workflows`, ".md")).toEqual(["plan.md"]);
-    expect(ls(WORKFLOWS, ".workflow.js")).toHaveLength(6);
+    expect(ls(WORKFLOWS, ".workflow.js")).toHaveLength(5);
   });
 
   test("moved role files: ci-monitor is Bash-only by instruction, pr-author names the result files, planner stays English", () => {
@@ -1005,9 +1029,13 @@ describe("build-task delivery scripts", () => {
     expect(sweep(TREE, /spec-driven-delivery/)).toEqual([]);
   });
 
-  test("dev notes and README describe the six build-task scripts, the role files and the size-driven choices", () => {
-    expectHas(DEV_NOTES, ["build-task-plan.workflow.js", "build-task-implement.workflow.js", "build-task-ship.workflow.js", "implement-<slug>.json", "review-<slug>.json", "pr-body-<slug>.md", "agents/planner.md", "agents/shipper.md", "agents/worktree-merger.md", "carry a `tools` allowlist", "`--size=<SIZE>`", "`implement.md`, `ship.md`", "assets/skills/plan-task/workflows/plan.md", "assets/skills/spec-task/workflows/spec.md"]);
+  test("dev notes and README describe the five build-task scripts, the role files and the size-driven choices", () => {
+    expectHas(DEV_NOTES, ["build-task-plan.workflow.js", "build-task-implement.workflow.js", "build-task-ship.workflow.js", "implement-<slug>.json", "review-<slug>.json", "pr-body-<slug>.md", "agents/planner.md", "agents/shipper.md", "agents/worktree-merger.md", "carry a `tools` allowlist", "`--size=<SIZE>`", "`implement.md`, `ship.md`", "assets/skills/plan-task/workflows/plan.md", "assets/skills/spec-task/workflows/spec.md", "build-task-design.workflow.js", "assets/skills/design-task/workflows/design.md", "assets/skills/design-task/", "`taskflow:design-task`", "the design script and design-task's direct dispatch"]);
     expectHas(WF_RULE, ["plan.workflow.js", "`S → sonnet`, `M → opus`, `L → opus`, `XL → fable`", "`review-task`", "carries `NO_NARRATION`"]);
+    expectHas(WF_RULE, ["build-task-design.workflow.js", "assets/skills/design-task/SKILL.md", "size agent"]);
+    expectLacks(WF_RULE, ["build-task-explore", "has no inline prompt and no `NO_NARRATION` constant", "six `build-task-*.workflow.js`"]);
+    expectLacks(DEV_NOTES, ["build-task-explore", "Six scripts"]);
+    expectLacks(`${PLUGIN}/README.md`, ["build-task-explore", "six"]);
     expectLacks(WF_RULE, ["CLASSIFY_SCHEMA", "simple → sonnet", "hardest", "agents/planner.md", "`LEVEL`", "changes-review", "build-task-review", "ponytailReview", "fix-applier", "review-finder"]);
     expectHas(`${PLUGIN}/README.md`, ["plan.workflow.js", "implement.workflow.js", "ship.workflow.js", "planner.md", "ci-fixer.md"]);
     expectLacks(`${PLUGIN}/README.md`, ["references/"]);
@@ -1032,15 +1060,15 @@ describe("removed review engine", () => {
 describe("explore lens check documentation", () => {
   const WIKI = "development/wiki/plugins/taskflow/design/workflows.md";
 
-  test("explore.md documents the three phases, the explore-scribe agent and the lens pairs, no size floor", () => {
-    const F = `${BT_WF}/explore.md`;
-    expectHas(F, ["`taskflow:explore-scribe`", "`## Lens: <name>`", "`_End of lens: <name>_`", "| `Scout`", "| `Explore`", "| `Scribe`", "only the design script, which reads the same file.", "`graphmind memory`", "with the Write tool"]);
+  test("design.md documents the explore phases, the explore-scribe agent and the lens pairs, no size floor", () => {
+    const F = DESIGN_REF;
+    expectHas(F, ["`taskflow:explore-scribe`", "`## Lens: <name>`", "`_End of lens: <name>_`", "| `Scout`", "| `Explore`", "| `Scribe`", "never by re-running this script's Design stage", "`graphmind memory`", "with the Write tool"]);
     expectLacks(F, ["90%", "wc -c", "Recorded project knowledge", "No plugin agent dependency", "(and spec)"]);
   });
 
   test("developer notes and the workflow rule describe the explore-scribe agent and the ten agentType roles", () => {
-    expectHas(DEV_NOTES, ["Ten of the plugin agents are build-task roles", "`explore-scribe`", "checks lens header/footer pairs instead of a byte count", "the lens header/footer lines come from the script", "(`SKILL.md` step 6)"]);
-    expectLacks(DEV_NOTES, ["in the explore, implement and review scripts", "(`SKILL.md` step 5)", "Eight of the plugin agents", "the other ten have one"]);
+    expectHas(DEV_NOTES, ["Ten of the plugin agents are build-task roles", "`explore-scribe`", "checks lens header/footer pairs instead of a byte count", "the lens header/footer lines come from the script", "(`SKILL.md` step 5)"]);
+    expectLacks(DEV_NOTES, ["in the explore, implement and review scripts", "(`SKILL.md` step 6)", "Eight of the plugin agents", "the other ten have one"]);
     expectHas(WF_RULE, ["Ten roles are dispatched through a plugin `agentType`", "ten build-task roles", "`taskflow:explore-scribe` (`tools: Read, Write`)", "written as the lens `graphmind memory` (omitted when empty"]);
     expectLacks(WF_RULE, ["MIN_WRITE_RATIO", "Recorded project knowledge", "memory recall, scribe, spec writer", "Eleven roles", "Thirteen roles"]);
   });
@@ -1066,7 +1094,8 @@ describe("spec-task and plan-task documentation", () => {
   const PAGE = "development/wiki/plugins/taskflow/design/spec-and-plan-skills.md";
 
   test("README, developer notes, workflow rule and wiki describe the two internal skills", () => {
-    expectHas(`${PLUGIN}/README.md`, ["| `spec-task`", "| `plan-task`", "spec-task/", "plan-task/", "explore.md  design.md  implement.md  ship.md"]);
+    expectHas(`${PLUGIN}/README.md`, ["| `spec-task`", "| `plan-task`", "spec-task/", "plan-task/", "implement.md  ship.md", "| `design-task`", "design-task/"]);
+    expectLacks(`${PLUGIN}/README.md`, ["explore.md  design.md"]);
     expectHas(DEV_NOTES, ["assets/skills/spec-task/", "assets/skills/plan-task/", "(../development/wiki/plugins/taskflow/design/spec-and-plan-skills.md)", "`assets/skills/*/workflows/`", "`taskflow:spec-task`", "`taskflow:plan-task`"]);
     expectLacks(DEV_NOTES, ["`assets/skills/build-task/workflows/` must be added"]);
     expectHas(WF_RULE, ["`user_input_required`", "`rounds_exhausted`", "`assets/skills/plan-task/SKILL.md`", "## Resumable spec and plan scripts"]);
@@ -1074,5 +1103,17 @@ describe("spec-task and plan-task documentation", () => {
     expectHas("development/wiki/plugins/taskflow/index.md", ["(design/spec-and-plan-skills.md)"]);
     expectHas("development/wiki/plugins/taskflow/design/decide.md", ["spec-task and plan-task"]);
     expectHas("development/wiki/log.md", ["## [2026-11-28] ingest | spec-task and plan-task skills"]);
+  });
+});
+
+describe("design-task wiki page", () => {
+  const PAGE = "development/wiki/plugins/taskflow/design/design-task.md";
+
+  test("the wiki records why design-task exists, its routing, the rejected alternatives and the open points", () => {
+    expectHas(PAGE, ["# design-task", "## Decision (2026-11-28, user-approved spec)", "## Rejected", "## Accepted losses", "## Not verified", "USER DECISION", "build-task-design", "`blocked`", "subagent_type"]);
+    expectHas("development/wiki/plugins/taskflow/index.md", ["(design/design-task.md)"]);
+    expectHas("development/wiki/plugins/index.md", ["design-task", "dispatch-task and review-task"]);
+    expectHas("development/wiki/log.md", ["## [2026-11-28] ingest | design-task skill"]);
+    expectHas("development/wiki/plugins/taskflow/design/workflows.md", ["design-task's `design.md`", "runs the spec once, as step 4, after the \"Yes\""]);
   });
 });

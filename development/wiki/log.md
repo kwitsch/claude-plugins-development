@@ -290,3 +290,7 @@ Source: user decision 2026-11-20 (task spec), PR stacked on `feature/tsdown-plug
 ## [2026-11-28] ingest | spec-task and plan-task skills
 
 - New `plugins/taskflow/design/spec-and-plan-skills.md`: why build-task's spec and plan steps became the internal `spec-task` and `plan-task` skills (taskflow 3.2.0), the resumable scripts (`USER_INPUT`, `user_input_required` with `conflict` / `rounds_exhausted`), why every decision is re-sent on each resume, the output-path derivation, the headless cap of 3, and the unverified three-level Skill nesting. `design/workflows.md`, `design/decide.md` and `plugins/taskflow/index.md` were updated. Source: approved spec, branch `feature/spec-plan-skills-from-build-task`.
+
+## [2026-11-28] ingest | design-task skill
+
+- New `plugins/taskflow/design/design-task.md`: why build-task's explore, size, design and intent steps became the internal `design-task` skill (taskflow 3.3.0) over one merged `build-task-design` script (Scout → Explore → Scribe → Size → Design), `blocked` returns with decide-ready questions instead of errors, the routing (re-explore re-runs the workflow, every other answer starts only the designer through the Agent tool; USER DECISION), the headless cap of 3 re-runs, rejected alternatives A-D and what is not verified live. `design/workflows.md`, `design/decide.md`, `design/spec-and-plan-skills.md`, `design/review-task.md`, `design/size-calibration.md`, `plugins/taskflow/index.md` and `plugins/index.md` were updated. Source: approved spec, branch `feature/design-task-skill`.
