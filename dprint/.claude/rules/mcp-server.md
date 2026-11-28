@@ -21,6 +21,8 @@ arguments are named constants or comments in the sources; this rule records beha
 - `hooks/watch-paths.ts` and `watch-list.ts` must not import `server.ts` (`watch-list.ts` not `format.ts` either):
   `watch-paths` runs as its own `command` hook.
 - Scope never uses `process.cwd()`.
+- Every hook in `hooks.template.json` carries an English `statusMessage` (`dprint: <what the hook does>`), pinned by
+  `mcp-server.test.ts`: the person sees why a turn waits.
 - Needs dprint >= 0.50.
 - The config's `excludes` are not evaluated here: `dprint lsp` returns no edits for an excluded file (checked on
   0.64.3).

@@ -1917,3 +1917,10 @@ test("bash_finished also reports a reformat file_changed already made mid-Bash",
   assert.match(r.hookSpecificOutput.additionalContext, /: "a\.ts"\./);
   assert.deepEqual(await s.tool("drain_notices", { hook_event_name: "PreToolUse", cwd: repo, ...SESSION }), {});
 });
+
+test("hooks.json: every hook carries an English statusMessage that names the plugin", () => {
+  const hooks: { hooks: { statusMessage?: string }[] }[] = Object.values(JSON.parse(readFileSync(path.join(PLUGIN, "hooks/hooks.json"), "utf8")).hooks).flat() as never;
+  const handlers = hooks.flatMap((h) => h.hooks);
+  assert.equal(handlers.length, 13);
+  for (const h of handlers) assert.match(h.statusMessage ?? "", /^dprint: [a-z]/);
+});
