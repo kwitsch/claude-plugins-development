@@ -10,7 +10,7 @@ import { PLUGIN, SERVER } from "./support/mcp.ts";
 const read = (...rel: string[]): string => readFileSync(path.join(PLUGIN, ...rel), "utf8");
 const pkg = JSON.parse(read("..", "package.json")) as { version: string; description: string; scripts: Record<string, string>; devDependencies: Record<string, string>; pluginBuild: { assets: string[] } };
 const manifest = JSON.parse(read(".claude-plugin", "plugin.json")) as Record<string, unknown>;
-const hooks = JSON.parse(read("hooks", "hooks.json")) as { description: string; hooks: Record<string, { matcher: string; hooks: Record<string, unknown>[] }[]> };
+const hooks = JSON.parse(read("hooks", "hooks.json")) as { description: string; hooks: Record<string, { matcher: string; hooks: ({ statusMessage?: string } & Record<string, unknown>)[] }[]> };
 const readme = read("README.md");
 /** The plugin's own built modules (the vendored bundle is third-party code). */
 const OWN_MODULES = ["mcp/server.mjs", "skills/universal-format/format-files.mjs"];
@@ -29,13 +29,26 @@ test("PreToolUse hook -> format_pre mcp_tool, matcher Write|Edit, timeout 60, no
   const entry = hooks.hooks.PreToolUse[0];
   assert.equal(entry.matcher, "Write|Edit");
   const { input: _input, ...hook } = entry.hooks[0];
-  assert.deepEqual(hook, { type: "mcp_tool", server: "plugin:universal-format:universal-format-hooks", tool: "format_pre", timeout: 60 });
+  assert.deepEqual(hook, {
+    type: "mcp_tool",
+    statusMessage: "universal-format: formatting the file before it is written",
+    server: "plugin:universal-format:universal-format-hooks",
+    tool: "format_pre",
+    timeout: 60,
+  });
 });
 
 test("hooks.json declares exactly one event, PreToolUse, with exactly one hook (no PostToolUse, no CwdChanged)", () => {
   assert.deepEqual(Object.keys(hooks.hooks), ["PreToolUse"]);
   assert.equal(hooks.hooks.PreToolUse.length, 1);
   assert.equal(hooks.hooks.PreToolUse[0].hooks.length, 1);
+});
+
+// The spinner text of each hook (`statusMessage`): English, names the plugin and what the hook does.
+test("hooks.json: every hook carries an English statusMessage that names the plugin", () => {
+  const handlers = Object.values(hooks.hooks).flat().flatMap((e) => e.hooks);
+  assert.equal(handlers.length, 1);
+  for (const h of handlers) assert.match(h.statusMessage ?? "", /^universal-format: [a-z]/);
 });
 
 // Without `input` Claude Code delivers an EMPTY arguments object to the tool, not the hook JSON: the handler would
