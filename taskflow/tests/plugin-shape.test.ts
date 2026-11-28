@@ -1029,9 +1029,13 @@ describe("build-task delivery scripts", () => {
     expect(sweep(TREE, /spec-driven-delivery/)).toEqual([]);
   });
 
-  test("dev notes and README describe the six build-task scripts, the role files and the size-driven choices", () => {
-    expectHas(DEV_NOTES, ["build-task-plan.workflow.js", "build-task-implement.workflow.js", "build-task-ship.workflow.js", "implement-<slug>.json", "review-<slug>.json", "pr-body-<slug>.md", "agents/planner.md", "agents/shipper.md", "agents/worktree-merger.md", "carry a `tools` allowlist", "`--size=<SIZE>`", "`implement.md`, `ship.md`", "assets/skills/plan-task/workflows/plan.md", "assets/skills/spec-task/workflows/spec.md"]);
+  test("dev notes and README describe the five build-task scripts, the role files and the size-driven choices", () => {
+    expectHas(DEV_NOTES, ["build-task-plan.workflow.js", "build-task-implement.workflow.js", "build-task-ship.workflow.js", "implement-<slug>.json", "review-<slug>.json", "pr-body-<slug>.md", "agents/planner.md", "agents/shipper.md", "agents/worktree-merger.md", "carry a `tools` allowlist", "`--size=<SIZE>`", "`implement.md`, `ship.md`", "assets/skills/plan-task/workflows/plan.md", "assets/skills/spec-task/workflows/spec.md", "build-task-design.workflow.js", "assets/skills/design-task/workflows/design.md", "assets/skills/design-task/", "`taskflow:design-task`", "the design script and design-task's direct dispatch"]);
     expectHas(WF_RULE, ["plan.workflow.js", "`S → sonnet`, `M → opus`, `L → opus`, `XL → fable`", "`review-task`", "carries `NO_NARRATION`"]);
+    expectHas(WF_RULE, ["build-task-design.workflow.js", "assets/skills/design-task/SKILL.md", "size agent"]);
+    expectLacks(WF_RULE, ["build-task-explore", "has no inline prompt and no `NO_NARRATION` constant", "six `build-task-*.workflow.js`"]);
+    expectLacks(DEV_NOTES, ["build-task-explore", "Six scripts"]);
+    expectLacks(`${PLUGIN}/README.md`, ["build-task-explore", "six"]);
     expectLacks(WF_RULE, ["CLASSIFY_SCHEMA", "simple → sonnet", "hardest", "agents/planner.md", "`LEVEL`", "changes-review", "build-task-review", "ponytailReview", "fix-applier", "review-finder"]);
     expectHas(`${PLUGIN}/README.md`, ["plan.workflow.js", "implement.workflow.js", "ship.workflow.js", "planner.md", "ci-fixer.md"]);
     expectLacks(`${PLUGIN}/README.md`, ["references/"]);
@@ -1063,8 +1067,8 @@ describe("explore lens check documentation", () => {
   });
 
   test("developer notes and the workflow rule describe the explore-scribe agent and the ten agentType roles", () => {
-    expectHas(DEV_NOTES, ["Ten of the plugin agents are build-task roles", "`explore-scribe`", "checks lens header/footer pairs instead of a byte count", "the lens header/footer lines come from the script", "(`SKILL.md` step 6)"]);
-    expectLacks(DEV_NOTES, ["in the explore, implement and review scripts", "(`SKILL.md` step 5)", "Eight of the plugin agents", "the other ten have one"]);
+    expectHas(DEV_NOTES, ["Ten of the plugin agents are build-task roles", "`explore-scribe`", "checks lens header/footer pairs instead of a byte count", "the lens header/footer lines come from the script", "(`SKILL.md` step 5)"]);
+    expectLacks(DEV_NOTES, ["in the explore, implement and review scripts", "(`SKILL.md` step 6)", "Eight of the plugin agents", "the other ten have one"]);
     expectHas(WF_RULE, ["Ten roles are dispatched through a plugin `agentType`", "ten build-task roles", "`taskflow:explore-scribe` (`tools: Read, Write`)", "written as the lens `graphmind memory` (omitted when empty"]);
     expectLacks(WF_RULE, ["MIN_WRITE_RATIO", "Recorded project knowledge", "memory recall, scribe, spec writer", "Eleven roles", "Thirteen roles"]);
   });
@@ -1090,7 +1094,8 @@ describe("spec-task and plan-task documentation", () => {
   const PAGE = "development/wiki/plugins/taskflow/design/spec-and-plan-skills.md";
 
   test("README, developer notes, workflow rule and wiki describe the two internal skills", () => {
-    expectHas(`${PLUGIN}/README.md`, ["| `spec-task`", "| `plan-task`", "spec-task/", "plan-task/", "explore.md  design.md  implement.md  ship.md"]);
+    expectHas(`${PLUGIN}/README.md`, ["| `spec-task`", "| `plan-task`", "spec-task/", "plan-task/", "implement.md  ship.md", "| `design-task`", "design-task/"]);
+    expectLacks(`${PLUGIN}/README.md`, ["explore.md  design.md"]);
     expectHas(DEV_NOTES, ["assets/skills/spec-task/", "assets/skills/plan-task/", "(../development/wiki/plugins/taskflow/design/spec-and-plan-skills.md)", "`assets/skills/*/workflows/`", "`taskflow:spec-task`", "`taskflow:plan-task`"]);
     expectLacks(DEV_NOTES, ["`assets/skills/build-task/workflows/` must be added"]);
     expectHas(WF_RULE, ["`user_input_required`", "`rounds_exhausted`", "`assets/skills/plan-task/SKILL.md`", "## Resumable spec and plan scripts"]);
