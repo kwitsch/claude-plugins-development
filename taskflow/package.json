@@ -20,8 +20,6 @@
   "claudePlugin": {},
   "pluginBuild": {
     "assets": [
-      "skills/build-task/workflows/design.md",
-      "skills/build-task/workflows/explore.md",
       "skills/build-task/workflows/implement.md",
       "skills/build-task/workflows/ship.md",
       "skills/design-task/workflows/design.md",
