@@ -250,9 +250,8 @@ async function makePlan() {
       check = await agent(planCheckerPrompt, { label: "plan-recheck", phase: "Plan", schema: CHECK_VERDICT, model: MODELS.planChecker });
       if (check === null) return { plan: null, reason: "plan-recheck returned null" };
       if (hasConflict(check)) return { plan: null, ask: { reason: "conflict", findings: conflictFindings(check) } };
-      if (!check.approved && blockingFindings(check).length) {
-        return { plan: null, ask: { reason: "rounds_exhausted", findings: blockingFindings(check) } };
-      }
+      const stillBlocking = blockingFindings(check);
+      if (!check.approved && stillBlocking.length) return { plan: null, ask: { reason: "rounds_exhausted", findings: stillBlocking } };
     }
   }
   if (!Array.isArray(plan.tasks) || plan.tasks.length === 0) return { plan: null, reason: "planner returned no tasks" };
