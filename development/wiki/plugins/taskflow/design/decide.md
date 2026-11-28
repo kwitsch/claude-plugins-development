@@ -1,6 +1,6 @@
 # decide: why taskflow routes every decision through one skill
 
-Why build-task and review-task ask through the `decide` skill, how `--headless` picks the advisor or the `decider` agent, and what a headless run does when no decision comes back.
+Why build-task, review-task, spec-task and plan-task ask through the `decide` skill, how `--headless` picks the advisor or the `decider` agent, and what a headless run does when no decision comes back.
 
 ## Decision (2026-11-28, user-approved spec)
 
@@ -13,7 +13,7 @@ Why build-task and review-task ask through the `decide` skill, how `--headless` 
 - The advisor decides when a tool named `advisor` is in the session's tool list: a direct tool without parameters that reads the whole conversation (docs). It sees the content bullets, so it decides with the caller's context; a false negative only costs a decider call.
 - Advice that fails or leaves a question without a clear pick goes to `taskflow:decider`, for exactly those questions.
 - `decider` is a plugin agent (`model: opus`, `effort: high`, tools Read/Grep/Glob, read-only by instruction) because the effort of a subagent started from a skill is set only in agent frontmatter (docs). Its answers count only for asked ids; a missing id fails the call. It follows the precedent "a read-only decision agent (opus, high) when the user is unavailable" (`.claude/rules/plugin-docs-tasks.md`).
-- Headless never falls back to `AskUserQuestion`: it would stall an unattended run, and `claude -p` disables it ([claude-code-skill-facts](../../../../../.claude/rules/claude-code-skill-facts.md)). A failed headless decision prints `decide: no headless decision: <reason>`; build-task stops, review-task notes it and continues without the change.
+- Headless never falls back to `AskUserQuestion`: it would stall an unattended run, and `claude -p` disables it ([claude-code-skill-facts](../../../../../.claude/rules/claude-code-skill-facts.md)). A failed headless decision prints `decide: no headless decision: <reason>`; build-task, spec-task and plan-task stop, review-task notes it and continues without the change.
 
 ## build-task stops instead of looping
 

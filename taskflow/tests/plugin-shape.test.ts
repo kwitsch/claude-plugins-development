@@ -1006,7 +1006,7 @@ describe("build-task delivery scripts", () => {
   });
 
   test("dev notes and README describe the six build-task scripts, the role files and the size-driven choices", () => {
-    expectHas(DEV_NOTES, ["build-task-plan.workflow.js", "build-task-implement.workflow.js", "build-task-ship.workflow.js", "implement-<slug>.json", "review-<slug>.json", "pr-body-<slug>.md", "agents/planner.md", "agents/shipper.md", "agents/worktree-merger.md", "carry a `tools` allowlist", "`--size=<SIZE>`", "`plan.md`, `implement.md`, `ship.md`"]);
+    expectHas(DEV_NOTES, ["build-task-plan.workflow.js", "build-task-implement.workflow.js", "build-task-ship.workflow.js", "implement-<slug>.json", "review-<slug>.json", "pr-body-<slug>.md", "agents/planner.md", "agents/shipper.md", "agents/worktree-merger.md", "carry a `tools` allowlist", "`--size=<SIZE>`", "`implement.md`, `ship.md`", "assets/skills/plan-task/workflows/plan.md", "assets/skills/spec-task/workflows/spec.md"]);
     expectHas(WF_RULE, ["plan.workflow.js", "`S → sonnet`, `M → opus`, `L → opus`, `XL → fable`", "`review-task`", "carries `NO_NARRATION`"]);
     expectLacks(WF_RULE, ["CLASSIFY_SCHEMA", "simple → sonnet", "hardest", "agents/planner.md", "`LEVEL`", "changes-review", "build-task-review", "ponytailReview", "fix-applier", "review-finder"]);
     expectHas(`${PLUGIN}/README.md`, ["plan.workflow.js", "implement.workflow.js", "ship.workflow.js", "planner.md", "ci-fixer.md"]);
@@ -1059,5 +1059,20 @@ describe("review-task wiki page", () => {
     expectHas("development/wiki/plugins/taskflow/index.md", ["(design/review-task.md)"]);
     expectHas("development/wiki/plugins/index.md", ["dispatch-task and review-task"]);
     expectLacks("development/wiki/plugins/taskflow/design/workflows.md", ["copies the review engine", "Lean (ponytail) review", "the 15 files"]);
+  });
+});
+
+describe("spec-task and plan-task documentation", () => {
+  const PAGE = "development/wiki/plugins/taskflow/design/spec-and-plan-skills.md";
+
+  test("README, developer notes, workflow rule and wiki describe the two internal skills", () => {
+    expectHas(`${PLUGIN}/README.md`, ["| `spec-task`", "| `plan-task`", "spec-task/", "plan-task/", "explore.md  design.md  implement.md  ship.md"]);
+    expectHas(DEV_NOTES, ["assets/skills/spec-task/", "assets/skills/plan-task/", "(../development/wiki/plugins/taskflow/design/spec-and-plan-skills.md)", "`assets/skills/*/workflows/`", "`taskflow:spec-task`", "`taskflow:plan-task`"]);
+    expectLacks(DEV_NOTES, ["`assets/skills/build-task/workflows/` must be added"]);
+    expectHas(WF_RULE, ["`user_input_required`", "`rounds_exhausted`", "`assets/skills/plan-task/SKILL.md`", "## Resumable spec and plan scripts"]);
+    expectHas(PAGE, ["# spec-task and plan-task", "## Decision (2026-11-28, user-approved spec)", "## Not verified", "build-task-spec"]);
+    expectHas("development/wiki/plugins/taskflow/index.md", ["(design/spec-and-plan-skills.md)"]);
+    expectHas("development/wiki/plugins/taskflow/design/decide.md", ["spec-task and plan-task"]);
+    expectHas("development/wiki/log.md", ["## [2026-11-28] ingest | spec-task and plan-task skills"]);
   });
 });
