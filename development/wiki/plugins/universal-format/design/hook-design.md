@@ -15,7 +15,7 @@ Why universal-format is one PreToolUse `mcp_tool` hook on a persistent MCP serve
 
 ## Changes made by git operations
 
-- The rule of universal-lint F41 (0.19.0, PR #155) and dprint F30 (PR #156, unmerged as of 2026-11-28) — no lint/format for files a `git pull`, branch switch or worktree switch changed — is satisfied here by construction: the only hook is PreToolUse `Write|Edit`; git operations run through Bash or EnterWorktree and never reach `format_pre` (code read 2026-11-28; decided by the design agent of this change, universal-format 0.19.8).
+- The rule of universal-lint F41 (0.19.0, PR #155) and dprint F30 — no lint/format for files a `git pull`, branch switch or worktree switch changed — is satisfied here by construction: the only hook is PreToolUse `Write|Edit`; git operations run through Bash or EnterWorktree and never reach `format_pre` (code read 2026-11-28).
 - Not ported, on purpose: the `index.lock` wait and the stopped-merge skip (`MERGE_HEAD`, `rebase-merge`, `rebase-apply`; unmerged and staged-only files). In universal-lint they gate only FileChanged (`src/hooks/lint-core.ts`, FileChanged handler), never Write/Edit; a Write/Edit during a stopped merge is Claude's own change (conflict resolution). A git spawn per Write/Edit would only add latency.
 - Accepted residual: an Edit formats the whole merged file, so lines a pull or merge brought into the edited file can be reformatted with Claude's edit; inside unresolved conflict hunks the formatter usually fails and the hook answers `{}`.
 - The skill `/universal-format:universal-format` formats whatever the user selected, also git-changed files (e.g. "the files of PR 123"): explicit user intent, no git filter.
