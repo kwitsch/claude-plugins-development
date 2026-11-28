@@ -58,7 +58,10 @@ arguments are named constants or comments in the sources; this rule records beha
 - `fileWritten` records Edit/Write content per real path, as a digest, only where a config exists.
 - `fileChanged` formats a watched file whole on disk unless it is out of scope, oversized, has a lone CR or mixed
   line endings (pure CRLF is formatted on its LF view), equals the recorded content, is gitignored, or is tracked and
-  unchanged against the index. One `git status` decides (`!!` or empty output skips; a git failure means format). Own
+  unchanged against the index. One `git status` decides (`!!` or empty output skips; a git failure means format).
+  Before it, an `index.lock` in the file's git dir is waited for (bounded; then the usual verdict), and while
+  `MERGE_HEAD`, `rebase-merge` or `rebase-apply` exists there, unmerged and staged-only files are skipped
+  ([skip git operation changes](../../../development/wiki/plugins/dprint/tasks/F30-skip-git-operation-changes.md)). Own
   `dprint lsp`; a bounded number of events run at once, a bounded number queue, the rest are dropped with a stderr line.
 - `formatPre`: config gate first (no `dprint lsp` spawn without a config in the effective cwd or an ancestor), then the
   size guard (`MAX_CHANGED_BYTES`), then `git check-ignore` (ignored files skipped). Write and Edit: whole-file

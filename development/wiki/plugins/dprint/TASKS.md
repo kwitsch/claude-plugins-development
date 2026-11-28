@@ -32,6 +32,7 @@ None.
 - [x] [F27](tasks/F27-stat-heavy-guards-on-9p.md) `done` low: Cache findConfig results to cut stat latency on 9P repos
 - [x] [F28](tasks/F28-tests-miss-perf-paths.md) `done` low: Test the performance-relevant server paths
 - [x] [F29](tasks/F29-bash-finished-stat-scan.md) `done` low: Bound the per-Bash watch-list mtime scan in bash_finished
+- [x] [F30](tasks/F30-skip-git-operation-changes.md) `done` medium: Skip files changed by git operations in FileChanged and bash_finished
 
 ## Closed without code
 
