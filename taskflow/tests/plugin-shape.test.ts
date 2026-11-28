@@ -1100,3 +1100,15 @@ describe("spec-task and plan-task documentation", () => {
     expectHas("development/wiki/log.md", ["## [2026-11-28] ingest | spec-task and plan-task skills"]);
   });
 });
+
+describe("design-task wiki page", () => {
+  const PAGE = "development/wiki/plugins/taskflow/design/design-task.md";
+
+  test("the wiki records why design-task exists, its routing, the rejected alternatives and the open points", () => {
+    expectHas(PAGE, ["# design-task", "## Decision (2026-11-28, user-approved spec)", "## Rejected", "## Accepted losses", "## Not verified", "USER DECISION", "build-task-design", "`blocked`", "subagent_type"]);
+    expectHas("development/wiki/plugins/taskflow/index.md", ["(design/design-task.md)"]);
+    expectHas("development/wiki/plugins/index.md", ["design-task", "dispatch-task and review-task"]);
+    expectHas("development/wiki/log.md", ["## [2026-11-28] ingest | design-task skill"]);
+    expectHas("development/wiki/plugins/taskflow/design/workflows.md", ["design-task's `design.md`", "runs the spec once, as step 4, after the \"Yes\""]);
+  });
+});

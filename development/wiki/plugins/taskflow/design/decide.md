@@ -19,7 +19,7 @@ Why build-task, review-task, spec-task and plan-task ask through the `decide` sk
 
 - A bare "No — needs changes" at the headless intent check stops the run with the draft path: no user is there to describe the change, and a correction made up by the decider would be a guess.
 - At most 3 design-script resumes per headless invocation (question answers and intent corrections together); a 4th stops with the draft path, so a design that does not converge cannot loop unattended.
-- Headless answers enter the draft as binding USER DECISIONs; the final report lists every `Decided ...` line so a human can audit them.
+- Headless answers enter the draft as binding USER DECISIONs; the final report lists every `Decided ...` line so a human can audit them. Since taskflow 3.3.0 both stops and the cap (3 re-runs: full workflow re-runs plus designer dispatches) live in `design-task` ([design-task.md](design-task.md)).
 
 ## Not verified
 
