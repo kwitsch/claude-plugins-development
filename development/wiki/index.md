@@ -10,6 +10,7 @@ Catalog of what earlier sessions wrote down, in this wiki and elsewhere in the r
 - [mods-engine-tools.md](facts/mods-engine-tools.md): `$.tool.register` naming and lifetime, serving a tool, permissions of hook-served tools, `$.tool.call` between plugins, what `tool.check` sees and can decide.
 - [mods-engine-io.md](facts/mods-engine-io.md): `$.http.fetch` limits and error texts, `$.model.complete` cut-off replies, `$.clock` overflow and overlap, `$.mcp.connect`/`call`, `$.ui.log` and the band above the prompt.
 - [mods-engine-session.md](facts/mods-engine-session.md): `$.session.messages` row shapes, `prompt.submit` origins, how `$.command.run` queues, what a `session.compact` hook replaces, usage and cache lifetime.
+- [mods-engine-status-line.md](facts/mods-engine-status-line.md): the `ui.render` `StatusLine` site and its `props.text`, `$.session.usage().rateLimits` and its freshness after a turn ended, `session.measure` cadence, `$.fs` from a `$.clock.every` callback.
 - [claude-code-command-hooks.md](facts/claude-code-command-hooks.md): `if` and FileChanged matcher filters, physical cwd in payloads, the transcript records a hook's exit 2 leaves, the `command` + `args` form.
 - [test-kit-vs-engine.md](facts/test-kit-vs-engine.md): where `claude-engine-vitest` and `claude plugin test` differ from a real session.
 - [npm-npx-and-node.md](facts/npm-npx-and-node.md): npx lookup order, registry re-check and lock, non-blocking stdin after importing `node:process`, timer overflow, lookup cost under WSL.
