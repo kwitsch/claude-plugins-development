@@ -13,6 +13,14 @@ Why universal-format is one PreToolUse `mcp_tool` hook on a persistent MCP serve
 - The hook stays synchronous: the reformat must land, and the model must see the "re-read before further edits" notice, before its next tool call touches the file.
 - The server is persistent, so prettier stays warm: a warm format of a small TypeScript file takes about 3 ms, the first one about 60 ms, a server start about 55 ms (measured 2026-11-17, [vendor-build.md](vendor-build.md)).
 
+## Changes made by git operations
+
+- The rule of universal-lint F41 (0.19.0, PR #155) and dprint F30 (PR #156, unmerged as of 2026-11-28) — no lint/format for files a `git pull`, branch switch or worktree switch changed — is satisfied here by construction: the only hook is PreToolUse `Write|Edit`; git operations run through Bash or EnterWorktree and never reach `format_pre` (code read 2026-11-28; decided by the design agent of this change, universal-format 0.19.8).
+- Not ported, on purpose: the `index.lock` wait and the stopped-merge skip (`MERGE_HEAD`, `rebase-merge`, `rebase-apply`; unmerged and staged-only files). In universal-lint they gate only FileChanged (`src/hooks/lint-core.ts`, FileChanged handler), never Write/Edit; a Write/Edit during a stopped merge is Claude's own change (conflict resolution). A git spawn per Write/Edit would only add latency.
+- Accepted residual: an Edit formats the whole merged file, so lines a pull or merge brought into the edited file can be reformatted with Claude's edit; inside unresolved conflict hunks the formatter usually fails and the hook answers `{}`.
+- The skill `/universal-format:universal-format` formats whatever the user selected, also git-changed files (e.g. "the files of PR 123"): explicit user intent, no git filter.
+- Restoring a post-write, CwdChanged or EnterWorktree hook would need this gate; reference: universal-lint `src/hooks/lint-core.ts` (`gitDirOf`, FileChanged git gate).
+
 ## The `input` template is required
 
 - An `mcp_tool` hook without `input` delivers `arguments: {}`, not the hook JSON (live 2.1.226): the handler would format nothing while the hook reports success. `tests/manifest.test.ts` pins the exact template.

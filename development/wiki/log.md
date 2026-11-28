@@ -278,3 +278,7 @@ Source: user decision 2026-11-20 (task spec), PR stacked on `feature/tsdown-plug
 ## [2026-11-28] ingest | statusbar: StatusLine site, live usage and timer checks
 
 - New `facts/mods-engine-status-line.md` (live checks L1-L4 of the statusbar probe: StatusLine site and `props.text`, `rateLimits` freshness after a turn ended, `$.fs` from a timer callback, `session.measure`) and `plugins/statusbar/design/drawing-the-status-line.md` (user decisions, rejected alternatives, residuals, outcomes). Source: approved spec, branch `feature/statusbar-plugin`.
+
+## [2026-11-28] ingest | universal-format: git-operation exemption holds by construction, hook statusMessage
+
+- `plugins/universal-format/design/hook-design.md` gains `## Changes made by git operations`: the F41/F30 rule (no format for files a git pull, branch switch or worktree switch changed) holds by construction because the only hook is PreToolUse `Write|Edit`; the `index.lock` wait and stopped-merge skip are not ported; the whole-file Edit residual and the unfiltered skill are recorded. Source: approved spec, branch `feature/universal-format-git-skip-status` (universal-format 0.19.8, hook `statusMessage`).
