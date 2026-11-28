@@ -628,7 +628,7 @@ function releaseChangeSlot(): void {
  * `git status --porcelain --untracked-files=normal --ignored=matching`: `!!` or empty output, e.g. after
  * checkout/pull/reset/stash); when git fails or is absent the file is formatted. Files git operations wrote are left
  * alone: while `index.lock` exists in the file's git dir ({@link gitDirOf}) the status waits up to
- * {@link LOCK_WAIT_MS} (a lock that outlives the wait leaves the usual verdict), and during a stopped merge or rebase
+ * {@link LOCK_WAIT_MS} before a change slot is taken (a lock that outlives the wait leaves the usual verdict), and during a stopped merge or rebase
  * ({@link MERGE_MARKERS}) unmerged and staged-only files ({@link MERGE_STAGED}) are skipped. CRLF files are formatted
  * on their LF view and written back with CRLF. At most {@link MAX_ACTIVE_CHANGES} calls run git and dprint at once,
  * the rest wait in order (beyond {@link MAX_WAITING_CHANGES} waiting they are dropped with a stderr line), on a
@@ -644,11 +644,19 @@ async function formatOnDisk(sc: Scope, s: { fp: string; real: string }, signal?:
   try {
     if (signal?.aborted) return false;
     if (overCap(statSync(s.fp).size, s.fp)) return false;
+    // a running git operation (pull, checkout, merge) writes the worktree under index.lock before the index is final:
+    // wait for it, bounded, so the verdict sees git's end state; a lock that outlives the wait leaves the old verdicts.
+    // Before the slot: waiting events must not hold one of the few slots (a stale lock would stall every event 5 s each)
+    const gitDir = gitDirOf(path.dirname(s.real));
+    const lockEnd = Date.now() + LOCK_WAIT_MS;
+    while (gitDir !== null && existsSync(path.join(gitDir, "index.lock")) && Date.now() < lockEnd) {
+      await sleep(LOCK_POLL_MS);
+      if (signal?.aborted) return false;
+    }
     if (!(await acquireChangeSlot(s.fp))) return false;
     try {
       // cancelled while waiting for the slot: give it back without reading or spawning anything
       if (signal?.aborted) return false;
-      // the file may have grown while this event waited for the slot: check the cap again before the read
       // the file may have grown while this event waited for the slot: check the cap again before the read
       if (overCap(statSync(s.fp).size, s.fp)) return false;
       // read after the slot is held: waiting events must not each keep up to 1 MiB of text alive
@@ -663,14 +671,6 @@ async function formatOnDisk(sc: Scope, s: { fp: string; real: string }, signal?:
       // one spawn answers both. --untracked-files=normal is required: under status.showUntrackedFiles=no git
       // rejects --ignored otherwise. --no-optional-locks keeps .git/index.lock free for the user's git,
       // cwd = dirname picks the nearest repository (nested repos, submodules)
-      // a running git operation (pull, checkout, merge) writes the worktree under index.lock before the index is final:
-      // wait for it, bounded, so the verdict sees git's end state; a lock that outlives the wait leaves the old verdicts
-      const gitDir = gitDirOf(path.dirname(s.real));
-      const lockEnd = Date.now() + LOCK_WAIT_MS;
-      while (gitDir !== null && existsSync(path.join(gitDir, "index.lock")) && Date.now() < lockEnd) {
-        await sleep(LOCK_POLL_MS);
-        if (signal?.aborted) return false;
-      }
       try {
         const { stdout } = await execFileAsync(
           "git",
