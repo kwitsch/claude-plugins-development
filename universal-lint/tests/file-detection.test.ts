@@ -4,6 +4,7 @@ import { spawn, spawnSync } from "node:child_process";
 import { appendFileSync, copyFileSync, mkdirSync, readFileSync, readlinkSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
+import { fileURLToPath } from "node:url";
 import { expect, test } from "vitest";
 import { FILE_CHANGED_SLOTS } from "../src/hooks/lint-core.ts";
 import { makeEnv, WATCH } from "./support/lint-hook.ts";
@@ -526,18 +527,21 @@ test("FileChanged: while index.lock exists git status waits; the state git commi
   assert.equal(lines.filter((l) => l.startsWith("shellcheck")).length, 0);
 });
 
-// real wall-clock time on purpose (spec test 6): no clock seam exists, and one only for this test is not justified
-test("FileChanged: an index.lock that never goes away ends the wait at GIT_TIMEOUT_MS and the file is linted (fail open, F41)", { timeout: 20_000 }, async () => {
+// the server's clock jumps past GIT_TIMEOUT_MS (`support/skew-clock.ts`) while the lock stays: no wall-clock threshold
+test("FileChanged: an index.lock that never goes away ends the wait at GIT_TIMEOUT_MS and the file is linted (fail open, F41)", async () => {
   const e = makeEnv();
   seed(e);
   const a = path.join(e.cwd, "a.sh");
   writeFileSync(a, "echo $1\n");
   writeFileSync(path.join(e.cwd, ".git", "index.lock"), "");
-  const { s, change } = gitSession(e, e.cwd);
+  const skewFile = path.join(path.dirname(e.record), "skew");
+  const s = e.server({ out: OUT, cwd: e.cwd, env: { NODE_OPTIONS: `--import=${fileURLToPath(new URL("./support/skew-clock.ts", import.meta.url))}`, SKEW_FILE: skewFile } });
   await s.key("s1");
-  const t0 = Date.now();
-  await change(a);
-  assert.ok(Date.now() - t0 >= 9_000, "the call waited for the lock up to GIT_TIMEOUT_MS");
+  const pending = s.call("file_changed", { hook_event_name: "FileChanged", cwd: e.cwd, session_id: "s1", scratchpad_dir: "", file_path: a, event: "change" });
+  await sleep(300);
+  assert.equal(e.lines().length, 0, "the call is still waiting for the lock");
+  writeFileSync(skewFile, "11000");
+  await pending;
   assert.equal(e.lines().length, 1);
   assert.match(e.lines()[0], /^shellcheck /);
 });
