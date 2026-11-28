@@ -215,8 +215,8 @@ describe("manifest", () => {
     expect(manifest).not.toHaveProperty("userConfig");
   });
 
-  test("package.json and plugin.json versions agree and are 3.2.0", () => {
-    expect(pkg.version).toBe("3.2.0");
+  test("package.json and plugin.json versions agree and are 3.3.0", () => {
+    expect(pkg.version).toBe("3.3.0");
     expect(manifest.version).toBe(pkg.version);
   });
 
