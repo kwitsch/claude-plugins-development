@@ -203,8 +203,8 @@ describe("manifest", () => {
     expect(manifest).not.toHaveProperty("userConfig");
   });
 
-  test("package.json and plugin.json versions agree and are 3.1.0", () => {
-    expect(pkg.version).toBe("3.1.0");
+  test("package.json and plugin.json versions agree and are 3.1.1", () => {
+    expect(pkg.version).toBe("3.1.1");
     expect(manifest.version).toBe(pkg.version);
   });
 
@@ -299,7 +299,7 @@ describe("build-task skill", () => {
   test("build-task routes every decision through taskflow:decide and forwards --headless", () => {
     expect(read(F)).toMatch(/^argument-hint: "\[--skip-branch-check\] \[--headless\] \[task-description\]"$/m);
     expect(read(F)).toMatch(/^allowed-tools:.*"Agent"/m);
-    expectHas(F, ["Skill(skill: \"taskflow:decide\", args: \"[--headless] <JSON>\")", "`DECISIONS:`", "never call `AskUserQuestion` directly", "`$ARGUMENTS` may start with `--skip-branch-check` and/or `--headless`", "context: whyItMatters", "\"id\": \"intent\"", "\"Yes — proceed\", \"No — needs changes\"", "\"id\": \"changes\"", "headless intent check rejected the design without corrections", "headless design did not converge after 3 resumes", "with `--headless ` prepended to `args`", "\"id\": \"reversal-<hash>\"", "`Decided ...`", "(step 3's Keypoints are shown by its decide call)"]);
+    expectHas(F, ["Skill(skill: \"taskflow:decide\", args: \"[--headless] <JSON>\")", "`DECISIONS:`", "never call `AskUserQuestion` directly", "`$ARGUMENTS` may start with `--skip-branch-check` and/or `--headless`", "context: whyItMatters", "\"id\": \"intent\"", "\"Yes — proceed\", \"No — needs changes\"", "\"id\": \"changes\"", "headless intent check rejected the design without corrections", "headless design did not converge after 3 resumes", "with `--headless` prepended to `args`", "\"id\": \"reversal-<hash>\"", "`Decided ...`", "(step 3's Keypoints are shown by its decide call)"]);
     expectLacks(F, ["User decisions go through `AskUserQuestion`", "separate, mandatory"]);
     // AskUserQuestion survives only in allowed-tools, the description and the never-call sentence
     for (const l of read(F).split("\n").filter((x) => x.includes("AskUserQuestion"))) expect(l).toMatch(/^allowed-tools:|decide skill \(AskUserQuestion|never call `AskUserQuestion` directly/);
