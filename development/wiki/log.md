@@ -270,3 +270,7 @@ Source: user decision 2026-11-20 (task spec), PR stacked on `feature/tsdown-plug
 ## [2026-11-27] ingest | taskflow 3.0.0: review-task replaces the review engine
 
 - New `plugins/taskflow/design/review-task.md`: why the `review-task` skill runs the bundled `simplify` and `code-review --fix` instead of taskflow's own review engine (deleted: the `changes-audit` skill, the `changes-review` and `build-task-review` workflows, `review.md`, three review agents), the size → level mapping and why XL reaches `max`, the accepted losses (spec escalation, lean pass, pick-list) and why build-task writes `REVIEW_PATH` itself. `plugins/taskflow/design/workflows.md` drops the engine-copy and lean-review reasons (12 shipped asset files now); `plugins/taskflow/index.md` and `plugins/index.md` follow. Source: approved spec, branch `feature/review-task-skill`.
+
+## [2026-11-28] ingest | taskflow 3.1.0: decide skill and --headless
+
+- New `plugins/taskflow/design/decide.md`: why every build-task and review-task decision goes through the `decide` skill, why headless asks the advisor tool first and the `decider` agent (opus) second, why there is no `AskUserQuestion` fallback in headless, the bare-"No" stop and the 3-resume cap, and what is not verified live (advisor detection, `effort` honoured). `plugins/taskflow/index.md` lists it. Source: approved spec, branch `feature/decide-skill-headless`.

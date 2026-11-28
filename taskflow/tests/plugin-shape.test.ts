@@ -1,4 +1,4 @@
-// Structural checks of the built taskflow plugin: manifest, the three skills, the six workflow scripts, the ten
+// Structural checks of the built taskflow plugin: manifest, the four skills, the six workflow scripts, the eleven
 // agents, the docs, plus the developer notes (taskflow/CLAUDE.md, taskflow/.claude/rules/) and .oxlintrc.json from
 // their source paths. Ported from the old bats suite; grep line matches become `m`-flag regexes over the whole text,
 // `[[:space:]]` becomes `[ \t]`. Shipped files are read from the built plugin/, so build before testing.
@@ -203,8 +203,8 @@ describe("manifest", () => {
     expect(manifest).not.toHaveProperty("userConfig");
   });
 
-  test("package.json and plugin.json versions agree and are 3.0.0", () => {
-    expect(pkg.version).toBe("3.0.0");
+  test("package.json and plugin.json versions agree and are 3.1.0", () => {
+    expect(pkg.version).toBe("3.1.0");
     expect(manifest.version).toBe(pkg.version);
   });
 
@@ -294,6 +294,15 @@ describe("build-task skill", () => {
     expectHas(`${BT_WF}/explore.md`, ["`TASK`", "`EXPLORE_PATH`", "`GRAPHMIND_AVAILABLE`", "`REPO_PATH`", "`explorePath`", "`subsystems`", "haiku"]);
     expectHas(`${BT_WF}/design.md`, ["`EXPLORE_PATH`", "`DRAFT_PATH`", "`SIZE`", "`RESUME`", "`USER_INPUT`", "`user_input_required`", "`minorFindings`", "fable", "`GRAPHMIND_AVAILABLE` only adds a hint to the designer and design-reviewer prompts"]);
     expectHas(`${BT_WF}/spec.md`, ["`DRAFT_PATH`", "`SPEC_PATH`", "`specPath`", "`specReviewed`", "`minorFindings`"]);
+  });
+
+  test("build-task routes every decision through taskflow:decide and forwards --headless", () => {
+    expect(read(F)).toMatch(/^argument-hint: "\[--skip-branch-check\] \[--headless\] \[task-description\]"$/m);
+    expect(read(F)).toMatch(/^allowed-tools:.*"Agent"/m);
+    expectHas(F, ["Skill(skill: \"taskflow:decide\", args: \"[--headless] <JSON>\")", "`DECISIONS:`", "never call `AskUserQuestion` directly", "`$ARGUMENTS` may start with `--skip-branch-check` and/or `--headless`", "context: whyItMatters", "\"id\": \"intent\"", "\"Yes — proceed\", \"No — needs changes\"", "\"id\": \"changes\"", "headless intent check rejected the design without corrections", "headless design did not converge after 3 resumes", "with `--headless ` prepended to `args`", "\"id\": \"reversal-<hash>\"", "`Decided ...`", "(step 3's Keypoints are shown by its decide call)"]);
+    expectLacks(F, ["User decisions go through `AskUserQuestion`", "separate, mandatory"]);
+    // AskUserQuestion survives only in allowed-tools, the description and the never-call sentence
+    for (const l of read(F).split("\n").filter((x) => x.includes("AskUserQuestion"))) expect(l).toMatch(/^allowed-tools:|decide skill \(AskUserQuestion|never call `AskUserQuestion` directly/);
   });
 });
 
@@ -399,7 +408,7 @@ describe("agents", () => {
   test("every role file except pr-author requires an English final message", () => {
     const others = ls(AGENTS, ".md").filter((f) => f !== "pr-author.md");
     for (const f of others) expectHas(`${AGENTS}/${f}`, ["Write that final message in English, whatever the language of the task or its inputs; commit messages are not covered."]);
-    expect(others).toHaveLength(9);
+    expect(others).toHaveLength(10);
   });
 
   test("read-only-declared agents carry a least-privilege tools allowlist without Write/Edit", () => {
@@ -407,6 +416,12 @@ describe("agents", () => {
       expect(read(`${AGENTS}/${a}.md`)).toMatch(/^tools:/m);
       expect(read(`${AGENTS}/${a}.md`)).not.toMatch(/^tools:.*[ \t,[\]"'](Write|Edit)([ \t,[\]"']|$)/m);
     }
+  });
+
+  test("decider: opus at effort high, read-only Read/Grep/Glob, answers as a JSON array", () => {
+    const F = `${AGENTS}/decider.md`;
+    expectHas(F, ["name: decider", "description: INTERNAL ONLY", "model: opus", "effort: high", "tools: [\"Read\", \"Grep\", \"Glob\"]", "You are read-only: never use Write, Edit, NotebookEdit, or a Bash command that changes files or git state.", "\"answer\": \"<option text verbatim or free text>\""]);
+    expect(read(F)).not.toMatch(/^tools:.*(Write|Edit|Bash)/m);
   });
 
   test("worktree-merger checks the current branch before merging, not primary-vs-worktree", () => {
@@ -596,6 +611,33 @@ describe("review-task skill", () => {
     expect(lines.length).toBeGreaterThan(0);
     for (const l of lines) expect(l).toMatch(/\bno\b/i);
   });
+
+  test("review-task takes --headless, strips it before --size and routes decisions through taskflow:decide", () => {
+    expect(read(F)).toMatch(/^argument-hint: "\[--headless\] \[--size=S\|M\|L\|XL\] \[base ref\]"$/m);
+    for (const t of ["AskUserQuestion", "Agent"]) expect(read(F)).toMatch(new RegExp(`^allowed-tools:.*"${t}"`, "m"));
+    expectHas(F, ["## Decisions", "Skill(skill: \"taskflow:decide\", args: \"[--headless] <JSON>\")", "`DECISIONS:`", "never call `AskUserQuestion` directly", "`Decided ...`"]);
+    const strip = read(F).indexOf("Strip `--headless` first");
+    expect(strip).toBeGreaterThan(-1);
+    expect(strip).toBeLessThan(read(F).indexOf("then the `--size=<v>` token"));
+    // AskUserQuestion survives only in allowed-tools and the never-call sentence
+    for (const l of read(F).split("\n").filter((x) => x.includes("AskUserQuestion"))) expect(l).toMatch(/^allowed-tools:|never call `AskUserQuestion` directly/);
+  });
+});
+
+describe("decide skill", () => {
+  const F = `${PLUGIN}/skills/decide/SKILL.md`;
+
+  test("decide frontmatter: name, AskUserQuestion and Agent allowed, model-invocable, inline", () => {
+    expect(read(F)).toMatch(/^name:[ \t]*decide$/m);
+    for (const t of ["AskUserQuestion", "Agent"]) expect(read(F)).toMatch(new RegExp(`^allowed-tools:.*"${t}"`, "m"));
+    expect(read(F)).not.toMatch(/^disable-model-invocation:[ \t]*true/m);
+    expect(read(F)).not.toMatch(/^context:[ \t]*fork/m);
+  });
+
+  test("decide body: --headless, advisor first, taskflow:decider fallback, DECISIONS line, error texts, no exclamation-backtick", () => {
+    expectHas(F, ["--headless", "advisor()", "taskflow:decider", "DECISIONS:", "decide: invalid input:", "decide: no headless decision:", "Decided <id>: <answer> (<BY>: <reason>)", "Headless never falls back to `AskUserQuestion`"]);
+    expectLacks(F, ["!`"]);
+  });
 });
 
 describe("ship merge-state remediation wiring", () => {
@@ -632,8 +674,8 @@ describe("ship merge-state remediation wiring", () => {
     expect(sweep(TREE, /pr_stale|pr_conflict/)).toEqual([]);
   });
 
-  test("the agent roster is exactly 10 *.md files", () => {
-    expect(ls(AGENTS, ".md")).toHaveLength(10);
+  test("the agent roster is exactly 11 *.md files", () => {
+    expect(ls(AGENTS, ".md")).toHaveLength(11);
   });
 
   test("plugin README and layout document the review-task skill", () => {
@@ -641,8 +683,8 @@ describe("ship merge-state remediation wiring", () => {
     expectLacks(`${PLUGIN}/README.md`, ["changes-review", "changes-audit", "build-task-review.workflow.js", "review-finder", "fix-applier", "ponytailReview"]);
   });
 
-  test("CLAUDE.md boundary rule covers review-task, its size → level table and the 10 agents", () => {
-    expectHas(DEV_NOTES, ["skills/review-task/", "10 static role prompts", "`S` → `medium`, `M` → `high`, `L` → `xhigh`, `XL` → `max`", "(../development/wiki/plugins/taskflow/design/review-task.md)"]);
+  test("CLAUDE.md boundary rule covers review-task, its size → level table and the 11 agents", () => {
+    expectHas(DEV_NOTES, ["skills/review-task/", "11 static role prompts", "`S` → `medium`, `M` → `high`, `L` → `xhigh`, `XL` → `max`", "(../development/wiki/plugins/taskflow/design/review-task.md)"]);
     expectLacks(DEV_NOTES, ["changes-review", "changes-audit", "build-task-review.workflow.js", "13 static role prompts", "fix-applier", "review-finder"]);
   });
 });
@@ -717,8 +759,27 @@ describe("ship merge-state documentation", () => {
     expect(read(`${PLUGIN}/README.md`).toLowerCase()).toContain("merge-state");
   });
 
-  test("CLAUDE.md documents ship-ensure-mergeable.mjs alongside the 10-agent roster", () => {
-    expectHas(DEV_NOTES, ["ship-ensure-mergeable.mjs", "10 static role prompts"]);
+  test("CLAUDE.md documents ship-ensure-mergeable.mjs alongside the 11-agent roster", () => {
+    expectHas(DEV_NOTES, ["ship-ensure-mergeable.mjs", "11 static role prompts"]);
+  });
+});
+
+describe("decide documentation", () => {
+  const PAGE = "development/wiki/plugins/taskflow/design/decide.md";
+
+  test("README documents the decide skill, --headless and the decider agent", () => {
+    expectHas(`${PLUGIN}/README.md`, ["| `decide`", "| `decider`", "decide/", "decider.md", "11 agents", "/taskflow:build-task --headless"]);
+  });
+
+  test("CLAUDE.md names skills/decide/, the decider agent and the wiki page; build-task no longer owns AskUserQuestion", () => {
+    expectHas(DEV_NOTES, ["skills/decide/", "(../development/wiki/plugins/taskflow/design/decide.md)", "`taskflow:decider`", "routes every decision through `decide`", "or the decide skill for `decider`"]);
+    expectLacks(DEV_NOTES, ["owns `AskUserQuestion` checkpoints", "Each has one caller, its build-task script."]);
+  });
+
+  test("the wiki records why decide exists, the headless order and the unverified points", () => {
+    expectHas(PAGE, ["# decide", "`DECISIONS: [{id, answer}]`", "## Headless: advisor first, then the decider agent", "## Not verified", "(docs)"]);
+    expectHas("development/wiki/plugins/taskflow/index.md", ["(design/decide.md)"]);
+    expectHas("development/wiki/log.md", ["taskflow 3.1.0: decide skill and --headless"]);
   });
 });
 
