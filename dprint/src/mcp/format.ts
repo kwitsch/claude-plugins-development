@@ -516,7 +516,7 @@ const LOCK_WAIT_MS = Number(process.env.DPRINT_HOOKS_LOCK_WAIT_MS ?? "5000");
 /** Poll interval of the index.lock wait. */
 const LOCK_POLL_MS = 100;
 /** `git status --porcelain` XY codes git leaves during a stopped merge/rebase: unmerged, and staged with a clean worktree. */
-const MERGE_STAGED = /^(?:DD|AU|UD|UA|DU|AA|UU|[MADRC] )$/;
+const MERGE_STAGED = /^(?:DD|AU|UD|UA|DU|AA|UU|[MADRCT] )$/;
 /** Files in the git dir that mark a stopped merge (`git pull`/`merge`) or rebase. */
 const MERGE_MARKERS = ["MERGE_HEAD", "rebase-merge", "rebase-apply"];
 
@@ -544,8 +544,10 @@ function gitDirOf(dir: string): string | null {
     }
     if (isDir) return dotGit;
     try {
-      const target = /^gitdir: (.+)$/m.exec(readFileSync(dotGit, "utf8"))?.[1];
-      return target ? path.resolve(d, target.trim()) : null;
+      // like git: everything after the prefix, minus the terminal CR/LF (a path may hold spaces or a newline)
+      const content = readFileSync(dotGit, "utf8");
+      const target = content.startsWith("gitdir: ") ? content.slice(8).replace(/[\r\n]+$/, "") : "";
+      return target ? path.resolve(d, target) : null;
     } catch {
       return null;
     }
