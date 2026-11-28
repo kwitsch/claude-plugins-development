@@ -1,5 +1,5 @@
 /**
- * The pure part of statusbar: the formatter that prints the line of the user's `statusline-command.sh`. It holds no
+ * The pure part of statusbar: the formatter that prints the line of the user's `statusline-command.sh` and the git lookup that mirrors the script's `git -C <cwd>`. It holds no
  * `$` (only `register.ts` may use it); the build bundles this module into the hook's plugin output.
  *
  * @packageDocumentation
@@ -21,7 +21,15 @@ export type LineInput = {
   sevenDay?: number;
 };
 
-/** Red, `\033[0;31m`. */
+/** The subset of `$.fs` the git lookup needs. */
+export type GitFs = {
+  /** Whether `path` exists. */
+  exists(path: string): Promise<boolean>;
+  /** The text of the file at `path`; rejects when it cannot be read. */
+  read(path: string): Promise<string>;
+};
+
+/** Red,`\033[0;31m`. */
 const RED = "\x1b[0;31m";
 /** Green, `\033[0;32m`. */
 const GREEN = "\x1b[0;32m";
@@ -126,4 +134,60 @@ export function statusLine(input: LineInput): string {
     if (p >= 80) parts.push(paint(p >= 90 ? RED : YELLOW, `${SEVEN_DAY} ${p}%`));
   }
   return parts.join(" | ");
+}
+
+/** A detached HEAD: a SHA-1 or SHA-256 object name. */
+const HASH = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/;
+/** The HEAD prefix of a checked-out branch. */
+const HEADS = "ref: refs/heads/";
+
+/**
+ * The branch a HEAD file names, as `git symbolic-ref --short HEAD || git rev-parse --short HEAD` prints it.
+ *
+ * @param fs - Filesystem reads.
+ * @param path - The HEAD file.
+ * @returns Everything after `refs/heads/`, the first 7 hash characters of a detached HEAD, or `""` (other refs, garbage, a failed read).
+ */
+async function headBranch(fs: GitFs, path: string): Promise<string> {
+  let text: string;
+  try {
+    text = await fs.read(path);
+  } catch {
+    // shortcut: an unreadable HEAD shows as a repo without a branch, as the script's git call would print nothing
+    return "";
+  }
+  const head = text.endsWith("\n") ? text.slice(0, -1) : text;
+  if (head.startsWith(HEADS)) return head.slice(HEADS.length);
+  return HASH.test(head) ? head.slice(0, 7) : "";
+}
+
+/**
+ * Repo detection and branch as `git -C <cwd>` would report them: walks up from `cwd` to the first `.git`; a `.git`
+ * file (linked worktree, submodule) is followed through its `gitdir:` line, a relative one resolved against the
+ * `.git` file's directory.
+ *
+ * @param cwd - The session's working directory.
+ * @param fs - Filesystem reads (`$.fs.exists` / `$.fs.read`).
+ * @returns `isGit` (a `.git` was found and, for a file, holds `gitdir:`) and the branch (`""` when none).
+ * @throws When `fs` rejects anything but the HEAD read.
+ */
+export async function gitBranch(cwd: string, fs: GitFs): Promise<{ isGit: boolean; branch: string }> {
+  let dir = stripSep(cwd);
+  for (;;) {
+    const dotGit = `${dir}/.git`;
+    let head: string | undefined;
+    if (await fs.exists(`${dotGit}/HEAD`)) {
+      head = `${dotGit}/HEAD`;
+    } else if (await fs.exists(dotGit)) {
+      const line = (await fs.read(dotGit)).split("\n").find((l) => l.startsWith("gitdir:"));
+      if (line === undefined) return { isGit: false, branch: "" };
+      const target = stripSep(line.slice("gitdir:".length).trim());
+      const absolute = target.startsWith("/") || target.startsWith("\\") || /^[A-Za-z]:[/\\]/.test(target);
+      head = `${absolute ? target : `${dir}/${target}`}/HEAD`;
+    }
+    if (head !== undefined) return { isGit: true, branch: await headBranch(fs, head) };
+    const i = lastSep(dir);
+    if (i < 0) return { isGit: false, branch: "" };
+    dir = dir.slice(0, i);
+  }
 }

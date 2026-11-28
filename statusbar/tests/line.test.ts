@@ -1,7 +1,7 @@
 // Rows of the pure formatter in src/hooks/line.ts. Expected strings are written from the printf formats of the user's
 // statusline-command.sh (ANSI codes, glyph bytes, thresholds, '%.0f' rounding), not from the source.
 import { expect, test } from "vitest";
-import { type LineInput, statusLine } from "../src/hooks/line.ts";
+import { gitBranch, type GitFs, type LineInput, statusLine } from "../src/hooks/line.ts";
 
 /** Red, `\033[0;31m`. */
 const R = "\x1b[0;31m";
@@ -96,3 +96,51 @@ for (const [label, input, line] of folderRows) {
     expect(statusLine(input)).toBe(line);
   });
 }
+
+/**
+ * An in-memory `GitFs`: a path exists when it is a key or a directory above a key.
+ *
+ * @param files - Path to content.
+ * @param failRead - A path whose read rejects although it exists.
+ * @returns The fake.
+ */
+function memFs(files: Map<string, string>, failRead?: string): GitFs {
+  return {
+    exists: async (path) => files.has(path) || [...files.keys()].some((k) => k.startsWith(`${path}/`)),
+    read: async (path) => {
+      const text = files.get(path);
+      if (path === failRead || text === undefined) throw new Error(`ENOENT: ${path}`);
+      return text;
+    },
+  };
+}
+
+/** A 40-hex object name. */
+const SHA = "0123456789abcdef0123456789abcdef01234567";
+
+/** Git rows: label, cwd, files, failing read, expected result. */
+const gitRows: [string, string, [string, string][], string | undefined, { isGit: boolean; branch: string }][] = [
+  ["repo root", "/r", [["/r/.git/HEAD", "ref: refs/heads/main\n"]], undefined, { isGit: true, branch: "main" }],
+  ["subdirectory", "/r/a/b", [["/r/.git/HEAD", "ref: refs/heads/main\n"]], undefined, { isGit: true, branch: "main" }],
+  ["trailing separator on cwd", "/r/a/", [["/r/.git/HEAD", "ref: refs/heads/main\n"]], undefined, { isGit: true, branch: "main" }],
+  ["slash branch", "/r", [["/r/.git/HEAD", "ref: refs/heads/feature/x\n"]], undefined, { isGit: true, branch: "feature/x" }],
+  ["detached HEAD", "/r", [["/r/.git/HEAD", `${SHA}\n`]], undefined, { isGit: true, branch: "0123456" }],
+  ["detached HEAD, sha256", "/r", [["/r/.git/HEAD", `${SHA}${SHA.slice(0, 24)}\n`]], undefined, { isGit: true, branch: "0123456" }],
+  ["linked worktree", "/w/sub", [["/w/.git", "gitdir: /r/.git/worktrees/w\n"], ["/r/.git/worktrees/w/HEAD", "ref: refs/heads/wt\n"]], undefined, { isGit: true, branch: "wt" }],
+  ["relative gitdir", "/m", [["/m/.git", "gitdir: modules/m\n"], ["/m/modules/m/HEAD", "ref: refs/heads/dev\n"]], undefined, { isGit: true, branch: "dev" }],
+  ["no .git up to /", "/x/y", [["/r/.git/HEAD", "ref: refs/heads/main\n"]], undefined, { isGit: false, branch: "" }],
+  [".git file without gitdir", "/w", [["/w/.git", "something else\n"]], undefined, { isGit: false, branch: "" }],
+  ["HEAD read rejects", "/r", [["/r/.git/HEAD", "ref: refs/heads/main\n"]], "/r/.git/HEAD", { isGit: true, branch: "" }],
+  ["garbage HEAD", "/r", [["/r/.git/HEAD", "garbage\n"]], undefined, { isGit: true, branch: "" }],
+  ["ref outside refs/heads", "/r", [["/r/.git/HEAD", "ref: refs/remotes/origin/main\n"]], undefined, { isGit: true, branch: "" }],
+  [".git at the root", "/a", [["/.git/HEAD", "ref: refs/heads/root\n"]], undefined, { isGit: true, branch: "root" }],
+];
+for (const [label, cwd, files, failRead, expected] of gitRows) {
+  test(`gitBranch: ${label}`, async () => {
+    expect(await gitBranch(cwd, memFs(new Map(files), failRead))).toEqual(expected);
+  });
+}
+
+test("gitBranch: a rejected .git file read propagates", async () => {
+  await expect(gitBranch("/w", memFs(new Map([["/w/.git", "gitdir: /r\n"]]), "/w/.git"))).rejects.toThrow("ENOENT");
+});
