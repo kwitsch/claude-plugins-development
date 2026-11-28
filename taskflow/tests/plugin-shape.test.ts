@@ -1,4 +1,4 @@
-// Structural checks of the built taskflow plugin: manifest, the four skills, the six workflow scripts, the eleven
+// Structural checks of the built taskflow plugin: manifest, the six skills, the six workflow scripts, the eleven
 // agents, the docs, plus the developer notes (taskflow/CLAUDE.md, taskflow/.claude/rules/) and .oxlintrc.json from
 // their source paths. Ported from the old bats suite; grep line matches become `m`-flag regexes over the whole text,
 // `[[:space:]]` becomes `[ \t]`. Shipped files are read from the built plugin/, so build before testing.
@@ -649,6 +649,33 @@ describe("decide skill", () => {
     expectHas(F, ["--headless", "advisor()", "taskflow:decider", "DECISIONS:", "decide: invalid input:", "decide: no headless decision:", "Decided <id>: <answer> (<BY>: <reason>)", "Headless never falls back to `AskUserQuestion`"]);
     expectLacks(F, ["!`"]);
   });
+});
+
+describe("spec-task and plan-task skills", () => {
+  const SKILLS = [
+    { name: "spec-task", dir: SPEC_TASK, ref: SPEC_REF, script: "taskflow:build-task-spec", extra: ["\"reviewed\": ", "\"id\": \"intent\"", "Does this spec match the approved design?", "draft-"] },
+    { name: "plan-task", dir: PLAN_TASK, ref: PLAN_REF, script: "taskflow:build-task-plan", extra: ["\"model\": ", "graphmind which", "select:mcp__graphmind__gm_search", "select:mcp__jev-api__request", "git rev-parse --show-toplevel", "Does this plan implement the approved spec?", "spec-"] },
+  ];
+  for (const s of SKILLS) {
+    const F = `${s.dir}/SKILL.md`;
+
+    test(`${s.name} SKILL.md: contract, sizing, decide routing, resume cap, acceptance and RESULT line`, () => {
+      expect(nonEmpty(F)).toBe(true);
+      expect(read(F)).toMatch(new RegExp(`^name: ${s.name}$`, "m"));
+      expect(read(F)).toMatch(/^argument-hint: "\[--headless\] \[--size=S\|M\|L\|XL\] <(draft|spec) path>"$/m);
+      for (const t of ["Read", "Workflow", "ToolSearch", "Skill", "mcp__taskflow__size-task"]) expect(read(F)).toMatch(new RegExp(`^allowed-tools:.*"${t}"`, "m"));
+      expectHas(F, [`name: ${s.name}`, "[--headless] [--size=S|M|L|XL]", "Invalid --size \"<v>\": use S, M, L or XL.", "taskflow:decide", "Skill(skill: \"taskflow:decide\", args: \"[--headless] <JSON>\")", "`DECISIONS:`", "select:mcp__taskflow__size-task", "Size: <SIZE> (from --size)", "own reasoning", "user_input_required", "conflict", "rounds_exhausted", "Run another correction round", "Accept the", "\"Stop\"", "\"Yes — proceed\", \"No — needs changes\"", "did not converge after 3 resumes", "rejected the", "RESULT: {\"path\": ", s.script, "args global is undefined", "Never use `scriptPath`", "Plugin root: ${CLAUDE_PLUGIN_ROOT}", "DECISIONS_SO_FAR", "`Decided ...`", `${s.name}: `, "workflows/"]);
+      expectHas(F, s.extra);
+      expectLacks(F, ["!`", "context: fork", "disable-model-invocation"]);
+      // AskUserQuestion appears only in the never-call sentence
+      for (const l of read(F).split("\n").filter((x) => x.includes("AskUserQuestion"))) expect(l).toMatch(/never call `AskUserQuestion` directly/);
+    });
+
+    test(`${s.name} ships its usage reference with the resume contract`, () => {
+      expect(nonEmpty(s.ref)).toBe(true);
+      expectHas(s.ref, ["`USER_INPUT`", "`user_input_required`"]);
+    });
+  }
 });
 
 describe("ship merge-state remediation wiring", () => {
