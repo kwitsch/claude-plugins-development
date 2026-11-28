@@ -9,9 +9,3 @@ Mod-only plugin: `src/hooks/register.ts` (every hook and every `$` use) and the 
 - The 10 s `$.clock.every(10_000, ...)` timer is armed only in `session.start`, after cancelling the previous one.
 - `gitBranch` gets closures over `$.fs.exists` / `$.fs.read`, never `$.fs` itself (the engine rejects a bare `$.<noun>` value).
 - Every `$` call after `next` is caught; `refresh` keeps the last line on failure and skips while one runs (`busy`). No `$.process.run`, `$.tool.call` or `$.http.fetch`.
-
-## Tests
-
-- `tests/line.test.ts`: formatter and git-lookup rows (pure, no kit).
-- `tests/register.test.ts`: `claude-engine-vitest` bound to `src/hooks/register.ts`; the StatusLine site is mounted with `props.text: "cmd"` and a stub beneath records the text it gets.
-- `claude-tests/register.test.ts`: one test per registered event on the built `register.js` (`pnpm --filter statusbar test:plugin`, needs `claude`).

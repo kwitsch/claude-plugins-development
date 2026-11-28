@@ -1,6 +1,6 @@
 # statusbar knowledge
 
-What the wiki holds for statusbar: pages for agent sessions (not shipped, English). The plugin's constraints are in its `CLAUDE.md` and `.claude/rules/`.
+What the wiki holds for statusbar: pages for agent sessions (not shipped, English). The plugin's constraints are in its `CLAUDE.md`.
 
 ## Pages
 

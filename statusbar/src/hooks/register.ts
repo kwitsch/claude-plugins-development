@@ -11,7 +11,7 @@
  *
  * @packageDocumentation
  */
-import { gitBranch, statusLine } from "./line.js";
+import { gitBranch, type GitFs, statusLine } from "./line.js";
 
 /** One entry of `$.session.usage().rateLimits`. */
 type RateLimit = {
@@ -44,12 +44,7 @@ type Engine = {
     usage(): Promise<Usage>;
   };
   /** Filesystem reads for the git lookup. */
-  fs: {
-    /** Whether `path` exists. */
-    exists(path: string): Promise<boolean>;
-    /** The text of the file at `path`. */
-    read(path: string): Promise<string>;
-  };
+  fs: GitFs;
   /** Time. */
   clock: {
     /** Calls `fn` every `ms` until cancelled; the engine does not wait for `fn`, so a slow call overlaps the next. */
@@ -62,7 +57,7 @@ type Engine = {
   };
 };
 /** A `ui.render` event of the StatusLine site; `props.text` is the status line command's output. */
-type RenderEvent = { props: { text?: string } & Record<string, unknown> } & Record<string, unknown>;
+type RenderEvent = { props: { text?: string } & Record<string, unknown> };
 /** Continues the hook chain with an event. */
 type Next<E, R> = (e: E) => Promise<R>;
 /** A function hook taking event `E` and resolving `R`. */
@@ -96,9 +91,8 @@ async function refresh($: Engine): Promise<void> {
   if (busy) return;
   busy = true;
   try {
-    const cwd = await $.session.cwd();
+    const [cwd, u] = await Promise.all([$.session.cwd(), $.session.usage()]);
     const git = await gitBranch(cwd, { exists: (path) => $.fs.exists(path), read: (path) => $.fs.read(path) });
-    const u = await $.session.usage();
     const c = u.context;
     const context = c.percent || (c.window ? ((c.tokens ?? 0) / c.window) * 100 : undefined);
     const used = (kind: string): number | undefined => u.rateLimits?.find((r) => r.kind === kind)?.percentUsed;
@@ -115,6 +109,21 @@ async function refresh($: Engine): Promise<void> {
 }
 
 /**
+ * The `turn.complete` and `session.measure` hook: redraws after the chain ran. `refresh` is the catch for every `$`
+ * call after `next`: it never throws.
+ *
+ * @param $ - Engine interface.
+ * @param e - The event.
+ * @param next - Continues the hook chain.
+ * @returns The chain's result.
+ */
+const redraw: Hook<unknown, unknown> = async ($, e, next) => {
+  const r = await next(e);
+  await refresh($);
+  return r;
+};
+
+/**
  * Registers the module's hooks.
  *
  * @param on - The engine's hook registration.
@@ -124,31 +133,15 @@ export const register = (on: On): void => {
     const r = await next(e);
     try {
       timer?.cancel();
-      timer = $.clock.every(10_000, () => void refresh($).catch(() => undefined));
-      await refresh($);
+      timer = $.clock.every(10_000, () => void refresh($));
     } catch {
       // the hook never throws after next; the next trigger redraws
     }
+    await refresh($);
     return r;
   });
-  on("turn.complete", async function turnComplete($, e, next) {
-    const r = await next(e);
-    try {
-      await refresh($);
-    } catch {
-      // refresh does not throw; guard kept for every $ call after next
-    }
-    return r;
-  });
-  on("session.measure", async function sessionMeasure($, e, next) {
-    const r = await next(e);
-    try {
-      await refresh($);
-    } catch {
-      // refresh does not throw; guard kept for every $ call after next
-    }
-    return r;
-  });
+  on("turn.complete", redraw);
+  on("session.measure", redraw);
   on("ui.render", { component: "StatusLine" }, function render($, e, next) {
     return shown === undefined ? next(e) : next({ ...e, props: { ...e.props, text: shown } });
   });
